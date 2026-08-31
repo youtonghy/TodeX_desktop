@@ -1,0 +1,36 @@
+import { resolve } from 'node:path';
+import { defineConfig, externalizeDepsPlugin } from 'electron-vite';
+import react from '@vitejs/plugin-react';
+import tailwindcss from '@tailwindcss/vite';
+
+const desktopRoot = import.meta.dirname;
+
+export default defineConfig({
+  main: {
+    plugins: [externalizeDepsPlugin()],
+  },
+  preload: {
+    plugins: [externalizeDepsPlugin()],
+    build: {
+      rollupOptions: {
+        output: {
+          format: 'cjs',
+          inlineDynamicImports: true,
+          entryFileNames: '[name].cjs',
+          chunkFileNames: '[name].cjs',
+          assetFileNames: '[name].[ext]',
+        },
+      },
+    },
+  },
+  renderer: {
+    resolve: {
+      alias: {
+        '@renderer': resolve(desktopRoot, 'src/renderer'),
+        '@todex/protocol': resolve(desktopRoot, '../TodeX_app/src/lib'),
+        '@react-native-community/netinfo': resolve(desktopRoot, 'src/renderer/stubs/netinfo.ts'),
+      },
+    },
+    plugins: [react(), tailwindcss()],
+  },
+});
