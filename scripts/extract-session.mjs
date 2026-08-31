@@ -149,21 +149,6 @@ session = session.replace(
 `,
   '',
 );
-// The RN WebSocket three-argument constructor (per-request headers) does not
-// exist in the DOM implementation; the desktop relies on the access_token
-// query parameter carried by buildV2WebSocketUrlWithOptions instead.
-session = session.replace(
-  `    const options = settings.authToken
-      ? { headers: { Authorization: \`Bearer \${settings.authToken}\` } }
-      : undefined;
-
-    try {
-      const socket = new (WebSocket as typeof WebSocket & {
-        new (uri: string, protocols?: string | string[] | null, options?: { headers?: Record<string, string> }): WebSocket;
-      })(wsUrl, undefined, options);`,
-  `    try {
-      const socket = new WebSocket(wsUrl);`,
-);
 session = session.replace(/Alert\.alert/g, 'desktopAlert');
 session = session.replace(
   'await Clipboard.setStringAsync(lastMessage.subtitle);',

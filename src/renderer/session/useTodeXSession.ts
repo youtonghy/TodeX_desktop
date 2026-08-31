@@ -2235,6 +2235,11 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       cryptoQueryString: crypto?.queryString,
       authToken: settings.authToken,
     });
+
+    // Single-argument constructor, matching the Desktop session: authentication
+    // rides on the URL (access_token + pairing query). The old three-argument
+    // RN form passed headers in a position Electron ignores, which only worked
+    // because the token was already in the URL.
     try {
       const socket = new WebSocket(wsUrl);
       const generation = socketGenerationRef.current;
