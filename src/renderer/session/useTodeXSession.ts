@@ -21,7 +21,7 @@ import {
   WorkspaceRecord,
   approvalResponsePayload,
   buildHttpUrl,
-  buildWebSocketUrl,
+  buildWebSocketUrlWithToken,
   classifyPendingRequest,
   createRequestId,
   displayNameFromPath,
@@ -2198,15 +2198,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       return;
     }
 
-    const wsUrl = buildWebSocketUrl(settings.serverUrl, crypto?.queryString);
-    const options = settings.authToken
-      ? { headers: { Authorization: `Bearer ${settings.authToken}` } }
-      : undefined;
+    const wsUrl = buildWebSocketUrlWithToken(settings.serverUrl, crypto?.queryString, settings.authToken);
 
     try {
-      const socket = new (WebSocket as typeof WebSocket & {
-        new (uri: string, protocols?: string | string[] | null, options?: { headers?: Record<string, string> }): WebSocket;
-      })(wsUrl, undefined, options);
+      const socket = new WebSocket(wsUrl);
       const generation = socketGenerationRef.current;
       socketRef.current = socket;
       socketCryptoRef.current = crypto;
@@ -5510,4 +5505,3 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     setAutoConnectEnabled,
   };
 }
-
