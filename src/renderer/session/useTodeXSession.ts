@@ -7,8 +7,9 @@ import {
   type Dispatch,
   type SetStateAction,
 } from 'react';
-import type { ProviderDescriptor, ProviderKind, ConversationManifest } from '@todex/protocol/v2';
+import type { ProviderDescriptor, ProviderKind, ConversationManifest, PromptSkillRef, SkillCatalogDescriptor } from '@todex/protocol/v2';
 import { V2ApiClient, buildV2WebSocketUrlWithOptions } from '@todex/protocol/v2';
+import { probeBackendConnection, nextReconnectDelayMs, inspectServerUrl, tokenMatchesOrigin } from '@todex/protocol/connectionProbe';
 import {
   ConnectionSettings,
   CodexMemorySettings,
@@ -80,6 +81,7 @@ import {
   SESSION_CURSORS_STORAGE_KEY,
   EXPERIMENTAL_FEATURES_STORAGE_KEY,
   TOKEN_STORAGE_KEY,
+  TOKEN_ORIGIN_STORAGE_KEY,
   JSON_SAVE_DEBOUNCE_MS,
   SESSION_CURSOR_SAVE_DEBOUNCE_MS,
   WORKSPACE_SYNC_DEBOUNCE_MS,
@@ -89,7 +91,6 @@ import {
   MAX_TRANSPORT_HELLO_SESSION_CURSORS,
   MAX_TIMELINE_ITEMS,
   MAX_EVENTS,
-  RECONNECT_DELAY_MS,
   CHAT_ATTACH_REPLAY_LIMIT,
   TERMINAL_MAX_OUTPUT_ENTRIES,
   DEFAULT_TERMINAL_ROWS,
@@ -241,6 +242,11 @@ import {
   makeSystemEntry,
   classifyProgressEvent,
   classifyChatEvent,
+  classifyV2ConversationEvent,
+  conversationFromManifest,
+  mergeManifestConversations,
+  isV2Conversation,
+  canSwitchConversationAgent,
   isTurnTerminalEvent,
   timelineEntryFromNativeHistoryEntry,
   isVisibleConversationEntry,
@@ -302,6 +308,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const socketGenerationRef = useRef(0);
   const autoConnectAttemptedRef = useRef(false);
   const sessionCursorsRef = useRef(new Map<string, number>());
+  const reconnectAttemptRef = useRef(0);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const manualDisconnectRef = useRef(false);
   const workspaceBackendReadyRef = useRef(false);
@@ -370,6 +377,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         if (!active) return;
         setV2Providers(providers.providers);
         setV2Conversations(conversations.conversations);
+        setConversations((current) => mergeManifestConversations(current, conversations.conversations, workspacesRef.current));
       })
       .catch(() => {
         if (!active) return;
@@ -653,6 +661,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         storedSessionCursors,
         storedExperimentalFeatures,
         storedToken,
+        storedTokenOrigin,
       ] = await Promise.all([
         loadJson<PersistedSettings | null>(SETTINGS_STORAGE_KEY, null),
         loadJson<WorkspaceRecord[]>(WORKSPACES_STORAGE_KEY, []),
@@ -663,13 +672,18 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         loadJson<Record<string, number>>(SESSION_CURSORS_STORAGE_KEY, {}),
         loadJson<Partial<ExperimentalFeatureSettings> | null>(EXPERIMENTAL_FEATURES_STORAGE_KEY, null),
         loadSecret(TOKEN_STORAGE_KEY),
+        loadSecret(TOKEN_ORIGIN_STORAGE_KEY),
       ]);
 
       if (!alive) {
         return;
       }
 
-      const nextSettings = fromPersistedSettings(storedSettings, storedToken);
+      const nextSettings = fromPersistedSettings(
+        storedSettings,
+        tokenMatchesOrigin(storedTokenOrigin, storedSettings?.serverUrl || defaultSettings.serverUrl) ? storedToken : '',
+      );
+      nextSettings.serverUrl = normalizeServerUrl(nextSettings.serverUrl);
       const normalizedWorkspaces = storedWorkspaces.map((workspace) => ({
         ...workspace,
         reasoningEffort: normalizeReasoningEffort(workspace.reasoningEffort),
@@ -776,6 +790,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     }
     void saveJson(SETTINGS_STORAGE_KEY, toPersistedSettings(settings));
     void saveSecret(TOKEN_STORAGE_KEY, settings.authToken);
+    void saveSecret(TOKEN_ORIGIN_STORAGE_KEY, settings.authToken ? normalizeServerUrl(settings.serverUrl) : '');
   }, [hydrated, settings]);
 
   const syncWorkspacesToBackend = useCallback(
@@ -2047,15 +2062,54 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         return;
       }
       if (messageType === 'conversation.event') {
-        // Conversation-plane events are rendered by the dedicated v2 screen,
-        // not the legacy workbench timeline.
+        const payload = parsed.payload && typeof parsed.payload === 'object'
+          ? parsed.payload as Record<string, unknown>
+          : parsed;
+        const conversationId = typeof payload.conversationId === 'string' ? payload.conversationId : '';
+        const conversation = conversationsRef.current.find((item) => item.id === conversationId || item.v2ConversationId === conversationId);
+        if (conversation && typeof payload.type === 'string') {
+          const event = payload as unknown as import('@todex/protocol/v2').ConversationEvent;
+          const entry = classifyV2ConversationEvent(event, conversation.workspaceId);
+          if (entry) {
+            upsertChatTimeline(entry, event.type.includes('delta'));
+          }
+          if (event.type === 'turn.started') {
+            setConversationThinking(conversation.id, true);
+          }
+          if (event.type === 'turn.completed' || event.type === 'turn.cancelled' || event.type === 'turn.failed') {
+            setConversationThinking(conversation.id, false);
+          }
+          if (typeof event.sequence === 'number') {
+            updateConversation(conversation.id, { lastSequence: event.sequence, updatedAt: Date.now() });
+          }
+          if (event.type === 'permission.requested') {
+            const inner = event.payload && typeof event.payload === 'object' && !Array.isArray(event.payload)
+              ? event.payload as Record<string, unknown>
+              : {};
+            const permissionId = typeof inner.permissionId === 'string' ? inner.permissionId : '';
+            if (permissionId) {
+              enqueueServerEvent({
+                type: 'conversation.permission.request',
+                payload: {
+                  requestId: permissionId,
+                  permissionId,
+                  conversationId,
+                  sessionId: conversation.sessionId,
+                  title: inner.title,
+                  kind: inner.kind,
+                  details: inner.details,
+                },
+              });
+            }
+          }
+        }
         return;
       }
       enqueueServerEvent(parsed as unknown as ServerEvent);
     } catch (error) {
       setLastError(error instanceof Error ? error.message : 'failed to parse websocket message');
     }
-  }, [enqueueServerEvent]);
+  }, [enqueueServerEvent, setConversationThinking, updateConversation, upsertChatTimeline]);
 
   const scheduleSocketFrameDrain = useCallback(() => {
     if (pendingSocketFrameDrainRef.current !== null) {
@@ -2214,6 +2268,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     };
   }, [checkConnectionHealth, hydrated]);
 
+  const lastFailureRetryableRef = useRef(true);
+
   const connect = useCallback(() => {
     manualDisconnectRef.current = false;
     autoConnectAttemptedRef.current = true;
@@ -2221,67 +2277,153 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     closeSocket(false);
     setLastError('');
     setConnectionState('connecting');
+    setConnectionHealth((current) => ({ ...current, status: 'checking', error: '', code: '' }));
 
-    let crypto: TransportCryptoSession | null = null;
-    try {
-      crypto = createTransportCryptoSession(settings);
-    } catch (error) {
-      setConnectionState('error');
-      setLastError(error instanceof Error ? error.message : '无法初始化加密连接');
-      return;
-    }
-
-    const wsUrl = buildV2WebSocketUrlWithOptions(settings.serverUrl, {
-      cryptoQueryString: crypto?.queryString,
-      authToken: settings.authToken,
-    });
-
-    // Single-argument constructor, matching the Desktop session: authentication
-    // rides on the URL (access_token + pairing query). The old three-argument
-    // RN form passed headers in a position Electron ignores, which only worked
-    // because the token was already in the URL.
-    try {
-      const socket = new WebSocket(wsUrl);
-      const generation = socketGenerationRef.current;
-      socketRef.current = socket;
-      socketCryptoRef.current = crypto;
-
-      socket.onopen = () => {
-        setConnectionState('open');
-        // Replaces the legacy transport hello: resume Codex sessions from the
-        // client-side cursors so events emitted while disconnected are
-        // replayed by the backend.
-        sendSessionResume(getSessionCursorSnapshot());
-        void checkConnectionHealth();
-        void refreshServerVersion();
-        void syncWorkspacesFromBackend();
-      };
-
-      socket.onmessage = (event) => {
-        enqueueSocketFrame({
-          data: String(event.data),
-          generation,
-          crypto: socketCryptoRef.current,
-        });
-      };
-
-      socket.onerror = () => {
+    void (async () => {
+      const inspected = inspectServerUrl(settings.serverUrl);
+      if (inspected.error) {
+        lastFailureRetryableRef.current = inspected.error.retryable;
         setConnectionState('error');
-        setLastError('websocket error');
-      };
+        setLastError(inspected.error.userMessage);
+        setConnectionHealth({
+          status: 'offline',
+          latencyMs: null,
+          lastCheckedAt: Date.now(),
+          error: inspected.error.userMessage,
+          code: inspected.error.code,
+        });
+        return;
+      }
 
-      socket.onclose = () => {
-        setConnectionState((current) => (current === 'open' || current === 'connecting' ? 'closed' : current));
-        if (socketRef.current === socket) {
-          socketCryptoRef.current = null;
+      const probe = await probeBackendConnection({
+        serverUrl: inspected.origin,
+        authToken: settings.authToken,
+      });
+      if (!probe.ok || probe.error) {
+        const error = probe.error ?? ConnectionError.unreachable('backend probe failed');
+        lastFailureRetryableRef.current = error.retryable;
+        setConnectionState('error');
+        setLastError(error.userMessage);
+        setConnectionHealth({
+          status: 'offline',
+          latencyMs: null,
+          lastCheckedAt: Date.now(),
+          error: error.userMessage,
+          code: error.code,
+        });
+        if (probe.version) {
+          setServerVersion({
+            name: probe.version.name,
+            version: probe.version.version,
+            data_dir: probe.version.dataDir || '',
+            workspace_root: probe.version.workspaceRoot || '',
+          });
         }
-      };
-    } catch (error) {
-      setConnectionState('error');
-      socketCryptoRef.current = null;
-      setLastError(error instanceof Error ? error.message : 'failed to connect');
-    }
-  }, [checkConnectionHealth, closeSocket, enqueueSocketFrame, getSessionCursorSnapshot, refreshServerVersion, sendSessionResume, settings, syncWorkspacesFromBackend]);
+        if (probe.providers.length) {
+          setV2Providers(probe.providers);
+        }
+        return;
+      }
+
+      setV2Providers(probe.providers);
+      if (probe.version) {
+        setServerVersion({
+          name: probe.version.name,
+          version: probe.version.version,
+          data_dir: probe.version.dataDir || '',
+          workspace_root: probe.version.workspaceRoot || '',
+        });
+      }
+      setConnectionHealth({
+        status: 'online',
+        latencyMs: null,
+        lastCheckedAt: Date.now(),
+        error: '',
+        code: '',
+      });
+
+      let crypto: TransportCryptoSession | null = null;
+      try {
+        crypto = createTransportCryptoSession({ ...settings, serverUrl: inspected.origin });
+      } catch (error) {
+        lastFailureRetryableRef.current = false;
+        setConnectionState('error');
+        setLastError(error instanceof Error ? error.message : '无法初始化加密连接');
+        return;
+      }
+
+      const wsUrl = buildV2WebSocketUrlWithOptions(inspected.origin, {
+        cryptoQueryString: crypto?.queryString,
+        authToken: settings.authToken,
+      });
+
+      try {
+        const socket = new WebSocket(wsUrl);
+        const generation = socketGenerationRef.current;
+        socketRef.current = socket;
+        socketCryptoRef.current = crypto;
+
+        socket.onopen = () => {
+          reconnectAttemptRef.current = 0;
+          lastFailureRetryableRef.current = true;
+          setConnectionState('open');
+          sendSessionResume(getSessionCursorSnapshot());
+          void checkConnectionHealth();
+          void refreshServerVersion();
+          void syncWorkspacesFromBackend();
+          for (const conversation of conversationsRef.current) {
+            if (conversation.v2ConversationId) {
+              try {
+                sendRawProtocolFrame({
+                  id: createRequestId('sub'),
+                  type: 'conversation.subscribe',
+                  payload: {
+                    conversationId: conversation.v2ConversationId,
+                    afterSequence: conversation.lastSequence ?? 0,
+                    limit: 200,
+                  },
+                });
+              } catch {
+                // subscribe is best-effort after resume
+              }
+            }
+          }
+        };
+
+        socket.onmessage = (event) => {
+          enqueueSocketFrame({
+            data: String(event.data),
+            generation,
+            crypto: socketCryptoRef.current,
+          });
+        };
+
+        socket.onerror = () => {
+          lastFailureRetryableRef.current = true;
+          setConnectionState('error');
+          setLastError(ConnectionError.websocketFailed(wsUrl).userMessage);
+          setConnectionHealth((current) => ({
+            ...current,
+            status: 'offline',
+            error: ConnectionError.websocketFailed(wsUrl).userMessage,
+            code: 'websocket_failed',
+          }));
+        };
+
+        socket.onclose = () => {
+          setConnectionState((current) => (current === 'open' || current === 'connecting' ? 'closed' : current));
+          if (socketRef.current === socket) {
+            socketCryptoRef.current = null;
+          }
+        };
+      } catch (error) {
+        lastFailureRetryableRef.current = true;
+        setConnectionState('error');
+        socketCryptoRef.current = null;
+        setLastError(error instanceof Error ? error.message : ConnectionError.websocketFailed(wsUrl).userMessage);
+      }
+    })();
+  }, [checkConnectionHealth, closeSocket, enqueueSocketFrame, getSessionCursorSnapshot, refreshServerVersion, sendRawProtocolFrame, sendSessionResume, settings, syncWorkspacesFromBackend]);
 
   useEffect(() => {
     if (!hydrated || !autoConnectEnabled || manualDisconnectRef.current) {
@@ -2290,15 +2432,20 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     if (connectionState !== 'closed' && connectionState !== 'error') {
       return;
     }
+    if (!lastFailureRetryableRef.current) {
+      return;
+    }
     if (reconnectTimerRef.current) {
       clearTimeout(reconnectTimerRef.current);
     }
+    const delay = nextReconnectDelayMs(reconnectAttemptRef.current);
+    reconnectAttemptRef.current += 1;
     reconnectTimerRef.current = setTimeout(() => {
       reconnectTimerRef.current = null;
       if (!manualDisconnectRef.current) {
         connect();
       }
-    }, RECONNECT_DELAY_MS);
+    }, delay);
     return () => {
       if (reconnectTimerRef.current) {
         clearTimeout(reconnectTimerRef.current);
@@ -3974,33 +4121,130 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     return true;
   }, [getConversationContext, sendNativeThreadAction]);
 
-  const createConversation = useCallback((workspaceId: string) => {
+  const rekeyConversationComposer = useCallback((fromId: string, toId: string) => {
+    if (!fromId || !toId || fromId === toId) {
+      return;
+    }
+    const move = <T,>(setter: Dispatch<SetStateAction<Record<string, T>>>) => {
+      setter((current) => {
+        if (!Object.prototype.hasOwnProperty.call(current, fromId)) {
+          return current;
+        }
+        const { [fromId]: value, ...rest } = current;
+        return { ...rest, [toId]: value };
+      });
+    };
+    move(setChatDrafts);
+    move(setQueuedChatDrafts);
+    move(setComposerSelections);
+    move(setComposerAttachments);
+    move(setSelectedSkills);
+  }, []);
+
+  const createConversation = useCallback((
+    workspaceId: string,
+    options?: { provider: ProviderKind; providerProfile?: string; title?: string },
+  ) => {
     const workspace = workspacesRef.current.find((item) => item.id === workspaceId);
     if (!workspace) {
       desktopAlert('未找到工作区', '请返回后重新选择工作区。');
       return null;
     }
+    if (!options?.provider) {
+      desktopAlert('请选择 Agent', '新建对话时必须选择一个可用的 Agent。');
+      return null;
+    }
 
-    const nextConversation = createDefaultConversation(workspace);
-    setConversations((current) => [nextConversation, ...current]);
+    const placeholder = {
+      ...createDefaultConversation(workspace),
+      title: options.title?.trim() || '新对话',
+      provider: options.provider,
+      providerProfile: options.providerProfile,
+    };
+    setConversations((current) => [placeholder, ...current]);
     setActiveWorkspaceId(workspace.id);
-    setActiveConversationId(nextConversation.id);
-    appendTimeline(makeSystemEntry('New native thread', '正在通过 Codex 原生 thread/start 创建新对话。', workspace.id, nextConversation.id));
+    setActiveConversationId(placeholder.id);
+    appendTimeline(makeSystemEntry(
+      '正在创建对话',
+      `Agent：${options.provider}`,
+      workspace.id,
+      placeholder.id,
+    ));
 
     void (async () => {
       try {
-        await startLocalAdapter(workspace, nextConversation);
-        const threadId = await ensureThreadId(workspace, nextConversation, true);
-        unmaterializedNativeThreadIdsRef.current.add(threadId);
-        void requestNativeThreadList(workspace.id).catch(() => undefined);
+        const api = new V2ApiClient({ serverUrl: settings.serverUrl, authToken: settings.authToken });
+        const created = await api.createConversation({
+          provider: options.provider,
+          workspace: workspace.path,
+          title: options.title?.trim() || undefined,
+          providerProfile: options.providerProfile,
+        });
+        const record = conversationFromManifest(created, workspace.id);
+        rekeyConversationComposer(placeholder.id, record.id);
+        setConversations((current) => [
+          record,
+          ...current.filter((item) => item.id !== placeholder.id && item.id !== record.id),
+        ]);
+        setV2Conversations((current) => [created, ...current.filter((item) => item.id !== created.id)]);
+        setActiveConversationId(record.id);
+        try {
+          sendRawProtocolFrame({
+            id: createRequestId('sub'),
+            type: 'conversation.subscribe',
+            payload: { conversationId: created.id, afterSequence: 0, limit: 200 },
+          });
+        } catch {
+          // HTTP create succeeded; subscribe retries on next connect.
+        }
+        appendTimeline(makeSystemEntry('对话已创建', created.provider, workspace.id, record.id));
       } catch (error) {
-        const message = error instanceof Error ? localTurnErrorMessage(error.message) : '创建原生 thread 失败';
+        setConversations((current) => current.filter((item) => item.id !== placeholder.id));
+        const message = error instanceof Error ? error.message : '创建对话失败';
         setLastError(message);
+        desktopAlert('创建对话失败', message);
       }
     })();
 
-    return nextConversation;
-  }, [appendTimeline, ensureThreadId, requestNativeThreadList, startLocalAdapter]);
+    return placeholder;
+  }, [appendTimeline, rekeyConversationComposer, sendRawProtocolFrame, settings.authToken, settings.serverUrl]);
+
+  const switchConversationAgent = useCallback((conversationId: string, provider: ProviderKind) => {
+    const context = getConversationContext(conversationId);
+    if (!context) {
+      desktopAlert('未选择对话', '请先选择工作区和对话。');
+      return;
+    }
+    const { workspace, conversation } = context;
+    if (conversation.provider === provider) {
+      return;
+    }
+    if (!canSwitchConversationAgent(conversation, {
+      timeline: timelineRef.current.filter((entry) => entry.conversationId === conversation.id),
+      thinking: thinkingConversationsRef.current[conversation.id] === true,
+    })) {
+      desktopAlert('无法切换 Agent', '任务开始后不能再切换 Agent。请新建对话。');
+      return;
+    }
+    const descriptor = v2Providers.find((item) => item.id === provider);
+    if (!descriptor?.available) {
+      desktopAlert('该 Agent 当前不可用', descriptor?.unavailableReason || '请选择其他可用的 Agent。');
+      return;
+    }
+    const created = createConversation(workspace.id, {
+      provider,
+      providerProfile: descriptor.profiles[0],
+      title: conversation.title,
+    });
+    if (!created) {
+      return;
+    }
+    rekeyConversationComposer(conversation.id, created.id);
+    setConversations((current) => current.filter((item) => item.id !== conversation.id));
+    setV2Conversations((current) => current.filter(
+      (item) => item.id !== conversation.v2ConversationId && item.id !== conversation.id,
+    ));
+  }, [createConversation, getConversationContext, rekeyConversationComposer, v2Providers]);
 
   const renameConversation = useCallback((conversationId: string, title: string) => {
     const nextTitle = title.trim();
@@ -4113,6 +4357,59 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     }
   }, [getConversationContext, sendNativeThreadAction, updateConversation]);
 
+  const promptSkillsFromAttachments = useCallback((skills: SelectedSkillAttachment[]): PromptSkillRef[] => {
+    return skills
+      .filter((skill) => Boolean(skill.resourceId))
+      .map((skill) => ({ resourceId: skill.resourceId as string, name: skill.name }));
+  }, []);
+
+  const sendV2Prompt = useCallback(
+    (
+      text: string,
+      conversationId = activeConversationRef.current,
+      skills: SelectedSkillAttachment[] = [],
+    ) => {
+      const context = getConversationContext(conversationId);
+      if (!context) {
+        desktopAlert('未选择对话', '请先选择工作区和对话。');
+        return false;
+      }
+      const { workspace, conversation } = context;
+      const v2Id = conversation.v2ConversationId || (isV2Conversation(conversation) ? conversation.id : '');
+      if (!v2Id) {
+        desktopAlert('当前不是 v2 对话', '请新建对话后再发送。');
+        return false;
+      }
+      const skillRefs = promptSkillsFromAttachments(skills);
+      setConversationThinking(conversation.id, true);
+      appendTimeline(makeSystemEntry(
+        '正在思考',
+        skillRefs.length ? `已附带 ${skillRefs.length} 个 Skill，由后端注入。` : '请求已发给 Backend。',
+        workspace.id,
+        conversation.id,
+      ));
+      const sent = sendRawProtocolFrame({
+        id: createRequestId('prompt'),
+        type: 'conversation.prompt',
+        payload: {
+          conversationId: v2Id,
+          text,
+          ...(skillRefs.length ? { skills: skillRefs } : {}),
+        },
+      });
+      if (!sent) {
+        setConversationThinking(conversation.id, false);
+        setLastError('请先连接 Backend。');
+        return false;
+      }
+      if (conversation.title === '新对话' && text.trim()) {
+        updateConversation(conversation.id, { title: text.slice(0, 18), updatedAt: Date.now() });
+      }
+      return true;
+    },
+    [appendTimeline, getConversationContext, promptSkillsFromAttachments, sendRawProtocolFrame, setConversationThinking, updateConversation],
+  );
+
   const sendLocalTurn = useCallback(
     async (
       text: string,
@@ -4200,9 +4497,14 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   );
 
   useEffect(() => {
-    sendQueuedChatDraftRef.current = (submission, conversationId) =>
-      sendLocalTurn(submission.text, 'implement', conversationId, submission.attachments, submission.skills);
-  }, [sendLocalTurn]);
+    sendQueuedChatDraftRef.current = async (submission, conversationId) => {
+      const conversation = conversationsRef.current.find((item) => item.id === conversationId) ?? null;
+      if (isV2Conversation(conversation)) {
+        return sendV2Prompt(submission.text, conversationId, submission.skills);
+      }
+      return sendLocalTurn(submission.text, 'implement', conversationId, submission.attachments, submission.skills);
+    };
+  }, [sendLocalTurn, sendV2Prompt]);
 
   const toggleSelectedSkill = useCallback((conversationId: string, skill: SkillListItem) => {
     if (!skill.enabled) {
@@ -4223,9 +4525,96 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     });
   }, [setConversationSelectedSkills]);
 
+  const toggleCatalogSkill = useCallback((conversationId: string, skill: SkillCatalogDescriptor, provider: ProviderKind) => {
+    if (!skill.valid) {
+      desktopAlert('Skill 无效', skill.error || '该 Skill 当前不能添加到下一条消息。');
+      return;
+    }
+    const nextSkill: SelectedSkillAttachment = {
+      name: skill.name,
+      path: skill.source,
+      displayName: skill.name,
+      resourceId: skill.resourceId,
+      provider,
+    };
+    setConversationSelectedSkills(conversationId, (current) => {
+      const exists = current.some((item) => item.resourceId === skill.resourceId || (item.name === skill.name && item.path === skill.source));
+      if (exists) {
+        return current.filter((item) => item.resourceId !== skill.resourceId && (item.name !== skill.name || item.path !== skill.source));
+      }
+      return [...current, nextSkill];
+    });
+  }, [setConversationSelectedSkills]);
+
+  const previewSkillResource = useCallback(async (provider: ProviderKind, resourceId: string) => {
+    const workspacePath = activeWorkspace?.path || settings.defaultWorkspacePath;
+    if (!workspacePath) {
+      throw new Error('请先选择工作区');
+    }
+    const api = new V2ApiClient({ serverUrl: settings.serverUrl, authToken: settings.authToken });
+    const result = await api.getSkillResource(provider, workspacePath, resourceId);
+    return result.content;
+  }, [activeWorkspace?.path, settings.authToken, settings.defaultWorkspacePath, settings.serverUrl]);
+
+  const refreshMcpServer = useCallback((conversationId: string, resourceId: string) => {
+    const conversation = conversationsRef.current.find((item) => item.id === conversationId) ?? null;
+    const v2Id = conversation?.v2ConversationId || conversation?.id;
+    if (!conversation || !isV2Conversation(conversation) || !v2Id) {
+      desktopAlert('需要 v2 对话', '请先新建对话后再刷新 MCP。');
+      return false;
+    }
+    return Boolean(sendRawProtocolFrame({
+      id: createRequestId('mcp'),
+      type: 'mcp.refresh',
+      payload: { conversationId: v2Id, resourceId },
+    }));
+  }, [sendRawProtocolFrame]);
+
+  const callMcpTool = useCallback((conversationId: string, resourceId: string, toolName: string, args: Record<string, unknown> = {}) => {
+    const conversation = conversationsRef.current.find((item) => item.id === conversationId) ?? null;
+    const workspace = conversation
+      ? workspacesRef.current.find((item) => item.id === conversation.workspaceId) ?? null
+      : null;
+    const v2Id = conversation?.v2ConversationId || conversation?.id;
+    if (!conversation || !workspace || !isV2Conversation(conversation) || !v2Id) {
+      desktopAlert('需要 v2 对话', '请先新建对话后再调用 MCP。');
+      return false;
+    }
+    appendTimeline(makeSystemEntry('正在调用 MCP', `${toolName}`, workspace.id, conversation.id));
+    return Boolean(sendRawProtocolFrame({
+      id: createRequestId('mcp'),
+      type: 'mcp.call',
+      payload: {
+        conversationId: v2Id,
+        resourceId,
+        toolName,
+        arguments: args,
+      },
+    }));
+  }, [appendTimeline, sendRawProtocolFrame]);
+
   const sendApprovalResponse = useCallback(
     (accepted: boolean, request: PendingRequest) => {
       const data = eventPayloadData(request.event);
+      if (request.requestType === 'conversation.permission.request') {
+        const conversationId = typeof data.conversationId === 'string' ? data.conversationId : '';
+        const conversation = conversationsRef.current.find((item) => item.id === conversationId || item.v2ConversationId === conversationId) ?? null;
+        const v2Id = conversation?.v2ConversationId || conversation?.id || conversationId;
+        const permissionId = typeof data.permissionId === 'string' ? data.permissionId : request.requestId;
+        if (!v2Id || !permissionId) {
+          desktopAlert('权限请求无效', '找不到对应的对话。');
+          return false;
+        }
+        return Boolean(sendRawProtocolFrame({
+          id: createRequestId('perm'),
+          type: 'conversation.permission.respond',
+          payload: {
+            conversationId: v2Id,
+            permissionId,
+            decision: { outcome: accepted ? 'allow_once' : 'reject_once' },
+          },
+        }));
+      }
       const requestSessionId = sessionIdFromEvent(request.event, data);
       const conversation = requestSessionId
         ? conversationsRef.current.find((item) => item.sessionId === requestSessionId) ?? null
@@ -4249,7 +4638,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         conversationId: conversation.id,
       });
     },
-    [sendProtocolMessage],
+    [sendProtocolMessage, sendRawProtocolFrame],
   );
 
   const applyPermissionPreset = useCallback(
@@ -4758,10 +5147,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       }
 
       if (lower === 'clear' || lower === 'new') {
-        const nextConversation = createConversation(workspace.id);
-        if (nextConversation) {
-          selectConversation(workspace.id, nextConversation.id);
-        }
+        openPanel('CreateConversation');
         return;
       }
 
@@ -4974,6 +5360,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       attachWorkspaceConversation,
       settings,
       modelCatalog,
+      openPanel,
       setConversationChatDraft,
       setConversationComposerSelection,
       setLastError,
@@ -5118,6 +5505,19 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       desktopAlert('未选择工作区', '请先选择一个工作区。');
       return;
     }
+    if (isV2Conversation(conversation)) {
+      const v2Id = conversation.v2ConversationId || conversation.id;
+      if (sendRawProtocolFrame({
+        id: createRequestId('cancel'),
+        type: 'conversation.cancel',
+        payload: { conversationId: v2Id },
+      })) {
+        appendTimeline(makeSystemEntry('已发送停止', '正在请求 Backend 取消当前回合。', workspace.id, conversation.id));
+      } else {
+        setLastError('请先连接 Backend。');
+      }
+      return;
+    }
     const threadId = normalizeThreadId(conversation.threadId);
     if (!threadId) {
       setLastError('当前还没有可中断的 thread。');
@@ -5126,7 +5526,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     if (sendWorkspaceCommand(workspace, 'codex.local.interrupt', { threadId, turnId: turnIds[conversationId] || '' }, conversation)) {
       appendTimeline(makeSystemEntry('已发送停止', '正在请求 Codex 中断当前思考。', workspace.id, conversation.id));
     }
-  }, [appendTimeline, sendWorkspaceCommand, turnIds]);
+  }, [appendTimeline, sendRawProtocolFrame, sendWorkspaceCommand, turnIds]);
 
   const submitChat = useCallback((conversationId: string) => {
     const text = (chatDrafts[conversationId] ?? '').trim();
@@ -5140,7 +5540,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       desktopAlert('未选择工作区', '请先选择一个工作区。');
       return;
     }
-    const { workspace } = context;
+    const { workspace, conversation } = context;
     const isThinking = thinkingConversations[conversationId] === true;
     const mentionReferences = parseMentionReferences(text);
     if (mentionReferences.length > 0) {
@@ -5176,12 +5576,19 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       appendTimeline(makeSystemEntry('消息已加入候选', '当前任务完成后会自动继续发送。', workspace.id, conversationId));
       return;
     }
+    if (isV2Conversation(conversation)) {
+      if (attachments.length > 0) {
+        appendTimeline(makeSystemEntry('v2 对话暂不发送本地附件', '附件仅保留在时间线记录中。', workspace.id, conversationId));
+      }
+      sendV2Prompt(text, conversationId, skills);
+      return;
+    }
     if (attachments.length > 0 || skills.length > 0) {
       void sendLocalTurn(text, 'implement', conversationId, attachments, skills);
       return;
     }
     sendSlashCommand(text, conversationId);
-  }, [appendTimeline, chatDrafts, composerAttachments, getConversationContext, rememberMentionReferences, selectedSkills, sendLocalTurn, sendSlashCommand, setConversationAttachments, setConversationChatDraft, setConversationComposerSelection, setConversationSelectedSkills, thinkingConversations]);
+  }, [appendTimeline, chatDrafts, composerAttachments, getConversationContext, rememberMentionReferences, selectedSkills, sendLocalTurn, sendSlashCommand, sendV2Prompt, setConversationAttachments, setConversationChatDraft, setConversationComposerSelection, setConversationSelectedSkills, thinkingConversations]);
 
   const runWorkspaceCommand = useCallback((workspace: WorkspaceRecord, conversation: ConversationRecord, command: 'start' | 'status' | 'attach' | 'stop' | 'interrupt') => {
     if (command === 'start') {
@@ -5469,6 +5876,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     forkWorkspace,
     removeWorkspace,
     createConversation,
+    switchConversationAgent,
     selectConversation,
     renameConversation,
     forkConversation,
@@ -5489,6 +5897,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     sendTerminalInput,
     requestSkillList,
     refreshCapabilityCatalog,
+    toggleCatalogSkill,
+    previewSkillResource,
+    refreshMcpServer,
+    callMcpTool,
     fetchWorkspaceDirectorySnapshot: (path?: string) => fetchWorkspaceDirectorySnapshot(settings, path),
     openModelPicker,
     applyModelCommand,

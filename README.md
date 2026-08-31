@@ -47,7 +47,9 @@ node node_modules/electron/install.js
 force_no_cache=true node node_modules/electron/install.js
 ```
 
-`npm run dev` 会打开 1280×800 的桌面窗口。先启动 `TodeX_backend` / `todex-agentd`，再在设置里连接或粘贴配对内容。 HeroUI Pro 还需要 `motion`、`react-aria-components` 等 peer，已写在本包的 `package.json` 中。
+`pnpm run dev` 会先跑 `check:electron`，确认本机 Electron 二进制可用后再启动。窗口默认 1280×800。先启动 `TodeX_backend` / `todex-agentd`，再在设置里连接或粘贴配对内容。HeroUI Pro 还需要 `motion`、`react-aria-components` 等 peer，已写在本包的 `package.json` 中。
+
+主聊天新建对话走 Backend `POST /v2/conversations`，必须选择 Agent（Codex CLI / ACP / Pi / Claude Code）。创建后 Provider 锁定；切换 Agent 等于在同一工作区新建对话。旧的 Codex native thread 仍可从侧栏打开作为历史。
 
 其它命令：
 
@@ -55,9 +57,27 @@ force_no_cache=true node node_modules/electron/install.js
 pnpm run typecheck
 pnpm run build
 pnpm run preview
+pnpm run check:electron
 ```
 
 本次范围以 macOS 开发运行为准，不包含 Windows / Linux 安装包或自动更新。
+
+## 连接排障 / Connection troubleshooting
+
+设置页会显示分类后的错误，而不是一直停在「连接中」：
+
+| 现象 | 含义 | 处理 |
+| --- | --- | --- |
+| Backend 未启动或端口错误 | `/v2/version` 或 `/health` 连不上 | 先启动 `todex-agentd`，确认端口 |
+| Backend 地址无效 | URL 无法解析 | 使用 `http://127.0.0.1:7345` 这种 origin |
+| Token 缺失或无效 | 401/403 | 重新配对或填写正确 token；token 绑定到归一化后的 origin |
+| 协议已废弃（/v1） | 地址里带了 `/v1` | 改用 `/v2`，不要使用旧协议 |
+| WebSocket 握手失败 | HTTP 探测成功但 `/v2/ws` 失败 | 检查 token、加密协议和防火墙 |
+| Agent 不可用 | `GET /v2/providers` 中该 provider `available=false` | 在运行 daemon 的机器上登录对应 CLI |
+
+连接探测顺序：`/v2/version` → `/health` → `/v2/providers`。可重试错误会按 2s → 4s → … → 30s 退避；认证失败或协议错误不会自动重连。点击设置里的「重试」会立即再探测。
+
+Desktop 与 App 共用协议库，但 UI 不同：Desktop 是三栏（侧栏 / 聊天 / 右侧能力与工作台），App 保持移动端堆叠导航。
 
 ## 与移动端的关系 / Relation to TodeX_app
 

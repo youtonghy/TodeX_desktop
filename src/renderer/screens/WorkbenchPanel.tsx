@@ -238,7 +238,7 @@ function FilesPane({ session }: { session: TodeXSession }) {
             className="w-full"
             selectedKeys={selected ? new Set([selected]) : new Set()}
             selectionMode="single"
-            onSelectionChange={(keys) => {
+            onSelectionChange={(keys: 'all' | Set<string>) => {
               const next = keys === 'all' ? '' : String([...keys][0] ?? '');
               const entry = entries.find((item) => item.path === next);
               if (entry?.kind === 'file') setSelected(next);

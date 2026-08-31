@@ -1,12 +1,15 @@
 import { Paperclip, Stop } from '@gravity-ui/icons';
-import { Button, Chip, ScrollShadow, toast } from '@heroui/react';
+import { Button, Chip, Label, ListBox, ScrollShadow, Select, toast } from '@heroui/react';
 import { ChatMessage, PromptInput } from '@heroui-pro/react';
+import { providerDisplayName, type ProviderKind } from '@todex/protocol/v2';
 import type { TodeXSession } from '../session/useTodeXSession';
 import {
   attachmentId,
   buildConversationRenderItems,
+  canSwitchConversationAgent,
   inferMimeType,
   isImageMimeType,
+  isV2Conversation,
   MAX_COMPOSER_ATTACHMENTS,
   SLASH_COMMANDS,
   dataUrlFromBase64,
@@ -43,6 +46,18 @@ export function ChatPanel({ session }: Props) {
   const mention = findMentionTrigger(draft, session.composerSelections[conversation.id]?.end ?? draft.length);
   const capability = findCapabilityHashTrigger(draft, session.composerSelections[conversation.id]?.end ?? draft.length);
   const thinking = session.thinkingConversations[conversation.id] === true;
+  const conversationTimeline = session.timeline.filter((entry) => entry.conversationId === conversation.id);
+  const canSwitchAgent = canSwitchConversationAgent(conversation, {
+    timeline: conversationTimeline,
+    thinking,
+  });
+  const currentProvider = isV2Conversation(conversation) ? conversation.provider || '' : '';
+  const agentLabel = currentProvider
+    ? providerDisplayName(currentProvider, 'Agent')
+    : '历史 Codex';
+  const disabledAgentKeys = session.v2Providers
+    .filter((item) => !item.available)
+    .map((item) => item.id);
 
   const addFiles = async (paths: string[]) => {
     for (const path of paths) {
@@ -117,6 +132,9 @@ export function ChatPanel({ session }: Props) {
       </ScrollShadow>
       <div className="border-separator border-t px-5 py-4">
         <div className="mx-auto max-w-2xl">
+          {session.lastError ? (
+            <p className="text-danger mb-2 text-xs">{session.lastError}</p>
+          ) : null}
           {slashSuggestions.length > 0 ? (
             <div className="mb-2 flex flex-wrap gap-2">
               {slashSuggestions.slice(0, 8).map((item) => (
@@ -135,6 +153,21 @@ export function ChatPanel({ session }: Props) {
               ))}
             </div>
           ) : null}
+          {(session.selectedSkills[conversation.id] ?? []).length > 0 ? (
+            <div className="mb-2 flex flex-wrap gap-2">
+              {(session.selectedSkills[conversation.id] ?? []).map((skill) => (
+                <Button
+                  key={skill.resourceId || `${skill.name}:${skill.path}`}
+                  size="sm"
+                  variant="tertiary"
+                  onPress={() => session.setConversationSelectedSkills(conversation.id, (current) =>
+                    current.filter((item) => (item.resourceId || item.name) !== (skill.resourceId || skill.name)))}
+                >
+                  Skill · {skill.displayName || skill.name} ×
+                </Button>
+              ))}
+            </div>
+          ) : null}
           <div
             onDragOver={(event) => event.preventDefault()}
             onDrop={async (event) => {
@@ -149,7 +182,7 @@ export function ChatPanel({ session }: Props) {
             <PromptInput
               value={draft}
               status={thinking ? 'streaming' : 'ready'}
-              onValueChange={(value) => session.setConversationChatDraft(conversation.id, value)}
+              onValueChange={(value: string) => session.setConversationChatDraft(conversation.id, value)}
               onSubmit={() => {
                 if (draft.trim().startsWith('/')) {
                   session.sendSlashCommand(draft, conversation.id);
@@ -174,6 +207,41 @@ export function ChatPanel({ session }: Props) {
                     >
                       <Paperclip className="size-4" />
                     </PromptInput.Action>
+                    <Select
+                      className="min-w-32 max-w-44"
+                      variant="secondary"
+                      placeholder="选择 Agent"
+                      selectedKey={currentProvider || undefined}
+                      isDisabled={!canSwitchAgent}
+                      disabledKeys={disabledAgentKeys}
+                      onSelectionChange={(key) => {
+                        if (typeof key !== 'string' || !key || key === currentProvider) {
+                          return;
+                        }
+                        session.switchConversationAgent(conversation.id, key as ProviderKind);
+                      }}
+                    >
+                      <Label className="hidden">选择 Agent</Label>
+                      <Select.Trigger>
+                        <Select.Value>{agentLabel}</Select.Value>
+                        <Select.Indicator />
+                      </Select.Trigger>
+                      <Select.Popover>
+                        <ListBox>
+                          {session.v2Providers.map((item) => (
+                            <ListBox.Item
+                              key={item.id}
+                              id={item.id}
+                              textValue={providerDisplayName(item.id, item.displayName)}
+                            >
+                              {providerDisplayName(item.id, item.displayName)}
+                              {item.available ? '' : ` · ${item.unavailableReason || '不可用'}`}
+                              <ListBox.ItemIndicator />
+                            </ListBox.Item>
+                          ))}
+                        </ListBox>
+                      </Select.Popover>
+                    </Select>
                   </PromptInput.ToolbarStart>
                   <PromptInput.ToolbarEnd>
                     {thinking ? (

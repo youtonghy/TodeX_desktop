@@ -1,11 +1,56 @@
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme, shell } from 'electron';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const MAX_IMAGE_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 const MAX_FILE_ATTACHMENT_BYTES = 512 * 1024;
+const APP_IDENTITY = 'todex-desktop';
+const PROTOCOL_VERSION = 'v2';
+const DEFAULT_BACKEND_URL = process.env.TODEX_BACKEND_URL?.trim() || 'http://127.0.0.1:7345';
 
 type StoreShape = Record<string, unknown>;
+
+function sourceRoot(): string {
+  try {
+    return join(fileURLToPath(new URL('.', import.meta.url)), '../..');
+  } catch {
+    return process.cwd();
+  }
+}
+
+function logIdentity(window: BrowserWindow): void {
+  const renderer = process.env.ELECTRON_RENDERER_URL
+    ? process.env.ELECTRON_RENDERER_URL
+    : join(__dirname, '../renderer/index.html');
+  console.log(`[${APP_IDENTITY}] app=${APP_IDENTITY}`);
+  console.log(`[${APP_IDENTITY}] protocol=${PROTOCOL_VERSION}`);
+  console.log(`[${APP_IDENTITY}] electron=${process.versions.electron} chrome=${process.versions.chrome}`);
+  console.log(`[${APP_IDENTITY}] execPath=${process.execPath}`);
+  console.log(`[${APP_IDENTITY}] sourceRoot=${sourceRoot()}`);
+  console.log(`[${APP_IDENTITY}] userData=${app.getPath('userData')}`);
+  console.log(`[${APP_IDENTITY}] renderer=${renderer}`);
+  console.log(`[${APP_IDENTITY}] defaultBackend=${DEFAULT_BACKEND_URL}`);
+  window.webContents.on('did-navigate', (_event, url) => {
+    console.log(`[${APP_IDENTITY}] did-navigate ${url}`);
+  });
+}
+
+function assertElectronBinary(): void {
+  if (!existsSync(process.execPath)) {
+    throw new Error(`Electron executable missing: ${process.execPath}`);
+  }
+}
+
+async function probeDefaultBackend(): Promise<void> {
+  const target = `${DEFAULT_BACKEND_URL.replace(/\/+$/, '')}/v2/version`;
+  try {
+    const response = await fetch(target, { signal: AbortSignal.timeout(2000) });
+    console.log(`[${APP_IDENTITY}] backendProbe ${target} -> ${response.status}`);
+  } catch (error) {
+    console.warn(`[${APP_IDENTITY}] backendProbe ${target} failed: ${error instanceof Error ? error.message : error}`);
+  }
+}
 
 function storePath(): string {
   return join(app.getPath('userData'), 'todex-desktop-store.json');
@@ -47,10 +92,15 @@ function createWindow(): BrowserWindow {
   });
 
   if (process.env.ELECTRON_RENDERER_URL) {
+    console.log(`[${APP_IDENTITY}] loading renderer URL ${process.env.ELECTRON_RENDERER_URL}`);
     void window.loadURL(process.env.ELECTRON_RENDERER_URL);
   } else {
-    void window.loadFile(join(__dirname, '../renderer/index.html'));
+    const html = join(__dirname, '../renderer/index.html');
+    console.log(`[${APP_IDENTITY}] loading renderer file ${html}`);
+    void window.loadFile(html);
   }
+
+  logIdentity(window);
 
   window.webContents.on('preload-error', (_event, path, error) => {
     console.error('TodeX preload error', path, error);
@@ -82,6 +132,12 @@ function mimeFromName(name: string): string {
 }
 
 app.whenReady().then(() => {
+  try {
+    assertElectronBinary();
+  } catch (error) {
+    console.error(`[${APP_IDENTITY}] ${error instanceof Error ? error.message : error}`);
+  }
+  void probeDefaultBackend();
   ipcMain.handle('store:get', (_event, key: string) => {
     return readStore()[key] ?? null;
   });

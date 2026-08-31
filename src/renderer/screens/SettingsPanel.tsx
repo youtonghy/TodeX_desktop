@@ -8,6 +8,7 @@ import { toast } from '@heroui/react';
 import { Field } from '../components/Field';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { connectionStateLabel, healthLabelOf } from '../session/helpers';
+import { connectionFailureLabel } from '@todex/protocol/connectionError';
 
 type Props = {
   session: TodeXSession;
@@ -38,11 +39,12 @@ async function decodeQrFromFile(file: File): Promise<string | null> {
 }
 
 export function SettingsPanel({ session }: Props) {
-  const { settings, setSettings, connectionState, connectionHealth, serverVersion, connect, closeSocket } = session;
+  const { settings, setSettings, connectionState, connectionHealth, serverVersion, lastError, connect, closeSocket } = session;
   const [pairingText, setPairingText] = useState('');
   const [chunks, setChunks] = useState<Map<number, PairingQrChunk>>(new Map());
   const connected = connectionState === 'open' || connectionState === 'connecting';
   const loopback = useMemo(() => isLoopback(settings.serverUrl), [settings.serverUrl]);
+  const classified = connectionFailureLabel(connectionHealth.code);
 
   const applyRawPairing = async (raw: string) => {
     try {
@@ -75,8 +77,10 @@ export function SettingsPanel({ session }: Props) {
       <div>
         <h2 className="text-xl font-semibold">连接</h2>
         <p className="text-muted mt-1 text-sm">{healthLabelOf(connectionHealth)} · {connectionStateLabel(connectionState)}</p>
+        {classified ? <p className="text-danger mt-1 text-sm">{classified}</p> : null}
+        {lastError && lastError !== connectionHealth.error ? <p className="text-danger mt-1 text-sm">{lastError}</p> : null}
         {serverVersion ? (
-          <Chip className="mt-2" variant="soft">{serverVersion.name} {serverVersion.version}</Chip>
+          <Chip className="mt-2" variant="soft">{serverVersion.name} {serverVersion.version}{settings.tenantId ? ` · ${settings.tenantId}` : ''}</Chip>
         ) : null}
       </div>
       <Surface className="flex flex-col gap-4 rounded-2xl p-5">
@@ -114,8 +118,11 @@ export function SettingsPanel({ session }: Props) {
         ) : null}
         <div className="flex gap-2">
           <Button onPress={() => (connected ? closeSocket(true) : connect())}>
-            {connected ? '断开' : '连接'}
+            {connected ? '断开' : connectionState === 'error' ? '重试' : '连接'}
           </Button>
+          {connectionState === 'error' && connected === false ? (
+            <Button variant="secondary" onPress={() => connect()}>重试</Button>
+          ) : null}
         </div>
       </Surface>
       <Surface className="flex flex-col gap-4 rounded-2xl p-5">

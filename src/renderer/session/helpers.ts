@@ -14,6 +14,9 @@ import type {
   ServerEvent,
   WorkspaceRecord,
 } from '@todex/protocol/todex';
+import type { ConversationEvent, ConversationManifest, ProviderKind } from '@todex/protocol/v2';
+import { providerDisplayName } from '@todex/protocol/v2';
+import type { ConnectionFailureCode } from '@todex/protocol/connectionError';
 import {
   buildHttpUrl,
   createRequestId,
@@ -85,6 +88,10 @@ export type ConversationRecord = {
   mode?: 'plan' | 'implement';
   goalStatus?: string;
   goalObjective?: string;
+  provider?: ProviderKind | string;
+  providerProfile?: string;
+  v2ConversationId?: string;
+  lastSequence?: number;
   createdAt: number;
   updatedAt: number;
 };
@@ -353,6 +360,8 @@ export type SelectedSkillAttachment = {
   name: string;
   path: string;
   displayName: string;
+  resourceId?: string;
+  provider?: ProviderKind | string;
 };
 
 export type ThreadMenuAction =
@@ -393,6 +402,7 @@ export type ConnectionHealth = {
   latencyMs: number | null;
   lastCheckedAt: number | null;
   error: string;
+  code?: ConnectionFailureCode | '';
 };
 
 export const CONNECTION_HEALTH_INTERVAL_MS = 5000;
@@ -974,6 +984,7 @@ export const MENTION_HISTORY_STORAGE_KEY = 'todex.desktop.mentionHistory.v1';
 export const SESSION_CURSORS_STORAGE_KEY = 'todex.desktop.sessionCursors.v1';
 export const EXPERIMENTAL_FEATURES_STORAGE_KEY = 'todex.desktop.experimentalFeatures.v1';
 export const TOKEN_STORAGE_KEY = 'todex.desktop.token.v1';
+export const TOKEN_ORIGIN_STORAGE_KEY = 'todex.desktop.tokenOrigin.v1';
 export const JSON_SAVE_DEBOUNCE_MS = 350;
 export const SESSION_CURSOR_SAVE_DEBOUNCE_MS = 800;
 export const WORKSPACE_SYNC_DEBOUNCE_MS = 900;
@@ -983,7 +994,8 @@ export const SOCKET_FRAME_DECODE_BUDGET_MS = 10;
 export const MAX_TRANSPORT_HELLO_SESSION_CURSORS = 12;
 export const MAX_TIMELINE_ITEMS = 260;
 export const MAX_EVENTS = 220;
-export const RECONNECT_DELAY_MS = 2500;
+export const RECONNECT_DELAY_MS = 2000;
+export const RECONNECT_MAX_DELAY_MS = 30_000;
 export const CHAT_ATTACH_REPLAY_LIMIT = 200;
 export const CHAT_BOTTOM_FOLLOW_THRESHOLD = 72;
 export const TERMINAL_MAX_OUTPUT_ENTRIES = 420;
@@ -1248,6 +1260,7 @@ export const defaultConnectionHealth: ConnectionHealth = {
   latencyMs: null,
   lastCheckedAt: null,
   error: '',
+  code: '',
 };
 
 export function modelCommandInitialValue(workspace: WorkspaceRecord, settings: ConnectionSettings): string {
@@ -1431,11 +1444,166 @@ export function healthLabelOf(health: ConnectionHealth): string {
     case 'checking':
       return health.latencyMs === null ? '检测中' : `检测中 · ${latencyLabelOf(health.latencyMs)}`;
     case 'offline':
-      return !health.error || health.error === 'Failed to fetch' ? '后端不可达' : health.error;
+      if (health.error) {
+        return health.error;
+      }
+      return '后端不可达';
     case 'unknown':
     default:
       return '等待检测';
   }
+}
+
+export function isV2Conversation(conversation: ConversationRecord | null | undefined): boolean {
+  return Boolean(conversation?.v2ConversationId || (conversation?.provider && conversation.provider !== ''));
+}
+
+export function canSwitchConversationAgent(
+  conversation: ConversationRecord | null | undefined,
+  options: {
+    timeline?: TimelineEntry[];
+    thinking?: boolean;
+  } = {},
+): boolean {
+  if (!conversation || !isV2Conversation(conversation)) {
+    return false;
+  }
+  if (options.thinking) {
+    return false;
+  }
+  if ((conversation.lastSequence ?? 0) > 0) {
+    return false;
+  }
+  return !(options.timeline ?? []).some(
+    (entry) => entry.conversationId === conversation.id && entry.kind === 'outgoing',
+  );
+}
+
+export function conversationFromManifest(
+  manifest: ConversationManifest,
+  workspaceId: string,
+): ConversationRecord {
+  const createdAt = Date.parse(manifest.createdAt) || Date.now();
+  const updatedAt = Date.parse(manifest.updatedAt) || createdAt;
+  return {
+    id: manifest.id,
+    workspaceId,
+    title: manifest.title || providerDisplayName(manifest.provider),
+    preview: '',
+    nativeStatus: manifest.status,
+    archived: false,
+    sessionId: `v2_${manifest.id}`,
+    threadId: '',
+    localAdapterState: 'idle',
+    mode: 'implement',
+    goalStatus: '',
+    goalObjective: '',
+    provider: manifest.provider,
+    providerProfile: manifest.providerProfile,
+    v2ConversationId: manifest.id,
+    lastSequence: manifest.lastSequence,
+    createdAt,
+    updatedAt,
+  };
+}
+
+export function mergeManifestConversations(
+  current: ConversationRecord[],
+  manifests: ConversationManifest[],
+  workspaces: WorkspaceRecord[],
+): ConversationRecord[] {
+  const next = [...current];
+  for (const manifest of manifests) {
+    const workspace = workspaces.find((item) => item.path === manifest.workspace)
+      ?? workspaces.find((item) => manifest.workspace.startsWith(item.path));
+    if (!workspace) {
+      continue;
+    }
+    const record = conversationFromManifest(manifest, workspace.id);
+    const existing = next.findIndex((item) => item.v2ConversationId === manifest.id || item.id === manifest.id);
+    if (existing >= 0) {
+      next[existing] = {
+        ...next[existing],
+        ...record,
+        sessionId: next[existing].sessionId || record.sessionId,
+      };
+    } else {
+      next.unshift(record);
+    }
+  }
+  return next.sort((left, right) => right.updatedAt - left.updatedAt);
+}
+
+export function classifyV2ConversationEvent(
+  event: ConversationEvent,
+  workspaceId: string,
+): TimelineEntry | null {
+  const payload = event.payload && typeof event.payload === 'object' && !Array.isArray(event.payload)
+    ? event.payload as Record<string, unknown>
+    : {};
+  const content = typeof payload.content === 'string'
+    ? payload.content
+    : typeof payload.text === 'string'
+      ? payload.text
+      : typeof payload.message === 'string'
+        ? payload.message
+        : '';
+  const role = typeof payload.role === 'string' ? payload.role : '';
+
+  if (event.type === 'message.created' && (role === 'user' || role === 'human')) {
+    return {
+      id: event.eventId,
+      kind: 'outgoing',
+      title: 'You',
+      subtitle: content,
+      raw: shortJson(event),
+      at: Date.parse(event.time) || Date.now(),
+      workspaceId,
+      conversationId: event.conversationId,
+    };
+  }
+  if (event.type === 'message.created' || event.type.endsWith('.delta') || event.type.includes('agent') || event.type.includes('assistant')) {
+    if (!content && event.type === 'turn.started') {
+      return null;
+    }
+    if (content || event.type === 'message.created') {
+      return {
+        id: event.eventId,
+        kind: 'incoming',
+        title: 'Agent',
+        subtitle: content || event.type,
+        raw: shortJson(event),
+        at: Date.parse(event.time) || Date.now(),
+        workspaceId,
+        conversationId: event.conversationId,
+      };
+    }
+  }
+  if (event.type.startsWith('mcp.') || event.type === 'skill.injected' || event.type.startsWith('permission.') || event.type.startsWith('turn.') || event.type === 'conversation.created') {
+    return {
+      id: event.eventId,
+      kind: 'system',
+      title: event.type,
+      subtitle: content || shortJson(payload).slice(0, 220),
+      raw: shortJson(event),
+      at: Date.parse(event.time) || Date.now(),
+      workspaceId,
+      conversationId: event.conversationId,
+    };
+  }
+  if (content) {
+    return {
+      id: event.eventId,
+      kind: 'incoming',
+      title: 'Agent',
+      subtitle: content,
+      raw: shortJson(event),
+      at: Date.parse(event.time) || Date.now(),
+      workspaceId,
+      conversationId: event.conversationId,
+    };
+  }
+  return null;
 }
 
 export function modeLabelOf(mode: ConversationRecord['mode']): string {

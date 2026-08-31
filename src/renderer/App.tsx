@@ -10,7 +10,8 @@ import { SettingsPanel } from './screens/SettingsPanel';
 import { AsidePanel } from './screens/AsidePanel';
 import { WorkbenchPanel } from './screens/WorkbenchPanel';
 import { Field } from './components/Field';
-import { connectionStateLabel, fetchWorkspaceDirectorySnapshot, healthLabelOf } from './session/helpers';
+import { connectionStateLabel, fetchWorkspaceDirectorySnapshot, healthLabelOf, isV2Conversation } from './session/helpers';
+import { providerDisplayName, type ProviderKind } from '@todex/protocol/v2';
 import { isWorkbenchTab, panelFromRoute, type DesktopPanel, type OpenPanelOptions, type WorkbenchTab } from './lib/panels';
 
 function applyTheme(dark: boolean) {
@@ -24,8 +25,13 @@ export function App() {
   const [slashCommand, setSlashCommand] = useState<string>();
   const [asideOpen, setAsideOpen] = useState(true);
   const [createOpen, setCreateOpen] = useState(false);
+  const [createConversationOpen, setCreateConversationOpen] = useState(false);
 
   const openPanel = useCallback((name: string, params?: OpenPanelOptions) => {
+    if (name === 'CreateConversation') {
+      setCreateConversationOpen(true);
+      return;
+    }
     const next = panelFromRoute(name);
     if (!next) {
       return;
@@ -97,7 +103,7 @@ export function App() {
               onCreateWorkspace={() => setCreateOpen(true)}
               onCreateConversation={() => {
                 if (session.activeWorkspaceId) {
-                  session.createConversation(session.activeWorkspaceId);
+                  setCreateConversationOpen(true);
                 }
               }}
             />
@@ -109,8 +115,24 @@ export function App() {
                 <span className="truncate text-sm font-medium">
                   {session.activeConversation?.title ?? '对话'}
                 </span>
+                {session.activeConversation ? (
+                  <Chip size="sm" variant="soft" className="whitespace-nowrap">
+                    {isV2Conversation(session.activeConversation)
+                      ? providerDisplayName(session.activeConversation.provider || '', 'Agent')
+                      : '历史 Codex'}
+                  </Chip>
+                ) : null}
                 <Navbar.Spacer />
                 <Navbar.Content>
+                  {session.activeWorkspaceId ? (
+                    <Button
+                      size="sm"
+                      variant="tertiary"
+                      onPress={() => setCreateConversationOpen(true)}
+                    >
+                      新建对话
+                    </Button>
+                  ) : null}
                   <Chip size="sm" variant="soft" className="whitespace-nowrap">
                     {session.connectionState === 'open'
                       ? healthLabelOf(session.connectionHealth)
@@ -177,6 +199,11 @@ export function App() {
         </Modal.Backdrop>
       </Modal>
       <CreateWorkspaceModal session={session} isOpen={createOpen} onOpenChange={setCreateOpen} />
+      <CreateConversationModal
+        session={session}
+        isOpen={createConversationOpen}
+        onOpenChange={setCreateConversationOpen}
+      />
     </div>
   );
 }
@@ -259,6 +286,112 @@ function CreateWorkspaceModal({
               <Button
                 onPress={() => {
                   void session.createWorkspace(name || path, path);
+                  onOpenChange(false);
+                }}
+              >
+                <Plus className="size-4" />
+                创建
+              </Button>
+            </Modal.Footer>
+          </Modal.Dialog>
+        </Modal.Container>
+      </Modal.Backdrop>
+    </Modal>
+  );
+}
+
+function CreateConversationModal({
+  session,
+  isOpen,
+  onOpenChange,
+}: {
+  session: TodeXSession;
+  isOpen: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const [title, setTitle] = useState('');
+  const [provider, setProvider] = useState<ProviderKind | ''>('');
+  const [profile, setProfile] = useState('');
+
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+    const firstAvailable = session.v2Providers.find((item) => item.available);
+    const nextProvider = firstAvailable?.id ?? '';
+    setTitle('');
+    setProvider(nextProvider);
+    setProfile(firstAvailable?.profiles[0] ?? '');
+  }, [isOpen, session.v2Providers]);
+
+  const selected = session.v2Providers.find((item) => item.id === provider) ?? null;
+  const needsProfile = Boolean(selected && (selected.id === 'acp' || selected.profiles.length > 1));
+
+  return (
+    <Modal isOpen={isOpen} onOpenChange={onOpenChange}>
+      <Modal.Backdrop>
+        <Modal.Container>
+          <Modal.Dialog className="sm:max-w-lg">
+            <Modal.CloseTrigger />
+            <Modal.Header>
+              <Modal.Heading>新建对话</Modal.Heading>
+            </Modal.Header>
+            <Modal.Body className="flex flex-col gap-4">
+              <p className="text-muted text-sm">
+                先选 Agent 再创建。任务开始前可在输入框旁改 Agent；发出第一条消息后锁定。
+              </p>
+              {!session.activeWorkspaceId ? (
+                <p className="text-danger text-sm">请先选择一个工作区。</p>
+              ) : null}
+              <div className="flex flex-wrap gap-2">
+                {session.v2Providers.map((item) => (
+                  <Button
+                    key={item.id}
+                    size="sm"
+                    variant={provider === item.id ? 'primary' : 'tertiary'}
+                    isDisabled={!item.available}
+                    onPress={() => {
+                      setProvider(item.id);
+                      setProfile(item.profiles[0] ?? '');
+                    }}
+                  >
+                    {providerDisplayName(item.id, item.displayName)}
+                    {item.available ? '' : ` · ${item.unavailableReason || '不可用'}`}
+                  </Button>
+                ))}
+              </div>
+              {selected && !selected.available ? (
+                <p className="text-danger text-sm">{selected.unavailableReason || '该 Agent 当前不可用'}</p>
+              ) : null}
+              {needsProfile ? (
+                <div className="flex flex-wrap gap-2">
+                  {selected?.profiles.map((item) => (
+                    <Button
+                      key={item}
+                      size="sm"
+                      variant={profile === item ? 'primary' : 'tertiary'}
+                      onPress={() => setProfile(item)}
+                    >
+                      {item}
+                    </Button>
+                  ))}
+                </div>
+              ) : null}
+              <Field label="标题（可选）" value={title} onChange={setTitle} />
+            </Modal.Body>
+            <Modal.Footer>
+              <Button slot="close" variant="tertiary">取消</Button>
+              <Button
+                isDisabled={!session.activeWorkspaceId || !selected?.available || (needsProfile && !profile)}
+                onPress={() => {
+                  if (!session.activeWorkspaceId || !selected?.available) {
+                    return;
+                  }
+                  session.createConversation(session.activeWorkspaceId, {
+                    provider: selected.id,
+                    providerProfile: needsProfile ? profile || undefined : selected.profiles[0],
+                    title: title.trim() || undefined,
+                  });
                   onOpenChange(false);
                 }}
               >

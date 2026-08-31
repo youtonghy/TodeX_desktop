@@ -7,6 +7,8 @@
   "main": "./out/main/index.js",
   "type": "module",
   "scripts": {
+    "check:electron": "node ./scripts/check-electron.mjs",
+    "predev": "node ./scripts/check-electron.mjs",
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",

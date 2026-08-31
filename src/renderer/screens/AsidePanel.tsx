@@ -42,6 +42,25 @@ export function AsidePanel({ session, panel, slashCommand, onBack }: Props) {
         providers={session.v2Providers}
         catalogs={session.capabilityCatalogs}
         onRefresh={(provider: ProviderKind) => void session.refreshCapabilityCatalog(provider)}
+        conversationId={conversation?.id}
+        selectedSkills={conversation ? session.selectedSkills[conversation.id] ?? [] : []}
+        canInvoke={Boolean(conversation?.v2ConversationId || conversation?.provider)}
+        onToggleSkill={(skill, provider) => {
+          if (conversation) {
+            session.toggleCatalogSkill(conversation.id, skill, provider);
+          }
+        }}
+        onPreviewSkill={(skill, provider) => session.previewSkillResource(provider, skill.resourceId)}
+        onRefreshMcp={(resourceId) => {
+          if (conversation) {
+            session.refreshMcpServer(conversation.id, resourceId);
+          }
+        }}
+        onCallMcp={(resourceId, toolName) => {
+          if (conversation) {
+            session.callMcpTool(conversation.id, resourceId, toolName);
+          }
+        }}
       />
       </div>
     );
