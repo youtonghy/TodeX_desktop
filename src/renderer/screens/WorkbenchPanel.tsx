@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Code, FileText, Folder, Globe } from '@gravity-ui/icons';
 import { Button, Chip, Input, ScrollShadow, Tabs, TextField } from '@heroui/react';
+import type { Selection } from '@heroui/react';
 import { FileTree } from '@heroui-pro/react';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { terminalIdForConversation, terminalStatusLabel } from '../session/helpers';
@@ -238,7 +239,7 @@ function FilesPane({ session }: { session: TodeXSession }) {
             className="w-full"
             selectedKeys={selected ? new Set([selected]) : new Set()}
             selectionMode="single"
-            onSelectionChange={(keys: 'all' | Set<string>) => {
+            onSelectionChange={(keys: Selection) => {
               const next = keys === 'all' ? '' : String([...keys][0] ?? '');
               const entry = entries.find((item) => item.path === next);
               if (entry?.kind === 'file') setSelected(next);
