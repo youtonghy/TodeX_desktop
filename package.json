@@ -2,6 +2,7 @@
   "name": "todex-desktop",
   "version": "1.0.0",
   "private": true,
+  "packageManager": "pnpm@11.24.0",
   "description": "TodeX desktop client for todex-agentd",
   "main": "./out/main/index.js",
   "type": "module",

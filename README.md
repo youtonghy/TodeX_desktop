@@ -30,8 +30,8 @@ export HEROUI_AUTH_TOKEN="$HEROUI_KEY"
 
 ```bash
 cd TodeX_desktop
-npm install
-npm run dev
+pnpm install
+pnpm run dev
 ```
 
 `npm install` 会触发 `@heroui-pro/react` 的 postinstall，从 HeroUI 拉取 Pro 组件产物。如果跳过了 `HEROUI_AUTH_TOKEN`，界面会缺 Pro 组件。首次安装还需要能访问网络以下载 Electron 二进制；若出现 `Electron uninstall`，通常是 Electron 下载中断导致 `dist` 目录残缺，先删除当前 artifact 再安装：
@@ -52,9 +52,9 @@ force_no_cache=true node node_modules/electron/install.js
 其它命令：
 
 ```bash
-npm run typecheck
-npm run build
-npm run preview
+pnpm run typecheck
+pnpm run build
+pnpm run preview
 ```
 
 本次范围以 macOS 开发运行为准，不包含 Windows / Linux 安装包或自动更新。

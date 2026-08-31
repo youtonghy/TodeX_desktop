@@ -1,0 +1,4 @@
+allowBuilds:
+  '@heroui-pro/react': false
+  '@zowe/secrets-for-zowe-sdk': false
+  esbuild: false
