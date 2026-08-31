@@ -8,7 +8,7 @@ import {
   type SetStateAction,
 } from 'react';
 import type { ProviderDescriptor, ProviderKind, ConversationManifest } from '@todex/protocol/v2';
-import { V2ApiClient, V2ConversationSocket } from '@todex/protocol/v2';
+import { V2ApiClient, buildV2WebSocketUrlWithOptions } from '@todex/protocol/v2';
 import {
   ConnectionSettings,
   CodexMemorySettings,
@@ -21,7 +21,6 @@ import {
   WorkspaceRecord,
   approvalResponsePayload,
   buildHttpUrl,
-  buildWebSocketUrlWithToken,
   classifyPendingRequest,
   createRequestId,
   displayNameFromPath,
@@ -49,6 +48,7 @@ import {
   insertCapabilityReference,
   sandboxPolicyForMode,
   shortJson,
+  utf8ByteLength,
   type CodexThreadHistoryEntry,
 } from '@todex/protocol/todex';
 import { loadJson, loadSecret, saveJson, saveSecret } from '../lib/storage';
@@ -62,11 +62,7 @@ import {
   type TransportCryptoSession,
 } from '@todex/protocol/transportCrypto';
 import {
-  TodeXTransportClient,
-  type TransportOutboundMessage,
-  type TransportStatusSnapshot,
-  cursorFromEvent as transportCursorFromEvent,
-  sessionIdFromEvent as transportSessionIdFromEvent,
+  MAX_LEGACY_MESSAGE_BYTES,
 } from '@todex/protocol/transport';
 import { ConnectionError } from '@todex/protocol/connectionError';
 import { desktopAlert } from '../lib/desktopAlert';
@@ -74,7 +70,6 @@ import { panelFromRoute, type DesktopPanel, type OpenPanelOptions } from '../lib
 import type { CatalogState } from '../screens/CapabilitiesPanel';
 import {
   DEFAULT_COMPOSER_SELECTION,
-  DEFAULT_TRANSPORT_STATUS,
   EXPERIMENTAL_FEATURE_DEFAULTS,
   SETTINGS_STORAGE_KEY,
   WORKSPACES_STORAGE_KEY,
@@ -280,7 +275,6 @@ export type OpenPanelFn = (name: string, params?: OpenPanelOptions) => void;
 export type TodeXSession = ReturnType<typeof useTodeXSession>;
 
 export type { CatalogState };
-
 export function useTodeXSession(openPanel: OpenPanelFn) {
   const socketRef = useRef<WebSocket | null>(null);
   const socketCryptoRef = useRef<TransportCryptoSession | null>(null);
@@ -304,8 +298,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const pendingServerEventFrameRef = useRef<number | null>(null);
   const pendingSocketFramesRef = useRef<PendingSocketFrame[]>([]);
   const pendingSocketFrameDrainRef = useRef<number | null>(null);
-  const transportClientRef = useRef<TodeXTransportClient | null>(null);
-  const v2SocketRef = useRef<V2ConversationSocket | null>(null);
   const capabilityWorkspaceRef = useRef('');
   const socketGenerationRef = useRef(0);
   const autoConnectAttemptedRef = useRef(false);
@@ -328,7 +320,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const [activeConversationId, setActiveConversationId] = useState('');
   const [connectionState, setConnectionState] = useState<ConnectionState>('idle');
   const [connectionHealth, setConnectionHealth] = useState<ConnectionHealth>(defaultConnectionHealth);
-  const [transportStatus, setTransportStatus] = useState<TransportStatusSnapshot>(DEFAULT_TRANSPORT_STATUS);
   const [remoteModelCatalog, setRemoteModelCatalog] = useState<CodexModelCatalogItem[]>([]);
   const [modelCatalogStatus, setModelCatalogStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
   const [modelCatalogError, setModelCatalogError] = useState('');
@@ -385,17 +376,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         setV2Providers([]);
         setV2Conversations([]);
       });
-    const socket = new V2ConversationSocket({
-      serverUrl: settings.serverUrl,
-      authToken: settings.authToken,
-      onError: () => { /* v1 remains the source of truth for legacy sessions. */ },
-    });
-    v2SocketRef.current = socket;
-    socket.connect();
+    // The main connection below is the single `/v2/ws` socket; providers and
+    // conversations lists are plain HTTP refreshes, no side channel needed.
     return () => {
       active = false;
-      socket.close();
-      if (v2SocketRef.current === socket) v2SocketRef.current = null;
     };
   }, [hydrated, settings.authToken, settings.serverUrl]);
 
@@ -610,7 +594,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     }
     workspaceBackendReadyRef.current = false;
     if (socketRef.current) {
-      transportClientRef.current?.flushAcks?.();
       try {
         socketRef.current.close();
       } catch {
@@ -619,7 +602,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       socketRef.current = null;
     }
     socketCryptoRef.current = null;
-    transportClientRef.current?.detach();
     pendingServerEventsRef.current = [];
     if (pendingServerEventFrameRef.current !== null) {
       cancelAnimationFrame(pendingServerEventFrameRef.current);
@@ -799,7 +781,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const syncWorkspacesToBackend = useCallback(
     async (snapshot: WorkspaceRecord[] = workspacesRef.current) => {
       try {
-        const response = await fetch(buildHttpUrl(settings.serverUrl, '/v1/workspaces'), {
+        const response = await fetch(buildHttpUrl(settings.serverUrl, '/v2/workspaces'), {
           method: 'PUT',
           headers: authHeaders(settings, { 'Content-Type': 'application/json' }),
           body: JSON.stringify({ workspaces: prepareWorkspaceSyncPayload(snapshot) }),
@@ -833,7 +815,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const syncWorkspacesFromBackend = useCallback(async () => {
     workspaceBackendReadyRef.current = false;
     try {
-      const response = await fetch(buildHttpUrl(settings.serverUrl, '/v1/workspaces'), {
+      const response = await fetch(buildHttpUrl(settings.serverUrl, '/v2/workspaces'), {
         headers: authHeaders(settings),
       });
       if (!response.ok) {
@@ -973,11 +955,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
 
   const runtimeStatus = useMemo<RuntimeStatusState>(() => ({
     socket: connectionState,
-    transport: transportStatus,
     daemon: connectionHealth.status,
     codexAdapter: activeConversation?.localAdapterState ?? activeWorkspace?.localAdapterState ?? 'unknown',
     turn: activeTurnId ? 'running' : 'idle',
-  }), [activeConversation?.localAdapterState, activeTurnId, activeWorkspace?.localAdapterState, connectionHealth.status, connectionState, transportStatus]);
+  }), [activeConversation?.localAdapterState, activeTurnId, activeWorkspace?.localAdapterState, connectionHealth.status, connectionState]);
 
   const getConversationContext = useCallback((conversationId = activeConversationRef.current): ConversationContext | null => {
     const conversation = conversationsRef.current.find((item) => item.id === conversationId) ?? null;
@@ -1574,7 +1555,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           return;
         }
         sessionCursorsRef.current.set(sessionId, cursor);
-        transportClientRef.current?.ack(event);
         persistSessionCursors();
       }
       setEvents((current) => [event, ...current].slice(0, MAX_EVENTS));
@@ -2051,10 +2031,27 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
 
     try {
       const text = frame.crypto?.decryptServerText(frame.data) ?? frame.data;
-      const events = frame.transport
-        ? frame.transport.decode(text)
-        : [JSON.parse(text) as ServerEvent];
-      events.forEach(enqueueServerEvent);
+      const parsed = JSON.parse(text) as Record<string, unknown>;
+      const messageType = typeof parsed.type === 'string' ? parsed.type : '';
+      if (messageType === 'server.result') {
+        // v2 command acknowledgements (session.resume, conversation.*). The
+        // legacy plane answers through ServerEvents, nothing to enqueue.
+        return;
+      }
+      if (messageType === 'server.error' && parsed.id !== undefined) {
+        // v2 command error envelope; surface the structured message.
+        const payload = parsed.payload as { code?: unknown; message?: unknown } | undefined;
+        const code = typeof payload?.code === 'string' ? payload.code : '';
+        const detail = typeof payload?.message === 'string' ? payload.message : 'v2 命令失败';
+        setLastError(code ? `[${code}] ${detail}` : detail);
+        return;
+      }
+      if (messageType === 'conversation.event') {
+        // Conversation-plane events are rendered by the dedicated v2 screen,
+        // not the legacy workbench timeline.
+        return;
+      }
+      enqueueServerEvent(parsed as unknown as ServerEvent);
     } catch (error) {
       setLastError(error instanceof Error ? error.message : 'failed to parse websocket message');
     }
@@ -2096,6 +2093,42 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     scheduleSocketFrameDrain();
   }, [scheduleSocketFrameDrain]);
 
+  /** Raw `{id, type, payload}` frame on the unified /v2/ws socket: encrypt,
+   * guard the 8 MiB backend limit, send. Returns null when the frame never
+   * left (socket closed) and throws ConnectionError on oversize payloads. */
+  const sendRawProtocolFrame = useCallback((message: { id: string; type: string; payload: Record<string, unknown> }) => {
+    const socket = socketRef.current;
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      return null;
+    }
+    let frame: string;
+    try {
+      frame = JSON.stringify(message);
+    } catch (error) {
+      setLastError(error instanceof Error ? error.message : '消息序列化失败。');
+      return null;
+    }
+    frame = socketCryptoRef.current?.encryptClientText(frame) ?? frame;
+    const size = utf8ByteLength(frame);
+    if (size > MAX_LEGACY_MESSAGE_BYTES) {
+      throw ConnectionError.messageTooLarge(size, MAX_LEGACY_MESSAGE_BYTES);
+    }
+    socket.send(frame);
+    return message;
+  }, []);
+
+  const sendSessionResume = useCallback((sessionCursors: Record<string, number>) => {
+    try {
+      sendRawProtocolFrame({
+        id: createRequestId('resume'),
+        type: 'session.resume',
+        payload: { sessionCursors },
+      });
+    } catch (error: unknown) {
+      setLastError(error instanceof ConnectionError ? error.userMessage : '会话恢复失败，请稍后重试。');
+    }
+  }, [sendRawProtocolFrame]);
+
   const pushSystem = useCallback(
     (title: string, subtitle = '') => {
       appendTimeline(makeSystemEntry(title, subtitle, activeWorkspaceRef.current, activeConversationRef.current));
@@ -2105,7 +2138,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
 
   const refreshServerVersion = useCallback(async () => {
     try {
-      const response = await fetch(buildHttpUrl(settings.serverUrl, '/v1/version'));
+      const response = await fetch(buildHttpUrl(settings.serverUrl, '/v2/version'));
       if (!response.ok) {
         throw new Error(`version endpoint returned ${response.status}`);
       }
@@ -2113,7 +2146,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       setServerVersion(json);
     } catch (error) {
       setServerVersion(null);
-      setLastError(error instanceof Error ? error.message : 'failed to fetch /v1/version');
+      setLastError(error instanceof Error ? error.message : 'failed to fetch /v2/version');
     }
   }, [settings.serverUrl]);
 
@@ -2198,8 +2231,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       return;
     }
 
-    const wsUrl = buildWebSocketUrlWithToken(settings.serverUrl, crypto?.queryString, settings.authToken);
-
+    const wsUrl = buildV2WebSocketUrlWithOptions(settings.serverUrl, {
+      cryptoQueryString: crypto?.queryString,
+      authToken: settings.authToken,
+    });
     try {
       const socket = new WebSocket(wsUrl);
       const generation = socketGenerationRef.current;
@@ -2207,29 +2242,11 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       socketCryptoRef.current = crypto;
 
       socket.onopen = () => {
-        const transport = new TodeXTransportClient({
-          loadSessionCursors: getSessionCursorSnapshot,
-          onStatus: setTransportStatus,
-        });
-        transportClientRef.current = transport;
-        try {
-          transport.attach(socket, (text) => socketCryptoRef.current?.encryptClientText(text) ?? text);
-        } catch (error: unknown) {
-          // The handshake envelope goes through the same size guard as any other
-          // frame. Surface a failure as a connection error rather than letting it
-          // escape this event handler and strand the UI in 'connecting'.
-          setConnectionState('error');
-          setLastError(
-            error instanceof ConnectionError ? error.userMessage : '连接握手失败，请稍后重试。',
-          );
-          try {
-            socket.close();
-          } catch {
-            // ignore
-          }
-          return;
-        }
         setConnectionState('open');
+        // Replaces the legacy transport hello: resume Codex sessions from the
+        // client-side cursors so events emitted while disconnected are
+        // replayed by the backend.
+        sendSessionResume(getSessionCursorSnapshot());
         void checkConnectionHealth();
         void refreshServerVersion();
         void syncWorkspacesFromBackend();
@@ -2240,7 +2257,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           data: String(event.data),
           generation,
           crypto: socketCryptoRef.current,
-          transport: transportClientRef.current,
         });
       };
 
@@ -2253,7 +2269,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         setConnectionState((current) => (current === 'open' || current === 'connecting' ? 'closed' : current));
         if (socketRef.current === socket) {
           socketCryptoRef.current = null;
-          transportClientRef.current?.detach();
         }
       };
     } catch (error) {
@@ -2261,7 +2276,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       socketCryptoRef.current = null;
       setLastError(error instanceof Error ? error.message : 'failed to connect');
     }
-  }, [checkConnectionHealth, closeSocket, enqueueSocketFrame, getSessionCursorSnapshot, refreshServerVersion, settings, syncWorkspacesFromBackend]);
+  }, [checkConnectionHealth, closeSocket, enqueueSocketFrame, getSessionCursorSnapshot, refreshServerVersion, sendSessionResume, settings, syncWorkspacesFromBackend]);
 
   useEffect(() => {
     if (!hydrated || !autoConnectEnabled || manualDisconnectRef.current) {
@@ -2309,9 +2324,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         return false;
       }
 
-      let message: TransportOutboundMessage | null | undefined;
+      let message: { id: string; type: string; payload: Record<string, unknown> } | null;
       try {
-        message = transportClientRef.current?.send(type, payload, requestId);
+        message = sendRawProtocolFrame({ id: requestId, type, payload });
       } catch (error: unknown) {
         setLastError(
           error instanceof ConnectionError ? error.userMessage : '消息发送失败，请稍后重试。',
@@ -2331,7 +2346,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       }
       return true;
     },
-    [appendTimeline],
+    [appendTimeline, sendRawProtocolFrame],
   );
 
   const seedTerminalState = useCallback((workspace: WorkspaceRecord, conversation: ConversationRecord, patch: Partial<TerminalClientState> = {}) => {
@@ -5382,8 +5397,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       }
     }
   }, [sendNativeThreadAction, sendTrackedLocalMethod]);
-
-
   return {
     hydrated,
     settings,
@@ -5394,7 +5407,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     activeConversationId,
     connectionState,
     connectionHealth,
-    transportStatus,
     remoteModelCatalog,
     modelCatalog,
     modelCatalogStatus,
@@ -5505,3 +5517,4 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     setAutoConnectEnabled,
   };
 }
+

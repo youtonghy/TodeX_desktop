@@ -35,7 +35,6 @@ import {
 } from '@todex/protocol/todex';
 import type { TransportCryptoSession } from '@todex/protocol/transportCrypto';
 import type { PairingQrChunk } from '@todex/protocol/transportCrypto';
-import type { TodeXTransportClient, TransportStatusSnapshot } from '@todex/protocol/transport';
 import {
   cursorFromEvent as transportCursorFromEvent,
   sessionIdFromEvent as transportSessionIdFromEvent,
@@ -237,11 +236,6 @@ export type PendingThreadAction = {
 export type ComposerSelection = { start: number; end: number };
 
 export const DEFAULT_COMPOSER_SELECTION: ComposerSelection = { start: 0, end: 0 };
-export const DEFAULT_TRANSPORT_STATUS: TransportStatusSnapshot = {
-  status: 'disabled',
-  clientId: '',
-  error: '',
-};
 
 export type PairingChunkCollector = {
   checksum: string;
@@ -308,7 +302,6 @@ export type PendingSocketFrame = {
   data: string;
   generation: number;
   crypto: TransportCryptoSession | null;
-  transport: TodeXTransportClient | null;
 };
 
 export type ConversationContext = {
@@ -390,7 +383,6 @@ export type ConnectionState = 'idle' | 'connecting' | 'open' | 'closed' | 'error
 
 export type RuntimeStatusState = {
   socket: ConnectionState;
-  transport: TransportStatusSnapshot;
   daemon: ConnectionHealth['status'];
   codexAdapter: LocalAdapterState | 'unknown';
   turn: 'idle' | 'running';
@@ -971,6 +963,7 @@ export function textFromItem(item: Record<string, unknown>): string {
 }
 
 export type PersistedSettings = Omit<ConnectionSettings, 'authToken'>;
+
 
 export const SETTINGS_STORAGE_KEY = 'todex.desktop.settings.v1';
 export const WORKSPACES_STORAGE_KEY = 'todex.desktop.workspaces.v1';
@@ -1842,7 +1835,7 @@ export async function fetchWorkspaceDirectorySnapshot(
   settings: ConnectionSettings,
   path?: string,
 ): Promise<WorkspaceDirectorySnapshot> {
-  const url = new URL(buildHttpUrl(settings.serverUrl, '/v1/workspace/directories'));
+  const url = new URL(buildHttpUrl(settings.serverUrl, '/v2/workspace/directories'));
   if (path) {
     url.searchParams.set('path', path);
   }
@@ -2255,3 +2248,4 @@ export function forkConversationRecord(conversation: ConversationRecord, title?:
     updatedAt: Date.now(),
   };
 }
+

@@ -9,8 +9,31 @@ mkdirSync(sessionDir, { recursive: true });
 
 const source = readFileSync(appPath, 'utf8').split('\n');
 
+function lineOf(needle) {
+  const index = source.findIndex((line) => line === needle);
+  if (index < 0) {
+    throw new Error(`marker not found in App.tsx: ${needle}`);
+  }
+  return index;
+}
+
+// Marker-based slicing: line numbers rot every time App.tsx changes, stable
+// structural markers do not. Helpers run from the first shared type to the App
+// component; the session slice is the component body up to its loading
+// early-return JSX (the desktop hook has no UI of its own).
+const helpersStart = lineOf('type ServerVersion = {');
+const sessionStart = lineOf('export default function App() {');
+const hydratedReturn = source.findIndex((line) => line === '  if (!hydrated) {');
+if (hydratedReturn < 0) {
+  throw new Error('App() loading early-return marker not found');
+}
+let sessionEnd = hydratedReturn - 1;
+while (source[sessionEnd].trim() === '') {
+  sessionEnd -= 1;
+}
+
 function sliceLines(start, end) {
-  return source.slice(start - 1, end).join('\n');
+  return source.slice(start, end + 1).join('\n');
 }
 
 function exportTopLevel(block) {
@@ -21,11 +44,15 @@ function exportTopLevel(block) {
     .replace(/^async function /gm, 'export async function ');
 }
 
-let helpers = sliceLines(151, 2378);
-helpers = helpers.replace(
-  "type ComposerSelection = TextInputSelectionChangeEventData['selection'];",
-  'export type ComposerSelection = { start: number; end: number };',
-);
+let helpers = sliceLines(helpersStart, sessionStart - 1);
+// App.tsx interleaves RN navigation/theme plumbing between the shared helpers;
+// the desktop session never renders, so drop that island wholesale.
+const navIslandStart = helpers.indexOf('const Stack = createNativeStackNavigator<RootStackParamList>();');
+const navIslandEnd = helpers.indexOf("const DARK_STATUS_BAR_STYLE = 'light' as const;");
+if (navIslandStart < 0 || navIslandEnd < navIslandStart) {
+  throw new Error('RN navigation island markers not found in App.tsx helpers region');
+}
+helpers = helpers.slice(0, navIslandStart) + helpers.slice(navIslandEnd + "const DARK_STATUS_BAR_STYLE = 'light' as const;".length).replace(/^\n+/, '\n');
 helpers = helpers.replace(/todex\.mobile\./g, 'todex.desktop.');
 helpers = helpers.replace(
   'const encoded = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });',
@@ -43,6 +70,14 @@ helpers = helpers.replace(
 helpers = helpers.replace(
   '    return await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.UTF8 });',
   '    const info = await readDesktopFile(uri);\n    return info.text;',
+);
+helpers = helpers.replace(
+  "type ComposerSelection = TextInputSelectionChangeEventData['selection'];",
+  'export type ComposerSelection = { start: number; end: number };',
+);
+helpers = helpers.replace(
+  "    return health.error || '后端不可达';",
+  "    return !health.error || health.error === 'Failed to fetch' ? '后端不可达' : health.error;",
 );
 helpers = exportTopLevel(helpers);
 
@@ -65,18 +100,28 @@ const helpersHeader = `import type {
 import {
   buildHttpUrl,
   createRequestId,
+  eventId,
   eventPayloadData,
+  extractThreadIdFromEvent,
+  DEFAULT_REASONING_EFFORT_OPTIONS,
   FAST_SERVICE_TIER,
   FALLBACK_CODEX_MODELS,
   mergeWorkspaceRecords,
   normalizeReasoningEffort,
+  parseMcpServerStatusListResponse,
+  parsePermissionProfileListResponse,
   normalizeThreadId,
+  parseCodexNativeThread,
   prepareWorkspaceSyncPayload,
+  shortJson,
+  type CodexThreadHistoryEntry,
 } from '@todex/protocol/todex';
 import type { TransportCryptoSession } from '@todex/protocol/transportCrypto';
 import type { PairingQrChunk } from '@todex/protocol/transportCrypto';
-import type { TodeXTransportClient, TransportStatusSnapshot } from '@todex/protocol/transport';
-import { sessionIdFromEvent as transportSessionIdFromEvent } from '@todex/protocol/transport';
+import {
+  cursorFromEvent as transportCursorFromEvent,
+  sessionIdFromEvent as transportSessionIdFromEvent,
+} from '@todex/protocol/transport';
 
 async function readDesktopFile(uri: string): Promise<{ sizeBytes: number | null; text?: string; base64?: string }> {
   if (uri.startsWith('data:')) {
@@ -89,12 +134,11 @@ async function readDesktopFileBase64(uri: string): Promise<string> {
   const file = await window.todexDesktop.fs.readFile(uri);
   return file.base64;
 }
-
 `;
 
-writeFileSync(join(sessionDir, 'helpers.ts'), `${helpersHeader}${helpers}\n`);
+writeFileSync(join(sessionDir, 'helpers.ts'), `${helpersHeader}\n${helpers}\n`);
 
-let session = sliceLines(2380, 7490);
+let session = sliceLines(sessionStart, sessionEnd);
 session = session.replace('export default function App() {', 'export function useTodeXSession(openPanel: OpenPanelFn) {');
 session = session.replace(
   `  const { theme } = useUniwind();
@@ -105,7 +149,26 @@ session = session.replace(
 `,
   '',
 );
+// The RN WebSocket three-argument constructor (per-request headers) does not
+// exist in the DOM implementation; the desktop relies on the access_token
+// query parameter carried by buildV2WebSocketUrlWithOptions instead.
+session = session.replace(
+  `    const options = settings.authToken
+      ? { headers: { Authorization: \`Bearer \${settings.authToken}\` } }
+      : undefined;
+
+    try {
+      const socket = new (WebSocket as typeof WebSocket & {
+        new (uri: string, protocols?: string | string[] | null, options?: { headers?: Record<string, string> }): WebSocket;
+      })(wsUrl, undefined, options);`,
+  `    try {
+      const socket = new WebSocket(wsUrl);`,
+);
 session = session.replace(/Alert\.alert/g, 'desktopAlert');
+session = session.replace(
+  'await Clipboard.setStringAsync(lastMessage.subtitle);',
+  'await navigator.clipboard.writeText(lastMessage.subtitle);',
+);
 session = session.replace(/navigationRef\.current\?\.navigate/g, 'openPanel');
 session = session.replace(
   `  useEffect(() => {
@@ -137,18 +200,19 @@ const sessionHeader = `import {
   type SetStateAction,
 } from 'react';
 import type { ProviderDescriptor, ProviderKind, ConversationManifest } from '@todex/protocol/v2';
-import { V2ApiClient, V2ConversationSocket } from '@todex/protocol/v2';
+import { V2ApiClient, buildV2WebSocketUrlWithOptions } from '@todex/protocol/v2';
 import {
   ConnectionSettings,
+  CodexMemorySettings,
   CodexModelCatalogItem,
   CodexNativeThread,
+  CodexServiceTierOption,
   LocalAdapterState,
   PendingRequest,
   ServerEvent,
   WorkspaceRecord,
   approvalResponsePayload,
   buildHttpUrl,
-  buildWebSocketUrl,
   classifyPendingRequest,
   createRequestId,
   displayNameFromPath,
@@ -161,6 +225,7 @@ import {
   normalizeThreadId,
   normalizeServerUrl,
   mergeWorkspaceRecords,
+  prepareWorkspaceSyncPayload,
   parseCodexModelListResponse,
   parseCodexNativeThread,
   parseCodexNativeThreadListResponse,
@@ -175,6 +240,7 @@ import {
   insertCapabilityReference,
   sandboxPolicyForMode,
   shortJson,
+  utf8ByteLength,
   type CodexThreadHistoryEntry,
 } from '@todex/protocol/todex';
 import { loadJson, loadSecret, saveJson, saveSecret } from '../lib/storage';
@@ -188,11 +254,7 @@ import {
   type TransportCryptoSession,
 } from '@todex/protocol/transportCrypto';
 import {
-  TodeXTransportClient,
-  type TransportOutboundMessage,
-  type TransportStatusSnapshot,
-  cursorFromEvent as transportCursorFromEvent,
-  sessionIdFromEvent as transportSessionIdFromEvent,
+  MAX_LEGACY_MESSAGE_BYTES,
 } from '@todex/protocol/transport';
 import { ConnectionError } from '@todex/protocol/connectionError';
 import { desktopAlert } from '../lib/desktopAlert';
@@ -200,7 +262,6 @@ import { panelFromRoute, type DesktopPanel, type OpenPanelOptions } from '../lib
 import type { CatalogState } from '../screens/CapabilitiesPanel';
 import {
   DEFAULT_COMPOSER_SELECTION,
-  DEFAULT_TRANSPORT_STATUS,
   EXPERIMENTAL_FEATURE_DEFAULTS,
   SETTINGS_STORAGE_KEY,
   WORKSPACES_STORAGE_KEY,
@@ -268,10 +329,16 @@ import {
   type TimelineTarget,
   type ConnectionState,
   type ConnectionHealth,
+  type RuntimeStatusState,
+  type TerminalOutputEntry,
+  type TerminalLifecycleState,
+  type PermissionPreset,
   type TimelineEntry,
   type SlashCommand,
   type MentionSuggestion,
   type WorkspaceMentionHistory,
+  type MentionReference,
+  type ThreadMenuAction,
   type PersistedSettings,
   type WorkspaceDirectorySnapshot,
   canonicalSlashCommand,
@@ -345,30 +412,63 @@ import {
   nowLabel,
   latencyLabelOf,
   threadDateLabel,
-  buildConversationRenderItems,
-  classifyChatEvent,
-  createDefaultConversation,
-  forkConversationRecord,
   parseThreadMetadataArgs,
+  parseThreadMetadataPrompt,
+  parseThreadMemoryMode,
+  parsePositiveLimit,
+  parseJsonArrayPrompt,
   nativeThreadPatchFromNotification,
   findMentionTrigger,
   buildMentionSuggestions,
+  insertMention,
   parseMentionReferences,
   summarizeMentionReferences,
   stringFromUnknown,
   parseWorkspaceDirectorySnapshot,
   permissionPresetForProfile,
+  permissionProfileLabel,
+  permissionPresetSelected,
   approvalsReviewerValue,
+  makeOutgoingEntry,
+  makeSystemEntry,
+  classifyProgressEvent,
+  classifyChatEvent,
+  isTurnTerminalEvent,
+  timelineEntryFromNativeHistoryEntry,
+  isVisibleConversationEntry,
+  conversationPreviewText,
+  isStepProgressEntry,
+  isThinkingProgressEntry,
+  isCollapsibleProgressEntry,
+  executionGroupId,
+  buildConversationRenderItems,
+  createDefaultConversation,
+  conversationsForWorkspaceSnapshot,
+  forkConversationRecord,
+  formatThreadSummary,
+  formatThreadActionResult,
+  resultThreadFromValue,
+  goalPatchFromEventData,
+  turnIdFromEventData,
+  turnStatusFromEventData,
+  textFromLocalTurnPayload,
+  cursorFromEvent,
+  threadIdFromEventData,
+  personalityLabel,
+  FEEDBACK_CATEGORIES,
+  PERSONALITY_OPTIONS,
+  CONNECTION_HEALTH_INTERVAL_MS,
+  CONNECTION_HEALTH_TIMEOUT_MS,
+  MAX_COMPOSER_ATTACHMENTS,
 } from './helpers';
 
 export type OpenPanelFn = (name: string, params?: OpenPanelOptions) => void;
 
+export type TodeXSession = ReturnType<typeof useTodeXSession>;
+
 export type { CatalogState };
-
 `;
-
-const sessionFooter = `
-  return {
+const sessionFooter = `  return {
     hydrated,
     settings,
     setSettings,
@@ -378,7 +478,6 @@ const sessionFooter = `
     activeConversationId,
     connectionState,
     connectionHealth,
-    transportStatus,
     remoteModelCatalog,
     modelCatalog,
     modelCatalogStatus,
@@ -455,15 +554,51 @@ const sessionFooter = `
     stopTerminalSession,
     sendTerminalInput,
     requestSkillList,
-    applyPairingPayload,
     refreshCapabilityCatalog,
     fetchWorkspaceDirectorySnapshot: (path?: string) => fetchWorkspaceDirectorySnapshot(settings, path),
     openModelPicker,
     applyModelCommand,
-    handleSlashCommand,
+    sendSlashCommand,
+    openSlashCommandActionPage,
+    copyLastAgentMessage,
+    runWorkspaceCommand,
+    runThreadMenuAction,
+    submitThreadCommandPrompt,
+    stopThinking,
+    openPermissionsMenu,
+    applyPermissionPreset,
+    applyPersonality,
+    applyServiceTier,
+    toggleFastServiceTier,
+    requestMcpInventory,
+    requestPermissionProfiles,
+    requestHooksCatalog,
+    requestPluginsCatalog,
+    requestMemorySettings,
+    updateMemorySettings,
+    resetMemories,
+    applyPermissionProfile,
+    seedTerminalState,
+    resizeTerminalSession,
+    requestTerminalStatus,
+    clearTerminalOutput,
+    setSkillListVisible,
+    toggleSelectedSkill,
+    autoConnectEnabled,
+    setAutoConnectEnabled,
   };
 }
 `;
 
 writeFileSync(join(sessionDir, 'useTodeXSession.ts'), `${sessionHeader}${session}\n${sessionFooter}\n`);
-console.log('extracted helpers and session');
+
+// Consistency guard: the generator must never reintroduce the retired legacy
+// transport plane or `/v1` endpoints into generated session code.
+const banned = /TodeXTransportClient|buildWebSocketUrlWithToken|buildWebSocketUrl\b|transport\.hello|transport\.chunk|transport\.ack|DEFAULT_TRANSPORT_STATUS|TransportStatusSnapshot|\/v1\//;
+for (const [name, text] of [['helpers.ts', helpers], ['useTodeXSession.ts', session], ['headers', `${helpersHeader}${sessionHeader}${sessionFooter}`]]) {
+  const match = banned.exec(text);
+  if (match) {
+    throw new Error(`generated ${name} contains retired reference: ${match[0]}`);
+  }
+}
+console.log('extracted helpers and session (v2)');
