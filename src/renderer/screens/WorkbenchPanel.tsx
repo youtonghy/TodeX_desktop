@@ -1,10 +1,11 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Code, FileText, Folder, Globe } from '@gravity-ui/icons';
 import { Button, Chip, Input, ScrollShadow, Tabs, TextField } from '@heroui/react';
 import { FileTree } from '@heroui-pro/react';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { terminalIdForConversation, terminalStatusLabel } from '../session/helpers';
 import type { WorkbenchTab } from '../lib/panels';
+import { V2ApiClient } from '@todex/protocol/v2';
 
 type Props = {
   session: TodeXSession;
@@ -63,7 +64,7 @@ export function WorkbenchPanel({ session, tab, onTabChange }: Props) {
           <TerminalPane session={session} />
         </Tabs.Panel>
         <Tabs.Panel className="flex min-h-0 flex-1 flex-col overflow-hidden p-0" id="browser">
-          <BrowserPane workspacePath={session.activeWorkspace?.path} />
+          <BrowserPane workspacePath={session.activeWorkspace?.path} session={session} />
         </Tabs.Panel>
         <Tabs.Panel className="flex min-h-0 flex-1 flex-col overflow-hidden p-0" id="files">
           <FilesPane session={session} />
@@ -149,9 +150,11 @@ function TerminalPane({ session }: { session: TodeXSession }) {
   );
 }
 
-function BrowserPane({ workspacePath }: { workspacePath?: string }) {
+function BrowserPane({ workspacePath, session }: { workspacePath?: string; session: TodeXSession }) {
   const [draft, setDraft] = useState('http://127.0.0.1:7345');
   const [url, setUrl] = useState('');
+  const [result, setResult] = useState<{ status: number; contentType: string; body: string } | null>(null);
+  const [error, setError] = useState('');
 
   return (
     <div className="flex h-full min-h-0 flex-col px-4 pb-4 pt-3">
@@ -159,7 +162,10 @@ function BrowserPane({ workspacePath }: { workspacePath?: string }) {
         className="mb-3 flex gap-2"
         onSubmit={(event) => {
           event.preventDefault();
-          setUrl(draft.trim());
+          const target = draft.trim();
+          setUrl(target); setError(''); setResult(null);
+          const api = new V2ApiClient({ serverUrl: session.settings.serverUrl, authToken: session.settings.authToken });
+          void api.fetchBrowser(target).then(setResult).catch((reason) => setError(reason instanceof Error ? reason.message : '浏览器请求失败'));
         }}
       >
         <TextField aria-label="地址" className="min-w-0 flex-1" value={draft} onChange={setDraft}>
@@ -169,20 +175,17 @@ function BrowserPane({ workspacePath }: { workspacePath?: string }) {
           打开
         </Button>
       </form>
-      {url ? (
-        <iframe
-          className="bg-surface min-h-0 flex-1 rounded-xl"
-          sandbox="allow-scripts allow-same-origin allow-forms"
-          src={url}
-          title="工作区浏览器预览"
-        />
+      {error ? <p className="text-danger text-sm">{error}</p> : null}
+      {url && result ? (
+        <div className="bg-surface min-h-0 flex-1 overflow-auto rounded-xl p-3">
+          <p className="text-muted mb-2 text-xs">{result.status} · {result.contentType} · 后端代理</p>
+          <pre className="font-mono text-xs whitespace-pre-wrap">{result.body}</pre>
+        </div>
       ) : (
         <div className="bg-surface-secondary flex min-h-0 flex-1 flex-col items-center justify-center gap-2 rounded-xl px-6 text-center">
           <Globe className="text-muted size-6" />
           <p className="text-sm font-medium">浏览器预览</p>
-          <p className="text-muted max-w-xs text-xs">
-            输入地址后在此预览页面。工作区 {workspacePath || '尚未选择'}，后端内嵌浏览接口未接入前仅作前端占位。
-          </p>
+          <p className="text-muted max-w-xs text-xs">输入地址后由 backend 所在机器请求并返回内容。工作区 {workspacePath || '尚未选择'}。</p>
         </div>
       )}
     </div>
@@ -190,10 +193,23 @@ function BrowserPane({ workspacePath }: { workspacePath?: string }) {
 }
 
 function FilesPane({ session }: { session: TodeXSession }) {
-  const [selected, setSelected] = useState<string>('readme');
+  const [selected, setSelected] = useState<string>('');
+  const [entries, setEntries] = useState<Array<{ name: string; path: string; kind: 'directory' | 'file' }>>([]);
+  const [file, setFile] = useState<{ name: string; text?: string; mimeType: string } | null>(null);
+  const [error, setError] = useState('');
   const conversation = session.activeConversation;
   const diff = conversation ? session.gitDiffByConversation[conversation.id] : undefined;
-  const preview = PLACEHOLDER_FILES[selected] ?? PLACEHOLDER_FILES.readme;
+  useEffect(() => {
+    const path = session.activeWorkspace?.path;
+    if (!path) return;
+    const api = new V2ApiClient({ serverUrl: session.settings.serverUrl, authToken: session.settings.authToken });
+    void api.listWorkspaceDirectories(path).then((snapshot) => setEntries(snapshot.entries)).catch((reason) => setError(reason instanceof Error ? reason.message : '目录读取失败'));
+  }, [session.activeWorkspace?.path, session.settings.serverUrl, session.settings.authToken]);
+  useEffect(() => {
+    if (!selected) return;
+    const api = new V2ApiClient({ serverUrl: session.settings.serverUrl, authToken: session.settings.authToken });
+    void api.readWorkspaceFile(selected).then(setFile).catch((reason) => setError(reason instanceof Error ? reason.message : '文件读取失败'));
+  }, [selected, session.settings.serverUrl, session.settings.authToken]);
   const rootName = useMemo(
     () => session.activeWorkspace?.name || 'workspace',
     [session.activeWorkspace?.name],
@@ -220,24 +236,22 @@ function FilesPane({ session }: { session: TodeXSession }) {
           <FileTree
             aria-label="工作区文件"
             className="w-full"
-            defaultExpandedKeys={['src']}
-            selectedKeys={new Set([selected])}
+            selectedKeys={selected ? new Set([selected]) : new Set()}
             selectionMode="single"
             onSelectionChange={(keys) => {
-              const next = keys === 'all' ? 'readme' : String([...keys][0] ?? 'readme');
-              setSelected(next);
+              const next = keys === 'all' ? '' : String([...keys][0] ?? '');
+              const entry = entries.find((item) => item.path === next);
+              if (entry?.kind === 'file') setSelected(next);
             }}
           >
-            <FileTree.Item icon={<Folder />} id="src" textValue="src" title={rootName}>
-              <FileTree.Item icon={<FileText />} id="readme" textValue="README.md" title="README.md" />
-              <FileTree.Item icon={<FileText />} id="agent" textValue="AGENTS.md" title="AGENTS.md" />
-              <FileTree.Item icon={<Code />} id="package" textValue="package.json" title="package.json" />
+            <FileTree.Item icon={<Folder />} id="root" textValue={rootName} title={rootName}>
+              {entries.map((entry) => <FileTree.Item key={entry.path} icon={entry.kind === 'directory' ? <Folder /> : <FileText />} id={entry.path} textValue={entry.name} title={entry.name} />)}
             </FileTree.Item>
           </FileTree>
         </ScrollShadow>
         <ScrollShadow className="bg-surface-secondary min-h-0 flex-[1.2] rounded-xl p-3">
-          <p className="text-muted mb-2 text-xs">{preview.title}</p>
-          <pre className="font-mono text-xs whitespace-pre-wrap">{preview.body}</pre>
+          <p className="text-muted mb-2 text-xs">{file?.name || '选择文件预览'}</p>
+          {error ? <p className="text-danger text-xs">{error}</p> : <pre className="font-mono text-xs whitespace-pre-wrap">{file?.text || '该文件不可作为文本预览。'}</pre>}
         </ScrollShadow>
         <ScrollShadow className="bg-surface-secondary min-h-0 flex-1 rounded-xl p-3">
           <div className="mb-2 flex items-center justify-between">
