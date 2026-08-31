@@ -34,10 +34,17 @@ npm install
 npm run dev
 ```
 
-`npm install` 会触发 `@heroui-pro/react` 的 postinstall，从 HeroUI 拉取 Pro 组件产物。如果跳过了 `HEROUI_AUTH_TOKEN`，界面会缺 Pro 组件。首次安装还需要能访问网络以下载 Electron 二进制；若出现 `Electron uninstall`，在本目录执行：
+`npm install` 会触发 `@heroui-pro/react` 的 postinstall，从 HeroUI 拉取 Pro 组件产物。如果跳过了 `HEROUI_AUTH_TOKEN`，界面会缺 Pro 组件。首次安装还需要能访问网络以下载 Electron 二进制；若出现 `Electron uninstall`，通常是 Electron 下载中断导致 `dist` 目录残缺，先删除当前 artifact 再安装：
 
 ```bash
+rm -rf node_modules/electron/dist
 node node_modules/electron/install.js
+```
+
+如果 `install.js` 仍误判为已安装，可强制重新下载：
+
+```bash
+force_no_cache=true node node_modules/electron/install.js
 ```
 
 `npm run dev` 会打开 1280×800 的桌面窗口。先启动 `TodeX_backend` / `todex-agentd`，再在设置里连接或粘贴配对内容。 HeroUI Pro 还需要 `motion`、`react-aria-components` 等 peer，已写在本包的 `package.json` 中。
