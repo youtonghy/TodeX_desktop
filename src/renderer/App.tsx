@@ -223,16 +223,28 @@ function CreateWorkspaceModal({
 
   useEffect(() => {
     if (!isOpen) return;
-    setPath(session.settings.defaultWorkspacePath);
-    void fetchWorkspaceDirectorySnapshot(session.settings, session.settings.defaultWorkspacePath)
+    const defaultPath = session.settings.defaultWorkspacePath;
+    const backendRoot = session.serverVersion?.workspace_root || '';
+    setPath(defaultPath);
+    void fetchWorkspaceDirectorySnapshot(session.settings, defaultPath)
       .then((snapshot) => {
         setPath(snapshot.current);
         setEntries(snapshot.entries.map((entry) => entry.path));
       })
-      .catch(() => {
-        setEntries([]);
+      .catch(async () => {
+        if (!backendRoot || backendRoot === defaultPath) {
+          setEntries([]);
+          return;
+        }
+        try {
+          const snapshot = await fetchWorkspaceDirectorySnapshot(session.settings, backendRoot);
+          setPath(snapshot.current);
+          setEntries(snapshot.entries.map((entry) => entry.path));
+        } catch {
+          setEntries([]);
+        }
       });
-  }, [isOpen, session.settings]);
+  }, [isOpen, session.serverVersion?.workspace_root, session.settings]);
 
   return (
     <Modal isOpen={isOpen} onOpenChange={onOpenChange}>
@@ -284,8 +296,17 @@ function CreateWorkspaceModal({
             <Modal.Footer>
               <Button slot="close" variant="tertiary">取消</Button>
               <Button
-                onPress={() => {
-                  void session.createWorkspace(name || path, path);
+                onPress={async () => {
+                  let validatedPath = path;
+                  if (session.connectionState === 'open') {
+                    try {
+                      validatedPath = (await session.fetchWorkspaceDirectorySnapshot(path)).current;
+                    } catch (error) {
+                      toast.danger(error instanceof Error ? error.message : '无法读取目录');
+                      return;
+                    }
+                  }
+                  session.createWorkspace(name || validatedPath, validatedPath);
                   onOpenChange(false);
                 }}
               >

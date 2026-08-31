@@ -51,6 +51,8 @@ force_no_cache=true node node_modules/electron/install.js
 
 主聊天新建对话走 Backend `POST /v2/conversations`，必须选择 Agent（Codex CLI / ACP / Pi / Claude Code）。创建后 Provider 锁定；切换 Agent 等于在同一工作区新建对话。旧的 Codex native thread 仍可从侧栏打开作为历史。
 
+新建工作区时，Desktop 会先用 Backend 的目录接口校验路径；如果本地保存的默认目录不属于当前 Backend，会回退到 `/v2/version` 返回的 `workspace_root`。创建对话失败时会显示 Backend 返回的具体错误，而不是把目录或 Provider 错误归类成网络故障。
+
 其它命令：
 
 ```bash

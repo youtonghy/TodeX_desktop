@@ -4155,6 +4155,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       return null;
     }
 
+    const previousActiveConversationId = activeConversationRef.current;
     const placeholder = {
       ...createDefaultConversation(workspace),
       title: options.title?.trim() || '新对话',
@@ -4200,6 +4201,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         appendTimeline(makeSystemEntry('对话已创建', created.provider, workspace.id, record.id));
       } catch (error) {
         setConversations((current) => current.filter((item) => item.id !== placeholder.id));
+        setActiveConversationId((current) => (
+          current === placeholder.id ? previousActiveConversationId : current
+        ));
         const message = error instanceof Error ? error.message : '创建对话失败';
         setLastError(message);
         desktopAlert('创建对话失败', message);
@@ -5934,4 +5938,3 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     setAutoConnectEnabled,
   };
 }
-
