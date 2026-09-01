@@ -1,5 +1,5 @@
-import { RiAddLine, RiCodeBoxLine, RiFolder3Line, RiRobot2Line, RiSettings3Line, RiTerminalBoxLine } from '@remixicon/react';
-import { Badge, Button, Dropdown } from '@heroui/react';
+import { RiAddLine, RiBarChartBoxLine, RiCodeBoxLine, RiFolder3Line, RiInformationLine, RiPuzzle2Line, RiRobot2Line, RiSettings3Line, RiTerminalBoxLine } from '@remixicon/react';
+import { Badge, Button, Dropdown, Label } from '@heroui/react';
 import { useEffect, useState } from 'react';
 import type { MouseEvent } from 'react';
 import { ChatListView, Sidebar } from '@heroui-pro/react';
@@ -12,6 +12,8 @@ type Props = {
   onCreateConversation: () => void;
   onOpenSettings: () => void;
   onOpenCapabilities: () => void;
+  onOpenUsage: () => void;
+  onOpenAbout: () => void;
 };
 
 type ContextMenu = { kind: 'workspace' | 'conversation'; id: string; x: number; y: number } | null;
@@ -23,7 +25,7 @@ function providerIcon(provider?: string) {
   return RiCodeBoxLine;
 }
 
-export function AppSidebar({ session, onCreateWorkspace, onCreateConversation, onOpenSettings, onOpenCapabilities }: Props) {
+export function AppSidebar({ session, onCreateWorkspace, onCreateConversation, onOpenSettings, onOpenCapabilities, onOpenUsage, onOpenAbout }: Props) {
   const workspaceConversations = session.conversations.filter(
     (conversation) => conversation.workspaceId === session.activeWorkspaceId && !conversation.archived,
   );
@@ -88,9 +90,13 @@ export function AppSidebar({ session, onCreateWorkspace, onCreateConversation, o
             <Dropdown.Menu onAction={(key) => {
               if (key === 'settings') onOpenSettings();
               if (key === 'capabilities') onOpenCapabilities();
+              if (key === 'usage') onOpenUsage();
+              if (key === 'about') onOpenAbout();
             }}>
-              <Dropdown.Item id="settings" textValue="设置">设置</Dropdown.Item>
-              <Dropdown.Item id="capabilities" textValue="MCP / Skill 管理">MCP / Skill 管理</Dropdown.Item>
+              <Dropdown.Item id="settings" textValue="设置"><RiSettings3Line className="text-muted size-4 shrink-0" /><Label>设置</Label></Dropdown.Item>
+              <Dropdown.Item id="capabilities" textValue="MCP / Skill 管理"><RiPuzzle2Line className="text-muted size-4 shrink-0" /><Label>MCP / Skill 管理</Label></Dropdown.Item>
+              <Dropdown.Item id="usage" textValue="使用统计"><RiBarChartBoxLine className="text-muted size-4 shrink-0" /><Label>使用统计</Label></Dropdown.Item>
+              <Dropdown.Item id="about" textValue="关于"><RiInformationLine className="text-muted size-4 shrink-0" /><Label>关于</Label></Dropdown.Item>
             </Dropdown.Menu>
           </Dropdown.Popover>
         </Dropdown>

@@ -800,6 +800,53 @@ export type ConversationContextUsage = {
   updatedAt: number;
 };
 
+export type UsageRecord = {
+  id: string;
+  conversationId: string;
+  provider: string;
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  cachedInputTokens: number;
+  cacheWriteTokens: number;
+  updatedAt: number;
+};
+
+export function normalizeUsageRecords(value: unknown): UsageRecord[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const seen = new Set<string>();
+  const records: UsageRecord[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      continue;
+    }
+    const raw = item as Record<string, unknown>;
+    const id = typeof raw.id === 'string' ? raw.id.trim() : '';
+    if (!id || seen.has(id)) {
+      continue;
+    }
+    seen.add(id);
+    records.push({
+      id,
+      conversationId: typeof raw.conversationId === 'string' ? raw.conversationId : '',
+      provider: typeof raw.provider === 'string' && raw.provider.trim() ? raw.provider.trim() : 'unknown',
+      model: typeof raw.model === 'string' && raw.model.trim() ? raw.model.trim() : 'unknown',
+      inputTokens: usageNumber(raw.inputTokens),
+      outputTokens: usageNumber(raw.outputTokens),
+      cachedInputTokens: usageNumber(raw.cachedInputTokens),
+      cacheWriteTokens: usageNumber(raw.cacheWriteTokens),
+      updatedAt: usageNumber(raw.updatedAt) || Date.now(),
+    });
+    if (records.length >= MAX_USAGE_RECORDS) {
+      break;
+    }
+  }
+  return records;
+}
+
 function usageNumber(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : 0;
 }
@@ -1055,6 +1102,7 @@ export const ACTIVE_SELECTION_STORAGE_KEY = 'todex.desktop.activeSelection.v1';
 export const MENTION_HISTORY_STORAGE_KEY = 'todex.desktop.mentionHistory.v1';
 export const SESSION_CURSORS_STORAGE_KEY = 'todex.desktop.sessionCursors.v1';
 export const EXPERIMENTAL_FEATURES_STORAGE_KEY = 'todex.desktop.experimentalFeatures.v1';
+export const USAGE_RECORDS_STORAGE_KEY = 'todex.desktop.usageRecords.v1';
 export const TOKEN_STORAGE_KEY = 'todex.desktop.token.v1';
 export const TOKEN_ORIGIN_STORAGE_KEY = 'todex.desktop.tokenOrigin.v1';
 export const JSON_SAVE_DEBOUNCE_MS = 350;
@@ -1065,6 +1113,7 @@ export const SOCKET_FRAME_DECODE_BATCH_SIZE = 8;
 export const SOCKET_FRAME_DECODE_BUDGET_MS = 10;
 export const MAX_TRANSPORT_HELLO_SESSION_CURSORS = 12;
 export const MAX_TIMELINE_ITEMS = 260;
+export const MAX_USAGE_RECORDS = 2_000;
 export const MAX_EVENTS = 220;
 export const RECONNECT_DELAY_MS = 2000;
 export const RECONNECT_MAX_DELAY_MS = 30_000;

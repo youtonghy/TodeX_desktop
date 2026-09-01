@@ -81,6 +81,7 @@ import {
   MENTION_HISTORY_STORAGE_KEY,
   SESSION_CURSORS_STORAGE_KEY,
   EXPERIMENTAL_FEATURES_STORAGE_KEY,
+  USAGE_RECORDS_STORAGE_KEY,
   TOKEN_STORAGE_KEY,
   TOKEN_ORIGIN_STORAGE_KEY,
   BACKEND_CONNECTIONS_STORAGE_KEY,
@@ -92,6 +93,7 @@ import {
   SOCKET_FRAME_DECODE_BUDGET_MS,
   MAX_TRANSPORT_HELLO_SESSION_CURSORS,
   MAX_TIMELINE_ITEMS,
+  MAX_USAGE_RECORDS,
   MAX_EVENTS,
   CHAT_ATTACH_REPLAY_LIMIT,
   TERMINAL_MAX_OUTPUT_ENTRIES,
@@ -263,6 +265,8 @@ import {
   executionGroupId,
   buildConversationRenderItems,
   type ConversationContextUsage,
+  type UsageRecord,
+  normalizeUsageRecords,
   createDefaultConversation,
   conversationsForWorkspaceSnapshot,
   forkConversationRecord,
@@ -377,6 +381,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const [providerModels, setProviderModels] = useState<Partial<Record<ProviderKind, ProviderModelDescriptor[]>>>({});
   const [providerCommands, setProviderCommands] = useState<Partial<Record<ProviderKind, ProviderCommandDescriptor[]>>>({});
   const [contextUsageByConversation, setContextUsageByConversation] = useState<Record<string, ConversationContextUsage>>({});
+  const [usageRecords, setUsageRecords] = useState<UsageRecord[]>([]);
 
   useEffect(() => {
     if (!hydrated || !settings.serverUrl.trim()) {
@@ -678,6 +683,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         storedMentionHistory,
         storedSessionCursors,
         storedExperimentalFeatures,
+        storedUsageRecords,
         storedBackendConnections,
         storedToken,
         storedTokenOrigin,
@@ -690,6 +696,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         loadJson<WorkspaceMentionHistory[]>(MENTION_HISTORY_STORAGE_KEY, []),
         loadJson<Record<string, number>>(SESSION_CURSORS_STORAGE_KEY, {}),
         loadJson<Partial<ExperimentalFeatureSettings> | null>(EXPERIMENTAL_FEATURES_STORAGE_KEY, null),
+        loadJson<unknown>(USAGE_RECORDS_STORAGE_KEY, []),
         loadJson<BackendConnectionProfile[]>(BACKEND_CONNECTIONS_STORAGE_KEY, []),
         loadSecret(TOKEN_STORAGE_KEY),
         loadSecret(TOKEN_ORIGIN_STORAGE_KEY),
@@ -769,6 +776,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       setTimeline(storedTimeline.slice(0, MAX_TIMELINE_ITEMS));
       setMentionHistory(storedMentionHistory);
       setExperimentalFeatures(normalizeExperimentalFeatures(storedExperimentalFeatures));
+      setUsageRecords(normalizeUsageRecords(storedUsageRecords));
       setActiveWorkspaceId(firstWorkspaceId);
       setActiveConversationId(firstConversationId);
       setAutoConnectEnabled(Boolean(storedSettings?.serverUrl?.trim()));
@@ -934,6 +942,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     }
     scheduleJsonSave(TIMELINE_STORAGE_KEY, timeline.slice(0, MAX_TIMELINE_ITEMS));
   }, [hydrated, scheduleJsonSave, timeline]);
+
+  useEffect(() => {
+    if (!hydrated) {
+      return;
+    }
+    scheduleJsonSave(USAGE_RECORDS_STORAGE_KEY, usageRecords.slice(0, MAX_USAGE_RECORDS));
+  }, [hydrated, scheduleJsonSave, usageRecords]);
 
   useEffect(() => {
     if (!hydrated) {
@@ -2198,6 +2213,23 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           const contextUsage = contextUsageFromV2Event(event);
           if (contextUsage) {
             setContextUsageByConversation((current) => ({ ...current, [conversation.id]: contextUsage }));
+            const usageRecord: UsageRecord = {
+              id: `${conversation.id}:${event.eventId}`,
+              conversationId: conversation.id,
+              provider: conversation.provider || 'unknown',
+              model: contextUsage.model || conversation.model || 'unknown',
+              inputTokens: contextUsage.inputTokens,
+              outputTokens: contextUsage.outputTokens,
+              cachedInputTokens: contextUsage.cachedInputTokens,
+              cacheWriteTokens: contextUsage.cacheWriteTokens,
+              updatedAt: contextUsage.updatedAt,
+            };
+            setUsageRecords((current) => {
+              if (current.some((record) => record.id === usageRecord.id)) {
+                return current;
+              }
+              return [usageRecord, ...current].slice(0, MAX_USAGE_RECORDS);
+            });
           }
           const payloadTurnId = event.payload && typeof event.payload === 'object' && !Array.isArray(event.payload)
             ? (event.payload as Record<string, unknown>).turnId
@@ -6097,6 +6129,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     providerModels,
     providerCommands,
     contextUsageByConversation,
+    usageRecords,
     pendingRequests,
     selectedRequest,
     activeWorkspace,

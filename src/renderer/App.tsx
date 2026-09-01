@@ -10,6 +10,8 @@ import { SettingsPanel } from './screens/SettingsPanel';
 import { AsidePanel } from './screens/AsidePanel';
 import { CapabilitiesPanel } from './screens/CapabilitiesPanel';
 import { WorkbenchPanel } from './screens/WorkbenchPanel';
+import { UsagePanel } from './screens/UsagePanel';
+import { AboutPanel } from './screens/AboutPanel';
 import { Field } from './components/Field';
 import { connectionStateLabel, fetchWorkspaceDirectorySnapshot, isV2Conversation } from './session/helpers';
 import { providerDisplayName, type ProviderKind } from '@todex/protocol/v2';
@@ -80,7 +82,7 @@ export function App() {
     if (isWorkbenchTab(next)) {
       setWorkbenchTab(next);
     }
-    if (next !== 'settings') {
+    if (next !== 'settings' && next !== 'usage' && next !== 'about') {
       persistAsideOpen(true);
     }
   }, [persistAsideOpen]);
@@ -103,7 +105,10 @@ export function App() {
   }, [session.activeConversation, session.connectionState]);
 
   const settingsOpen = panel === 'settings';
-  const overlayPanel = panel && panel !== 'settings' && !isWorkbenchTab(panel) ? panel : null;
+  const usageOpen = panel === 'usage';
+  const aboutOpen = panel === 'about';
+  const modalPanel = settingsOpen || usageOpen || aboutOpen;
+  const overlayPanel = panel && !modalPanel && !isWorkbenchTab(panel) ? panel : null;
 
   return (
     <div className="bg-background text-foreground h-full">
@@ -152,6 +157,8 @@ export function App() {
               }}
               onOpenSettings={() => setPanel('settings')}
               onOpenCapabilities={() => setCapabilitiesOpen(true)}
+              onOpenUsage={() => setPanel('usage')}
+              onOpenAbout={() => setPanel('about')}
             />
           }
           navbar={
@@ -198,6 +205,28 @@ export function App() {
               <Modal.Body className="max-h-[70vh] overflow-y-auto">
                 <SettingsPanel session={session} />
               </Modal.Body>
+            </Modal.Dialog>
+          </Modal.Container>
+        </Modal.Backdrop>
+      </Modal>
+      <Modal isOpen={usageOpen} onOpenChange={(open) => { if (!open) setPanel((current) => current === 'usage' ? null : current); }}>
+        <Modal.Backdrop>
+          <Modal.Container>
+            <Modal.Dialog className="max-h-[92vh] sm:max-w-5xl">
+              <Modal.CloseTrigger />
+              <Modal.Header><Modal.Heading>使用统计</Modal.Heading></Modal.Header>
+              <Modal.Body className="max-h-[82vh] overflow-y-auto p-0"><UsagePanel session={session} /></Modal.Body>
+            </Modal.Dialog>
+          </Modal.Container>
+        </Modal.Backdrop>
+      </Modal>
+      <Modal isOpen={aboutOpen} onOpenChange={(open) => { if (!open) setPanel((current) => current === 'about' ? null : current); }}>
+        <Modal.Backdrop>
+          <Modal.Container>
+            <Modal.Dialog className="max-h-[90vh] sm:max-w-2xl">
+              <Modal.CloseTrigger />
+              <Modal.Header><Modal.Heading>关于</Modal.Heading></Modal.Header>
+              <Modal.Body className="max-h-[76vh] overflow-y-auto p-0"><AboutPanel session={session} /></Modal.Body>
             </Modal.Dialog>
           </Modal.Container>
         </Modal.Backdrop>
