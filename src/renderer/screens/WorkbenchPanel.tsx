@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { RiAddLine, RiFileTextLine, RiFolder3Line, RiGlobalLine, RiFocus3Line } from '@remixicon/react';
+import { RiAddLine, RiArrowLeftDoubleLine, RiArrowRightDoubleLine, RiFileTextLine, RiFolder3Line, RiGlobalLine, RiFocus3Line } from '@remixicon/react';
 import { Button, Chip, Dropdown, Input, ScrollShadow, TextField } from '@heroui/react';
 import type { Selection } from '@heroui/react';
 import { FileTree } from '@heroui-pro/react';
+import { Resizable } from '@heroui-pro/react/resizable';
+import type { PanelImperativeHandle } from '@heroui-pro/react/resizable';
 import { CodeBlock } from '@heroui-pro/react/code-block';
 import { Markdown } from '@heroui-pro/react/markdown';
 import type { TodeXSession } from '../session/useTodeXSession';
@@ -658,6 +660,8 @@ function FilesPane({ session, target }: { session: TodeXSession; target?: OpenPa
   const [file, setFile] = useState<{ name: string; path: string; text?: string; mimeType: string } | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [treeCollapsed, setTreeCollapsed] = useState(false);
+  const treePanelRef = useRef<PanelImperativeHandle>(null);
   const appliedTargetRef = useRef('');
   const rootPath = session.activeWorkspace?.path || '';
   const rootName = useMemo(() => session.activeWorkspace?.name || 'workspace', [session.activeWorkspace?.name]);
@@ -730,6 +734,11 @@ function FilesPane({ session, target }: { session: TodeXSession; target?: OpenPa
     </FileTree.Item>
   );
 
+  const toggleTree = () => {
+    if (treePanelRef.current?.isCollapsed()) treePanelRef.current.expand();
+    else treePanelRef.current?.collapse();
+  };
+
   return (
     <div className="flex h-full min-h-0 flex-col px-4 pb-4 pt-3">
       <div className="mb-3 flex items-center justify-between gap-3">
@@ -737,10 +746,27 @@ function FilesPane({ session, target }: { session: TodeXSession; target?: OpenPa
           <p className="text-sm font-medium">文件</p>
           <p className="text-muted truncate text-xs">{rootPath || '未选择工作区'}</p>
         </div>
-        <Button size="sm" variant="tertiary" isDisabled={!rootPath || loading} onPress={() => rootPath && void loadDirectory(rootPath)}>刷新</Button>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button size="sm" variant="tertiary" isDisabled={!rootPath || loading} onPress={() => rootPath && void loadDirectory(rootPath)}>刷新</Button>
+          <Button size="sm" variant="tertiary" onPress={toggleTree} aria-label={treeCollapsed ? '显示文件树' : '收起文件树'}>
+            {treeCollapsed ? <RiArrowRightDoubleLine className="size-4" /> : <RiArrowLeftDoubleLine className="size-4" />}
+          </Button>
+        </div>
       </div>
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 lg:grid-cols-[minmax(180px,0.75fr)_minmax(0,1.25fr)]">
-        <ScrollShadow className="bg-surface-secondary min-h-0 rounded-xl p-2">
+      <Resizable autoSaveId="todex.files-pane" className="min-h-0 flex-1 gap-3" onLayoutChange={() => setTreeCollapsed(Boolean(treePanelRef.current?.isCollapsed()))}>
+        <Resizable.Panel
+          id="file-tree"
+          handleRef={treePanelRef}
+          defaultSize="30%"
+          minSize="18%"
+          maxSize="50%"
+          collapsedSize="0px"
+          collapsible
+          onCollapse={() => setTreeCollapsed(true)}
+          onExpand={() => setTreeCollapsed(false)}
+          className="min-h-0"
+        >
+          <ScrollShadow className="bg-surface-secondary h-full min-h-0 rounded-xl p-2">
           <FileTree
             aria-label="工作区文件"
             className="w-full"
@@ -758,14 +784,16 @@ function FilesPane({ session, target }: { session: TodeXSession; target?: OpenPa
               {entries.map(renderEntry)}
             </FileTree.Item>
           </FileTree>
-        </ScrollShadow>
-        <div className="flex min-h-0 flex-col gap-3">
-          <ScrollShadow className="bg-surface-secondary min-h-0 flex-[1.5] rounded-xl p-3">
+          </ScrollShadow>
+        </Resizable.Panel>
+        <Resizable.Handle type="pill" withIndicator aria-label="调整文件树宽度" />
+        <Resizable.Panel defaultSize="70%" minSize="50%" className="min-h-0">
+          <ScrollShadow className="bg-surface-secondary h-full min-h-0 rounded-xl p-3">
             <p className="text-muted mb-2 truncate text-xs">{file?.path || '选择文件预览'}</p>
             {error ? <p className="text-danger text-xs">{error}</p> : <FilePreview file={file} />}
           </ScrollShadow>
-        </div>
-      </div>
+        </Resizable.Panel>
+      </Resizable>
     </div>
   );
 }
