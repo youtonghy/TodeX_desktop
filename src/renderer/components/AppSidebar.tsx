@@ -1,5 +1,7 @@
 import { Folder, Gear, Plus } from '@gravity-ui/icons';
-import { Badge, Button, Dropdown } from '@heroui/react';
+import { Badge, Button } from '@heroui/react';
+import { useEffect, useState } from 'react';
+import type { MouseEvent } from 'react';
 import { ChatListView, Sidebar } from '@heroui-pro/react';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { isConversationHighlighted } from '../session/helpers';
@@ -11,6 +13,8 @@ type Props = {
   onOpenSettings: () => void;
 };
 
+type ContextMenu = { kind: 'workspace' | 'conversation'; id: string; x: number; y: number } | null;
+
 export function AppSidebar({ session, onCreateWorkspace, onCreateConversation, onOpenSettings }: Props) {
   const workspaceConversations = session.conversations.filter(
     (conversation) => conversation.workspaceId === session.activeWorkspaceId && !conversation.archived,
@@ -20,6 +24,45 @@ export function AppSidebar({ session, onCreateWorkspace, onCreateConversation, o
     : session.connectionHealth.latencyMs !== null && session.connectionHealth.latencyMs <= 100
       ? 'success'
       : 'warning';
+  const [contextMenu, setContextMenu] = useState<ContextMenu>(null);
+
+  useEffect(() => {
+    const close = () => setContextMenu(null);
+    window.addEventListener('click', close);
+    window.addEventListener('blur', close);
+    return () => {
+      window.removeEventListener('click', close);
+      window.removeEventListener('blur', close);
+    };
+  }, []);
+
+  const openContextMenu = (event: MouseEvent, kind: 'workspace' | 'conversation', id: string) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setContextMenu({ kind, id, x: event.clientX, y: event.clientY });
+  };
+
+  const runContextAction = (action: 'rename' | 'fork' | 'delete') => {
+    if (!contextMenu) return;
+    if (contextMenu.kind === 'workspace') {
+      const workspace = session.workspaces.find((item) => item.id === contextMenu.id);
+      if (!workspace) return;
+      if (action === 'rename') {
+        const name = window.prompt('新的工作区名称', workspace.name);
+        if (name) session.renameWorkspace(workspace.id, name);
+      } else if (action === 'fork') session.forkWorkspace(workspace.id);
+      else session.removeWorkspace(workspace.id);
+    } else {
+      const conversation = session.conversations.find((item) => item.id === contextMenu.id);
+      if (!conversation) return;
+      if (action === 'rename') {
+        const title = window.prompt('新的对话标题', conversation.title);
+        if (title) session.renameConversation(conversation.id, title);
+      } else if (action === 'fork') session.forkConversation(conversation.id);
+      else session.removeConversation(conversation.id);
+    }
+    setContextMenu(null);
+  };
 
   return (
     <Sidebar>
@@ -67,34 +110,13 @@ export function AppSidebar({ session, onCreateWorkspace, onCreateConversation, o
               onAction={(key) => session.selectWorkspace(String(key))}
             >
               {(workspace) => (
-              <ChatListView.Item key={workspace.id} id={workspace.id} textValue={workspace.name}>
+              <ChatListView.Item key={workspace.id} id={workspace.id} textValue={workspace.name} onContextMenu={(event) => openContextMenu(event, 'workspace', workspace.id)}>
                 <ChatListView.ItemContent>
                   <ChatListView.Icon><Folder className="size-4" /></ChatListView.Icon>
                   <ChatListView.Text>
                     <ChatListView.Title>{workspace.name}</ChatListView.Title>
                     <ChatListView.Preview>{workspace.path}</ChatListView.Preview>
                   </ChatListView.Text>
-                  <Dropdown>
-                    <Dropdown.Trigger aria-label="工作区操作" className="inline-flex size-7 items-center justify-center rounded-md">
-                      ···
-                    </Dropdown.Trigger>
-                    <Dropdown.Popover>
-                      <Dropdown.Menu
-                        onAction={(key) => {
-                          if (key === 'rename') {
-                            const name = window.prompt('新的工作区名称', workspace.name);
-                            if (name) session.renameWorkspace(workspace.id, name);
-                          }
-                          if (key === 'fork') session.forkWorkspace(workspace.id);
-                          if (key === 'delete') session.removeWorkspace(workspace.id);
-                        }}
-                      >
-                        <Dropdown.Item id="rename" textValue="改名">改名</Dropdown.Item>
-                        <Dropdown.Item id="fork" textValue="Fork">Fork</Dropdown.Item>
-                        <Dropdown.Item id="delete" textValue="删除">删除</Dropdown.Item>
-                      </Dropdown.Menu>
-                    </Dropdown.Popover>
-                  </Dropdown>
                 </ChatListView.ItemContent>
               </ChatListView.Item>
             )}
@@ -123,7 +145,7 @@ export function AppSidebar({ session, onCreateWorkspace, onCreateConversation, o
               }}
             >
             {(conversation) => (
-              <ChatListView.Item key={conversation.id} id={conversation.id} textValue={conversation.title}>
+              <ChatListView.Item key={conversation.id} id={conversation.id} textValue={conversation.title} onContextMenu={(event) => openContextMenu(event, 'conversation', conversation.id)}>
                 <ChatListView.ItemContent>
                   <ChatListView.Icon><span className="text-xs font-semibold">{conversation.provider?.slice(0, 1).toUpperCase() || 'C'}</span></ChatListView.Icon>
                   <ChatListView.Text>
@@ -131,27 +153,6 @@ export function AppSidebar({ session, onCreateWorkspace, onCreateConversation, o
                     <ChatListView.Preview>{conversation.preview || '还没有消息'}</ChatListView.Preview>
                   </ChatListView.Text>
                   <ChatListView.Meta>{isConversationHighlighted(conversation, session.activeConversationId, session.turnIds) ? '运行中' : ''}</ChatListView.Meta>
-                  <Dropdown>
-                    <Dropdown.Trigger aria-label="对话操作" className="inline-flex size-7 items-center justify-center rounded-md">
-                      ···
-                    </Dropdown.Trigger>
-                    <Dropdown.Popover>
-                      <Dropdown.Menu
-                        onAction={(key) => {
-                          if (key === 'rename') {
-                            const title = window.prompt('新的对话标题', conversation.title);
-                            if (title) session.renameConversation(conversation.id, title);
-                          }
-                          if (key === 'fork') session.forkConversation(conversation.id);
-                          if (key === 'delete') session.removeConversation(conversation.id);
-                        }}
-                      >
-                        <Dropdown.Item id="rename" textValue="改名">改名</Dropdown.Item>
-                        <Dropdown.Item id="fork" textValue="Fork">Fork</Dropdown.Item>
-                        <Dropdown.Item id="delete" textValue="删除">删除</Dropdown.Item>
-                      </Dropdown.Menu>
-                    </Dropdown.Popover>
-                  </Dropdown>
                 </ChatListView.ItemContent>
                 {isConversationHighlighted(conversation, session.activeConversationId, session.turnIds) ? (
                   <span className="sr-only">运行中</span>
@@ -162,6 +163,19 @@ export function AppSidebar({ session, onCreateWorkspace, onCreateConversation, o
           )}
         </Sidebar.Group>
       </Sidebar.Content>
+      {contextMenu ? (
+        <div
+          role="menu"
+          aria-label="上下文菜单"
+          className="fixed z-50 min-w-36 rounded-lg border border-separator bg-surface p-1 shadow-lg"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <button type="button" role="menuitem" className="context-menu-item" onClick={() => runContextAction('rename')}>改名</button>
+          <button type="button" role="menuitem" className="context-menu-item" onClick={() => runContextAction('fork')}>Fork</button>
+          <button type="button" role="menuitem" className="context-menu-item text-danger" onClick={() => runContextAction('delete')}>删除</button>
+        </div>
+      ) : null}
     </Sidebar>
   );
 }

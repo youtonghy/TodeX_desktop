@@ -251,13 +251,22 @@ function TerminalPane({ session, terminalId }: { session: TodeXSession; terminal
         </div>
       </div>
       <ScrollShadow className="min-h-0 flex-1 px-4 py-3">
-        <pre className="font-mono text-xs leading-5 whitespace-pre-wrap text-[#d8dee9]">
-          {lines.length
-            ? lines.map((entry) => entry.text.endsWith('\n') ? entry.text : `${entry.text}\n`).join('')
-            : session.connectionState === 'open'
-              ? '$ 正在连接终端...'
-              : '$ 等待连接到 todex-agentd'}
-        </pre>
+        <div className="font-mono text-xs leading-5 text-[#d8dee9]">
+          {lines.length ? lines.map((entry) => (
+            <div
+              key={entry.id}
+              className={entry.kind === 'stderr' || entry.kind === 'error'
+                ? 'whitespace-pre-wrap break-words text-red-300'
+                : entry.kind === 'input'
+                  ? 'whitespace-pre-wrap break-words text-emerald-300'
+                  : 'whitespace-pre-wrap break-words'}
+            >
+              {entry.text}
+            </div>
+          )) : (
+            <div className="text-[#a8b0ba]">{session.connectionState === 'open' ? '$ 正在连接终端...' : '$ 等待连接到 todex-agentd'}</div>
+          )}
+        </div>
       </ScrollShadow>
       <form
         className="flex gap-2 border-t border-white/10 bg-[#191d22] p-3"
