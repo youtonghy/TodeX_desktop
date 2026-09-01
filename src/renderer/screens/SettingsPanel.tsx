@@ -1,9 +1,8 @@
-import { useMemo, useState } from 'react';
-import { Button, Chip, Label, ListBox, Select, Surface, Switch, TextArea, TextField } from '@heroui/react';
-import { Folder, Paperclip } from '@gravity-ui/icons';
+import { useState } from 'react';
+import { Button, Chip, Label, ListBox, Select, Surface, TextArea, TextField } from '@heroui/react';
+import { Paperclip } from '@gravity-ui/icons';
 import jsQR from 'jsqr';
 import { applyPairingToSettings, assemblePairingQrChunkPayload, parsePairingQrFrame, resolvePairingPayload, type PairingQrChunk } from '@todex/protocol/transportCrypto';
-import { normalizeServerUrl } from '@todex/protocol/todex';
 import { toast } from '@heroui/react';
 import { Field } from '../components/Field';
 import type { TodeXSession } from '../session/useTodeXSession';
@@ -13,15 +12,6 @@ import { connectionFailureLabel } from '@todex/protocol/connectionError';
 type Props = {
   session: TodeXSession;
 };
-
-function isLoopback(serverUrl: string): boolean {
-  try {
-    const host = new URL(normalizeServerUrl(serverUrl)).hostname;
-    return host === '127.0.0.1' || host === 'localhost' || host === '::1';
-  } catch {
-    return false;
-  }
-}
 
 async function decodeQrFromFile(file: File): Promise<string | null> {
   const bitmap = await createImageBitmap(file);
@@ -43,7 +33,6 @@ export function SettingsPanel({ session }: Props) {
   const [pairingText, setPairingText] = useState('');
   const [chunks, setChunks] = useState<Map<number, PairingQrChunk>>(new Map());
   const connected = connectionState === 'open' || connectionState === 'connecting';
-  const loopback = useMemo(() => isLoopback(settings.serverUrl), [settings.serverUrl]);
   const classified = connectionFailureLabel(connectionHealth.code);
 
   const applyRawPairing = async (raw: string) => {
@@ -189,48 +178,6 @@ export function SettingsPanel({ session }: Props) {
             }}
           />
         </label>
-      </Surface>
-      <Surface className="flex flex-col gap-4 rounded-2xl p-5">
-        <h3 className="font-semibold">默认工作区</h3>
-        <div className="flex items-end gap-2">
-          <div className="flex-1">
-            <Field
-              label="默认目录"
-              value={settings.defaultWorkspacePath}
-              onChange={(defaultWorkspacePath) => setSettings((current) => ({ ...current, defaultWorkspacePath }))}
-            />
-          </div>
-          {loopback ? (
-            <Button
-              variant="secondary"
-              onPress={async () => {
-                const path = await window.todexDesktop.dialog.openDirectory();
-                if (path) {
-                  setSettings((current) => ({ ...current, defaultWorkspacePath: path }));
-                }
-              }}
-            >
-              <Folder className="size-4" />
-              本机选择
-            </Button>
-          ) : null}
-        </div>
-        <Field label="默认模型" value={settings.defaultModel} onChange={(defaultModel) => setSettings((current) => ({ ...current, defaultModel }))} />
-        <Field
-          label="思考强度"
-          value={settings.defaultReasoningEffort ?? ''}
-          onChange={(defaultReasoningEffort) => setSettings((current) => ({ ...current, defaultReasoningEffort }))}
-        />
-        <Field label="审批策略" value={settings.approvalPolicy} onChange={(approvalPolicy) => setSettings((current) => ({ ...current, approvalPolicy }))} />
-        <Field label="沙盒模式" value={settings.sandboxMode} onChange={(sandboxMode) => setSettings((current) => ({ ...current, sandboxMode }))} />
-        <Switch isSelected={session.autoConnectEnabled} onChange={session.setAutoConnectEnabled}>
-          <Switch.Content>
-            <Switch.Control>
-              <Switch.Thumb />
-            </Switch.Control>
-            启动后自动连接
-          </Switch.Content>
-        </Switch>
       </Surface>
     </div>
   );

@@ -1,4 +1,4 @@
-import { FaceRobot, Folder, Gear, Plus } from '@gravity-ui/icons';
+import { Folder, Gear, Plus } from '@gravity-ui/icons';
 import { Badge, Button, Dropdown } from '@heroui/react';
 import { Sidebar } from '@heroui-pro/react';
 import type { TodeXSession } from '../session/useTodeXSession';
@@ -26,9 +26,7 @@ export function AppSidebar({ session, onCreateWorkspace, onCreateConversation, o
       <Sidebar.Header>
         <div className="flex items-center gap-2 px-1 py-2">
           <Badge.Anchor className="shrink-0">
-            <div className="bg-accent text-accent-foreground flex size-8 items-center justify-center rounded-full">
-              <FaceRobot className="size-4" />
-            </div>
+            <div className="bg-accent size-8 rounded-full" aria-hidden="true" />
             <Badge
               color={healthColor}
               placement="bottom-right"

@@ -246,26 +246,38 @@ export function ChatPanel({ session }: Props) {
           {(slashSuggestions.length > 0 || mentionSuggestions.length > 0 || (mention && mentionSuggestions.length === 0)) ? (
             <div className="composer-suggestions-popover">
               {slashSuggestions.length > 0 ? (
-                <div className="flex flex-col gap-1">
+                <ListBox
+                  aria-label="命令建议"
+                  onAction={(key) => {
+                    const item = slashSuggestions.find((candidate) => candidate.command === String(key));
+                    if (item) session.setConversationChatDraft(conversation.id, `${item.command} `);
+                  }}
+                >
                   {slashSuggestions.slice(0, 12).map((item) => (
-                    <Button key={item.command} size="sm" variant="tertiary" className="min-h-9 justify-start text-left" onPress={() => session.setConversationChatDraft(conversation.id, `${item.command} `)}>
-                      <span className="font-medium">{item.command}</span>
-                      <span className="text-muted truncate text-xs">{item.description}</span>
-                    </Button>
+                    <ListBox.Item key={item.command} id={item.command} textValue={`${item.command} ${item.description}`} className="composer-suggestion-item">
+                      <span className="composer-suggestion-command">{item.command}</span>
+                      <span className="composer-suggestion-description">{item.description}</span>
+                    </ListBox.Item>
                   ))}
-                </div>
+                </ListBox>
               ) : mentionSuggestions.length > 0 ? (
-                <div className="flex flex-col gap-1">
+                <ListBox
+                  aria-label="文件建议"
+                  onAction={(key) => {
+                    const item = mentionSuggestions.find((candidate) => candidate.id === String(key));
+                    if (!item || !mention) return;
+                    session.setConversationChatDraft(conversation.id, insertMention(draft, mention, item.insertText));
+                    const cursor = mention.start + item.insertText.length;
+                    session.setConversationComposerSelection(conversation.id, { start: cursor, end: cursor });
+                  }}
+                >
                   {mentionSuggestions.map((item) => (
-                    <Button key={item.id} size="sm" variant="tertiary" className="min-h-9 justify-start text-left" onPress={() => {
-                      session.setConversationChatDraft(conversation.id, insertMention(draft, mention!, item.insertText));
-                      session.setConversationComposerSelection(conversation.id, { start: mention!.start + item.insertText.length, end: mention!.start + item.insertText.length });
-                    }}>
-                      <span className="font-medium">@{item.title}</span>
-                      <span className="text-muted truncate text-xs">{item.description}</span>
-                    </Button>
+                    <ListBox.Item key={item.id} id={item.id} textValue={`@${item.title} ${item.description}`} className="composer-suggestion-item">
+                      <span className="composer-suggestion-command">@{item.title}</span>
+                      <span className="composer-suggestion-description">{item.description}</span>
+                    </ListBox.Item>
                   ))}
-                </div>
+                </ListBox>
               ) : mention ? <p className="text-muted px-2 py-1 text-xs">正在搜索工作区文件…</p> : null}
             </div>
           ) : null}
