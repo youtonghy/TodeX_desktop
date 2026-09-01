@@ -296,7 +296,7 @@ function BrowserPane({ workspacePath, session }: { workspacePath?: string; sessi
   const [error, setError] = useState('');
 
   return (
-    <div className="flex h-full min-h-0 flex-col px-4 pb-4 pt-3">
+    <div className="flex h-full min-h-0 flex-col p-3">
       <form
         className="mb-3 flex gap-2"
         onSubmit={(event) => {
