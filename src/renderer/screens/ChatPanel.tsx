@@ -247,22 +247,24 @@ export function ChatPanel({ session }: Props) {
             <p className="text-danger mb-2 text-xs">{session.lastError}</p>
           ) : null}
           {slashSuggestions.length > 0 ? (
-            <div className="mb-2 flex flex-wrap gap-2">
-              {slashSuggestions.slice(0, 8).map((item) => (
-                <Button key={item.command} size="sm" variant="tertiary" onPress={() => session.setConversationChatDraft(conversation.id, `${item.command} `)}>
-                  {item.command}
+            <div className="command-suggestions mb-2 flex max-h-64 flex-col gap-1 overflow-y-auto">
+              {slashSuggestions.slice(0, 12).map((item) => (
+                <Button key={item.command} size="sm" variant="tertiary" className="min-h-9 justify-start text-left" onPress={() => session.setConversationChatDraft(conversation.id, `${item.command} `)}>
+                  <span className="font-medium">{item.command}</span>
+                  <span className="text-muted truncate text-xs">{item.description}</span>
                 </Button>
               ))}
             </div>
           ) : null}
           {mentionSuggestions.length > 0 ? (
-            <div className="mb-2 flex max-h-32 flex-wrap gap-2 overflow-y-auto">
+            <div className="command-suggestions mb-2 flex max-h-64 flex-col gap-1 overflow-y-auto">
               {mentionSuggestions.map((item) => (
-                <Button key={item.id} size="sm" variant="tertiary" onPress={() => {
+                <Button key={item.id} size="sm" variant="tertiary" className="min-h-9 justify-start text-left" onPress={() => {
                   session.setConversationChatDraft(conversation.id, insertMention(draft, mention!, item.insertText));
                   session.setConversationComposerSelection(conversation.id, { start: mention!.start + item.insertText.length, end: mention!.start + item.insertText.length });
                 }}>
-                  @{item.title}
+                  <span className="font-medium">@{item.title}</span>
+                  <span className="text-muted truncate text-xs">{item.description}</span>
                 </Button>
               ))}
             </div>

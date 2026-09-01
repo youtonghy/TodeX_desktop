@@ -85,6 +85,36 @@ body {
   gap: 0.5rem;
 }
 
+.connection-select {
+  width: 100%;
+}
+
+.connection-select__trigger {
+  min-height: 2rem;
+  width: 100%;
+}
+
+.connection-select__trigger [data-slot="select-value"] {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.connection-select__trigger [data-sidebar="label"] {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.command-suggestions {
+  border: 1px solid var(--separator);
+  border-radius: 0.5rem;
+  padding: 0.25rem;
+  background: var(--surface);
+}
+
 .composer-control {
   min-width: 2.25rem;
   max-width: 8.5rem;

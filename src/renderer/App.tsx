@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Button, Chip, Dropdown, Modal, Toast, toast } from '@heroui/react';
 import { AppLayout, Navbar } from '@heroui-pro/react';
-import { Ellipsis, Gear, LayoutSideContentLeft, Plus } from '@gravity-ui/icons';
+import { Ellipsis, LayoutSideContentLeft, Plus } from '@gravity-ui/icons';
 import { useTodeXSession, type TodeXSession } from './session/useTodeXSession';
 import { DesktopAlertHost } from './components/DesktopAlertHost';
 import { AppSidebar } from './components/AppSidebar';
@@ -109,6 +109,7 @@ export function App() {
                   setCreateConversationOpen(true);
                 }
               }}
+              onOpenSettings={() => setPanel('settings')}
             />
           }
           navbar={
@@ -169,9 +170,6 @@ export function App() {
                       </Dropdown.Menu>
                     </Dropdown.Popover>
                   </Dropdown>
-                  <Button isIconOnly size="sm" variant="ghost" aria-label="设置" onPress={() => setPanel('settings')}>
-                    <Gear className="size-4" />
-                  </Button>
                   <AppLayout.AsideTrigger />
                 </Navbar.Content>
               </Navbar.Header>

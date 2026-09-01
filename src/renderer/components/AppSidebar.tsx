@@ -1,31 +1,78 @@
-import { Folder, Plus } from '@gravity-ui/icons';
-import { Button, Dropdown } from '@heroui/react';
+import { FaceRobot, Folder, Gear, Plus } from '@gravity-ui/icons';
+import { Badge, Button, Dropdown, Label, ListBox, Select } from '@heroui/react';
 import { Sidebar } from '@heroui-pro/react';
 import type { TodeXSession } from '../session/useTodeXSession';
-import { isConversationHighlighted } from '../session/helpers';
+import { connectionStateLabel, isConversationHighlighted } from '../session/helpers';
+import type { ProviderKind } from '@todex/protocol/v2';
 
 type Props = {
   session: TodeXSession;
   onCreateWorkspace: () => void;
   onCreateConversation: () => void;
+  onOpenSettings: () => void;
 };
 
-export function AppSidebar({ session, onCreateWorkspace, onCreateConversation }: Props) {
+export function AppSidebar({ session, onCreateWorkspace, onCreateConversation, onOpenSettings }: Props) {
   const workspaceConversations = session.conversations.filter(
     (conversation) => conversation.workspaceId === session.activeWorkspaceId && !conversation.archived,
   );
+  const activeProvider = session.activeConversation?.provider || '';
+  const availableProviders = session.v2Providers.filter((item) => item.available);
+  const healthColor = session.connectionState !== 'open'
+    ? 'danger'
+    : session.connectionHealth.latencyMs !== null && session.connectionHealth.latencyMs <= 100
+      ? 'success'
+      : 'warning';
+  const connectionLabel = session.connectionState === 'open'
+    ? session.connectionHealth.latencyMs === null ? '在线' : `${session.connectionHealth.latencyMs} ms`
+    : connectionStateLabel(session.connectionState);
 
   return (
     <Sidebar>
       <Sidebar.Header>
-        <div className="flex items-center gap-3 px-1 py-2">
-          <div className="bg-accent flex size-7 shrink-0 items-center justify-center rounded-md">
-            <span className="text-accent-foreground text-sm font-bold">T</span>
-          </div>
-          <span className="text-foreground text-sm font-semibold" data-sidebar="label">
-            TodeX
-          </span>
+        <div className="flex items-center gap-2 px-1 py-2">
+          <Badge.Anchor className="shrink-0">
+            <div className="bg-accent text-accent-foreground flex size-8 items-center justify-center rounded-full">
+              <FaceRobot className="size-4" />
+            </div>
+            <Badge color={healthColor} placement="bottom-right" size="sm">{connectionLabel}</Badge>
+          </Badge.Anchor>
+          <span className="text-foreground min-w-0 flex-1 truncate text-sm font-semibold" data-sidebar="label">TodeX</span>
+          <Button isIconOnly size="sm" variant="ghost" aria-label="设置" onPress={onOpenSettings}>
+            <Gear className="size-4" />
+          </Button>
         </div>
+        <Select
+          className="connection-select mt-1"
+          selectedKey={activeProvider || null}
+          isDisabled={!session.activeConversation || availableProviders.length === 0}
+          aria-label="选择连接 Agent"
+          onSelectionChange={(key) => {
+            if (typeof key === 'string' && key && session.activeConversation && key !== activeProvider) {
+              session.switchConversationAgent(session.activeConversation.id, key as ProviderKind);
+            }
+          }}
+        >
+          <Label className="hidden">选择连接 Agent</Label>
+          <Select.Trigger className="connection-select__trigger">
+            <Select.Value>
+              <FaceRobot className="size-4 shrink-0" />
+              <span data-sidebar="label" className="truncate">{activeProvider || '选择连接'}</span>
+            </Select.Value>
+            <Select.Indicator />
+          </Select.Trigger>
+          <Select.Popover>
+            <ListBox>
+              {availableProviders.map((provider) => (
+                <ListBox.Item key={provider.id} id={provider.id} textValue={provider.displayName}>
+                  <FaceRobot className="size-4" />
+                  <span>{provider.displayName}</span>
+                  <ListBox.ItemIndicator />
+                </ListBox.Item>
+              ))}
+            </ListBox>
+          </Select.Popover>
+        </Select>
       </Sidebar.Header>
       <Sidebar.Content>
         <Sidebar.Group>
