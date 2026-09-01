@@ -80,6 +80,7 @@ export type WorkspaceDirectorySnapshot = {
 export type ConversationRecord = {
   id: string;
   workspaceId: string;
+  backendConnectionId?: string | null;
   title: string;
   preview?: string;
   nativeStatus?: string;

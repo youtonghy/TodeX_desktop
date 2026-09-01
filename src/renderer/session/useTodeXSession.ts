@@ -2962,10 +2962,18 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   }, [backendConnections, conversations, workspaces]);
 
   const selectConversation = useCallback((workspaceId: string, conversationId: string) => {
+    const conversation = conversations.find((item) => item.id === conversationId);
+    const workspace = workspaces.find((item) => item.id === workspaceId);
+    const profileId = conversation?.backendConnectionId ?? workspace?.backendConnectionId;
+    const profile = backendConnections.find((item) => item.id === profileId);
+    if (profile) {
+      setActiveBackendConnectionId(profile.id);
+      setSettings((current) => settingsFromProfile(profile, current));
+    }
     setActiveWorkspaceId(workspaceId);
     setActiveConversationId(conversationId);
     setLastError('');
-  }, []);
+  }, [backendConnections, conversations, workspaces]);
 
   const removeWorkspace = useCallback(
     (workspaceId: string) => {
@@ -4325,7 +4333,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
 
   const createConversation = useCallback((
     workspaceId: string,
-    options?: { provider: ProviderKind; providerProfile?: string; title?: string },
+    options?: { provider: ProviderKind; providerProfile?: string; title?: string; backendConnectionId?: string },
   ) => {
     const workspace = workspacesRef.current.find((item) => item.id === workspaceId);
     if (!workspace) {
@@ -4338,11 +4346,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     }
 
     const previousActiveConversationId = activeConversationRef.current;
+    const backendProfile = backendConnections.find((item) => item.id === options.backendConnectionId) ?? backendConnections.find((item) => item.id === workspace.backendConnectionId);
     const placeholder = {
       ...createDefaultConversation(workspace),
       title: options.title?.trim() || '新对话',
       provider: options.provider,
       providerProfile: options.providerProfile,
+      backendConnectionId: backendProfile?.id ?? workspace.backendConnectionId ?? null,
     };
     setConversations((current) => [placeholder, ...current]);
     setActiveWorkspaceId(workspace.id);
@@ -4356,14 +4366,14 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
 
     void (async () => {
       try {
-        const api = new V2ApiClient({ serverUrl: settings.serverUrl, authToken: settings.authToken });
+        const api = new V2ApiClient({ serverUrl: backendProfile?.serverUrl ?? settings.serverUrl, authToken: backendProfile?.authToken ?? settings.authToken });
         const created = await api.createConversation({
           provider: options.provider,
           workspace: workspace.path,
           title: options.title?.trim() || undefined,
           providerProfile: options.providerProfile,
         });
-        const record = conversationFromManifest(created, workspace.id);
+        const record = { ...conversationFromManifest(created, workspace.id), backendConnectionId: backendProfile?.id ?? workspace.backendConnectionId ?? null };
         rekeyConversationComposer(placeholder.id, record.id);
         setConversations((current) => [
           record,
@@ -4395,7 +4405,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     })();
 
     return placeholder;
-  }, [appendTimeline, rekeyConversationComposer, sendRawProtocolFrame, settings.authToken, settings.serverUrl]);
+  }, [appendTimeline, backendConnections, rekeyConversationComposer, sendRawProtocolFrame, settings.authToken, settings.serverUrl]);
 
   const switchConversationAgent = useCallback((conversationId: string, provider: ProviderKind) => {
     const context = getConversationContext(conversationId);

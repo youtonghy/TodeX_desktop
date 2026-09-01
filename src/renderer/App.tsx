@@ -349,6 +349,7 @@ function CreateConversationModal({
   const [title, setTitle] = useState('');
   const [provider, setProvider] = useState<ProviderKind | ''>('');
   const [profile, setProfile] = useState('');
+  const [backendId, setBackendId] = useState(session.activeBackendConnectionId);
 
   useEffect(() => {
     if (!isOpen) {
@@ -357,9 +358,10 @@ function CreateConversationModal({
     const firstAvailable = session.v2Providers.find((item) => item.available);
     const nextProvider = firstAvailable?.id ?? '';
     setTitle('');
+    setBackendId(session.activeBackendConnectionId);
     setProvider(nextProvider);
     setProfile(firstAvailable?.profiles[0] ?? '');
-  }, [isOpen, session.v2Providers]);
+  }, [isOpen, session.activeBackendConnectionId, session.v2Providers]);
 
   const selected = session.v2Providers.find((item) => item.id === provider) ?? null;
   const needsProfile = Boolean(selected && (selected.id === 'acp' || selected.profiles.length > 1));
@@ -380,6 +382,19 @@ function CreateConversationModal({
               {!session.activeWorkspaceId ? (
                 <p className="text-danger text-sm">请先选择一个工作区。</p>
               ) : null}
+              <Select selectedKey={backendId} onSelectionChange={(key) => {
+                if (typeof key !== 'string') return;
+                const backend = session.backendConnections.find((item) => item.id === key);
+                if (!backend) return;
+                setBackendId(key);
+                setProvider('');
+                setProfile('');
+                session.setActiveBackendConnectionId(key);
+                session.setSettings((current) => ({ ...current, serverUrl: backend.serverUrl, authToken: backend.authToken, tenantId: backend.tenantId, encryptionProtocol: backend.encryptionProtocol, encryptionPublicKey: backend.encryptionPublicKey }));
+              }}>
+                <Label>连接后端</Label><Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
+                <Select.Popover><ListBox>{session.backendConnections.map((backend) => <ListBox.Item key={backend.id} id={backend.id} textValue={backend.name}>{backend.name} · {backend.serverUrl}</ListBox.Item>)}</ListBox></Select.Popover>
+              </Select>
               <div className="flex flex-wrap gap-2">
                 {session.v2Providers.map((item) => (
                   <Button
@@ -428,6 +443,7 @@ function CreateConversationModal({
                     provider: selected.id,
                     providerProfile: needsProfile ? profile || undefined : selected.profiles[0],
                     title: title.trim() || undefined,
+                    backendConnectionId: backendId,
                   });
                   onOpenChange(false);
                 }}
