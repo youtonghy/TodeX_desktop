@@ -115,6 +115,29 @@ body {
   background: var(--surface);
 }
 
+.composer-container {
+  position: relative;
+}
+
+.composer-suggestions-popover {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 0.5rem);
+  left: 0;
+  z-index: 30;
+  max-height: 18rem;
+  overflow-y: auto;
+  border: 1px solid var(--separator);
+  border-radius: 0.65rem;
+  padding: 0.35rem;
+  background: var(--surface);
+  box-shadow: 0 12px 32px rgb(15 23 42 / 0.16);
+}
+
+.connection-create-button {
+  min-height: 2.25rem;
+}
+
 .composer-control {
   min-width: 2.25rem;
   max-width: 8.5rem;

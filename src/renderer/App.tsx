@@ -10,7 +10,7 @@ import { SettingsPanel } from './screens/SettingsPanel';
 import { AsidePanel } from './screens/AsidePanel';
 import { WorkbenchPanel } from './screens/WorkbenchPanel';
 import { Field } from './components/Field';
-import { connectionStateLabel, fetchWorkspaceDirectorySnapshot, healthLabelOf, isV2Conversation } from './session/helpers';
+import { connectionStateLabel, fetchWorkspaceDirectorySnapshot, isV2Conversation } from './session/helpers';
 import { providerDisplayName, type ProviderKind } from '@todex/protocol/v2';
 import { isWorkbenchTab, panelFromRoute, type DesktopPanel, type OpenPanelOptions, type WorkbenchTab } from './lib/panels';
 
@@ -130,20 +130,6 @@ export function App() {
                 ) : null}
                 <Navbar.Spacer />
                 <Navbar.Content>
-                  {session.activeWorkspaceId ? (
-                    <Button
-                      size="sm"
-                      variant="tertiary"
-                      onPress={() => setCreateConversationOpen(true)}
-                    >
-                      新建对话
-                    </Button>
-                  ) : null}
-                  <Chip size="sm" variant="soft" className="whitespace-nowrap">
-                    {session.connectionState === 'open'
-                      ? healthLabelOf(session.connectionHealth)
-                      : connectionStateLabel(session.connectionState)}
-                  </Chip>
                 <Dropdown>
                   <Dropdown.Trigger aria-label="更多面板" className="inline-flex size-8 items-center justify-center rounded-lg">
                     <Ellipsis className="size-4" />

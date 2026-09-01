@@ -242,33 +242,36 @@ export function ChatPanel({ session }: Props) {
         </div>
       </ScrollShadow>
       <div className="border-separator border-t px-5 py-4">
-        <div className="mx-auto max-w-2xl">
+        <div className="composer-container mx-auto max-w-2xl">
+          {(slashSuggestions.length > 0 || mentionSuggestions.length > 0 || (mention && mentionSuggestions.length === 0)) ? (
+            <div className="composer-suggestions-popover">
+              {slashSuggestions.length > 0 ? (
+                <div className="flex flex-col gap-1">
+                  {slashSuggestions.slice(0, 12).map((item) => (
+                    <Button key={item.command} size="sm" variant="tertiary" className="min-h-9 justify-start text-left" onPress={() => session.setConversationChatDraft(conversation.id, `${item.command} `)}>
+                      <span className="font-medium">{item.command}</span>
+                      <span className="text-muted truncate text-xs">{item.description}</span>
+                    </Button>
+                  ))}
+                </div>
+              ) : mentionSuggestions.length > 0 ? (
+                <div className="flex flex-col gap-1">
+                  {mentionSuggestions.map((item) => (
+                    <Button key={item.id} size="sm" variant="tertiary" className="min-h-9 justify-start text-left" onPress={() => {
+                      session.setConversationChatDraft(conversation.id, insertMention(draft, mention!, item.insertText));
+                      session.setConversationComposerSelection(conversation.id, { start: mention!.start + item.insertText.length, end: mention!.start + item.insertText.length });
+                    }}>
+                      <span className="font-medium">@{item.title}</span>
+                      <span className="text-muted truncate text-xs">{item.description}</span>
+                    </Button>
+                  ))}
+                </div>
+              ) : mention ? <p className="text-muted px-2 py-1 text-xs">正在搜索工作区文件…</p> : null}
+            </div>
+          ) : null}
           {session.lastError ? (
             <p className="text-danger mb-2 text-xs">{session.lastError}</p>
           ) : null}
-          {slashSuggestions.length > 0 ? (
-            <div className="command-suggestions mb-2 flex max-h-64 flex-col gap-1 overflow-y-auto">
-              {slashSuggestions.slice(0, 12).map((item) => (
-                <Button key={item.command} size="sm" variant="tertiary" className="min-h-9 justify-start text-left" onPress={() => session.setConversationChatDraft(conversation.id, `${item.command} `)}>
-                  <span className="font-medium">{item.command}</span>
-                  <span className="text-muted truncate text-xs">{item.description}</span>
-                </Button>
-              ))}
-            </div>
-          ) : null}
-          {mentionSuggestions.length > 0 ? (
-            <div className="command-suggestions mb-2 flex max-h-64 flex-col gap-1 overflow-y-auto">
-              {mentionSuggestions.map((item) => (
-                <Button key={item.id} size="sm" variant="tertiary" className="min-h-9 justify-start text-left" onPress={() => {
-                  session.setConversationChatDraft(conversation.id, insertMention(draft, mention!, item.insertText));
-                  session.setConversationComposerSelection(conversation.id, { start: mention!.start + item.insertText.length, end: mention!.start + item.insertText.length });
-                }}>
-                  <span className="font-medium">@{item.title}</span>
-                  <span className="text-muted truncate text-xs">{item.description}</span>
-                </Button>
-              ))}
-            </div>
-          ) : mention ? <p className="text-muted mb-2 text-xs">正在搜索工作区文件…</p> : null}
           {capability ? <p className="text-muted mb-2 text-xs">输入 # 可引用 Skill 或 MCP。</p> : null}
           {attachments.length > 0 ? (
             <div className="mb-2 flex flex-wrap gap-2">
