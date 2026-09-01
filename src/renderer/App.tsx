@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Button, Chip, Dropdown, Modal, Toast, toast } from '@heroui/react';
+import { Button, Chip, Modal, Toast, toast } from '@heroui/react';
 import { AppLayout, Navbar } from '@heroui-pro/react';
-import { RiAddLine, RiLayoutLeftLine, RiMore2Line } from '@remixicon/react';
+import { RiAddLine, RiLayoutLeftLine } from '@remixicon/react';
 import { useTodeXSession, type TodeXSession } from './session/useTodeXSession';
 import { DesktopAlertHost } from './components/DesktopAlertHost';
 import { AppSidebar } from './components/AppSidebar';
@@ -110,6 +110,7 @@ export function App() {
                 }
               }}
               onOpenSettings={() => setPanel('settings')}
+              onOpenCapabilities={() => { setPanel('capabilities'); setAsideOpen(true); }}
             />
           }
           navbar={
@@ -129,35 +130,7 @@ export function App() {
                   </Chip>
                 ) : null}
                 <Navbar.Spacer />
-                <Navbar.Content>
-                <Dropdown>
-                  <Dropdown.Trigger aria-label="更多面板" className="inline-flex size-8 items-center justify-center rounded-lg">
-                    <RiMore2Line className="size-4" />
-                  </Dropdown.Trigger>
-                    <Dropdown.Popover>
-                      <Dropdown.Menu
-                        onAction={(key) => {
-                          const id = String(key);
-                          if (id === 'terminal' || id === 'browser' || id === 'files' || id === 'git-diff') {
-                            setWorkbenchTab(id);
-                            setPanel(id);
-                            setAsideOpen(true);
-                            return;
-                          }
-                          setPanel(id as DesktopPanel);
-                          setAsideOpen(true);
-                        }}
-                      >
-                        <Dropdown.Item id="slash-commands" textValue="斜杠命令">斜杠命令</Dropdown.Item>
-                        <Dropdown.Item id="capabilities" textValue="能力">Skills / MCP</Dropdown.Item>
-                        <Dropdown.Item id="experimental" textValue="实验">实验功能</Dropdown.Item>
-                        <Dropdown.Item id="git-diff" textValue="Git Diff">Git Diff</Dropdown.Item>
-                        <Dropdown.Item id="v2" textValue="2.0">TodeX 2.0</Dropdown.Item>
-                      </Dropdown.Menu>
-                    </Dropdown.Popover>
-                  </Dropdown>
-                  <AppLayout.AsideTrigger />
-                </Navbar.Content>
+                <Navbar.Content><AppLayout.AsideTrigger /></Navbar.Content>
               </Navbar.Header>
             </Navbar>
           }

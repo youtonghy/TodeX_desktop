@@ -1,5 +1,5 @@
 import { RiAddLine, RiCodeBoxLine, RiFolder3Line, RiRobot2Line, RiSettings3Line, RiTerminalBoxLine } from '@remixicon/react';
-import { Badge, Button } from '@heroui/react';
+import { Badge, Button, Dropdown } from '@heroui/react';
 import { useEffect, useState } from 'react';
 import type { MouseEvent } from 'react';
 import { ChatListView, Sidebar } from '@heroui-pro/react';
@@ -11,6 +11,7 @@ type Props = {
   onCreateWorkspace: () => void;
   onCreateConversation: () => void;
   onOpenSettings: () => void;
+  onOpenCapabilities: () => void;
 };
 
 type ContextMenu = { kind: 'workspace' | 'conversation'; id: string; x: number; y: number } | null;
@@ -22,7 +23,7 @@ function providerIcon(provider?: string) {
   return RiCodeBoxLine;
 }
 
-export function AppSidebar({ session, onCreateWorkspace, onCreateConversation, onOpenSettings }: Props) {
+export function AppSidebar({ session, onCreateWorkspace, onCreateConversation, onOpenSettings, onOpenCapabilities }: Props) {
   const workspaceConversations = session.conversations.filter(
     (conversation) => conversation.workspaceId === session.activeWorkspaceId && !conversation.archived,
   );
@@ -74,21 +75,25 @@ export function AppSidebar({ session, onCreateWorkspace, onCreateConversation, o
   return (
     <Sidebar>
       <Sidebar.Header>
-        <div className="flex items-center gap-2 px-1 py-2">
-          <Badge.Anchor className="shrink-0">
-            <div className="bg-accent size-8 rounded-full" aria-hidden="true" />
-            <Badge
-              color={healthColor}
-              placement="bottom-right"
-              size="sm"
-              aria-label={session.connectionState === 'open' ? '后端已连接' : '后端未连接'}
-            />
-          </Badge.Anchor>
-          <span className="text-foreground min-w-0 flex-1 truncate text-sm font-semibold" data-sidebar="label">TodeX</span>
-          <Button isIconOnly size="sm" variant="ghost" aria-label="设置" onPress={onOpenSettings}>
-            <RiSettings3Line className="size-4" />
-          </Button>
-        </div>
+        <Dropdown>
+          <Dropdown.Trigger aria-label="TodeX 菜单" className="flex w-full items-center gap-2 rounded-lg px-1 py-2 text-left">
+            <Badge.Anchor className="shrink-0">
+              <div className="bg-accent size-8 rounded-full" aria-hidden="true" />
+              <Badge color={healthColor} placement="bottom-right" size="sm" aria-label={session.connectionState === 'open' ? '后端已连接' : '后端未连接'} />
+            </Badge.Anchor>
+            <span className="text-foreground min-w-0 flex-1 truncate text-sm font-semibold" data-sidebar="label">TodeX</span>
+            <RiSettings3Line className="size-4 shrink-0" />
+          </Dropdown.Trigger>
+          <Dropdown.Popover>
+            <Dropdown.Menu onAction={(key) => {
+              if (key === 'settings') onOpenSettings();
+              if (key === 'capabilities') onOpenCapabilities();
+            }}>
+              <Dropdown.Item id="settings" textValue="设置">设置</Dropdown.Item>
+              <Dropdown.Item id="capabilities" textValue="MCP / Skill 管理">MCP / Skill 管理</Dropdown.Item>
+            </Dropdown.Menu>
+          </Dropdown.Popover>
+        </Dropdown>
         <Button
           className="connection-create-button mt-1 w-full justify-start"
           variant="secondary"
