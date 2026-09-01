@@ -786,6 +786,72 @@ export type TimelineEntry = {
   requestId?: string;
 };
 
+export type ConversationContextUsage = {
+  usedTokens: number;
+  contextWindow?: number;
+  inputTokens: number;
+  outputTokens: number;
+  cachedInputTokens: number;
+  cacheWriteTokens: number;
+  model?: string;
+  updatedAt: number;
+};
+
+function usageNumber(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : 0;
+}
+
+export function contextUsageFromV2Event(event: ConversationEvent): ConversationContextUsage | null {
+  const payload = event.payload && typeof event.payload === 'object' && !Array.isArray(event.payload)
+    ? event.payload as Record<string, unknown>
+    : {};
+  const metadata = payload.metadata && typeof payload.metadata === 'object' && !Array.isArray(payload.metadata)
+    ? payload.metadata as Record<string, unknown>
+    : {};
+  const tokenUsage = metadata.tokenUsage && typeof metadata.tokenUsage === 'object' && !Array.isArray(metadata.tokenUsage)
+    ? metadata.tokenUsage as Record<string, unknown>
+    : null;
+  const last = tokenUsage?.last && typeof tokenUsage.last === 'object' && !Array.isArray(tokenUsage.last)
+    ? tokenUsage.last as Record<string, unknown>
+    : null;
+
+  if (payload.providerMethod === 'thread/tokenUsage/updated' && last) {
+    return {
+      usedTokens: usageNumber(last.totalTokens),
+      contextWindow: usageNumber(tokenUsage?.modelContextWindow) || undefined,
+      inputTokens: usageNumber(last.inputTokens),
+      outputTokens: usageNumber(last.outputTokens),
+      cachedInputTokens: usageNumber(last.cachedInputTokens),
+      cacheWriteTokens: usageNumber(last.cacheWriteInputTokens),
+      updatedAt: Date.parse(event.time) || Date.now(),
+    };
+  }
+
+  const message = payload.message && typeof payload.message === 'object' && !Array.isArray(payload.message)
+    ? payload.message as Record<string, unknown>
+    : null;
+  const usage = message?.usage && typeof message.usage === 'object' && !Array.isArray(message.usage)
+    ? message.usage as Record<string, unknown>
+    : null;
+  if (event.type !== 'message.completed' || message?.role !== 'assistant' || !usage) {
+    return null;
+  }
+  const inputTokens = usageNumber(usage.input);
+  const outputTokens = usageNumber(usage.output);
+  const cachedInputTokens = usageNumber(usage.cacheRead);
+  const cacheWriteTokens = usageNumber(usage.cacheWrite);
+  const nativeTotal = usageNumber(usage.totalTokens);
+  return {
+    usedTokens: nativeTotal || inputTokens + outputTokens + cachedInputTokens + cacheWriteTokens,
+    inputTokens,
+    outputTokens,
+    cachedInputTokens,
+    cacheWriteTokens,
+    model: typeof message.model === 'string' ? message.model : undefined,
+    updatedAt: Date.parse(event.time) || Date.now(),
+  };
+}
+
 export type ConversationRenderItem =
   | { type: 'entry'; entry: TimelineEntry }
   | { type: 'executionGroup'; id: string; entries: TimelineEntry[] };

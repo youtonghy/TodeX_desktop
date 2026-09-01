@@ -242,6 +242,7 @@ import {
   classifyProgressEvent,
   classifyChatEvent,
   classifyV2ConversationEvent,
+  contextUsageFromV2Event,
   reduceV2ConversationEvents,
   conversationFromManifest,
   mergeManifestConversations,
@@ -256,6 +257,7 @@ import {
   isCollapsibleProgressEntry,
   executionGroupId,
   buildConversationRenderItems,
+  type ConversationContextUsage,
   createDefaultConversation,
   conversationsForWorkspaceSnapshot,
   forkConversationRecord,
@@ -367,6 +369,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const [capabilityCatalogs, setCapabilityCatalogs] = useState<Partial<Record<ProviderKind, CatalogState>>>({});
   const [providerModels, setProviderModels] = useState<Partial<Record<ProviderKind, ProviderModelDescriptor[]>>>({});
   const [providerCommands, setProviderCommands] = useState<Partial<Record<ProviderKind, ProviderCommandDescriptor[]>>>({});
+  const [contextUsageByConversation, setContextUsageByConversation] = useState<Record<string, ConversationContextUsage>>({});
 
   useEffect(() => {
     if (!hydrated || !settings.serverUrl.trim()) {
@@ -1030,6 +1033,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       if (!active) return;
 
       const replayState = reduceV2ConversationEvents(events, workspaceId);
+      const restoredUsage = events.reduce<ConversationContextUsage | null>(
+        (latest, event) => contextUsageFromV2Event(event) ?? latest,
+        null,
+      );
+      if (restoredUsage) {
+        setContextUsageByConversation((current) => ({ ...current, [conversationId]: restoredUsage }));
+      }
       setTimeline((current) => [
         ...replayState.timeline,
         ...current.filter((entry) => entry.conversationId !== conversationId),
@@ -2164,6 +2174,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         const conversation = conversationsRef.current.find((item) => item.id === conversationId || item.v2ConversationId === conversationId);
         if (conversation && typeof payload.type === 'string') {
           const event = payload as unknown as import('@todex/protocol/v2').ConversationEvent;
+          const contextUsage = contextUsageFromV2Event(event);
+          if (contextUsage) {
+            setContextUsageByConversation((current) => ({ ...current, [conversation.id]: contextUsage }));
+          }
           const payloadTurnId = event.payload && typeof event.payload === 'object' && !Array.isArray(event.payload)
             ? (event.payload as Record<string, unknown>).turnId
             : '';
@@ -6015,6 +6029,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     capabilityCatalogs,
     providerModels,
     providerCommands,
+    contextUsageByConversation,
     pendingRequests,
     selectedRequest,
     activeWorkspace,

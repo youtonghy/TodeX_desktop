@@ -1,6 +1,6 @@
-import { Paperclip, Stop } from '@gravity-ui/icons';
+import { Cpu, FaceRobot, MagicWand, Paperclip, Shield, Stop } from '@gravity-ui/icons';
 import { useEffect, useState } from 'react';
-import { Button, Chip, Label, ListBox, ScrollShadow, Select, toast } from '@heroui/react';
+import { Button, Chip, Label, ListBox, ScrollShadow, Select, Tooltip, toast } from '@heroui/react';
 import { ChatMessage, PromptInput } from '@heroui-pro/react';
 import { providerDisplayName, type ProviderKind } from '@todex/protocol/v2';
 import type { TodeXSession } from '../session/useTodeXSession';
@@ -34,6 +34,52 @@ const PERMISSION_LABELS = new Map([
   ['auto-review', '自动审批'],
   ['full-access', '完全访问'],
 ]);
+
+function formatTokenCount(value: number): string {
+  return new Intl.NumberFormat('zh-CN', { notation: value >= 10_000 ? 'compact' : 'standard', maximumFractionDigits: 1 }).format(value);
+}
+
+function ContextUsageIndicator({
+  usedTokens,
+  contextWindow,
+  inputTokens,
+  outputTokens,
+  cachedInputTokens,
+  cacheWriteTokens,
+}: {
+  usedTokens: number;
+  contextWindow?: number;
+  inputTokens: number;
+  outputTokens: number;
+  cachedInputTokens: number;
+  cacheWriteTokens: number;
+}) {
+  const percent = contextWindow ? Math.min(100, Math.max(0, usedTokens / contextWindow * 100)) : null;
+  const progress = percent ?? 0;
+  return (
+    <Tooltip delay={100}>
+      <Tooltip.Trigger
+        className="context-usage-ring"
+        aria-label={percent === null ? '上下文用量等待 Provider 返回' : `上下文已使用 ${percent.toFixed(1)}%`}
+        style={{ background: `conic-gradient(var(--accent) ${progress}%, var(--separator) ${progress}% 100%)` }}
+      >
+        <span />
+      </Tooltip.Trigger>
+      <Tooltip.Content>
+        <div className="min-w-48 space-y-1 p-1 text-xs">
+          <p className="font-medium">上下文使用情况</p>
+          {percent === null ? <p className="text-muted">等待 Provider 返回上下文窗口。</p> : (
+            <>
+              <p>{formatTokenCount(usedTokens)} / {formatTokenCount(contextWindow!)} tokens · {percent.toFixed(1)}%</p>
+              <p className="text-muted">输入 {formatTokenCount(inputTokens)} · 输出 {formatTokenCount(outputTokens)}</p>
+              <p className="text-muted">缓存读取 {formatTokenCount(cachedInputTokens)} · 缓存写入 {formatTokenCount(cacheWriteTokens)}</p>
+            </>
+          )}
+        </div>
+      </Tooltip.Content>
+    </Tooltip>
+  );
+}
 
 export function ChatPanel({ session }: Props) {
   const conversation = session.activeConversation;
@@ -100,6 +146,10 @@ export function ChatPanel({ session }: Props) {
   const currentModel = conversation.model || providerModels.find((item) => item.isDefault)?.id || (currentProvider === 'codex' ? workspace.model || session.settings.defaultModel : '');
   // An unset Pi/agent effort is meaningful: let the provider apply its own default.
   const currentReasoningEffort = conversation.reasoningEffort ?? null;
+  const contextUsage = session.contextUsageByConversation[conversation.id];
+  const contextModelId = contextUsage?.model || currentModel;
+  const currentContextWindow = contextUsage?.contextWindow
+    ?? providerModels.find((item) => item.id === contextModelId || item.id.endsWith(`/${contextModelId}`))?.contextWindow;
   const currentPermission = permissionPresetForProfile(
     workspace.permissionProfile,
     workspace.approvalsReviewer || session.settings.approvalsReviewer,
@@ -268,7 +318,7 @@ export function ChatPanel({ session }: Props) {
                 <PromptInput.Content>
                   <PromptInput.TextArea placeholder="发送消息，或输入 / 命令" />
                 </PromptInput.Content>
-                <PromptInput.Toolbar>
+                <PromptInput.Toolbar className="composer-toolbar">
                   <PromptInput.ToolbarStart className="min-w-0 flex-1">
                     <PromptInput.Action
                       aria-label="添加附件"
@@ -280,10 +330,10 @@ export function ChatPanel({ session }: Props) {
                       <Paperclip className="size-4" />
                     </PromptInput.Action>
                     <Select
-                      className="min-w-20 max-w-24"
+                      className="composer-control"
                       variant="secondary"
                       placeholder="选择 Agent"
-                    selectedKey={currentProvider || null}
+                      selectedKey={currentProvider || null}
                       isDisabled={!canSwitchAgent}
                       onSelectionChange={(key) => {
                         if (typeof key !== 'string' || !key || key === currentProvider) {
@@ -293,9 +343,9 @@ export function ChatPanel({ session }: Props) {
                       }}
                     >
                       <Label className="hidden">选择 Agent</Label>
-                      <Select.Trigger>
-                        <Select.Value>{agentLabel}</Select.Value>
-                        <Select.Indicator />
+                      <Select.Trigger className="composer-control__trigger">
+                        <Select.Value><FaceRobot className="composer-control__icon" /><span className="composer-control__text">{agentLabel}</span></Select.Value>
+                        <Select.Indicator className="composer-control__indicator" />
                       </Select.Trigger>
                       <Select.Popover>
                         <ListBox>
@@ -313,7 +363,7 @@ export function ChatPanel({ session }: Props) {
                       </Select.Popover>
                     </Select>
                     <Select
-                      className="min-w-20 max-w-24"
+                      className="composer-control"
                       variant="secondary"
                       selectedKey={currentModel || null}
                       onSelectionChange={(key) => {
@@ -323,9 +373,9 @@ export function ChatPanel({ session }: Props) {
                       }}
                     >
                       <Label className="hidden">选择模型</Label>
-                      <Select.Trigger>
-                        <Select.Value>{modelDisplayLabel(currentModel, session.modelCatalog)}</Select.Value>
-                        <Select.Indicator />
+                      <Select.Trigger className="composer-control__trigger">
+                        <Select.Value><Cpu className="composer-control__icon" /><span className="composer-control__text">{modelDisplayLabel(currentModel, session.modelCatalog)}</span></Select.Value>
+                        <Select.Indicator className="composer-control__indicator" />
                       </Select.Trigger>
                       <Select.Popover>
                         <ListBox>
@@ -339,7 +389,7 @@ export function ChatPanel({ session }: Props) {
                       </Select.Popover>
                     </Select>
                     <Select
-                      className="min-w-20 max-w-24"
+                      className="composer-control"
                       variant="secondary"
                       selectedKey={currentReasoningEffort}
                       onSelectionChange={(key) => {
@@ -349,9 +399,9 @@ export function ChatPanel({ session }: Props) {
                       }}
                     >
                       <Label className="hidden">思考强度</Label>
-                      <Select.Trigger>
-                        <Select.Value>{currentReasoningEffort || '默认强度'}</Select.Value>
-                        <Select.Indicator />
+                      <Select.Trigger className="composer-control__trigger">
+                        <Select.Value><MagicWand className="composer-control__icon" /><span className="composer-control__text">{currentReasoningEffort || '默认强度'}</span></Select.Value>
+                        <Select.Indicator className="composer-control__indicator" />
                       </Select.Trigger>
                       <Select.Popover>
                         <ListBox>
@@ -362,7 +412,7 @@ export function ChatPanel({ session }: Props) {
                       </Select.Popover>
                     </Select>
                     {canChoosePermission ? <Select
-                      className="min-w-24 max-w-28"
+                      className="composer-control"
                       variant="secondary"
                       selectedKey={currentPermission.id}
                       onSelectionChange={(key) => {
@@ -378,9 +428,9 @@ export function ChatPanel({ session }: Props) {
                       }}
                     >
                       <Label className="hidden">选择权限</Label>
-                      <Select.Trigger>
-                        <Select.Value>{PERMISSION_LABELS.get(currentPermission.id) || currentPermission.title}</Select.Value>
-                        <Select.Indicator />
+                      <Select.Trigger className="composer-control__trigger">
+                        <Select.Value><Shield className="composer-control__icon" /><span className="composer-control__text">{PERMISSION_LABELS.get(currentPermission.id) || currentPermission.title}</span></Select.Value>
+                        <Select.Indicator className="composer-control__indicator" />
                       </Select.Trigger>
                       <Select.Popover>
                         <ListBox>
@@ -392,9 +442,17 @@ export function ChatPanel({ session }: Props) {
                           ))}
                         </ListBox>
                       </Select.Popover>
-                    </Select> : <Button size="sm" variant="tertiary" isDisabled aria-label="完全访问权限">完全访问</Button>}
+                    </Select> : <Button className="composer-control composer-control__static" size="sm" variant="tertiary" isDisabled aria-label="完全访问权限"><Shield className="composer-control__icon" /><span className="composer-control__text">完全访问</span></Button>}
                   </PromptInput.ToolbarStart>
-                  <PromptInput.ToolbarEnd>
+                  <PromptInput.ToolbarEnd className="gap-2">
+                    <ContextUsageIndicator
+                      usedTokens={contextUsage?.usedTokens ?? 0}
+                      contextWindow={currentContextWindow}
+                      inputTokens={contextUsage?.inputTokens ?? 0}
+                      outputTokens={contextUsage?.outputTokens ?? 0}
+                      cachedInputTokens={contextUsage?.cachedInputTokens ?? 0}
+                      cacheWriteTokens={contextUsage?.cacheWriteTokens ?? 0}
+                    />
                     {thinking ? (
                       <Button variant="danger-soft" onPress={() => session.stopThinking(conversation.id)}>
                         <Stop className="size-4" />
