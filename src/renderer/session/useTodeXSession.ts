@@ -705,7 +705,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       );
       nextSettings.serverUrl = normalizeServerUrl(nextSettings.serverUrl);
       const storedProfiles = (storedBackendConnections as unknown[]).map(normalizeBackendConnectionProfile).filter((profile): profile is BackendConnectionProfile => Boolean(profile));
-      const profiles = storedProfiles.length ? storedProfiles : [profileFromSettings(nextSettings)];
+      const hydratedProfiles = storedProfiles.length ? await Promise.all(storedProfiles.map(async (profile) => ({ ...profile, authToken: (await loadSecret(`${TOKEN_STORAGE_KEY}.${profile.id}`)) || (profile.id === 'default-backend' ? nextSettings.authToken : '') }))) : [];
+      const profiles = hydratedProfiles.length ? hydratedProfiles : [profileFromSettings(nextSettings)];
       const normalizedWorkspaces = storedWorkspaces.map((workspace) => ({
         ...workspace,
         reasoningEffort: normalizeReasoningEffort(workspace.reasoningEffort),
@@ -818,7 +819,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   }, [hydrated, settings]);
 
   useEffect(() => {
-    if (hydrated) void saveJson(BACKEND_CONNECTIONS_STORAGE_KEY, backendConnections);
+    if (hydrated) {
+      void saveJson(BACKEND_CONNECTIONS_STORAGE_KEY, backendConnections.map(({ authToken: _authToken, ...profile }) => profile));
+      for (const profile of backendConnections) void saveSecret(`${TOKEN_STORAGE_KEY}.${profile.id}`, profile.authToken);
+    }
   }, [backendConnections, hydrated]);
 
   const syncWorkspacesToBackend = useCallback(
