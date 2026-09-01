@@ -304,6 +304,9 @@ function BrowserPane({ workspacePath }: { workspacePath?: string }) {
           try {
             const parsed = new URL(target);
             if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error('仅支持 HTTP 和 HTTPS 地址');
+            const host = parsed.hostname.toLowerCase();
+            const loopback = host === 'localhost' || host === '::1' || /^127(?:\.\d{1,3}){3}$/.test(host);
+            if (!loopback) throw new Error('浏览器预览仅允许访问本机地址');
             setUrl(parsed.toString());
             setError('');
           } catch (reason) {
