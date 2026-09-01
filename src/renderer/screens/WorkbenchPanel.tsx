@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { RiAddLine, RiFileTextLine, RiFolder3Line, RiGlobalLine, RiFocus3Line } from '@remixicon/react';
 import { Button, Chip, Dropdown, Input, ScrollShadow, TextField } from '@heroui/react';
 import type { Selection } from '@heroui/react';
@@ -346,9 +346,20 @@ function BrowserPane({ workspacePath, session }: { workspacePath?: string; sessi
   const [url, setUrl] = useState('');
   const [error, setError] = useState('');
   const [inspect, setInspect] = useState(false);
-  const [selected, setSelected] = useState<HTMLElement | null>(null);
   const frameRef = useRef<HTMLIFrameElement>(null);
   const selectedRef = useRef<HTMLElement | null>(null);
+  const selectionAnchorRef = useRef<HTMLElement | null>(null);
+
+  const appendReference = useCallback((element: HTMLElement) => {
+    const tag = element.tagName.toLowerCase();
+    const text = (element.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 160);
+    const id = element.id ? `#${element.id}` : '';
+    const reference = `[网页元素 ${tag}${id}${text ? `: ${text}` : ''}]`;
+    const conversationId = session.activeConversation?.id;
+    if (conversationId) {
+      session.setConversationChatDraft(conversationId, (current) => `${current}${current ? '\n' : ''}${reference}`);
+    }
+  }, [session.activeConversation?.id, session.setConversationChatDraft]);
 
   useEffect(() => {
     const frame = frameRef.current;
@@ -398,25 +409,39 @@ function BrowserPane({ workspacePath, session }: { workspacePath?: string; sessi
         const move = (event: MouseEvent) => {
           const element = isFrameElement(event.target) ? event.target : null;
           hovered = element;
+          if (!selectedRef.current) selectionAnchorRef.current = element;
           positionOverlay(hoverOverlay, element === selectedRef.current ? null : element);
         };
         const click = (event: MouseEvent) => {
           event.preventDefault(); event.stopPropagation();
           if (isFrameElement(event.target)) {
             selectedRef.current = event.target;
+            selectionAnchorRef.current = event.target;
             positionOverlay(selectedOverlay, event.target);
             positionOverlay(hoverOverlay, null);
-            setSelected(event.target);
+            appendReference(event.target);
           }
         };
         const wheel = (event: WheelEvent) => {
-          if (!selectedRef.current) return;
+          const current = selectedRef.current ?? hovered;
+          if (!current) return;
           event.preventDefault();
-          const next = event.deltaY > 0 ? selectedRef.current.parentElement : selectedRef.current.firstElementChild;
+          const anchor = selectionAnchorRef.current ?? current;
+          selectionAnchorRef.current = anchor;
+          const candidate = event.deltaY > 0
+            ? current.parentElement && current.parentElement !== doc.documentElement ? current.parentElement : null
+            : anchor && current !== anchor
+              ? Array.from(current.children).find((child) => child.contains(anchor))
+              : current.firstElementChild;
+          const next = candidate ?? null;
           if (isFrameElement(next)) {
-            selectedRef.current = next;
-            positionOverlay(selectedOverlay, next);
-            setSelected(next);
+            if (selectedRef.current) {
+              selectedRef.current = next;
+              positionOverlay(selectedOverlay, next);
+            } else {
+              hovered = next;
+              positionOverlay(hoverOverlay, next);
+            }
           }
         };
         const reposition = () => {
@@ -425,13 +450,13 @@ function BrowserPane({ workspacePath, session }: { workspacePath?: string; sessi
         };
         doc.addEventListener('mousemove', move, true);
         doc.addEventListener('click', click, true);
-        doc.addEventListener('wheel', wheel, { capture: true, passive: false });
+        frameWindow.addEventListener('wheel', wheel, { capture: true, passive: false });
         doc.addEventListener('scroll', reposition, true);
         frameWindow.addEventListener('resize', reposition);
         return () => {
           doc.removeEventListener('mousemove', move, true);
           doc.removeEventListener('click', click, true);
-          doc.removeEventListener('wheel', wheel, true);
+          frameWindow.removeEventListener('wheel', wheel, true);
           doc.removeEventListener('scroll', reposition, true);
           frameWindow.removeEventListener('resize', reposition);
           doc.documentElement.style.cursor = previousCursor;
@@ -445,7 +470,7 @@ function BrowserPane({ workspacePath, session }: { workspacePath?: string; sessi
     const handleLoad = () => {
       cleanup?.();
       selectedRef.current = null;
-      setSelected(null);
+      selectionAnchorRef.current = null;
       cleanup = bind();
     };
     frame.addEventListener('load', handleLoad);
@@ -453,21 +478,7 @@ function BrowserPane({ workspacePath, session }: { workspacePath?: string; sessi
       frame.removeEventListener('load', handleLoad);
       cleanup?.();
     };
-  }, [inspect]);
-
-  const insertSelection = () => {
-    if (!selectedRef.current) return;
-    const selectedElement = selectedRef.current;
-    const tag = selectedElement.tagName.toLowerCase();
-    const text = (selectedElement.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 160);
-    const id = selectedElement.id ? `#${selectedElement.id}` : '';
-    const reference = `[网页元素 ${tag}${id}${text ? `: ${text}` : ''}]`;
-    const conversationId = session.activeConversation?.id;
-    if (conversationId) session.setConversationChatDraft(conversationId, (current) => `${current}${current ? '\n' : ''}${reference}`);
-    selectedRef.current = null;
-    setSelected(null);
-    setInspect(false);
-  };
+  }, [appendReference, inspect]);
 
   return (
     <div className="flex h-full min-h-0 flex-col p-3">
@@ -496,10 +507,9 @@ function BrowserPane({ workspacePath, session }: { workspacePath?: string; sessi
         <Button type="submit" variant="secondary">
           打开
         </Button>
-        <Button type="button" isIconOnly variant={inspect ? 'primary' : 'secondary'} aria-label="检查网页元素" onPress={() => { setInspect((current) => { if (!current) selectedRef.current = null; return !current; }); setSelected(null); }}>
+        <Button type="button" isIconOnly variant={inspect ? 'primary' : 'secondary'} aria-label="检查网页元素" onPress={() => { setInspect((current) => { if (!current) { selectedRef.current = null; selectionAnchorRef.current = null; } return !current; }); }}>
           <RiFocus3Line className="size-4" />
         </Button>
-        {selected ? <Button type="button" variant="tertiary" onPress={insertSelection}>插入对话</Button> : null}
       </form>
       {error ? <p className="text-danger text-sm">{error}</p> : null}
       {url ? (
