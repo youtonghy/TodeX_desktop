@@ -1,7 +1,9 @@
-import { Cpu, FaceRobot, MagicWand, Paperclip, Shield, Stop } from '@gravity-ui/icons';
+import { Cpu, FaceRobot, MagicWand, Shield, Stop } from '@gravity-ui/icons';
 import { useEffect, useState } from 'react';
 import { Button, Chip, Label, ListBox, ScrollShadow, Select, Tooltip, toast } from '@heroui/react';
-import { ChatMessage, PromptInput } from '@heroui-pro/react';
+import { ChainOfThought, ChatMessage, PromptInput } from '@heroui-pro/react';
+import { ChatTool } from '@heroui-pro/react/chat-tool';
+import { Markdown } from '@heroui-pro/react/markdown';
 import { providerDisplayName, type ProviderKind } from '@todex/protocol/v2';
 import type { TodeXSession } from '../session/useTodeXSession';
 import {
@@ -201,25 +203,34 @@ export function ChatPanel({ session }: Props) {
           ) : null}
           {items.map((item) => {
             if (item.type === 'executionGroup') {
+              const expanded = thinking && item.entries.some((entry) => entry.at >= (conversationTimeline.at(-1)?.at ?? 0));
               return (
-                <details key={item.id} className="border-separator border-l-2 px-3 py-1">
-                  <summary className="text-muted cursor-pointer text-xs">执行步骤 · {item.entries.length}</summary>
-                  <div className="text-muted mt-2 flex flex-col gap-1 text-xs">
-                    {item.entries.map((entry) => (
-                      <p key={entry.id} className="whitespace-pre-wrap">{entry.subtitle || entry.title}</p>
-                    ))}
-                  </div>
-                </details>
+                <ChainOfThought key={item.id} defaultExpanded={expanded} isStreaming={expanded} className="chat-process-trace">
+                  <ChainOfThought.Trigger>执行步骤 · {item.entries.length}</ChainOfThought.Trigger>
+                  <ChainOfThought.Content>
+                    <ChainOfThought.Steps>
+                      {item.entries.map((entry) => (
+                        <ChainOfThought.Step key={entry.id} label={entry.title}>
+                          <p className="whitespace-pre-wrap text-xs">{entry.subtitle || entry.title}</p>
+                        </ChainOfThought.Step>
+                      ))}
+                    </ChainOfThought.Steps>
+                  </ChainOfThought.Content>
+                </ChainOfThought>
               );
             }
             const entry = item.entry;
             if (isToolCallEntry(entry)) {
-              return (
-                <details key={entry.id} className="border-separator border-l-2 px-3 py-1">
-                  <summary className="text-muted cursor-pointer text-xs">工具调用</summary>
-                  <pre className="text-muted mt-2 max-w-full overflow-x-auto whitespace-pre-wrap text-xs">{entry.subtitle}</pre>
-                </details>
-              );
+              let argsText = entry.subtitle;
+              let toolName = '工具调用';
+              try {
+                const value = JSON.parse(entry.subtitle) as Record<string, unknown>;
+                toolName = typeof value.tool === 'string' ? value.tool : typeof value.command === 'string' ? '命令执行' : toolName;
+                argsText = JSON.stringify(value, null, 2);
+              } catch {
+                // Keep non-JSON provider output visible as tool input.
+              }
+              return <ChatTool key={entry.id} defaultExpanded={thinking} state={thinking ? 'input-streaming' : 'output-available'} toolName={toolName} argsText={argsText} triggerPrefix={thinking ? '正在调用：' : '已调用：'} />;
             }
             const request = session.pendingRequests.find((pendingItem) => pendingItem.requestId && (entry.requestId === pendingItem.requestId || entry.raw.includes(pendingItem.requestId)));
             const isUser = entry.kind === 'outgoing';
@@ -227,7 +238,9 @@ export function ChatPanel({ session }: Props) {
               <div key={entry.id} className={`flex gap-3 py-2 ${isUser ? 'justify-end' : 'justify-start'}`}>
                 <div className={`min-w-0 max-w-[85%] ${isUser ? 'text-right' : ''}`}>
                   {isUser ? <p className="text-muted text-xs font-medium">You</p> : null}
-                  <p className={`${isUser ? 'mt-1' : ''} whitespace-pre-wrap text-sm leading-6`}>{entry.subtitle}</p>
+                  <div className={`${isUser ? 'mt-1' : ''} text-sm leading-6`}>
+                    {isUser ? <p className="whitespace-pre-wrap">{entry.subtitle}</p> : <Markdown id={entry.id}>{entry.subtitle}</Markdown>}
+                  </div>
                   {request ? (
                     <ChatMessage.Actions>
                       <Button size="sm" onPress={() => session.sendApprovalResponse(true, request)}>同意</Button>
@@ -337,15 +350,6 @@ export function ChatPanel({ session }: Props) {
                 </PromptInput.Content>
                 <PromptInput.Toolbar className="composer-toolbar">
                   <PromptInput.ToolbarStart className="min-w-0 flex-1">
-                    <PromptInput.Action
-                      aria-label="添加附件"
-                      onPress={async () => {
-                        const paths = await window.todexDesktop.dialog.openFiles();
-                        await addFiles(paths);
-                      }}
-                    >
-                      <Paperclip className="size-4" />
-                    </PromptInput.Action>
                     <Select
                       className="composer-control"
                       variant="secondary"
@@ -475,9 +479,7 @@ export function ChatPanel({ session }: Props) {
                         <Stop className="size-4" />
                         停止
                       </Button>
-                    ) : (
-                      <PromptInput.Send />
-                    )}
+                    ) : null}
                   </PromptInput.ToolbarEnd>
                 </PromptInput.Toolbar>
               </PromptInput.Shell>
