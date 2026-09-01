@@ -296,6 +296,7 @@ function BrowserPane({ workspacePath, session }: { workspacePath?: string; sessi
   const [inspect, setInspect] = useState(false);
   const [selected, setSelected] = useState<HTMLElement | null>(null);
   const frameRef = useRef<HTMLIFrameElement>(null);
+  const selectedRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     const frame = frameRef.current;
@@ -309,17 +310,27 @@ function BrowserPane({ workspacePath, session }: { workspacePath?: string; sessi
           const element = event.target instanceof HTMLElement ? event.target : null;
           if (hovered && hovered !== element) hovered.style.outline = '';
           hovered = element;
-          if (element) element.style.outline = '2px solid #0ea5e9';
+          if (element && element !== selectedRef.current) element.style.setProperty('outline', '2px solid #0ea5e9', 'important');
         };
         const click = (event: MouseEvent) => {
           event.preventDefault(); event.stopPropagation();
-          if (event.target instanceof HTMLElement) setSelected(event.target);
+          if (event.target instanceof HTMLElement) {
+            selectedRef.current?.style.removeProperty('outline');
+            selectedRef.current = event.target;
+            event.target.style.setProperty('outline', '2px solid #2563eb', 'important');
+            setSelected(event.target);
+          }
         };
         const wheel = (event: WheelEvent) => {
-          if (!selected) return;
+          if (!selectedRef.current) return;
           event.preventDefault();
-          const next = event.deltaY > 0 ? selected.parentElement : selected.firstElementChild;
-          if (next instanceof HTMLElement) setSelected(next);
+          const next = event.deltaY > 0 ? selectedRef.current.parentElement : selectedRef.current.firstElementChild;
+          if (next instanceof HTMLElement) {
+            selectedRef.current.style.removeProperty('outline');
+            selectedRef.current = next;
+            next.style.setProperty('outline', '2px solid #2563eb', 'important');
+            setSelected(next);
+          }
         };
         doc.addEventListener('mousemove', move, true);
         doc.addEventListener('click', click, true);
@@ -331,13 +342,14 @@ function BrowserPane({ workspacePath, session }: { workspacePath?: string; sessi
     let cleanup = bind();
     frame.addEventListener('load', () => { cleanup?.(); cleanup = bind(); });
     return () => { cleanup?.(); };
-  }, [inspect, selected]);
+  }, [inspect]);
 
   const insertSelection = () => {
-    if (!selected) return;
-    const tag = selected.tagName.toLowerCase();
-    const text = (selected.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 160);
-    const id = selected.id ? `#${selected.id}` : '';
+    if (!selectedRef.current) return;
+    const selectedElement = selectedRef.current;
+    const tag = selectedElement.tagName.toLowerCase();
+    const text = (selectedElement.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 160);
+    const id = selectedElement.id ? `#${selectedElement.id}` : '';
     const reference = `[网页元素 ${tag}${id}${text ? `: ${text}` : ''}]`;
     const conversationId = session.activeConversation?.id;
     if (conversationId) session.setConversationChatDraft(conversationId, (current) => `${current}${current ? '\n' : ''}${reference}`);
