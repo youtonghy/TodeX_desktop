@@ -1,4 +1,4 @@
-import { Folder, Gear, Plus } from '@gravity-ui/icons';
+import { RiAddLine, RiFolder3Line, RiSettings3Line } from '@remixicon/react';
 import { Badge, Button } from '@heroui/react';
 import { useEffect, useState } from 'react';
 import type { MouseEvent } from 'react';
@@ -79,7 +79,7 @@ export function AppSidebar({ session, onCreateWorkspace, onCreateConversation, o
           </Badge.Anchor>
           <span className="text-foreground min-w-0 flex-1 truncate text-sm font-semibold" data-sidebar="label">TodeX</span>
           <Button isIconOnly size="sm" variant="ghost" aria-label="设置" onPress={onOpenSettings}>
-            <Gear className="size-4" />
+            <RiSettings3Line className="size-4" />
           </Button>
         </div>
         <Button
@@ -88,7 +88,7 @@ export function AppSidebar({ session, onCreateWorkspace, onCreateConversation, o
           isDisabled={!session.activeWorkspaceId}
           onPress={onCreateConversation}
         >
-          <Plus className="size-4" />
+          <RiAddLine className="size-4" />
           <span data-sidebar="label">增加对话</span>
         </Button>
       </Sidebar.Header>
@@ -97,7 +97,7 @@ export function AppSidebar({ session, onCreateWorkspace, onCreateConversation, o
           <div className="flex items-center justify-between px-2">
             <Sidebar.GroupLabel>工作区</Sidebar.GroupLabel>
             <Button isIconOnly size="sm" variant="ghost" aria-label="新建工作区" onPress={onCreateWorkspace}>
-              <Plus className="size-4" />
+              <RiAddLine className="size-4" />
             </Button>
           </div>
           {session.workspaces.length === 0 ? (
@@ -112,7 +112,7 @@ export function AppSidebar({ session, onCreateWorkspace, onCreateConversation, o
               {(workspace) => (
               <ChatListView.Item key={workspace.id} id={workspace.id} textValue={workspace.name} onContextMenu={(event) => openContextMenu(event, 'workspace', workspace.id)}>
                 <ChatListView.ItemContent>
-                  <ChatListView.Icon><Folder className="size-4" /></ChatListView.Icon>
+                  <ChatListView.Icon><RiFolder3Line className="size-4" /></ChatListView.Icon>
                   <ChatListView.Text>
                     <ChatListView.Title>{workspace.name}</ChatListView.Title>
                     <ChatListView.Preview>{workspace.path}</ChatListView.Preview>
@@ -127,7 +127,7 @@ export function AppSidebar({ session, onCreateWorkspace, onCreateConversation, o
           <div className="flex items-center justify-between px-2">
             <Sidebar.GroupLabel>对话</Sidebar.GroupLabel>
             <Button isIconOnly size="sm" variant="ghost" aria-label="新建对话" isDisabled={!session.activeWorkspaceId} onPress={onCreateConversation}>
-              <Plus className="size-4" />
+              <RiAddLine className="size-4" />
             </Button>
           </div>
           {workspaceConversations.length === 0 ? (

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { FileText, Folder, Globe, Plus } from '@gravity-ui/icons';
+import { RiAddLine, RiFileTextLine, RiFolder3Line, RiGlobalLine } from '@remixicon/react';
 import { Button, Chip, Dropdown, Input, ScrollShadow, TextField } from '@heroui/react';
 import type { Selection } from '@heroui/react';
 import { FileTree } from '@heroui-pro/react';
@@ -94,7 +94,7 @@ export function WorkbenchPanel({ session, tab, onTabChange }: Props) {
           ))}
         </div>
         <Dropdown>
-          <Dropdown.Trigger aria-label="新建工作台标签" className="inline-flex size-8 items-center justify-center"><Plus className="size-4" /></Dropdown.Trigger>
+          <Dropdown.Trigger aria-label="新建工作台标签" className="inline-flex size-8 items-center justify-center"><RiAddLine className="size-4" /></Dropdown.Trigger>
           <Dropdown.Popover>
             <Dropdown.Menu onAction={(key) => addTab(String(key) as WorkbenchTab)}>
               <Dropdown.Item id="terminal" textValue="终端">终端</Dropdown.Item>
@@ -322,7 +322,7 @@ function BrowserPane({ workspacePath, session }: { workspacePath?: string; sessi
         </div>
       ) : (
         <div className="bg-surface-secondary flex min-h-0 flex-1 flex-col items-center justify-center gap-2 rounded-xl px-6 text-center">
-          <Globe className="text-muted size-6" />
+          <RiGlobalLine className="text-muted size-6" />
           <p className="text-sm font-medium">浏览器预览</p>
           <p className="text-muted max-w-xs text-xs">输入地址后由 backend 所在机器请求并返回内容。工作区 {workspacePath || '尚未选择'}。</p>
         </div>
@@ -402,8 +402,8 @@ function FilesPane({ session }: { session: TodeXSession }) {
               if (entry?.kind === 'file') setSelected(next);
             }}
           >
-            <FileTree.Item icon={<Folder />} id="root" textValue={rootName} title={rootName}>
-              {entries.map((entry) => <FileTree.Item key={entry.path} icon={entry.kind === 'directory' ? <Folder /> : <FileText />} id={entry.path} textValue={entry.name} title={entry.name} />)}
+            <FileTree.Item icon={<RiFolder3Line />} id="root" textValue={rootName} title={rootName}>
+              {entries.map((entry) => <FileTree.Item key={entry.path} icon={entry.kind === 'directory' ? <RiFolder3Line /> : <RiFileTextLine />} id={entry.path} textValue={entry.name} title={entry.name} />)}
             </FileTree.Item>
           </FileTree>
         </ScrollShadow>

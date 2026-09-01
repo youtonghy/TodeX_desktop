@@ -1,4 +1,4 @@
-import { Cpu, FaceRobot, MagicWand, Shield, Stop } from '@gravity-ui/icons';
+import { RiCpuLine, RiMagicLine, RiRobot2Line, RiShieldLine, RiStopCircleLine } from '@remixicon/react';
 import { useEffect, useState } from 'react';
 import { Button, Chip, Label, ListBox, ScrollShadow, Select, Tooltip, toast } from '@heroui/react';
 import { ChainOfThought, ChatMessage, PromptInput } from '@heroui-pro/react';
@@ -365,7 +365,7 @@ export function ChatPanel({ session }: Props) {
                     >
                       <Label className="hidden">选择 Agent</Label>
                       <Select.Trigger className="composer-control__trigger">
-                        <Select.Value><FaceRobot className="composer-control__icon" /><span className="composer-control__text">{agentLabel}</span></Select.Value>
+                        <Select.Value><RiRobot2Line className="composer-control__icon" /><span className="composer-control__text">{agentLabel}</span></Select.Value>
                         <Select.Indicator className="composer-control__indicator" />
                       </Select.Trigger>
                       <Select.Popover>
@@ -395,7 +395,7 @@ export function ChatPanel({ session }: Props) {
                     >
                       <Label className="hidden">选择模型</Label>
                       <Select.Trigger className="composer-control__trigger">
-                        <Select.Value><Cpu className="composer-control__icon" /><span className="composer-control__text">{modelDisplayLabel(currentModel, session.modelCatalog)}</span></Select.Value>
+                        <Select.Value><RiCpuLine className="composer-control__icon" /><span className="composer-control__text">{modelDisplayLabel(currentModel, session.modelCatalog)}</span></Select.Value>
                         <Select.Indicator className="composer-control__indicator" />
                       </Select.Trigger>
                       <Select.Popover>
@@ -421,7 +421,7 @@ export function ChatPanel({ session }: Props) {
                     >
                       <Label className="hidden">思考强度</Label>
                       <Select.Trigger className="composer-control__trigger">
-                        <Select.Value><MagicWand className="composer-control__icon" /><span className="composer-control__text">{currentReasoningEffort || '默认强度'}</span></Select.Value>
+                        <Select.Value><RiMagicLine className="composer-control__icon" /><span className="composer-control__text">{currentReasoningEffort || '默认强度'}</span></Select.Value>
                         <Select.Indicator className="composer-control__indicator" />
                       </Select.Trigger>
                       <Select.Popover>
@@ -450,7 +450,7 @@ export function ChatPanel({ session }: Props) {
                     >
                       <Label className="hidden">选择权限</Label>
                       <Select.Trigger className="composer-control__trigger">
-                        <Select.Value><Shield className="composer-control__icon" /><span className="composer-control__text">{PERMISSION_LABELS.get(currentPermission.id) || currentPermission.title}</span></Select.Value>
+                        <Select.Value><RiShieldLine className="composer-control__icon" /><span className="composer-control__text">{PERMISSION_LABELS.get(currentPermission.id) || currentPermission.title}</span></Select.Value>
                         <Select.Indicator className="composer-control__indicator" />
                       </Select.Trigger>
                       <Select.Popover>
@@ -463,7 +463,7 @@ export function ChatPanel({ session }: Props) {
                           ))}
                         </ListBox>
                       </Select.Popover>
-                    </Select> : <Button className="composer-control composer-control__static" size="sm" variant="tertiary" isDisabled aria-label="完全访问权限"><Shield className="composer-control__icon" /><span className="composer-control__text">完全访问</span></Button>}
+                    </Select> : <Button className="composer-control composer-control__static" size="sm" variant="tertiary" isDisabled aria-label="完全访问权限"><RiShieldLine className="composer-control__icon" /><span className="composer-control__text">完全访问</span></Button>}
                   </PromptInput.ToolbarStart>
                   <PromptInput.ToolbarEnd className="gap-2">
                     <ContextUsageIndicator
@@ -476,7 +476,7 @@ export function ChatPanel({ session }: Props) {
                     />
                     {thinking ? (
                       <Button variant="danger-soft" onPress={() => session.stopThinking(conversation.id)}>
-                        <Stop className="size-4" />
+                        <RiStopCircleLine className="size-4" />
                         停止
                       </Button>
                     ) : null}

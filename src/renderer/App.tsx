@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Button, Chip, Dropdown, Modal, Toast, toast } from '@heroui/react';
 import { AppLayout, Navbar } from '@heroui-pro/react';
-import { Ellipsis, LayoutSideContentLeft, Plus } from '@gravity-ui/icons';
+import { RiAddLine, RiLayoutLeftLine, RiMore2Line } from '@remixicon/react';
 import { useTodeXSession, type TodeXSession } from './session/useTodeXSession';
 import { DesktopAlertHost } from './components/DesktopAlertHost';
 import { AppSidebar } from './components/AppSidebar';
@@ -116,7 +116,7 @@ export function App() {
             <Navbar maxWidth="full">
               <Navbar.Header>
                 <Button isIconOnly size="sm" variant="ghost" aria-label={sidebarOpen ? '折叠侧栏' : '展开侧栏'} onPress={() => setSidebarOpen((open) => !open)}>
-                  <LayoutSideContentLeft className="size-4" />
+                  <RiLayoutLeftLine className="size-4" />
                 </Button>
                 <span className="truncate text-sm font-medium">
                   {session.activeConversation?.title ?? '对话'}
@@ -132,7 +132,7 @@ export function App() {
                 <Navbar.Content>
                 <Dropdown>
                   <Dropdown.Trigger aria-label="更多面板" className="inline-flex size-8 items-center justify-center rounded-lg">
-                    <Ellipsis className="size-4" />
+                    <RiMore2Line className="size-4" />
                   </Dropdown.Trigger>
                     <Dropdown.Popover>
                       <Dropdown.Menu
@@ -300,7 +300,7 @@ function CreateWorkspaceModal({
                   onOpenChange(false);
                 }}
               >
-                <Plus className="size-4" />
+                <RiAddLine className="size-4" />
                 创建
               </Button>
             </Modal.Footer>
@@ -406,7 +406,7 @@ function CreateConversationModal({
                   onOpenChange(false);
                 }}
               >
-                <Plus className="size-4" />
+                <RiAddLine className="size-4" />
                 创建
               </Button>
             </Modal.Footer>

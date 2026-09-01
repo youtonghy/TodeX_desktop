@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Button, Chip, Label, ListBox, Select, Surface, TextArea, TextField } from '@heroui/react';
-import { Paperclip } from '@gravity-ui/icons';
+import { RiAttachment2 } from '@remixicon/react';
 import jsQR from 'jsqr';
 import { applyPairingToSettings, assemblePairingQrChunkPayload, parsePairingQrFrame, resolvePairingPayload, type PairingQrChunk } from '@todex/protocol/transportCrypto';
 import { toast } from '@heroui/react';
@@ -160,7 +160,7 @@ export function SettingsPanel({ session }: Props) {
             void applyRawPairing(decoded);
           }}
         >
-          <Paperclip className="mb-2 size-5" />
+          <RiAttachment2 className="mb-2 size-5" />
           拖入二维码图片
           <input
             className="hidden"

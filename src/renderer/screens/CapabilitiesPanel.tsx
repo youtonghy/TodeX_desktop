@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Button, Card, ScrollShadow, Spinner, Tabs, toast } from '@heroui/react';
-import { ArrowRotateRight, Thunderbolt, LogoGitlab } from '@gravity-ui/icons';
+import { RiFlashlightLine, RiGitlabLine, RiRefreshLine } from '@remixicon/react';
 import type { McpCatalog, McpServerCatalogDescriptor, ProviderDescriptor, ProviderKind, SkillCatalog, SkillCatalogDescriptor } from '@todex/protocol/v2';
 import { providerDisplayName } from '@todex/protocol/v2';
 import type { SelectedSkillAttachment } from '../session/helpers';
@@ -88,7 +88,7 @@ export function CapabilitiesPanel({
         </div>
         {providerChoice !== 'common' ? (
           <Button isIconOnly size="sm" variant="ghost" aria-label="刷新" onPress={() => onRefresh(providerChoice)}>
-            <ArrowRotateRight className="size-4" />
+            <RiRefreshLine className="size-4" />
           </Button>
         ) : null}
       </div>
@@ -171,7 +171,7 @@ function SkillRow({
     <Card className="mb-2 p-3">
       <div className="flex gap-3">
         <div className="bg-accent-soft flex size-9 items-center justify-center rounded-lg">
-          <Thunderbolt className="text-accent size-4" />
+          <RiFlashlightLine className="text-accent size-4" />
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between gap-2">
@@ -213,7 +213,7 @@ function McpRow({
     <Card className="mb-2 p-3">
       <div className="flex gap-3">
         <div className="bg-success-soft flex size-9 items-center justify-center rounded-lg">
-          <LogoGitlab className="text-success size-4" />
+          <RiGitlabLine className="text-success size-4" />
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between gap-2">
