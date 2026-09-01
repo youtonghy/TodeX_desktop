@@ -488,6 +488,57 @@ export function fileNameFromUri(uri: string, fallback: string): string {
   return part ? decodeURIComponent(part) : fallback;
 }
 
+export type WorkspaceLinkTarget =
+  | { kind: 'browser-url'; url: string }
+  | { kind: 'browser-file'; filePath: string }
+  | { kind: 'file'; filePath: string }
+  | null;
+
+function normalizeWorkspacePath(path: string): string {
+  const prefix = path.startsWith('/') ? '/' : '';
+  const parts = path.split(/[\\/]+/).filter(Boolean);
+  const normalized: string[] = [];
+  for (const part of parts) {
+    if (part === '.') continue;
+    if (part === '..') {
+      normalized.pop();
+    } else {
+      normalized.push(part);
+    }
+  }
+  return `${prefix}${normalized.join('/')}` || prefix || '.';
+}
+
+export function workspaceLinkTarget(href: string | undefined, workspacePath: string | undefined): WorkspaceLinkTarget {
+  if (!href?.trim() || !workspacePath) return null;
+  const raw = href.trim();
+  try {
+    const parsed = new URL(raw);
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+      return { kind: 'browser-url', url: parsed.toString() };
+    }
+    return null;
+  } catch {
+    // Relative and absolute workspace paths are handled below.
+  }
+  const pathPart = raw.split(/[?#]/, 1)[0];
+  if (!pathPart) return null;
+  let decodedPath = pathPart;
+  try {
+    decodedPath = decodeURIComponent(pathPart);
+  } catch {
+    return null;
+  }
+  const root = normalizeWorkspacePath(workspacePath).replace(/\/$/, '');
+  const candidate = normalizeWorkspacePath(decodedPath.startsWith('/') ? decodedPath : `${root}/${decodedPath}`);
+  if (candidate !== root && !candidate.startsWith(`${root}/`)) return null;
+  const extension = candidate.split('/').pop()?.split('.').pop()?.toLowerCase() || '';
+  if (extension === 'html' || extension === 'htm' || extension === 'xhtml' || extension === 'svg') {
+    return { kind: 'browser-file', filePath: candidate };
+  }
+  return { kind: 'file', filePath: candidate };
+}
+
 export function inferMimeType(name: string, fallback = 'application/octet-stream'): string {
   const extension = name.split('.').pop()?.toLowerCase() ?? '';
   switch (extension) {

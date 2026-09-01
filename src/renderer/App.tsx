@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Button, Chip, Label, ListBox, Modal, Select, Toast, toast } from '@heroui/react';
+import { Button, Chip, Label, ListBox, Modal, Select, Toast, toast, Checkbox, Input, TextField } from '@heroui/react';
 import { AppLayout, Navbar } from '@heroui-pro/react';
-import { RiAddLine, RiLayoutLeftLine } from '@remixicon/react';
+import { RiAddLine, RiGithubLine, RiLayoutLeftLine } from '@remixicon/react';
+import type { GitRepositorySummary } from '../preload';
 import { useTodeXSession, type TodeXSession } from './session/useTodeXSession';
 import { DesktopAlertHost } from './components/DesktopAlertHost';
 import { AppSidebar } from './components/AppSidebar';
@@ -50,6 +51,7 @@ function writeLayoutOpen(next: LayoutOpenState) {
 
 export function App() {
   const [panel, setPanel] = useState<DesktopPanel | null>(null);
+  const [panelTarget, setPanelTarget] = useState<OpenPanelOptions>({});
   const [workbenchTab, setWorkbenchTab] = useState<WorkbenchTab>('terminal');
   const [slashCommand, setSlashCommand] = useState<string>();
   const [asideOpen, setAsideOpen] = useState(() => readLayoutOpen().asideOpen);
@@ -57,6 +59,7 @@ export function App() {
   const [createOpen, setCreateOpen] = useState(false);
   const [createConversationOpen, setCreateConversationOpen] = useState(false);
   const [capabilitiesOpen, setCapabilitiesOpen] = useState(false);
+  const [gitOpen, setGitOpen] = useState(false);
 
   const persistSidebarOpen = useCallback((open: boolean) => {
     setSidebarOpen(open);
@@ -78,6 +81,7 @@ export function App() {
       return;
     }
     setSlashCommand(params?.command);
+    setPanelTarget({ url: params?.url, filePath: params?.filePath });
     setPanel(next);
     if (isWorkbenchTab(next)) {
       setWorkbenchTab(next);
@@ -143,7 +147,7 @@ export function App() {
                 onBack={() => setPanel(workbenchTab)}
               />
             ) : (
-              <WorkbenchPanel session={session} tab={workbenchTab} onTabChange={setWorkbenchTab} />
+              <WorkbenchPanel session={session} tab={workbenchTab} target={panelTarget} onTabChange={setWorkbenchTab} />
             )
           }
           sidebar={
@@ -178,7 +182,12 @@ export function App() {
                   </Chip>
                 ) : null}
                 <Navbar.Spacer />
-                <Navbar.Content><AppLayout.AsideTrigger /></Navbar.Content>
+                <Navbar.Content>
+                  <Button isIconOnly size="sm" variant="ghost" aria-label="GitHub 操作" onPress={() => setGitOpen(true)}>
+                    <RiGithubLine className="size-4" />
+                  </Button>
+                  <AppLayout.AsideTrigger />
+                </Navbar.Content>
               </Navbar.Header>
             </Navbar>
           }
@@ -234,6 +243,7 @@ export function App() {
       <Modal isOpen={capabilitiesOpen} onOpenChange={setCapabilitiesOpen}>
         <Modal.Backdrop><Modal.Container><Modal.Dialog className="max-h-[90vh] sm:max-w-2xl"><Modal.CloseTrigger /><Modal.Header><Modal.Heading>MCP / Skill 管理</Modal.Heading></Modal.Header><Modal.Body className="max-h-[75vh] overflow-y-auto"><CapabilitiesPanel workspacePath={session.activeWorkspace?.path ?? session.settings.defaultWorkspacePath} providers={session.v2Providers} catalogs={session.capabilityCatalogs} onRefresh={(provider) => void session.refreshCapabilityCatalog(provider)} conversationId={session.activeConversation?.id} selectedSkills={session.activeConversation ? session.selectedSkills[session.activeConversation.id] ?? [] : []} canInvoke={Boolean(session.activeConversation?.v2ConversationId || session.activeConversation?.provider)} onToggleSkill={(skill, provider) => session.activeConversation && session.toggleCatalogSkill(session.activeConversation.id, skill, provider)} onPreviewSkill={(skill, provider) => session.previewSkillResource(provider, skill.resourceId)} onRefreshMcp={(resourceId) => session.activeConversation && session.refreshMcpServer(session.activeConversation.id, resourceId)} onCallMcp={(resourceId, toolName) => session.activeConversation && session.callMcpTool(session.activeConversation.id, resourceId, toolName)} /></Modal.Body></Modal.Dialog></Modal.Container></Modal.Backdrop>
       </Modal>
+      <GitHubModal session={session} isOpen={gitOpen} onOpenChange={setGitOpen} />
       <CreateWorkspaceModal session={session} isOpen={createOpen} onOpenChange={setCreateOpen} />
       <CreateConversationModal
         session={session}
@@ -242,6 +252,60 @@ export function App() {
       />
     </div>
   );
+}
+
+function GitHubModal({ session, isOpen, onOpenChange }: { session: TodeXSession; isOpen: boolean; onOpenChange: (open: boolean) => void }) {
+  const [repos, setRepos] = useState<GitRepositorySummary[]>([]);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [message, setMessage] = useState('Update from TodeX');
+  const [loading, setLoading] = useState(false);
+  const workspacePath = session.activeWorkspace?.path || session.settings.defaultWorkspacePath;
+
+  const refresh = useCallback(async () => {
+    if (!workspacePath) return;
+    setLoading(true);
+    try {
+      const next = await window.todexDesktop.git.scan(workspacePath);
+      setRepos(next);
+      setSelected(next.filter((repo) => repo.files.length > 0).map((repo) => repo.path));
+    } catch (error) {
+      toast.danger(error instanceof Error ? error.message : 'Git 状态读取失败');
+    } finally { setLoading(false); }
+  }, [workspacePath]);
+
+  useEffect(() => { if (isOpen) void refresh(); }, [isOpen, refresh]);
+
+  const run = async (action: 'commit' | 'commit-push' | 'push') => {
+    if (!selected.length) return;
+    setLoading(true);
+    try {
+      for (const path of selected) await window.todexDesktop.git.run(path, action, message);
+      toast.success(action === 'push' ? '已推送' : action === 'commit-push' ? '已提交并推送' : '已创建提交');
+      await refresh();
+    } catch (error) { toast.danger(error instanceof Error ? error.message : 'Git 操作失败'); }
+    finally { setLoading(false); }
+  };
+
+  return <Modal isOpen={isOpen} onOpenChange={onOpenChange}>
+    <Modal.Backdrop><Modal.Container><Modal.Dialog className="max-h-[90vh] sm:max-w-2xl">
+      <Modal.CloseTrigger /><Modal.Header><Modal.Heading className="flex items-center gap-2"><RiGithubLine className="size-5" /> GitHub 操作</Modal.Heading></Modal.Header>
+      <Modal.Body className="max-h-[72vh] overflow-y-auto">
+        <div className="mb-4 flex items-end gap-3"><TextField className="min-w-0 flex-1" value={message} onChange={setMessage}><Label>提交信息</Label><Input /></TextField><Button size="sm" variant="secondary" onPress={() => void refresh()} isDisabled={loading}>刷新</Button></div>
+        {!repos.length && !loading ? <p className="text-muted text-sm">当前路径及其子目录没有 Git 仓库。</p> : null}
+        <div className="space-y-2">
+          {repos.map((repo) => <div key={repo.path} className="border-separator bg-surface-secondary rounded-lg border p-3">
+            <div className="flex items-start gap-3"><Checkbox isSelected={selected.includes(repo.path)} onChange={(checked) => setSelected((current) => checked ? [...new Set([...current, repo.path])] : current.filter((path) => path !== repo.path))} aria-label={`选择 ${repo.name}`} isDisabled={!repo.files.length} />
+              <div className="min-w-0 flex-1"><p className="truncate text-sm font-medium">{repo.name}</p><p className="text-muted truncate text-xs">{repo.path} · {repo.branch}</p>
+                {repo.error ? <p className="text-danger mt-1 text-xs">{repo.error}</p> : <p className="text-muted mt-1 text-xs">{repo.files.length} 个文件 · +{repo.additions} / -{repo.deletions}</p>}
+                {repo.files.length ? <p className="text-muted mt-1 truncate text-xs">{repo.files.slice(0, 4).map((file) => `${file.status} ${file.path}`).join(' · ')}{repo.files.length > 4 ? ' …' : ''}</p> : null}
+              </div>
+            </div>
+          </div>)}
+        </div>
+      </Modal.Body>
+      <Modal.Footer className="flex-wrap justify-end gap-2"><Button variant="secondary" onPress={() => void run('push')} isDisabled={loading || !selected.length}>单推送</Button><Button variant="secondary" onPress={() => void run('commit')} isDisabled={loading || !selected.length}>创建提交</Button><Button onPress={() => void run('commit-push')} isDisabled={loading || !selected.length}>提交并推送</Button></Modal.Footer>
+    </Modal.Dialog></Modal.Container></Modal.Backdrop>
+  </Modal>;
 }
 
 function CreateWorkspaceModal({

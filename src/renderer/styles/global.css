@@ -252,16 +252,43 @@ body {
 @container (max-width: 34rem) {
   .composer-control {
     width: 2.25rem;
+    min-width: 2.25rem;
     max-width: 2.25rem;
-    flex-basis: 2.25rem;
+    flex: 0 0 2.25rem;
   }
 
   .composer-control__trigger,
   .composer-control__static {
+    display: inline-flex;
+    width: 2.25rem;
+    min-width: 2.25rem;
     height: 2.25rem;
     min-height: 2.25rem;
+    align-items: center;
     justify-content: center;
-    padding-inline: 0.45rem;
+    padding: 0;
+  }
+
+  .composer-control__trigger.select__trigger:has(.select__indicator) {
+    padding-inline: 0;
+  }
+
+  .composer-control__trigger [data-slot="select-value"],
+  .composer-control__trigger .select__value {
+    display: flex;
+    width: 100%;
+    min-width: 0;
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    gap: 0;
+    text-align: center;
+  }
+
+  .composer-control__icon,
+  .composer-control__trigger svg,
+  .composer-control__static svg {
+    margin: 0;
   }
 
   .composer-control__text,

@@ -18,10 +18,24 @@ export type TodeXDesktopApi = {
   fs: {
     readFile: (filePath: string) => Promise<DesktopFilePayload>;
   };
+  git: {
+    scan: (workspacePath: string) => Promise<GitRepositorySummary[]>;
+    run: (workspacePath: string, action: 'commit' | 'commit-push' | 'push', message?: string) => Promise<{ output: string }>;
+  };
   theme: {
     shouldUseDark: () => Promise<boolean>;
     onUpdated: (listener: (dark: boolean) => void) => () => void;
   };
+};
+
+export type GitRepositorySummary = {
+  path: string;
+  name: string;
+  branch: string;
+  files: Array<{ path: string; status: string }>;
+  additions: number;
+  deletions: number;
+  error?: string;
 };
 
 declare global {

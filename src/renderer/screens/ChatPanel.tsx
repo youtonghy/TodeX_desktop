@@ -24,6 +24,7 @@ import {
   canonicalSlashCommand,
   modelDisplayLabel,
   permissionPresetForProfile,
+  workspaceLinkTarget,
 } from '../session/helpers';
 import { findCapabilityHashTrigger } from '@todex/protocol/todex';
 
@@ -282,7 +283,35 @@ export function ChatPanel({ session }: Props) {
                 <div className={`min-w-0 max-w-[85%] ${isUser ? 'text-right' : ''}`}>
                   {isUser ? <p className="text-muted text-xs font-medium">You</p> : null}
                   <div className={`${isUser ? 'mt-1' : ''} text-sm leading-6`}>
-                    {isUser ? <p className="whitespace-pre-wrap">{entry.subtitle}</p> : <Markdown id={entry.id}>{entry.subtitle}</Markdown>}
+                    {isUser ? <p className="whitespace-pre-wrap">{entry.subtitle}</p> : (
+                      <Markdown
+                        id={entry.id}
+                        components={{
+                          a: ({ href, children, ...props }) => {
+                            const target = workspaceLinkTarget(href, workspace.path);
+                            return (
+                              <a
+                                {...props}
+                                href={href}
+                                onClick={(event) => {
+                                  if (!target) return;
+                                  event.preventDefault();
+                                  if (target.kind === 'browser-url' || target.kind === 'browser-file') {
+                                    session.openPanel('Browser', target.kind === 'browser-url' ? { url: target.url } : { filePath: target.filePath });
+                                  } else {
+                                    session.openPanel('Files', { filePath: target.filePath });
+                                  }
+                                }}
+                              >
+                                {children}
+                              </a>
+                            );
+                          },
+                        }}
+                      >
+                        {entry.subtitle}
+                      </Markdown>
+                    )}
                   </div>
                   {request ? (
                     <ChatMessage.Actions>

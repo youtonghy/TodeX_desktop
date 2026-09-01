@@ -1,7 +1,11 @@
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme, shell } from 'electron';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+
+const execFileAsync = promisify(execFile);
 
 const MAX_IMAGE_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 const MAX_FILE_ATTACHMENT_BYTES = 512 * 1024;
@@ -131,6 +135,61 @@ function mimeFromName(name: string): string {
   return 'application/octet-stream';
 }
 
+async function gitText(cwd: string, args: string[]): Promise<string> {
+  const result = await execFileAsync('git', ['-C', cwd, ...args], { maxBuffer: 4 * 1024 * 1024 });
+  return result.stdout.trim();
+}
+
+async function gitSummary(repoPath: string) {
+  const root = await gitText(repoPath, ['rev-parse', '--show-toplevel']);
+  const branch = await gitText(root, ['branch', '--show-current']).catch(() => 'HEAD');
+  const status = await gitText(root, ['status', '--short', '--untracked-files=all']);
+  const stat = await gitText(root, ['diff', '--numstat', 'HEAD']).catch(() => '');
+  let additions = 0;
+  let deletions = 0;
+  for (const line of stat.split('\n')) {
+    const [added, removed] = line.split('\t');
+    if (/^\d+$/.test(added)) additions += Number(added);
+    if (/^\d+$/.test(removed)) deletions += Number(removed);
+  }
+  const untracked = await gitText(root, ['ls-files', '--others', '--exclude-standard']).catch(() => '');
+  for (const relative of untracked.split('\n').filter(Boolean)) {
+    try {
+      const text = readFileSync(join(root, relative), 'utf8');
+      additions += text ? text.split(/\r?\n/).length - (text.endsWith('\n') ? 1 : 0) : 0;
+    } catch { /* binary or unreadable files have no line count */ }
+  }
+  return {
+    path: root,
+    name: root.split(/[\\/]/).pop() || root,
+    branch: branch || 'HEAD',
+    files: status ? status.split('\n').map((line) => ({ status: line.slice(0, 2), path: line.slice(3) })) : [],
+    additions,
+    deletions,
+  };
+}
+
+async function findGitRepositories(workspacePath: string): Promise<string[]> {
+  const candidates = [workspacePath];
+  const scan = (dir: string, depth: number) => {
+    if (depth > 2) return;
+    try {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        if (!entry.isDirectory() || entry.name === 'node_modules' || entry.name === '.git') continue;
+        const child = join(dir, entry.name);
+        candidates.push(child);
+        scan(child, depth + 1);
+      }
+    } catch { /* inaccessible directories are skipped */ }
+  };
+  scan(workspacePath, 0);
+  const roots = new Set<string>();
+  for (const candidate of candidates) {
+    try { roots.add((await gitText(candidate, ['rev-parse', '--show-toplevel']))); } catch { /* not a repository */ }
+  }
+  return [...roots];
+}
+
 app.whenReady().then(() => {
   try {
     assertElectronBinary();
@@ -191,6 +250,27 @@ app.whenReady().then(() => {
       base64: buffer.toString('base64'),
       text,
     };
+  });
+
+  ipcMain.handle('git:scan', async (_event, workspacePath: string) => {
+    const repos = await findGitRepositories(workspacePath);
+    return Promise.all(repos.map(async (repoPath) => {
+      try { return await gitSummary(repoPath); }
+      catch (error) { return { path: repoPath, name: repoPath.split(/[\\/]/).pop() || repoPath, branch: '未知', files: [], additions: 0, deletions: 0, error: error instanceof Error ? error.message : 'Git 读取失败' }; }
+    }));
+  });
+
+  ipcMain.handle('git:run', async (_event, workspacePath: string, action: 'commit' | 'commit-push' | 'push', message?: string) => {
+    const repos = await findGitRepositories(workspacePath);
+    const outputs: string[] = [];
+    for (const repo of repos) {
+      if (action !== 'push') {
+        await gitText(repo, ['add', '-A']);
+        await gitText(repo, ['commit', '-m', message?.trim() || 'Update from TodeX']);
+      }
+      if (action === 'push' || action === 'commit-push') outputs.push(await gitText(repo, ['push']));
+    }
+    return { output: outputs.filter(Boolean).join('\n') || '操作完成' };
   });
 
   ipcMain.handle('theme:shouldUseDark', () => nativeTheme.shouldUseDarkColors);

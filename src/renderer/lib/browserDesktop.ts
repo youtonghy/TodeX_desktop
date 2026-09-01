@@ -41,6 +41,10 @@ export function installBrowserDesktopBridge(): void {
         throw new Error('浏览器预览不支持读取本机文件');
       },
     },
+    git: {
+      scan: async () => [],
+      run: async () => ({ output: '浏览器预览不支持 Git 操作' }),
+    },
     theme: {
       shouldUseDark: async () => window.matchMedia('(prefers-color-scheme: dark)').matches,
       onUpdated: (listener) => {

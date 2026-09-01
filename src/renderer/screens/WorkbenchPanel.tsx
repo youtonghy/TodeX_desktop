@@ -1,16 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
 import { RiAddLine, RiFileTextLine, RiFolder3Line, RiGlobalLine, RiFocus3Line } from '@remixicon/react';
 import { Button, Chip, Dropdown, Input, ScrollShadow, TextField } from '@heroui/react';
 import type { Selection } from '@heroui/react';
 import { FileTree } from '@heroui-pro/react';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { latencyLabelOf, terminalIdForConversation, terminalStatusLabel } from '../session/helpers';
-import type { WorkbenchTab } from '../lib/panels';
+import type { OpenPanelOptions, WorkbenchTab } from '../lib/panels';
 import { V2ApiClient } from '@todex/protocol/v2';
 
 type Props = {
   session: TodeXSession;
   tab: WorkbenchTab;
+  target?: OpenPanelOptions;
   onTabChange: (tab: WorkbenchTab) => void;
 };
 
@@ -69,7 +71,7 @@ const PLACEHOLDER_FILES: Record<string, { title: string; language: string; body:
   },
 };
 
-export function WorkbenchPanel({ session, tab, onTabChange }: Props) {
+export function WorkbenchPanel({ session, tab, target, onTabChange }: Props) {
   const conversationId = session.activeConversation?.id ?? '';
   const [items, setItems] = useState<WorkbenchItem[]>([]);
   const [activeId, setActiveId] = useState('');
@@ -161,8 +163,8 @@ export function WorkbenchPanel({ session, tab, onTabChange }: Props) {
         {items.map((item) => (
           <div key={item.id} className={item.id === active?.id ? 'h-full' : 'hidden'}>
             {item.type === 'terminal' ? <TerminalPane session={session} terminalId={terminalIdForConversation(conversationId, item.id)} /> : null}
-            {item.type === 'browser' ? <BrowserPane workspacePath={session.activeWorkspace?.path} session={session} /> : null}
-            {item.type === 'files' ? <FilesPane session={session} /> : null}
+            {item.type === 'browser' ? <BrowserPane workspacePath={session.activeWorkspace?.path} session={session} target={target} /> : null}
+            {item.type === 'files' ? <FilesPane session={session} target={target} /> : null}
             {item.type === 'git-diff' ? <GitDiffPane session={session} /> : null}
           </div>
         ))}
@@ -341,14 +343,37 @@ function TerminalPane({ session, terminalId }: { session: TodeXSession; terminal
   );
 }
 
-function BrowserPane({ workspacePath, session }: { workspacePath?: string; session: TodeXSession }) {
+function BrowserPane({ workspacePath, session, target }: { workspacePath?: string; session: TodeXSession; target?: OpenPanelOptions }) {
   const [draft, setDraft] = useState('http://127.0.0.1:7345');
   const [url, setUrl] = useState('');
+  const [srcDoc, setSrcDoc] = useState('');
   const [error, setError] = useState('');
   const [inspect, setInspect] = useState(false);
   const frameRef = useRef<HTMLIFrameElement>(null);
   const selectedRef = useRef<HTMLElement | null>(null);
   const selectionAnchorRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (target?.url) {
+      setDraft(target.url);
+      setUrl(target.url);
+      setSrcDoc('');
+      setError('');
+      return;
+    }
+    if (!target?.filePath) return;
+    setDraft(target.filePath);
+    setUrl('');
+    setSrcDoc('');
+    setError('');
+    const api = new V2ApiClient({ serverUrl: session.settings.serverUrl, authToken: session.settings.authToken });
+    void api.readWorkspaceFile(target.filePath)
+      .then((file) => {
+        if (!file.text) throw new Error('该网页文件无法作为文本加载');
+        setSrcDoc(file.text);
+      })
+      .catch((reason) => setError(reason instanceof Error ? reason.message : '网页文件读取失败'));
+  }, [session.settings.authToken, session.settings.serverUrl, target?.filePath, target?.url]);
 
   const appendReference = useCallback((element: HTMLElement) => {
     const tag = element.tagName.toLowerCase();
@@ -494,6 +519,7 @@ function BrowserPane({ workspacePath, session }: { workspacePath?: string; sessi
             const loopback = host === 'localhost' || host === '::1' || /^127(?:\.\d{1,3}){3}$/.test(host);
             if (!loopback) throw new Error('浏览器预览仅允许访问本机地址');
             setUrl(parsed.toString());
+            setSrcDoc('');
             setError('');
           } catch (reason) {
             setUrl('');
@@ -512,9 +538,9 @@ function BrowserPane({ workspacePath, session }: { workspacePath?: string; sessi
         </Button>
       </form>
       {error ? <p className="text-danger text-sm">{error}</p> : null}
-      {url ? (
+      {url || srcDoc ? (
         <div className="bg-surface min-h-0 flex-1 overflow-hidden rounded-xl">
-          <iframe ref={frameRef} title="网页预览" src={url} className="size-full border-0" sandbox="allow-forms allow-modals allow-popups allow-same-origin allow-scripts" />
+          <iframe ref={frameRef} title="网页预览" src={url || undefined} srcDoc={srcDoc || undefined} className="size-full border-0" sandbox="allow-forms allow-modals allow-popups allow-same-origin allow-scripts" />
         </div>
       ) : (
         <div className="bg-surface-secondary flex min-h-0 flex-1 flex-col items-center justify-center gap-2 rounded-xl px-6 text-center">
@@ -546,76 +572,155 @@ function GitDiffPane({ session }: { session: TodeXSession }) {
   );
 }
 
-function FilesPane({ session }: { session: TodeXSession }) {
-  const [selected, setSelected] = useState<string>('');
-  const [entries, setEntries] = useState<Array<{ name: string; path: string; kind: 'directory' | 'file' }>>([]);
-  const [file, setFile] = useState<{ name: string; text?: string; mimeType: string } | null>(null);
+type FileTreeEntry = {
+  name: string;
+  path: string;
+  kind: 'directory' | 'file';
+  children?: FileTreeEntry[];
+};
+
+function absoluteEntryPath(cwd: string, relativePath: string): string {
+  return `${cwd.replace(/[\\/]$/, '')}/${relativePath.replace(/^[/\\]+/, '').replace(/[/\\]+/g, '/')}`;
+}
+
+function findFileTreeEntry(entries: FileTreeEntry[], path: string): FileTreeEntry | undefined {
+  for (const entry of entries) {
+    if (entry.path === path) return entry;
+    const nested = entry.children ? findFileTreeEntry(entry.children, path) : undefined;
+    if (nested) return nested;
+  }
+  return undefined;
+}
+
+function replaceFileTreeChildren(entries: FileTreeEntry[], path: string, children: FileTreeEntry[]): FileTreeEntry[] {
+  return entries.map((entry) => {
+    if (entry.path === path) return { ...entry, children };
+    return entry.children ? { ...entry, children: replaceFileTreeChildren(entry.children, path, children) } : entry;
+  });
+}
+
+function FilesPane({ session, target }: { session: TodeXSession; target?: OpenPanelOptions }) {
+  const [entries, setEntries] = useState<FileTreeEntry[]>([]);
+  const [selected, setSelected] = useState('');
+  const [expandedKeys, setExpandedKeys] = useState<Selection>(new Set());
+  const [file, setFile] = useState<{ name: string; path: string; text?: string; mimeType: string } | null>(null);
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+  const appliedTargetRef = useRef('');
   const conversation = session.activeConversation;
   const diff = conversation ? session.gitDiffByConversation[conversation.id] : undefined;
-  useEffect(() => {
-    const path = session.activeWorkspace?.path;
-    if (!path) return;
+  const rootPath = session.activeWorkspace?.path || '';
+  const rootName = useMemo(() => session.activeWorkspace?.name || 'workspace', [session.activeWorkspace?.name]);
+
+  const readFile = useCallback(async (path: string) => {
+    setSelected(path);
+    setError('');
     const api = new V2ApiClient({ serverUrl: session.settings.serverUrl, authToken: session.settings.authToken });
-    void api.listWorkspaceDirectories(path).then((snapshot) => setEntries(snapshot.entries)).catch((reason) => setError(reason instanceof Error ? reason.message : '目录读取失败'));
-  }, [session.activeWorkspace?.path, session.settings.serverUrl, session.settings.authToken]);
-  useEffect(() => {
-    if (!selected) return;
+    try {
+      setFile(await api.readWorkspaceFile(path));
+    } catch (reason) {
+      setFile(null);
+      setError(reason instanceof Error ? reason.message : '文件读取失败');
+    }
+  }, [session.settings.authToken, session.settings.serverUrl]);
+
+  const loadDirectory = useCallback(async (directory: string) => {
+    setLoading(true);
+    setError('');
     const api = new V2ApiClient({ serverUrl: session.settings.serverUrl, authToken: session.settings.authToken });
-    void api.readWorkspaceFile(selected).then(setFile).catch((reason) => setError(reason instanceof Error ? reason.message : '文件读取失败'));
-  }, [selected, session.settings.serverUrl, session.settings.authToken]);
-  const rootName = useMemo(
-    () => session.activeWorkspace?.name || 'workspace',
-    [session.activeWorkspace?.name],
+    try {
+      const snapshot = await api.listWorkspaceEntries(directory, '', 100);
+      const children = snapshot.entries
+        .map((entry) => ({ ...entry, path: absoluteEntryPath(directory, entry.path) }))
+        .sort((left, right) => Number(right.kind === 'directory') - Number(left.kind === 'directory') || left.name.localeCompare(right.name));
+      setEntries((current) => directory === rootPath ? children : replaceFileTreeChildren(current, directory, children));
+      setExpandedKeys((current) => new Set([...current, directory]));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : '目录读取失败');
+    } finally {
+      setLoading(false);
+    }
+  }, [rootPath, session.settings.authToken, session.settings.serverUrl]);
+
+  useEffect(() => {
+    setEntries([]);
+    setSelected('');
+    setFile(null);
+    setExpandedKeys(new Set());
+    appliedTargetRef.current = '';
+    if (rootPath) void loadDirectory(rootPath);
+  }, [loadDirectory, rootPath]);
+
+  useEffect(() => {
+    if (!target?.filePath || target.filePath === appliedTargetRef.current) return;
+    appliedTargetRef.current = target.filePath;
+    void readFile(target.filePath);
+  }, [readFile, target?.filePath]);
+
+  const handleAction = async (key: string) => {
+    const entry = findFileTreeEntry(entries, key);
+    if (!entry) return;
+    if (entry.kind === 'directory') {
+      if (!entry.children) await loadDirectory(entry.path);
+      setExpandedKeys((current) => new Set([...current, entry.path]));
+    } else {
+      await readFile(entry.path);
+    }
+  };
+
+  const renderEntry = (entry: FileTreeEntry): ReactNode => (
+    <FileTree.Item
+      key={entry.path}
+      icon={entry.kind === 'directory' ? <RiFolder3Line /> : <RiFileTextLine />}
+      id={entry.path}
+      textValue={entry.name}
+      title={entry.name}
+    >
+      {entry.children?.map(renderEntry)}
+    </FileTree.Item>
   );
 
   return (
     <div className="flex h-full min-h-0 flex-col px-4 pb-4 pt-3">
       <div className="mb-3 flex items-center justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-sm font-medium">文件预览</p>
-          <p className="text-muted truncate text-xs">{session.activeWorkspace?.path || '未选择工作区'}</p>
+          <p className="text-sm font-medium">文件</p>
+          <p className="text-muted truncate text-xs">{rootPath || '未选择工作区'}</p>
         </div>
-        <Button
-          size="sm"
-          variant="tertiary"
-          isDisabled={!conversation}
-          onPress={() => conversation && session.requestGitDiff(conversation.id)}
-        >
-          刷新 Diff
-        </Button>
+        <Button size="sm" variant="tertiary" isDisabled={!rootPath || loading} onPress={() => rootPath && void loadDirectory(rootPath)}>刷新</Button>
       </div>
-      <div className="flex min-h-0 flex-1 flex-col gap-3">
-        <ScrollShadow className="bg-surface-secondary min-h-0 flex-[1.1] rounded-xl p-2">
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 lg:grid-cols-[minmax(180px,0.75fr)_minmax(0,1.25fr)]">
+        <ScrollShadow className="bg-surface-secondary min-h-0 rounded-xl p-2">
           <FileTree
             aria-label="工作区文件"
             className="w-full"
             selectedKeys={selected ? new Set([selected]) : new Set()}
+            expandedKeys={expandedKeys}
             selectionMode="single"
             onSelectionChange={(keys: Selection) => {
-              const next = keys === 'all' ? '' : String([...keys][0] ?? '');
-              const entry = entries.find((item) => item.path === next);
-              if (entry?.kind === 'file') setSelected(next);
+              const key = keys === 'all' ? '' : String([...keys][0] ?? '');
+              if (key) void handleAction(key);
             }}
+            onExpandedChange={setExpandedKeys}
           >
-            <FileTree.Item icon={<RiFolder3Line />} id="root" textValue={rootName} title={rootName}>
-              {entries.map((entry) => <FileTree.Item key={entry.path} icon={entry.kind === 'directory' ? <RiFolder3Line /> : <RiFileTextLine />} id={entry.path} textValue={entry.name} title={entry.name} />)}
+            <FileTree.Item icon={<RiFolder3Line />} id={rootPath || 'root'} textValue={rootName} title={rootName}>
+              {entries.map(renderEntry)}
             </FileTree.Item>
           </FileTree>
         </ScrollShadow>
-        <ScrollShadow className="bg-surface-secondary min-h-0 flex-[1.2] rounded-xl p-3">
-          <p className="text-muted mb-2 text-xs">{file?.name || '选择文件预览'}</p>
-          {error ? <p className="text-danger text-xs">{error}</p> : <pre className="font-mono text-xs whitespace-pre-wrap">{file?.text || '该文件不可作为文本预览。'}</pre>}
-        </ScrollShadow>
-        <ScrollShadow className="bg-surface-secondary min-h-0 flex-1 rounded-xl p-3">
-          <div className="mb-2 flex items-center justify-between">
-            <p className="text-xs font-medium">Git Diff</p>
-            {diff?.error ? <Chip size="sm" variant="soft">{diff.error}</Chip> : null}
-          </div>
-          <pre className="text-muted font-mono text-xs whitespace-pre-wrap">
-            {diff?.diff || '暂无 diff。后端接口未返回时，这里保持空白占位。'}
-          </pre>
-        </ScrollShadow>
+        <div className="flex min-h-0 flex-col gap-3">
+          <ScrollShadow className="bg-surface-secondary min-h-0 flex-[1.5] rounded-xl p-3">
+            <p className="text-muted mb-2 truncate text-xs">{file?.path || '选择文件预览'}</p>
+            {error ? <p className="text-danger text-xs">{error}</p> : <pre className="font-mono text-xs whitespace-pre-wrap">{file?.text || '该文件不可作为文本预览。'}</pre>}
+          </ScrollShadow>
+          <ScrollShadow className="bg-surface-secondary min-h-0 flex-1 rounded-xl p-3">
+            <div className="mb-2 flex items-center justify-between">
+              <p className="text-xs font-medium">Git Diff</p>
+              {diff?.error ? <Chip size="sm" variant="soft">{diff.error}</Chip> : null}
+            </div>
+            <pre className="text-muted font-mono text-xs whitespace-pre-wrap">{diff?.diff || '暂无 diff。后端接口未返回时，这里保持空白占位。'}</pre>
+          </ScrollShadow>
+        </div>
       </div>
     </div>
   );

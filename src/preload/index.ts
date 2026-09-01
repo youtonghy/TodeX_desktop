@@ -7,6 +7,15 @@ export type DesktopFilePayload = {
   base64: string;
   text?: string;
 };
+export type GitRepositorySummary = {
+  path: string;
+  name: string;
+  branch: string;
+  files: Array<{ path: string; status: string }>;
+  additions: number;
+  deletions: number;
+  error?: string;
+};
 
 const api = {
   store: {
@@ -20,6 +29,10 @@ const api = {
   },
   fs: {
     readFile: (filePath: string) => ipcRenderer.invoke('fs:readFile', filePath) as Promise<DesktopFilePayload>,
+  },
+  git: {
+    scan: (workspacePath: string) => ipcRenderer.invoke('git:scan', workspacePath),
+    run: (workspacePath: string, action: 'commit' | 'commit-push' | 'push', message?: string) => ipcRenderer.invoke('git:run', workspacePath, action, message),
   },
   theme: {
     shouldUseDark: () => ipcRenderer.invoke('theme:shouldUseDark') as Promise<boolean>,

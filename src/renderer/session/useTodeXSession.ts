@@ -6204,5 +6204,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     toggleSelectedSkill,
     autoConnectEnabled,
     setAutoConnectEnabled,
+    openPanel,
   };
 }

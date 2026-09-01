@@ -18,6 +18,8 @@ export type OpenPanelOptions = {
   workspaceId?: string;
   conversationId?: string;
   command?: string;
+  url?: string;
+  filePath?: string;
 };
 
 export function isWorkbenchTab(panel: DesktopPanel | null): panel is WorkbenchTab {
