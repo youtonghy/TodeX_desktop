@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { RiAddLine, RiFileTextLine, RiFolder3Line, RiGlobalLine } from '@remixicon/react';
+import { RiAddLine, RiFileTextLine, RiFolder3Line, RiGlobalLine, RiFocus3Line } from '@remixicon/react';
 import { Button, Chip, Dropdown, Input, ScrollShadow, TextField } from '@heroui/react';
 import type { Selection } from '@heroui/react';
 import { FileTree } from '@heroui-pro/react';
@@ -109,7 +109,7 @@ export function WorkbenchPanel({ session, tab, onTabChange }: Props) {
         {items.map((item) => (
           <div key={item.id} className={item.id === active?.id ? 'h-full' : 'hidden'}>
             {item.type === 'terminal' ? <TerminalPane session={session} terminalId={terminalIdForConversation(conversationId, item.id)} /> : null}
-            {item.type === 'browser' ? <BrowserPane workspacePath={session.activeWorkspace?.path} /> : null}
+            {item.type === 'browser' ? <BrowserPane workspacePath={session.activeWorkspace?.path} session={session} /> : null}
             {item.type === 'files' ? <FilesPane session={session} /> : null}
             {item.type === 'git-diff' ? <GitDiffPane session={session} /> : null}
           </div>
@@ -289,10 +289,60 @@ function TerminalPane({ session, terminalId }: { session: TodeXSession; terminal
   );
 }
 
-function BrowserPane({ workspacePath }: { workspacePath?: string }) {
+function BrowserPane({ workspacePath, session }: { workspacePath?: string; session: TodeXSession }) {
   const [draft, setDraft] = useState('http://127.0.0.1:7345');
   const [url, setUrl] = useState('');
   const [error, setError] = useState('');
+  const [inspect, setInspect] = useState(false);
+  const [selected, setSelected] = useState<HTMLElement | null>(null);
+  const frameRef = useRef<HTMLIFrameElement>(null);
+
+  useEffect(() => {
+    const frame = frameRef.current;
+    if (!frame || !inspect) return;
+    const bind = () => {
+      try {
+        const doc = frame.contentDocument;
+        if (!doc) return;
+        let hovered: HTMLElement | null = null;
+        const move = (event: MouseEvent) => {
+          const element = event.target instanceof HTMLElement ? event.target : null;
+          if (hovered && hovered !== element) hovered.style.outline = '';
+          hovered = element;
+          if (element) element.style.outline = '2px solid #0ea5e9';
+        };
+        const click = (event: MouseEvent) => {
+          event.preventDefault(); event.stopPropagation();
+          if (event.target instanceof HTMLElement) setSelected(event.target);
+        };
+        const wheel = (event: WheelEvent) => {
+          if (!selected) return;
+          event.preventDefault();
+          const next = event.deltaY > 0 ? selected.parentElement : selected.firstElementChild;
+          if (next instanceof HTMLElement) setSelected(next);
+        };
+        doc.addEventListener('mousemove', move, true);
+        doc.addEventListener('click', click, true);
+        doc.addEventListener('wheel', wheel, { capture: true, passive: false });
+        return () => { doc.removeEventListener('mousemove', move, true); doc.removeEventListener('click', click, true); doc.removeEventListener('wheel', wheel, true); if (hovered) hovered.style.outline = ''; };
+      } catch { setError('该页面禁止读取元素，无法使用检查功能'); }
+      return undefined;
+    };
+    let cleanup = bind();
+    frame.addEventListener('load', () => { cleanup?.(); cleanup = bind(); });
+    return () => { cleanup?.(); };
+  }, [inspect, selected]);
+
+  const insertSelection = () => {
+    if (!selected) return;
+    const tag = selected.tagName.toLowerCase();
+    const text = (selected.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 160);
+    const id = selected.id ? `#${selected.id}` : '';
+    const reference = `[网页元素 ${tag}${id}${text ? `: ${text}` : ''}]`;
+    const conversationId = session.activeConversation?.id;
+    if (conversationId) session.setConversationChatDraft(conversationId, (current) => `${current}${current ? '\n' : ''}${reference}`);
+    setInspect(false);
+  };
 
   return (
     <div className="flex h-full min-h-0 flex-col p-3">
@@ -321,11 +371,15 @@ function BrowserPane({ workspacePath }: { workspacePath?: string }) {
         <Button type="submit" variant="secondary">
           打开
         </Button>
+        <Button type="button" isIconOnly variant={inspect ? 'primary' : 'secondary'} aria-label="检查网页元素" onPress={() => { setInspect((current) => !current); setSelected(null); }}>
+          <RiFocus3Line className="size-4" />
+        </Button>
+        {selected ? <Button type="button" variant="tertiary" onPress={insertSelection}>插入对话</Button> : null}
       </form>
       {error ? <p className="text-danger text-sm">{error}</p> : null}
       {url ? (
         <div className="bg-surface min-h-0 flex-1 overflow-hidden rounded-xl">
-          <iframe title="网页预览" src={url} className="size-full border-0" sandbox="allow-forms allow-modals allow-popups allow-same-origin allow-scripts" />
+          <iframe ref={frameRef} title="网页预览" src={url} className="size-full border-0" sandbox="allow-forms allow-modals allow-popups allow-same-origin allow-scripts" />
         </div>
       ) : (
         <div className="bg-surface-secondary flex min-h-0 flex-1 flex-col items-center justify-center gap-2 rounded-xl px-6 text-center">
