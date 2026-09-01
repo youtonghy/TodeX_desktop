@@ -1,4 +1,4 @@
-import { RiBarChartBoxLine, RiClipboardLine, RiCpuLine, RiGitBranchLine, RiMagicLine, RiRobot2Line, RiShieldLine, RiStopCircleLine } from '@remixicon/react';
+import { RiBarChartBoxLine, RiClipboardLine, RiCpuLine, RiFlashlightLine, RiGitBranchLine, RiMagicLine, RiShieldLine, RiStopCircleLine } from '@remixicon/react';
 import { useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import { Button, Chip, Label, ListBox, ScrollShadow, Select, Tooltip, toast } from '@heroui/react';
@@ -7,6 +7,7 @@ import { ChatMessageActions } from '@heroui-pro/react/chat-message-actions';
 import { ChatTool } from '@heroui-pro/react/chat-tool';
 import { Markdown } from '@heroui-pro/react/markdown';
 import { providerDisplayName, type ProviderKind } from '@todex/protocol/v2';
+import { ProviderIcon } from '../components/ProviderIcon';
 import type { TodeXSession } from '../session/useTodeXSession';
 import {
   PERMISSION_PRESETS,
@@ -67,6 +68,21 @@ function isChatReminderEntry(entry: { subtitle: string; title: string }): boolea
   return entry.subtitle.includes('本地会话启动超时')
     || entry.title === '本地会话启动超时'
     || entry.subtitle.trim() === 'codex.local.start';
+}
+
+function reasoningIcon(effort: string | null | undefined) {
+  switch (effort?.toLowerCase()) {
+    case 'high':
+    case 'xhigh':
+    case 'max':
+    case 'ultra':
+      return RiFlashlightLine;
+    case 'low':
+      return RiBarChartBoxLine;
+    case 'medium':
+    default:
+      return RiMagicLine;
+  }
 }
 
 function ContextUsageIndicator({
@@ -220,6 +236,7 @@ export function ChatPanel({ session }: Props) {
       .sort((left, right) => left.at - right.at),
   );
   const currentProvider = isV2Conversation(conversation) ? conversation.provider || '' : '';
+  const agentProvider = conversation.provider || (isV2Conversation(conversation) ? '' : 'codex');
   const slashTrigger = draft.trim().startsWith('/') ? draft.trim() : '';
   const liveCommands = currentProvider ? (session.providerCommands[currentProvider as ProviderKind] ?? []) : [];
   const slashCatalog = liveCommands.length > 0
@@ -267,15 +284,16 @@ export function ChatPanel({ session }: Props) {
     timeline: conversationTimeline,
     thinking,
   });
-  const agentLabel = currentProvider
-    ? providerDisplayName(currentProvider, 'Agent')
-    : '历史';
+  const agentLabel = agentProvider
+    ? providerDisplayName(agentProvider, 'Agent')
+    : 'Agent';
   const availableProviders = session.v2Providers.filter((item) => item.available);
   const providerDescriptor = session.v2Providers.find((item) => item.id === currentProvider);
   const providerModels = session.providerModels[currentProvider as ProviderKind] ?? providerDescriptor?.models ?? [];
   const currentModel = conversation.model || providerModels.find((item) => item.isDefault)?.id || (currentProvider === 'codex' ? workspace.model || session.settings.defaultModel : '');
   // An unset Pi/agent effort is meaningful: let the provider apply its own default.
   const currentReasoningEffort = conversation.reasoningEffort ?? null;
+  const ReasoningIcon = reasoningIcon(currentReasoningEffort);
   const contextUsage = session.contextUsageByConversation[conversation.id];
   const contextModelId = contextUsage?.model || currentModel;
   const currentContextWindow = contextUsage?.contextWindow
@@ -513,7 +531,7 @@ export function ChatPanel({ session }: Props) {
                       className="composer-control"
                       variant="secondary"
                       placeholder="选择 Agent"
-                      selectedKey={currentProvider || null}
+                      selectedKey={currentProvider || agentProvider || null}
                       isDisabled={!canSwitchAgent}
                       onSelectionChange={(key) => {
                         if (typeof key !== 'string' || !key || key === currentProvider) {
@@ -524,7 +542,7 @@ export function ChatPanel({ session }: Props) {
                     >
                       <Label className="hidden">选择 Agent</Label>
                       <Select.Trigger className="composer-control__trigger">
-                        <Select.Value><RiRobot2Line className="composer-control__icon" /><span className="composer-control__text">{agentLabel}</span></Select.Value>
+                        <Select.Value><ProviderIcon className="composer-control__icon" provider={agentProvider} /><span className="composer-control__text">{agentLabel}</span></Select.Value>
                         <Select.Indicator className="composer-control__indicator" />
                       </Select.Trigger>
                       <Select.Popover>
@@ -535,6 +553,7 @@ export function ChatPanel({ session }: Props) {
                               id={item.id}
                               textValue={providerDisplayName(item.id, item.displayName)}
                             >
+                              <ProviderIcon provider={item.id} />
                               {providerDisplayName(item.id, item.displayName)}
                               <ListBox.ItemIndicator />
                             </ListBox.Item>
@@ -580,13 +599,16 @@ export function ChatPanel({ session }: Props) {
                     >
                       <Label className="hidden">思考强度</Label>
                       <Select.Trigger className="composer-control__trigger">
-                        <Select.Value><RiMagicLine className="composer-control__icon" /><span className="composer-control__text">{currentReasoningEffort || '默认强度'}</span></Select.Value>
+                        <Select.Value><ReasoningIcon className="composer-control__icon" /><span className="composer-control__text">{currentReasoningEffort || '默认强度'}</span></Select.Value>
                         <Select.Indicator className="composer-control__indicator" />
                       </Select.Trigger>
                       <Select.Popover>
                         <ListBox>
                           {(providerModels.find((item) => item.id === currentModel)?.supportedReasoningEfforts ?? []).map((effort) => (
-                            <ListBox.Item key={effort} id={effort} textValue={effort}>{effort}</ListBox.Item>
+                            <ListBox.Item key={effort} id={effort} textValue={effort}>
+                              {(() => { const Icon = reasoningIcon(effort); return <Icon className="size-4" aria-hidden="true" />; })()}
+                              {effort}
+                            </ListBox.Item>
                           ))}
                         </ListBox>
                       </Select.Popover>

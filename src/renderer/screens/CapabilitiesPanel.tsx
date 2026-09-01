@@ -3,6 +3,7 @@ import { Button, Card, ScrollShadow, Spinner, Tabs, toast } from '@heroui/react'
 import { RiFlashlightLine, RiGitlabLine, RiRefreshLine } from '@remixicon/react';
 import type { McpCatalog, McpServerCatalogDescriptor, ProviderDescriptor, ProviderKind, SkillCatalog, SkillCatalogDescriptor } from '@todex/protocol/v2';
 import { providerDisplayName } from '@todex/protocol/v2';
+import { ProviderIcon } from '../components/ProviderIcon';
 import type { SelectedSkillAttachment } from '../session/helpers';
 
 export type CatalogState = {
@@ -96,6 +97,7 @@ export function CapabilitiesPanel({
         <Button size="sm" variant={providerChoice === 'common' ? 'primary' : 'tertiary'} onPress={() => setProviderChoice('common')}>通用</Button>
         {providers.map((item) => (
           <Button key={item.id} size="sm" variant={providerChoice === item.id ? 'primary' : 'tertiary'} onPress={() => setProviderChoice(item.id)}>
+            <ProviderIcon provider={item.id} />
             {providerDisplayName(item.id)} {item.available ? '●' : '○'}
           </Button>
         ))}

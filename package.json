@@ -20,6 +20,7 @@
     "@heroui/react": "^3.2.4",
     "@heroui/styles": "^3.2.4",
     "@iconify/react": "^6.0.2",
+    "@lobehub/icons-static-svg": "^1.94.0",
     "@noble/ciphers": "^2.4.0",
     "@noble/curves": "^2.4.0",
     "@noble/hashes": "^2.4.0",

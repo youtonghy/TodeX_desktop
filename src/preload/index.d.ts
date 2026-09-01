@@ -20,7 +20,7 @@ export type TodeXDesktopApi = {
   };
   git: {
     scan: (workspacePath: string) => Promise<GitRepositorySummary[]>;
-    run: (workspacePath: string, action: 'commit' | 'commit-push' | 'push', message?: string) => Promise<{ output: string }>;
+    run: (workspacePath: string, action: 'commit' | 'commit-push' | 'push' | 'initial', message?: string, includeUnstaged?: boolean) => Promise<{ output: string }>;
   };
   theme: {
     shouldUseDark: () => Promise<boolean>;
@@ -35,6 +35,7 @@ export type GitRepositorySummary = {
   files: Array<{ path: string; status: string }>;
   additions: number;
   deletions: number;
+  initialEligible?: boolean;
   error?: string;
 };
 

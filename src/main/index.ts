@@ -159,6 +159,7 @@ async function gitSummary(repoPath: string) {
       additions += text ? text.split(/\r?\n/).length - (text.endsWith('\n') ? 1 : 0) : 0;
     } catch { /* binary or unreadable files have no line count */ }
   }
+  const initialEligible = !(await gitText(root, ['rev-parse', '--verify', 'HEAD']).catch(() => ''));
   return {
     path: root,
     name: root.split(/[\\/]/).pop() || root,
@@ -166,6 +167,7 @@ async function gitSummary(repoPath: string) {
     files: status ? status.split('\n').map((line) => ({ status: line.slice(0, 2), path: line.slice(3) })) : [],
     additions,
     deletions,
+    initialEligible,
   };
 }
 
@@ -254,19 +256,27 @@ app.whenReady().then(() => {
 
   ipcMain.handle('git:scan', async (_event, workspacePath: string) => {
     const repos = await findGitRepositories(workspacePath);
-    return Promise.all(repos.map(async (repoPath) => {
+    const summaries = await Promise.all(repos.map(async (repoPath) => {
       try { return await gitSummary(repoPath); }
-      catch (error) { return { path: repoPath, name: repoPath.split(/[\\/]/).pop() || repoPath, branch: '未知', files: [], additions: 0, deletions: 0, error: error instanceof Error ? error.message : 'Git 读取失败' }; }
+      catch (error) { return { path: repoPath, name: repoPath.split(/[\\/]/).pop() || repoPath, branch: '未知', files: [], additions: 0, deletions: 0, initialEligible: false, error: error instanceof Error ? error.message : 'Git 读取失败' }; }
     }));
+    if (!summaries.some((repo) => repo.path === workspacePath)) summaries.unshift({ path: workspacePath, name: workspacePath.split(/[\\/]/).pop() || workspacePath, branch: '未初始化', files: [], additions: 0, deletions: 0, initialEligible: true });
+    return summaries;
   });
 
-  ipcMain.handle('git:run', async (_event, workspacePath: string, action: 'commit' | 'commit-push' | 'push', message?: string) => {
-    const repos = await findGitRepositories(workspacePath);
+  ipcMain.handle('git:run', async (_event, workspacePath: string, action: 'commit' | 'commit-push' | 'push' | 'initial', message?: string, includeUnstaged = true) => {
     const outputs: string[] = [];
-    for (const repo of repos) {
-      if (action !== 'push') {
-        await gitText(repo, ['add', '-A']);
-        await gitText(repo, ['commit', '-m', message?.trim() || 'Update from TodeX']);
+    const repositoryRoot = await gitText(workspacePath, ['rev-parse', '--show-toplevel']).catch(() => '');
+    const targets = [repositoryRoot || workspacePath];
+    for (const repo of targets) {
+      if (action === 'initial') {
+        await gitText(repo, ['init']);
+        if (includeUnstaged) await gitText(repo, ['add', '-A']);
+        await gitText(repo, ['commit', '-m', message?.trim() || 'Initial commit']);
+      } else if (action !== 'push') {
+        if (includeUnstaged) await gitText(repo, ['add', '-A']);
+        const summary = await gitSummary(repo);
+        await gitText(repo, ['commit', '-m', message?.trim() || `Update ${summary.files.length} file${summary.files.length === 1 ? '' : 's'} in ${summary.name}`]);
       }
       if (action === 'push' || action === 'commit-push') outputs.push(await gitText(repo, ['push']));
     }

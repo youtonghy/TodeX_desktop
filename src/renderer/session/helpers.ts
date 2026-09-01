@@ -15,7 +15,7 @@ import type {
   ServerEvent,
   WorkspaceRecord,
 } from '@todex/protocol/todex';
-import type { ConversationEvent, ConversationManifest, ProviderKind } from '@todex/protocol/v2';
+import type { ConversationEvent, ConversationManifest, ProviderDescriptor, ProviderKind } from '@todex/protocol/v2';
 import { providerDisplayName } from '@todex/protocol/v2';
 import type { ConnectionFailureCode } from '@todex/protocol/connectionError';
 import {
@@ -840,6 +840,49 @@ export type TimelineEntry = {
   requestId?: string;
 };
 
+export function workspaceDisplayName(workspace: Pick<WorkspaceRecord, 'name' | 'path'>): string {
+  const name = workspace.name.trim();
+  if (name && !/[\\/]/.test(name)) {
+    return name;
+  }
+  const normalizedPath = workspace.path.replace(/[\\/]+$/, '');
+  return normalizedPath.split(/[\\/]/).pop() || name || workspace.path;
+}
+
+export function conversationDisplayTitle(
+  conversation: Pick<ConversationRecord, 'id' | 'title' | 'preview' | 'provider'>,
+  timeline: TimelineEntry[],
+): string {
+  const title = conversation.title.trim();
+  const genericTitles = new Set([
+    '',
+    '默认对话',
+    '新对话',
+    'codex',
+    'codex cli',
+    'pi',
+    'claude',
+    'claude code',
+    conversation.provider ? providerDisplayName(conversation.provider).toLowerCase() : '',
+  ]);
+  if (!genericTitles.has(title.toLowerCase())) {
+    return title;
+  }
+
+  const summarize = (value: string) => {
+    const compact = value.replace(/\s+/g, ' ').trim();
+    return compact.length > 32 ? `${compact.slice(0, 32)}…` : compact;
+  };
+  const preview = summarize(conversation.preview || '');
+  if (preview && preview !== '暂无预览' && preview !== '还没有消息') {
+    return preview;
+  }
+  const firstPrompt = [...timeline]
+    .filter((entry) => entry.conversationId === conversation.id && entry.kind === 'outgoing' && entry.subtitle.trim())
+    .sort((left, right) => left.at - right.at)[0];
+  return summarize(firstPrompt?.subtitle || '') || title || '未命名对话';
+}
+
 export type ConversationContextUsage = {
   usedTokens: number;
   contextWindow?: number;
@@ -1651,6 +1694,53 @@ export function isV2Conversation(conversation: ConversationRecord | null | undef
   return Boolean(conversation?.v2ConversationId || (conversation?.provider && conversation.provider !== ''));
 }
 
+export function resolveCreateConversationAgent(input: {
+  requestedProvider?: string;
+  requestedProfile?: string;
+  providers: ProviderDescriptor[];
+  conversations: ConversationRecord[];
+  activeConversationId: string;
+  workspaceId: string;
+}): { provider: ProviderKind; providerProfile?: string } | null {
+  const available = input.providers.filter((item) => item.available);
+  const match = (provider?: string, profile?: string) => {
+    if (!provider) {
+      return null;
+    }
+    const descriptor = available.find((item) => item.id === provider);
+    if (!descriptor) {
+      return null;
+    }
+    const nextProfile = profile && descriptor.profiles.includes(profile)
+      ? profile
+      : descriptor.profiles[0];
+    return { provider: descriptor.id, providerProfile: nextProfile };
+  };
+
+  if (input.requestedProvider) {
+    return match(input.requestedProvider, input.requestedProfile);
+  }
+
+  const candidates = [
+    input.conversations.find((item) => item.id === input.activeConversationId),
+    ...input.conversations
+      .filter((item) => item.workspaceId === input.workspaceId && !item.archived)
+      .sort((left, right) => right.updatedAt - left.updatedAt),
+    ...input.conversations
+      .filter((item) => !item.archived)
+      .sort((left, right) => right.updatedAt - left.updatedAt),
+  ];
+  for (const conversation of candidates) {
+    const found = match(conversation?.provider, conversation?.providerProfile);
+    if (found) {
+      return found;
+    }
+  }
+
+  const first = available[0];
+  return first ? match(first.id) : null;
+}
+
 export function canSwitchConversationAgent(
   conversation: ConversationRecord | null | undefined,
   options: {
@@ -1664,11 +1754,12 @@ export function canSwitchConversationAgent(
   if (options.thinking) {
     return false;
   }
-  if ((conversation.lastSequence ?? 0) > 0) {
-    return false;
-  }
+  // lastSequence also advances for subscribe/metadata events, so it cannot
+  // mean "the user has started this chat". Lock only after a real message.
   return !(options.timeline ?? []).some(
-    (entry) => entry.conversationId === conversation.id && entry.kind === 'outgoing',
+    (entry) =>
+      entry.conversationId === conversation.id
+      && (entry.kind === 'outgoing' || entry.kind === 'incoming'),
   );
 }
 

@@ -1,21 +1,23 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Button, Chip, Label, ListBox, Modal, Select, Toast, toast, Checkbox, Input, TextField } from '@heroui/react';
+import { Button, Chip, Label, ListBox, Modal, Select, Toast, toast, Checkbox, TextArea, TextField } from '@heroui/react';
 import { AppLayout, Navbar } from '@heroui-pro/react';
-import { RiAddLine, RiGithubLine, RiLayoutLeftLine } from '@remixicon/react';
+import { RiAddLine, RiGitBranchLine, RiGitCommitLine, RiGithubLine, RiLayoutLeftLine, RiUploadCloud2Line } from '@remixicon/react';
 import type { GitRepositorySummary } from '../preload';
 import { useTodeXSession, type TodeXSession } from './session/useTodeXSession';
 import { DesktopAlertHost } from './components/DesktopAlertHost';
 import { AppSidebar } from './components/AppSidebar';
 import { ChatPanel } from './screens/ChatPanel';
 import { SettingsPanel } from './screens/SettingsPanel';
+import { ProviderIcon } from './components/ProviderIcon';
 import { AsidePanel } from './screens/AsidePanel';
 import { CapabilitiesPanel } from './screens/CapabilitiesPanel';
 import { WorkbenchPanel } from './screens/WorkbenchPanel';
 import { UsagePanel } from './screens/UsagePanel';
 import { AboutPanel } from './screens/AboutPanel';
+import { KanbanPanel } from './screens/KanbanPanel';
 import { Field } from './components/Field';
 import { connectionStateLabel, fetchWorkspaceDirectorySnapshot, isV2Conversation } from './session/helpers';
-import { providerDisplayName, type ProviderKind } from '@todex/protocol/v2';
+import { providerDisplayName } from '@todex/protocol/v2';
 import { isWorkbenchTab, panelFromRoute, type DesktopPanel, type OpenPanelOptions, type WorkbenchTab } from './lib/panels';
 
 const LAYOUT_AUTO_SAVE_ID = 'todex-desktop-app-layout';
@@ -57,7 +59,6 @@ export function App() {
   const [asideOpen, setAsideOpen] = useState(() => readLayoutOpen().asideOpen);
   const [sidebarOpen, setSidebarOpen] = useState(() => readLayoutOpen().sidebarOpen);
   const [createOpen, setCreateOpen] = useState(false);
-  const [createConversationOpen, setCreateConversationOpen] = useState(false);
   const [capabilitiesOpen, setCapabilitiesOpen] = useState(false);
   const [gitOpen, setGitOpen] = useState(false);
 
@@ -72,10 +73,6 @@ export function App() {
   }, []);
 
   const openPanel = useCallback((name: string, params?: OpenPanelOptions) => {
-    if (name === 'CreateConversation') {
-      setCreateConversationOpen(true);
-      return;
-    }
     const next = panelFromRoute(name);
     if (!next) {
       return;
@@ -112,7 +109,7 @@ export function App() {
   const usageOpen = panel === 'usage';
   const aboutOpen = panel === 'about';
   const modalPanel = settingsOpen || usageOpen || aboutOpen;
-  const overlayPanel = panel && !modalPanel && !isWorkbenchTab(panel) ? panel : null;
+  const overlayPanel = panel && panel !== 'kanban' && !modalPanel && !isWorkbenchTab(panel) ? panel : null;
 
   return (
     <div className="bg-background text-foreground h-full">
@@ -155,14 +152,17 @@ export function App() {
               session={session}
               onCreateWorkspace={() => setCreateOpen(true)}
               onCreateConversation={() => {
-                if (session.activeWorkspaceId) {
-                  setCreateConversationOpen(true);
+                if (!session.activeWorkspaceId) {
+                  return;
                 }
+                session.createConversation(session.activeWorkspaceId);
+                setPanel(null);
               }}
               onOpenSettings={() => setPanel('settings')}
               onOpenCapabilities={() => setCapabilitiesOpen(true)}
               onOpenUsage={() => setPanel('usage')}
               onOpenAbout={() => setPanel('about')}
+              onOpenKanban={() => { setPanel('kanban'); persistAsideOpen(false); }}
             />
           }
           navbar={
@@ -172,10 +172,11 @@ export function App() {
                   <RiLayoutLeftLine className="size-4" />
                 </Button>
                 <span className="truncate text-sm font-medium">
-                  {session.activeConversation?.title ?? '对话'}
+                  {panel === 'kanban' ? '今日看板' : session.activeConversation?.title ?? '对话'}
                 </span>
                 {session.activeConversation ? (
                   <Chip size="sm" variant="soft" className="whitespace-nowrap">
+                    <ProviderIcon provider={isV2Conversation(session.activeConversation) ? session.activeConversation.provider : 'codex'} />
                     {isV2Conversation(session.activeConversation)
                       ? providerDisplayName(session.activeConversation.provider || '', 'Agent')
                       : '历史 Codex'}
@@ -192,7 +193,9 @@ export function App() {
             </Navbar>
           }
         >
-          <ChatPanel session={session} />
+          {panel === 'kanban' ? (
+            <KanbanPanel session={session} onOpenConversation={() => setPanel(null)} />
+          ) : <ChatPanel session={session} />}
         </AppLayout>
       ) : (
         <div className="flex h-full flex-col items-center justify-center gap-3">
@@ -245,21 +248,18 @@ export function App() {
       </Modal>
       <GitHubModal session={session} isOpen={gitOpen} onOpenChange={setGitOpen} />
       <CreateWorkspaceModal session={session} isOpen={createOpen} onOpenChange={setCreateOpen} />
-      <CreateConversationModal
-        session={session}
-        isOpen={createConversationOpen}
-        onOpenChange={setCreateConversationOpen}
-      />
     </div>
   );
 }
 
 function GitHubModal({ session, isOpen, onOpenChange }: { session: TodeXSession; isOpen: boolean; onOpenChange: (open: boolean) => void }) {
   const [repos, setRepos] = useState<GitRepositorySummary[]>([]);
-  const [selected, setSelected] = useState<string[]>([]);
-  const [message, setMessage] = useState('Update from TodeX');
+  const [activeRepoPath, setActiveRepoPath] = useState('');
+  const [message, setMessage] = useState('');
+  const [includeUnstaged, setIncludeUnstaged] = useState(true);
   const [loading, setLoading] = useState(false);
   const workspacePath = session.activeWorkspace?.path || session.settings.defaultWorkspacePath;
+  const activeRepo = repos.find((repo) => repo.path === activeRepoPath) ?? repos[0];
 
   const refresh = useCallback(async () => {
     if (!workspacePath) return;
@@ -267,7 +267,7 @@ function GitHubModal({ session, isOpen, onOpenChange }: { session: TodeXSession;
     try {
       const next = await window.todexDesktop.git.scan(workspacePath);
       setRepos(next);
-      setSelected(next.filter((repo) => repo.files.length > 0).map((repo) => repo.path));
+      setActiveRepoPath((current) => next.some((repo) => repo.path === current) ? current : next.find((repo) => repo.files.length > 0)?.path ?? next[0]?.path ?? '');
     } catch (error) {
       toast.danger(error instanceof Error ? error.message : 'Git 状态读取失败');
     } finally { setLoading(false); }
@@ -275,35 +275,45 @@ function GitHubModal({ session, isOpen, onOpenChange }: { session: TodeXSession;
 
   useEffect(() => { if (isOpen) void refresh(); }, [isOpen, refresh]);
 
-  const run = async (action: 'commit' | 'commit-push' | 'push') => {
-    if (!selected.length) return;
+  const run = async (action: 'commit' | 'commit-push' | 'push' | 'initial') => {
+    if (!activeRepo) return;
     setLoading(true);
     try {
-      for (const path of selected) await window.todexDesktop.git.run(path, action, message);
-      toast.success(action === 'push' ? '已推送' : action === 'commit-push' ? '已提交并推送' : '已创建提交');
+      await window.todexDesktop.git.run(activeRepo.path, action, message, includeUnstaged);
+      toast.success(action === 'initial' ? '已初始化并创建提交' : action === 'push' ? '已推送' : action === 'commit-push' ? '已提交并推送' : '已创建提交');
       await refresh();
     } catch (error) { toast.danger(error instanceof Error ? error.message : 'Git 操作失败'); }
     finally { setLoading(false); }
   };
 
   return <Modal isOpen={isOpen} onOpenChange={onOpenChange}>
-    <Modal.Backdrop><Modal.Container><Modal.Dialog className="max-h-[90vh] sm:max-w-2xl">
-      <Modal.CloseTrigger /><Modal.Header><Modal.Heading className="flex items-center gap-2"><RiGithubLine className="size-5" /> GitHub 操作</Modal.Heading></Modal.Header>
-      <Modal.Body className="max-h-[72vh] overflow-y-auto">
-        <div className="mb-4 flex items-end gap-3"><TextField className="min-w-0 flex-1" value={message} onChange={setMessage}><Label>提交信息</Label><Input /></TextField><Button size="sm" variant="secondary" onPress={() => void refresh()} isDisabled={loading}>刷新</Button></div>
-        {!repos.length && !loading ? <p className="text-muted text-sm">当前路径及其子目录没有 Git 仓库。</p> : null}
-        <div className="space-y-2">
-          {repos.map((repo) => <div key={repo.path} className="border-separator bg-surface-secondary rounded-lg border p-3">
-            <div className="flex items-start gap-3"><Checkbox isSelected={selected.includes(repo.path)} onChange={(checked) => setSelected((current) => checked ? [...new Set([...current, repo.path])] : current.filter((path) => path !== repo.path))} aria-label={`选择 ${repo.name}`} isDisabled={!repo.files.length} />
-              <div className="min-w-0 flex-1"><p className="truncate text-sm font-medium">{repo.name}</p><p className="text-muted truncate text-xs">{repo.path} · {repo.branch}</p>
-                {repo.error ? <p className="text-danger mt-1 text-xs">{repo.error}</p> : <p className="text-muted mt-1 text-xs">{repo.files.length} 个文件 · +{repo.additions} / -{repo.deletions}</p>}
-                {repo.files.length ? <p className="text-muted mt-1 truncate text-xs">{repo.files.slice(0, 4).map((file) => `${file.status} ${file.path}`).join(' · ')}{repo.files.length > 4 ? ' …' : ''}</p> : null}
-              </div>
-            </div>
-          </div>)}
+    <Modal.Backdrop><Modal.Container><Modal.Dialog className="sm:max-w-md">
+      <Modal.CloseTrigger />
+      <Modal.Header>
+        <Modal.Icon className="bg-default text-foreground"><RiGithubLine className="size-5" /></Modal.Icon>
+        {repos.length > 1 ? <><Modal.Heading className="sr-only">GitHub 操作</Modal.Heading><Select className="w-full" aria-label="选择仓库" selectedKey={activeRepo?.path} onSelectionChange={(key) => { if (typeof key === 'string') setActiveRepoPath(key); }}>
+          <Select.Trigger className="min-w-0"><RiGitBranchLine className="size-4" /><Select.Value /><Select.Indicator /></Select.Trigger>
+          <Select.Popover><ListBox>{repos.map((repo) => <ListBox.Item key={repo.path} id={repo.path} textValue={`${repo.name} ${repo.branch}`}>{repo.name} · {repo.branch}</ListBox.Item>)}</ListBox></Select.Popover>
+        </Select></> : <Modal.Heading className="flex min-w-0 items-center gap-2"><RiGitBranchLine className="size-4" /><span className="truncate">{activeRepo?.branch || '未初始化'}</span></Modal.Heading>}
+      </Modal.Header>
+      <Modal.Body>
+        <TextField value={message} onChange={setMessage} aria-label="提交信息">
+          <TextArea className="min-h-28 resize-none" placeholder="提交信息（留空将自动生成）..." />
+        </TextField>
+        {activeRepo?.error ? <p className="text-danger text-xs">{activeRepo.error}</p> : null}
+        <div className="border-separator flex items-center gap-3 border-b py-3">
+          <Checkbox isSelected={includeUnstaged} onChange={setIncludeUnstaged} aria-label="包含未暂存的更改" />
+          <span className="text-sm">包含未暂存的更改 <span className="text-muted">· {activeRepo?.files.length ?? 0} 个文件</span></span>
+          <span className="ml-auto font-mono text-sm tabular-nums"><span className="text-success">+{activeRepo?.additions ?? 0}</span> <span className="text-danger">-{activeRepo?.deletions ?? 0}</span></span>
+        </div>
+        <div className="pt-2">
+          <Button variant="secondary" className="h-12 w-full justify-start gap-3 text-base" onPress={() => void run(activeRepo?.initialEligible ? 'initial' : 'commit')} isDisabled={loading || !activeRepo}>
+            <RiGitCommitLine className="size-5" /><span>{activeRepo?.initialEligible ? '初始化仓库' : '提交'}</span>
+          </Button>
+          <Button variant="ghost" className="h-12 w-full justify-start gap-3 text-base" onPress={() => void run('commit-push')} isDisabled={loading || !activeRepo || Boolean(activeRepo.initialEligible)}><RiUploadCloud2Line className="size-5" />提交并推送</Button>
+          <Button variant="ghost" className="h-12 w-full justify-start gap-3 text-base" onPress={() => void run('push')} isDisabled={loading || !activeRepo || Boolean(activeRepo.initialEligible)}><RiUploadCloud2Line className="size-5" />推送</Button>
         </div>
       </Modal.Body>
-      <Modal.Footer className="flex-wrap justify-end gap-2"><Button variant="secondary" onPress={() => void run('push')} isDisabled={loading || !selected.length}>单推送</Button><Button variant="secondary" onPress={() => void run('commit')} isDisabled={loading || !selected.length}>创建提交</Button><Button onPress={() => void run('commit-push')} isDisabled={loading || !selected.length}>提交并推送</Button></Modal.Footer>
     </Modal.Dialog></Modal.Container></Modal.Backdrop>
   </Modal>;
 }
@@ -416,128 +426,6 @@ function CreateWorkspaceModal({
                   }
                   session.setActiveBackendConnectionId(backendId);
                   session.createWorkspace(name || validatedPath, validatedPath);
-                  onOpenChange(false);
-                }}
-              >
-                <RiAddLine className="size-4" />
-                创建
-              </Button>
-            </Modal.Footer>
-          </Modal.Dialog>
-        </Modal.Container>
-      </Modal.Backdrop>
-    </Modal>
-  );
-}
-
-function CreateConversationModal({
-  session,
-  isOpen,
-  onOpenChange,
-}: {
-  session: TodeXSession;
-  isOpen: boolean;
-  onOpenChange: (open: boolean) => void;
-}) {
-  const [title, setTitle] = useState('');
-  const [provider, setProvider] = useState<ProviderKind | ''>('');
-  const [profile, setProfile] = useState('');
-  const [backendId, setBackendId] = useState(session.activeBackendConnectionId);
-
-  useEffect(() => {
-    if (!isOpen) {
-      return;
-    }
-    const firstAvailable = session.v2Providers.find((item) => item.available);
-    const nextProvider = firstAvailable?.id ?? '';
-    setTitle('');
-    setBackendId(session.activeBackendConnectionId);
-    setProvider(nextProvider);
-    setProfile(firstAvailable?.profiles[0] ?? '');
-  }, [isOpen, session.activeBackendConnectionId, session.v2Providers]);
-
-  const selected = session.v2Providers.find((item) => item.id === provider) ?? null;
-  const needsProfile = Boolean(selected && (selected.id === 'acp' || selected.profiles.length > 1));
-
-  return (
-    <Modal isOpen={isOpen} onOpenChange={onOpenChange}>
-      <Modal.Backdrop>
-        <Modal.Container>
-          <Modal.Dialog className="sm:max-w-lg">
-            <Modal.CloseTrigger />
-            <Modal.Header>
-              <Modal.Heading>新建对话</Modal.Heading>
-            </Modal.Header>
-            <Modal.Body className="flex flex-col gap-4">
-              <p className="text-muted text-sm">
-                先选 Agent 再创建。任务开始前可在输入框旁改 Agent；发出第一条消息后锁定。
-              </p>
-              {!session.activeWorkspaceId ? (
-                <p className="text-danger text-sm">请先选择一个工作区。</p>
-              ) : null}
-              <Select selectedKey={backendId} onSelectionChange={(key) => {
-                if (typeof key !== 'string') return;
-                const backend = session.backendConnections.find((item) => item.id === key);
-                if (!backend) return;
-                setBackendId(key);
-                setProvider('');
-                setProfile('');
-                session.setActiveBackendConnectionId(key);
-                session.setSettings((current) => ({ ...current, serverUrl: backend.serverUrl, authToken: backend.authToken, tenantId: backend.tenantId, encryptionProtocol: backend.encryptionProtocol, encryptionPublicKey: backend.encryptionPublicKey }));
-              }}>
-                <Label>连接后端</Label><Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
-                <Select.Popover><ListBox>{session.backendConnections.map((backend) => <ListBox.Item key={backend.id} id={backend.id} textValue={backend.name}>{backend.name} · {backend.serverUrl}</ListBox.Item>)}</ListBox></Select.Popover>
-              </Select>
-              <div className="flex flex-wrap gap-2">
-                {session.v2Providers.map((item) => (
-                  <Button
-                    key={item.id}
-                    size="sm"
-                    variant={provider === item.id ? 'primary' : 'tertiary'}
-                    isDisabled={!item.available}
-                    onPress={() => {
-                      setProvider(item.id);
-                      setProfile(item.profiles[0] ?? '');
-                    }}
-                  >
-                    {providerDisplayName(item.id, item.displayName)}
-                    {item.available ? '' : ` · ${item.unavailableReason || '不可用'}`}
-                  </Button>
-                ))}
-              </div>
-              {selected && !selected.available ? (
-                <p className="text-danger text-sm">{selected.unavailableReason || '该 Agent 当前不可用'}</p>
-              ) : null}
-              {needsProfile ? (
-                <div className="flex flex-wrap gap-2">
-                  {selected?.profiles.map((item) => (
-                    <Button
-                      key={item}
-                      size="sm"
-                      variant={profile === item ? 'primary' : 'tertiary'}
-                      onPress={() => setProfile(item)}
-                    >
-                      {item}
-                    </Button>
-                  ))}
-                </div>
-              ) : null}
-              <Field label="标题（可选）" value={title} onChange={setTitle} />
-            </Modal.Body>
-            <Modal.Footer>
-              <Button slot="close" variant="tertiary">取消</Button>
-              <Button
-                isDisabled={!session.activeWorkspaceId || !selected?.available || (needsProfile && !profile)}
-                onPress={() => {
-                  if (!session.activeWorkspaceId || !selected?.available) {
-                    return;
-                  }
-                  session.createConversation(session.activeWorkspaceId, {
-                    provider: selected.id,
-                    providerProfile: needsProfile ? profile || undefined : selected.profiles[0],
-                    title: title.trim() || undefined,
-                    backendConnectionId: backendId,
-                  });
                   onOpenChange(false);
                 }}
               >

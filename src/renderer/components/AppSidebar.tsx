@@ -1,10 +1,11 @@
-import { RiAddLine, RiBarChartBoxLine, RiCodeBoxLine, RiFolder3Line, RiInformationLine, RiPuzzle2Line, RiRobot2Line, RiSettings3Line, RiTerminalBoxLine } from '@remixicon/react';
-import { Badge, Button, Dropdown, Label } from '@heroui/react';
+import { RiAddLine, RiBarChartBoxLine, RiFolder3Line, RiInformationLine, RiKanbanView2, RiPuzzle2Line, RiSettings3Line } from '@remixicon/react';
+import { Badge, Button, Chip, Dropdown, Label } from '@heroui/react';
 import { useEffect, useState } from 'react';
 import type { MouseEvent } from 'react';
 import { ChatListView, Sidebar } from '@heroui-pro/react';
+import { ProviderIcon } from './ProviderIcon';
 import type { TodeXSession } from '../session/useTodeXSession';
-import { isConversationHighlighted } from '../session/helpers';
+import { conversationDisplayTitle, isConversationHighlighted, workspaceDisplayName } from '../session/helpers';
 
 type Props = {
   session: TodeXSession;
@@ -14,18 +15,28 @@ type Props = {
   onOpenCapabilities: () => void;
   onOpenUsage: () => void;
   onOpenAbout: () => void;
+  onOpenKanban: () => void;
 };
 
 type ContextMenu = { kind: 'workspace' | 'conversation'; id: string; x: number; y: number } | null;
 
-function providerIcon(provider?: string) {
-  const normalized = provider?.toLowerCase() || '';
-  if (normalized.includes('pi')) return RiTerminalBoxLine;
-  if (normalized.includes('claude')) return RiRobot2Line;
-  return RiCodeBoxLine;
+function conversationStatus(session: TodeXSession, conversation: TodeXSession['conversations'][number]): { color: string; label: string } | null {
+  const latest = session.timeline
+    .filter((entry) => entry.conversationId === conversation.id)
+    .sort((left, right) => right.at - left.at)[0];
+  if (isConversationHighlighted(conversation, session.activeConversationId, session.turnIds)) {
+    return { color: 'bg-green-500', label: '正在工作' };
+  }
+  if (/error|failed|异常|失败/i.test(conversation.nativeStatus || '') || /error|failed|异常|失败/i.test(latest?.title || '')) {
+    return { color: 'bg-amber-500', label: '遇到问题' };
+  }
+  if (conversation.id !== session.activeConversationId && latest?.kind === 'incoming') {
+    return { color: 'bg-blue-500', label: '有未读回复' };
+  }
+  return null;
 }
 
-export function AppSidebar({ session, onCreateWorkspace, onCreateConversation, onOpenSettings, onOpenCapabilities, onOpenUsage, onOpenAbout }: Props) {
+export function AppSidebar({ session, onCreateWorkspace, onCreateConversation, onOpenSettings, onOpenCapabilities, onOpenUsage, onOpenAbout, onOpenKanban }: Props) {
   const workspaceConversations = session.conversations.filter(
     (conversation) => conversation.workspaceId === session.activeWorkspaceId && !conversation.archived,
   );
@@ -83,7 +94,10 @@ export function AppSidebar({ session, onCreateWorkspace, onCreateConversation, o
               <div className="bg-accent size-8 rounded-full" aria-hidden="true" />
               <Badge color={healthColor} placement="bottom-right" size="sm" aria-label={session.connectionState === 'open' ? '后端已连接' : '后端未连接'} />
             </Badge.Anchor>
-            <span className="text-foreground min-w-0 flex-1 truncate text-sm font-semibold" data-sidebar="label">TodeX</span>
+            <span className="flex min-w-0 flex-1 items-center gap-1.5" data-sidebar="label">
+              <span className="text-foreground truncate text-sm font-semibold">TodeX</span>
+              <Chip size="sm" variant="soft">V2</Chip>
+            </span>
             <RiSettings3Line className="size-4 shrink-0" />
           </Dropdown.Trigger>
           <Dropdown.Popover>
@@ -109,6 +123,10 @@ export function AppSidebar({ session, onCreateWorkspace, onCreateConversation, o
           <RiAddLine className="size-4" />
           <span data-sidebar="label">增加对话</span>
         </Button>
+        <Button className="mt-1 w-full justify-start" variant="ghost" onPress={onOpenKanban}>
+          <RiKanbanView2 className="size-4" />
+          <span data-sidebar="label">今日看板</span>
+        </Button>
       </Sidebar.Header>
       <Sidebar.Content>
         <Sidebar.Group>
@@ -128,11 +146,11 @@ export function AppSidebar({ session, onCreateWorkspace, onCreateConversation, o
               onAction={(key) => session.selectWorkspace(String(key))}
             >
               {(workspace) => (
-              <ChatListView.Item key={workspace.id} id={workspace.id} textValue={workspace.name} onContextMenu={(event) => openContextMenu(event, 'workspace', workspace.id)}>
+              <ChatListView.Item key={workspace.id} id={workspace.id} textValue={workspaceDisplayName(workspace)} onContextMenu={(event) => openContextMenu(event, 'workspace', workspace.id)}>
                 <ChatListView.ItemContent>
                   <ChatListView.Icon><RiFolder3Line className="size-4" /></ChatListView.Icon>
                   <ChatListView.Text>
-                    <ChatListView.Title>{workspace.name}</ChatListView.Title>
+                    <ChatListView.Title>{workspaceDisplayName(workspace)}</ChatListView.Title>
                     <ChatListView.Preview>{workspace.path}</ChatListView.Preview>
                   </ChatListView.Text>
                 </ChatListView.ItemContent>
@@ -163,11 +181,16 @@ export function AppSidebar({ session, onCreateWorkspace, onCreateConversation, o
               }}
             >
             {(conversation) => (
-              <ChatListView.Item key={conversation.id} id={conversation.id} textValue={conversation.title} onContextMenu={(event) => openContextMenu(event, 'conversation', conversation.id)}>
+              <ChatListView.Item key={conversation.id} id={conversation.id} textValue={conversationDisplayTitle(conversation, session.timeline)} onContextMenu={(event) => openContextMenu(event, 'conversation', conversation.id)}>
                 <ChatListView.ItemContent>
-                  <ChatListView.Icon>{(() => { const Icon = providerIcon(conversation.provider); return <Icon className="size-4" />; })()}</ChatListView.Icon>
+                  <ChatListView.Icon>
+                    {(() => {
+                      const status = conversationStatus(session, conversation);
+                      return <span className="relative flex size-5 items-center justify-center"><ProviderIcon className="size-4" provider={conversation.provider} /><span className={`absolute -bottom-0.5 -right-0.5 size-2 rounded-full ring-2 ring-surface ${status?.color || 'hidden'}`} aria-label={status?.label} /></span>;
+                    })()}
+                  </ChatListView.Icon>
                   <ChatListView.Text>
-                    <ChatListView.Title>{conversation.title}</ChatListView.Title>
+                    <ChatListView.Title>{conversationDisplayTitle(conversation, session.timeline)}</ChatListView.Title>
                     <ChatListView.Preview>{conversation.preview || '还没有消息'}</ChatListView.Preview>
                   </ChatListView.Text>
                   <ChatListView.Meta>{isConversationHighlighted(conversation, session.activeConversationId, session.turnIds) ? '运行中' : ''}</ChatListView.Meta>

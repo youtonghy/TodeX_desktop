@@ -255,6 +255,7 @@ import {
   mergeManifestConversations,
   isV2Conversation,
   canSwitchConversationAgent,
+  resolveCreateConversationAgent,
   isTurnTerminalEvent,
   timelineEntryFromNativeHistoryEntry,
   isVisibleConversationEntry,
@@ -299,6 +300,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const activeConversationRef = useRef('');
   const workspacesRef = useRef<WorkspaceRecord[]>([]);
   const conversationsRef = useRef<ConversationRecord[]>([]);
+  const v2ProvidersRef = useRef<ProviderDescriptor[]>([]);
   const timelineRef = useRef<TimelineEntry[]>([]);
   const turnIdsRef = useRef<Record<string, string>>({});
   const thinkingConversationsRef = useRef<Record<string, boolean>>({});
@@ -804,6 +806,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   useEffect(() => {
     conversationsRef.current = conversations;
   }, [conversations]);
+
+  useEffect(() => {
+    v2ProvidersRef.current = v2Providers;
+  }, [v2Providers]);
 
   useEffect(() => {
     turnIdsRef.current = turnIds;
@@ -4365,25 +4371,36 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
 
   const createConversation = useCallback((
     workspaceId: string,
-    options?: { provider: ProviderKind; providerProfile?: string; title?: string; backendConnectionId?: string },
+    options?: { provider?: ProviderKind; providerProfile?: string; title?: string; backendConnectionId?: string },
   ) => {
     const workspace = workspacesRef.current.find((item) => item.id === workspaceId);
     if (!workspace) {
       desktopAlert('未找到工作区', '请返回后重新选择工作区。');
       return null;
     }
-    if (!options?.provider) {
-      desktopAlert('请选择 Agent', '新建对话时必须选择一个可用的 Agent。');
+    const agent = resolveCreateConversationAgent({
+      requestedProvider: options?.provider,
+      requestedProfile: options?.providerProfile,
+      providers: v2ProvidersRef.current,
+      conversations: conversationsRef.current,
+      activeConversationId: activeConversationRef.current,
+      workspaceId: workspace.id,
+    });
+    if (!agent) {
+      desktopAlert(
+        options?.provider ? '该 Agent 当前不可用' : '没有可用的 Agent',
+        options?.provider ? '请选择其他可用的 Agent。' : '请先连接后端，并确认至少有一个 Agent 可用。',
+      );
       return null;
     }
 
     const previousActiveConversationId = activeConversationRef.current;
-    const backendProfile = backendConnections.find((item) => item.id === options.backendConnectionId) ?? backendConnections.find((item) => item.id === workspace.backendConnectionId);
+    const backendProfile = backendConnections.find((item) => item.id === options?.backendConnectionId) ?? backendConnections.find((item) => item.id === workspace.backendConnectionId);
     const placeholder = {
       ...createDefaultConversation(workspace),
-      title: options.title?.trim() || '新对话',
-      provider: options.provider,
-      providerProfile: options.providerProfile,
+      title: options?.title?.trim() || '新对话',
+      provider: agent.provider,
+      providerProfile: agent.providerProfile,
       backendConnectionId: backendProfile?.id ?? workspace.backendConnectionId ?? null,
     };
     setConversations((current) => [placeholder, ...current]);
@@ -4391,7 +4408,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     setActiveConversationId(placeholder.id);
     appendTimeline(makeSystemEntry(
       '正在创建对话',
-      `Agent：${options.provider}`,
+      `Agent：${agent.provider}`,
       workspace.id,
       placeholder.id,
     ));
@@ -4400,10 +4417,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       try {
         const api = new V2ApiClient({ serverUrl: backendProfile?.serverUrl ?? settings.serverUrl, authToken: backendProfile?.authToken ?? settings.authToken });
         const created = await api.createConversation({
-          provider: options.provider,
+          provider: agent.provider,
           workspace: workspace.path,
-          title: options.title?.trim() || undefined,
-          providerProfile: options.providerProfile,
+          title: options?.title?.trim() || undefined,
+          providerProfile: agent.providerProfile,
         });
         const record = { ...conversationFromManifest(created, workspace.id), backendConnectionId: backendProfile?.id ?? workspace.backendConnectionId ?? null };
         rekeyConversationComposer(placeholder.id, record.id);
@@ -4470,8 +4487,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       return;
     }
     rekeyConversationComposer(conversation.id, created.id);
+    setConversations((current) => current.filter((item) => item.id !== conversation.id));
     if (isV2Conversation(conversation)) {
-      setConversations((current) => current.filter((item) => item.id !== conversation.id));
       setV2Conversations((current) => current.filter(
         (item) => item.id !== conversation.v2ConversationId && item.id !== conversation.id,
       ));
@@ -5391,7 +5408,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       }
 
       if (lower === 'clear' || lower === 'new') {
-        openPanel('CreateConversation');
+        createConversation(workspace.id);
         return;
       }
 

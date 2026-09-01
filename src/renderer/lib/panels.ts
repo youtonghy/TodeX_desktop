@@ -10,7 +10,8 @@ export type DesktopPanel =
   | 'files'
   | 'capabilities'
   | 'experimental'
-  | 'v2';
+  | 'v2'
+  | 'kanban';
 
 export type WorkbenchTab = 'terminal' | 'browser' | 'files' | 'git-diff';
 
@@ -52,6 +53,8 @@ export function panelFromRoute(name: string): DesktopPanel | null {
       return 'experimental';
     case 'V2Conversations':
       return 'v2';
+    case 'Kanban':
+      return 'kanban';
     default:
       return null;
   }

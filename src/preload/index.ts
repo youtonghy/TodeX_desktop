@@ -14,6 +14,7 @@ export type GitRepositorySummary = {
   files: Array<{ path: string; status: string }>;
   additions: number;
   deletions: number;
+  initialEligible?: boolean;
   error?: string;
 };
 
@@ -32,7 +33,7 @@ const api = {
   },
   git: {
     scan: (workspacePath: string) => ipcRenderer.invoke('git:scan', workspacePath),
-    run: (workspacePath: string, action: 'commit' | 'commit-push' | 'push', message?: string) => ipcRenderer.invoke('git:run', workspacePath, action, message),
+    run: (workspacePath: string, action: 'commit' | 'commit-push' | 'push' | 'initial', message?: string, includeUnstaged = true) => ipcRenderer.invoke('git:run', workspacePath, action, message, includeUnstaged),
   },
   theme: {
     shouldUseDark: () => ipcRenderer.invoke('theme:shouldUseDark') as Promise<boolean>,
