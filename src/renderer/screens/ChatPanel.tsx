@@ -63,6 +63,12 @@ function isImeCompositionKey(event: KeyboardEvent): boolean {
   return event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229;
 }
 
+function isChatReminderEntry(entry: { subtitle: string; title: string }): boolean {
+  return entry.subtitle.includes('本地会话启动超时')
+    || entry.title === '本地会话启动超时'
+    || entry.subtitle.trim() === 'codex.local.start';
+}
+
 function ContextUsageIndicator({
   usedTokens,
   contextWindow,
@@ -210,7 +216,7 @@ export function ChatPanel({ session }: Props) {
   const attachments = session.composerAttachments[conversation.id] ?? [];
   const items = buildConversationRenderItems(
     [...session.timeline.filter((entry) => entry.conversationId === conversation.id)]
-      .filter((entry) => entry.kind !== 'system' || isStepProgressEntry(entry))
+      .filter((entry) => (entry.kind !== 'system' || isStepProgressEntry(entry)) && !isChatReminderEntry(entry))
       .sort((left, right) => left.at - right.at),
   );
   const currentProvider = isV2Conversation(conversation) ? conversation.provider || '' : '';
