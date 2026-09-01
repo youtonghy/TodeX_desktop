@@ -1,4 +1,4 @@
-import { RiAddLine, RiFolder3Line, RiSettings3Line } from '@remixicon/react';
+import { RiAddLine, RiCodeBoxLine, RiFolder3Line, RiRobot2Line, RiSettings3Line, RiTerminalBoxLine } from '@remixicon/react';
 import { Badge, Button } from '@heroui/react';
 import { useEffect, useState } from 'react';
 import type { MouseEvent } from 'react';
@@ -14,6 +14,13 @@ type Props = {
 };
 
 type ContextMenu = { kind: 'workspace' | 'conversation'; id: string; x: number; y: number } | null;
+
+function providerIcon(provider?: string) {
+  const normalized = provider?.toLowerCase() || '';
+  if (normalized.includes('pi')) return RiTerminalBoxLine;
+  if (normalized.includes('claude')) return RiRobot2Line;
+  return RiCodeBoxLine;
+}
 
 export function AppSidebar({ session, onCreateWorkspace, onCreateConversation, onOpenSettings }: Props) {
   const workspaceConversations = session.conversations.filter(
@@ -147,7 +154,7 @@ export function AppSidebar({ session, onCreateWorkspace, onCreateConversation, o
             {(conversation) => (
               <ChatListView.Item key={conversation.id} id={conversation.id} textValue={conversation.title} onContextMenu={(event) => openContextMenu(event, 'conversation', conversation.id)}>
                 <ChatListView.ItemContent>
-                  <ChatListView.Icon><span className="text-xs font-semibold">{conversation.provider?.slice(0, 1).toUpperCase() || 'C'}</span></ChatListView.Icon>
+                  <ChatListView.Icon>{(() => { const Icon = providerIcon(conversation.provider); return <Icon className="size-4" />; })()}</ChatListView.Icon>
                   <ChatListView.Text>
                     <ChatListView.Title>{conversation.title}</ChatListView.Title>
                     <ChatListView.Preview>{conversation.preview || '还没有消息'}</ChatListView.Preview>
