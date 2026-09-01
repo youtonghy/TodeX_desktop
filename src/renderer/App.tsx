@@ -15,20 +15,56 @@ import { connectionStateLabel, fetchWorkspaceDirectorySnapshot, isV2Conversation
 import { providerDisplayName, type ProviderKind } from '@todex/protocol/v2';
 import { isWorkbenchTab, panelFromRoute, type DesktopPanel, type OpenPanelOptions, type WorkbenchTab } from './lib/panels';
 
+const LAYOUT_AUTO_SAVE_ID = 'todex-desktop-app-layout';
+const LAYOUT_OPEN_STORAGE_KEY = 'todex.desktop.layoutOpen.v1';
+
+type LayoutOpenState = {
+  sidebarOpen: boolean;
+  asideOpen: boolean;
+};
+
 function applyTheme(dark: boolean) {
   document.documentElement.classList.toggle('dark', dark);
   document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+}
+
+function readLayoutOpen(): LayoutOpenState {
+  try {
+    const raw = window.localStorage.getItem(LAYOUT_OPEN_STORAGE_KEY);
+    if (!raw) return { sidebarOpen: true, asideOpen: true };
+    const parsed = JSON.parse(raw) as Partial<LayoutOpenState>;
+    return {
+      sidebarOpen: parsed.sidebarOpen !== false,
+      asideOpen: parsed.asideOpen !== false,
+    };
+  } catch {
+    return { sidebarOpen: true, asideOpen: true };
+  }
+}
+
+function writeLayoutOpen(next: LayoutOpenState) {
+  window.localStorage.setItem(LAYOUT_OPEN_STORAGE_KEY, JSON.stringify(next));
 }
 
 export function App() {
   const [panel, setPanel] = useState<DesktopPanel | null>(null);
   const [workbenchTab, setWorkbenchTab] = useState<WorkbenchTab>('terminal');
   const [slashCommand, setSlashCommand] = useState<string>();
-  const [asideOpen, setAsideOpen] = useState(true);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [asideOpen, setAsideOpen] = useState(() => readLayoutOpen().asideOpen);
+  const [sidebarOpen, setSidebarOpen] = useState(() => readLayoutOpen().sidebarOpen);
   const [createOpen, setCreateOpen] = useState(false);
   const [createConversationOpen, setCreateConversationOpen] = useState(false);
   const [capabilitiesOpen, setCapabilitiesOpen] = useState(false);
+
+  const persistSidebarOpen = useCallback((open: boolean) => {
+    setSidebarOpen(open);
+    writeLayoutOpen({ ...readLayoutOpen(), sidebarOpen: open });
+  }, []);
+
+  const persistAsideOpen = useCallback((open: boolean) => {
+    setAsideOpen(open);
+    writeLayoutOpen({ ...readLayoutOpen(), asideOpen: open });
+  }, []);
 
   const openPanel = useCallback((name: string, params?: OpenPanelOptions) => {
     if (name === 'CreateConversation') {
@@ -45,9 +81,9 @@ export function App() {
       setWorkbenchTab(next);
     }
     if (next !== 'settings') {
-      setAsideOpen(true);
+      persistAsideOpen(true);
     }
-  }, []);
+  }, [persistAsideOpen]);
 
   const session = useTodeXSession(openPanel);
 
@@ -79,17 +115,20 @@ export function App() {
           scrollMode="content"
           sidebarCollapsible="offcanvas"
           sidebarOpen={sidebarOpen}
-          onSidebarOpenChange={setSidebarOpen}
+          onSidebarOpenChange={persistSidebarOpen}
           sidebarResizable
           sidebarDefaultSize="248px"
           sidebarMinSize="200px"
           sidebarMaxSize="320px"
+          sidebarResizeBehavior="preserve-pixel-size"
           asideResizable
           asideDefaultSize="420px"
           asideMinSize="320px"
           asideMaxSize="640px"
+          asideResizeBehavior="preserve-pixel-size"
+          resizableAutoSaveId={LAYOUT_AUTO_SAVE_ID}
           asideOpen={asideOpen}
-          onAsideOpenChange={setAsideOpen}
+          onAsideOpenChange={persistAsideOpen}
           aside={
             overlayPanel ? (
               <AsidePanel
@@ -118,7 +157,7 @@ export function App() {
           navbar={
             <Navbar maxWidth="full">
               <Navbar.Header>
-                <Button isIconOnly size="sm" variant="ghost" aria-label={sidebarOpen ? '折叠侧栏' : '展开侧栏'} onPress={() => setSidebarOpen((open) => !open)}>
+                <Button isIconOnly size="sm" variant="ghost" aria-label={sidebarOpen ? '折叠侧栏' : '展开侧栏'} onPress={() => persistSidebarOpen(!sidebarOpen)}>
                   <RiLayoutLeftLine className="size-4" />
                 </Button>
                 <span className="truncate text-sm font-medium">

@@ -1,12 +1,12 @@
 import { useState } from 'react';
-import { Button, Chip, Label, ListBox, Select, Surface, TextArea, TextField } from '@heroui/react';
+import { Button, Chip, Description, Label, ListBox, Select, Surface, TextArea, TextField, toast } from '@heroui/react';
+import { RadioButtonGroup } from '@heroui-pro/react';
 import { RiAttachment2 } from '@remixicon/react';
 import jsQR from 'jsqr';
 import { applyPairingToSettings, assemblePairingQrChunkPayload, parsePairingQrFrame, resolvePairingPayload, type PairingQrChunk } from '@todex/protocol/transportCrypto';
-import { toast } from '@heroui/react';
 import { Field } from '../components/Field';
 import type { TodeXSession } from '../session/useTodeXSession';
-import { connectionStateLabel, healthLabelOf } from '../session/helpers';
+import { connectionStateLabel, healthLabelOf, settingsFromProfile } from '../session/helpers';
 import { connectionFailureLabel } from '@todex/protocol/connectionError';
 
 type Props = {
@@ -34,6 +34,14 @@ export function SettingsPanel({ session }: Props) {
   const [chunks, setChunks] = useState<Map<number, PairingQrChunk>>(new Map());
   const connected = connectionState === 'open' || connectionState === 'connecting';
   const classified = connectionFailureLabel(connectionHealth.code);
+  const activeProfile = backendConnections.find((item) => item.id === activeBackendConnectionId);
+
+  const selectBackend = (id: string) => {
+    const profile = backendConnections.find((item) => item.id === id);
+    if (!profile) return;
+    setActiveBackendConnectionId(profile.id);
+    setSettings((current) => settingsFromProfile(profile, current));
+  };
 
   const applyRawPairing = async (raw: string) => {
     try {
@@ -77,33 +85,39 @@ export function SettingsPanel({ session }: Props) {
           <h3 className="font-semibold">后端连接</h3>
           <Button size="sm" variant="secondary" onPress={() => addBackendConnection()}>添加后端</Button>
         </div>
-        <Select selectedKey={activeBackendConnectionId} onSelectionChange={(key) => {
-          if (typeof key !== 'string') return;
-          const profile = backendConnections.find((item) => item.id === key);
-          if (!profile) return;
-          setActiveBackendConnectionId(profile.id);
-          setSettings((current) => ({ ...current, serverUrl: profile.serverUrl, authToken: profile.authToken, tenantId: profile.tenantId, encryptionProtocol: profile.encryptionProtocol, encryptionPublicKey: profile.encryptionPublicKey }));
-        }}>
-          <Label>当前后端</Label>
-          <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
-          <Select.Popover><ListBox>{backendConnections.map((profile) => <ListBox.Item key={profile.id} id={profile.id} textValue={profile.name}>{profile.name}</ListBox.Item>)}</ListBox></Select.Popover>
-        </Select>
-        {(() => {
-          const profile = backendConnections.find((item) => item.id === activeBackendConnectionId);
-          if (!profile) return null;
-          return <>
-            <Field label="名称" value={profile.name} onChange={(name) => updateBackendConnection(profile.id, { name })} />
-            <Field label="后端地址" value={profile.serverUrl} onChange={(serverUrl) => { updateBackendConnection(profile.id, { serverUrl }); setSettings((current) => ({ ...current, serverUrl })); }} />
-            <Field label="Auth token" value={profile.authToken} type="password" onChange={(authToken) => { updateBackendConnection(profile.id, { authToken }); setSettings((current) => ({ ...current, authToken })); }} />
-            <Field label="Tenant" value={profile.tenantId} onChange={(tenantId) => { updateBackendConnection(profile.id, { tenantId }); setSettings((current) => ({ ...current, tenantId })); }} />
-            <Select selectedKey={profile.encryptionProtocol} onSelectionChange={(key) => { if (typeof key === 'string') { const encryptionProtocol = key as typeof profile.encryptionProtocol; updateBackendConnection(profile.id, { encryptionProtocol }); setSettings((current) => ({ ...current, encryptionProtocol })); } }}>
+        <RadioButtonGroup
+          className={backendConnections.length > 1 ? 'grid-cols-2' : 'grid-cols-1'}
+          layout="grid"
+          name="backend-connection"
+          value={activeBackendConnectionId}
+          variant="secondary"
+          onChange={selectBackend}
+        >
+          <Label className="col-span-full">当前后端</Label>
+          {backendConnections.map((profile) => (
+            <RadioButtonGroup.Item key={profile.id} value={profile.id}>
+              <RadioButtonGroup.Indicator />
+              <RadioButtonGroup.ItemContent>
+                <Label>{profile.name}</Label>
+                <Description className="truncate">{profile.tenantId ? `${profile.serverUrl} · ${profile.tenantId}` : profile.serverUrl}</Description>
+              </RadioButtonGroup.ItemContent>
+            </RadioButtonGroup.Item>
+          ))}
+        </RadioButtonGroup>
+        {activeProfile ? (
+          <>
+            <Field label="名称" value={activeProfile.name} onChange={(name) => updateBackendConnection(activeProfile.id, { name })} />
+            <Field label="后端地址" value={activeProfile.serverUrl} onChange={(serverUrl) => { updateBackendConnection(activeProfile.id, { serverUrl }); setSettings((current) => ({ ...current, serverUrl })); }} />
+            <Field label="Auth token" value={activeProfile.authToken} type="password" onChange={(authToken) => { updateBackendConnection(activeProfile.id, { authToken }); setSettings((current) => ({ ...current, authToken })); }} />
+            <Field label="Tenant" value={activeProfile.tenantId} onChange={(tenantId) => { updateBackendConnection(activeProfile.id, { tenantId }); setSettings((current) => ({ ...current, tenantId })); }} />
+            <Select selectedKey={activeProfile.encryptionProtocol} onSelectionChange={(key) => { if (typeof key === 'string') { const encryptionProtocol = key as typeof activeProfile.encryptionProtocol; updateBackendConnection(activeProfile.id, { encryptionProtocol }); setSettings((current) => ({ ...current, encryptionProtocol })); } }}>
               <Label>传输加密</Label><Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
               <Select.Popover><ListBox><ListBox.Item id="none" textValue="none">none</ListBox.Item><ListBox.Item id="x25519" textValue="x25519">x25519</ListBox.Item><ListBox.Item id="ml-kem-768" textValue="ml-kem-768">ml-kem-768</ListBox.Item></ListBox></Select.Popover>
             </Select>
-            {profile.encryptionProtocol !== 'none' ? <Field label="加密公钥" value={profile.encryptionPublicKey} onChange={(encryptionPublicKey) => updateBackendConnection(profile.id, { encryptionPublicKey })} /> : null}
-            <div className="flex gap-2"><Button onPress={() => (connected ? closeSocket(true) : connect())}>{connected ? '断开' : connectionState === 'error' ? '重试' : '连接'}</Button>{backendConnections.length > 1 ? <Button variant="danger-soft" onPress={() => removeBackendConnection(profile.id)}>删除后端</Button> : null}</div>
-          </>;
-        })()}
+            {activeProfile.encryptionProtocol !== 'none' ? <Field label="加密公钥" value={activeProfile.encryptionPublicKey} onChange={(encryptionPublicKey) => updateBackendConnection(activeProfile.id, { encryptionPublicKey })} /> : null}
+            <div className="flex gap-2"><Button onPress={() => (connected ? closeSocket(true) : connect())}>{connected ? '断开' : connectionState === 'error' ? '重试' : '连接'}</Button>{backendConnections.length > 1 ? <Button variant="danger-soft" onPress={() => removeBackendConnection(activeProfile.id)}>删除后端</Button> : null}</div>
+          </>
+        ) : null}
       </Surface>
       <Surface className="flex flex-col gap-4 rounded-2xl p-5">
         <h3 className="font-semibold">配对</h3>
