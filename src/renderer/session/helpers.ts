@@ -90,6 +90,8 @@ export type ConversationRecord = {
   goalObjective?: string;
   provider?: ProviderKind | string;
   providerProfile?: string;
+  model?: string;
+  reasoningEffort?: string | null;
   v2ConversationId?: string;
   lastSequence?: number;
   createdAt: number;
@@ -415,8 +417,8 @@ export function localConversationStateOf(conversation: ConversationRecord | null
   return conversation?.localAdapterState ?? 'idle';
 }
 
-export function isConversationHighlighted(conversation: ConversationRecord, activeConversationId: string, activeTurns: Record<string, string>): boolean {
-  return conversation.id === activeConversationId || Boolean(activeTurns[conversation.id]);
+export function isConversationHighlighted(conversation: ConversationRecord, _activeConversationId: string, activeTurns: Record<string, string>): boolean {
+  return Boolean(activeTurns[conversation.id]);
 }
 
 export function sessionIdForConversation(workspace: WorkspaceRecord, conversation: ConversationRecord): string {
@@ -1379,8 +1381,10 @@ export function createSessionId(name: string): string {
   return `cdxs_${slug}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
-export function terminalIdForConversation(conversationId: string): string {
-  return `term_${conversationId.replace(/[^a-zA-Z0-9_-]+/g, '_')}`;
+export function terminalIdForConversation(conversationId: string, suffix = ''): string {
+  const base = `term_${conversationId.replace(/[^a-zA-Z0-9_-]+/g, '_')}`;
+  const normalizedSuffix = suffix.replace(/[^a-zA-Z0-9_-]+/g, '_');
+  return normalizedSuffix ? `${base}_${normalizedSuffix}` : base;
 }
 
 export function terminalStatusLabel(status: TerminalLifecycleState): string {
@@ -1465,7 +1469,7 @@ export function canSwitchConversationAgent(
     thinking?: boolean;
   } = {},
 ): boolean {
-  if (!conversation || !isV2Conversation(conversation)) {
+  if (!conversation) {
     return false;
   }
   if (options.thinking) {
@@ -1512,7 +1516,11 @@ export function mergeManifestConversations(
   manifests: ConversationManifest[],
   workspaces: WorkspaceRecord[],
 ): ConversationRecord[] {
-  const next = [...current];
+  // The backend is the source of truth for v2 conversations. Drop locally
+  // cached v2 records whose manifest no longer exists instead of leaving a
+  // dead row that will fail on the next prompt.
+  const manifestIds = new Set(manifests.map((manifest) => manifest.id));
+  const next = current.filter((item) => !isV2Conversation(item) || manifestIds.has(item.v2ConversationId || item.id));
   for (const manifest of manifests) {
     const workspace = workspaces.find((item) => item.path === manifest.workspace)
       ?? workspaces.find((item) => manifest.workspace.startsWith(item.path));
@@ -1537,18 +1545,48 @@ export function mergeManifestConversations(
 export function classifyV2ConversationEvent(
   event: ConversationEvent,
   workspaceId: string,
+  activeTurnId = '',
 ): TimelineEntry | null {
   const payload = event.payload && typeof event.payload === 'object' && !Array.isArray(event.payload)
     ? event.payload as Record<string, unknown>
     : {};
+  const message = payload.message && typeof payload.message === 'object' && !Array.isArray(payload.message)
+    ? payload.message as Record<string, unknown>
+    : null;
+  const delta = payload.delta && typeof payload.delta === 'object' && !Array.isArray(payload.delta)
+    ? payload.delta as Record<string, unknown>
+    : null;
+  const contentParts = Array.isArray(message?.content) ? message.content : [];
+  const nestedContent = contentParts
+    .map((part) => {
+      if (typeof part === 'string') return part;
+      if (!part || typeof part !== 'object' || Array.isArray(part)) return '';
+      const item = part as Record<string, unknown>;
+      return typeof item.text === 'string' ? item.text : typeof item.content === 'string' ? item.content : '';
+    })
+    .filter(Boolean)
+    .join('');
   const content = typeof payload.content === 'string'
     ? payload.content
     : typeof payload.text === 'string'
       ? payload.text
-      : typeof payload.message === 'string'
-        ? payload.message
-        : '';
-  const role = typeof payload.role === 'string' ? payload.role : '';
+      : typeof payload.delta === 'string'
+        ? payload.delta
+        : typeof delta?.text === 'string'
+          ? delta.text
+          : typeof delta?.delta === 'string'
+            ? delta.delta
+            : typeof delta?.content === 'string'
+              ? delta.content
+              : typeof payload.message === 'string'
+                ? payload.message
+                : typeof message?.content === 'string'
+                  ? message.content
+                  : nestedContent;
+  const role = typeof payload.role === 'string'
+    ? payload.role
+    : typeof message?.role === 'string' ? message.role : '';
+  const turnId = typeof payload.turnId === 'string' ? payload.turnId : activeTurnId;
 
   if (event.type === 'message.created' && (role === 'user' || role === 'human')) {
     return {
@@ -1562,13 +1600,21 @@ export function classifyV2ConversationEvent(
       conversationId: event.conversationId,
     };
   }
-  if (event.type === 'message.created' || event.type.endsWith('.delta') || event.type.includes('agent') || event.type.includes('assistant')) {
+  if (event.type === 'message.completed' && (role === 'user' || role === 'human')) {
+    return null;
+  }
+  if (event.type.startsWith('thought.')) {
+    return null;
+  }
+  if (event.type === 'message.created' || event.type === 'message.completed' || event.type === 'message.delta' || event.type.includes('agent') || event.type.includes('assistant')) {
     if (!content && event.type === 'turn.started') {
       return null;
     }
     if (content || event.type === 'message.created') {
       return {
-        id: event.eventId,
+        id: event.type === 'message.delta' || event.type === 'message.completed'
+          ? `v2-assistant-${event.conversationId}-${turnId || 'current'}`
+          : event.eventId,
         kind: 'incoming',
         title: 'Agent',
         subtitle: content || event.type,
@@ -1579,7 +1625,10 @@ export function classifyV2ConversationEvent(
       };
     }
   }
-  if (event.type.startsWith('mcp.') || event.type === 'skill.injected' || event.type.startsWith('permission.') || event.type.startsWith('turn.') || event.type === 'conversation.created') {
+  if (event.type === 'conversation.created' || event.type === 'turn.started' || event.type === 'turn.completed' || event.type === 'turn.cancelled') {
+    return null;
+  }
+  if (event.type.startsWith('mcp.') || event.type === 'skill.injected' || event.type.startsWith('permission.') || event.type === 'turn.failed') {
     return {
       id: event.eventId,
       kind: 'system',
@@ -1604,6 +1653,55 @@ export function classifyV2ConversationEvent(
     };
   }
   return null;
+}
+
+export type V2ConversationReplayState = {
+  timeline: TimelineEntry[];
+  activeTurnId: string;
+  lastSequence: number;
+};
+
+export function reduceV2ConversationEvents(
+  events: ConversationEvent[],
+  workspaceId: string,
+): V2ConversationReplayState {
+  const timeline: TimelineEntry[] = [];
+  let activeTurnId = '';
+  let lastSequence = 0;
+
+  for (const event of [...events].sort((left, right) => left.sequence - right.sequence)) {
+    const payload = event.payload && typeof event.payload === 'object' && !Array.isArray(event.payload)
+      ? event.payload as Record<string, unknown>
+      : {};
+    const payloadTurnId = typeof payload.turnId === 'string' ? payload.turnId : '';
+    if (event.type === 'turn.started' && payloadTurnId) {
+      activeTurnId = payloadTurnId;
+    }
+
+    const entry = classifyV2ConversationEvent(event, workspaceId, payloadTurnId || activeTurnId);
+    if (entry) {
+      const index = timeline.findIndex((item) => item.id === entry.id);
+      if (index === -1) {
+        timeline.unshift(entry);
+      } else {
+        const previous = timeline[index];
+        timeline[index] = {
+          ...previous,
+          ...entry,
+          subtitle: event.type === 'message.delta'
+            ? `${previous.subtitle === '正在回复...' ? '' : previous.subtitle}${entry.subtitle}`
+            : entry.subtitle,
+        };
+      }
+    }
+
+    if (event.type === 'turn.completed' || event.type === 'turn.cancelled' || event.type === 'turn.failed') {
+      activeTurnId = '';
+    }
+    lastSequence = Math.max(lastSequence, event.sequence);
+  }
+
+  return { timeline, activeTurnId, lastSequence };
 }
 
 export function modeLabelOf(mode: ConversationRecord['mode']): string {
@@ -2416,4 +2514,3 @@ export function forkConversationRecord(conversation: ConversationRecord, title?:
     updatedAt: Date.now(),
   };
 }
-

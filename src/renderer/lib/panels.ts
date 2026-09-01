@@ -10,7 +10,7 @@ export type DesktopPanel =
   | 'experimental'
   | 'v2';
 
-export type WorkbenchTab = 'terminal' | 'browser' | 'files';
+export type WorkbenchTab = 'terminal' | 'browser' | 'files' | 'git-diff';
 
 export type OpenPanelOptions = {
   workspaceId?: string;
@@ -19,7 +19,7 @@ export type OpenPanelOptions = {
 };
 
 export function isWorkbenchTab(panel: DesktopPanel | null): panel is WorkbenchTab {
-  return panel === 'terminal' || panel === 'browser' || panel === 'files';
+  return panel === 'terminal' || panel === 'browser' || panel === 'files' || panel === 'git-diff';
 }
 
 export function panelFromRoute(name: string): DesktopPanel | null {
@@ -31,7 +31,7 @@ export function panelFromRoute(name: string): DesktopPanel | null {
     case 'SlashCommandAction':
       return 'slash-action';
     case 'GitDiff':
-      return 'files';
+      return 'git-diff';
     case 'Terminal':
       return 'terminal';
     case 'Browser':

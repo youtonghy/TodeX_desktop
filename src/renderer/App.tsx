@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Button, Chip, Dropdown, Modal, Toast, toast } from '@heroui/react';
 import { AppLayout, Navbar } from '@heroui-pro/react';
-import { Ellipsis, Gear, Plus } from '@gravity-ui/icons';
+import { Ellipsis, Gear, LayoutSideContentLeft, Plus } from '@gravity-ui/icons';
 import { useTodeXSession, type TodeXSession } from './session/useTodeXSession';
 import { DesktopAlertHost } from './components/DesktopAlertHost';
 import { AppSidebar } from './components/AppSidebar';
@@ -24,6 +24,7 @@ export function App() {
   const [workbenchTab, setWorkbenchTab] = useState<WorkbenchTab>('terminal');
   const [slashCommand, setSlashCommand] = useState<string>();
   const [asideOpen, setAsideOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const [createOpen, setCreateOpen] = useState(false);
   const [createConversationOpen, setCreateConversationOpen] = useState(false);
 
@@ -74,7 +75,9 @@ export function App() {
         <AppLayout
           className="h-full min-h-0"
           scrollMode="content"
-          sidebarCollapsible="none"
+          sidebarCollapsible="offcanvas"
+          sidebarOpen={sidebarOpen}
+          onSidebarOpenChange={setSidebarOpen}
           sidebarResizable
           sidebarDefaultSize="248px"
           sidebarMinSize="200px"
@@ -111,7 +114,9 @@ export function App() {
           navbar={
             <Navbar maxWidth="full">
               <Navbar.Header>
-                <AppLayout.MenuToggle />
+                <Button isIconOnly size="sm" variant="ghost" aria-label={sidebarOpen ? '折叠侧栏' : '展开侧栏'} onPress={() => setSidebarOpen((open) => !open)}>
+                  <LayoutSideContentLeft className="size-4" />
+                </Button>
                 <span className="truncate text-sm font-medium">
                   {session.activeConversation?.title ?? '对话'}
                 </span>
@@ -146,7 +151,7 @@ export function App() {
                       <Dropdown.Menu
                         onAction={(key) => {
                           const id = String(key);
-                          if (id === 'terminal' || id === 'browser' || id === 'files') {
+                          if (id === 'terminal' || id === 'browser' || id === 'files' || id === 'git-diff') {
                             setWorkbenchTab(id);
                             setPanel(id);
                             setAsideOpen(true);
@@ -159,6 +164,7 @@ export function App() {
                         <Dropdown.Item id="slash-commands" textValue="斜杠命令">斜杠命令</Dropdown.Item>
                         <Dropdown.Item id="capabilities" textValue="能力">Skills / MCP</Dropdown.Item>
                         <Dropdown.Item id="experimental" textValue="实验">实验功能</Dropdown.Item>
+                        <Dropdown.Item id="git-diff" textValue="Git Diff">Git Diff</Dropdown.Item>
                         <Dropdown.Item id="v2" textValue="2.0">TodeX 2.0</Dropdown.Item>
                       </Dropdown.Menu>
                     </Dropdown.Popover>

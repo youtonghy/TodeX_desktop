@@ -1,9 +1,11 @@
 import { Paperclip, Stop } from '@gravity-ui/icons';
+import { useEffect, useState } from 'react';
 import { Button, Chip, Label, ListBox, ScrollShadow, Select, toast } from '@heroui/react';
 import { ChatMessage, PromptInput } from '@heroui-pro/react';
 import { providerDisplayName, type ProviderKind } from '@todex/protocol/v2';
 import type { TodeXSession } from '../session/useTodeXSession';
 import {
+  PERMISSION_PRESETS,
   attachmentId,
   buildConversationRenderItems,
   canSwitchConversationAgent,
@@ -14,7 +16,11 @@ import {
   SLASH_COMMANDS,
   dataUrlFromBase64,
   findMentionTrigger,
+  buildMentionSuggestions,
+  insertMention,
   canonicalSlashCommand,
+  modelDisplayLabel,
+  permissionPresetForProfile,
 } from '../session/helpers';
 import { findCapabilityHashTrigger } from '@todex/protocol/todex';
 
@@ -22,9 +28,34 @@ type Props = {
   session: TodeXSession;
 };
 
+const PERMISSION_LABELS = new Map([
+  ['read-only', '只读'],
+  ['default', '请求审批'],
+  ['auto-review', '自动审批'],
+  ['full-access', '完全访问'],
+]);
+
 export function ChatPanel({ session }: Props) {
   const conversation = session.activeConversation;
   const workspace = session.activeWorkspace;
+  const draft = conversation ? (session.chatDrafts[conversation.id] ?? '') : '';
+  const mention = findMentionTrigger(draft, conversation ? (session.composerSelections[conversation.id]?.end ?? draft.length) : 0);
+  const [mentionSuggestions, setMentionSuggestions] = useState<Array<{ id: string; title: string; description: string; insertText: string }>>([]);
+  useEffect(() => {
+    let active = true;
+    if (!mention || !workspace) {
+      setMentionSuggestions([]);
+      return () => { active = false; };
+    }
+    void session.fetchWorkspaceEntries(workspace.path, mention.query)
+      .then((result) => {
+        if (active) setMentionSuggestions(buildMentionSuggestions(mention, result.entries));
+      })
+      .catch(() => {
+        if (active) setMentionSuggestions([]);
+      });
+    return () => { active = false; };
+  }, [mention?.query, mention?.start, workspace?.path, session.fetchWorkspaceEntries]);
   if (!conversation || !workspace) {
     return (
       <div className="flex h-full flex-col items-center justify-center px-8 text-center">
@@ -34,16 +65,25 @@ export function ChatPanel({ session }: Props) {
     );
   }
 
-  const draft = session.chatDrafts[conversation.id] ?? '';
   const attachments = session.composerAttachments[conversation.id] ?? [];
   const items = buildConversationRenderItems(
-    session.timeline.filter((entry) => entry.conversationId === conversation.id),
+    [...session.timeline.filter((entry) => entry.conversationId === conversation.id)]
+      .sort((left, right) => left.at - right.at),
   );
+  const currentProvider = isV2Conversation(conversation) ? conversation.provider || '' : '';
   const slashTrigger = draft.trim().startsWith('/') ? draft.trim() : '';
+  const liveCommands = currentProvider ? (session.providerCommands[currentProvider as ProviderKind] ?? []) : [];
+  const slashCatalog = liveCommands.length > 0
+    ? liveCommands.map((item) => ({
+      command: `/${item.name}`,
+      title: item.name,
+      description: item.description || `${item.source} command`,
+      category: 'context' as const,
+    }))
+    : SLASH_COMMANDS;
   const slashSuggestions = slashTrigger
-    ? SLASH_COMMANDS.filter((item) => canonicalSlashCommand(item.command).startsWith(canonicalSlashCommand(slashTrigger.split(/\s+/)[0] || slashTrigger)))
+    ? slashCatalog.filter((item) => canonicalSlashCommand(item.command).startsWith(canonicalSlashCommand(slashTrigger.split(/\s+/)[0] || slashTrigger)))
     : [];
-  const mention = findMentionTrigger(draft, session.composerSelections[conversation.id]?.end ?? draft.length);
   const capability = findCapabilityHashTrigger(draft, session.composerSelections[conversation.id]?.end ?? draft.length);
   const thinking = session.thinkingConversations[conversation.id] === true;
   const conversationTimeline = session.timeline.filter((entry) => entry.conversationId === conversation.id);
@@ -51,13 +91,31 @@ export function ChatPanel({ session }: Props) {
     timeline: conversationTimeline,
     thinking,
   });
-  const currentProvider = isV2Conversation(conversation) ? conversation.provider || '' : '';
   const agentLabel = currentProvider
     ? providerDisplayName(currentProvider, 'Agent')
-    : '历史 Codex';
-  const disabledAgentKeys = session.v2Providers
-    .filter((item) => !item.available)
-    .map((item) => item.id);
+    : '历史';
+  const availableProviders = session.v2Providers.filter((item) => item.available);
+  const providerDescriptor = session.v2Providers.find((item) => item.id === currentProvider);
+  const providerModels = session.providerModels[currentProvider as ProviderKind] ?? providerDescriptor?.models ?? [];
+  const currentModel = conversation.model || providerModels.find((item) => item.isDefault)?.id || (currentProvider === 'codex' ? workspace.model || session.settings.defaultModel : '');
+  // An unset Pi/agent effort is meaningful: let the provider apply its own default.
+  const currentReasoningEffort = conversation.reasoningEffort ?? null;
+  const currentPermission = permissionPresetForProfile(
+    workspace.permissionProfile,
+    workspace.approvalsReviewer || session.settings.approvalsReviewer,
+  ) ?? PERMISSION_PRESETS.find((preset) =>
+    preset.approvalPolicy === workspace.approvalPolicy && preset.sandboxMode === workspace.sandboxMode,
+  ) ?? PERMISSION_PRESETS[1];
+  const canChoosePermission = currentProvider === 'codex' || currentProvider === 'claude-code';
+  const isToolCallEntry = (entry: (typeof session.timeline)[number]) => {
+    if (entry.kind !== 'incoming') return false;
+    try {
+      const value = JSON.parse(entry.subtitle) as Record<string, unknown>;
+      return Boolean(value && typeof value === 'object' && (Object.keys(value).length === 0 || 'command' in value || 'tool' in value || 'toolCall' in value));
+    } catch {
+      return false;
+    }
+  };
 
   const addFiles = async (paths: string[]) => {
     for (const path of paths) {
@@ -94,38 +152,41 @@ export function ChatPanel({ session }: Props) {
           {items.map((item) => {
             if (item.type === 'executionGroup') {
               return (
-                <details key={item.id} className="border-separator rounded-xl border px-3 py-2">
+                <details key={item.id} className="border-separator border-l-2 px-3 py-1">
                   <summary className="text-muted cursor-pointer text-xs">执行步骤 · {item.entries.length}</summary>
-                  <div className="mt-2 flex flex-col gap-2">
+                  <div className="text-muted mt-2 flex flex-col gap-1 text-xs">
                     {item.entries.map((entry) => (
-                      <p key={entry.id} className="text-sm whitespace-pre-wrap">{entry.subtitle || entry.title}</p>
+                      <p key={entry.id} className="whitespace-pre-wrap">{entry.subtitle || entry.title}</p>
                     ))}
                   </div>
                 </details>
               );
             }
             const entry = item.entry;
+            if (isToolCallEntry(entry)) {
+              return (
+                <details key={entry.id} className="border-separator border-l-2 px-3 py-1">
+                  <summary className="text-muted cursor-pointer text-xs">工具调用</summary>
+                  <pre className="text-muted mt-2 max-w-full overflow-x-auto whitespace-pre-wrap text-xs">{entry.subtitle}</pre>
+                </details>
+              );
+            }
             const request = session.pendingRequests.find((pendingItem) => pendingItem.requestId && (entry.requestId === pendingItem.requestId || entry.raw.includes(pendingItem.requestId)));
             const isUser = entry.kind === 'outgoing';
-            const Message = isUser ? ChatMessage.User : ChatMessage.Assistant;
             return (
-              <Message key={entry.id}>
-                <ChatMessage.Avatar alt={isUser ? 'You' : 'Codex'} fallback={isUser ? 'You' : 'CX'} />
-                <ChatMessage.Body>
-                  <ChatMessage.Bubble>
-                    <ChatMessage.Content>
-                      <p className="text-sm font-medium">{entry.title}</p>
-                      <p className="mt-1 whitespace-pre-wrap text-sm">{entry.subtitle}</p>
-                    </ChatMessage.Content>
-                  </ChatMessage.Bubble>
+              <div key={entry.id} className={`flex gap-3 py-2 ${isUser ? 'justify-end' : 'justify-start'}`}>
+                <div className={`min-w-0 max-w-[85%] ${isUser ? 'text-right' : ''}`}>
+                  {isUser ? <p className="text-muted text-xs font-medium">You</p> : null}
+                  <p className={`${isUser ? 'mt-1' : ''} whitespace-pre-wrap text-sm leading-6`}>{entry.subtitle}</p>
                   {request ? (
                     <ChatMessage.Actions>
                       <Button size="sm" onPress={() => session.sendApprovalResponse(true, request)}>同意</Button>
                       <Button size="sm" variant="danger-soft" onPress={() => session.sendApprovalResponse(false, request)}>拒绝</Button>
                     </ChatMessage.Actions>
                   ) : null}
-                </ChatMessage.Body>
-              </Message>
+                </div>
+                {isUser ? <ChatMessage.Avatar alt="You" fallback="You" /> : null}
+              </div>
             );
           })}
         </div>
@@ -144,7 +205,18 @@ export function ChatPanel({ session }: Props) {
               ))}
             </div>
           ) : null}
-          {mention ? <p className="text-muted mb-2 text-xs">输入 @ 后接文件名，可引用工作区文件。</p> : null}
+          {mentionSuggestions.length > 0 ? (
+            <div className="mb-2 flex max-h-32 flex-wrap gap-2 overflow-y-auto">
+              {mentionSuggestions.map((item) => (
+                <Button key={item.id} size="sm" variant="tertiary" onPress={() => {
+                  session.setConversationChatDraft(conversation.id, insertMention(draft, mention!, item.insertText));
+                  session.setConversationComposerSelection(conversation.id, { start: mention!.start + item.insertText.length, end: mention!.start + item.insertText.length });
+                }}>
+                  @{item.title}
+                </Button>
+              ))}
+            </div>
+          ) : mention ? <p className="text-muted mb-2 text-xs">正在搜索工作区文件…</p> : null}
           {capability ? <p className="text-muted mb-2 text-xs">输入 # 可引用 Skill 或 MCP。</p> : null}
           {attachments.length > 0 ? (
             <div className="mb-2 flex flex-wrap gap-2">
@@ -197,7 +269,7 @@ export function ChatPanel({ session }: Props) {
                   <PromptInput.TextArea placeholder="发送消息，或输入 / 命令" />
                 </PromptInput.Content>
                 <PromptInput.Toolbar>
-                  <PromptInput.ToolbarStart>
+                  <PromptInput.ToolbarStart className="min-w-0 flex-1">
                     <PromptInput.Action
                       aria-label="添加附件"
                       onPress={async () => {
@@ -208,12 +280,11 @@ export function ChatPanel({ session }: Props) {
                       <Paperclip className="size-4" />
                     </PromptInput.Action>
                     <Select
-                      className="min-w-32 max-w-44"
+                      className="min-w-20 max-w-24"
                       variant="secondary"
                       placeholder="选择 Agent"
-                      selectedKey={currentProvider || undefined}
+                    selectedKey={currentProvider || null}
                       isDisabled={!canSwitchAgent}
-                      disabledKeys={disabledAgentKeys}
                       onSelectionChange={(key) => {
                         if (typeof key !== 'string' || !key || key === currentProvider) {
                           return;
@@ -228,20 +299,100 @@ export function ChatPanel({ session }: Props) {
                       </Select.Trigger>
                       <Select.Popover>
                         <ListBox>
-                          {session.v2Providers.map((item) => (
+                          {availableProviders.map((item) => (
                             <ListBox.Item
                               key={item.id}
                               id={item.id}
                               textValue={providerDisplayName(item.id, item.displayName)}
                             >
                               {providerDisplayName(item.id, item.displayName)}
-                              {item.available ? '' : ` · ${item.unavailableReason || '不可用'}`}
                               <ListBox.ItemIndicator />
                             </ListBox.Item>
                           ))}
                         </ListBox>
                       </Select.Popover>
                     </Select>
+                    <Select
+                      className="min-w-20 max-w-24"
+                      variant="secondary"
+                      selectedKey={currentModel || null}
+                      onSelectionChange={(key) => {
+                        if (typeof key === 'string' && key) {
+                          session.applyConversationModelSelection(conversation.id, key, currentReasoningEffort);
+                        }
+                      }}
+                    >
+                      <Label className="hidden">选择模型</Label>
+                      <Select.Trigger>
+                        <Select.Value>{modelDisplayLabel(currentModel, session.modelCatalog)}</Select.Value>
+                        <Select.Indicator />
+                      </Select.Trigger>
+                      <Select.Popover>
+                        <ListBox>
+                          {providerModels.map((item) => (
+                            <ListBox.Item key={item.id} id={item.id} textValue={item.displayName}>
+                              {item.displayName}
+                              <ListBox.ItemIndicator />
+                            </ListBox.Item>
+                          ))}
+                        </ListBox>
+                      </Select.Popover>
+                    </Select>
+                    <Select
+                      className="min-w-20 max-w-24"
+                      variant="secondary"
+                      selectedKey={currentReasoningEffort}
+                      onSelectionChange={(key) => {
+                        if (typeof key === 'string' && key) {
+                          session.applyConversationModelSelection(conversation.id, currentModel, key);
+                        }
+                      }}
+                    >
+                      <Label className="hidden">思考强度</Label>
+                      <Select.Trigger>
+                        <Select.Value>{currentReasoningEffort || '默认强度'}</Select.Value>
+                        <Select.Indicator />
+                      </Select.Trigger>
+                      <Select.Popover>
+                        <ListBox>
+                          {(providerModels.find((item) => item.id === currentModel)?.supportedReasoningEfforts ?? []).map((effort) => (
+                            <ListBox.Item key={effort} id={effort} textValue={effort}>{effort}</ListBox.Item>
+                          ))}
+                        </ListBox>
+                      </Select.Popover>
+                    </Select>
+                    {canChoosePermission ? <Select
+                      className="min-w-24 max-w-28"
+                      variant="secondary"
+                      selectedKey={currentPermission.id}
+                      onSelectionChange={(key) => {
+                        const preset = PERMISSION_PRESETS.find((item) => item.id === key);
+                        if (preset) {
+                          void session.applyPermissionProfile(
+                            conversation.id,
+                            preset.profileId,
+                            preset.description,
+                            preset.approvalsReviewer,
+                          );
+                        }
+                      }}
+                    >
+                      <Label className="hidden">选择权限</Label>
+                      <Select.Trigger>
+                        <Select.Value>{PERMISSION_LABELS.get(currentPermission.id) || currentPermission.title}</Select.Value>
+                        <Select.Indicator />
+                      </Select.Trigger>
+                      <Select.Popover>
+                        <ListBox>
+                          {PERMISSION_PRESETS.map((preset) => (
+                            <ListBox.Item key={preset.id} id={preset.id} textValue={PERMISSION_LABELS.get(preset.id) || preset.title}>
+                              {PERMISSION_LABELS.get(preset.id) || preset.title}
+                              <ListBox.ItemIndicator />
+                            </ListBox.Item>
+                          ))}
+                        </ListBox>
+                      </Select.Popover>
+                    </Select> : <Button size="sm" variant="tertiary" isDisabled aria-label="完全访问权限">完全访问</Button>}
                   </PromptInput.ToolbarStart>
                   <PromptInput.ToolbarEnd>
                     {thinking ? (
