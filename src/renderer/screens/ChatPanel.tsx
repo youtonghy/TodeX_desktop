@@ -30,6 +30,19 @@ type Props = {
   session: TodeXSession;
 };
 
+function toolPresentation(raw: string) {
+  try {
+    const value = JSON.parse(raw) as Record<string, unknown>;
+    const toolName = typeof value.toolName === 'string' ? value.toolName
+      : typeof value.tool === 'string' ? value.tool
+        : typeof value.command === 'string' ? '命令执行' : '工具调用';
+    const args = value.arguments ?? value.input ?? (typeof value.command === 'string' ? { command: value.command } : {});
+    return { toolName, argsText: typeof args === 'string' ? args : JSON.stringify(args, null, 2) };
+  } catch {
+    return { toolName: '工具调用', argsText: raw };
+  }
+}
+
 const PERMISSION_LABELS = new Map([
   ['read-only', '只读'],
   ['default', '请求审批'],
@@ -160,7 +173,7 @@ export function ChatPanel({ session }: Props) {
   ) ?? PERMISSION_PRESETS[1];
   const canChoosePermission = currentProvider === 'codex' || currentProvider === 'claude-code';
   const isToolCallEntry = (entry: (typeof session.timeline)[number]) => {
-    if (entry.kind !== 'incoming') return false;
+    if (entry.kind !== 'incoming' && entry.title !== '工具调用') return false;
     try {
       const value = JSON.parse(entry.subtitle) as Record<string, unknown>;
       return Boolean(value && typeof value === 'object' && (Object.keys(value).length === 0 || 'command' in value || 'tool' in value || 'toolCall' in value));
@@ -205,13 +218,16 @@ export function ChatPanel({ session }: Props) {
             if (item.type === 'executionGroup') {
               const expanded = thinking && item.entries.some((entry) => entry.at >= (conversationTimeline.at(-1)?.at ?? 0));
               return (
-                <ChainOfThought key={item.id} defaultExpanded={expanded} isStreaming={expanded} className="chat-process-trace">
+                <ChainOfThought key={`${item.id}-${expanded ? 'open' : 'closed'}`} defaultExpanded={expanded} isStreaming={expanded} className="chat-process-trace">
                   <ChainOfThought.Trigger>执行步骤 · {item.entries.length}</ChainOfThought.Trigger>
                   <ChainOfThought.Content>
                     <ChainOfThought.Steps>
                       {item.entries.map((entry) => (
                         <ChainOfThought.Step key={entry.id} label={entry.title}>
-                          <p className="whitespace-pre-wrap text-xs">{entry.subtitle || entry.title}</p>
+                          {isToolCallEntry(entry) ? (() => {
+                            const { toolName, argsText } = toolPresentation(entry.subtitle);
+                            return <ChatTool defaultExpanded={thinking} state={thinking ? 'input-streaming' : 'output-available'} toolName={toolName} argsText={argsText} />;
+                          })() : <p className="whitespace-pre-wrap text-xs">{entry.subtitle || entry.title}</p>}
                         </ChainOfThought.Step>
                       ))}
                     </ChainOfThought.Steps>
@@ -221,15 +237,7 @@ export function ChatPanel({ session }: Props) {
             }
             const entry = item.entry;
             if (isToolCallEntry(entry)) {
-              let argsText = entry.subtitle;
-              let toolName = '工具调用';
-              try {
-                const value = JSON.parse(entry.subtitle) as Record<string, unknown>;
-                toolName = typeof value.tool === 'string' ? value.tool : typeof value.command === 'string' ? '命令执行' : toolName;
-                argsText = JSON.stringify(value, null, 2);
-              } catch {
-                // Keep non-JSON provider output visible as tool input.
-              }
+              const { toolName, argsText } = toolPresentation(entry.subtitle);
               return <ChatTool key={entry.id} defaultExpanded={thinking} state={thinking ? 'input-streaming' : 'output-available'} toolName={toolName} argsText={argsText} triggerPrefix={thinking ? '正在调用：' : '已调用：'} />;
             }
             const request = session.pendingRequests.find((pendingItem) => pendingItem.requestId && (entry.requestId === pendingItem.requestId || entry.raw.includes(pendingItem.requestId)));

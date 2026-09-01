@@ -1669,8 +1669,38 @@ export function classifyV2ConversationEvent(
   if (event.type === 'message.completed' && (role === 'user' || role === 'human')) {
     return null;
   }
-  if (event.type.startsWith('thought.')) {
-    return null;
+  const deltaType = typeof delta?.type === 'string' ? delta.type : '';
+  const messageRole = typeof message?.role === 'string' ? message.role : '';
+  const isToolEvent = /tool|command|function|mcp/i.test(event.type)
+    || /tool|command|function|mcp/i.test(deltaType)
+    || messageRole === 'tool';
+  if (event.type.startsWith('thought.') || /reasoning|thinking|analysis/i.test(event.type)) {
+    const thought = typeof payload.thought === 'string' ? payload.thought
+      : typeof payload.reasoning === 'string' ? payload.reasoning
+        : content;
+    return thought ? {
+      id: `v2-thought-${event.conversationId}-${turnId || event.eventId}`,
+      kind: 'system',
+      title: '思考中',
+      subtitle: thought,
+      raw: shortJson(event),
+      at: Date.parse(event.time) || Date.now(),
+      workspaceId,
+      conversationId: event.conversationId,
+    } : null;
+  }
+  if (isToolEvent) {
+    const toolPayload = content || shortJson(payload);
+    return {
+      id: `v2-tool-${event.conversationId}-${turnId || event.eventId}`,
+      kind: 'system',
+      title: '工具调用',
+      subtitle: toolPayload,
+      raw: shortJson(event),
+      at: Date.parse(event.time) || Date.now(),
+      workspaceId,
+      conversationId: event.conversationId,
+    };
   }
   if (event.type === 'message.created' || event.type === 'message.completed' || event.type === 'message.delta' || event.type.includes('agent') || event.type.includes('assistant')) {
     if (!content && event.type === 'turn.started') {
@@ -2485,7 +2515,9 @@ export function isStepProgressEntry(entry: TimelineEntry): boolean {
   return entry.kind === 'system' && (
     entry.title === '执行步骤' ||
     entry.title === '步骤完成' ||
-    entry.title === '请求权限批准'
+    entry.title === '请求权限批准' ||
+    entry.title === '工具调用' ||
+    entry.title === '思考中'
   );
 }
 
