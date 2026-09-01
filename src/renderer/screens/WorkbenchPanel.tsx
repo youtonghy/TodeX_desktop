@@ -109,7 +109,7 @@ export function WorkbenchPanel({ session, tab, onTabChange }: Props) {
         {items.map((item) => (
           <div key={item.id} className={item.id === active?.id ? 'h-full' : 'hidden'}>
             {item.type === 'terminal' ? <TerminalPane session={session} terminalId={terminalIdForConversation(conversationId, item.id)} /> : null}
-            {item.type === 'browser' ? <BrowserPane workspacePath={session.activeWorkspace?.path} session={session} /> : null}
+            {item.type === 'browser' ? <BrowserPane workspacePath={session.activeWorkspace?.path} /> : null}
             {item.type === 'files' ? <FilesPane session={session} /> : null}
             {item.type === 'git-diff' ? <GitDiffPane session={session} /> : null}
           </div>
@@ -289,10 +289,9 @@ function TerminalPane({ session, terminalId }: { session: TodeXSession; terminal
   );
 }
 
-function BrowserPane({ workspacePath, session }: { workspacePath?: string; session: TodeXSession }) {
+function BrowserPane({ workspacePath }: { workspacePath?: string }) {
   const [draft, setDraft] = useState('http://127.0.0.1:7345');
   const [url, setUrl] = useState('');
-  const [result, setResult] = useState<{ status: number; contentType: string; body: string } | null>(null);
   const [error, setError] = useState('');
 
   return (
@@ -302,9 +301,15 @@ function BrowserPane({ workspacePath, session }: { workspacePath?: string; sessi
         onSubmit={(event) => {
           event.preventDefault();
           const target = draft.trim();
-          setUrl(target); setError(''); setResult(null);
-          const api = new V2ApiClient({ serverUrl: session.settings.serverUrl, authToken: session.settings.authToken });
-          void api.fetchBrowser(target).then(setResult).catch((reason) => setError(reason instanceof Error ? reason.message : '浏览器请求失败'));
+          try {
+            const parsed = new URL(target);
+            if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error('仅支持 HTTP 和 HTTPS 地址');
+            setUrl(parsed.toString());
+            setError('');
+          } catch (reason) {
+            setUrl('');
+            setError(reason instanceof Error ? reason.message : '请输入有效的网址');
+          }
         }}
       >
         <TextField aria-label="地址" className="min-w-0 flex-1" value={draft} onChange={setDraft}>
@@ -315,10 +320,9 @@ function BrowserPane({ workspacePath, session }: { workspacePath?: string; sessi
         </Button>
       </form>
       {error ? <p className="text-danger text-sm">{error}</p> : null}
-      {url && result ? (
-        <div className="bg-surface min-h-0 flex-1 overflow-auto rounded-xl p-3">
-          <p className="text-muted mb-2 text-xs">{result.status} · {result.contentType} · 后端代理</p>
-          <pre className="font-mono text-xs whitespace-pre-wrap">{result.body}</pre>
+      {url ? (
+        <div className="bg-surface min-h-0 flex-1 overflow-hidden rounded-xl">
+          <iframe title="网页预览" src={url} className="size-full border-0" sandbox="allow-forms allow-modals allow-popups allow-same-origin allow-scripts" />
         </div>
       ) : (
         <div className="bg-surface-secondary flex min-h-0 flex-1 flex-col items-center justify-center gap-2 rounded-xl px-6 text-center">
