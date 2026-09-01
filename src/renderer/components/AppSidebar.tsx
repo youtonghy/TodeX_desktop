@@ -1,6 +1,6 @@
 import { Folder, Gear, Plus } from '@gravity-ui/icons';
 import { Badge, Button, Dropdown } from '@heroui/react';
-import { Sidebar } from '@heroui-pro/react';
+import { ChatListView, Sidebar } from '@heroui-pro/react';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { isConversationHighlighted } from '../session/helpers';
 
@@ -60,20 +60,20 @@ export function AppSidebar({ session, onCreateWorkspace, onCreateConversation, o
           {session.workspaces.length === 0 ? (
             <p className="text-muted px-3 py-2 text-xs">还没有工作区。</p>
           ) : (
-            <Sidebar.Menu aria-label="工作区">
-              {session.workspaces.map((workspace) => (
-              <Sidebar.MenuItem
-                key={workspace.id}
-                id={workspace.id}
-                isCurrent={workspace.id === session.activeWorkspaceId}
-                textValue={workspace.name}
-                onAction={() => session.selectWorkspace(workspace.id)}
-              >
-                <Sidebar.MenuIcon>
-                  <Folder className="size-4" />
-                </Sidebar.MenuIcon>
-                <Sidebar.MenuLabel>{workspace.name}</Sidebar.MenuLabel>
-                <Sidebar.MenuActions>
+            <ChatListView
+              aria-label="工作区"
+              density="compact"
+              items={session.workspaces}
+              onAction={(key) => session.selectWorkspace(String(key))}
+            >
+              {(workspace) => (
+              <ChatListView.Item key={workspace.id} id={workspace.id} textValue={workspace.name}>
+                <ChatListView.ItemContent>
+                  <ChatListView.Icon><Folder className="size-4" /></ChatListView.Icon>
+                  <ChatListView.Text>
+                    <ChatListView.Title>{workspace.name}</ChatListView.Title>
+                    <ChatListView.Preview>{workspace.path}</ChatListView.Preview>
+                  </ChatListView.Text>
                   <Dropdown>
                     <Dropdown.Trigger aria-label="工作区操作" className="inline-flex size-7 items-center justify-center rounded-md">
                       ···
@@ -95,10 +95,10 @@ export function AppSidebar({ session, onCreateWorkspace, onCreateConversation, o
                       </Dropdown.Menu>
                     </Dropdown.Popover>
                   </Dropdown>
-                </Sidebar.MenuActions>
-              </Sidebar.MenuItem>
-            ))}
-          </Sidebar.Menu>
+                </ChatListView.ItemContent>
+              </ChatListView.Item>
+            )}
+            </ChatListView>
           )}
         </Sidebar.Group>
         <Sidebar.Group>
@@ -113,20 +113,24 @@ export function AppSidebar({ session, onCreateWorkspace, onCreateConversation, o
               {session.activeWorkspaceId ? '这个工作区还没有对话。' : '选择工作区后可创建对话。'}
             </p>
           ) : (
-            <Sidebar.Menu aria-label="对话">
-            {workspaceConversations.map((conversation) => (
-              <Sidebar.MenuItem
-                key={conversation.id}
-                id={conversation.id}
-                isCurrent={conversation.id === session.activeConversationId}
-                textValue={conversation.title}
-                onAction={() => session.selectConversation(conversation.workspaceId, conversation.id)}
-              >
-                <Sidebar.MenuLabel>{conversation.title}</Sidebar.MenuLabel>
-                {isConversationHighlighted(conversation, session.activeConversationId, session.turnIds) ? (
-                  <Sidebar.MenuChip>运行中</Sidebar.MenuChip>
-                ) : null}
-                <Sidebar.MenuActions>
+            <ChatListView
+              aria-label="对话"
+              density="compact"
+              items={workspaceConversations}
+              onAction={(key) => {
+                const conversation = workspaceConversations.find((item) => item.id === String(key));
+                if (conversation) session.selectConversation(conversation.workspaceId, conversation.id);
+              }}
+            >
+            {(conversation) => (
+              <ChatListView.Item key={conversation.id} id={conversation.id} textValue={conversation.title}>
+                <ChatListView.ItemContent>
+                  <ChatListView.Icon><span className="text-xs font-semibold">{conversation.provider?.slice(0, 1).toUpperCase() || 'C'}</span></ChatListView.Icon>
+                  <ChatListView.Text>
+                    <ChatListView.Title>{conversation.title}</ChatListView.Title>
+                    <ChatListView.Preview>{conversation.preview || '还没有消息'}</ChatListView.Preview>
+                  </ChatListView.Text>
+                  <ChatListView.Meta>{isConversationHighlighted(conversation, session.activeConversationId, session.turnIds) ? '运行中' : ''}</ChatListView.Meta>
                   <Dropdown>
                     <Dropdown.Trigger aria-label="对话操作" className="inline-flex size-7 items-center justify-center rounded-md">
                       ···
@@ -148,10 +152,13 @@ export function AppSidebar({ session, onCreateWorkspace, onCreateConversation, o
                       </Dropdown.Menu>
                     </Dropdown.Popover>
                   </Dropdown>
-                </Sidebar.MenuActions>
-              </Sidebar.MenuItem>
-            ))}
-          </Sidebar.Menu>
+                </ChatListView.ItemContent>
+                {isConversationHighlighted(conversation, session.activeConversationId, session.turnIds) ? (
+                  <span className="sr-only">运行中</span>
+                ) : null}
+              </ChatListView.Item>
+            )}
+            </ChatListView>
           )}
         </Sidebar.Group>
       </Sidebar.Content>

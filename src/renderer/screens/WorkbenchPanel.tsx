@@ -4,7 +4,7 @@ import { Button, Chip, Dropdown, Input, ScrollShadow, TextField } from '@heroui/
 import type { Selection } from '@heroui/react';
 import { FileTree } from '@heroui-pro/react';
 import type { TodeXSession } from '../session/useTodeXSession';
-import { terminalIdForConversation, terminalStatusLabel } from '../session/helpers';
+import { latencyLabelOf, terminalIdForConversation, terminalStatusLabel } from '../session/helpers';
 import type { WorkbenchTab } from '../lib/panels';
 import { V2ApiClient } from '@todex/protocol/v2';
 
@@ -124,6 +124,9 @@ function TerminalPane({ session, terminalId }: { session: TodeXSession; terminal
   const workspace = session.activeWorkspace;
   const conversation = session.activeConversation;
   const autoStartAttempts = useRef(new Set<string>());
+  const manualStopRef = useRef(false);
+  const reconnectTimerRef = useRef<number | null>(null);
+  const reconnectAttemptRef = useRef(0);
   const terminalByIdRef = useRef(session.terminalById);
   const terminal = terminalId ? session.terminalById[terminalId] : undefined;
   const lines = terminal?.output ?? [];
@@ -133,6 +136,12 @@ function TerminalPane({ session, terminalId }: { session: TodeXSession; terminal
   useEffect(() => {
     setInput('');
     autoStartAttempts.current.clear();
+    manualStopRef.current = false;
+    reconnectAttemptRef.current = 0;
+    if (reconnectTimerRef.current !== null) {
+      window.clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
   }, [conversation?.id]);
 
   useEffect(() => {
@@ -172,6 +181,41 @@ function TerminalPane({ session, terminalId }: { session: TodeXSession; terminal
     workspace?.path,
   ]);
 
+  useEffect(() => {
+    if (!workspace || !conversation || !terminalId || session.connectionState !== 'open' || manualStopRef.current) {
+      return;
+    }
+    if (terminal?.status === 'running') {
+      reconnectAttemptRef.current = 0;
+      return;
+    }
+    if (terminal?.status !== 'error' && terminal?.status !== 'exited') {
+      return;
+    }
+    if (reconnectTimerRef.current !== null) {
+      return;
+    }
+    const delay = Math.min(10_000, 1000 * 2 ** reconnectAttemptRef.current);
+    reconnectAttemptRef.current += 1;
+    reconnectTimerRef.current = window.setTimeout(() => {
+      reconnectTimerRef.current = null;
+      const latest = terminalByIdRef.current[terminalId];
+      session.startTerminalSession(workspace, conversation, {
+        terminalId,
+        cwd: latest?.cwd || workspace.path,
+        shell: latest?.shell || '',
+        rows: latest?.rows || 24,
+        cols: latest?.cols || 80,
+      });
+    }, delay);
+    return () => {
+      if (reconnectTimerRef.current !== null) {
+        window.clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
+      }
+    };
+  }, [conversation, session.connectionState, session.startTerminalSession, terminal?.status, terminalId, workspace]);
+
   return (
     <div className="flex h-full min-h-0 flex-col bg-[#111418] text-[#e7eaee]">
       <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-2">
@@ -181,30 +225,22 @@ function TerminalPane({ session, terminalId }: { session: TodeXSession; terminal
             {workspace?.path || '未选择工作区'} · {terminal ? terminalStatusLabel(terminal.status) : '未启动'}
           </p>
         </div>
-        <div className="flex shrink-0 gap-2">
-          {terminal && (terminal.status === 'error' || terminal.status === 'exited') ? (
-            <Button
-              size="sm"
-              variant="secondary"
-              onPress={() => {
-                if (!workspace || !conversation || !terminalId) return;
-                session.startTerminalSession(workspace, conversation, {
-                  terminalId,
-                  cwd: terminal.cwd || workspace.path,
-                  shell: terminal.shell,
-                  rows: terminal.rows,
-                  cols: terminal.cols,
-                });
-              }}
-            >
-              重连
-            </Button>
-          ) : null}
+        <div className="flex shrink-0 items-center gap-2">
+          <Chip size="sm" variant="soft">
+            {session.connectionState === 'open'
+              ? session.connectionHealth.latencyMs === null ? '检测中' : latencyLabelOf(session.connectionHealth.latencyMs)
+              : '未连接'}
+          </Chip>
           <Button
             size="sm"
             variant="danger-soft"
             isDisabled={!terminalId || !terminal || terminal.status === 'exited'}
             onPress={() => {
+              manualStopRef.current = true;
+              if (reconnectTimerRef.current !== null) {
+                window.clearTimeout(reconnectTimerRef.current);
+                reconnectTimerRef.current = null;
+              }
               if (terminalId) {
                 session.stopTerminalSession(terminalId, workspace?.tenantId || session.settings.tenantId);
               }

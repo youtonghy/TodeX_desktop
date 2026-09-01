@@ -177,8 +177,11 @@ body {
 
 .composer-control__trigger,
 .composer-control__static {
-  height: 2rem;
-  min-height: 2rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 2.25rem;
+  min-height: 2.25rem;
   width: 100%;
   padding-inline: 0.55rem;
 }
@@ -229,13 +232,15 @@ body {
 
 @container (max-width: 34rem) {
   .composer-control {
-    width: 2rem;
-    max-width: 2rem;
-    flex-basis: 2rem;
+    width: 2.25rem;
+    max-width: 2.25rem;
+    flex-basis: 2.25rem;
   }
 
   .composer-control__trigger,
   .composer-control__static {
+    height: 2.25rem;
+    min-height: 2.25rem;
     justify-content: center;
     padding-inline: 0.45rem;
   }
