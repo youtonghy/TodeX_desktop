@@ -1,8 +1,8 @@
-import { RiCpuLine, RiMagicLine, RiRobot2Line, RiShieldLine, RiStopCircleLine } from '@remixicon/react';
+import { RiBarChartBoxLine, RiClipboardLine, RiCpuLine, RiGitBranchLine, RiMagicLine, RiRobot2Line, RiShieldLine, RiStopCircleLine } from '@remixicon/react';
 import { useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import { Button, Chip, Label, ListBox, ScrollShadow, Select, Tooltip, toast } from '@heroui/react';
-import { ChainOfThought, ChatMessage, PromptInput } from '@heroui-pro/react';
+import { ChainOfThought, ChatMessage, HoverCard, PromptInput } from '@heroui-pro/react';
 import { ChatTool } from '@heroui-pro/react/chat-tool';
 import { Markdown } from '@heroui-pro/react/markdown';
 import { providerDisplayName, type ProviderKind } from '@todex/protocol/v2';
@@ -100,6 +100,72 @@ function ContextUsageIndicator({
         </div>
       </Tooltip.Content>
     </Tooltip>
+  );
+}
+
+function AgentMessageActions({
+  conversationId,
+  entry,
+  session,
+}: {
+  conversationId: string;
+  entry: { id: string; subtitle: string; at: number };
+  session: TodeXSession;
+}) {
+  const records = session.usageRecords.filter((record) => record.conversationId === conversationId);
+  const usage = records.sort((left, right) => right.updatedAt - left.updatedAt)[0];
+  const totalTokens = usage
+    ? usage.inputTokens + usage.outputTokens + usage.cachedInputTokens + usage.cacheWriteTokens
+    : 0;
+  const elapsedSeconds = usage ? Math.max(0.001, (usage.updatedAt - entry.at) / 1000) : 0;
+  const outputTps = usage && elapsedSeconds > 0 ? usage.outputTokens / elapsedSeconds : 0;
+
+  return (
+    <ChatMessage.Actions className="mt-1">
+      <ChatMessage.Action
+        isIconOnly
+        size="sm"
+        variant="tertiary"
+        aria-label="复制回复"
+        tooltip="复制回复"
+        onPress={() => void navigator.clipboard.writeText(entry.subtitle)
+          .then(() => toast.success('已复制回复'))
+          .catch(() => toast.danger('复制失败，请重试'))}
+      >
+        <RiClipboardLine aria-hidden="true" />
+      </ChatMessage.Action>
+      <ChatMessage.Action
+        isIconOnly
+        size="sm"
+        variant="tertiary"
+        aria-label="Fork 对话"
+        tooltip="Fork 对话"
+        onPress={() => session.forkConversation(conversationId)}
+      >
+        <RiGitBranchLine aria-hidden="true" />
+      </ChatMessage.Action>
+      <HoverCard>
+        <HoverCard.Trigger>
+          <ChatMessage.Action isIconOnly size="sm" variant="tertiary" aria-label="查看回复统计" tooltip="查看回复统计">
+            <RiBarChartBoxLine aria-hidden="true" />
+          </ChatMessage.Action>
+        </HoverCard.Trigger>
+        <HoverCard.Content>
+          <HoverCard.Arrow />
+          <div className="min-w-52 space-y-1 p-1 text-xs">
+            <p className="font-medium">回复统计</p>
+            {usage ? (
+              <>
+                <p className="text-muted">模型：{usage.model}</p>
+                <p>输入 {formatTokenCount(usage.inputTokens)} · 输出 {formatTokenCount(usage.outputTokens)}</p>
+                <p>缓存读取 {formatTokenCount(usage.cachedInputTokens)} · 写入 {formatTokenCount(usage.cacheWriteTokens)}</p>
+                <p>总计 {formatTokenCount(totalTokens)} tokens · 输出 TPS {outputTps.toFixed(1)}</p>
+              </>
+            ) : <p className="text-muted">暂无该回复的 usage 数据。</p>}
+          </div>
+        </HoverCard.Content>
+      </HoverCard>
+    </ChatMessage.Actions>
   );
 }
 
@@ -313,6 +379,7 @@ export function ChatPanel({ session }: Props) {
                       </Markdown>
                     )}
                   </div>
+                  {!isUser ? <AgentMessageActions conversationId={conversation.id} entry={entry} session={session} /> : null}
                   {request ? (
                     <ChatMessage.Actions>
                       <Button size="sm" onPress={() => session.sendApprovalResponse(true, request)}>同意</Button>
