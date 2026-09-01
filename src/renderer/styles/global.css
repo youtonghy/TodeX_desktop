@@ -145,6 +145,10 @@ body {
   cursor: pointer;
 }
 
+.composer-suggestion-item--active {
+  background: var(--surface-secondary);
+}
+
 .composer-suggestion-item:hover,
 .composer-suggestion-item[data-focused="true"] {
   background: var(--surface-secondary);

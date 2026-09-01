@@ -1,5 +1,6 @@
 import { RiCpuLine, RiMagicLine, RiRobot2Line, RiShieldLine, RiStopCircleLine } from '@remixicon/react';
 import { useEffect, useState } from 'react';
+import type { KeyboardEvent } from 'react';
 import { Button, Chip, Label, ListBox, ScrollShadow, Select, Tooltip, toast } from '@heroui/react';
 import { ChainOfThought, ChatMessage, PromptInput } from '@heroui-pro/react';
 import { ChatTool } from '@heroui-pro/react/chat-tool';
@@ -102,6 +103,7 @@ export function ChatPanel({ session }: Props) {
   const draft = conversation ? (session.chatDrafts[conversation.id] ?? '') : '';
   const mention = findMentionTrigger(draft, conversation ? (session.composerSelections[conversation.id]?.end ?? draft.length) : 0);
   const [mentionSuggestions, setMentionSuggestions] = useState<Array<{ id: string; title: string; description: string; insertText: string }>>([]);
+  const [suggestionIndex, setSuggestionIndex] = useState(0);
   useEffect(() => {
     let active = true;
     if (!mention || !workspace) {
@@ -145,6 +147,32 @@ export function ChatPanel({ session }: Props) {
   const slashSuggestions = slashTrigger
     ? slashCatalog.filter((item) => canonicalSlashCommand(item.command).startsWith(canonicalSlashCommand(slashTrigger.split(/\s+/)[0] || slashTrigger)))
     : [];
+  const suggestionCount = slashSuggestions.length > 0 ? Math.min(12, slashSuggestions.length) : mentionSuggestions.length;
+  const applySuggestion = (index: number) => {
+    if (slashSuggestions.length > 0) {
+      const item = slashSuggestions[index];
+      if (item) session.setConversationChatDraft(conversation.id, `${item.command} `);
+      return;
+    }
+    const item = mentionSuggestions[index];
+    if (!item || !mention) return;
+    session.setConversationChatDraft(conversation.id, insertMention(draft, mention, item.insertText));
+    const cursor = mention.start + item.insertText.length;
+    session.setConversationComposerSelection(conversation.id, { start: cursor, end: cursor });
+  };
+  const handleSuggestionKeyDown = (event: KeyboardEvent) => {
+    if (!suggestionCount) return;
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      setSuggestionIndex((current) => (current + (event.key === 'ArrowDown' ? 1 : -1) + suggestionCount) % suggestionCount);
+    } else if (event.key === 'Enter') {
+      event.preventDefault();
+      applySuggestion(suggestionIndex);
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      setSuggestionIndex(0);
+    }
+  };
   const capability = findCapabilityHashTrigger(draft, session.composerSelections[conversation.id]?.end ?? draft.length);
   const thinking = session.thinkingConversations[conversation.id] === true;
   const conversationTimeline = session.timeline.filter((entry) => entry.conversationId === conversation.id);
@@ -274,8 +302,8 @@ export function ChatPanel({ session }: Props) {
                     if (item) session.setConversationChatDraft(conversation.id, `${item.command} `);
                   }}
                 >
-                  {slashSuggestions.slice(0, 12).map((item) => (
-                    <ListBox.Item key={item.command} id={item.command} textValue={`${item.command} ${item.description}`} className="composer-suggestion-item">
+                  {slashSuggestions.slice(0, 12).map((item, index) => (
+                    <ListBox.Item key={item.command} id={item.command} textValue={`${item.command} ${item.description}`} className={`composer-suggestion-item ${index === suggestionIndex ? 'composer-suggestion-item--active' : ''}`}>
                       <span className="composer-suggestion-command">{item.command}</span>
                       <span className="composer-suggestion-description">{item.description}</span>
                     </ListBox.Item>
@@ -292,8 +320,8 @@ export function ChatPanel({ session }: Props) {
                     session.setConversationComposerSelection(conversation.id, { start: cursor, end: cursor });
                   }}
                 >
-                  {mentionSuggestions.map((item) => (
-                    <ListBox.Item key={item.id} id={item.id} textValue={`@${item.title} ${item.description}`} className="composer-suggestion-item">
+                  {mentionSuggestions.map((item, index) => (
+                    <ListBox.Item key={item.id} id={item.id} textValue={`@${item.title} ${item.description}`} className={`composer-suggestion-item ${index === suggestionIndex ? 'composer-suggestion-item--active' : ''}`}>
                       <span className="composer-suggestion-command">@{item.title}</span>
                       <span className="composer-suggestion-description">{item.description}</span>
                     </ListBox.Item>
@@ -342,7 +370,7 @@ export function ChatPanel({ session }: Props) {
             <PromptInput
               value={draft}
               status={thinking ? 'streaming' : 'ready'}
-              onValueChange={(value: string) => session.setConversationChatDraft(conversation.id, value)}
+              onValueChange={(value: string) => { setSuggestionIndex(0); session.setConversationChatDraft(conversation.id, value); }}
               onSubmit={() => {
                 if (draft.trim().startsWith('/')) {
                   session.sendSlashCommand(draft, conversation.id);
@@ -354,7 +382,7 @@ export function ChatPanel({ session }: Props) {
             >
               <PromptInput.Shell>
                 <PromptInput.Content>
-                  <PromptInput.TextArea placeholder="发送消息，或输入 / 命令" />
+                  <PromptInput.TextArea placeholder="发送消息，或输入 / 命令" onKeyDown={handleSuggestionKeyDown} />
                 </PromptInput.Content>
                 <PromptInput.Toolbar className="composer-toolbar">
                   <PromptInput.ToolbarStart className="min-w-0 flex-1">
