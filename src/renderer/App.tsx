@@ -16,7 +16,7 @@ import { providerDisplayName, type ProviderKind } from '@todex/protocol/v2';
 import { isWorkbenchTab, panelFromRoute, type DesktopPanel, type OpenPanelOptions, type WorkbenchTab } from './lib/panels';
 
 const LAYOUT_AUTO_SAVE_ID = 'todex-desktop-app-layout';
-const LAYOUT_OPEN_STORAGE_KEY = 'todex.desktop.layoutOpen.v1';
+const LAYOUT_OPEN_STORAGE_KEY = 'todex.desktop.layoutOpen.v3';
 
 type LayoutOpenState = {
   sidebarOpen: boolean;
@@ -31,14 +31,14 @@ function applyTheme(dark: boolean) {
 function readLayoutOpen(): LayoutOpenState {
   try {
     const raw = window.localStorage.getItem(LAYOUT_OPEN_STORAGE_KEY);
-    if (!raw) return { sidebarOpen: true, asideOpen: true };
+    if (!raw) return { sidebarOpen: true, asideOpen: false };
     const parsed = JSON.parse(raw) as Partial<LayoutOpenState>;
     return {
       sidebarOpen: parsed.sidebarOpen !== false,
-      asideOpen: parsed.asideOpen !== false,
+      asideOpen: parsed.asideOpen === true,
     };
   } catch {
-    return { sidebarOpen: true, asideOpen: true };
+    return { sidebarOpen: true, asideOpen: false };
   }
 }
 

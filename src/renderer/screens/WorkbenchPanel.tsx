@@ -16,12 +16,40 @@ type Props = {
 
 type WorkbenchItem = { id: string; type: WorkbenchTab; title: string };
 
+type StoredWorkbenchState = {
+  items: WorkbenchItem[];
+  activeId: string;
+};
+
+const WORKBENCH_STORAGE_KEY = 'todex.desktop.workbench.v2';
+const WORKBENCH_TYPES = new Set<WorkbenchTab>(['terminal', 'browser', 'files', 'git-diff']);
+
 const WORKBENCH_LABELS: Record<WorkbenchTab, string> = {
   terminal: '终端',
   browser: '浏览器',
   files: '文件',
   'git-diff': 'Git Diff',
 };
+
+function parseStoredWorkbenchState(value: unknown): StoredWorkbenchState {
+  if (!value || typeof value !== 'object') return { items: [], activeId: '' };
+  const candidate = value as Partial<StoredWorkbenchState>;
+  const seen = new Set<string>();
+  const items = Array.isArray(candidate.items)
+    ? candidate.items.filter((item): item is WorkbenchItem => {
+      if (!item || typeof item !== 'object') return false;
+      const entry = item as Partial<WorkbenchItem>;
+      if (typeof entry.id !== 'string' || seen.has(entry.id)) return false;
+      if (typeof entry.title !== 'string' || !WORKBENCH_TYPES.has(entry.type as WorkbenchTab)) return false;
+      seen.add(entry.id);
+      return true;
+    })
+    : [];
+  const activeId = typeof candidate.activeId === 'string' && items.some((item) => item.id === candidate.activeId)
+    ? candidate.activeId
+    : items[0]?.id ?? '';
+  return { items, activeId };
+}
 
 const PLACEHOLDER_FILES: Record<string, { title: string; language: string; body: string }> = {
   readme: {
@@ -43,26 +71,47 @@ const PLACEHOLDER_FILES: Record<string, { title: string; language: string; body:
 
 export function WorkbenchPanel({ session, tab, onTabChange }: Props) {
   const conversationId = session.activeConversation?.id ?? '';
-  const [items, setItems] = useState<WorkbenchItem[]>(() => [{ id: 'terminal-1', type: 'terminal', title: '终端 1' }]);
-  const [activeId, setActiveId] = useState('terminal-1');
+  const [items, setItems] = useState<WorkbenchItem[]>([]);
+  const [activeId, setActiveId] = useState('');
+  const [restored, setRestored] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
+    void window.todexDesktop.store.get(WORKBENCH_STORAGE_KEY)
+      .then((value) => {
+        if (cancelled) return;
+        const stored = parseStoredWorkbenchState(value);
+        setItems(stored.items);
+        setActiveId(stored.activeId);
+        const active = stored.items.find((item) => item.id === stored.activeId);
+        if (active) onTabChange(active.type);
+      })
+      .catch((reason) => {
+        console.error('Failed to restore workbench tabs', reason);
+      })
+      .finally(() => {
+        if (!cancelled) setRestored(true);
+      });
+    return () => { cancelled = true; };
+  }, [onTabChange]);
+
+  useEffect(() => {
+    if (!restored) return;
+    void window.todexDesktop.store.set(WORKBENCH_STORAGE_KEY, { items, activeId } satisfies StoredWorkbenchState)
+      .catch((reason) => {
+        console.error('Failed to persist workbench tabs', reason);
+      });
+  }, [activeId, items, restored]);
+
+  useEffect(() => {
+    if (!restored) return;
     const next = items.find((item) => item.type === tab);
-    if (next) {
+    if (next && next.id !== activeId) {
       setActiveId(next.id);
-    } else {
-      const created = { id: `${tab}-1`, type: tab, title: WORKBENCH_LABELS[tab] };
-      setItems((current) => [...current, created]);
-      setActiveId(created.id);
     }
-  }, [tab]);
+  }, [activeId, items, restored, tab]);
 
-  useEffect(() => {
-    setItems([{ id: 'terminal-1', type: 'terminal', title: '终端 1' }]);
-    setActiveId('terminal-1');
-  }, [conversationId]);
-
-  const active = items.find((item) => item.id === activeId) ?? items[0];
+  const active = items.find((item) => item.id === activeId) ?? null;
   const addTab = (type: WorkbenchTab) => {
     const count = items.filter((item) => item.type === type).length + 1;
     const item = { id: `${type}-${Date.now()}`, type, title: `${WORKBENCH_LABELS[type]} ${count}` };
@@ -106,6 +155,9 @@ export function WorkbenchPanel({ session, tab, onTabChange }: Props) {
         </Dropdown>
       </div>
       <div className="min-h-0 flex-1 overflow-hidden">
+        {!active ? (
+          <div className="text-muted flex h-full items-center justify-center text-sm">暂无打开的标签</div>
+        ) : null}
         {items.map((item) => (
           <div key={item.id} className={item.id === active?.id ? 'h-full' : 'hidden'}>
             {item.type === 'terminal' ? <TerminalPane session={session} terminalId={terminalIdForConversation(conversationId, item.id)} /> : null}
@@ -304,20 +356,56 @@ function BrowserPane({ workspacePath, session }: { workspacePath?: string; sessi
     const bind = () => {
       try {
         const doc = frame.contentDocument;
-        if (!doc) return;
+        const frameWindow = frame.contentWindow;
+        if (!doc || !frameWindow) return;
+        const FrameHTMLElement = (frameWindow as Window & typeof globalThis).HTMLElement;
         let hovered: HTMLElement | null = null;
+        const isFrameElement = (value: EventTarget | Element | null): value is HTMLElement => (
+          value instanceof FrameHTMLElement
+        );
+        const createOverlay = (color: string) => {
+          const overlay = doc.createElement('div');
+          overlay.setAttribute('aria-hidden', 'true');
+          Object.assign(overlay.style, {
+            position: 'fixed',
+            pointerEvents: 'none',
+            zIndex: '2147483647',
+            border: `2px solid ${color}`,
+            boxSizing: 'border-box',
+            display: 'none',
+          });
+          doc.body.appendChild(overlay);
+          return overlay;
+        };
+        const hoverOverlay = createOverlay('#0ea5e9');
+        const selectedOverlay = createOverlay('#2563eb');
+        const positionOverlay = (overlay: HTMLDivElement, element: HTMLElement | null) => {
+          if (!element || !element.isConnected) {
+            overlay.style.display = 'none';
+            return;
+          }
+          const rect = element.getBoundingClientRect();
+          Object.assign(overlay.style, {
+            display: 'block',
+            left: `${rect.left}px`,
+            top: `${rect.top}px`,
+            width: `${rect.width}px`,
+            height: `${rect.height}px`,
+          });
+        };
+        const previousCursor = doc.documentElement.style.cursor;
+        doc.documentElement.style.cursor = 'crosshair';
         const move = (event: MouseEvent) => {
-          const element = event.target instanceof HTMLElement ? event.target : null;
-          if (hovered && hovered !== element) hovered.style.outline = '';
+          const element = isFrameElement(event.target) ? event.target : null;
           hovered = element;
-          if (element && element !== selectedRef.current) element.style.setProperty('outline', '2px solid #0ea5e9', 'important');
+          positionOverlay(hoverOverlay, element === selectedRef.current ? null : element);
         };
         const click = (event: MouseEvent) => {
           event.preventDefault(); event.stopPropagation();
-          if (event.target instanceof HTMLElement) {
-            selectedRef.current?.style.removeProperty('outline');
+          if (isFrameElement(event.target)) {
             selectedRef.current = event.target;
-            event.target.style.setProperty('outline', '2px solid #2563eb', 'important');
+            positionOverlay(selectedOverlay, event.target);
+            positionOverlay(hoverOverlay, null);
             setSelected(event.target);
           }
         };
@@ -325,23 +413,46 @@ function BrowserPane({ workspacePath, session }: { workspacePath?: string; sessi
           if (!selectedRef.current) return;
           event.preventDefault();
           const next = event.deltaY > 0 ? selectedRef.current.parentElement : selectedRef.current.firstElementChild;
-          if (next instanceof HTMLElement) {
-            selectedRef.current.style.removeProperty('outline');
+          if (isFrameElement(next)) {
             selectedRef.current = next;
-            next.style.setProperty('outline', '2px solid #2563eb', 'important');
+            positionOverlay(selectedOverlay, next);
             setSelected(next);
           }
+        };
+        const reposition = () => {
+          positionOverlay(hoverOverlay, hovered === selectedRef.current ? null : hovered);
+          positionOverlay(selectedOverlay, selectedRef.current);
         };
         doc.addEventListener('mousemove', move, true);
         doc.addEventListener('click', click, true);
         doc.addEventListener('wheel', wheel, { capture: true, passive: false });
-        return () => { doc.removeEventListener('mousemove', move, true); doc.removeEventListener('click', click, true); doc.removeEventListener('wheel', wheel, true); if (hovered) hovered.style.outline = ''; };
+        doc.addEventListener('scroll', reposition, true);
+        frameWindow.addEventListener('resize', reposition);
+        return () => {
+          doc.removeEventListener('mousemove', move, true);
+          doc.removeEventListener('click', click, true);
+          doc.removeEventListener('wheel', wheel, true);
+          doc.removeEventListener('scroll', reposition, true);
+          frameWindow.removeEventListener('resize', reposition);
+          doc.documentElement.style.cursor = previousCursor;
+          hoverOverlay.remove();
+          selectedOverlay.remove();
+        };
       } catch { setError('该页面禁止读取元素，无法使用检查功能'); }
       return undefined;
     };
     let cleanup = bind();
-    frame.addEventListener('load', () => { cleanup?.(); cleanup = bind(); });
-    return () => { cleanup?.(); };
+    const handleLoad = () => {
+      cleanup?.();
+      selectedRef.current = null;
+      setSelected(null);
+      cleanup = bind();
+    };
+    frame.addEventListener('load', handleLoad);
+    return () => {
+      frame.removeEventListener('load', handleLoad);
+      cleanup?.();
+    };
   }, [inspect]);
 
   const insertSelection = () => {
@@ -353,6 +464,8 @@ function BrowserPane({ workspacePath, session }: { workspacePath?: string; sessi
     const reference = `[网页元素 ${tag}${id}${text ? `: ${text}` : ''}]`;
     const conversationId = session.activeConversation?.id;
     if (conversationId) session.setConversationChatDraft(conversationId, (current) => `${current}${current ? '\n' : ''}${reference}`);
+    selectedRef.current = null;
+    setSelected(null);
     setInspect(false);
   };
 
@@ -383,7 +496,7 @@ function BrowserPane({ workspacePath, session }: { workspacePath?: string; sessi
         <Button type="submit" variant="secondary">
           打开
         </Button>
-        <Button type="button" isIconOnly variant={inspect ? 'primary' : 'secondary'} aria-label="检查网页元素" onPress={() => { setInspect((current) => !current); setSelected(null); }}>
+        <Button type="button" isIconOnly variant={inspect ? 'primary' : 'secondary'} aria-label="检查网页元素" onPress={() => { setInspect((current) => { if (!current) selectedRef.current = null; return !current; }); setSelected(null); }}>
           <RiFocus3Line className="size-4" />
         </Button>
         {selected ? <Button type="button" variant="tertiary" onPress={insertSelection}>插入对话</Button> : null}
