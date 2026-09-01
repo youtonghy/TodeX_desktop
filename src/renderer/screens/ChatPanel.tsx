@@ -1,5 +1,5 @@
 import { RiCpuLine, RiMagicLine, RiRobot2Line, RiShieldLine, RiStopCircleLine } from '@remixicon/react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import { Button, Chip, Label, ListBox, ScrollShadow, Select, Tooltip, toast } from '@heroui/react';
 import { ChainOfThought, ChatMessage, PromptInput } from '@heroui-pro/react';
@@ -55,6 +55,11 @@ function formatTokenCount(value: number): string {
   return new Intl.NumberFormat('zh-CN', { notation: value >= 10_000 ? 'compact' : 'standard', maximumFractionDigits: 1 }).format(value);
 }
 
+function isImeCompositionKey(event: KeyboardEvent): boolean {
+  // WebKit may expose an active IME key as 229 even when isComposing is false.
+  return event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229;
+}
+
 function ContextUsageIndicator({
   usedTokens,
   contextWindow,
@@ -104,6 +109,7 @@ export function ChatPanel({ session }: Props) {
   const mention = findMentionTrigger(draft, conversation ? (session.composerSelections[conversation.id]?.end ?? draft.length) : 0);
   const [mentionSuggestions, setMentionSuggestions] = useState<Array<{ id: string; title: string; description: string; insertText: string }>>([]);
   const [suggestionIndex, setSuggestionIndex] = useState(0);
+  const isComposingRef = useRef(false);
   useEffect(() => {
     let active = true;
     if (!mention || !workspace) {
@@ -161,6 +167,7 @@ export function ChatPanel({ session }: Props) {
     session.setConversationComposerSelection(conversation.id, { start: cursor, end: cursor });
   };
   const handleSuggestionKeyDown = (event: KeyboardEvent) => {
+    if (isComposingRef.current || isImeCompositionKey(event)) return;
     if (!suggestionCount) return;
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault();
@@ -370,6 +377,11 @@ export function ChatPanel({ session }: Props) {
             <PromptInput
               value={draft}
               status={thinking ? 'streaming' : 'ready'}
+              onKeyDownCapture={(event) => {
+                if (event.key === 'Enter' && (isComposingRef.current || isImeCompositionKey(event))) {
+                  event.stopPropagation();
+                }
+              }}
               onValueChange={(value: string) => { setSuggestionIndex(0); session.setConversationChatDraft(conversation.id, value); }}
               onSubmit={() => {
                 if (draft.trim().startsWith('/')) {
@@ -382,7 +394,12 @@ export function ChatPanel({ session }: Props) {
             >
               <PromptInput.Shell>
                 <PromptInput.Content>
-                  <PromptInput.TextArea placeholder="发送消息，或输入 / 命令" onKeyDown={handleSuggestionKeyDown} />
+                  <PromptInput.TextArea
+                    placeholder="发送消息，或输入 / 命令"
+                    onCompositionStart={() => { isComposingRef.current = true; }}
+                    onCompositionEnd={() => { isComposingRef.current = false; }}
+                    onKeyDown={handleSuggestionKeyDown}
+                  />
                 </PromptInput.Content>
                 <PromptInput.Toolbar className="composer-toolbar">
                   <PromptInput.ToolbarStart className="min-w-0 flex-1">
