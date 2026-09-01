@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import { Button, Chip, Label, ListBox, ScrollShadow, Select, Tooltip, toast } from '@heroui/react';
 import { ChainOfThought, ChatMessage, HoverCard, PromptInput } from '@heroui-pro/react';
+import { ChatMessageActions } from '@heroui-pro/react/chat-message-actions';
 import { ChatTool } from '@heroui-pro/react/chat-tool';
 import { Markdown } from '@heroui-pro/react/markdown';
 import { providerDisplayName, type ProviderKind } from '@todex/protocol/v2';
@@ -14,6 +15,7 @@ import {
   canSwitchConversationAgent,
   inferMimeType,
   isImageMimeType,
+  isStepProgressEntry,
   isV2Conversation,
   MAX_COMPOSER_ATTACHMENTS,
   SLASH_COMMANDS,
@@ -121,11 +123,8 @@ function AgentMessageActions({
   const outputTps = usage && elapsedSeconds > 0 ? usage.outputTokens / elapsedSeconds : 0;
 
   return (
-    <ChatMessage.Actions className="mt-1">
-      <ChatMessage.Action
-        isIconOnly
-        size="sm"
-        variant="tertiary"
+    <ChatMessageActions className="mt-1">
+      <ChatMessageActions.Copy
         aria-label="复制回复"
         tooltip="复制回复"
         onPress={() => void navigator.clipboard.writeText(entry.subtitle)
@@ -133,11 +132,11 @@ function AgentMessageActions({
           .catch(() => toast.danger('复制失败，请重试'))}
       >
         <RiClipboardLine aria-hidden="true" />
-      </ChatMessage.Action>
+      </ChatMessageActions.Copy>
       <ChatMessage.Action
         isIconOnly
         size="sm"
-        variant="tertiary"
+        variant="ghost"
         aria-label="Fork 对话"
         tooltip="Fork 对话"
         onPress={() => session.forkConversation(conversationId)}
@@ -146,7 +145,7 @@ function AgentMessageActions({
       </ChatMessage.Action>
       <HoverCard>
         <HoverCard.Trigger>
-          <ChatMessage.Action isIconOnly size="sm" variant="tertiary" aria-label="查看回复统计" tooltip="查看回复统计">
+          <ChatMessage.Action isIconOnly size="sm" variant="ghost" aria-label="查看回复统计">
             <RiBarChartBoxLine aria-hidden="true" />
           </ChatMessage.Action>
         </HoverCard.Trigger>
@@ -165,7 +164,7 @@ function AgentMessageActions({
           </div>
         </HoverCard.Content>
       </HoverCard>
-    </ChatMessage.Actions>
+    </ChatMessageActions>
   );
 }
 
@@ -177,6 +176,13 @@ export function ChatPanel({ session }: Props) {
   const [mentionSuggestions, setMentionSuggestions] = useState<Array<{ id: string; title: string; description: string; insertText: string }>>([]);
   const [suggestionIndex, setSuggestionIndex] = useState(0);
   const isComposingRef = useRef(false);
+  const lastToastErrorRef = useRef('');
+  useEffect(() => {
+    if (session.lastError && session.lastError !== lastToastErrorRef.current) {
+      lastToastErrorRef.current = session.lastError;
+      toast.danger(session.lastError);
+    }
+  }, [session.lastError]);
   useEffect(() => {
     let active = true;
     if (!mention || !workspace) {
@@ -204,6 +210,7 @@ export function ChatPanel({ session }: Props) {
   const attachments = session.composerAttachments[conversation.id] ?? [];
   const items = buildConversationRenderItems(
     [...session.timeline.filter((entry) => entry.conversationId === conversation.id)]
+      .filter((entry) => entry.kind !== 'system' || isStepProgressEntry(entry))
       .sort((left, right) => left.at - right.at),
   );
   const currentProvider = isV2Conversation(conversation) ? conversation.provider || '' : '';
@@ -379,7 +386,7 @@ export function ChatPanel({ session }: Props) {
                       </Markdown>
                     )}
                   </div>
-                  {!isUser ? <AgentMessageActions conversationId={conversation.id} entry={entry} session={session} /> : null}
+                  {entry.kind === 'incoming' ? <AgentMessageActions conversationId={conversation.id} entry={entry} session={session} /> : null}
                   {request ? (
                     <ChatMessage.Actions>
                       <Button size="sm" onPress={() => session.sendApprovalResponse(true, request)}>同意</Button>
@@ -432,9 +439,6 @@ export function ChatPanel({ session }: Props) {
                 </ListBox>
               ) : mention ? <p className="text-muted px-2 py-1 text-xs">正在搜索工作区文件…</p> : null}
             </div>
-          ) : null}
-          {session.lastError ? (
-            <p className="text-danger mb-2 text-xs">{session.lastError}</p>
           ) : null}
           {capability ? <p className="text-muted mb-2 text-xs">输入 # 可引用 Skill 或 MCP。</p> : null}
           {attachments.length > 0 ? (
