@@ -29,7 +29,7 @@ async function decodeQrFromFile(file: File): Promise<string | null> {
 }
 
 export function SettingsPanel({ session }: Props) {
-  const { settings, setSettings, connectionState, connectionHealth, serverVersion, lastError, connect, closeSocket } = session;
+  const { settings, setSettings, backendConnections, activeBackendConnectionId, setActiveBackendConnectionId, updateBackendConnection, addBackendConnection, removeBackendConnection, connectionState, connectionHealth, serverVersion, lastError, connect, closeSocket } = session;
   const [pairingText, setPairingText] = useState('');
   const [chunks, setChunks] = useState<Map<number, PairingQrChunk>>(new Map());
   const connected = connectionState === 'open' || connectionState === 'connecting';
@@ -73,46 +73,37 @@ export function SettingsPanel({ session }: Props) {
         ) : null}
       </div>
       <Surface className="flex flex-col gap-4 rounded-2xl p-5">
-        <Field label="后端地址" value={settings.serverUrl} onChange={(serverUrl) => setSettings((current) => ({ ...current, serverUrl }))} />
-        <Field label="Auth token" value={settings.authToken} type="password" onChange={(authToken) => setSettings((current) => ({ ...current, authToken }))} />
-        <Field label="Tenant" value={settings.tenantId} onChange={(tenantId) => setSettings((current) => ({ ...current, tenantId }))} />
-        <Select
-          className="w-full"
-          selectedKey={settings.encryptionProtocol}
-          onSelectionChange={(key) => {
-            if (typeof key === 'string') {
-              setSettings((current) => ({ ...current, encryptionProtocol: key as typeof current.encryptionProtocol }));
-            }
-          }}
-        >
-          <Label>传输加密</Label>
-          <Select.Trigger>
-            <Select.Value />
-            <Select.Indicator />
-          </Select.Trigger>
-          <Select.Popover>
-            <ListBox>
-              <ListBox.Item id="none" textValue="none">none</ListBox.Item>
-              <ListBox.Item id="x25519" textValue="x25519">x25519</ListBox.Item>
-              <ListBox.Item id="ml-kem-768" textValue="ml-kem-768">ml-kem-768</ListBox.Item>
-            </ListBox>
-          </Select.Popover>
-        </Select>
-        {settings.encryptionProtocol !== 'none' ? (
-          <Field
-            label="加密公钥"
-            value={settings.encryptionPublicKey}
-            onChange={(encryptionPublicKey) => setSettings((current) => ({ ...current, encryptionPublicKey }))}
-          />
-        ) : null}
-        <div className="flex gap-2">
-          <Button onPress={() => (connected ? closeSocket(true) : connect())}>
-            {connected ? '断开' : connectionState === 'error' ? '重试' : '连接'}
-          </Button>
-          {connectionState === 'error' && connected === false ? (
-            <Button variant="secondary" onPress={() => connect()}>重试</Button>
-          ) : null}
+        <div className="flex items-center justify-between">
+          <h3 className="font-semibold">后端连接</h3>
+          <Button size="sm" variant="secondary" onPress={() => addBackendConnection()}>添加后端</Button>
         </div>
+        <Select selectedKey={activeBackendConnectionId} onSelectionChange={(key) => {
+          if (typeof key !== 'string') return;
+          const profile = backendConnections.find((item) => item.id === key);
+          if (!profile) return;
+          setActiveBackendConnectionId(profile.id);
+          setSettings((current) => ({ ...current, serverUrl: profile.serverUrl, authToken: profile.authToken, tenantId: profile.tenantId, encryptionProtocol: profile.encryptionProtocol, encryptionPublicKey: profile.encryptionPublicKey }));
+        }}>
+          <Label>当前后端</Label>
+          <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
+          <Select.Popover><ListBox>{backendConnections.map((profile) => <ListBox.Item key={profile.id} id={profile.id} textValue={profile.name}>{profile.name}</ListBox.Item>)}</ListBox></Select.Popover>
+        </Select>
+        {(() => {
+          const profile = backendConnections.find((item) => item.id === activeBackendConnectionId);
+          if (!profile) return null;
+          return <>
+            <Field label="名称" value={profile.name} onChange={(name) => updateBackendConnection(profile.id, { name })} />
+            <Field label="后端地址" value={profile.serverUrl} onChange={(serverUrl) => { updateBackendConnection(profile.id, { serverUrl }); setSettings((current) => ({ ...current, serverUrl })); }} />
+            <Field label="Auth token" value={profile.authToken} type="password" onChange={(authToken) => { updateBackendConnection(profile.id, { authToken }); setSettings((current) => ({ ...current, authToken })); }} />
+            <Field label="Tenant" value={profile.tenantId} onChange={(tenantId) => { updateBackendConnection(profile.id, { tenantId }); setSettings((current) => ({ ...current, tenantId })); }} />
+            <Select selectedKey={profile.encryptionProtocol} onSelectionChange={(key) => { if (typeof key === 'string') { const encryptionProtocol = key as typeof profile.encryptionProtocol; updateBackendConnection(profile.id, { encryptionProtocol }); setSettings((current) => ({ ...current, encryptionProtocol })); } }}>
+              <Label>传输加密</Label><Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
+              <Select.Popover><ListBox><ListBox.Item id="none" textValue="none">none</ListBox.Item><ListBox.Item id="x25519" textValue="x25519">x25519</ListBox.Item><ListBox.Item id="ml-kem-768" textValue="ml-kem-768">ml-kem-768</ListBox.Item></ListBox></Select.Popover>
+            </Select>
+            {profile.encryptionProtocol !== 'none' ? <Field label="加密公钥" value={profile.encryptionPublicKey} onChange={(encryptionPublicKey) => updateBackendConnection(profile.id, { encryptionPublicKey })} /> : null}
+            <div className="flex gap-2"><Button onPress={() => (connected ? closeSocket(true) : connect())}>{connected ? '断开' : connectionState === 'error' ? '重试' : '连接'}</Button>{backendConnections.length > 1 ? <Button variant="danger-soft" onPress={() => removeBackendConnection(profile.id)}>删除后端</Button> : null}</div>
+          </>;
+        })()}
       </Surface>
       <Surface className="flex flex-col gap-4 rounded-2xl p-5">
         <h3 className="font-semibold">配对</h3>

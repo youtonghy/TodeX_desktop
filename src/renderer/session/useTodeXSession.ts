@@ -12,6 +12,7 @@ import { V2ApiClient, buildV2WebSocketUrlWithOptions } from '@todex/protocol/v2'
 import { probeBackendConnection, nextReconnectDelayMs, inspectServerUrl, tokenMatchesOrigin } from '@todex/protocol/connectionProbe';
 import {
   ConnectionSettings,
+  BackendConnectionProfile,
   CodexMemorySettings,
   CodexModelCatalogItem,
   CodexNativeThread,
@@ -82,6 +83,7 @@ import {
   EXPERIMENTAL_FEATURES_STORAGE_KEY,
   TOKEN_STORAGE_KEY,
   TOKEN_ORIGIN_STORAGE_KEY,
+  BACKEND_CONNECTIONS_STORAGE_KEY,
   JSON_SAVE_DEBOUNCE_MS,
   SESSION_CURSOR_SAVE_DEBOUNCE_MS,
   WORKSPACE_SYNC_DEBOUNCE_MS,
@@ -104,6 +106,9 @@ import {
   DIRECT_SLASH_COMMANDS,
   defaultSettings,
   defaultConnectionHealth,
+  normalizeBackendConnectionProfile,
+  profileFromSettings,
+  settingsFromProfile,
   PERMISSION_PRESETS,
   type ServerVersion,
   type ConversationRecord,
@@ -323,6 +328,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const [hydrated, setHydrated] = useState(false);
   const [autoConnectEnabled, setAutoConnectEnabled] = useState(false);
   const [settings, setSettings] = useState<ConnectionSettings>(defaultSettings);
+  const [backendConnections, setBackendConnections] = useState<BackendConnectionProfile[]>([]);
+  const [activeBackendConnectionId, setActiveBackendConnectionId] = useState('default-backend');
   const [workspaces, setWorkspaces] = useState<WorkspaceRecord[]>([]);
   const [conversations, setConversations] = useState<ConversationRecord[]>([]);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState('');
@@ -671,6 +678,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         storedMentionHistory,
         storedSessionCursors,
         storedExperimentalFeatures,
+        storedBackendConnections,
         storedToken,
         storedTokenOrigin,
       ] = await Promise.all([
@@ -682,6 +690,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         loadJson<WorkspaceMentionHistory[]>(MENTION_HISTORY_STORAGE_KEY, []),
         loadJson<Record<string, number>>(SESSION_CURSORS_STORAGE_KEY, {}),
         loadJson<Partial<ExperimentalFeatureSettings> | null>(EXPERIMENTAL_FEATURES_STORAGE_KEY, null),
+        loadJson<BackendConnectionProfile[]>(BACKEND_CONNECTIONS_STORAGE_KEY, []),
         loadSecret(TOKEN_STORAGE_KEY),
         loadSecret(TOKEN_ORIGIN_STORAGE_KEY),
       ]);
@@ -695,6 +704,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         tokenMatchesOrigin(storedTokenOrigin, storedSettings?.serverUrl || defaultSettings.serverUrl) ? storedToken : '',
       );
       nextSettings.serverUrl = normalizeServerUrl(nextSettings.serverUrl);
+      const storedProfiles = (storedBackendConnections as unknown[]).map(normalizeBackendConnectionProfile).filter((profile): profile is BackendConnectionProfile => Boolean(profile));
+      const profiles = storedProfiles.length ? storedProfiles : [profileFromSettings(nextSettings)];
       const normalizedWorkspaces = storedWorkspaces.map((workspace) => ({
         ...workspace,
         reasoningEffort: normalizeReasoningEffort(workspace.reasoningEffort),
@@ -750,6 +761,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       );
 
       setSettings(nextSettings);
+      setBackendConnections(profiles);
+      setActiveBackendConnectionId(profiles[0]?.id ?? 'default-backend');
       setWorkspaces(normalizedWorkspaces);
       setConversations(normalizedConversations);
       setTimeline(storedTimeline.slice(0, MAX_TIMELINE_ITEMS));
@@ -803,6 +816,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     void saveSecret(TOKEN_STORAGE_KEY, settings.authToken);
     void saveSecret(TOKEN_ORIGIN_STORAGE_KEY, settings.authToken ? normalizeServerUrl(settings.serverUrl) : '');
   }, [hydrated, settings]);
+
+  useEffect(() => {
+    if (hydrated) void saveJson(BACKEND_CONNECTIONS_STORAGE_KEY, backendConnections);
+  }, [backendConnections, hydrated]);
 
   const syncWorkspacesToBackend = useCallback(
     async (snapshot: WorkspaceRecord[] = workspacesRef.current) => {
@@ -2859,6 +2876,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         id,
         name,
         path,
+        backendConnectionId: activeBackendConnectionId,
         sessionId,
         tenantId: settings.tenantId,
         threadId,
@@ -2890,8 +2908,32 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       settings.defaultReasoningEffort,
       settings.sandboxMode,
       settings.tenantId,
+      activeBackendConnectionId,
     ],
   );
+
+  const updateBackendConnection = useCallback((id: string, patch: Partial<BackendConnectionProfile>) => {
+    setBackendConnections((current) => current.map((profile) => profile.id === id ? { ...profile, ...patch, updatedAt: Date.now() } : profile));
+  }, []);
+
+  const addBackendConnection = useCallback((profile?: Partial<BackendConnectionProfile>) => {
+    const id = createRequestId('backend');
+    const next: BackendConnectionProfile = { ...profileFromSettings(settings, '新后端', id), ...profile, id, createdAt: Date.now(), updatedAt: Date.now() };
+    setBackendConnections((current) => [...current, next]);
+    setActiveBackendConnectionId(id);
+    setSettings((current) => settingsFromProfile(next, current));
+    return next;
+  }, [settings]);
+
+  const removeBackendConnection = useCallback((id: string) => {
+    if (backendConnections.length <= 1) return;
+    const next = backendConnections.filter((profile) => profile.id !== id);
+    setBackendConnections(next);
+    if (activeBackendConnectionId === id && next[0]) {
+      setActiveBackendConnectionId(next[0].id);
+      setSettings((current) => settingsFromProfile(next[0], current));
+    }
+  }, [activeBackendConnectionId, backendConnections]);
 
   const selectWorkspace = useCallback((workspaceId: string) => {
     const workspace = workspaces.find((item) => item.id === workspaceId);
@@ -2899,6 +2941,11 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       return;
     }
     setActiveWorkspaceId(workspaceId);
+    const profile = backendConnections.find((item) => item.id === workspace.backendConnectionId);
+    if (profile) {
+      setActiveBackendConnectionId(profile.id);
+      setSettings((current) => settingsFromProfile(profile, current));
+    }
     const conversation = conversations.find((item) => item.workspaceId === workspaceId);
     if (conversation) {
       setActiveConversationId(conversation.id);
@@ -2908,7 +2955,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       setActiveConversationId(nextConversation.id);
     }
     setLastError('');
-  }, [conversations, workspaces]);
+  }, [backendConnections, conversations, workspaces]);
 
   const selectConversation = useCallback((workspaceId: string, conversationId: string) => {
     setActiveWorkspaceId(workspaceId);
@@ -5976,6 +6023,12 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     hydrated,
     settings,
     setSettings,
+    backendConnections,
+    activeBackendConnectionId,
+    setActiveBackendConnectionId,
+    updateBackendConnection,
+    addBackendConnection,
+    removeBackendConnection,
     workspaces,
     conversations,
     activeWorkspaceId,

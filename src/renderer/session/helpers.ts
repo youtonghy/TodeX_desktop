@@ -8,6 +8,7 @@ import type {
   CodexPluginListResult,
   CodexReasoningEffortOption,
   CodexServiceTierOption,
+  BackendConnectionProfile,
   ConnectionSettings,
   LocalAdapterState,
   PendingRequest,
@@ -28,6 +29,7 @@ import {
   FALLBACK_CODEX_MODELS,
   mergeWorkspaceRecords,
   normalizeReasoningEffort,
+  normalizeServerUrl,
   parseMcpServerStatusListResponse,
   parsePermissionProfileListResponse,
   normalizeThreadId,
@@ -1044,6 +1046,7 @@ export type PersistedSettings = Omit<ConnectionSettings, 'authToken'>;
 
 
 export const SETTINGS_STORAGE_KEY = 'todex.desktop.settings.v1';
+export const BACKEND_CONNECTIONS_STORAGE_KEY = 'todex.desktop.backendConnections.v1';
 export const WORKSPACES_STORAGE_KEY = 'todex.desktop.workspaces.v1';
 export const CONVERSATIONS_STORAGE_KEY = 'todex.desktop.conversations.v1';
 export const TIMELINE_STORAGE_KEY = 'todex.desktop.timeline.v1';
@@ -1420,6 +1423,25 @@ export function fromPersistedSettings(raw: Partial<PersistedSettings> | null | u
     defaultReasoningEffort: normalizeReasoningEffort(safeRaw.defaultReasoningEffort) ?? defaultSettings.defaultReasoningEffort,
     authToken,
   };
+}
+
+export function profileFromSettings(settings: ConnectionSettings, name = '默认后端', id = 'default-backend'): BackendConnectionProfile {
+  const now = Date.now();
+  return { id, name, serverUrl: normalizeServerUrl(settings.serverUrl), authToken: settings.authToken, tenantId: settings.tenantId, encryptionProtocol: settings.encryptionProtocol, encryptionPublicKey: settings.encryptionPublicKey, createdAt: now, updatedAt: now };
+}
+
+export function settingsFromProfile(profile: BackendConnectionProfile, current: ConnectionSettings): ConnectionSettings {
+  return { ...current, serverUrl: normalizeServerUrl(profile.serverUrl), authToken: profile.authToken, tenantId: profile.tenantId, encryptionProtocol: profile.encryptionProtocol, encryptionPublicKey: profile.encryptionPublicKey };
+}
+
+export function normalizeBackendConnectionProfile(value: unknown): BackendConnectionProfile | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  const id = typeof raw.id === 'string' ? raw.id.trim() : '';
+  const serverUrl = typeof raw.serverUrl === 'string' ? raw.serverUrl.trim() : '';
+  if (!id || !serverUrl) return null;
+  const now = Date.now();
+  return { id, name: typeof raw.name === 'string' && raw.name.trim() ? raw.name.trim() : '后端', serverUrl: normalizeServerUrl(serverUrl), authToken: typeof raw.authToken === 'string' ? raw.authToken : '', tenantId: typeof raw.tenantId === 'string' && raw.tenantId.trim() ? raw.tenantId.trim() : 'local', encryptionProtocol: raw.encryptionProtocol === 'x25519' || raw.encryptionProtocol === 'ml-kem-768' ? raw.encryptionProtocol : 'none', encryptionPublicKey: typeof raw.encryptionPublicKey === 'string' ? raw.encryptionPublicKey : '', createdAt: typeof raw.createdAt === 'number' ? raw.createdAt : now, updatedAt: typeof raw.updatedAt === 'number' ? raw.updatedAt : now };
 }
 
 export function authHeaders(settings: ConnectionSettings, extra: Record<string, string> = {}): Record<string, string> {

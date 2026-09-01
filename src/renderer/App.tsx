@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Button, Chip, Modal, Toast, toast } from '@heroui/react';
+import { Button, Chip, Label, ListBox, Modal, Select, Toast, toast } from '@heroui/react';
 import { AppLayout, Navbar } from '@heroui-pro/react';
 import { RiAddLine, RiLayoutLeftLine } from '@remixicon/react';
 import { useTodeXSession, type TodeXSession } from './session/useTodeXSession';
@@ -8,6 +8,7 @@ import { AppSidebar } from './components/AppSidebar';
 import { ChatPanel } from './screens/ChatPanel';
 import { SettingsPanel } from './screens/SettingsPanel';
 import { AsidePanel } from './screens/AsidePanel';
+import { CapabilitiesPanel } from './screens/CapabilitiesPanel';
 import { WorkbenchPanel } from './screens/WorkbenchPanel';
 import { Field } from './components/Field';
 import { connectionStateLabel, fetchWorkspaceDirectorySnapshot, isV2Conversation } from './session/helpers';
@@ -27,6 +28,7 @@ export function App() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [createOpen, setCreateOpen] = useState(false);
   const [createConversationOpen, setCreateConversationOpen] = useState(false);
+  const [capabilitiesOpen, setCapabilitiesOpen] = useState(false);
 
   const openPanel = useCallback((name: string, params?: OpenPanelOptions) => {
     if (name === 'CreateConversation') {
@@ -110,7 +112,7 @@ export function App() {
                 }
               }}
               onOpenSettings={() => setPanel('settings')}
-              onOpenCapabilities={() => { setPanel('capabilities'); setAsideOpen(true); }}
+              onOpenCapabilities={() => setCapabilitiesOpen(true)}
             />
           }
           navbar={
@@ -161,6 +163,9 @@ export function App() {
           </Modal.Container>
         </Modal.Backdrop>
       </Modal>
+      <Modal isOpen={capabilitiesOpen} onOpenChange={setCapabilitiesOpen}>
+        <Modal.Backdrop><Modal.Container><Modal.Dialog className="max-h-[90vh] sm:max-w-2xl"><Modal.CloseTrigger /><Modal.Header><Modal.Heading>MCP / Skill 管理</Modal.Heading></Modal.Header><Modal.Body className="max-h-[75vh] overflow-y-auto"><CapabilitiesPanel workspacePath={session.activeWorkspace?.path ?? session.settings.defaultWorkspacePath} providers={session.v2Providers} catalogs={session.capabilityCatalogs} onRefresh={(provider) => void session.refreshCapabilityCatalog(provider)} conversationId={session.activeConversation?.id} selectedSkills={session.activeConversation ? session.selectedSkills[session.activeConversation.id] ?? [] : []} canInvoke={Boolean(session.activeConversation?.v2ConversationId || session.activeConversation?.provider)} onToggleSkill={(skill, provider) => session.activeConversation && session.toggleCatalogSkill(session.activeConversation.id, skill, provider)} onPreviewSkill={(skill, provider) => session.previewSkillResource(provider, skill.resourceId)} onRefreshMcp={(resourceId) => session.activeConversation && session.refreshMcpServer(session.activeConversation.id, resourceId)} onCallMcp={(resourceId, toolName) => session.activeConversation && session.callMcpTool(session.activeConversation.id, resourceId, toolName)} /></Modal.Body></Modal.Dialog></Modal.Container></Modal.Backdrop>
+      </Modal>
       <CreateWorkspaceModal session={session} isOpen={createOpen} onOpenChange={setCreateOpen} />
       <CreateConversationModal
         session={session}
@@ -182,14 +187,18 @@ function CreateWorkspaceModal({
 }) {
   const [name, setName] = useState('');
   const [path, setPath] = useState(session.settings.defaultWorkspacePath);
+  const [backendId, setBackendId] = useState(session.activeBackendConnectionId);
   const [entries, setEntries] = useState<string[]>([]);
+  const selectedBackend = session.backendConnections.find((profile) => profile.id === backendId);
+  const directorySettings = selectedBackend ? { ...session.settings, serverUrl: selectedBackend.serverUrl, authToken: selectedBackend.authToken, tenantId: selectedBackend.tenantId, encryptionProtocol: selectedBackend.encryptionProtocol, encryptionPublicKey: selectedBackend.encryptionPublicKey } : session.settings;
 
   useEffect(() => {
     if (!isOpen) return;
     const defaultPath = session.settings.defaultWorkspacePath;
+    setBackendId(session.activeBackendConnectionId);
     const backendRoot = session.serverVersion?.workspace_root || '';
     setPath(defaultPath);
-    void fetchWorkspaceDirectorySnapshot(session.settings, defaultPath)
+    void fetchWorkspaceDirectorySnapshot(directorySettings, defaultPath)
       .then((snapshot) => {
         setPath(snapshot.current);
         setEntries(snapshot.entries.map((entry) => entry.path));
@@ -200,14 +209,14 @@ function CreateWorkspaceModal({
           return;
         }
         try {
-          const snapshot = await fetchWorkspaceDirectorySnapshot(session.settings, backendRoot);
+          const snapshot = await fetchWorkspaceDirectorySnapshot(directorySettings, backendRoot);
           setPath(snapshot.current);
           setEntries(snapshot.entries.map((entry) => entry.path));
         } catch {
           setEntries([]);
         }
       });
-  }, [isOpen, session.serverVersion?.workspace_root, session.settings]);
+  }, [isOpen, session.activeBackendConnectionId, session.serverVersion?.workspace_root, session.settings]);
 
   return (
     <Modal isOpen={isOpen} onOpenChange={onOpenChange}>
@@ -220,6 +229,10 @@ function CreateWorkspaceModal({
             </Modal.Header>
             <Modal.Body className="flex flex-col gap-4">
               <Field label="名称" value={name} onChange={setName} />
+              <Select selectedKey={backendId} onSelectionChange={(key) => { if (typeof key === 'string') setBackendId(key); }}>
+                <Label>连接后端</Label><Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
+                <Select.Popover><ListBox>{session.backendConnections.map((profile) => <ListBox.Item key={profile.id} id={profile.id} textValue={profile.name}>{profile.name} · {profile.serverUrl}</ListBox.Item>)}</ListBox></Select.Popover>
+              </Select>
               <Field label="目录" value={path} onChange={setPath} />
               <div className="flex gap-2">
                 <Button
@@ -235,7 +248,7 @@ function CreateWorkspaceModal({
                   variant="tertiary"
                   onPress={async () => {
                     try {
-                      const snapshot = await fetchWorkspaceDirectorySnapshot(session.settings, path);
+                      const snapshot = await fetchWorkspaceDirectorySnapshot(directorySettings, path);
                       setPath(snapshot.current);
                       setEntries(snapshot.entries.map((entry) => entry.path));
                     } catch (error) {
@@ -263,12 +276,13 @@ function CreateWorkspaceModal({
                   let validatedPath = path;
                   if (session.connectionState === 'open') {
                     try {
-                      validatedPath = (await session.fetchWorkspaceDirectorySnapshot(path)).current;
+                      validatedPath = (await fetchWorkspaceDirectorySnapshot(directorySettings, path)).current;
                     } catch (error) {
                       toast.danger(error instanceof Error ? error.message : '无法读取目录');
                       return;
                     }
                   }
+                  session.setActiveBackendConnectionId(backendId);
                   session.createWorkspace(name || validatedPath, validatedPath);
                   onOpenChange(false);
                 }}
