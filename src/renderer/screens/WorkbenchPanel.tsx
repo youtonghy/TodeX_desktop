@@ -4,6 +4,8 @@ import { RiAddLine, RiFileTextLine, RiFolder3Line, RiGlobalLine, RiFocus3Line } 
 import { Button, Chip, Dropdown, Input, ScrollShadow, TextField } from '@heroui/react';
 import type { Selection } from '@heroui/react';
 import { FileTree } from '@heroui-pro/react';
+import { CodeBlock } from '@heroui-pro/react/code-block';
+import { Markdown } from '@heroui-pro/react/markdown';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { latencyLabelOf, terminalIdForConversation, terminalStatusLabel } from '../session/helpers';
 import type { OpenPanelOptions, WorkbenchTab } from '../lib/panels';
@@ -599,6 +601,56 @@ function replaceFileTreeChildren(entries: FileTreeEntry[], path: string, childre
   });
 }
 
+function fileExtension(path: string): string {
+  return path.split(/[\\/]/).pop()?.split('.').pop()?.toLowerCase() || '';
+}
+
+function codeLanguage(path: string): string {
+  const extension = fileExtension(path);
+  const languages: Record<string, string> = {
+    c: 'c',
+    cpp: 'cpp',
+    css: 'css',
+    go: 'go',
+    html: 'html',
+    java: 'java',
+    js: 'javascript',
+    json: 'json',
+    jsx: 'jsx',
+    mdx: 'mdx',
+    py: 'python',
+    rb: 'ruby',
+    rs: 'rust',
+    sh: 'shellscript',
+    sql: 'sql',
+    swift: 'swift',
+    ts: 'typescript',
+    tsx: 'tsx',
+    vue: 'vue',
+    xml: 'xml',
+    yaml: 'yaml',
+    yml: 'yaml',
+  };
+  return languages[extension] || 'plaintext';
+}
+
+function isMarkdownFile(path: string): boolean {
+  return ['md', 'markdown', 'mdx'].includes(fileExtension(path));
+}
+
+function FilePreview({ file }: { file: { path: string; text?: string; mimeType: string } | null }) {
+  if (!file?.text) return <pre className="font-mono text-xs whitespace-pre-wrap">该文件不可作为文本预览。</pre>;
+  if (isMarkdownFile(file.path)) return <Markdown>{file.text}</Markdown>;
+  return (
+    <CodeBlock className="min-w-0">
+      <CodeBlock.Header>
+        <span className="text-muted text-xs uppercase">{codeLanguage(file.path)}</span>
+      </CodeBlock.Header>
+      <CodeBlock.Code code={file.text} language={codeLanguage(file.path)} />
+    </CodeBlock>
+  );
+}
+
 function FilesPane({ session, target }: { session: TodeXSession; target?: OpenPanelOptions }) {
   const [entries, setEntries] = useState<FileTreeEntry[]>([]);
   const [selected, setSelected] = useState('');
@@ -607,8 +659,6 @@ function FilesPane({ session, target }: { session: TodeXSession; target?: OpenPa
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const appliedTargetRef = useRef('');
-  const conversation = session.activeConversation;
-  const diff = conversation ? session.gitDiffByConversation[conversation.id] : undefined;
   const rootPath = session.activeWorkspace?.path || '';
   const rootName = useMemo(() => session.activeWorkspace?.name || 'workspace', [session.activeWorkspace?.name]);
 
@@ -697,6 +747,7 @@ function FilesPane({ session, target }: { session: TodeXSession; target?: OpenPa
             selectedKeys={selected ? new Set([selected]) : new Set()}
             expandedKeys={expandedKeys}
             selectionMode="single"
+            selectionBehavior="replace"
             onSelectionChange={(keys: Selection) => {
               const key = keys === 'all' ? '' : String([...keys][0] ?? '');
               if (key) void handleAction(key);
@@ -711,14 +762,7 @@ function FilesPane({ session, target }: { session: TodeXSession; target?: OpenPa
         <div className="flex min-h-0 flex-col gap-3">
           <ScrollShadow className="bg-surface-secondary min-h-0 flex-[1.5] rounded-xl p-3">
             <p className="text-muted mb-2 truncate text-xs">{file?.path || '选择文件预览'}</p>
-            {error ? <p className="text-danger text-xs">{error}</p> : <pre className="font-mono text-xs whitespace-pre-wrap">{file?.text || '该文件不可作为文本预览。'}</pre>}
-          </ScrollShadow>
-          <ScrollShadow className="bg-surface-secondary min-h-0 flex-1 rounded-xl p-3">
-            <div className="mb-2 flex items-center justify-between">
-              <p className="text-xs font-medium">Git Diff</p>
-              {diff?.error ? <Chip size="sm" variant="soft">{diff.error}</Chip> : null}
-            </div>
-            <pre className="text-muted font-mono text-xs whitespace-pre-wrap">{diff?.diff || '暂无 diff。后端接口未返回时，这里保持空白占位。'}</pre>
+            {error ? <p className="text-danger text-xs">{error}</p> : <FilePreview file={file} />}
           </ScrollShadow>
         </div>
       </div>
