@@ -884,6 +884,7 @@ export type TimelineEntry = {
   subtitle: string;
   raw: string;
   at: number;
+  sequence?: number;
   workspaceId?: string;
   conversationId?: string;
   requestId?: string;
@@ -1888,6 +1889,9 @@ export function classifyV2ConversationEvent(
   const delta = payload.delta && typeof payload.delta === 'object' && !Array.isArray(payload.delta)
     ? payload.delta as Record<string, unknown>
     : null;
+  const providerItem = payload.item && typeof payload.item === 'object' && !Array.isArray(payload.item)
+    ? payload.item as Record<string, unknown>
+    : null;
   const contentParts = Array.isArray(message?.content) ? message.content : [];
   const nestedContent = contentParts
     .map((part) => {
@@ -1914,7 +1918,9 @@ export function classifyV2ConversationEvent(
                 ? payload.message
                 : typeof message?.content === 'string'
                   ? message.content
-                  : nestedContent;
+                  : typeof message?.text === 'string'
+                    ? message.text
+                    : nestedContent;
   const role = typeof payload.role === 'string'
     ? payload.role
     : typeof message?.role === 'string' ? message.role : '';
@@ -1928,6 +1934,7 @@ export function classifyV2ConversationEvent(
       subtitle: content,
       raw: shortJson(event),
       at: Date.parse(event.time) || Date.now(),
+      sequence: event.sequence,
       workspaceId,
       conversationId: event.conversationId,
     };
@@ -1937,6 +1944,23 @@ export function classifyV2ConversationEvent(
   }
   const deltaType = typeof delta?.type === 'string' ? delta.type : '';
   const messageRole = typeof message?.role === 'string' ? message.role : '';
+  const providerItemType = providerItem ? itemTypeOf(providerItem) : '';
+  const isAssistantItem = providerItemType === 'agentMessage' || providerItemType === 'agent_message';
+  const isReasoningItem = /reasoning|thinking|thought|analysis/i.test(providerItemType);
+  if (event.type.startsWith('tool.') && (isAssistantItem || isReasoningItem)) {
+    if (!isAssistantItem || event.type !== 'tool.completed') return null;
+    return {
+      id: `v2-assistant-${event.conversationId}-${turnId || 'current'}`,
+      kind: 'incoming',
+      title: 'Agent',
+      subtitle: (providerItem ? textFromItem(providerItem) : '') || content || '正在回复...',
+      raw: shortJson(event),
+      at: Date.parse(event.time) || Date.now(),
+      sequence: event.sequence,
+      workspaceId,
+      conversationId: event.conversationId,
+    };
+  }
   const isToolEvent = /tool|command|function|mcp/i.test(event.type)
     || /tool|command|function|mcp/i.test(deltaType)
     || messageRole === 'tool';
@@ -1951,6 +1975,7 @@ export function classifyV2ConversationEvent(
       subtitle: thought,
       raw: shortJson(event),
       at: Date.parse(event.time) || Date.now(),
+      sequence: event.sequence,
       workspaceId,
       conversationId: event.conversationId,
     } : null;
@@ -1964,6 +1989,7 @@ export function classifyV2ConversationEvent(
       subtitle: toolPayload,
       raw: shortJson(event),
       at: Date.parse(event.time) || Date.now(),
+      sequence: event.sequence,
       workspaceId,
       conversationId: event.conversationId,
     };
@@ -1982,6 +2008,7 @@ export function classifyV2ConversationEvent(
         subtitle: content || event.type,
         raw: shortJson(event),
         at: Date.parse(event.time) || Date.now(),
+        sequence: event.sequence,
         workspaceId,
         conversationId: event.conversationId,
       };
@@ -1998,6 +2025,7 @@ export function classifyV2ConversationEvent(
       subtitle: content || shortJson(payload).slice(0, 220),
       raw: shortJson(event),
       at: Date.parse(event.time) || Date.now(),
+      sequence: event.sequence,
       workspaceId,
       conversationId: event.conversationId,
     };
@@ -2010,6 +2038,7 @@ export function classifyV2ConversationEvent(
       subtitle: content,
       raw: shortJson(event),
       at: Date.parse(event.time) || Date.now(),
+      sequence: event.sequence,
       workspaceId,
       conversationId: event.conversationId,
     };

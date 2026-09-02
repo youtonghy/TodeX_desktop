@@ -233,7 +233,12 @@ export function ChatPanel({ session }: Props) {
   const items = buildConversationRenderItems(
     [...session.timeline.filter((entry) => entry.conversationId === conversation.id)]
       .filter((entry) => (entry.kind !== 'system' || isStepProgressEntry(entry)) && !isChatReminderEntry(entry))
-      .sort((left, right) => left.at - right.at),
+      .sort((left, right) => {
+        if (left.sequence !== undefined && right.sequence !== undefined && left.sequence !== right.sequence) {
+          return left.sequence - right.sequence;
+        }
+        return left.at - right.at;
+      }),
   );
   const currentProvider = isV2Conversation(conversation) ? conversation.provider || '' : '';
   const agentProvider = conversation.provider || (isV2Conversation(conversation) ? '' : 'codex');
