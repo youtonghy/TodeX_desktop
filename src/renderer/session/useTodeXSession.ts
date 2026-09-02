@@ -37,6 +37,7 @@ import {
   normalizeThreadId,
   normalizeServerUrl,
   mergeWorkspaceRecords,
+  remapWorkspaceScopedRecords,
   prepareWorkspaceSyncPayload,
   parseCodexModelListResponse,
   parseCodexNativeThread,
@@ -924,10 +925,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const syncWorkspacesToBackend = useCallback(
     async (snapshot: WorkspaceRecord[] = workspacesRef.current) => {
       try {
+        const activeSnapshot = snapshot.filter((workspace) =>
+          !workspace.backendConnectionId || workspace.backendConnectionId === activeBackendConnectionId,
+        );
         const response = await fetch(buildHttpUrl(settings.serverUrl, '/v2/workspaces'), {
           method: 'PUT',
           headers: authHeaders(settings, { 'Content-Type': 'application/json' }),
-          body: JSON.stringify({ workspaces: prepareWorkspaceSyncPayload(snapshot) }),
+          body: JSON.stringify({ workspaces: prepareWorkspaceSyncPayload(activeSnapshot) }),
         });
         if (!response.ok) {
           throw new Error(`workspace sync returned ${response.status}`);
@@ -938,7 +942,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         return false;
       }
     },
-    [settings],
+    [activeBackendConnectionId, settings],
   );
 
   const scheduleWorkspaceBackendSave = useCallback(
@@ -966,28 +970,55 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       }
       const remoteWorkspaces = parseWorkspaceSyncResponse(await response.json());
       const localWorkspaces = workspacesRef.current;
-      const nextWorkspaces = remoteWorkspaces.length > 0
-        ? mergeWorkspaceRecords(localWorkspaces, remoteWorkspaces).map((workspace) => ({
+      const localActiveWorkspaces = localWorkspaces.filter((workspace) =>
+        !workspace.backendConnectionId || workspace.backendConnectionId === activeBackendConnectionId,
+      );
+      const otherWorkspaces = localWorkspaces.filter((workspace) =>
+        Boolean(workspace.backendConnectionId) && workspace.backendConnectionId !== activeBackendConnectionId,
+      );
+      const taggedRemoteWorkspaces = remoteWorkspaces.map((workspace) => ({
+        ...workspace,
+        backendConnectionId: activeBackendConnectionId || null,
+      }));
+      const nextActiveWorkspaces = remoteWorkspaces.length > 0
+        ? mergeWorkspaceRecords(localActiveWorkspaces, taggedRemoteWorkspaces).map((workspace) => ({
             ...workspace,
             threadId: '',
             localAdapterState:
-              localWorkspaces.find((item) => item.id === workspace.id)?.localAdapterState ??
+              localActiveWorkspaces.find((item) => item.id === workspace.id || item.path === workspace.path)?.localAdapterState ??
               workspace.localAdapterState ??
               'idle',
           }))
-        : localWorkspaces;
+        : localActiveWorkspaces;
+      const nextWorkspaces = [...otherWorkspaces, ...nextActiveWorkspaces]
+        .sort((left, right) => right.updatedAt - left.updatedAt);
 
       if (nextWorkspaces.length > 0) {
-        const nextConversations = conversationsForWorkspaceSnapshot(nextWorkspaces, conversationsRef.current);
+        const remappedConversations = remapWorkspaceScopedRecords(
+          conversationsRef.current,
+          localActiveWorkspaces,
+          nextActiveWorkspaces,
+        );
+        const nextConversations = conversationsForWorkspaceSnapshot(nextWorkspaces, remappedConversations);
+        const remappedActive = remapWorkspaceScopedRecords(
+          [{ workspaceId: activeWorkspaceRef.current }],
+          localActiveWorkspaces,
+          nextActiveWorkspaces,
+        )[0]?.workspaceId ?? activeWorkspaceRef.current;
         workspaceBackendSkipNextSaveRef.current = true;
         setWorkspaces(nextWorkspaces);
         setConversations(nextConversations);
-        if (!nextWorkspaces.some((workspace) => workspace.id === activeWorkspaceRef.current)) {
+        setTimeline((current) => remapWorkspaceScopedRecords(current, localActiveWorkspaces, nextActiveWorkspaces));
+        setMentionHistory((current) => remapWorkspaceScopedRecords(current, localActiveWorkspaces, nextActiveWorkspaces));
+        if (remappedActive !== activeWorkspaceRef.current) {
+          setActiveWorkspaceId(remappedActive);
+        }
+        if (!nextWorkspaces.some((workspace) => workspace.id === remappedActive)) {
           const nextWorkspaceId = nextWorkspaces[0]?.id ?? '';
           setActiveWorkspaceId(nextWorkspaceId);
           setActiveConversationId(nextConversations.find((conversation) => conversation.workspaceId === nextWorkspaceId)?.id ?? '');
         } else if (!nextConversations.some((conversation) => conversation.id === activeConversationRef.current)) {
-          setActiveConversationId(nextConversations.find((conversation) => conversation.workspaceId === activeWorkspaceRef.current)?.id ?? '');
+          setActiveConversationId(nextConversations.find((conversation) => conversation.workspaceId === remappedActive)?.id ?? '');
         }
       }
 
@@ -999,8 +1030,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       } catch (error) {
         setLastError(error instanceof Error ? error.message : '对话目录同步失败');
       }
-      if (!workspaceSyncPayloadEquals(remoteWorkspaces, nextWorkspaces)) {
-        void syncWorkspacesToBackend(nextWorkspaces);
+      if (!workspaceSyncPayloadEquals(taggedRemoteWorkspaces, nextActiveWorkspaces)) {
+        void syncWorkspacesToBackend(nextActiveWorkspaces);
       }
       return true;
     } catch (error) {
@@ -1008,7 +1039,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       setLastError(error instanceof Error ? error.message : '工作区同步失败');
       return false;
     }
-  }, [settings, syncWorkspacesToBackend]);
+  }, [activeBackendConnectionId, settings, syncWorkspacesToBackend]);
+
+  useEffect(() => {
+    if (!hydrated || connectionState !== 'open') return;
+    const timer = setInterval(() => void syncWorkspacesFromBackend(), 15000);
+    return () => clearInterval(timer);
+  }, [connectionState, hydrated, syncWorkspacesFromBackend]);
 
   useEffect(() => {
     if (!hydrated) {
@@ -3140,6 +3177,19 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
 
   const removeWorkspace = useCallback(
     (workspaceId: string) => {
+      const removedWorkspace = workspaces.find((workspace) => workspace.id === workspaceId);
+      if (
+        connectionState === 'open' &&
+        removedWorkspace &&
+        (!removedWorkspace.backendConnectionId || removedWorkspace.backendConnectionId === activeBackendConnectionId)
+      ) {
+        void fetch(buildHttpUrl(settings.serverUrl, `/v2/workspaces/${encodeURIComponent(workspaceId)}`), {
+          method: 'DELETE',
+          headers: authHeaders(settings),
+        }).then((response) => {
+          if (!response.ok) throw new Error(`workspace delete returned ${response.status}`);
+        }).catch((error) => setLastError(error instanceof Error ? error.message : '工作区删除同步失败'));
+      }
       const removedConversationIds = conversations
         .filter((conversation) => conversation.workspaceId === workspaceId)
         .map((conversation) => conversation.id);
@@ -3175,7 +3225,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         setActiveConversationId(conversations.find((conversation) => conversation.workspaceId === next?.id)?.id ?? '');
       }
     },
-    [activeWorkspaceId, conversations, workspaces],
+    [activeBackendConnectionId, activeWorkspaceId, connectionState, conversations, settings, workspaces],
   );
 
   const renameWorkspace = useCallback((workspaceId: string, name: string) => {
