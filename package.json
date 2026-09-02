@@ -11,6 +11,7 @@
     "predev": "node ./scripts/check-electron.mjs",
     "dev": "electron-vite dev",
     "build": "electron-vite build",
+    "package": "pnpm run build && electron-builder",
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.node.json"
   },
@@ -50,6 +51,7 @@
     "@types/react-dom": "^19.2.5",
     "@vitejs/plugin-react": "^5.2.0",
     "electron": "^44.0.0",
+    "electron-builder": "^26.15.3",
     "electron-vite": "^5.0.0",
     "typescript": "^5.9.3",
     "vite": "^7.3.6"

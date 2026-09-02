@@ -1,0 +1,227 @@
+name: Release desktop packages
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version (for example, 1.2.3 or v1.2.3)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-release
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: "22"
+  PNPM_VERSION: "11.24.0"
+
+jobs:
+  prepare:
+    name: Validate release
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - name: Normalize version
+        id: version
+        shell: bash
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          version="${INPUT_VERSION#v}"
+          if [[ ! "${version}" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "Version must use stable SemVer format X.Y.Z." >&2
+            exit 1
+          fi
+
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          echo "tag=v${version}" >> "${GITHUB_OUTPUT}"
+
+      - name: Reject an existing release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${RELEASE_TAG}" >/dev/null 2>&1; then
+            echo "Tag ${RELEASE_TAG} already exists." >&2
+            exit 1
+          fi
+          if gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            echo "Release ${RELEASE_TAG} already exists." >&2
+            exit 1
+          fi
+
+  validate:
+    name: Validate desktop application
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    outputs:
+      protocol_sha: ${{ steps.protocol.outputs.sha }}
+    env:
+      HEROUI_AUTH_TOKEN: ${{ secrets.HEROUI_AUTH_TOKEN }}
+    defaults:
+      run:
+        working-directory: TodeX_desktop
+    steps:
+      - name: Checkout desktop
+        uses: actions/checkout@v6
+        with:
+          path: TodeX_desktop
+
+      - name: Checkout shared protocol
+        uses: actions/checkout@v6
+        with:
+          repository: youtonghy/TodeX
+          ref: main
+          path: TodeX_app
+          token: ${{ secrets.PROTOCOL_REPO_TOKEN || github.token }}
+
+      - name: Record shared protocol revision
+        id: protocol
+        shell: bash
+        run: echo "sha=$(git -C ../TodeX_app rev-parse HEAD)" >> "${GITHUB_OUTPUT}"
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install pnpm
+        run: npm install --global pnpm@${PNPM_VERSION}
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate application
+        run: |
+          pnpm run check:electron
+          pnpm run typecheck
+          pnpm run build
+
+  build:
+    name: Build ${{ matrix.label }}
+    needs:
+      - prepare
+      - validate
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2025
+            label: windows
+            args: --win nsis --x64 --arm64
+            files: release/*.exe
+          - os: macos-15
+            label: macos-arm64
+            args: --mac dmg --arm64
+            files: release/*.dmg
+          - os: ubuntu-24.04
+            label: linux-x64
+            args: --linux AppImage --x64
+            files: release/*.AppImage
+    defaults:
+      run:
+        working-directory: TodeX_desktop
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      HEROUI_AUTH_TOKEN: ${{ secrets.HEROUI_AUTH_TOKEN }}
+    steps:
+      - name: Checkout desktop
+        uses: actions/checkout@v6
+        with:
+          path: TodeX_desktop
+
+      - name: Checkout shared protocol
+        uses: actions/checkout@v6
+        with:
+          repository: youtonghy/TodeX
+          ref: ${{ needs.validate.outputs.protocol_sha }}
+          path: TodeX_app
+          token: ${{ secrets.PROTOCOL_REPO_TOKEN || github.token }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install pnpm
+        run: npm install --global pnpm@${PNPM_VERSION}
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Set package version
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+        run: npm pkg set "version=${RELEASE_VERSION}"
+
+      - name: Package desktop application
+        shell: bash
+        env:
+          BUILD_ARGS: ${{ matrix.args }}
+        run: pnpm run package -- ${BUILD_ARGS} --publish never
+
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: TodeX-v${{ needs.prepare.outputs.version }}-${{ matrix.label }}
+          path: TodeX_desktop/${{ matrix.files }}
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: Publish GitHub Release
+    needs:
+      - prepare
+      - validate
+      - build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download desktop packages
+        uses: actions/download-artifact@v5
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create checksums
+        working-directory: dist
+        run: sha256sum * > SHA256SUMS
+
+      - name: Create and verify release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+          PROTOCOL_SHA: ${{ needs.validate.outputs.protocol_sha }}
+        run: |
+          gh release create "${RELEASE_TAG}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --target "${GITHUB_SHA}" \
+            --title "${RELEASE_TAG}" \
+            --notes "Shared protocol commit: ${PROTOCOL_SHA}" \
+            --generate-notes \
+            --draft
+
+          cleanup() {
+            gh release delete "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --cleanup-tag --yes || true
+          }
+          trap cleanup ERR
+
+          gh release upload "${RELEASE_TAG}" dist/* --repo "${GITHUB_REPOSITORY}"
+          find dist -maxdepth 1 -type f -exec basename {} \; | sort > expected-assets.txt
+          gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" \
+            --json assets --jq '.assets[].name' | sort > uploaded-assets.txt
+          diff -u expected-assets.txt uploaded-assets.txt
+
+          gh release edit "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --draft=false
+          trap - ERR

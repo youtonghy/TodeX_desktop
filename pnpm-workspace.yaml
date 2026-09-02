@@ -3,3 +3,4 @@ allowBuilds:
   '@heroui-pro/react': true
   '@zowe/secrets-for-zowe-sdk': false
   esbuild: false
+  electron-winstaller: false

@@ -144,9 +144,25 @@ The desktop window will launch at 1280×800.
 | :--- | :--- |
 | `pnpm run dev` | Runs `predev` checks and starts the Electron app in Vite dev mode. |
 | `pnpm run build` | Builds the main process, preload script, and renderer assets. |
+| `pnpm run package` | Builds and packages the Electron application with electron-builder. |
 | `pnpm run preview` | Previews the production build locally. |
 | `pnpm run typecheck` | Validates TypeScript types across main and renderer targets. |
 | `pnpm run check:electron` | Verifies that the native Electron binary is intact. |
+
+## Desktop Releases
+
+Desktop packages are created manually from **Actions > Release desktop packages**.
+Enter a stable semantic version such as `1.2.3`; after validation, the workflow
+publishes Windows x64 and ARM64 NSIS installers, a macOS Apple Silicon DMG, a Linux
+x64 AppImage, and SHA-256 checksums to the `v1.2.3` GitHub Release.
+
+The Windows and macOS packages are currently unsigned, so SmartScreen or Gatekeeper
+may require the user to approve the first launch. The build checks out the mobile
+repository's `main` branch beside this repository because the desktop client shares
+its protocol source, then pins the resolved commit across every platform. If that
+repository is private, configure a `PROTOCOL_REPO_TOKEN` Actions secret with read
+access. The workflow also requires a `HEROUI_AUTH_TOKEN` Actions secret so a fresh
+runner can install the HeroUI Pro dependency.
 
 ---
 

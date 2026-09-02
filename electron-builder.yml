@@ -1,0 +1,39 @@
+appId: com.unbaked0692.todexdesktop
+productName: TodeX
+
+directories:
+  output: release
+
+files:
+  - out/**/*
+  - package.json
+
+asar: true
+
+mac:
+  identity: null
+  target:
+    - target: dmg
+      arch:
+        - arm64
+  artifactName: TodeX-v${version}-macos-${arch}.${ext}
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+        - arm64
+  artifactName: TodeX-v${version}-windows-${arch}.${ext}
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+
+linux:
+  category: Development
+  target:
+    - target: AppImage
+      arch:
+        - x64
+  artifactName: TodeX-v${version}-linux-${arch}.${ext}

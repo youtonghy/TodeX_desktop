@@ -144,9 +144,23 @@ pnpm run dev
 | :--- | :--- |
 | `pnpm run dev` | 执行前置检查并在 Vite 开发模式下启动 Electron 应用。 |
 | `pnpm run build` | 编译构建主进程、Preload 脚本及渲染进程生产资源。 |
+| `pnpm run package` | 使用 electron-builder 编译并打包 Electron 应用。 |
 | `pnpm run preview` | 本地预览生产构建产物。 |
 | `pnpm run typecheck` | 执行全工程 TypeScript 类型静态检查。 |
 | `pnpm run check:electron` | 校验本地 Electron 二进制文件完整性。 |
+
+## 桌面端发布
+
+桌面安装包通过 **Actions > Release desktop packages** 手动发布。输入 `1.2.3`
+这样的稳定语义版本后，工作流会验证应用并发布 Windows x64、Windows ARM64
+NSIS 安装程序、macOS Apple Silicon DMG、Linux x64 AppImage 和 SHA-256 校验文件。
+
+Windows 与 macOS 安装包目前没有代码签名，首次运行时可能需要用户手动通过
+SmartScreen 或 Gatekeeper。由于桌面端直接共享移动端协议源码，构建时会把移动端
+仓库的 `main` 分支检出到相邻目录，并将验证时解析出的提交固定用于全部平台。如果
+该仓库是私有仓库，需要配置具有只读权限的 `PROTOCOL_REPO_TOKEN` Actions Secret。
+此外，发布工作流需要配置 `HEROUI_AUTH_TOKEN` Actions Secret，才能在全新的 Runner
+上安装 HeroUI Pro 依赖。
 
 ---
 
