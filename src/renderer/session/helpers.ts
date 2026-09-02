@@ -1802,9 +1802,10 @@ export function mergeManifestConversations(
   const manifestIds = new Set(manifests.map((manifest) => manifest.id));
   const next = current.filter((item) => !isV2Conversation(item) || manifestIds.has(item.v2ConversationId || item.id));
   for (const manifest of manifests) {
-    const workspace = manifest.workspaceId
+    const workspace = (manifest.workspaceId
       ? workspaces.find((item) => item.id === manifest.workspaceId)
-      : workspaces.find((item) => item.path === manifest.workspace);
+      : undefined)
+      ?? workspaces.find((item) => item.path === manifest.workspace);
     if (!workspace) {
       continue;
     }
