@@ -291,6 +291,8 @@ export function ChatPanel({ session }: Props) {
   const providerDescriptor = session.v2Providers.find((item) => item.id === currentProvider);
   const providerModels = session.providerModels[currentProvider as ProviderKind] ?? providerDescriptor?.models ?? [];
   const currentModel = conversation.model || providerModels.find((item) => item.isDefault)?.id || (currentProvider === 'codex' ? workspace.model || session.settings.defaultModel : '');
+  const currentModelDescriptor = providerModels.find((item) => item.id === currentModel);
+  const supportedReasoningEfforts = currentModelDescriptor?.supportedReasoningEfforts ?? [];
   // An unset Pi/agent effort is meaningful: let the provider apply its own default.
   const currentReasoningEffort = conversation.reasoningEffort ?? null;
   const ReasoningIcon = reasoningIcon(currentReasoningEffort);
@@ -564,10 +566,11 @@ export function ChatPanel({ session }: Props) {
                     <Select
                       className="composer-control"
                       variant="secondary"
+                      isDisabled={providerModels.length === 0}
                       selectedKey={currentModel || null}
                       onSelectionChange={(key) => {
                         if (typeof key === 'string' && key) {
-                          session.applyConversationModelSelection(conversation.id, key, currentReasoningEffort);
+                          session.applyConversationModelSelection(conversation.id, key, null);
                         }
                       }}
                     >
@@ -590,6 +593,7 @@ export function ChatPanel({ session }: Props) {
                     <Select
                       className="composer-control"
                       variant="secondary"
+                      isDisabled={!currentModelDescriptor || supportedReasoningEfforts.length === 0}
                       selectedKey={currentReasoningEffort}
                       onSelectionChange={(key) => {
                         if (typeof key === 'string' && key) {
@@ -599,12 +603,12 @@ export function ChatPanel({ session }: Props) {
                     >
                       <Label className="hidden">思考强度</Label>
                       <Select.Trigger className="composer-control__trigger">
-                        <Select.Value><ReasoningIcon className="composer-control__icon" /><span className="composer-control__text">{currentReasoningEffort || '默认强度'}</span></Select.Value>
+                        <Select.Value><ReasoningIcon className="composer-control__icon" /><span className="composer-control__text">{currentReasoningEffort || (currentModelDescriptor ? '不支持调节' : '等待同步')}</span></Select.Value>
                         <Select.Indicator className="composer-control__indicator" />
                       </Select.Trigger>
                       <Select.Popover>
                         <ListBox>
-                          {(providerModels.find((item) => item.id === currentModel)?.supportedReasoningEfforts ?? []).map((effort) => (
+                          {supportedReasoningEfforts.map((effort) => (
                             <ListBox.Item key={effort} id={effort} textValue={effort}>
                               {(() => { const Icon = reasoningIcon(effort); return <Icon className="size-4" aria-hidden="true" />; })()}
                               {effort}

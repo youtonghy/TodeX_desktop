@@ -15,7 +15,7 @@ import type {
   ServerEvent,
   WorkspaceRecord,
 } from '@todex/protocol/todex';
-import type { ConversationEvent, ConversationManifest, ProviderDescriptor, ProviderKind } from '@todex/protocol/v2';
+import type { ConversationEvent, ConversationManifest, ProviderDescriptor, ProviderKind, ProviderModelDescriptor } from '@todex/protocol/v2';
 import { providerDisplayName } from '@todex/protocol/v2';
 import type { ConnectionFailureCode } from '@todex/protocol/connectionError';
 import {
@@ -100,6 +100,55 @@ export type ConversationRecord = {
   createdAt: number;
   updatedAt: number;
 };
+
+export type ProviderModelPreference = {
+  lastModel?: string;
+  reasoningByModel: Record<string, string>;
+};
+
+export type ProviderModelPreferences = Record<string, ProviderModelPreference>;
+
+export function providerModelPreferenceKey(backendConnectionId: string | null | undefined, provider: string): string {
+  return `${backendConnectionId?.trim() || 'default-backend'}::${provider.trim()}`;
+}
+
+export function normalizeProviderModelPreferences(value: unknown): ProviderModelPreferences {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return Object.fromEntries(Object.entries(value).flatMap(([key, raw]) => {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return [];
+    const record = raw as Record<string, unknown>;
+    const reasoning = record.reasoningByModel;
+    const reasoningByModel = reasoning && typeof reasoning === 'object' && !Array.isArray(reasoning)
+      ? Object.fromEntries(Object.entries(reasoning).filter(
+        (entry): entry is [string, string] => typeof entry[1] === 'string' && Boolean(entry[1].trim()),
+      ))
+      : {};
+    const lastModel = typeof record.lastModel === 'string' && record.lastModel.trim() ? record.lastModel.trim() : undefined;
+    return [[key, { ...(lastModel ? { lastModel } : {}), reasoningByModel }]];
+  }));
+}
+
+export function resolveProviderModel(
+  models: ProviderModelDescriptor[],
+  requestedModel?: string | null,
+  preferredModel?: string | null,
+): ProviderModelDescriptor | null {
+  return models.find((item) => item.id === requestedModel)
+    ?? models.find((item) => item.id === preferredModel)
+    ?? models.find((item) => item.isDefault)
+    ?? models[0]
+    ?? null;
+}
+
+export function resolveProviderReasoningEffort(
+  model: ProviderModelDescriptor | null,
+  candidates: Array<string | null | undefined>,
+): string | null {
+  if (!model || model.supportedReasoningEfforts.length === 0) return null;
+  return candidates.find((candidate): candidate is string => (
+    typeof candidate === 'string' && model.supportedReasoningEfforts.includes(candidate)
+  )) ?? (model.supportedReasoningEfforts.includes('medium') ? 'medium' : model.supportedReasoningEfforts[0] ?? null);
+}
 
 export type PendingThreadList = {
   workspaceId: string;
@@ -1197,6 +1246,7 @@ export const MENTION_HISTORY_STORAGE_KEY = 'todex.desktop.mentionHistory.v1';
 export const SESSION_CURSORS_STORAGE_KEY = 'todex.desktop.sessionCursors.v1';
 export const EXPERIMENTAL_FEATURES_STORAGE_KEY = 'todex.desktop.experimentalFeatures.v1';
 export const USAGE_RECORDS_STORAGE_KEY = 'todex.desktop.usageRecords.v1';
+export const PROVIDER_MODEL_PREFERENCES_STORAGE_KEY = 'todex.desktop.providerModelPreferences.v1';
 export const TOKEN_STORAGE_KEY = 'todex.desktop.token.v1';
 export const TOKEN_ORIGIN_STORAGE_KEY = 'todex.desktop.tokenOrigin.v1';
 export const JSON_SAVE_DEBOUNCE_MS = 350;

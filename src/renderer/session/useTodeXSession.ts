@@ -82,6 +82,7 @@ import {
   SESSION_CURSORS_STORAGE_KEY,
   EXPERIMENTAL_FEATURES_STORAGE_KEY,
   USAGE_RECORDS_STORAGE_KEY,
+  PROVIDER_MODEL_PREFERENCES_STORAGE_KEY,
   TOKEN_STORAGE_KEY,
   TOKEN_ORIGIN_STORAGE_KEY,
   BACKEND_CONNECTIONS_STORAGE_KEY,
@@ -157,6 +158,7 @@ import {
   type ThreadMenuAction,
   type PersistedSettings,
   type WorkspaceDirectorySnapshot,
+  type ProviderModelPreferences,
   canonicalSlashCommand,
   slashCommandDefinition,
   slashCommandNeedsActionPage,
@@ -199,6 +201,10 @@ import {
   modelDisplayLabel,
   reasoningOptionsForModel,
   defaultReasoningForModel,
+  normalizeProviderModelPreferences,
+  providerModelPreferenceKey,
+  resolveProviderModel,
+  resolveProviderReasoningEffort,
   serviceTiersForModel,
   fastServiceTierForModel,
   serviceTierLabel,
@@ -305,6 +311,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const turnIdsRef = useRef<Record<string, string>>({});
   const thinkingConversationsRef = useRef<Record<string, boolean>>({});
   const terminalByIdRef = useRef<Record<string, TerminalClientState>>({});
+  const providerModelPreferencesRef = useRef<ProviderModelPreferences>({});
+  const providerModelsRef = useRef<Partial<Record<ProviderKind, ProviderModelDescriptor[]>>>({});
   const pendingLocalStartsRef = useRef(new Map<string, PendingLocalStart>());
   const pendingThreadStartsRef = useRef(new Map<string, PendingThreadStart>());
   const pendingThreadListsRef = useRef(new Map<string, PendingThreadList>());
@@ -381,6 +389,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const [v2Conversations, setV2Conversations] = useState<ConversationManifest[]>([]);
   const [capabilityCatalogs, setCapabilityCatalogs] = useState<Partial<Record<ProviderKind, CatalogState>>>({});
   const [providerModels, setProviderModels] = useState<Partial<Record<ProviderKind, ProviderModelDescriptor[]>>>({});
+  const [providerModelPreferences, setProviderModelPreferences] = useState<ProviderModelPreferences>({});
   const [providerCommands, setProviderCommands] = useState<Partial<Record<ProviderKind, ProviderCommandDescriptor[]>>>({});
   const [contextUsageByConversation, setContextUsageByConversation] = useState<Record<string, ConversationContextUsage>>({});
   const [usageRecords, setUsageRecords] = useState<UsageRecord[]>([]);
@@ -436,6 +445,54 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     ),
     [remoteModelCatalog, settings.defaultModel, workspaces],
   );
+
+  const resolveRememberedProviderSelection = useCallback((
+    backendConnectionId: string | null | undefined,
+    provider: ProviderKind,
+    requestedModel?: string | null,
+    requestedEffort?: string | null,
+    modelsOverride?: ProviderModelDescriptor[],
+  ) => {
+    const preference = providerModelPreferencesRef.current[
+      providerModelPreferenceKey(backendConnectionId, provider)
+    ];
+    const models = modelsOverride ?? providerModelsRef.current[provider] ?? [];
+    const modelDescriptor = resolveProviderModel(models, requestedModel, preference?.lastModel);
+    const model = modelDescriptor?.id ?? requestedModel?.trim() ?? preference?.lastModel ?? '';
+    const reasoningEffort = modelDescriptor
+      ? resolveProviderReasoningEffort(modelDescriptor, [
+          requestedEffort,
+          preference?.reasoningByModel[modelDescriptor.id],
+          modelDescriptor.defaultReasoningEffort,
+        ])
+      : requestedEffort ?? (model ? preference?.reasoningByModel[model] : undefined) ?? null;
+    return { model, reasoningEffort, modelDescriptor };
+  }, []);
+
+  const rememberProviderModelSelection = useCallback((
+    backendConnectionId: string | null | undefined,
+    provider: ProviderKind,
+    model: string,
+    reasoningEffort: string | null,
+  ) => {
+    const nextModel = model.trim();
+    if (!nextModel) return;
+    const key = providerModelPreferenceKey(backendConnectionId, provider);
+    setProviderModelPreferences((current) => {
+      const previous = current[key] ?? { reasoningByModel: {} };
+      const next = {
+        ...current,
+        [key]: {
+          lastModel: nextModel,
+          reasoningByModel: reasoningEffort
+            ? { ...previous.reasoningByModel, [nextModel]: reasoningEffort }
+            : previous.reasoningByModel,
+        },
+      };
+      providerModelPreferencesRef.current = next;
+      return next;
+    });
+  }, []);
 
   const setConversationChatDraft = useCallback((conversationId: string, value: SetStateAction<string>) => {
     if (!conversationId) {
@@ -695,6 +752,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         storedExperimentalFeatures,
         storedUsageRecords,
         storedBackendConnections,
+        storedProviderModelPreferences,
         storedToken,
         storedTokenOrigin,
       ] = await Promise.all([
@@ -708,6 +766,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         loadJson<Partial<ExperimentalFeatureSettings> | null>(EXPERIMENTAL_FEATURES_STORAGE_KEY, null),
         loadJson<unknown>(USAGE_RECORDS_STORAGE_KEY, []),
         loadJson<BackendConnectionProfile[]>(BACKEND_CONNECTIONS_STORAGE_KEY, []),
+        loadJson<unknown>(PROVIDER_MODEL_PREFERENCES_STORAGE_KEY, {}),
         loadSecret(TOKEN_STORAGE_KEY),
         loadSecret(TOKEN_ORIGIN_STORAGE_KEY),
       ]);
@@ -787,6 +846,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       setMentionHistory(storedMentionHistory);
       setExperimentalFeatures(normalizeExperimentalFeatures(storedExperimentalFeatures));
       setUsageRecords(normalizeUsageRecords(storedUsageRecords));
+      const normalizedProviderModelPreferences = normalizeProviderModelPreferences(storedProviderModelPreferences);
+      providerModelPreferencesRef.current = normalizedProviderModelPreferences;
+      setProviderModelPreferences(normalizedProviderModelPreferences);
       setActiveWorkspaceId(firstWorkspaceId);
       setActiveConversationId(firstConversationId);
       setAutoConnectEnabled(Boolean(storedSettings?.serverUrl?.trim()));
@@ -832,6 +894,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   }, [terminalById]);
 
   useEffect(() => {
+    providerModelPreferencesRef.current = providerModelPreferences;
+  }, [providerModelPreferences]);
+
+  useEffect(() => {
     if (!hydrated) {
       return;
     }
@@ -846,6 +912,12 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       for (const profile of backendConnections) void saveSecret(`${TOKEN_STORAGE_KEY}.${profile.id}`, profile.authToken);
     }
   }, [backendConnections, hydrated]);
+
+  useEffect(() => {
+    if (hydrated) {
+      void saveJson(PROVIDER_MODEL_PREFERENCES_STORAGE_KEY, providerModelPreferences);
+    }
+  }, [hydrated, providerModelPreferences]);
 
   const syncWorkspacesToBackend = useCallback(
     async (snapshot: WorkspaceRecord[] = workspacesRef.current) => {
@@ -1038,13 +1110,44 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     void Promise.all(v2Providers.filter((item) => item.available).map(async (provider) => {
       try {
         const result = await api.listProviderModels(provider.id, activeWorkspace.path);
-        if (!cancelled) setProviderModels((current) => ({ ...current, [provider.id]: result.models }));
+        if (!cancelled) {
+          setProviderModels((current) => {
+            const next = { ...current, [provider.id]: result.models };
+            providerModelsRef.current = next;
+            return next;
+          });
+          const conversation = conversationsRef.current.find((item) => item.id === activeConversationRef.current);
+          if (conversation?.provider === provider.id) {
+            const selection = resolveRememberedProviderSelection(
+              conversation.backendConnectionId ?? activeBackendConnectionId,
+              provider.id,
+              conversation.model,
+              conversation.reasoningEffort,
+              result.models,
+            );
+            if (selection.model && (selection.model !== conversation.model || selection.reasoningEffort !== conversation.reasoningEffort)) {
+              setConversations((current) => current.map((item) => item.id === conversation.id ? {
+                ...item,
+                model: selection.model,
+                reasoningEffort: selection.reasoningEffort,
+              } : item));
+            }
+            if (selection.model) {
+              rememberProviderModelSelection(
+                conversation.backendConnectionId ?? activeBackendConnectionId,
+                provider.id,
+                selection.model,
+                selection.reasoningEffort,
+              );
+            }
+          }
+        }
       } catch {
         // Keep the descriptor models when live discovery is unavailable.
       }
     }));
     return () => { cancelled = true; };
-  }, [activeWorkspace?.path, hydrated, settings.authToken, settings.serverUrl, v2Providers]);
+  }, [activeBackendConnectionId, activeWorkspace?.path, hydrated, rememberProviderModelSelection, resolveRememberedProviderSelection, settings.authToken, settings.serverUrl, v2Providers]);
 
   useEffect(() => {
     if (!hydrated || !activeWorkspace?.path || v2Providers.length === 0) return;
@@ -4414,12 +4517,16 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
 
     const previousActiveConversationId = activeConversationRef.current;
     const backendProfile = backendConnections.find((item) => item.id === options?.backendConnectionId) ?? backendConnections.find((item) => item.id === workspace.backendConnectionId);
+    const backendConnectionId = backendProfile?.id ?? workspace.backendConnectionId ?? null;
+    const rememberedSelection = resolveRememberedProviderSelection(backendConnectionId, agent.provider);
     const placeholder = {
       ...createDefaultConversation(workspace),
       title: options?.title?.trim() || '新对话',
       provider: agent.provider,
       providerProfile: agent.providerProfile,
-      backendConnectionId: backendProfile?.id ?? workspace.backendConnectionId ?? null,
+      backendConnectionId,
+      model: rememberedSelection.model || undefined,
+      reasoningEffort: rememberedSelection.reasoningEffort,
     };
     setConversations((current) => [placeholder, ...current]);
     setActiveWorkspaceId(workspace.id);
@@ -4440,7 +4547,12 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           title: options?.title?.trim() || undefined,
           providerProfile: agent.providerProfile,
         });
-        const record = { ...conversationFromManifest(created, workspace.id), backendConnectionId: backendProfile?.id ?? workspace.backendConnectionId ?? null };
+        const record = {
+          ...conversationFromManifest(created, workspace.id),
+          backendConnectionId,
+          model: rememberedSelection.model || undefined,
+          reasoningEffort: rememberedSelection.reasoningEffort,
+        };
         rekeyConversationComposer(placeholder.id, record.id);
         setConversations((current) => [
           record,
@@ -4472,7 +4584,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     })();
 
     return placeholder;
-  }, [appendTimeline, backendConnections, rekeyConversationComposer, sendRawProtocolFrame, settings.authToken, settings.serverUrl]);
+  }, [appendTimeline, backendConnections, rekeyConversationComposer, resolveRememberedProviderSelection, sendRawProtocolFrame, settings.authToken, settings.serverUrl]);
 
   const switchConversationAgent = useCallback((conversationId: string, provider: ProviderKind) => {
     const context = getConversationContext(conversationId);
@@ -5026,12 +5138,36 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     (conversationId: string, model: string, reasoningEffort: string | null) => {
       const context = getConversationContext(conversationId);
       if (!context || !model.trim()) return;
+      const provider = context.conversation.provider as ProviderKind | undefined;
+      if (provider && v2ProvidersRef.current.some((item) => item.id === provider)) {
+        const backendConnectionId = context.conversation.backendConnectionId
+          ?? context.workspace.backendConnectionId
+          ?? activeBackendConnectionId;
+        const selection = resolveRememberedProviderSelection(
+          backendConnectionId,
+          provider,
+          model,
+          reasoningEffort,
+        );
+        if (!selection.model) return;
+        updateConversation(conversationId, {
+          model: selection.model,
+          reasoningEffort: selection.reasoningEffort,
+        });
+        rememberProviderModelSelection(
+          backendConnectionId,
+          provider,
+          selection.model,
+          selection.reasoningEffort,
+        );
+        return;
+      }
       updateConversation(conversationId, {
         model: model.trim(),
         reasoningEffort: normalizeReasoningEffort(reasoningEffort) ?? reasoningEffort,
       });
     },
-    [getConversationContext, updateConversation],
+    [activeBackendConnectionId, getConversationContext, rememberProviderModelSelection, resolveRememberedProviderSelection, updateConversation],
   );
 
   const applyDefaultModelSelection = useCallback(
