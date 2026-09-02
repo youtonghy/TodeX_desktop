@@ -403,10 +403,18 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         setV2Providers([]);
         setV2Conversations([]);
       });
+    const refreshTimer = setInterval(() => {
+      void api.listConversations().then((response) => {
+        if (!active) return;
+        setV2Conversations(response.conversations);
+        setConversations((current) => mergeManifestConversations(current, response.conversations, workspacesRef.current));
+      }).catch(() => undefined);
+    }, 15000);
     // The main connection below is the single `/v2/ws` socket; providers and
     // conversations lists are plain HTTP refreshes, no side channel needed.
     return () => {
       active = false;
+      clearInterval(refreshTimer);
     };
   }, [hydrated, settings.authToken, settings.serverUrl]);
 
@@ -910,6 +918,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       }
 
       workspaceBackendReadyRef.current = true;
+      try {
+        const conversationResponse = await new V2ApiClient({ serverUrl: settings.serverUrl, authToken: settings.authToken }).listConversations();
+        setV2Conversations(conversationResponse.conversations);
+        setConversations((current) => mergeManifestConversations(current, conversationResponse.conversations, nextWorkspaces));
+      } catch (error) {
+        setLastError(error instanceof Error ? error.message : '对话目录同步失败');
+      }
       if (!workspaceSyncPayloadEquals(remoteWorkspaces, nextWorkspaces)) {
         void syncWorkspacesToBackend(nextWorkspaces);
       }
@@ -2558,7 +2573,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
                   type: 'conversation.subscribe',
                   payload: {
                     conversationId: conversation.v2ConversationId,
-                    afterSequence: conversation.lastSequence ?? 0,
+                    // lastSequence is the backend high-water mark, not this
+                    // device's applied cursor. Replay from zero on reconnect
+                    // so a fresh device cannot skip persisted history.
+                    afterSequence: 0,
                     limit: 200,
                   },
                 });

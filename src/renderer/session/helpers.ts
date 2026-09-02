@@ -1775,7 +1775,7 @@ export function conversationFromManifest(
     title: manifest.title || providerDisplayName(manifest.provider),
     preview: '',
     nativeStatus: manifest.status,
-    archived: false,
+    archived: Boolean(manifest.archivedAt),
     sessionId: `v2_${manifest.id}`,
     threadId: '',
     localAdapterState: 'idle',
@@ -1802,8 +1802,9 @@ export function mergeManifestConversations(
   const manifestIds = new Set(manifests.map((manifest) => manifest.id));
   const next = current.filter((item) => !isV2Conversation(item) || manifestIds.has(item.v2ConversationId || item.id));
   for (const manifest of manifests) {
-    const workspace = workspaces.find((item) => item.path === manifest.workspace)
-      ?? workspaces.find((item) => manifest.workspace.startsWith(item.path));
+    const workspace = manifest.workspaceId
+      ? workspaces.find((item) => item.id === manifest.workspaceId)
+      : workspaces.find((item) => item.path === manifest.workspace);
     if (!workspace) {
       continue;
     }
