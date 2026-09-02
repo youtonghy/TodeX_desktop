@@ -19,11 +19,13 @@ import {
   CodexServiceTierOption,
   LocalAdapterState,
   PendingRequest,
+  PermissionOption,
   ServerEvent,
   WorkspaceRecord,
   approvalResponsePayload,
   buildHttpUrl,
   classifyPendingRequest,
+  permissionDecision,
   createRequestId,
   displayNameFromPath,
   eventId,
@@ -1253,9 +1255,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     const resolved = new Set<string>();
 
     for (const event of events) {
-      if (event.type === 'codex.serverRequest.resolved') {
+      if (event.type === 'codex.serverRequest.resolved' || event.type === 'permission.resolved') {
         const data = eventPayloadData(event);
-        const resolvedId = data.requestId ?? data.request_id;
+        const resolvedId = data.requestId ?? data.request_id ?? data.permissionId;
         if (typeof resolvedId === 'string' && resolvedId) {
           resolved.add(resolvedId);
         }
@@ -2395,6 +2397,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
                   title: inner.title,
                   kind: inner.kind,
                   details: inner.details,
+                  options: inner.options,
+                  providerRequestId: inner.providerRequestId,
                 },
               });
             }
@@ -4973,7 +4977,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   }, [appendTimeline, sendRawProtocolFrame]);
 
   const sendApprovalResponse = useCallback(
-    (accepted: boolean, request: PendingRequest) => {
+    (selection: boolean | PermissionOption, request: PendingRequest) => {
       const data = eventPayloadData(request.event);
       if (request.requestType === 'conversation.permission.request') {
         const conversationId = typeof data.conversationId === 'string' ? data.conversationId : '';
@@ -4990,7 +4994,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           payload: {
             conversationId: v2Id,
             permissionId,
-            decision: { outcome: accepted ? 'allow_once' : 'reject_once' },
+            decision: permissionDecision(selection),
           },
         }));
       }
@@ -5011,7 +5015,12 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         tenantId: workspace.tenantId,
         requestId: request.requestId,
         responseType: inferApprovalResponseType(request.requestType),
-        response: approvalResponsePayload(request, accepted),
+        response: approvalResponsePayload(
+          request,
+          typeof selection === 'boolean'
+            ? selection
+            : selection.kind === 'allow_once' || selection.kind === 'allow_always' || selection.kind === 'answer',
+        ),
       }, createRequestId('msg'), {
         workspaceId: workspace.id,
         conversationId: conversation.id,

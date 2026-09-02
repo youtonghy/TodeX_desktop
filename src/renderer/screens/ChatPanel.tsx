@@ -7,6 +7,7 @@ import { ChatMessageActions } from '@heroui-pro/react/chat-message-actions';
 import { ChatTool } from '@heroui-pro/react/chat-tool';
 import { Markdown } from '@heroui-pro/react/markdown';
 import { providerDisplayName, type ProviderKind } from '@todex/protocol/v2';
+import { permissionActions } from '@todex/protocol/todex';
 import { ProviderIcon } from '../components/ProviderIcon';
 import type { TodeXSession } from '../session/useTodeXSession';
 import {
@@ -420,8 +421,18 @@ export function ChatPanel({ session }: Props) {
                   {entry.kind === 'incoming' ? <AgentMessageActions conversationId={conversation.id} entry={entry} session={session} /> : null}
                   {request ? (
                     <ChatMessage.Actions>
-                      <Button size="sm" onPress={() => session.sendApprovalResponse(true, request)}>同意</Button>
-                      <Button size="sm" variant="danger-soft" onPress={() => session.sendApprovalResponse(false, request)}>拒绝</Button>
+                      {permissionActions(request).map((option) => (
+                        <Button
+                          key={typeof option === 'boolean' ? String(option) : option.optionId}
+                          size="sm"
+                          variant={typeof option === 'boolean'
+                            ? (option ? 'primary' : 'danger-soft')
+                            : (option.kind.startsWith('reject') ? 'danger-soft' : 'primary')}
+                          onPress={() => session.sendApprovalResponse(option, request)}
+                        >
+                          {typeof option === 'boolean' ? (option ? '同意' : '拒绝') : option.name}
+                        </Button>
+                      ))}
                     </ChatMessage.Actions>
                   ) : null}
                 </div>
