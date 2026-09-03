@@ -27,7 +27,7 @@
   - **右侧工作台面板（Workbench Panel）**：
     - **斜杠命令（Slash Commands）**：快速查看与调用当前 Agent 的可用命令。
     - **Git Diff**：工作区实时代码改动差异检查。
-    - **终端（Terminal）**：内嵌的交互式 PTY 终端会话。
+    - **终端（Terminal）**：基于 xterm.js 的交互式 PTY 会话，支持原始键盘输入、ANSI 输出与行列尺寸自动同步。
     - **能力目录（Capabilities）**：实时查看当前生效的 Skills 与 MCP Servers。
     - **实验特性（Experiments）**：特性开关与开发者诊断面板。
 - **配对与连接管理**：

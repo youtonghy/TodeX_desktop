@@ -44,6 +44,12 @@ importers:
       '@remixicon/react':
         specifier: ^4.9.0
         version: 4.9.0(react@19.2.8)
+      '@xterm/addon-fit':
+        specifier: ^0.11.0
+        version: 0.11.0
+      '@xterm/xterm':
+        specifier: ^6.0.0
+        version: 6.0.0
       jsqr:
         specifier: ^1.4.0
         version: 1.4.0
@@ -1246,6 +1252,12 @@ packages:
   '@xmldom/xmldom@0.8.15':
     resolution: {integrity: sha512-/5NV/vDALVFDXgLmfsy9TRCBlKwO2LNBFzpzvb9iIj+jR+eSc6DLYYvVOdivT/jm7MtU6TebYuRmzEOI7w40UA==}
     engines: {node: '>=10.0.0'}
+
+  '@xterm/addon-fit@0.11.0':
+    resolution: {integrity: sha512-jYcgT6xtVYhnhgxh3QgYDnnNMYTcf8ElbxxFzX0IZo+vabQqSPAjC3c1wJrKB5E19VwQei89QCiZZP86DCPF7g==}
+
+  '@xterm/xterm@6.0.0':
+    resolution: {integrity: sha512-TQwDdQGtwwDt+2cgKDLn0IRaSxYu1tSUjgKarSDkUM0ZNiSRXFpjxEsvc/Zgc5kq5omJ+V0a8/kIM2WD3sMOYg==}
 
   '@zowe/secrets-for-zowe-sdk@8.29.4':
     resolution: {integrity: sha512-fiRfuEuFNapwhVbN3LJIA2ZgVajNB+QNFN7O7ES/fIYGM612PKcXuvbZUJSlU69IZ8eUF8SP+9OnveK4s+GLgw==}
@@ -4046,6 +4058,10 @@ snapshots:
       - supports-color
 
   '@xmldom/xmldom@0.8.15': {}
+
+  '@xterm/addon-fit@0.11.0': {}
+
+  '@xterm/xterm@6.0.0': {}
 
   '@zowe/secrets-for-zowe-sdk@8.29.4':
     optional: true

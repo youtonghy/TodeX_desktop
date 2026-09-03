@@ -1,9 +1,11 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button, Card, Input, Label, ScrollShadow, Switch, TextArea, TextField } from '@heroui/react';
 import type { ProviderKind } from '@todex/protocol/v2';
 import type { DesktopPanel } from '../lib/panels';
 import type { TodeXSession } from '../session/useTodeXSession';
 import {
+  DEFAULT_TERMINAL_COLS,
+  DEFAULT_TERMINAL_ROWS,
   EXPERIMENTAL_FEATURES,
   SLASH_COMMANDS,
   SLASH_COMMAND_CATEGORY_LABELS,
@@ -11,6 +13,7 @@ import {
   terminalIdForConversation,
   terminalStatusLabel,
 } from '../session/helpers';
+import { XtermTerminal } from '../components/XtermTerminal';
 import { CapabilitiesPanel } from './CapabilitiesPanel';
 
 type Props = {
@@ -190,10 +193,33 @@ export function AsidePanel({ session, panel, slashCommand, onBack }: Props) {
 }
 
 function TerminalAside({ session, terminalId }: { session: TodeXSession; terminalId: string }) {
-  const [input, setInput] = useState('');
   const workspace = session.activeWorkspace;
   const conversation = session.activeConversation;
   const terminal = session.terminalById[terminalId];
+  const terminalByIdRef = useRef(session.terminalById);
+  const terminalSizeRef = useRef({ rows: DEFAULT_TERMINAL_ROWS, cols: DEFAULT_TERMINAL_COLS });
+
+  terminalByIdRef.current = session.terminalById;
+
+  useEffect(() => {
+    if (!terminal) return;
+    terminalSizeRef.current = { rows: terminal.rows, cols: terminal.cols };
+  }, [terminal?.cols, terminal?.rows]);
+
+  const handleTerminalData = useCallback((data: string) => {
+    const current = terminalByIdRef.current[terminalId];
+    if (!workspace || !current || current.status !== 'running') return;
+    session.sendTerminalInput(terminalId, workspace.tenantId || session.settings.tenantId, data);
+  }, [session.sendTerminalInput, session.settings.tenantId, terminalId, workspace]);
+
+  const handleTerminalResize = useCallback((rows: number, cols: number) => {
+    terminalSizeRef.current = { rows, cols };
+    const current = terminalByIdRef.current[terminalId];
+    if (!workspace || !current || current.status !== 'running') return;
+    if (current.rows === rows && current.cols === cols) return;
+    session.resizeTerminalSession(terminalId, workspace.tenantId || session.settings.tenantId, rows, cols);
+  }, [session.resizeTerminalSession, session.settings.tenantId, terminalId, workspace]);
+
   if (!workspace || !conversation) {
     return <p className="text-muted p-5 text-sm">请先选择对话。</p>;
   }
@@ -206,29 +232,40 @@ function TerminalAside({ session, terminalId }: { session: TodeXSession; termina
           <p className="text-muted text-xs">{terminal ? terminalStatusLabel(terminal.status) : '未启动'}</p>
         </div>
         <div className="flex gap-2">
-          <Button size="sm" onPress={() => session.startTerminalSession(workspace, conversation, { cwd: workspace.path, shell: '', rows: 24, cols: 80 })}>启动</Button>
-          <Button size="sm" variant="danger-soft" onPress={() => session.stopTerminalSession(terminalId, workspace.tenantId || session.settings.tenantId)}>停止</Button>
+          <Button
+            size="sm"
+            isDisabled={terminal?.status === 'running' || terminal?.status === 'starting'}
+            onPress={() => {
+              const size = terminalSizeRef.current;
+              session.startTerminalSession(workspace, conversation, {
+                cwd: workspace.path,
+                shell: '',
+                rows: size.rows,
+                cols: size.cols,
+              });
+            }}
+          >
+            启动
+          </Button>
+          <Button
+            size="sm"
+            variant="danger-soft"
+            isDisabled={!terminal || terminal.status === 'idle' || terminal.status === 'exited'}
+            onPress={() => session.stopTerminalSession(terminalId, workspace.tenantId || session.settings.tenantId)}
+          >
+            停止
+          </Button>
         </div>
       </div>
-      <ScrollShadow className="bg-surface-secondary min-h-0 flex-1 rounded-xl p-3">
-        <pre className="font-mono text-xs whitespace-pre-wrap">
-          {(terminal?.output ?? []).map((entry) => `${entry.kind}: ${entry.text}`).join('\n') || '暂无输出'}
-        </pre>
-      </ScrollShadow>
-      <form
-        className="mt-3 flex gap-2"
-        onSubmit={(event) => {
-          event.preventDefault();
-          if (!input.trim()) return;
-          session.sendTerminalInput(terminalId, workspace.tenantId || session.settings.tenantId, `${input}\n`);
-          setInput('');
-        }}
-      >
-        <TextField className="flex-1" value={input} onChange={setInput}>
-          <Input placeholder="输入命令" />
-        </TextField>
-        <Button type="submit">发送</Button>
-      </form>
+      <div className="min-h-0 flex-1 overflow-hidden rounded-lg bg-[#111418]">
+        <XtermTerminal
+          entries={terminal?.output ?? []}
+          isActive
+          isDisabled={terminal?.status !== 'running'}
+          onData={handleTerminalData}
+          onResize={handleTerminalResize}
+        />
+      </div>
     </div>
   );
 }

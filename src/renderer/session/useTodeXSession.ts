@@ -2960,7 +2960,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       data,
     }, createRequestId('terminal-input'));
     if (sent) {
-      appendTerminalOutput(terminalId, terminalOutputLine('input', data));
       return true;
     }
     if (terminal) {

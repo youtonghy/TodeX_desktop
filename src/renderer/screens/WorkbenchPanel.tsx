@@ -8,8 +8,15 @@ import { Resizable } from '@heroui-pro/react/resizable';
 import type { PanelImperativeHandle } from '@heroui-pro/react/resizable';
 import { CodeBlock } from '@heroui-pro/react/code-block';
 import { Markdown } from '@heroui-pro/react/markdown';
+import { XtermTerminal } from '../components/XtermTerminal';
 import type { TodeXSession } from '../session/useTodeXSession';
-import { latencyLabelOf, terminalIdForConversation, terminalStatusLabel } from '../session/helpers';
+import {
+  DEFAULT_TERMINAL_COLS,
+  DEFAULT_TERMINAL_ROWS,
+  latencyLabelOf,
+  terminalIdForConversation,
+  terminalStatusLabel,
+} from '../session/helpers';
 import type { OpenPanelOptions, WorkbenchTab } from '../lib/panels';
 import { V2ApiClient } from '@todex/protocol/v2';
 
@@ -166,7 +173,13 @@ export function WorkbenchPanel({ session, tab, target, onTabChange }: Props) {
         ) : null}
         {items.map((item) => (
           <div key={item.id} className={item.id === active?.id ? 'h-full' : 'hidden'}>
-            {item.type === 'terminal' ? <TerminalPane session={session} terminalId={terminalIdForConversation(conversationId, item.id)} /> : null}
+            {item.type === 'terminal' ? (
+              <TerminalPane
+                isActive={item.id === active?.id}
+                session={session}
+                terminalId={terminalIdForConversation(conversationId, item.id)}
+              />
+            ) : null}
             {item.type === 'browser' ? <BrowserPane workspacePath={session.activeWorkspace?.path} session={session} target={target} /> : null}
             {item.type === 'files' ? <FilesPane session={session} target={target} /> : null}
             {item.type === 'git-diff' ? <GitDiffPane session={session} /> : null}
@@ -177,8 +190,7 @@ export function WorkbenchPanel({ session, tab, target, onTabChange }: Props) {
   );
 }
 
-function TerminalPane({ session, terminalId }: { session: TodeXSession; terminalId: string }) {
-  const [input, setInput] = useState('');
+function TerminalPane({ session, terminalId, isActive }: { session: TodeXSession; terminalId: string; isActive: boolean }) {
   const workspace = session.activeWorkspace;
   const conversation = session.activeConversation;
   const autoStartAttempts = useRef(new Set<string>());
@@ -186,13 +198,12 @@ function TerminalPane({ session, terminalId }: { session: TodeXSession; terminal
   const reconnectTimerRef = useRef<number | null>(null);
   const reconnectAttemptRef = useRef(0);
   const terminalByIdRef = useRef(session.terminalById);
+  const terminalSizeRef = useRef({ rows: DEFAULT_TERMINAL_ROWS, cols: DEFAULT_TERMINAL_COLS });
   const terminal = terminalId ? session.terminalById[terminalId] : undefined;
-  const lines = terminal?.output ?? [];
 
   terminalByIdRef.current = session.terminalById;
 
   useEffect(() => {
-    setInput('');
     autoStartAttempts.current.clear();
     manualStopRef.current = false;
     reconnectAttemptRef.current = 0;
@@ -201,6 +212,11 @@ function TerminalPane({ session, terminalId }: { session: TodeXSession; terminal
       reconnectTimerRef.current = null;
     }
   }, [conversation?.id]);
+
+  useEffect(() => {
+    if (!terminal) return;
+    terminalSizeRef.current = { rows: terminal.rows, cols: terminal.cols };
+  }, [terminal?.cols, terminal?.rows]);
 
   useEffect(() => {
     if (!workspace || !conversation || !terminalId || session.connectionState !== 'open') {
@@ -219,12 +235,13 @@ function TerminalPane({ session, terminalId }: { session: TodeXSession; terminal
     const timeoutId = window.setTimeout(() => {
       const latest = terminalByIdRef.current[terminalId];
       if (!latest || latest.status === 'idle') {
+        const size = terminalSizeRef.current;
         session.startTerminalSession(workspace, conversation, {
           terminalId,
           cwd: workspace.path,
           shell: '',
-          rows: 24,
-          cols: 80,
+          rows: size.rows,
+          cols: size.cols,
         });
       }
     }, 300);
@@ -258,12 +275,13 @@ function TerminalPane({ session, terminalId }: { session: TodeXSession; terminal
     reconnectTimerRef.current = window.setTimeout(() => {
       reconnectTimerRef.current = null;
       const latest = terminalByIdRef.current[terminalId];
+      const size = terminalSizeRef.current;
       session.startTerminalSession(workspace, conversation, {
         terminalId,
         cwd: latest?.cwd || workspace.path,
         shell: latest?.shell || '',
-        rows: latest?.rows || 24,
-        cols: latest?.cols || 80,
+        rows: size.rows,
+        cols: size.cols,
       });
     }, delay);
     return () => {
@@ -273,6 +291,20 @@ function TerminalPane({ session, terminalId }: { session: TodeXSession; terminal
       }
     };
   }, [conversation, session.connectionState, session.startTerminalSession, terminal?.status, terminalId, workspace]);
+
+  const handleTerminalData = useCallback((data: string) => {
+    const current = terminalByIdRef.current[terminalId];
+    if (!workspace || !current || current.status !== 'running') return;
+    session.sendTerminalInput(terminalId, workspace.tenantId || session.settings.tenantId, data);
+  }, [session.sendTerminalInput, session.settings.tenantId, terminalId, workspace]);
+
+  const handleTerminalResize = useCallback((rows: number, cols: number) => {
+    terminalSizeRef.current = { rows, cols };
+    const current = terminalByIdRef.current[terminalId];
+    if (!workspace || !current || current.status !== 'running') return;
+    if (current.rows === rows && current.cols === cols) return;
+    session.resizeTerminalSession(terminalId, workspace.tenantId || session.settings.tenantId, rows, cols);
+  }, [session.resizeTerminalSession, session.settings.tenantId, terminalId, workspace]);
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-[#111418] text-[#e7eaee]">
@@ -308,41 +340,15 @@ function TerminalPane({ session, terminalId }: { session: TodeXSession; terminal
           </Button>
         </div>
       </div>
-      <ScrollShadow className="min-h-0 flex-1 px-4 py-3">
-        <div className="font-mono text-xs leading-5 text-[#d8dee9]">
-          {lines.length ? lines.map((entry) => (
-            <div
-              key={entry.id}
-              className={entry.kind === 'stderr' || entry.kind === 'error'
-                ? 'whitespace-pre-wrap break-words text-red-300'
-                : entry.kind === 'input'
-                  ? 'whitespace-pre-wrap break-words text-emerald-300'
-                  : 'whitespace-pre-wrap break-words'}
-            >
-              {entry.text}
-            </div>
-          )) : (
-            <div className="text-[#a8b0ba]">{session.connectionState === 'open' ? '$ 正在连接终端...' : '$ 等待连接到 todex-agentd'}</div>
-          )}
-        </div>
-      </ScrollShadow>
-      <form
-        className="flex gap-2 border-t border-white/10 bg-[#191d22] p-3"
-        onSubmit={(event) => {
-          event.preventDefault();
-          if (!input.trim() || !terminalId || !workspace) return;
-          session.sendTerminalInput(terminalId, workspace.tenantId || session.settings.tenantId, `${input}\n`);
-          setInput('');
-        }}
-      >
-        <span className="self-center font-mono text-sm text-emerald-400">$</span>
-        <TextField aria-label="终端输入" className="min-w-0 flex-1" value={input} onChange={setInput}>
-          <Input placeholder="输入命令" className="border-0 bg-transparent font-mono text-[#e7eaee]" />
-        </TextField>
-        <Button type="submit" isDisabled={!conversation || terminal?.status !== 'running'}>
-          发送
-        </Button>
-      </form>
+      <div className="min-h-0 flex-1">
+        <XtermTerminal
+          entries={terminal?.output ?? []}
+          isActive={isActive}
+          isDisabled={!conversation || terminal?.status !== 'running'}
+          onData={handleTerminalData}
+          onResize={handleTerminalResize}
+        />
+      </div>
     </div>
   );
 }

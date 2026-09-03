@@ -27,7 +27,7 @@ Built with **Electron 44**, **React 19**, **Vite 7**, **Tailwind CSS v4**, and *
   - **Right Workbench Panel**: Multi-tab workspace drawer offering:
     - **Slash Commands**: Reference of provider commands.
     - **Git Diff**: Live inspection of working directory changes.
-    - **Terminal**: Embedded interactive PTY terminal session.
+    - **Terminal**: Embedded xterm.js PTY session with direct keyboard input, ANSI output, and automatic row/column synchronization.
     - **Capabilities**: Real-time read-only catalog of active Skills and MCP servers.
     - **Experiments**: Feature toggles and developer diagnostics.
 - **Pairing & Connection Management**:
