@@ -1236,8 +1236,32 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         (latest, event) => contextUsageFromV2Event(event) ?? latest,
         null,
       );
+      const restoredUsageRecords = events.flatMap<UsageRecord>((event) => {
+        const usage = contextUsageFromV2Event(event);
+        if (!usage) return [];
+        return [{
+          id: `${conversationId}:${event.eventId}`,
+          conversationId,
+          provider: activeConversation.provider || 'unknown',
+          model: usage.model || activeConversation.model || 'unknown',
+          inputTokens: usage.inputTokens,
+          outputTokens: usage.outputTokens,
+          cachedInputTokens: usage.cachedInputTokens,
+          cacheWriteTokens: usage.cacheWriteTokens,
+          updatedAt: usage.updatedAt,
+        }];
+      });
       if (restoredUsage) {
         setContextUsageByConversation((current) => ({ ...current, [conversationId]: restoredUsage }));
+      }
+      if (restoredUsageRecords.length > 0) {
+        setUsageRecords((current) => {
+          const merged = [...restoredUsageRecords, ...current];
+          return merged
+            .filter((record, index) => merged.findIndex((item) => item.id === record.id) === index)
+            .sort((left, right) => right.updatedAt - left.updatedAt)
+            .slice(0, MAX_USAGE_RECORDS);
+        });
       }
       setTimeline((current) => [
         ...replayState.timeline,
@@ -1263,6 +1287,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     };
   }, [
     activeConversation?.id,
+    activeConversation?.model,
+    activeConversation?.provider,
     activeConversation?.v2ConversationId,
     activeConversation?.workspaceId,
     hydrated,

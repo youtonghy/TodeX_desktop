@@ -1009,6 +1009,31 @@ export function contextUsageFromV2Event(event: ConversationEvent): ConversationC
     ? tokenUsage.last as Record<string, unknown>
     : null;
 
+  const normalizedUsage = payload.usage && typeof payload.usage === 'object' && !Array.isArray(payload.usage)
+    ? payload.usage as Record<string, unknown>
+    : null;
+  const normalizedLast = normalizedUsage?.last && typeof normalizedUsage.last === 'object' && !Array.isArray(normalizedUsage.last)
+    ? normalizedUsage.last as Record<string, unknown>
+    : null;
+
+  if (event.type === 'usage.updated' && normalizedLast) {
+    const inputTokens = usageNumber(normalizedLast.input);
+    const outputTokens = usageNumber(normalizedLast.output);
+    const cachedInputTokens = usageNumber(normalizedLast.cacheRead);
+    const cacheWriteTokens = usageNumber(normalizedLast.cacheWrite);
+    const nativeTotal = usageNumber(normalizedLast.total);
+    return {
+      usedTokens: nativeTotal || inputTokens + outputTokens + cachedInputTokens + cacheWriteTokens,
+      contextWindow: usageNumber(payload.contextWindow) || undefined,
+      inputTokens,
+      outputTokens,
+      cachedInputTokens,
+      cacheWriteTokens,
+      model: typeof payload.model === 'string' ? payload.model : undefined,
+      updatedAt: Date.parse(event.time) || Date.now(),
+    };
+  }
+
   if (payload.providerMethod === 'thread/tokenUsage/updated' && last) {
     return {
       usedTokens: usageNumber(last.totalTokens),
