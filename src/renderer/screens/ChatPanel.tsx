@@ -1,7 +1,8 @@
-import { RiBarChartBoxLine, RiClipboardLine, RiCpuLine, RiFlashlightLine, RiGitBranchLine, RiMagicLine, RiShieldLine, RiStopCircleLine } from '@remixicon/react';
+import { RiBarChartBoxLine, RiClipboardLine, RiCpuLine, RiGitBranchLine, RiShieldLine, RiStopCircleLine } from '@remixicon/react';
+import { ThunderboltFill } from '@gravity-ui/icons';
 import { useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
-import { Button, Chip, Label, ListBox, ScrollShadow, Select, Tooltip, toast } from '@heroui/react';
+import { Button, Chip, Label, ListBox, Popover, ScrollShadow, Select, Slider, ToggleButton, Tooltip, toast } from '@heroui/react';
 import { ChainOfThought, ChatMessage, HoverCard, PromptInput } from '@heroui-pro/react';
 import { ChatMessageActions } from '@heroui-pro/react/chat-message-actions';
 import { ChatTool } from '@heroui-pro/react/chat-tool';
@@ -27,6 +28,7 @@ import {
   insertMention,
   canonicalSlashCommand,
   modelDisplayLabel,
+  reasoningEffortLabel,
   permissionPresetForProfile,
   workspaceLinkTarget,
 } from '../session/helpers';
@@ -69,21 +71,6 @@ function isChatReminderEntry(entry: { subtitle: string; title: string }): boolea
   return entry.subtitle.includes('本地会话启动超时')
     || entry.title === '本地会话启动超时'
     || entry.subtitle.trim() === 'codex.local.start';
-}
-
-function reasoningIcon(effort: string | null | undefined) {
-  switch (effort?.toLowerCase()) {
-    case 'high':
-    case 'xhigh':
-    case 'max':
-    case 'ultra':
-      return RiFlashlightLine;
-    case 'low':
-      return RiBarChartBoxLine;
-    case 'medium':
-    default:
-      return RiMagicLine;
-  }
 }
 
 function ContextUsageIndicator({
@@ -295,13 +282,19 @@ export function ChatPanel({ session }: Props) {
     : 'Agent';
   const availableProviders = session.v2Providers.filter((item) => item.available);
   const providerDescriptor = session.v2Providers.find((item) => item.id === currentProvider);
-  const providerModels = session.providerModels[currentProvider as ProviderKind] ?? providerDescriptor?.models ?? [];
+  const liveProviderModels = session.providerModels[currentProvider as ProviderKind];
+  const providerModels = liveProviderModels?.length ? liveProviderModels : providerDescriptor?.models ?? [];
   const currentModel = conversation.model || providerModels.find((item) => item.isDefault)?.id || (currentProvider === 'codex' ? workspace.model || session.settings.defaultModel : '');
   const currentModelDescriptor = providerModels.find((item) => item.id === currentModel);
   const supportedReasoningEfforts = currentModelDescriptor?.supportedReasoningEfforts ?? [];
   // An unset Pi/agent effort is meaningful: let the provider apply its own default.
   const currentReasoningEffort = conversation.reasoningEffort ?? null;
-  const ReasoningIcon = reasoningIcon(currentReasoningEffort);
+  const displayedReasoningEffort = currentReasoningEffort
+    ?? currentModelDescriptor?.defaultReasoningEffort
+    ?? (supportedReasoningEfforts.includes('medium') ? 'medium' : supportedReasoningEfforts[0])
+    ?? null;
+  const reasoningIndex = Math.max(0, supportedReasoningEfforts.indexOf(displayedReasoningEffort ?? ''));
+  const fastEnabled = workspace.serviceTier === 'priority' || workspace.serviceTier === 'fast';
   const contextUsage = session.contextUsageByConversation[conversation.id];
   const contextModelId = contextUsage?.model || currentModel;
   const currentContextWindow = contextUsage?.contextWindow
@@ -579,60 +572,100 @@ export function ChatPanel({ session }: Props) {
                         </ListBox>
                       </Select.Popover>
                     </Select>
-                    <Select
-                      className="composer-control"
-                      variant="secondary"
-                      isDisabled={providerModels.length === 0}
-                      selectedKey={currentModel || null}
-                      onSelectionChange={(key) => {
-                        if (typeof key === 'string' && key) {
-                          session.applyConversationModelSelection(conversation.id, key, null);
-                        }
-                      }}
-                    >
-                      <Label className="hidden">选择模型</Label>
-                      <Select.Trigger className="composer-control__trigger">
-                        <Select.Value><RiCpuLine className="composer-control__icon" /><span className="composer-control__text">{modelDisplayLabel(currentModel, session.modelCatalog)}</span></Select.Value>
-                        <Select.Indicator className="composer-control__indicator" />
-                      </Select.Trigger>
-                      <Select.Popover>
-                        <ListBox>
-                          {providerModels.map((item) => (
-                            <ListBox.Item key={item.id} id={item.id} textValue={item.displayName}>
-                              {item.displayName}
-                              <ListBox.ItemIndicator />
-                            </ListBox.Item>
-                          ))}
-                        </ListBox>
-                      </Select.Popover>
-                    </Select>
-                    <Select
-                      className="composer-control"
-                      variant="secondary"
-                      isDisabled={!currentModelDescriptor || supportedReasoningEfforts.length === 0}
-                      selectedKey={currentReasoningEffort}
-                      onSelectionChange={(key) => {
-                        if (typeof key === 'string' && key) {
-                          session.applyConversationModelSelection(conversation.id, currentModel, key);
-                        }
-                      }}
-                    >
-                      <Label className="hidden">思考强度</Label>
-                      <Select.Trigger className="composer-control__trigger">
-                        <Select.Value><ReasoningIcon className="composer-control__icon" /><span className="composer-control__text">{currentReasoningEffort || (currentModelDescriptor ? '不支持调节' : '等待同步')}</span></Select.Value>
-                        <Select.Indicator className="composer-control__indicator" />
-                      </Select.Trigger>
-                      <Select.Popover>
-                        <ListBox>
-                          {supportedReasoningEfforts.map((effort) => (
-                            <ListBox.Item key={effort} id={effort} textValue={effort}>
-                              {(() => { const Icon = reasoningIcon(effort); return <Icon className="size-4" aria-hidden="true" />; })()}
-                              {effort}
-                            </ListBox.Item>
-                          ))}
-                        </ListBox>
-                      </Select.Popover>
-                    </Select>
+                    <Popover>
+                      <Button
+                        className="composer-control composer-model-control__trigger"
+                        size="sm"
+                        variant="secondary"
+                        isDisabled={providerModels.length === 0}
+                        aria-label="选择模型和思考强度"
+                      >
+                        <RiCpuLine className="composer-control__icon" />
+                        <span className="composer-control__text">{modelDisplayLabel(currentModel, session.modelCatalog)}</span>
+                      </Button>
+                      <Popover.Content className="composer-model-popover" placement="top start" offset={8}>
+                        <Popover.Dialog className="composer-model-popover__dialog" aria-label="模型和思考强度">
+                          <div className="composer-model-popover__top-row">
+                            {currentProvider === 'codex' ? (
+                              <Tooltip delay={250}>
+                                <ToggleButton
+                                  isIconOnly
+                                  size="md"
+                                  variant="default"
+                                  className="composer-fast-toggle"
+                                  isSelected={fastEnabled}
+                                  aria-label={fastEnabled ? '关闭 Fast 模式' : '启用 Fast 模式'}
+                                  onChange={() => session.toggleFastServiceTier(conversation.id)}
+                                >
+                                  <ThunderboltFill className="size-5" aria-hidden="true" />
+                                </ToggleButton>
+                                <Tooltip.Content>{fastEnabled ? '关闭 Fast' : '启用 Fast'}</Tooltip.Content>
+                              </Tooltip>
+                            ) : null}
+                            <Select
+                              className="composer-model-popover__select"
+                              variant="secondary"
+                              selectedKey={currentModel || null}
+                              onSelectionChange={(key) => {
+                                if (typeof key === 'string' && key) {
+                                  session.applyConversationModelSelection(conversation.id, key, null);
+                                }
+                              }}
+                            >
+                              <Label className="hidden">选择模型</Label>
+                              <Select.Trigger className="composer-model-popover__model-trigger">
+                                <Select.Value><span className="composer-control__text">{currentModelDescriptor?.displayName || modelDisplayLabel(currentModel, session.modelCatalog)}</span></Select.Value>
+                                <Select.Indicator />
+                              </Select.Trigger>
+                              <Select.Popover>
+                                <ListBox>
+                                  {providerModels.map((item) => (
+                                    <ListBox.Item key={item.id} id={item.id} textValue={item.displayName}>
+                                      {item.displayName}
+                                      <ListBox.ItemIndicator />
+                                    </ListBox.Item>
+                                  ))}
+                                </ListBox>
+                              </Select.Popover>
+                            </Select>
+                          </div>
+                          <div className="composer-reasoning-header">
+                            <span>思考强度</span>
+                            <span>{currentModelDescriptor ? reasoningEffortLabel(displayedReasoningEffort) : '等待同步'}</span>
+                          </div>
+                          <Slider
+                            className="composer-reasoning-slider"
+                            minValue={0}
+                            maxValue={Math.max(0, supportedReasoningEfforts.length - 1)}
+                            step={1}
+                            value={reasoningIndex}
+                            isDisabled={supportedReasoningEfforts.length === 0}
+                            onChange={(value) => {
+                              const nextIndex = Array.isArray(value) ? value[0] : value;
+                              const effort = supportedReasoningEfforts[Math.round(nextIndex)];
+                              if (effort && effort !== currentReasoningEffort) {
+                                session.applyConversationModelSelection(conversation.id, currentModel, effort);
+                              }
+                            }}
+                          >
+                            <Label className="hidden">思考强度</Label>
+                            <Slider.Track className="composer-reasoning-slider__track">
+                              <Slider.Fill className="composer-reasoning-slider__fill" />
+                              <Slider.Marks className="composer-reasoning-slider__marks" aria-hidden="true">
+                                {supportedReasoningEfforts.map((effort, index) => (
+                                  <span
+                                    key={effort}
+                                    className="composer-reasoning-slider__mark"
+                                    style={{ left: `${supportedReasoningEfforts.length === 1 ? 50 : index / (supportedReasoningEfforts.length - 1) * 100}%` }}
+                                  />
+                                ))}
+                              </Slider.Marks>
+                              <Slider.Thumb className="composer-reasoning-slider__thumb" />
+                            </Slider.Track>
+                          </Slider>
+                        </Popover.Dialog>
+                      </Popover.Content>
+                    </Popover>
                     {canChoosePermission ? <Select
                       className="composer-control"
                       variant="secondary"
