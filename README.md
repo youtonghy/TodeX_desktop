@@ -31,6 +31,7 @@ Built with **Electron 44**, **React 19**, **Vite 7**, **Tailwind CSS v4**, and *
     - **Capabilities**: Real-time read-only catalog of active Skills and MCP servers.
     - **Experiments**: Feature toggles and developer diagnostics.
 - **Pairing & Connection Management**:
+  - Inspect the active Backend's Codex, Pi, Claude Code, Grok Build, and ACP CLI inventory, compare installed and latest versions, and start managed CLI upgrades.
   - Connect via direct host/port URL with Bearer token authentication.
   - Paste pairing JSON or multi-frame segmented QR payloads.
   - **Drag & Drop QR pairing**: Drop QR screenshot/image files directly into the window (parsed locally via `jsqr`).

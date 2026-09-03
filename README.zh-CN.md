@@ -31,6 +31,7 @@
     - **能力目录（Capabilities）**：实时查看当前生效的 Skills 与 MCP Servers。
     - **实验特性（Experiments）**：特性开关与开发者诊断面板。
 - **配对与连接管理**：
+  - 查看当前后端连接的 Codex、Pi、Claude Code、Grok Build 与 ACP CLI，比较当前/最新版本并一键升级受管 CLI。
   - 支持通过主机/端口与 Bearer Token 直接连接。
   - 支持粘贴配对 JSON 文本或多段分片二维码数据。
   - **拖拽二维码图片配对**：支持直接将二维码截图/图片拖入应用窗口（基于 `jsqr` 本地解码）。

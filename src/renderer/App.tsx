@@ -14,6 +14,7 @@ import { CapabilitiesPanel } from './screens/CapabilitiesPanel';
 import { WorkbenchPanel } from './screens/WorkbenchPanel';
 import { UsagePanel } from './screens/UsagePanel';
 import { AboutPanel } from './screens/AboutPanel';
+import { CliManagerPanel } from './screens/CliManagerPanel';
 import { KanbanPanel } from './screens/KanbanPanel';
 import { Field } from './components/Field';
 import { connectionStateLabel, fetchWorkspaceDirectorySnapshot, isV2Conversation } from './session/helpers';
@@ -83,7 +84,7 @@ export function App() {
     if (isWorkbenchTab(next)) {
       setWorkbenchTab(next);
     }
-    if (next !== 'settings' && next !== 'usage' && next !== 'about') {
+    if (next !== 'settings' && next !== 'usage' && next !== 'about' && next !== 'cli-manager') {
       persistAsideOpen(true);
     }
   }, [persistAsideOpen]);
@@ -108,7 +109,8 @@ export function App() {
   const settingsOpen = panel === 'settings';
   const usageOpen = panel === 'usage';
   const aboutOpen = panel === 'about';
-  const modalPanel = settingsOpen || usageOpen || aboutOpen;
+  const cliManagerOpen = panel === 'cli-manager';
+  const modalPanel = settingsOpen || usageOpen || aboutOpen || cliManagerOpen;
   const overlayPanel = panel && panel !== 'kanban' && !modalPanel && !isWorkbenchTab(panel) ? panel : null;
 
   return (
@@ -160,6 +162,7 @@ export function App() {
               }}
               onOpenSettings={() => setPanel('settings')}
               onOpenCapabilities={() => setCapabilitiesOpen(true)}
+              onOpenCliManager={() => { persistAsideOpen(false); setPanel('cli-manager'); }}
               onOpenUsage={() => setPanel('usage')}
               onOpenAbout={() => setPanel('about')}
               onOpenKanban={() => { setPanel('kanban'); persistAsideOpen(false); }}
@@ -239,6 +242,17 @@ export function App() {
               <Modal.CloseTrigger />
               <Modal.Header><Modal.Heading>关于</Modal.Heading></Modal.Header>
               <Modal.Body className="max-h-[76vh] overflow-y-auto p-0"><AboutPanel session={session} /></Modal.Body>
+            </Modal.Dialog>
+          </Modal.Container>
+        </Modal.Backdrop>
+      </Modal>
+      <Modal isOpen={cliManagerOpen} onOpenChange={(open) => { if (!open) setPanel((current) => current === 'cli-manager' ? null : current); }}>
+        <Modal.Backdrop>
+          <Modal.Container>
+            <Modal.Dialog className="max-h-[92vh] sm:max-w-3xl">
+              <Modal.CloseTrigger />
+              <Modal.Header><Modal.Heading>CLI 管理</Modal.Heading></Modal.Header>
+              <Modal.Body className="max-h-[80vh] overflow-y-auto p-0"><CliManagerPanel session={session} /></Modal.Body>
             </Modal.Dialog>
           </Modal.Container>
         </Modal.Backdrop>

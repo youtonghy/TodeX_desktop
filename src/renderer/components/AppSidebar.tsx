@@ -1,8 +1,8 @@
-import { RiAddLine, RiBarChartBoxLine, RiFolder3Line, RiInformationLine, RiKanbanView2, RiPuzzle2Line, RiSettings3Line } from '@remixicon/react';
+import { RiAddLine, RiBarChartBoxLine, RiFolder3Line, RiInformationLine, RiKanbanView2, RiPuzzle2Line, RiSettings3Line, RiTerminalBoxLine } from '@remixicon/react';
 import { Badge, Button, Chip, Dropdown, Label } from '@heroui/react';
 import { useEffect, useState } from 'react';
 import type { MouseEvent } from 'react';
-import { ChatListView, Sidebar } from '@heroui-pro/react';
+import { ChatListView, Sidebar, useSidebar } from '@heroui-pro/react';
 import { ProviderIcon } from './ProviderIcon';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { conversationDisplayTitle, isConversationHighlighted, workspaceDisplayName } from '../session/helpers';
@@ -13,6 +13,7 @@ type Props = {
   onCreateConversation: () => void;
   onOpenSettings: () => void;
   onOpenCapabilities: () => void;
+  onOpenCliManager: () => void;
   onOpenUsage: () => void;
   onOpenAbout: () => void;
   onOpenKanban: () => void;
@@ -36,7 +37,8 @@ function conversationStatus(session: TodeXSession, conversation: TodeXSession['c
   return null;
 }
 
-export function AppSidebar({ session, onCreateWorkspace, onCreateConversation, onOpenSettings, onOpenCapabilities, onOpenUsage, onOpenAbout, onOpenKanban }: Props) {
+export function AppSidebar({ session, onCreateWorkspace, onCreateConversation, onOpenSettings, onOpenCapabilities, onOpenCliManager, onOpenUsage, onOpenAbout, onOpenKanban }: Props) {
+  const { isMobile, setMobileOpen } = useSidebar();
   const workspaceConversations = session.conversations.filter(
     (conversation) => conversation.workspaceId === session.activeWorkspaceId && !conversation.archived,
   );
@@ -104,11 +106,16 @@ export function AppSidebar({ session, onCreateWorkspace, onCreateConversation, o
             <Dropdown.Menu onAction={(key) => {
               if (key === 'settings') onOpenSettings();
               if (key === 'capabilities') onOpenCapabilities();
+              if (key === 'cli-manager') {
+                if (isMobile) setMobileOpen(false);
+                onOpenCliManager();
+              }
               if (key === 'usage') onOpenUsage();
               if (key === 'about') onOpenAbout();
             }}>
               <Dropdown.Item id="settings" textValue="设置"><RiSettings3Line className="text-muted size-4 shrink-0" /><Label>设置</Label></Dropdown.Item>
               <Dropdown.Item id="capabilities" textValue="MCP / Skill 管理"><RiPuzzle2Line className="text-muted size-4 shrink-0" /><Label>MCP / Skill 管理</Label></Dropdown.Item>
+              <Dropdown.Item id="cli-manager" textValue="CLI 管理"><RiTerminalBoxLine className="text-muted size-4 shrink-0" /><Label>CLI 管理</Label></Dropdown.Item>
               <Dropdown.Item id="usage" textValue="使用统计"><RiBarChartBoxLine className="text-muted size-4 shrink-0" /><Label>使用统计</Label></Dropdown.Item>
               <Dropdown.Item id="about" textValue="关于"><RiInformationLine className="text-muted size-4 shrink-0" /><Label>关于</Label></Dropdown.Item>
             </Dropdown.Menu>

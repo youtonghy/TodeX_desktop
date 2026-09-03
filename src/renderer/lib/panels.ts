@@ -2,6 +2,7 @@ export type DesktopPanel =
   | 'settings'
   | 'usage'
   | 'about'
+  | 'cli-manager'
   | 'slash-commands'
   | 'slash-action'
   | 'git-diff'
@@ -35,6 +36,8 @@ export function panelFromRoute(name: string): DesktopPanel | null {
       return 'usage';
     case 'About':
       return 'about';
+    case 'CliManager':
+      return 'cli-manager';
     case 'SlashCommands':
       return 'slash-commands';
     case 'SlashCommandAction':
