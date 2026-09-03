@@ -44,6 +44,18 @@ import {
   cursorFromEvent as transportCursorFromEvent,
   sessionIdFromEvent as transportSessionIdFromEvent,
 } from '@todex/protocol/transport';
+import {
+  buildConversationRenderItems as sharedBuildConversationRenderItems,
+  executionGroupId as sharedExecutionGroupId,
+  classifyV2ConversationEvent as sharedClassifyV2ConversationEvent,
+  contextUsageFromV2Event as sharedContextUsageFromV2Event,
+  isCollapsibleProgressEntry as sharedIsCollapsibleProgressEntry,
+  isStepProgressEntry as sharedIsStepProgressEntry,
+  isThinkingProgressEntry as sharedIsThinkingProgressEntry,
+  shouldAppendV2ConversationEvent as sharedShouldAppendV2ConversationEvent,
+  type ConversationBlockCategory,
+  type ConversationBlockPhase,
+} from '@todex/protocol/mobileParity';
 
 async function readDesktopFile(uri: string): Promise<{ sizeBytes: number | null; text?: string; base64?: string }> {
   if (uri.startsWith('data:')) {
@@ -888,6 +900,11 @@ export type TimelineEntry = {
   workspaceId?: string;
   conversationId?: string;
   requestId?: string;
+  category?: ConversationBlockCategory;
+  phase?: ConversationBlockPhase;
+  turnId?: string;
+  blockId?: string;
+  contentIndex?: number;
 };
 
 export function workspaceDisplayName(workspace: Pick<WorkspaceRecord, 'name' | 'path'>): string {
@@ -996,79 +1013,7 @@ function usageNumber(value: unknown): number {
 }
 
 export function contextUsageFromV2Event(event: ConversationEvent): ConversationContextUsage | null {
-  const payload = event.payload && typeof event.payload === 'object' && !Array.isArray(event.payload)
-    ? event.payload as Record<string, unknown>
-    : {};
-  const metadata = payload.metadata && typeof payload.metadata === 'object' && !Array.isArray(payload.metadata)
-    ? payload.metadata as Record<string, unknown>
-    : {};
-  const tokenUsage = metadata.tokenUsage && typeof metadata.tokenUsage === 'object' && !Array.isArray(metadata.tokenUsage)
-    ? metadata.tokenUsage as Record<string, unknown>
-    : null;
-  const last = tokenUsage?.last && typeof tokenUsage.last === 'object' && !Array.isArray(tokenUsage.last)
-    ? tokenUsage.last as Record<string, unknown>
-    : null;
-
-  const normalizedUsage = payload.usage && typeof payload.usage === 'object' && !Array.isArray(payload.usage)
-    ? payload.usage as Record<string, unknown>
-    : null;
-  const normalizedLast = normalizedUsage?.last && typeof normalizedUsage.last === 'object' && !Array.isArray(normalizedUsage.last)
-    ? normalizedUsage.last as Record<string, unknown>
-    : null;
-
-  if (event.type === 'usage.updated' && normalizedLast) {
-    const inputTokens = usageNumber(normalizedLast.input);
-    const outputTokens = usageNumber(normalizedLast.output);
-    const cachedInputTokens = usageNumber(normalizedLast.cacheRead);
-    const cacheWriteTokens = usageNumber(normalizedLast.cacheWrite);
-    const nativeTotal = usageNumber(normalizedLast.total);
-    return {
-      usedTokens: nativeTotal || inputTokens + outputTokens + cachedInputTokens + cacheWriteTokens,
-      contextWindow: usageNumber(payload.contextWindow) || undefined,
-      inputTokens,
-      outputTokens,
-      cachedInputTokens,
-      cacheWriteTokens,
-      model: typeof payload.model === 'string' ? payload.model : undefined,
-      updatedAt: Date.parse(event.time) || Date.now(),
-    };
-  }
-
-  if (payload.providerMethod === 'thread/tokenUsage/updated' && last) {
-    return {
-      usedTokens: usageNumber(last.totalTokens),
-      contextWindow: usageNumber(tokenUsage?.modelContextWindow) || undefined,
-      inputTokens: usageNumber(last.inputTokens),
-      outputTokens: usageNumber(last.outputTokens),
-      cachedInputTokens: usageNumber(last.cachedInputTokens),
-      cacheWriteTokens: usageNumber(last.cacheWriteInputTokens),
-      updatedAt: Date.parse(event.time) || Date.now(),
-    };
-  }
-
-  const message = payload.message && typeof payload.message === 'object' && !Array.isArray(payload.message)
-    ? payload.message as Record<string, unknown>
-    : null;
-  const usage = message?.usage && typeof message.usage === 'object' && !Array.isArray(message.usage)
-    ? message.usage as Record<string, unknown>
-    : null;
-  if (event.type !== 'message.completed' || message?.role !== 'assistant' || !usage) {
-    return null;
-  }
-  const inputTokens = usageNumber(usage.input);
-  const outputTokens = usageNumber(usage.output);
-  const cachedInputTokens = usageNumber(usage.cacheRead);
-  const cacheWriteTokens = usageNumber(usage.cacheWrite);
-  const nativeTotal = usageNumber(usage.totalTokens);
-  return {
-    usedTokens: nativeTotal || inputTokens + outputTokens + cachedInputTokens + cacheWriteTokens,
-    inputTokens,
-    outputTokens,
-    cachedInputTokens,
-    cacheWriteTokens,
-    model: typeof message.model === 'string' ? message.model : undefined,
-    updatedAt: Date.parse(event.time) || Date.now(),
-  };
+  return sharedContextUsageFromV2Event(event) as ConversationContextUsage | null;
 }
 
 export type ConversationRenderItem =
@@ -1905,170 +1850,12 @@ export function classifyV2ConversationEvent(
   workspaceId: string,
   activeTurnId = '',
 ): TimelineEntry | null {
-  const payload = event.payload && typeof event.payload === 'object' && !Array.isArray(event.payload)
-    ? event.payload as Record<string, unknown>
-    : {};
-  const message = payload.message && typeof payload.message === 'object' && !Array.isArray(payload.message)
-    ? payload.message as Record<string, unknown>
-    : null;
-  const delta = payload.delta && typeof payload.delta === 'object' && !Array.isArray(payload.delta)
-    ? payload.delta as Record<string, unknown>
-    : null;
-  const providerItem = payload.item && typeof payload.item === 'object' && !Array.isArray(payload.item)
-    ? payload.item as Record<string, unknown>
-    : null;
-  const contentParts = Array.isArray(message?.content) ? message.content : [];
-  const nestedContent = contentParts
-    .map((part) => {
-      if (typeof part === 'string') return part;
-      if (!part || typeof part !== 'object' || Array.isArray(part)) return '';
-      const item = part as Record<string, unknown>;
-      return typeof item.text === 'string' ? item.text : typeof item.content === 'string' ? item.content : '';
-    })
-    .filter(Boolean)
-    .join('');
-  const content = typeof payload.content === 'string'
-    ? payload.content
-    : typeof payload.text === 'string'
-      ? payload.text
-      : typeof payload.delta === 'string'
-        ? payload.delta
-        : typeof delta?.text === 'string'
-          ? delta.text
-          : typeof delta?.delta === 'string'
-            ? delta.delta
-            : typeof delta?.content === 'string'
-              ? delta.content
-              : typeof payload.message === 'string'
-                ? payload.message
-                : typeof message?.content === 'string'
-                  ? message.content
-                  : typeof message?.text === 'string'
-                    ? message.text
-                    : nestedContent;
-  const role = typeof payload.role === 'string'
-    ? payload.role
-    : typeof message?.role === 'string' ? message.role : '';
-  const turnId = typeof payload.turnId === 'string' ? payload.turnId : activeTurnId;
+  const entry = sharedClassifyV2ConversationEvent(event, workspaceId, activeTurnId);
+  return entry ? { ...entry, raw: entry.category ? '' : shortJson(event), sequence: event.sequence } : null;
+}
 
-  if (event.type === 'message.created' && (role === 'user' || role === 'human')) {
-    return {
-      id: event.eventId,
-      kind: 'outgoing',
-      title: 'You',
-      subtitle: content,
-      raw: shortJson(event),
-      at: Date.parse(event.time) || Date.now(),
-      sequence: event.sequence,
-      workspaceId,
-      conversationId: event.conversationId,
-    };
-  }
-  if (event.type === 'message.completed' && (role === 'user' || role === 'human')) {
-    return null;
-  }
-  const deltaType = typeof delta?.type === 'string' ? delta.type : '';
-  const messageRole = typeof message?.role === 'string' ? message.role : '';
-  const providerItemType = providerItem ? itemTypeOf(providerItem) : '';
-  const isAssistantItem = providerItemType === 'agentMessage' || providerItemType === 'agent_message';
-  const isReasoningItem = /reasoning|thinking|thought|analysis/i.test(providerItemType);
-  if (event.type.startsWith('tool.') && (isAssistantItem || isReasoningItem)) {
-    if (!isAssistantItem || event.type !== 'tool.completed') return null;
-    return {
-      id: `v2-assistant-${event.conversationId}-${turnId || 'current'}`,
-      kind: 'incoming',
-      title: 'Agent',
-      subtitle: (providerItem ? textFromItem(providerItem) : '') || content || '正在回复...',
-      raw: shortJson(event),
-      at: Date.parse(event.time) || Date.now(),
-      sequence: event.sequence,
-      workspaceId,
-      conversationId: event.conversationId,
-    };
-  }
-  const isToolEvent = /tool|command|function|mcp/i.test(event.type)
-    || /tool|command|function|mcp/i.test(deltaType)
-    || messageRole === 'tool';
-  if (event.type.startsWith('thought.') || /reasoning|thinking|analysis/i.test(event.type)) {
-    const thought = typeof payload.thought === 'string' ? payload.thought
-      : typeof payload.reasoning === 'string' ? payload.reasoning
-        : content;
-    return thought ? {
-      id: `v2-thought-${event.conversationId}-${turnId || event.eventId}`,
-      kind: 'system',
-      title: '思考中',
-      subtitle: thought,
-      raw: shortJson(event),
-      at: Date.parse(event.time) || Date.now(),
-      sequence: event.sequence,
-      workspaceId,
-      conversationId: event.conversationId,
-    } : null;
-  }
-  if (isToolEvent) {
-    const toolPayload = content || shortJson(payload);
-    return {
-      id: `v2-tool-${event.conversationId}-${turnId || event.eventId}`,
-      kind: 'system',
-      title: '工具调用',
-      subtitle: toolPayload,
-      raw: shortJson(event),
-      at: Date.parse(event.time) || Date.now(),
-      sequence: event.sequence,
-      workspaceId,
-      conversationId: event.conversationId,
-    };
-  }
-  if (event.type === 'message.created' || event.type === 'message.completed' || event.type === 'message.delta' || event.type.includes('agent') || event.type.includes('assistant')) {
-    if (!content && event.type === 'turn.started') {
-      return null;
-    }
-    if (content || event.type === 'message.created') {
-      return {
-        id: event.type === 'message.delta' || event.type === 'message.completed'
-          ? `v2-assistant-${event.conversationId}-${turnId || 'current'}`
-          : event.eventId,
-        kind: 'incoming',
-        title: 'Agent',
-        subtitle: content || event.type,
-        raw: shortJson(event),
-        at: Date.parse(event.time) || Date.now(),
-        sequence: event.sequence,
-        workspaceId,
-        conversationId: event.conversationId,
-      };
-    }
-  }
-  if (event.type === 'conversation.created' || event.type === 'turn.started' || event.type === 'turn.completed' || event.type === 'turn.cancelled') {
-    return null;
-  }
-  if (event.type.startsWith('mcp.') || event.type === 'skill.injected' || event.type.startsWith('permission.') || event.type === 'turn.failed') {
-    return {
-      id: event.eventId,
-      kind: 'system',
-      title: event.type,
-      subtitle: content || shortJson(payload).slice(0, 220),
-      raw: shortJson(event),
-      at: Date.parse(event.time) || Date.now(),
-      sequence: event.sequence,
-      workspaceId,
-      conversationId: event.conversationId,
-    };
-  }
-  if (content) {
-    return {
-      id: event.eventId,
-      kind: 'incoming',
-      title: 'Agent',
-      subtitle: content,
-      raw: shortJson(event),
-      at: Date.parse(event.time) || Date.now(),
-      sequence: event.sequence,
-      workspaceId,
-      conversationId: event.conversationId,
-    };
-  }
-  return null;
+export function shouldAppendV2ConversationEvent(event: ConversationEvent): boolean {
+  return sharedShouldAppendV2ConversationEvent(event);
 }
 
 export type V2ConversationReplayState = {
@@ -2104,7 +1891,7 @@ export function reduceV2ConversationEvents(
         timeline[index] = {
           ...previous,
           ...entry,
-          subtitle: event.type === 'message.delta'
+          subtitle: shouldAppendV2ConversationEvent(event)
             ? `${previous.subtitle === '正在回复...' ? '' : previous.subtitle}${entry.subtitle}`
             : entry.subtitle,
         };
@@ -2118,6 +1905,26 @@ export function reduceV2ConversationEvents(
   }
 
   return { timeline, activeTurnId, lastSequence };
+}
+
+export function mergeConversationTimeline(
+  replayed: readonly TimelineEntry[],
+  live: readonly TimelineEntry[],
+): TimelineEntry[] {
+  const merged = new Map<string, TimelineEntry>();
+  for (const entry of [...replayed, ...live]) {
+    const previous = merged.get(entry.id);
+    if (!previous || (entry.sequence ?? 0) >= (previous.sequence ?? 0)) {
+      merged.set(entry.id, entry);
+    }
+  }
+  return [...merged.values()].sort((left, right) => {
+    if (left.sequence !== undefined && right.sequence !== undefined && left.sequence !== right.sequence) {
+      return right.sequence - left.sequence;
+    }
+    if (left.at !== right.at) return right.at - left.at;
+    return right.id.localeCompare(left.id);
+  });
 }
 
 export function modeLabelOf(mode: ConversationRecord['mode']): string {
@@ -2832,54 +2639,23 @@ export function conversationPreviewText(latest: TimelineEntry | undefined): stri
 }
 
 export function isStepProgressEntry(entry: TimelineEntry): boolean {
-  return entry.kind === 'system' && (
-    entry.title === '执行步骤' ||
-    entry.title === '步骤完成' ||
-    entry.title === '请求权限批准' ||
-    entry.title === '工具调用' ||
-    entry.title === '思考中'
-  );
+  return sharedIsStepProgressEntry(entry);
 }
 
 export function isThinkingProgressEntry(entry: TimelineEntry): boolean {
-  return entry.kind === 'system' && entry.title === '思考中';
+  return sharedIsThinkingProgressEntry(entry);
 }
 
 export function isCollapsibleProgressEntry(entry: TimelineEntry): boolean {
-  return isStepProgressEntry(entry) || isThinkingProgressEntry(entry);
+  return sharedIsCollapsibleProgressEntry(entry);
 }
 
 export function executionGroupId(entries: TimelineEntry[]): string {
-  const first = entries[0]?.id ?? 'empty';
-  const last = entries[entries.length - 1]?.id ?? first;
-  return `execution-group-${first}-${last}`;
+  return sharedExecutionGroupId(entries);
 }
 
 export function buildConversationRenderItems(entries: TimelineEntry[]): ConversationRenderItem[] {
-  const items: ConversationRenderItem[] = [];
-  let index = 0;
-
-  while (index < entries.length) {
-    const entry = entries[index];
-    if (!isStepProgressEntry(entry)) {
-      items.push({ type: 'entry', entry });
-      index += 1;
-      continue;
-    }
-
-    const groupEntries: TimelineEntry[] = [];
-    while (index < entries.length && isStepProgressEntry(entries[index])) {
-      groupEntries.push(entries[index]);
-      index += 1;
-    }
-    items.push({
-      type: 'executionGroup',
-      id: executionGroupId(groupEntries),
-      entries: groupEntries,
-    });
-  }
-
-  return items;
+  return sharedBuildConversationRenderItems(entries) as ConversationRenderItem[];
 }
 
 export function createDefaultConversation(workspace: WorkspaceRecord): ConversationRecord {

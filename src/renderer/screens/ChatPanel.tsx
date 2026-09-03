@@ -1,6 +1,6 @@
 import { RiBarChartBoxLine, RiClipboardLine, RiCpuLine, RiGitBranchLine, RiShieldLine, RiStopCircleLine } from '@remixicon/react';
 import { ThunderboltFill } from '@gravity-ui/icons';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import { Button, Chip, Label, ListBox, Popover, ScrollShadow, Select, Slider, ToggleButton, Tooltip, toast } from '@heroui/react';
 import { ChainOfThought, ChatMessage, HoverCard, PromptInput } from '@heroui-pro/react';
@@ -8,6 +8,7 @@ import { ChatMessageActions } from '@heroui-pro/react/chat-message-actions';
 import { ChatTool } from '@heroui-pro/react/chat-tool';
 import { Markdown } from '@heroui-pro/react/markdown';
 import { providerDisplayName, type ProviderKind } from '@todex/protocol/v2';
+import { progressGroupLabel } from '@todex/protocol/mobileParity';
 import { permissionActions } from '@todex/protocol/todex';
 import { ProviderIcon } from '../components/ProviderIcon';
 import type { TodeXSession } from '../session/useTodeXSession';
@@ -127,7 +128,7 @@ function AgentMessageActions({
   const records = session.usageRecords.filter((record) => record.conversationId === conversationId);
   const usage = records.sort((left, right) => right.updatedAt - left.updatedAt)[0];
   const totalTokens = usage
-    ? usage.inputTokens + usage.outputTokens + usage.cachedInputTokens + usage.cacheWriteTokens
+    ? usage.inputTokens + usage.outputTokens
     : 0;
   const elapsedSeconds = usage ? Math.max(0.001, (usage.updatedAt - entry.at) / 1000) : 0;
   const outputTps = usage && elapsedSeconds > 0 ? usage.outputTokens / elapsedSeconds : 0;
@@ -185,6 +186,7 @@ export function ChatPanel({ session }: Props) {
   const mention = findMentionTrigger(draft, conversation ? (session.composerSelections[conversation.id]?.end ?? draft.length) : 0);
   const [mentionSuggestions, setMentionSuggestions] = useState<Array<{ id: string; title: string; description: string; insertText: string }>>([]);
   const [suggestionIndex, setSuggestionIndex] = useState(0);
+  const [expandedProcessIds, setExpandedProcessIds] = useState<Set<string>>(() => new Set());
   const isComposingRef = useRef(false);
   const lastToastErrorRef = useRef('');
   useEffect(() => {
@@ -208,6 +210,26 @@ export function ChatPanel({ session }: Props) {
       });
     return () => { active = false; };
   }, [mention?.query, mention?.start, workspace?.path, session.fetchWorkspaceEntries]);
+  const items = useMemo(() => {
+    if (!conversation) return [];
+    return buildConversationRenderItems(
+      session.timeline
+        .filter((entry) => entry.conversationId === conversation.id)
+        .filter((entry) => (
+          entry.kind !== 'system'
+          || isStepProgressEntry(entry)
+          || entry.category === 'error'
+        ) && !isChatReminderEntry(entry))
+        .slice()
+        .sort((left, right) => {
+          if (left.sequence !== undefined && right.sequence !== undefined && left.sequence !== right.sequence) {
+            return left.sequence - right.sequence;
+          }
+          if (left.at !== right.at) return left.at - right.at;
+          return left.id.localeCompare(right.id);
+        }),
+    );
+  }, [conversation?.id, session.timeline]);
   if (!conversation || !workspace) {
     return (
       <div className="flex h-full flex-col items-center justify-center px-8 text-center">
@@ -218,16 +240,6 @@ export function ChatPanel({ session }: Props) {
   }
 
   const attachments = session.composerAttachments[conversation.id] ?? [];
-  const items = buildConversationRenderItems(
-    [...session.timeline.filter((entry) => entry.conversationId === conversation.id)]
-      .filter((entry) => (entry.kind !== 'system' || isStepProgressEntry(entry)) && !isChatReminderEntry(entry))
-      .sort((left, right) => {
-        if (left.sequence !== undefined && right.sequence !== undefined && left.sequence !== right.sequence) {
-          return left.sequence - right.sequence;
-        }
-        return left.at - right.at;
-      }),
-  );
   const currentProvider = isV2Conversation(conversation) ? conversation.provider || '' : '';
   const agentProvider = conversation.provider || (isV2Conversation(conversation) ? '' : 'codex');
   const slashTrigger = draft.trim().startsWith('/') ? draft.trim() : '';
@@ -272,6 +284,7 @@ export function ChatPanel({ session }: Props) {
   };
   const capability = findCapabilityHashTrigger(draft, session.composerSelections[conversation.id]?.end ?? draft.length);
   const thinking = session.thinkingConversations[conversation.id] === true;
+  const latestProcessGroupId = [...items].reverse().find((item) => item.type === 'executionGroup')?.id ?? '';
   const conversationTimeline = session.timeline.filter((entry) => entry.conversationId === conversation.id);
   const canSwitchAgent = canSwitchConversationAgent(conversation, {
     timeline: conversationTimeline,
@@ -307,13 +320,7 @@ export function ChatPanel({ session }: Props) {
   ) ?? PERMISSION_PRESETS[1];
   const canChoosePermission = currentProvider === 'codex' || currentProvider === 'claude-code';
   const isToolCallEntry = (entry: (typeof session.timeline)[number]) => {
-    if (entry.kind !== 'incoming' && entry.title !== '工具调用') return false;
-    try {
-      const value = JSON.parse(entry.subtitle) as Record<string, unknown>;
-      return Boolean(value && typeof value === 'object' && (Object.keys(value).length === 0 || 'command' in value || 'tool' in value || 'toolCall' in value));
-    } catch {
-      return false;
-    }
+    return entry.category ? entry.category === 'tool' : entry.kind === 'system' && entry.title === '工具调用';
   };
 
   const addFiles = async (paths: string[]) => {
@@ -346,33 +353,51 @@ export function ChatPanel({ session }: Props) {
       <ScrollShadow className="min-h-0 flex-1 px-5 py-5">
         <div className="mx-auto flex max-w-2xl flex-col gap-4">
           {items.length === 0 ? (
-            <p className="text-muted py-16 text-center text-sm">还没有消息。输入内容后发送。</p>
+            <p className="text-muted py-16 text-center text-sm" role="status">
+              {thinking ? '正在工作' : '还没有消息。输入内容后发送。'}
+            </p>
           ) : null}
           {items.map((item) => {
             if (item.type === 'executionGroup') {
-              const expanded = thinking && item.entries.some((entry) => entry.at >= (conversationTimeline.at(-1)?.at ?? 0));
+              const expanded = expandedProcessIds.has(item.id);
+              const pendingCount = item.entries.filter((entry) => entry.requestId && session.pendingRequests.some((request) => request.requestId === entry.requestId)).length;
               return (
-                <ChainOfThought key={`${item.id}-${expanded ? 'open' : 'closed'}`} defaultExpanded={expanded} isStreaming={expanded} className="chat-process-trace">
-                  <ChainOfThought.Trigger>执行步骤 · {item.entries.length}</ChainOfThought.Trigger>
-                  <ChainOfThought.Content>
-                    <ChainOfThought.Steps>
-                      {item.entries.map((entry) => (
-                        <ChainOfThought.Step key={entry.id} label={entry.title}>
-                          {isToolCallEntry(entry) ? (() => {
-                            const { toolName, argsText } = toolPresentation(entry.subtitle);
-                            return <ChatTool defaultExpanded={thinking} state={thinking ? 'input-streaming' : 'output-available'} toolName={toolName} argsText={argsText} />;
-                          })() : <p className="whitespace-pre-wrap text-xs">{entry.subtitle || entry.title}</p>}
-                        </ChainOfThought.Step>
-                      ))}
-                    </ChainOfThought.Steps>
-                  </ChainOfThought.Content>
+                <ChainOfThought
+                  key={item.id}
+                  isExpanded={expanded}
+                  onExpandedChange={(nextExpanded) => setExpandedProcessIds((current) => {
+                    const next = new Set(current);
+                    if (nextExpanded) next.add(item.id);
+                    else next.delete(item.id);
+                    return next;
+                  })}
+                  isStreaming={thinking && item.id === latestProcessGroupId}
+                  className="chat-process-trace"
+                >
+                  <ChainOfThought.Trigger>
+                    {progressGroupLabel(item.entries, thinking && item.id === latestProcessGroupId, pendingCount)} · {item.entries.length}
+                  </ChainOfThought.Trigger>
+                  {expanded ? (
+                    <ChainOfThought.Content>
+                      <ChainOfThought.Steps>
+                        {item.entries.map((entry) => (
+                          <ChainOfThought.Step key={entry.id} label={entry.title}>
+                            {isToolCallEntry(entry) ? (() => {
+                              const { toolName, argsText } = toolPresentation(entry.subtitle);
+                              return <ChatTool defaultExpanded={false} state={entry.phase === 'completed' ? 'output-available' : 'input-streaming'} toolName={toolName} argsText={argsText} />;
+                            })() : <p className="max-w-full overflow-x-auto whitespace-pre-wrap break-words text-xs">{entry.subtitle || entry.title}</p>}
+                          </ChainOfThought.Step>
+                        ))}
+                      </ChainOfThought.Steps>
+                    </ChainOfThought.Content>
+                  ) : null}
                 </ChainOfThought>
               );
             }
             const entry = item.entry;
             if (isToolCallEntry(entry)) {
               const { toolName, argsText } = toolPresentation(entry.subtitle);
-              return <ChatTool key={entry.id} defaultExpanded={thinking} state={thinking ? 'input-streaming' : 'output-available'} toolName={toolName} argsText={argsText} triggerPrefix={thinking ? '正在调用：' : '已调用：'} />;
+              return <ChatTool key={entry.id} defaultExpanded={false} state={entry.phase === 'completed' ? 'output-available' : 'input-streaming'} toolName={toolName} argsText={argsText} triggerPrefix={thinking ? '正在调用：' : '已调用：'} />;
             }
             const request = session.pendingRequests.find((pendingItem) => pendingItem.requestId && (entry.requestId === pendingItem.requestId || entry.raw.includes(pendingItem.requestId)));
             const isUser = entry.kind === 'outgoing';

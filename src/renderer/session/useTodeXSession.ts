@@ -258,8 +258,10 @@ import {
   classifyProgressEvent,
   classifyChatEvent,
   classifyV2ConversationEvent,
+  shouldAppendV2ConversationEvent,
   contextUsageFromV2Event,
   reduceV2ConversationEvents,
+  mergeConversationTimeline,
   conversationFromManifest,
   mergeManifestConversations,
   isV2Conversation,
@@ -1264,7 +1266,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         });
       }
       setTimeline((current) => [
-        ...replayState.timeline,
+        ...mergeConversationTimeline(
+          replayState.timeline,
+          current.filter((entry) => entry.conversationId === conversationId),
+        ),
         ...current.filter((entry) => entry.conversationId !== conversationId),
       ].slice(0, MAX_TIMELINE_ITEMS));
       setConversationTurnId(conversationId, replayState.activeTurnId);
@@ -2432,7 +2437,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
             typeof payloadTurnId === 'string' && payloadTurnId ? payloadTurnId : turnIdsRef.current[conversation.id] ?? '',
           );
           if (entry) {
-            upsertChatTimeline(entry, event.type.includes('delta'));
+            upsertChatTimeline(entry, shouldAppendV2ConversationEvent(event));
           }
           if (event.type === 'turn.started') {
             setConversationThinking(conversation.id, true);

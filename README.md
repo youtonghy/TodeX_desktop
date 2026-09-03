@@ -23,7 +23,7 @@ Built with **Electron 44**, **React 19**, **Vite 7**, **Tailwind CSS v4**, and *
 
 - **Desktop 3-Pane Interface**:
   - **Left Sidebar**: Workspace directory explorer, active conversation history, agent switcher badges, thread lifecycle actions (New, Rename, Fork, Delete), and quick settings.
-  - **Center Chat Panel**: Full conversation timeline with streaming Markdown rendering, Shiki syntax highlighting, KaTeX math formulas, interactive approval cards (commands, file diffs, tool calls), and prompt input with model selection, draggable reasoning effort, Codex Fast mode, `@` file mention, `/` slash commands, and `#` skill/MCP suggestions.
+  - **Center Chat Panel**: Full conversation timeline with streaming Markdown rendering, Shiki syntax highlighting, KaTeX math formulas, interactive approval cards (commands, file diffs, tool calls), and prompt input with model selection, draggable reasoning effort, Codex Fast mode, `@` file mention, `/` slash commands, and `#` skill/MCP suggestions. Reasoning and tool details are lazily mounted only after expansion, while final answers remain isolated from context and execution events.
   - **Right Workbench Panel**: Multi-tab workspace drawer offering:
     - **Slash Commands**: Reference of provider commands.
     - **Git Diff**: Live inspection of working directory changes.
