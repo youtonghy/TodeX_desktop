@@ -47,7 +47,7 @@ export function AsidePanel({ session, panel, slashCommand, onBack }: Props) {
         onRefresh={(provider: ProviderKind) => void session.refreshCapabilityCatalog(provider)}
         conversationId={conversation?.id}
         selectedSkills={conversation ? session.selectedSkills[conversation.id] ?? [] : []}
-        canInvoke={Boolean(conversation?.v2ConversationId || conversation?.provider)}
+        canInvoke={Boolean(conversation?.v2ConversationId)}
         onToggleSkill={(skill, provider) => {
           if (conversation) {
             session.toggleCatalogSkill(conversation.id, skill, provider);

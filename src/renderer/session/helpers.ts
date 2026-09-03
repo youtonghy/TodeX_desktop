@@ -1775,6 +1775,9 @@ export function canSwitchConversationAgent(
   if (options.thinking) {
     return false;
   }
+  if (conversation.v2ConversationId || normalizeThreadId(conversation.threadId)) {
+    return false;
+  }
   // lastSequence also advances for subscribe/metadata events, so it cannot
   // mean "the user has started this chat". Lock only after a real message.
   return !(options.timeline ?? []).some(
@@ -1817,11 +1820,14 @@ export function mergeManifestConversations(
   manifests: ConversationManifest[],
   workspaces: WorkspaceRecord[],
 ): ConversationRecord[] {
-  // The backend is the source of truth for v2 conversations. Drop locally
-  // cached v2 records whose manifest no longer exists instead of leaving a
-  // dead row that will fail on the next prompt.
+  // The backend is authoritative after materialization. Provider-backed local
+  // drafts have no v2ConversationId yet and must survive manifest refreshes.
   const manifestIds = new Set(manifests.map((manifest) => manifest.id));
-  const next = current.filter((item) => !isV2Conversation(item) || manifestIds.has(item.v2ConversationId || item.id));
+  const next = current.filter((item) => (
+    !isV2Conversation(item)
+    || !item.v2ConversationId
+    || manifestIds.has(item.v2ConversationId)
+  ));
   for (const manifest of manifests) {
     const workspace = (manifest.workspaceId
       ? workspaces.find((item) => item.id === manifest.workspaceId)
@@ -1833,9 +1839,11 @@ export function mergeManifestConversations(
     const record = conversationFromManifest(manifest, workspace.id);
     const existing = next.findIndex((item) => item.v2ConversationId === manifest.id || item.id === manifest.id);
     if (existing >= 0) {
+      const localId = next[existing].id;
       next[existing] = {
         ...next[existing],
         ...record,
+        id: localId,
         sessionId: next[existing].sessionId || record.sessionId,
       };
     } else {
