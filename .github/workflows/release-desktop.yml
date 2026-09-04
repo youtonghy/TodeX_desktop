@@ -103,7 +103,15 @@ jobs:
             echo "HEROUI_AUTH_TOKEN secret is not configured; HeroUI Pro cannot be installed." >&2
             exit 1
           fi
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            mv pnpm-workspace.yaml pnpm-workspace.yaml.ci
+            trap 'mv -f pnpm-workspace.yaml.ci pnpm-workspace.yaml' EXIT
+          fi
           npx -y hpsetup@latest "$HEROUI_KEY"
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            mv -f pnpm-workspace.yaml.ci pnpm-workspace.yaml
+            trap - EXIT
+          fi
           pnpm rebuild
 
       - name: Validate application
@@ -171,7 +179,15 @@ jobs:
             echo "HEROUI_AUTH_TOKEN secret is not configured; HeroUI Pro cannot be installed." >&2
             exit 1
           fi
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            mv pnpm-workspace.yaml pnpm-workspace.yaml.ci
+            trap 'mv -f pnpm-workspace.yaml.ci pnpm-workspace.yaml' EXIT
+          fi
           npx -y hpsetup@latest "$HEROUI_KEY"
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            mv -f pnpm-workspace.yaml.ci pnpm-workspace.yaml
+            trap - EXIT
+          fi
           pnpm rebuild
 
       - name: Package desktop application
