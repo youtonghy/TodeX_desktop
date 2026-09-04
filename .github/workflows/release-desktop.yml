@@ -64,7 +64,7 @@ jobs:
     outputs:
       protocol_sha: ${{ steps.protocol.outputs.sha }}
     env:
-      HEROUI_AUTH_TOKEN: ${{ secrets.HEROUI_AUTH_TOKEN }}
+      HEROUI_KEY: ${{ secrets.HEROUI_AUTH_TOKEN }}
     defaults:
       run:
         working-directory: TodeX_desktop
@@ -96,7 +96,15 @@ jobs:
         run: npm install --global pnpm@${PNPM_VERSION}
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        shell: bash
+        run: |
+          pnpm install --frozen-lockfile --ignore-scripts
+          if [ -z "$HEROUI_KEY" ]; then
+            echo "HEROUI_AUTH_TOKEN secret is not configured; HeroUI Pro cannot be installed." >&2
+            exit 1
+          fi
+          npx -y hpsetup@latest "$HEROUI_KEY"
+          pnpm rebuild
 
       - name: Validate application
         run: |
@@ -132,7 +140,7 @@ jobs:
         working-directory: TodeX_desktop
     env:
       CSC_IDENTITY_AUTO_DISCOVERY: "false"
-      HEROUI_AUTH_TOKEN: ${{ secrets.HEROUI_AUTH_TOKEN }}
+      HEROUI_KEY: ${{ secrets.HEROUI_AUTH_TOKEN }}
     steps:
       - name: Checkout desktop
         uses: actions/checkout@v6
@@ -156,7 +164,15 @@ jobs:
         run: npm install --global pnpm@${PNPM_VERSION}
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        shell: bash
+        run: |
+          pnpm install --frozen-lockfile --ignore-scripts
+          if [ -z "$HEROUI_KEY" ]; then
+            echo "HEROUI_AUTH_TOKEN secret is not configured; HeroUI Pro cannot be installed." >&2
+            exit 1
+          fi
+          npx -y hpsetup@latest "$HEROUI_KEY"
+          pnpm rebuild
 
       - name: Package desktop application
         shell: bash
