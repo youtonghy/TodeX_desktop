@@ -1,6 +1,6 @@
-import { RiAddLine, RiBarChartBoxLine, RiFolder3Line, RiInformationLine, RiKanbanView2, RiPuzzle2Line, RiSettings3Line, RiTerminalBoxLine } from '@remixicon/react';
+import { RiAddLine, RiArrowDownSLine, RiBarChartBoxLine, RiFolder3Line, RiInformationLine, RiKanbanView2, RiPuzzle2Line, RiSettings3Line, RiTerminalBoxLine } from '@remixicon/react';
 import { Badge, Button, Chip, Dropdown, Label } from '@heroui/react';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { MouseEvent } from 'react';
 import { ChatListView, Sidebar, useSidebar } from '@heroui-pro/react';
 import { ProviderIcon } from './ProviderIcon';
@@ -21,33 +21,123 @@ type Props = {
 
 type ContextMenu = { kind: 'workspace' | 'conversation'; id: string; x: number; y: number } | null;
 
-function conversationStatus(session: TodeXSession, conversation: TodeXSession['conversations'][number]): { color: string; label: string } | null {
-  const latest = session.timeline
-    .filter((entry) => entry.conversationId === conversation.id)
-    .sort((left, right) => right.at - left.at)[0];
+function getConversationStatus(
+  session: TodeXSession,
+  conversation: TodeXSession['conversations'][number],
+  latestEntry?: TodeXSession['timeline'][number],
+): { color: string; label: string } | null {
   if (isConversationHighlighted(conversation, session.activeConversationId, session.turnIds)) {
     return { color: 'bg-green-500', label: '正在工作' };
   }
-  if (/error|failed|异常|失败/i.test(conversation.nativeStatus || '') || /error|failed|异常|失败/i.test(latest?.title || '')) {
+  if (
+    /error|failed|异常|失败/i.test(conversation.nativeStatus || '') ||
+    /error|failed|异常|失败/i.test(latestEntry?.title || '')
+  ) {
     return { color: 'bg-amber-500', label: '遇到问题' };
   }
-  if (conversation.id !== session.activeConversationId && latest?.kind === 'incoming') {
+  if (conversation.id !== session.activeConversationId && latestEntry?.kind === 'incoming') {
     return { color: 'bg-blue-500', label: '有未读回复' };
   }
   return null;
 }
 
-export function AppSidebar({ session, onCreateWorkspace, onCreateConversation, onOpenSettings, onOpenCapabilities, onOpenCliManager, onOpenUsage, onOpenAbout, onOpenKanban }: Props) {
+export function AppSidebar({
+  session,
+  onCreateWorkspace,
+  onCreateConversation,
+  onOpenSettings,
+  onOpenCapabilities,
+  onOpenCliManager,
+  onOpenUsage,
+  onOpenAbout,
+  onOpenKanban,
+}: Props) {
   const { isMobile, setMobileOpen } = useSidebar();
-  const workspaceConversations = session.conversations.filter(
-    (conversation) => conversation.workspaceId === session.activeWorkspaceId && !conversation.archived,
-  );
+
+  const workspaceConversations = useMemo(() => (
+    session.conversations.filter(
+      (conversation) => conversation.workspaceId === session.activeWorkspaceId && !conversation.archived,
+    )
+  ), [session.activeWorkspaceId, session.conversations]);
+
   const healthColor = session.connectionState !== 'open'
     ? 'danger'
     : session.connectionHealth.latencyMs !== null && session.connectionHealth.latencyMs <= 100
       ? 'success'
       : 'warning';
+
   const [contextMenu, setContextMenu] = useState<ContextMenu>(null);
+
+  // Section collapse states
+  const [workspacesCollapsed, setWorkspacesCollapsed] = useState(false);
+  const [conversationsCollapsed, setConversationsCollapsed] = useState(false);
+
+  // Progressive disclosure limits (default 5, clicking '显示更多' shows 5 more)
+  const [workspaceLimit, setWorkspaceLimit] = useState(5);
+  const [conversationLimit, setConversationLimit] = useState(5);
+
+  // Reset conversation limit when switching workspaces
+  useEffect(() => {
+    setConversationLimit(5);
+  }, [session.activeWorkspaceId]);
+
+  // High-performance timeline lookup map: precomputed once in O(M) time instead of O(N*M) during sorting
+  const timelineInfoMap = useMemo(() => {
+    const map: Record<string, { latestAt: number; latestEntry?: TodeXSession['timeline'][number] }> = {};
+    const timeline = session.timeline;
+    for (let i = 0; i < timeline.length; i++) {
+      const entry = timeline[i];
+      if (entry?.conversationId && entry?.at) {
+        const existing = map[entry.conversationId];
+        if (!existing || entry.at > existing.latestAt) {
+          map[entry.conversationId] = { latestAt: entry.at, latestEntry: entry };
+        }
+      }
+    }
+    return map;
+  }, [session.timeline]);
+
+  // Precompute latest activity per workspace in O(C) time
+  const workspaceLastActiveMap = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (let i = 0; i < session.conversations.length; i++) {
+      const c = session.conversations[i];
+      if (!c.workspaceId) continue;
+      const cTime = Math.max(c.updatedAt || 0, c.createdAt || 0, timelineInfoMap[c.id]?.latestAt || 0);
+      if (!map[c.workspaceId] || cTime > map[c.workspaceId]) {
+        map[c.workspaceId] = cTime;
+      }
+    }
+    return map;
+  }, [session.conversations, timelineInfoMap]);
+
+  // Stable sorting for workspaces: based on last message/updated time, never jumps upon clicking
+  const sortedWorkspaces = useMemo(() => {
+    return [...session.workspaces].sort((a, b) => {
+      const aTime = Math.max(workspaceLastActiveMap[a.id] || 0, a.updatedAt || 0, a.createdAt || 0);
+      const bTime = Math.max(workspaceLastActiveMap[b.id] || 0, b.updatedAt || 0, b.createdAt || 0);
+      if (bTime !== aTime) return bTime - aTime;
+      return a.name.localeCompare(b.name);
+    });
+  }, [session.workspaces, workspaceLastActiveMap]);
+
+  // Stable sorting for conversations: based on last message/updated time, never jumps upon clicking
+  const sortedConversations = useMemo(() => {
+    return [...workspaceConversations].sort((a, b) => {
+      const aTime = Math.max(a.updatedAt || 0, a.createdAt || 0, timelineInfoMap[a.id]?.latestAt || 0);
+      const bTime = Math.max(b.updatedAt || 0, b.createdAt || 0, timelineInfoMap[b.id]?.latestAt || 0);
+      if (bTime !== aTime) return bTime - aTime;
+      return (b.title || '').localeCompare(a.title || '');
+    });
+  }, [workspaceConversations, timelineInfoMap]);
+
+  const displayedWorkspaces = useMemo(() => {
+    return sortedWorkspaces.slice(0, workspaceLimit);
+  }, [sortedWorkspaces, workspaceLimit]);
+
+  const displayedConversations = useMemo(() => {
+    return sortedConversations.slice(0, conversationLimit);
+  }, [sortedConversations, conversationLimit]);
 
   useEffect(() => {
     const close = () => setContextMenu(null);
@@ -91,16 +181,18 @@ export function AppSidebar({ session, onCreateWorkspace, onCreateConversation, o
     <Sidebar>
       <Sidebar.Header>
         <Dropdown>
-          <Dropdown.Trigger aria-label="TodeX 菜单" className="flex w-full items-center gap-2 rounded-lg px-1 py-2 text-left">
+          <Dropdown.Trigger
+            aria-label="TodeX 菜单"
+            className="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left hover:bg-surface-secondary active:bg-surface-secondary/70 transition-colors cursor-pointer select-none outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+          >
             <Badge.Anchor className="shrink-0">
               <div className="bg-accent size-8 rounded-full" aria-hidden="true" />
               <Badge color={healthColor} placement="bottom-right" size="sm" aria-label={session.connectionState === 'open' ? '后端已连接' : '后端未连接'} />
             </Badge.Anchor>
             <span className="flex min-w-0 flex-1 items-center gap-1.5" data-sidebar="label">
-              <span className="text-foreground truncate text-sm font-semibold">TodeX</span>
+              <span className="text-foreground truncate text-sm font-semibold tracking-tight">TodeX</span>
               <Chip size="sm" variant="soft">V2</Chip>
             </span>
-            <RiSettings3Line className="size-4 shrink-0" />
           </Dropdown.Trigger>
           <Dropdown.Popover>
             <Dropdown.Menu onAction={(key) => {
@@ -135,82 +227,246 @@ export function AppSidebar({ session, onCreateWorkspace, onCreateConversation, o
           <span data-sidebar="label">今日看板</span>
         </Button>
       </Sidebar.Header>
+
       <Sidebar.Content>
+        {/* Workspace Section */}
         <Sidebar.Group>
-          <div className="flex items-center justify-between px-2">
-            <Sidebar.GroupLabel>工作区</Sidebar.GroupLabel>
-            <Button isIconOnly size="sm" variant="ghost" aria-label="新建工作区" onPress={onCreateWorkspace}>
+          <div
+            role="button"
+            tabIndex={0}
+            onClick={() => setWorkspacesCollapsed((prev) => !prev)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                setWorkspacesCollapsed((prev) => !prev);
+              }
+            }}
+            className="group flex items-center justify-between px-2 py-1.5 rounded-lg cursor-pointer hover:bg-surface-secondary transition-colors select-none"
+            aria-expanded={!workspacesCollapsed}
+            aria-label={workspacesCollapsed ? '展开工作区' : '收起工作区'}
+          >
+            <div className="flex items-center gap-1.5 min-w-0">
+              <RiArrowDownSLine
+                className={`size-4 text-muted transition-transform duration-200 ${
+                  workspacesCollapsed ? '-rotate-90' : ''
+                }`}
+              />
+              <Sidebar.GroupLabel className="cursor-pointer p-0 font-medium text-foreground text-xs">
+                工作区
+              </Sidebar.GroupLabel>
+              <span className="text-[11px] text-muted font-normal">
+                ({session.workspaces.length})
+              </span>
+            </div>
+            <Button
+              isIconOnly
+              size="sm"
+              variant="ghost"
+              aria-label="新建工作区"
+              className="size-6 text-muted hover:text-foreground"
+              onPress={() => onCreateWorkspace()}
+              onClick={(e) => e.stopPropagation()}
+            >
               <RiAddLine className="size-4" />
             </Button>
           </div>
-          {session.workspaces.length === 0 ? (
-            <p className="text-muted px-3 py-2 text-xs">还没有工作区。</p>
-          ) : (
-            <ChatListView
-              aria-label="工作区"
-              density="compact"
-              items={session.workspaces}
-              onAction={(key) => session.selectWorkspace(String(key))}
-            >
-              {(workspace) => (
-              <ChatListView.Item key={workspace.id} id={workspace.id} textValue={workspaceDisplayName(workspace)} onContextMenu={(event) => openContextMenu(event, 'workspace', workspace.id)}>
-                <ChatListView.ItemContent>
-                  <ChatListView.Icon><RiFolder3Line className="size-4" /></ChatListView.Icon>
-                  <ChatListView.Text>
-                    <ChatListView.Title>{workspaceDisplayName(workspace)}</ChatListView.Title>
-                    <ChatListView.Preview>{workspace.path}</ChatListView.Preview>
-                  </ChatListView.Text>
-                </ChatListView.ItemContent>
-              </ChatListView.Item>
-            )}
-            </ChatListView>
+
+          {!workspacesCollapsed && (
+            session.workspaces.length === 0 ? (
+              <p className="text-muted px-3 py-2 text-xs">还没有工作区。</p>
+            ) : (
+              <>
+                <ChatListView
+                  key={`workspaces_${workspaceLimit}`}
+                  aria-label="工作区"
+                  density="compact"
+                  className="sidebar-chat-list"
+                  onAction={(key) => session.selectWorkspace(String(key))}
+                >
+                  {displayedWorkspaces.map((workspace) => {
+                    const isSelected = workspace.id === session.activeWorkspaceId;
+                    return (
+                      <ChatListView.Item
+                        key={workspace.id}
+                        id={workspace.id}
+                        className={`sidebar-item ${isSelected ? 'is-selected' : ''}`}
+                        textValue={workspaceDisplayName(workspace)}
+                        onContextMenu={(event) => openContextMenu(event, 'workspace', workspace.id)}
+                      >
+                        <ChatListView.ItemContent>
+                          <ChatListView.Icon>
+                            <RiFolder3Line className={`size-4 ${isSelected ? 'text-accent' : ''}`} />
+                          </ChatListView.Icon>
+                          <ChatListView.Text>
+                            <ChatListView.Title className={isSelected ? 'text-accent font-semibold' : ''}>
+                              {workspaceDisplayName(workspace)}
+                            </ChatListView.Title>
+                            <ChatListView.Preview>{workspace.path}</ChatListView.Preview>
+                          </ChatListView.Text>
+                        </ChatListView.ItemContent>
+                      </ChatListView.Item>
+                    );
+                  })}
+                </ChatListView>
+
+                {sortedWorkspaces.length > 5 && (
+                  <div className="flex items-center justify-between px-2 pt-1">
+                    {sortedWorkspaces.length > workspaceLimit ? (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 text-xs text-muted hover:text-foreground font-normal"
+                        onPress={() => setWorkspaceLimit((prev) => prev + 5)}
+                      >
+                        <span>显示更多 (+5)</span>
+                      </Button>
+                    ) : <span />}
+                    {workspaceLimit > 5 ? (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 text-xs text-muted hover:text-foreground font-normal"
+                        onPress={() => setWorkspaceLimit(5)}
+                      >
+                        <span>收起</span>
+                      </Button>
+                    ) : null}
+                  </div>
+                )}
+              </>
+            )
           )}
         </Sidebar.Group>
+
+        {/* Conversation Section */}
         <Sidebar.Group>
-          <div className="flex items-center justify-between px-2">
-            <Sidebar.GroupLabel>对话</Sidebar.GroupLabel>
-            <Button isIconOnly size="sm" variant="ghost" aria-label="新建对话" isDisabled={!session.activeWorkspaceId} onPress={onCreateConversation}>
+          <div
+            role="button"
+            tabIndex={0}
+            onClick={() => setConversationsCollapsed((prev) => !prev)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                setConversationsCollapsed((prev) => !prev);
+              }
+            }}
+            className="group flex items-center justify-between px-2 py-1.5 rounded-lg cursor-pointer hover:bg-surface-secondary transition-colors select-none"
+            aria-expanded={!conversationsCollapsed}
+            aria-label={conversationsCollapsed ? '展开对话' : '收起对话'}
+          >
+            <div className="flex items-center gap-1.5 min-w-0">
+              <RiArrowDownSLine
+                className={`size-4 text-muted transition-transform duration-200 ${
+                  conversationsCollapsed ? '-rotate-90' : ''
+                }`}
+              />
+              <Sidebar.GroupLabel className="cursor-pointer p-0 font-medium text-foreground text-xs">
+                对话
+              </Sidebar.GroupLabel>
+              <span className="text-[11px] text-muted font-normal">
+                ({workspaceConversations.length})
+              </span>
+            </div>
+            <Button
+              isIconOnly
+              size="sm"
+              variant="ghost"
+              aria-label="新建对话"
+              className="size-6 text-muted hover:text-foreground"
+              isDisabled={!session.activeWorkspaceId}
+              onPress={() => onCreateConversation()}
+              onClick={(e) => e.stopPropagation()}
+            >
               <RiAddLine className="size-4" />
             </Button>
           </div>
-          {workspaceConversations.length === 0 ? (
-            <p className="text-muted px-3 py-2 text-xs">
-              {session.activeWorkspaceId ? '这个工作区还没有对话。' : '选择工作区后可创建对话。'}
-            </p>
-          ) : (
-            <ChatListView
-              aria-label="对话"
-              density="compact"
-              items={workspaceConversations}
-              onAction={(key) => {
-                const conversation = workspaceConversations.find((item) => item.id === String(key));
-                if (conversation) session.selectConversation(conversation.workspaceId, conversation.id);
-              }}
-            >
-            {(conversation) => (
-              <ChatListView.Item key={conversation.id} id={conversation.id} textValue={conversationDisplayTitle(conversation, session.timeline)} onContextMenu={(event) => openContextMenu(event, 'conversation', conversation.id)}>
-                <ChatListView.ItemContent>
-                  <ChatListView.Icon>
-                    {(() => {
-                      const status = conversationStatus(session, conversation);
-                      return <span className="relative flex size-5 items-center justify-center"><ProviderIcon className="size-4" provider={conversation.provider} /><span className={`absolute -bottom-0.5 -right-0.5 size-2 rounded-full ring-2 ring-surface ${status?.color || 'hidden'}`} aria-label={status?.label} /></span>;
-                    })()}
-                  </ChatListView.Icon>
-                  <ChatListView.Text>
-                    <ChatListView.Title>{conversationDisplayTitle(conversation, session.timeline)}</ChatListView.Title>
-                    <ChatListView.Preview>{conversation.preview || '还没有消息'}</ChatListView.Preview>
-                  </ChatListView.Text>
-                  <ChatListView.Meta>{isConversationHighlighted(conversation, session.activeConversationId, session.turnIds) ? '运行中' : ''}</ChatListView.Meta>
-                </ChatListView.ItemContent>
-                {isConversationHighlighted(conversation, session.activeConversationId, session.turnIds) ? (
-                  <span className="sr-only">运行中</span>
-                ) : null}
-              </ChatListView.Item>
-            )}
-            </ChatListView>
+
+          {!conversationsCollapsed && (
+            workspaceConversations.length === 0 ? (
+              <p className="text-muted px-3 py-2 text-xs">
+                {session.activeWorkspaceId ? '这个工作区还没有对话。' : '选择工作区后可创建对话。'}
+              </p>
+            ) : (
+              <>
+                <ChatListView
+                  key={`${session.activeWorkspaceId || 'no-workspace'}_${conversationLimit}`}
+                  aria-label="对话"
+                  density="compact"
+                  className="sidebar-chat-list"
+                  onAction={(key) => {
+                    const conversation = workspaceConversations.find((item) => item.id === String(key));
+                    if (conversation) {
+                      session.selectConversation(conversation.workspaceId, conversation.id);
+                    }
+                  }}
+                >
+                  {displayedConversations.map((conversation) => {
+                    const isSelected = conversation.id === session.activeConversationId;
+                    const status = getConversationStatus(session, conversation, timelineInfoMap[conversation.id]?.latestEntry);
+                    return (
+                      <ChatListView.Item
+                        key={conversation.id}
+                        id={conversation.id}
+                        className={`sidebar-item ${isSelected ? 'is-selected' : ''}`}
+                        textValue={conversationDisplayTitle(conversation, session.timeline)}
+                        onContextMenu={(event) => openContextMenu(event, 'conversation', conversation.id)}
+                      >
+                        <ChatListView.ItemContent>
+                          <ChatListView.Icon>
+                            <span className="relative flex size-5 items-center justify-center">
+                              <ProviderIcon className="size-4" provider={conversation.provider} />
+                              <span
+                                className={`absolute -bottom-0.5 -right-0.5 size-2 rounded-full ring-2 ring-surface ${status?.color || 'hidden'}`}
+                                aria-label={status?.label}
+                              />
+                            </span>
+                          </ChatListView.Icon>
+                          <ChatListView.Text>
+                            <ChatListView.Title className={isSelected ? 'text-accent font-semibold' : ''}>
+                              {conversationDisplayTitle(conversation, session.timeline)}
+                            </ChatListView.Title>
+                            <ChatListView.Preview>{conversation.preview || '还没有消息'}</ChatListView.Preview>
+                          </ChatListView.Text>
+                          <ChatListView.Meta>{isConversationHighlighted(conversation, session.activeConversationId, session.turnIds) ? '运行中' : ''}</ChatListView.Meta>
+                        </ChatListView.ItemContent>
+                        {isConversationHighlighted(conversation, session.activeConversationId, session.turnIds) ? (
+                          <span className="sr-only">运行中</span>
+                        ) : null}
+                      </ChatListView.Item>
+                    );
+                  })}
+                </ChatListView>
+
+                {sortedConversations.length > 5 && (
+                  <div className="flex items-center justify-between px-2 pt-1">
+                    {sortedConversations.length > conversationLimit ? (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 text-xs text-muted hover:text-foreground font-normal"
+                        onPress={() => setConversationLimit((prev) => prev + 5)}
+                      >
+                        <span>显示更多 (+5)</span>
+                      </Button>
+                    ) : <span />}
+                    {conversationLimit > 5 ? (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 text-xs text-muted hover:text-foreground font-normal"
+                        onPress={() => setConversationLimit(5)}
+                      >
+                        <span>收起</span>
+                      </Button>
+                    ) : null}
+                  </div>
+                )}
+              </>
+            )
           )}
         </Sidebar.Group>
       </Sidebar.Content>
+
       {contextMenu ? (
         <div
           role="menu"

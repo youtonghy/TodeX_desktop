@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { RiAddLine, RiArrowLeftDoubleLine, RiArrowRightDoubleLine, RiFileTextLine, RiFolder3Line, RiGlobalLine, RiFocus3Line } from '@remixicon/react';
-import { Button, Chip, Dropdown, Input, ScrollShadow, TextField } from '@heroui/react';
+import { RiAddLine, RiArrowLeftDoubleLine, RiArrowRightDoubleLine, RiFileTextLine, RiFolder3Line, RiGlobalLine, RiFocus3Line, RiRefreshLine, RiStopCircleLine } from '@remixicon/react';
+import { Button, Chip, Dropdown, Input, Popover, ScrollShadow, TextField } from '@heroui/react';
 import type { Selection } from '@heroui/react';
 import { FileTree } from '@heroui-pro/react';
 import { Resizable } from '@heroui-pro/react/resizable';
@@ -156,7 +156,12 @@ export function WorkbenchPanel({ session, tab, target, onTabChange }: Props) {
           ))}
         </div>
         <Dropdown>
-          <Dropdown.Trigger aria-label="新建工作台标签" className="inline-flex size-8 items-center justify-center"><RiAddLine className="size-4" /></Dropdown.Trigger>
+          <Dropdown.Trigger
+            aria-label="新建工作台标签"
+            className="inline-flex size-8 items-center justify-center rounded-lg text-muted hover:text-foreground hover:bg-surface-secondary transition-colors cursor-pointer"
+          >
+            <RiAddLine className="size-4" />
+          </Dropdown.Trigger>
           <Dropdown.Popover>
             <Dropdown.Menu onAction={(key) => addTab(String(key) as WorkbenchTab)}>
               <Dropdown.Item id="terminal" textValue="终端">终端</Dropdown.Item>
@@ -306,15 +311,36 @@ function TerminalPane({ session, terminalId, isActive }: { session: TodeXSession
     session.resizeTerminalSession(terminalId, workspace.tenantId || session.settings.tenantId, rows, cols);
   }, [session.resizeTerminalSession, session.settings.tenantId, terminalId, workspace]);
 
+  const defaultPath = workspace?.path || '';
+  const [cwdDraft, setCwdDraft] = useState(defaultPath);
+
+  useEffect(() => {
+    setCwdDraft(workspace?.path || '');
+  }, [workspace?.path]);
+
+  const handleCwdSubmit = (targetPath: string) => {
+    const trimmed = targetPath.trim();
+    if (!trimmed || !terminalId || !workspace) return;
+    session.sendTerminalInput(terminalId, workspace.tenantId || session.settings.tenantId, `cd "${trimmed.replace(/"/g, '\\"')}"\r`);
+  };
+
   return (
-    <div className="flex h-full min-h-0 flex-col bg-[#111418] text-[#e7eaee]">
-      <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-2">
-        <div className="min-w-0">
-          <p className="text-sm font-medium">终端</p>
-          <p className="truncate text-xs text-[#8f98a3]">
-            {workspace?.path || '未选择工作区'} · {terminal ? terminalStatusLabel(terminal.status) : '未启动'}
-          </p>
-        </div>
+    <div className="flex h-full min-h-0 flex-col px-4 pb-4 pt-3">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            handleCwdSubmit(cwdDraft);
+          }}
+          className="min-w-0 flex-1"
+        >
+          <TextField aria-label="终端路径" className="w-full" value={cwdDraft} onChange={setCwdDraft}>
+            <Input
+              placeholder="/path/to/directory..."
+              className="text-xs"
+            />
+          </TextField>
+        </form>
         <div className="flex shrink-0 items-center gap-2">
           <Chip size="sm" variant="soft">
             {session.connectionState === 'open'
@@ -335,12 +361,17 @@ function TerminalPane({ session, terminalId, isActive }: { session: TodeXSession
                 session.stopTerminalSession(terminalId, workspace?.tenantId || session.settings.tenantId);
               }
             }}
+            aria-label="停止终端"
+            className="expandable-action-btn"
           >
-            停止
+            <span className="expandable-action-btn__icon">
+              <RiStopCircleLine className="size-4" />
+            </span>
+            <span className="expandable-action-btn__label">停止</span>
           </Button>
         </div>
       </div>
-      <div className="min-h-0 flex-1">
+      <div className="bg-surface-secondary min-h-0 flex-1 overflow-hidden rounded-xl border border-separator">
         <XtermTerminal
           entries={terminal?.output ?? []}
           isActive={isActive}
@@ -354,14 +385,42 @@ function TerminalPane({ session, terminalId, isActive }: { session: TodeXSession
 }
 
 function BrowserPane({ workspacePath, session, target }: { workspacePath?: string; session: TodeXSession; target?: OpenPanelOptions }) {
-  const [draft, setDraft] = useState('http://127.0.0.1:7345');
-  const [url, setUrl] = useState('');
+  const defaultUrl = target?.url ? target.url : (target?.filePath ? '' : 'http://127.0.0.1:7345');
+  const [draft, setDraft] = useState(defaultUrl || 'http://127.0.0.1:7345');
+  const [url, setUrl] = useState(defaultUrl);
   const [srcDoc, setSrcDoc] = useState('');
   const [error, setError] = useState('');
   const [inspect, setInspect] = useState(false);
   const frameRef = useRef<HTMLIFrameElement>(null);
   const selectedRef = useRef<HTMLElement | null>(null);
   const selectionAnchorRef = useRef<HTMLElement | null>(null);
+
+  const navigateTo = useCallback((input: string) => {
+    const trimmed = input.trim();
+    try {
+      const parsed = new URL(trimmed);
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error('仅支持 HTTP 和 HTTPS 地址');
+      const host = parsed.hostname.toLowerCase();
+      const loopback = host === 'localhost' || host === '::1' || /^127(?:\.\d{1,3}){3}$/.test(host);
+      if (!loopback) throw new Error('浏览器预览仅允许访问本机地址');
+      setUrl(parsed.toString());
+      setDraft(parsed.toString());
+      setSrcDoc('');
+      setError('');
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : '请输入有效的网址');
+    }
+  }, []);
+
+  const handleReload = () => {
+    if (frameRef.current) {
+      if (url) {
+        frameRef.current.src = url;
+      } else if (srcDoc) {
+        frameRef.current.srcdoc = srcDoc;
+      }
+    }
+  };
 
   useEffect(() => {
     if (target?.url) {
@@ -516,40 +575,58 @@ function BrowserPane({ workspacePath, session, target }: { workspacePath?: strin
   }, [appendReference, inspect]);
 
   return (
-    <div className="flex h-full min-h-0 flex-col p-3">
-      <form
-        className="mb-3 flex gap-2"
-        onSubmit={(event) => {
-          event.preventDefault();
-          const target = draft.trim();
-          try {
-            const parsed = new URL(target);
-            if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error('仅支持 HTTP 和 HTTPS 地址');
-            const host = parsed.hostname.toLowerCase();
-            const loopback = host === 'localhost' || host === '::1' || /^127(?:\.\d{1,3}){3}$/.test(host);
-            if (!loopback) throw new Error('浏览器预览仅允许访问本机地址');
-            setUrl(parsed.toString());
-            setSrcDoc('');
-            setError('');
-          } catch (reason) {
-            setUrl('');
-            setError(reason instanceof Error ? reason.message : '请输入有效的网址');
-          }
-        }}
-      >
-        <TextField aria-label="地址" className="min-w-0 flex-1" value={draft} onChange={setDraft}>
-          <Input placeholder="https://" />
-        </TextField>
-        <Button type="submit" variant="secondary">
-          打开
-        </Button>
-        <Button type="button" isIconOnly variant={inspect ? 'primary' : 'secondary'} aria-label="检查网页元素" onPress={() => { setInspect((current) => { if (!current) { selectedRef.current = null; selectionAnchorRef.current = null; } return !current; }); }}>
-          <RiFocus3Line className="size-4" />
-        </Button>
-      </form>
-      {error ? <p className="text-danger text-sm">{error}</p> : null}
+    <div className="flex h-full min-h-0 flex-col px-4 pb-4 pt-3">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            navigateTo(draft);
+          }}
+          className="min-w-0 flex-1"
+        >
+          <TextField aria-label="地址" className="w-full" value={draft} onChange={setDraft}>
+            <Input placeholder="http://127.0.0.1:..." className="text-xs" />
+          </TextField>
+        </form>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button
+            size="sm"
+            variant="tertiary"
+            isDisabled={!url && !srcDoc}
+            onPress={handleReload}
+            aria-label="刷新网页"
+            className="expandable-action-btn"
+          >
+            <span className="expandable-action-btn__icon">
+              <RiRefreshLine className="size-4" />
+            </span>
+            <span className="expandable-action-btn__label">刷新</span>
+          </Button>
+          <Button
+            size="sm"
+            variant={inspect ? 'primary' : 'tertiary'}
+            onPress={() => {
+              setInspect((current) => {
+                if (!current) {
+                  selectedRef.current = null;
+                  selectionAnchorRef.current = null;
+                }
+                return !current;
+              });
+            }}
+            aria-label={inspect ? '退出检查' : '选择元素'}
+            className="expandable-action-btn"
+          >
+            <span className="expandable-action-btn__icon">
+              <RiFocus3Line className="size-4" />
+            </span>
+            <span className="expandable-action-btn__label">{inspect ? '退出检查' : '选择元素'}</span>
+          </Button>
+        </div>
+      </div>
+      {error ? <p className="text-danger mb-2 text-xs">{error}</p> : null}
       {url || srcDoc ? (
-        <div className="bg-surface min-h-0 flex-1 overflow-hidden rounded-xl">
+        <div className="bg-surface min-h-0 flex-1 overflow-hidden rounded-xl border border-separator">
           <iframe ref={frameRef} title="网页预览" src={url || undefined} srcDoc={srcDoc || undefined} className="size-full border-0" sandbox="allow-forms allow-modals allow-popups allow-same-origin allow-scripts" />
         </div>
       ) : (
@@ -557,6 +634,9 @@ function BrowserPane({ workspacePath, session, target }: { workspacePath?: strin
           <RiGlobalLine className="text-muted size-6" />
           <p className="text-sm font-medium">浏览器预览</p>
           <p className="text-muted max-w-xs text-xs">输入地址后由 backend 所在机器请求并返回内容。工作区 {workspacePath || '尚未选择'}。</p>
+          <Button size="sm" variant="secondary" onPress={() => navigateTo(draft || 'http://127.0.0.1:7345')}>
+            打开默认地址
+          </Button>
         </div>
       )}
     </div>
@@ -566,14 +646,48 @@ function BrowserPane({ workspacePath, session, target }: { workspacePath?: strin
 function GitDiffPane({ session }: { session: TodeXSession }) {
   const conversation = session.activeConversation;
   const state = conversation ? session.gitDiffByConversation[conversation.id] : undefined;
+  const workspacePath = session.activeWorkspace?.path || '';
+  const [pathDraft, setPathDraft] = useState(workspacePath);
+
+  useEffect(() => {
+    setPathDraft(workspacePath);
+  }, [workspacePath]);
+
+  const handleRefresh = () => {
+    if (conversation) {
+      void session.requestGitDiff(conversation.id);
+    }
+  };
+
   return (
-    <div className="flex h-full min-h-0 flex-col p-4">
+    <div className="flex h-full min-h-0 flex-col px-4 pb-4 pt-3">
       <div className="mb-3 flex items-center justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-sm font-medium">Git Diff</p>
-          <p className="text-muted truncate text-xs">{session.activeWorkspace?.path || '未选择工作区'}</p>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            handleRefresh();
+          }}
+          className="min-w-0 flex-1"
+        >
+          <TextField aria-label="Git 工作区路径" className="w-full" value={pathDraft} onChange={setPathDraft}>
+            <Input placeholder="/path/to/workspace..." className="text-xs" />
+          </TextField>
+        </form>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button
+            size="sm"
+            variant="tertiary"
+            isDisabled={!conversation || state?.status === 'loading'}
+            onPress={handleRefresh}
+            aria-label="刷新 Git Diff"
+            className="expandable-action-btn"
+          >
+            <span className="expandable-action-btn__icon">
+              <RiRefreshLine className={`size-4 ${state?.status === 'loading' ? 'animate-spin' : ''}`} />
+            </span>
+            <span className="expandable-action-btn__label">刷新</span>
+          </Button>
         </div>
-        <Button size="sm" variant="secondary" isDisabled={!conversation} onPress={() => conversation && session.requestGitDiff(conversation.id)}>刷新</Button>
       </div>
       <ScrollShadow className="bg-surface-secondary min-h-0 flex-1 rounded-xl p-3">
         {state?.error ? <p className="text-danger text-xs">{state.error}</p> : <pre className="font-mono text-xs whitespace-pre-wrap">{state?.diff || '暂无 diff。'}</pre>}
@@ -669,8 +783,20 @@ function FilesPane({ session, target }: { session: TodeXSession; target?: OpenPa
   const [treeCollapsed, setTreeCollapsed] = useState(false);
   const treePanelRef = useRef<PanelImperativeHandle>(null);
   const appliedTargetRef = useRef('');
-  const rootPath = session.activeWorkspace?.path || '';
-  const rootName = useMemo(() => session.activeWorkspace?.name || 'workspace', [session.activeWorkspace?.name]);
+  const defaultPath = session.activeWorkspace?.path || '';
+  const [currentPath, setCurrentPath] = useState(defaultPath);
+  const [pathDraft, setPathDraft] = useState(defaultPath);
+
+  useEffect(() => {
+    const next = session.activeWorkspace?.path || '';
+    setCurrentPath(next);
+    setPathDraft(next);
+  }, [session.activeWorkspace?.path]);
+
+  const rootName = useMemo(() => {
+    if (!currentPath) return 'workspace';
+    return currentPath.split(/[/\\]/).filter(Boolean).pop() || currentPath;
+  }, [currentPath]);
 
   const readFile = useCallback(async (path: string) => {
     setSelected(path);
@@ -693,14 +819,14 @@ function FilesPane({ session, target }: { session: TodeXSession; target?: OpenPa
       const children = snapshot.entries
         .map((entry) => ({ ...entry, path: absoluteEntryPath(directory, entry.path) }))
         .sort((left, right) => Number(right.kind === 'directory') - Number(left.kind === 'directory') || left.name.localeCompare(right.name));
-      setEntries((current) => directory === rootPath ? children : replaceFileTreeChildren(current, directory, children));
+      setEntries((current) => directory === currentPath ? children : replaceFileTreeChildren(current, directory, children));
       setExpandedKeys((current) => new Set([...current, directory]));
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '目录读取失败');
     } finally {
       setLoading(false);
     }
-  }, [rootPath, session.settings.authToken, session.settings.serverUrl]);
+  }, [currentPath, session.settings.authToken, session.settings.serverUrl]);
 
   useEffect(() => {
     setEntries([]);
@@ -708,8 +834,14 @@ function FilesPane({ session, target }: { session: TodeXSession; target?: OpenPa
     setFile(null);
     setExpandedKeys(new Set());
     appliedTargetRef.current = '';
-    if (rootPath) void loadDirectory(rootPath);
-  }, [loadDirectory, rootPath]);
+    if (currentPath) void loadDirectory(currentPath);
+  }, [currentPath, loadDirectory]);
+
+  const handleNavigatePath = (path: string) => {
+    const trimmed = path.trim();
+    if (!trimmed) return;
+    setCurrentPath(trimmed);
+  };
 
   useEffect(() => {
     if (!target?.filePath || target.filePath === appliedTargetRef.current) return;
@@ -748,17 +880,46 @@ function FilesPane({ session, target }: { session: TodeXSession; target?: OpenPa
   return (
     <div className="flex h-full min-h-0 flex-col px-4 pb-4 pt-3">
       <div className="mb-3 flex items-center justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-sm font-medium">文件</p>
-          <p className="text-muted truncate text-xs">{rootPath || '未选择工作区'}</p>
-        </div>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            handleNavigatePath(pathDraft);
+          }}
+          className="min-w-0 flex-1"
+        >
+          <TextField aria-label="路径" className="w-full" value={pathDraft} onChange={setPathDraft}>
+            <Input placeholder="/path/to/directory..." className="text-xs" />
+          </TextField>
+        </form>
         <div className="flex shrink-0 items-center gap-2">
-          <Button size="sm" variant="tertiary" isDisabled={!rootPath || loading} onPress={() => rootPath && void loadDirectory(rootPath)}>刷新</Button>
-          <Button size="sm" variant="tertiary" onPress={toggleTree} aria-label={treeCollapsed ? '显示文件树' : '收起文件树'}>
-            {treeCollapsed ? <RiArrowRightDoubleLine className="size-4" /> : <RiArrowLeftDoubleLine className="size-4" />}
+          <Button
+            size="sm"
+            variant="tertiary"
+            isDisabled={!currentPath || loading}
+            onPress={() => currentPath && void loadDirectory(currentPath)}
+            aria-label="刷新目录"
+            className="expandable-action-btn"
+          >
+            <span className="expandable-action-btn__icon">
+              <RiRefreshLine className="size-4" />
+            </span>
+            <span className="expandable-action-btn__label">刷新</span>
+          </Button>
+          <Button
+            size="sm"
+            variant="tertiary"
+            onPress={toggleTree}
+            aria-label={treeCollapsed ? '显示文件树' : '收起文件树'}
+            className="expandable-action-btn"
+          >
+            <span className="expandable-action-btn__icon">
+              {treeCollapsed ? <RiArrowRightDoubleLine className="size-4" /> : <RiArrowLeftDoubleLine className="size-4" />}
+            </span>
+            <span className="expandable-action-btn__label">{treeCollapsed ? '展开文件树' : '收起文件树'}</span>
           </Button>
         </div>
       </div>
+      {error ? <p className="text-danger mb-2 text-xs">{error}</p> : null}
       <Resizable autoSaveId="todex.files-pane" className="min-h-0 flex-1 gap-3" onLayoutChange={() => setTreeCollapsed(Boolean(treePanelRef.current?.isCollapsed()))}>
         <Resizable.Panel
           id="file-tree"
@@ -772,10 +933,11 @@ function FilesPane({ session, target }: { session: TodeXSession; target?: OpenPa
           onExpand={() => setTreeCollapsed(false)}
           className="min-h-0"
         >
-          <ScrollShadow className="bg-surface-secondary h-full min-h-0 rounded-xl p-2">
+          <ScrollShadow className="bg-surface-secondary h-full min-h-0 rounded-xl py-2 pl-1 pr-1.5">
           <FileTree
+            key={currentPath || 'empty'}
             aria-label="工作区文件"
-            className="w-full"
+            className="w-full workbench-file-tree"
             selectedKeys={selected ? new Set([selected]) : new Set()}
             expandedKeys={expandedKeys}
             selectionMode="single"
@@ -786,7 +948,7 @@ function FilesPane({ session, target }: { session: TodeXSession; target?: OpenPa
             }}
             onExpandedChange={setExpandedKeys}
           >
-            <FileTree.Item icon={<RiFolder3Line />} id={rootPath || 'root'} textValue={rootName} title={rootName}>
+            <FileTree.Item key={currentPath || 'root'} icon={<RiFolder3Line />} id={currentPath || 'root'} textValue={rootName} title={rootName}>
               {entries.map(renderEntry)}
             </FileTree.Item>
           </FileTree>

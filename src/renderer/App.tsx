@@ -115,7 +115,7 @@ export function App() {
 
   return (
     <div className="bg-background text-foreground h-full">
-      <Toast.Provider />
+      <Toast.Provider placement="top" />
       <DesktopAlertHost />
       {session.hydrated ? (
         <AppLayout
@@ -301,7 +301,7 @@ function GitHubModal({ session, isOpen, onOpenChange }: { session: TodeXSession;
   };
 
   return <Modal isOpen={isOpen} onOpenChange={onOpenChange}>
-    <Modal.Backdrop><Modal.Container><Modal.Dialog className="sm:max-w-md">
+    <Modal.Backdrop><Modal.Container className="justify-center"><Modal.Dialog className="sm:max-w-md">
       <Modal.CloseTrigger />
       <Modal.Header>
         <Modal.Icon className="bg-default text-foreground"><RiGithubLine className="size-5" /></Modal.Icon>
@@ -310,23 +310,46 @@ function GitHubModal({ session, isOpen, onOpenChange }: { session: TodeXSession;
           <Select.Popover><ListBox>{repos.map((repo) => <ListBox.Item key={repo.path} id={repo.path} textValue={`${repo.name} ${repo.branch}`}>{repo.name} · {repo.branch}</ListBox.Item>)}</ListBox></Select.Popover>
         </Select></> : <Modal.Heading className="flex min-w-0 items-center gap-2"><RiGitBranchLine className="size-4" /><span className="truncate">{activeRepo?.branch || '未初始化'}</span></Modal.Heading>}
       </Modal.Header>
-      <Modal.Body>
-        <TextField value={message} onChange={setMessage} aria-label="提交信息">
-          <TextArea className="min-h-28 resize-none" placeholder="提交信息（留空将自动生成）..." />
-        </TextField>
+      <Modal.Body className="space-y-2 pt-1 pb-2">
         {activeRepo?.error ? <p className="text-danger text-xs">{activeRepo.error}</p> : null}
-        <div className="border-separator flex items-center gap-3 border-b py-3">
-          <Checkbox isSelected={includeUnstaged} onChange={setIncludeUnstaged} aria-label="包含未暂存的更改" />
-          <span className="text-sm">包含未暂存的更改 <span className="text-muted">· {activeRepo?.files.length ?? 0} 个文件</span></span>
-          <span className="ml-auto font-mono text-sm tabular-nums"><span className="text-success">+{activeRepo?.additions ?? 0}</span> <span className="text-danger">-{activeRepo?.deletions ?? 0}</span></span>
-        </div>
-        <div className="pt-2">
-          <Button variant="secondary" className="h-12 w-full justify-start gap-3 text-base" onPress={() => void run(activeRepo?.initialEligible ? 'initial' : 'commit')} isDisabled={loading || !activeRepo}>
-            <RiGitCommitLine className="size-5" /><span>{activeRepo?.initialEligible ? '初始化仓库' : '提交'}</span>
-          </Button>
-          <Button variant="ghost" className="h-12 w-full justify-start gap-3 text-base" onPress={() => void run('commit-push')} isDisabled={loading || !activeRepo || Boolean(activeRepo.initialEligible)}><RiUploadCloud2Line className="size-5" />提交并推送</Button>
-          <Button variant="ghost" className="h-12 w-full justify-start gap-3 text-base" onPress={() => void run('push')} isDisabled={loading || !activeRepo || Boolean(activeRepo.initialEligible)}><RiUploadCloud2Line className="size-5" />推送</Button>
-        </div>
+        <Button
+          variant="secondary"
+          className="h-12 w-full justify-between px-4 text-base"
+          onPress={() => void run(activeRepo?.initialEligible ? 'initial' : 'commit')}
+          isDisabled={loading || !activeRepo}
+        >
+          <div className="flex items-center gap-3">
+            <RiGitCommitLine className="size-5" />
+            <span>{activeRepo?.initialEligible ? '初始化仓库' : '提交'}</span>
+          </div>
+          <div className="flex items-center gap-1.5 font-mono text-sm tabular-nums">
+            <span className="text-success font-medium">+{activeRepo?.additions ?? 0}</span>
+            <span className="text-danger font-medium">-{activeRepo?.deletions ?? 0}</span>
+          </div>
+        </Button>
+        <Button
+          variant="ghost"
+          className="h-12 w-full justify-start gap-3 px-4 text-base"
+          onPress={() => void run('commit-push')}
+          isDisabled={loading || !activeRepo || Boolean(activeRepo.initialEligible)}
+        >
+          <RiUploadCloud2Line className="size-5" />
+          <span>提交并推送</span>
+        </Button>
+        <Button
+          variant="ghost"
+          className="h-12 w-full justify-between px-4 text-base"
+          onPress={() => void run('push')}
+          isDisabled={loading || !activeRepo || Boolean(activeRepo.initialEligible)}
+        >
+          <div className="flex items-center gap-3">
+            <RiUploadCloud2Line className="size-5" />
+            <span>推送</span>
+          </div>
+          <div className="text-muted text-xs font-normal">
+            <span>{activeRepo?.ahead ?? 0} 个 commit</span>
+          </div>
+        </Button>
       </Modal.Body>
     </Modal.Dialog></Modal.Container></Modal.Backdrop>
   </Modal>;

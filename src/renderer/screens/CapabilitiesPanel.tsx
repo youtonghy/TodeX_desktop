@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Button, Card, ScrollShadow, Spinner, Tabs, toast } from '@heroui/react';
-import { RiFlashlightLine, RiGitlabLine, RiRefreshLine } from '@remixicon/react';
+import { RiArrowDownSLine, RiFlashlightLine, RiGitlabLine, RiRefreshLine } from '@remixicon/react';
 import type { McpCatalog, McpServerCatalogDescriptor, ProviderDescriptor, ProviderKind, SkillCatalog, SkillCatalogDescriptor } from '@todex/protocol/v2';
 import { providerDisplayName } from '@todex/protocol/v2';
 import { ProviderIcon } from '../components/ProviderIcon';
@@ -49,7 +49,7 @@ export function CapabilitiesPanel({
 }: Props) {
   const [viewMode, setViewMode] = useState<ViewMode>('skills');
   const [providerChoice, setProviderChoice] = useState<ProviderChoice>('common');
-  const [preview, setPreview] = useState<{ resourceId: string; content: string } | null>(null);
+  const [previews, setPreviews] = useState<Record<string, string>>({});
   const provider = providerChoice === 'common' ? undefined : providers.find((item) => item.id === providerChoice);
   const providerKeys = useMemo(() => providers.map((item) => item.id), [providers]);
   const selectedCatalogs = providerChoice === 'common'
@@ -102,11 +102,23 @@ export function CapabilitiesPanel({
           </Button>
         ))}
       </div>
-      <Tabs selectedKey={viewMode} onSelectionChange={(key) => setViewMode(key === 'mcp' ? 'mcp' : 'skills')}>
-        <Tabs.List>
-          <Tabs.Tab id="skills">Skills</Tabs.Tab>
-          <Tabs.Tab id="mcp">MCPs</Tabs.Tab>
-        </Tabs.List>
+      <Tabs
+        selectedKey={viewMode}
+        onSelectionChange={(key) => setViewMode(key === 'mcp' ? 'mcp' : 'skills')}
+        className="w-full"
+      >
+        <Tabs.ListContainer className="w-full">
+          <Tabs.List aria-label="能力分类" className="grid w-full grid-cols-2">
+            <Tabs.Tab id="skills">
+              Skills
+              <Tabs.Indicator />
+            </Tabs.Tab>
+            <Tabs.Tab id="mcp">
+              MCPs
+              <Tabs.Indicator />
+            </Tabs.Tab>
+          </Tabs.List>
+        </Tabs.ListContainer>
       </Tabs>
       {state?.status === 'loading' ? (
         <div className="flex flex-col items-center py-10">
@@ -123,13 +135,13 @@ export function CapabilitiesPanel({
               item={item.skill}
               selected={selectedSkills.some((skill) => skill.resourceId === item.skill.resourceId || skill.name === item.skill.name)}
               canSelect={Boolean(canInvoke && onToggleSkill)}
-              preview={preview?.resourceId === item.skill.resourceId ? preview.content : null}
+              preview={previews[item.skill.resourceId] ?? null}
               onToggle={() => onToggleSkill?.(item.skill, item.provider)}
               onPreview={async () => {
                 if (!onPreviewSkill) return;
                 try {
                   const content = await onPreviewSkill(item.skill, item.provider);
-                  setPreview({ resourceId: item.skill.resourceId, content });
+                  setPreviews((current) => ({ ...current, [item.skill.resourceId]: content }));
                 } catch (error) {
                   toast.danger(error instanceof Error ? error.message : '无法预览 Skill');
                 }
@@ -166,32 +178,100 @@ function SkillRow({
   canSelect: boolean;
   preview: string | null;
   onToggle: () => void;
-  onPreview: () => void;
+  onPreview: () => Promise<void>;
 }) {
+  const [expanded, setExpanded] = useState(false);
+  const [loading, setLoading] = useState(false);
+
   const status = item.active && item.valid ? '当前启用' : item.shadowedBy ? '被覆盖' : item.valid ? '未启用' : '无效';
+
+  const handleToggle = async () => {
+    const next = !expanded;
+    setExpanded(next);
+    if (next && !preview && onPreview) {
+      setLoading(true);
+      try {
+        await onPreview();
+      } finally {
+        setLoading(false);
+      }
+    }
+  };
+
   return (
-    <Card className="mb-2 p-3">
+    <Card
+      role="button"
+      tabIndex={0}
+      aria-expanded={expanded}
+      className={`mb-2 p-3.5 transition-all cursor-pointer select-none hover:bg-surface-secondary/40 active:bg-surface-secondary/60 ${
+        expanded ? 'bg-surface-secondary/20 ring-1 ring-separator' : ''
+      }`}
+      onClick={handleToggle}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          void handleToggle();
+        }
+      }}
+    >
       <div className="flex gap-3">
-        <div className="bg-accent-soft flex size-9 items-center justify-center rounded-lg">
+        <div className="bg-accent-soft flex size-9 shrink-0 items-center justify-center rounded-lg">
           <RiFlashlightLine className="text-accent size-4" />
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between gap-2">
-            <p className="truncate font-semibold">{item.name}</p>
-            <p className="text-muted text-xs">{selected ? '已附加' : status}</p>
+            <p className="truncate font-semibold text-sm">{item.name}</p>
+            <div className="flex items-center gap-2 shrink-0">
+              <span className={`text-xs ${selected ? 'text-accent font-medium' : 'text-muted'}`}>
+                {selected ? '已附加' : status}
+              </span>
+              <RiArrowDownSLine
+                className={`text-muted size-4 transition-transform duration-200 ${
+                  expanded ? 'rotate-180' : ''
+                }`}
+              />
+            </div>
           </div>
-          {item.description ? <p className="text-muted mt-1 line-clamp-3 text-xs">{item.description}</p> : null}
-          <p className="text-muted mt-2 text-[11px]">{item.scope} · {item.source}</p>
-          <div className="mt-2 flex flex-wrap gap-2">
-            {canSelect ? (
-              <Button size="sm" variant={selected ? 'secondary' : 'primary'} onPress={onToggle}>
-                {selected ? '取消附加' : '附加到下一条消息'}
-              </Button>
-            ) : null}
-            <Button size="sm" variant="tertiary" onPress={() => void onPreview()}>预览</Button>
-          </div>
-          {preview ? (
-            <pre className="text-muted mt-2 max-h-40 overflow-auto whitespace-pre-wrap text-[11px]">{preview.slice(0, 4000)}</pre>
+          {item.description ? (
+            <p className={`text-muted mt-1 text-xs leading-relaxed ${expanded ? 'whitespace-pre-line' : 'line-clamp-2'}`}>
+              {item.description}
+            </p>
+          ) : null}
+          <p className="text-muted mt-1.5 text-[11px]">{item.scope} · {item.source}</p>
+
+          {expanded ? (
+            <div className="mt-3 border-t border-separator/40 pt-3" onClick={(e) => e.stopPropagation()}>
+              {loading ? (
+                <div className="flex items-center gap-2 py-3 text-muted text-xs">
+                  <Spinner size="sm" />
+                  <span>正在加载 Skill 内容…</span>
+                </div>
+              ) : preview ? (
+                <div className="rounded-lg bg-surface-secondary/60 border border-separator/50 p-2.5">
+                  <p className="text-muted mb-1 text-[11px] font-medium">指令与配置内容</p>
+                  <pre className="text-foreground/80 max-h-52 overflow-auto whitespace-pre-wrap font-mono text-[11px] leading-relaxed select-text">
+                    {preview.slice(0, 4000)}
+                  </pre>
+                </div>
+              ) : (
+                <p className="text-muted text-xs">暂无预览内容。</p>
+              )}
+
+              {canSelect ? (
+                <div className="mt-3 flex items-center justify-between">
+                  <span className="text-muted text-xs">
+                    {selected ? '已附加到当前对话' : '可附加到下一条对话中'}
+                  </span>
+                  <Button
+                    size="sm"
+                    variant={selected ? 'secondary' : 'primary'}
+                    onPress={onToggle}
+                  >
+                    {selected ? '取消附加' : '附加到下一条消息'}
+                  </Button>
+                </div>
+              ) : null}
+            </div>
           ) : null}
         </div>
       </div>

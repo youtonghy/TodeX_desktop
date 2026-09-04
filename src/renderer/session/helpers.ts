@@ -1072,17 +1072,21 @@ export type WorkspaceMentionHistory = {
 };
 
 export const REASONING_EFFORT_LABELS: Record<string, string> = {
-  none: 'None',
-  minimal: 'Minimal',
-  low: 'Low',
-  medium: 'Medium',
-  high: 'High',
-  xhigh: 'Extra high',
+  none: 'off',
+  off: 'off',
+  minimal: 'minimal',
+  low: 'low',
+  medium: 'medium',
+  high: 'high',
+  xhigh: 'max',
+  max: 'max',
+  ultra: 'ultra',
+  highest: 'ultra',
 };
 
 export function reasoningEffortLabel(value: string | null | undefined): string {
   const normalized = normalizeReasoningEffort(value);
-  return normalized ? REASONING_EFFORT_LABELS[normalized] ?? normalized : 'Default';
+  return normalized ? REASONING_EFFORT_LABELS[normalized] ?? normalized : 'default';
 }
 
 export function modelDisplayLabel(model: string | null | undefined, catalog: CodexModelCatalogItem[]): string {
