@@ -4800,6 +4800,26 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       .map((skill) => ({ resourceId: skill.resourceId as string, name: skill.name }));
   }, []);
 
+  const promptContentFromAttachments = useCallback((attachments: ComposerAttachmentDraft[]) => {
+    const content: Array<
+      { type: 'image'; data: string; mimeType: string }
+      | { type: 'text'; text: string }
+    > = [];
+    for (const attachment of attachments) {
+      if (attachment.kind === 'image' && attachment.dataUrl) {
+        const comma = attachment.dataUrl.indexOf(',');
+        if (comma >= 0) {
+          content.push({ type: 'image', data: attachment.dataUrl.slice(comma + 1), mimeType: attachment.mimeType });
+        }
+        continue;
+      }
+      if (typeof attachment.textContent === 'string') {
+        content.push({ type: 'text', text: `[附件: ${attachment.name}]\n${attachment.textContent}` });
+      }
+    }
+    return content;
+  }, []);
+
   const materializeV2Conversation = useCallback(async (
     conversationId: string,
     firstMessageText: string,
@@ -4904,6 +4924,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       text: string,
       conversationId = activeConversationRef.current,
       skills: SelectedSkillAttachment[] = [],
+      attachments: ComposerAttachmentDraft[] = [],
     ): Promise<boolean> => {
       const context = getConversationContext(conversationId);
       if (!context) {
@@ -4924,6 +4945,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         setConversationChatDraft(conversation.id, (current) => current || text);
         if (skills.length > 0) {
           setConversationSelectedSkills(conversation.id, (current) => current.length > 0 ? current : skills);
+        }
+        if (attachments.length > 0) {
+          setConversationAttachments(conversation.id, (current) => current.length > 0 ? current : attachments);
         }
       };
       if (
@@ -4946,7 +4970,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       try {
         const readyConversation = conversation.v2ConversationId
           ? conversation
-          : await materializeV2Conversation(conversation.id, text);
+          : await materializeV2Conversation(
+            conversation.id,
+            text || attachmentPrompt(attachments) || selectedSkillSummary(skills),
+          );
         const v2Id = readyConversation?.v2ConversationId;
         if (!readyConversation || !v2Id) {
           setConversationThinking(conversation.id, false);
@@ -4955,6 +4982,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         }
 
         const skillRefs = promptSkillsFromAttachments(skills);
+        const content = promptContentFromAttachments(attachments);
         const model = readyConversation.provider === 'codex'
           ? readyConversation.model || workspace.model || settings.defaultModel || undefined
           : readyConversation.model || undefined;
@@ -4968,6 +4996,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
             ...(model ? { model } : {}),
             ...(reasoningEffort ? { reasoningEffort } : {}),
             ...(skillRefs.length ? { skills: skillRefs } : {}),
+            ...(content.length ? { content } : {}),
           },
         });
         if (!sent) {
@@ -4994,7 +5023,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         }
       }
     },
-    [connectionState, getConversationContext, materializeV2Conversation, promptSkillsFromAttachments, sendRawProtocolFrame, setConversationChatDraft, setConversationSelectedSkills, setConversationThinking, settings.defaultModel, updateConversation],
+    [connectionState, getConversationContext, materializeV2Conversation, promptContentFromAttachments, promptSkillsFromAttachments, sendRawProtocolFrame, setConversationAttachments, setConversationChatDraft, setConversationSelectedSkills, setConversationThinking, settings.defaultModel, updateConversation],
   );
 
   const sendLocalTurn = useCallback(
@@ -5087,7 +5116,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     sendQueuedChatDraftRef.current = async (submission, conversationId) => {
       const conversation = conversationsRef.current.find((item) => item.id === conversationId) ?? null;
       if (isV2Conversation(conversation)) {
-        return sendV2Prompt(submission.text, conversationId, submission.skills);
+        return sendV2Prompt(submission.text, conversationId, submission.skills, submission.attachments);
       }
       return sendLocalTurn(submission.text, 'implement', conversationId, submission.attachments, submission.skills);
     };
@@ -6224,10 +6253,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       return;
     }
     if (isV2Conversation(conversation)) {
-      if (attachments.length > 0) {
-        appendTimeline(makeSystemEntry('v2 对话暂不发送本地附件', '附件仅保留在时间线记录中。', workspace.id, conversationId));
-      }
-      void sendV2Prompt(text, conversationId, skills);
+      void sendV2Prompt(text, conversationId, skills, attachments);
       return;
     }
     if (attachments.length > 0 || skills.length > 0) {

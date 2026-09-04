@@ -1,8 +1,8 @@
-import { RiBarChartBoxLine, RiClipboardLine, RiCpuLine, RiGitBranchLine, RiShieldLine, RiStopCircleLine } from '@remixicon/react';
+import { RiAttachment2, RiBarChartBoxLine, RiClipboardLine, RiCpuLine, RiGitBranchLine, RiShieldLine, RiStopCircleLine } from '@remixicon/react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
-import { Button, Chip, Label, ListBox, Popover, ScrollShadow, Select, Tooltip, toast } from '@heroui/react';
-import { ChainOfThought, ChatMessage, HoverCard, PromptInput } from '@heroui-pro/react';
+import { Button, Label, ListBox, Popover, ScrollShadow, Select, Tooltip, toast } from '@heroui/react';
+import { ChainOfThought, ChatAttachment, ChatAttachmentGroup, ChatAttachmentInput, ChatMessage, HoverCard, PromptInput } from '@heroui-pro/react';
 import { ChatMessageActions } from '@heroui-pro/react/chat-message-actions';
 import { ChatTool } from '@heroui-pro/react/chat-tool';
 import { Markdown } from '@heroui-pro/react/markdown';
@@ -23,7 +23,6 @@ import {
   isV2Conversation,
   MAX_COMPOSER_ATTACHMENTS,
   SLASH_COMMANDS,
-  dataUrlFromBase64,
   findMentionTrigger,
   buildMentionSuggestions,
   insertMention,
@@ -38,6 +37,43 @@ import { findCapabilityHashTrigger } from '@todex/protocol/todex';
 type Props = {
   session: TodeXSession;
 };
+
+const MAX_COMPOSER_IMAGE_BYTES = 2_500_000;
+const MAX_COMPOSER_TEXT_BYTES = 512 * 1024;
+const COMPOSER_ATTACHMENT_ACCEPT = 'image/*,text/*,.md,.mdx,.json,.yaml,.yml,.toml,.csv,.tsv,.ts,.tsx,.js,.jsx,.css,.html,.xml,.svg,.sh,.py,.rs,.go,.java,.kt,.swift';
+
+function isTextFile(file: File): boolean {
+  return file.type.startsWith('text/') || /\.(md|mdx|txt|json|ya?ml|toml|csv|tsv|tsx?|jsx?|css|html?|xml|svg|sh|py|rs|go|java|kt|swift)$/i.test(file.name);
+}
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error ?? new Error('无法读取图片'));
+    reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
+    reader.readAsDataURL(file);
+  });
+}
+
+function clipboardFiles(data: DataTransfer): File[] {
+  const files = Array.from(data.items)
+    .filter((item) => item.kind === 'file')
+    .flatMap((item) => {
+      const file = item.getAsFile();
+      return file ? [file] : [];
+    });
+  return files.length > 0 ? files : Array.from(data.files);
+}
+
+function attachmentName(file: File, index: number, mimeType: string, source: 'clipboard' | 'file'): string {
+  if (file.name.trim()) return file.name;
+  const extension = mimeType === 'image/jpeg' ? 'jpg'
+    : mimeType === 'image/gif' ? 'gif'
+      : mimeType === 'image/webp' ? 'webp'
+        : mimeType === 'image/png' ? 'png'
+          : 'bin';
+  return `${source === 'clipboard' ? 'pasted' : 'attachment'}-${index + 1}.${extension}`;
+}
 
 function toolPresentation(raw: string) {
   try {
@@ -190,6 +226,7 @@ export function ChatPanel({ session }: Props) {
   const [mentionSuggestions, setMentionSuggestions] = useState<Array<{ id: string; title: string; description: string; insertText: string }>>([]);
   const [suggestionIndex, setSuggestionIndex] = useState(0);
   const [expandedProcessIds, setExpandedProcessIds] = useState<Set<string>>(() => new Set());
+  const [isDraggingAttachment, setIsDraggingAttachment] = useState(false);
   const isComposingRef = useRef(false);
   const lastToastErrorRef = useRef('');
   useEffect(() => {
@@ -326,28 +363,48 @@ export function ChatPanel({ session }: Props) {
     return entry.category ? entry.category === 'tool' : entry.kind === 'system' && entry.title === '工具调用';
   };
 
-  const addFiles = async (paths: string[]) => {
-    for (const path of paths) {
-      if (attachments.length >= MAX_COMPOSER_ATTACHMENTS) break;
+  const addBrowserFiles = async (files: File[], source: 'clipboard' | 'file' = 'file') => {
+    const remaining = MAX_COMPOSER_ATTACHMENTS - attachments.length;
+    if (remaining <= 0) {
+      toast.danger(`一次最多附加 ${MAX_COMPOSER_ATTACHMENTS} 个文件`);
+      return;
+    }
+    const nextAttachments: (typeof attachments) = [];
+    let reachedLimit = false;
+    for (const [index, file] of files.entries()) {
+      if (nextAttachments.length >= remaining) {
+        reachedLimit = true;
+        break;
+      }
       try {
-        const file = await window.todexDesktop.fs.readFile(path);
-        const mimeType = file.mimeType || inferMimeType(file.name);
-        session.setConversationAttachments(conversation.id, (current) => [
-          ...current,
-          {
-            id: attachmentId(),
-            kind: isImageMimeType(mimeType) ? 'image' : 'file',
-            name: file.name,
-            mimeType,
-            sizeBytes: file.sizeBytes,
-            dataUrl: dataUrlFromBase64(file.base64, mimeType),
-            textContent: file.text,
-            source: 'file',
-          },
-        ]);
+        const mimeType = file.type || inferMimeType(file.name);
+        const image = isImageMimeType(mimeType);
+        if (image && file.size > MAX_COMPOSER_IMAGE_BYTES) throw new Error('图片不能超过 2.5 MB');
+        if (!image && (!isTextFile(file) || file.size > MAX_COMPOSER_TEXT_BYTES)) {
+          throw new Error('仅支持 512 KB 以内的文本文件，其他文件请放入工作区后用 @ 引用');
+        }
+        nextAttachments.push({
+          id: attachmentId(),
+          kind: image ? 'image' : 'file',
+          name: attachmentName(file, index, mimeType, source),
+          mimeType,
+          sizeBytes: file.size,
+          dataUrl: image ? await readFileAsDataUrl(file) : '',
+          textContent: image ? undefined : await file.text(),
+          source,
+        });
       } catch (error) {
         toast.danger(error instanceof Error ? error.message : '无法读取附件');
       }
+    }
+    if (nextAttachments.length > 0) {
+      session.setConversationAttachments(conversation.id, (current) => [
+        ...current,
+        ...nextAttachments,
+      ].slice(0, MAX_COMPOSER_ATTACHMENTS));
+    }
+    if (reachedLimit) {
+      toast.danger(`一次最多附加 ${MAX_COMPOSER_ATTACHMENTS} 个文件`);
     }
   };
 
@@ -504,13 +561,6 @@ export function ChatPanel({ session }: Props) {
             </div>
           ) : null}
           {capability ? <p className="text-muted mb-2 text-xs">输入 # 可引用 Skill 或 MCP。</p> : null}
-          {attachments.length > 0 ? (
-            <div className="mb-2 flex flex-wrap gap-2">
-              {attachments.map((attachment) => (
-                <Chip key={attachment.id} variant="soft">{attachment.name}</Chip>
-              ))}
-            </div>
-          ) : null}
           {(session.selectedSkills[conversation.id] ?? []).length > 0 ? (
             <div className="mb-2 flex flex-wrap gap-2">
               {(session.selectedSkills[conversation.id] ?? []).map((skill) => (
@@ -526,16 +576,11 @@ export function ChatPanel({ session }: Props) {
               ))}
             </div>
           ) : null}
-          <div
-            onDragOver={(event) => event.preventDefault()}
-            onDrop={async (event) => {
-              event.preventDefault();
-              const files = Array.from(event.dataTransfer.files);
-              const paths = files.map((file) => 'path' in file ? String((file as File & { path?: string }).path ?? '') : '').filter(Boolean);
-              if (paths.length) {
-                await addFiles(paths);
-              }
-            }}
+          <ChatAttachmentInput
+            accept={COMPOSER_ATTACHMENT_ACCEPT}
+            disabled={attachments.length >= MAX_COMPOSER_ATTACHMENTS}
+            multiple
+            onFilesSelected={(files) => { void addBrowserFiles(files); }}
           >
             <PromptInput
               value={draft}
@@ -555,10 +600,66 @@ export function ChatPanel({ session }: Props) {
               }}
               onStop={() => session.stopThinking(conversation.id)}
             >
-              <PromptInput.Shell>
+              <PromptInput.Shell
+                data-dragging={isDraggingAttachment || undefined}
+                onDragEnter={(event) => {
+                  if (!event.dataTransfer.types.includes('Files')) return;
+                  event.preventDefault();
+                  setIsDraggingAttachment(true);
+                }}
+                onDragOver={(event) => {
+                  if (!event.dataTransfer.types.includes('Files')) return;
+                  event.preventDefault();
+                  event.dataTransfer.dropEffect = 'copy';
+                  setIsDraggingAttachment(true);
+                }}
+                onDragLeave={(event) => {
+                  const nextTarget = event.relatedTarget;
+                  if (!nextTarget || !event.currentTarget.contains(nextTarget as Node)) {
+                    setIsDraggingAttachment(false);
+                  }
+                }}
+                onDrop={(event) => {
+                  const files = Array.from(event.dataTransfer.files);
+                  if (files.length === 0) return;
+                  event.preventDefault();
+                  setIsDraggingAttachment(false);
+                  void addBrowserFiles(files);
+                }}
+                onPaste={(event) => {
+                  const files = clipboardFiles(event.clipboardData);
+                  if (files.length === 0) return;
+                  event.preventDefault();
+                  void addBrowserFiles(files, 'clipboard');
+                }}
+              >
                 <PromptInput.Content>
+                  {attachments.length > 0 ? (
+                    <PromptInput.Attachments>
+                      <ChatAttachmentGroup aria-label="待发送附件" role="list">
+                        {attachments.map((attachment) => (
+                          <ChatAttachment
+                            key={attachment.id}
+                            mimeType={attachment.mimeType}
+                            name={attachment.name}
+                            role="listitem"
+                            size={attachment.sizeBytes ?? undefined}
+                            src={attachment.kind === 'image' ? attachment.dataUrl : undefined}
+                          >
+                            <ChatAttachment.Preview />
+                            <ChatAttachment.Info />
+                            <ChatAttachment.Remove
+                              aria-label={`移除附件 ${attachment.name}`}
+                              onPress={() => session.setConversationAttachments(conversation.id, (current) =>
+                                current.filter((item) => item.id !== attachment.id))}
+                            />
+                          </ChatAttachment>
+                        ))}
+                      </ChatAttachmentGroup>
+                    </PromptInput.Attachments>
+                  ) : null}
                   <PromptInput.TextArea
-                    placeholder="发送消息，或输入 / 命令"
+                    placeholder="发送消息，或粘贴 / 拖入图片和文件"
                     onCompositionStart={() => { isComposingRef.current = true; }}
                     onCompositionEnd={() => { isComposingRef.current = false; }}
                     onKeyDown={handleSuggestionKeyDown}
@@ -673,6 +774,23 @@ export function ChatPanel({ session }: Props) {
                     </Select> : <Button className="composer-control composer-control__static" size="sm" variant="tertiary" isDisabled aria-label="完全访问权限"><RiShieldLine className="composer-control__icon" /><span className="composer-control__text">完全访问</span></Button>}
                   </PromptInput.ToolbarStart>
                   <PromptInput.ToolbarEnd className="gap-2">
+                    <ChatAttachmentInput.Trigger
+                      aria-label="添加附件"
+                      render={({ isDisabled, onPress }) => (
+                        <Tooltip>
+                          <Tooltip.Trigger>
+                            <Button isIconOnly variant="ghost" aria-label="添加附件" isDisabled={isDisabled} onPress={onPress}>
+                              <RiAttachment2 className="size-4" />
+                            </Button>
+                          </Tooltip.Trigger>
+                          <Tooltip.Content>
+                            {attachments.length >= MAX_COMPOSER_ATTACHMENTS
+                              ? `最多附加 ${MAX_COMPOSER_ATTACHMENTS} 个文件`
+                              : '添加图片或文本附件'}
+                          </Tooltip.Content>
+                        </Tooltip>
+                      )}
+                    />
                     <ContextUsageIndicator
                       usedTokens={contextUsage?.usedTokens ?? 0}
                       contextWindow={currentContextWindow}
@@ -691,7 +809,7 @@ export function ChatPanel({ session }: Props) {
                 </PromptInput.Toolbar>
               </PromptInput.Shell>
             </PromptInput>
-          </div>
+          </ChatAttachmentInput>
         </div>
       </div>
     </div>
