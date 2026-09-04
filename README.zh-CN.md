@@ -153,8 +153,12 @@ pnpm run dev
 ## 桌面端发布
 
 桌面安装包通过 **Actions > Release desktop packages** 手动发布。输入 `1.2.3`
-这样的稳定语义版本后，工作流会验证应用并发布 Windows x64、Windows ARM64
-NSIS 安装程序、macOS Apple Silicon DMG、Linux x64 AppImage 和 SHA-256 校验文件。
+这样的稳定语义版本后，工作流会把版本注入应用元数据和“关于”页面，验证应用并
+发布 Windows x64、Windows ARM64 NSIS 安装程序、macOS Apple Silicon DMG、Linux
+x64 AppImage 和 SHA-256 校验文件。
+
+开发构建显示 `DEV0.0.0`；`package.json` 保留格式合法的 `0.0.0` 占位版本，
+直到 CI 打包时传入正式版本。
 
 Windows 与 macOS 安装包目前没有代码签名，首次运行时可能需要用户手动通过
 SmartScreen 或 Gatekeeper。由于桌面端直接共享移动端协议源码，构建时会把移动端

@@ -1,6 +1,5 @@
 import { Button, Card, Chip, toast } from '@heroui/react';
 import { RiFileCopyLine, RiGithubLine, RiInformationLine, RiServerLine } from '@remixicon/react';
-import packageInfo from '../../../package.json';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { connectionStateLabel } from '../session/helpers';
 
@@ -41,7 +40,7 @@ export function AboutPanel({ session }: Props) {
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="text-xl font-semibold">TodeX Desktop</h2>
-            <Chip size="sm" variant="soft">v{packageInfo.version}</Chip>
+            <Chip size="sm" variant="soft">v{__TODEX_BUILD_VERSION__}</Chip>
           </div>
           <p className="text-muted mt-1 text-sm">统一连接 Codex、Pi、Claude Code 等 Agent 的桌面工作台。</p>
         </div>
@@ -56,7 +55,7 @@ export function AboutPanel({ session }: Props) {
           </Chip>
         </div>
         <dl>
-          <InfoRow label="桌面版本" value={packageInfo.version} />
+          <InfoRow label="桌面版本" value={__TODEX_BUILD_VERSION__} />
           <InfoRow label="后端版本" value={backendVersion} />
           <InfoRow label="后端地址" value={session.settings.serverUrl || '未配置'} copyable={Boolean(session.settings.serverUrl)} />
           <InfoRow label="工作区" value={session.activeWorkspace?.path || '未选择'} copyable={Boolean(session.activeWorkspace?.path)} />

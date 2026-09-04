@@ -4,6 +4,7 @@ import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 
 const desktopRoot = import.meta.dirname;
+const buildVersion = process.env.TODEX_BUILD_VERSION?.trim() || 'DEV0.0.0';
 
 export default defineConfig({
   main: {
@@ -24,6 +25,9 @@ export default defineConfig({
     },
   },
   renderer: {
+    define: {
+      __TODEX_BUILD_VERSION__: JSON.stringify(buildVersion),
+    },
     server: {
       host: '127.0.0.1',
     },

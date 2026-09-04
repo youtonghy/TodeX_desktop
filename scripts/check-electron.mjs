@@ -20,14 +20,34 @@ try {
 }
 
 const pathFile = join(electronRoot, 'path.txt');
+const installScript = join(electronRoot, 'install.js');
+
+function getBinary() {
+  if (!existsSync(pathFile)) return null;
+  const relativeBinary = readFileSync(pathFile, 'utf8').trim();
+  const bin = join(electronRoot, 'dist', relativeBinary);
+  return existsSync(bin) ? bin : null;
+}
+
+let binary = getBinary();
+if (!binary && existsSync(installScript)) {
+  console.log('[todex-desktop] electron binary missing; running electron install script...');
+  const installResult = spawnSync(process.execPath, [installScript], {
+    cwd: electronRoot,
+    stdio: 'inherit',
+    env: process.env,
+  });
+  if (installResult.status === 0) {
+    binary = getBinary();
+  }
+}
+
 if (!existsSync(pathFile)) {
   fail(`missing ${pathFile}; reinstall electron so postinstall can download the binary`);
 }
 
-const relativeBinary = readFileSync(pathFile, 'utf8').trim();
-const binary = join(electronRoot, 'dist', relativeBinary);
-if (!existsSync(binary)) {
-  fail(`electron binary missing at ${binary}`);
+if (!binary) {
+  fail(`electron binary missing in ${join(electronRoot, 'dist')}`);
 }
 
 const result = spawnSync(binary, ['--version'], {

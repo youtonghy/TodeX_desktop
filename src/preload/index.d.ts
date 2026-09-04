@@ -35,6 +35,7 @@ export type GitRepositorySummary = {
   files: Array<{ path: string; status: string }>;
   additions: number;
   deletions: number;
+  ahead?: number;
   initialEligible?: boolean;
   error?: string;
 };

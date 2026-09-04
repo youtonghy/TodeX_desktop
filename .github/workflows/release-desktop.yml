@@ -158,17 +158,18 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Set package version
-        shell: bash
-        env:
-          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
-        run: npm pkg set "version=${RELEASE_VERSION}"
-
       - name: Package desktop application
         shell: bash
         env:
           BUILD_ARGS: ${{ matrix.args }}
-        run: pnpm run package -- ${BUILD_ARGS} --publish never
+          TODEX_BUILD_VERSION: ${{ needs.prepare.outputs.version }}
+        run: pnpm run package -- ${BUILD_ARGS} -c.extraMetadata.version=${TODEX_BUILD_VERSION} --publish never
+
+      - name: Verify injected version
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+        run: grep -R --fixed-strings --quiet "${RELEASE_VERSION}" out/renderer
 
       - name: Upload packages
         uses: actions/upload-artifact@v4

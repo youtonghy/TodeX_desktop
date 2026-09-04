@@ -154,8 +154,12 @@ The desktop window will launch at 1280×800.
 
 Desktop packages are created manually from **Actions > Release desktop packages**.
 Enter a stable semantic version such as `1.2.3`; after validation, the workflow
-publishes Windows x64 and ARM64 NSIS installers, a macOS Apple Silicon DMG, a Linux
-x64 AppImage, and SHA-256 checksums to the `v1.2.3` GitHub Release.
+injects it into the application metadata and About screen, then publishes Windows
+x64 and ARM64 NSIS installers, a macOS Apple Silicon DMG, a Linux x64 AppImage,
+and SHA-256 checksums to the `v1.2.3` GitHub Release.
+
+Development builds display `DEV0.0.0`; `package.json` keeps the valid placeholder
+version `0.0.0` until packaging receives a release version from CI.
 
 The Windows and macOS packages are currently unsigned, so SmartScreen or Gatekeeper
 may require the user to approve the first launch. The build checks out the mobile
