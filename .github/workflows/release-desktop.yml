@@ -179,7 +179,7 @@ jobs:
         env:
           BUILD_ARGS: ${{ matrix.args }}
           TODEX_BUILD_VERSION: ${{ needs.prepare.outputs.version }}
-        run: pnpm run package -- ${BUILD_ARGS} -c.extraMetadata.version=${TODEX_BUILD_VERSION} --publish never
+        run: pnpm run package ${BUILD_ARGS} -c.extraMetadata.version=${TODEX_BUILD_VERSION} --publish never
 
       - name: Verify injected version
         shell: bash
