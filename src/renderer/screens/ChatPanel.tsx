@@ -1,7 +1,7 @@
 import { RiAttachment2, RiBarChartBoxLine, RiClipboardLine, RiCpuLine, RiGitBranchLine, RiShieldLine, RiStopCircleLine } from '@remixicon/react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
-import { Button, Label, ListBox, Popover, ScrollShadow, Select, Tooltip, toast } from '@heroui/react';
+import { Alert, Button, Label, ListBox, Popover, ScrollShadow, Select, Tooltip, toast } from '@heroui/react';
 import { ChainOfThought, ChatAttachment, ChatAttachmentGroup, ChatAttachmentInput, ChatMessage, HoverCard, PromptInput } from '@heroui-pro/react';
 import { ChatMessageActions } from '@heroui-pro/react/chat-message-actions';
 import { ChatTool } from '@heroui-pro/react/chat-tool';
@@ -17,6 +17,7 @@ import {
   attachmentId,
   buildConversationRenderItems,
   canSwitchConversationAgent,
+  conversationImageInputSupport,
   inferMimeType,
   isImageMimeType,
   isStepProgressEntry,
@@ -40,7 +41,13 @@ type Props = {
 
 const MAX_COMPOSER_IMAGE_BYTES = 2_500_000;
 const MAX_COMPOSER_TEXT_BYTES = 512 * 1024;
-const COMPOSER_ATTACHMENT_ACCEPT = 'image/*,text/*,.md,.mdx,.json,.yaml,.yml,.toml,.csv,.tsv,.ts,.tsx,.js,.jsx,.css,.html,.xml,.svg,.sh,.py,.rs,.go,.java,.kt,.swift';
+const COMPOSER_IMAGE_ACCEPT = 'image/png,image/jpeg,image/gif,image/webp';
+const COMPOSER_TEXT_ACCEPT = 'text/*,.md,.mdx,.json,.yaml,.yml,.toml,.csv,.tsv,.ts,.tsx,.js,.jsx,.css,.html,.xml,.svg,.sh,.py,.rs,.go,.java,.kt,.swift';
+const SUPPORTED_COMPOSER_IMAGE_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
+
+function isSupportedComposerImage(mimeType: string): boolean {
+  return SUPPORTED_COMPOSER_IMAGE_MIME_TYPES.has(mimeType.trim().toLowerCase());
+}
 
 function isTextFile(file: File): boolean {
   return file.type.startsWith('text/') || /\.(md|mdx|txt|json|ya?ml|toml|csv|tsv|tsx?|jsx?|css|html?|xml|svg|sh|py|rs|go|java|kt|swift)$/i.test(file.name);
@@ -335,6 +342,12 @@ export function ChatPanel({ session }: Props) {
     : 'Agent';
   const availableProviders = session.v2Providers.filter((item) => item.available);
   const providerDescriptor = session.v2Providers.find((item) => item.id === currentProvider);
+  const imageInputSupport = conversationImageInputSupport(conversation, session.v2Providers);
+  const hasBlockedImageAttachment = !imageInputSupport.supported
+    && attachments.some((attachment) => attachment.kind === 'image');
+  const attachmentAccept = imageInputSupport.supported
+    ? `${COMPOSER_IMAGE_ACCEPT},${COMPOSER_TEXT_ACCEPT}`
+    : COMPOSER_TEXT_ACCEPT;
   const liveProviderModels = session.providerModels[currentProvider as ProviderKind];
   const providerModels = liveProviderModels?.length ? liveProviderModels : providerDescriptor?.models ?? [];
   const currentModel = conversation.model || providerModels.find((item) => item.isDefault)?.id || (currentProvider === 'codex' ? workspace.model || session.settings.defaultModel : '');
@@ -378,7 +391,13 @@ export function ChatPanel({ session }: Props) {
       }
       try {
         const mimeType = file.type || inferMimeType(file.name);
-        const image = isImageMimeType(mimeType);
+        const image = isSupportedComposerImage(mimeType);
+        if (image && !imageInputSupport.supported) {
+          throw new Error(imageInputSupport.reason || '当前 Agent 不支持图片输入');
+        }
+        if (!image && isImageMimeType(mimeType) && !isTextFile(file)) {
+          throw new Error('仅支持 PNG、JPEG、GIF 或 WebP 图片');
+        }
         if (image && file.size > MAX_COMPOSER_IMAGE_BYTES) throw new Error('图片不能超过 2.5 MB');
         if (!image && (!isTextFile(file) || file.size > MAX_COMPOSER_TEXT_BYTES)) {
           throw new Error('仅支持 512 KB 以内的文本文件，其他文件请放入工作区后用 @ 引用');
@@ -576,8 +595,17 @@ export function ChatPanel({ session }: Props) {
               ))}
             </div>
           ) : null}
+          {hasBlockedImageAttachment ? (
+            <Alert status="warning" className="mb-2">
+              <Alert.Indicator />
+              <Alert.Content>
+                <Alert.Title>当前无法发送图片</Alert.Title>
+                <Alert.Description>{imageInputSupport.reason}</Alert.Description>
+              </Alert.Content>
+            </Alert>
+          ) : null}
           <ChatAttachmentInput
-            accept={COMPOSER_ATTACHMENT_ACCEPT}
+            accept={attachmentAccept}
             disabled={attachments.length >= MAX_COMPOSER_ATTACHMENTS}
             multiple
             onFilesSelected={(files) => { void addBrowserFiles(files); }}
@@ -592,6 +620,10 @@ export function ChatPanel({ session }: Props) {
               }}
               onValueChange={(value: string) => { setSuggestionIndex(0); session.setConversationChatDraft(conversation.id, value); }}
               onSubmit={() => {
+                if (hasBlockedImageAttachment) {
+                  toast.danger('当前无法发送图片', { description: imageInputSupport.reason });
+                  return;
+                }
                 if (draft.trim().startsWith('/')) {
                   session.sendSlashCommand(draft, conversation.id);
                 } else {
@@ -659,7 +691,9 @@ export function ChatPanel({ session }: Props) {
                     </PromptInput.Attachments>
                   ) : null}
                   <PromptInput.TextArea
-                    placeholder="发送消息，或粘贴 / 拖入图片和文件"
+                    placeholder={imageInputSupport.supported
+                      ? '发送消息，或粘贴 / 拖入图片和文件'
+                      : '发送消息，或粘贴 / 拖入文本文件'}
                     onCompositionStart={() => { isComposingRef.current = true; }}
                     onCompositionEnd={() => { isComposingRef.current = false; }}
                     onKeyDown={handleSuggestionKeyDown}
@@ -786,7 +820,7 @@ export function ChatPanel({ session }: Props) {
                           <Tooltip.Content>
                             {attachments.length >= MAX_COMPOSER_ATTACHMENTS
                               ? `最多附加 ${MAX_COMPOSER_ATTACHMENTS} 个文件`
-                              : '添加图片或文本附件'}
+                              : imageInputSupport.supported ? '添加图片或文本附件' : '添加文本附件'}
                           </Tooltip.Content>
                         </Tooltip>
                       )}

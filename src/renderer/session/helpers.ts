@@ -1719,6 +1719,33 @@ export function isV2Conversation(conversation: ConversationRecord | null | undef
   return Boolean(conversation?.v2ConversationId || (conversation?.provider && conversation.provider !== ''));
 }
 
+export function conversationImageInputSupport(
+  conversation: ConversationRecord | null | undefined,
+  providers: ProviderDescriptor[],
+): { supported: boolean; reason?: string } {
+  if (!conversation) {
+    return { supported: false, reason: '请先选择一个对话。' };
+  }
+  // Provider-less conversations use the legacy local Codex path.
+  if (!isV2Conversation(conversation)) {
+    return { supported: true };
+  }
+  const descriptor = providers.find((item) => item.id === conversation.provider);
+  if (descriptor?.capabilities.imageInput === true) {
+    return { supported: true };
+  }
+  if (!descriptor || descriptor.capabilities.imageInput === undefined) {
+    return {
+      supported: false,
+      reason: '当前 Backend 版本未声明图片输入能力，请升级 Backend 后重试。',
+    };
+  }
+  return {
+    supported: false,
+    reason: `${providerDisplayName(descriptor.id, descriptor.displayName)} 当前不支持图片输入；可继续附加文本文件或切换 Agent。`,
+  };
+}
+
 export function resolveCreateConversationAgent(input: {
   requestedProvider?: string;
   requestedProfile?: string;

@@ -6,7 +6,7 @@ import {
   useState,
   type SetStateAction,
 } from 'react';
-import type { ProviderDescriptor, ProviderKind, ConversationManifest, PromptSkillRef, SkillCatalogDescriptor, ProviderModelDescriptor, ProviderCommandDescriptor } from '@todex/protocol/v2';
+import type { ProviderDescriptor, ProviderKind, ConversationManifest, PromptContentRef, PromptSkillRef, SkillCatalogDescriptor, ProviderModelDescriptor, ProviderCommandDescriptor } from '@todex/protocol/v2';
 import { V2ApiClient, buildV2WebSocketUrlWithOptions } from '@todex/protocol/v2';
 import { probeBackendConnection, nextReconnectDelayMs, inspectServerUrl, tokenMatchesOrigin } from '@todex/protocol/connectionProbe';
 import {
@@ -264,6 +264,7 @@ import {
   conversationFromManifest,
   mergeManifestConversations,
   isV2Conversation,
+  conversationImageInputSupport,
   canSwitchConversationAgent,
   resolveCreateConversationAgent,
   isTurnTerminalEvent,
@@ -4800,11 +4801,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       .map((skill) => ({ resourceId: skill.resourceId as string, name: skill.name }));
   }, []);
 
-  const promptContentFromAttachments = useCallback((attachments: ComposerAttachmentDraft[]) => {
-    const content: Array<
-      { type: 'image'; data: string; mimeType: string }
-      | { type: 'text'; text: string }
-    > = [];
+  const promptContentFromAttachments = useCallback((attachments: ComposerAttachmentDraft[]): PromptContentRef[] => {
+    const content: PromptContentRef[] = [];
     for (const attachment of attachments) {
       if (attachment.kind === 'image' && attachment.dataUrl) {
         const comma = attachment.dataUrl.indexOf(',');
@@ -4950,6 +4948,14 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           setConversationAttachments(conversation.id, (current) => current.length > 0 ? current : attachments);
         }
       };
+      if (attachments.some((attachment) => attachment.kind === 'image')) {
+        const imageSupport = conversationImageInputSupport(conversation, v2ProvidersRef.current);
+        if (!imageSupport.supported) {
+          setLastError(imageSupport.reason || '当前 Agent 不支持图片输入');
+          restoreSubmission();
+          return false;
+        }
+      }
       if (
         isFirstPrompt
         && (
@@ -6217,6 +6223,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       return;
     }
     const { workspace, conversation } = context;
+    if (attachments.some((attachment) => attachment.kind === 'image')) {
+      const imageSupport = conversationImageInputSupport(conversation, v2ProvidersRef.current);
+      if (!imageSupport.supported) {
+        setLastError(imageSupport.reason || '当前 Agent 不支持图片输入');
+        return;
+      }
+    }
     const isThinking = thinkingConversations[conversationId] === true;
     const mentionReferences = parseMentionReferences(text);
     if (mentionReferences.length > 0) {
