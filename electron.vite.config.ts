@@ -35,6 +35,10 @@ export default defineConfig({
       alias: {
         '@renderer': resolve(desktopRoot, 'src/renderer'),
         '@todex/protocol': resolve(desktopRoot, '../TodeX_app/src/lib'),
+        '@noble/ciphers': resolve(desktopRoot, 'node_modules/@noble/ciphers'),
+        '@noble/curves': resolve(desktopRoot, 'node_modules/@noble/curves'),
+        '@noble/hashes': resolve(desktopRoot, 'node_modules/@noble/hashes'),
+        '@noble/post-quantum': resolve(desktopRoot, 'node_modules/@noble/post-quantum'),
         '@react-native-community/netinfo': resolve(desktopRoot, 'src/renderer/stubs/netinfo.ts'),
       },
     },

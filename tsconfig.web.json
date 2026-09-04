@@ -16,6 +16,10 @@
     "paths": {
       "@renderer/*": ["src/renderer/*"],
       "@todex/protocol/*": ["../TodeX_app/src/lib/*"],
+      "@noble/ciphers/*": ["node_modules/@noble/ciphers/*"],
+      "@noble/curves/*": ["node_modules/@noble/curves/*"],
+      "@noble/hashes/*": ["node_modules/@noble/hashes/*"],
+      "@noble/post-quantum/*": ["node_modules/@noble/post-quantum/*"],
       "@react-native-community/netinfo": ["src/renderer/stubs/netinfo.ts"]
     }
   },
