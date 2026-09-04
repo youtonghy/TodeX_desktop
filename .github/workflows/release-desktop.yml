@@ -93,7 +93,7 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
 
       - name: Install pnpm
-        run: npm install --global pnpm@${PNPM_VERSION}
+        run: npm install --global pnpm@${{ env.PNPM_VERSION }}
 
       - name: Install dependencies
         shell: bash
@@ -161,7 +161,7 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
 
       - name: Install pnpm
-        run: npm install --global pnpm@${PNPM_VERSION}
+        run: npm install --global pnpm@${{ env.PNPM_VERSION }}
 
       - name: Install dependencies
         shell: bash
