@@ -1,6 +1,6 @@
 allowBuilds:
   electron: true
-  '@heroui-pro/react': true
-  '@zowe/secrets-for-zowe-sdk': false
+  "@heroui-pro/react": true
+  "@zowe/secrets-for-zowe-sdk": true
   esbuild: false
   electron-winstaller: false
