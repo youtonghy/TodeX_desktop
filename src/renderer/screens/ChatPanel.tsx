@@ -342,14 +342,17 @@ export function ChatPanel({ session }: Props) {
     : 'Agent';
   const availableProviders = session.v2Providers.filter((item) => item.available);
   const providerDescriptor = session.v2Providers.find((item) => item.id === currentProvider);
-  const imageInputSupport = conversationImageInputSupport(conversation, session.v2Providers);
+  const liveProviderModels = session.providerModels[currentProvider as ProviderKind];
+  const providerModels = liveProviderModels?.length ? liveProviderModels : providerDescriptor?.models ?? [];
+  const imageInputSupport = conversationImageInputSupport(conversation, session.v2Providers, {
+    models: providerModels,
+    profileCapability: session.providerImageInput[conversation.id],
+  });
   const hasBlockedImageAttachment = !imageInputSupport.supported
     && attachments.some((attachment) => attachment.kind === 'image');
   const attachmentAccept = imageInputSupport.supported
     ? `${COMPOSER_IMAGE_ACCEPT},${COMPOSER_TEXT_ACCEPT}`
     : COMPOSER_TEXT_ACCEPT;
-  const liveProviderModels = session.providerModels[currentProvider as ProviderKind];
-  const providerModels = liveProviderModels?.length ? liveProviderModels : providerDescriptor?.models ?? [];
   const currentModel = conversation.model || providerModels.find((item) => item.isDefault)?.id || (currentProvider === 'codex' ? workspace.model || session.settings.defaultModel : '');
   const currentModelDescriptor = providerModels.find((item) => item.id === currentModel);
   const supportedReasoningEfforts = currentModelDescriptor?.supportedReasoningEfforts ?? [];

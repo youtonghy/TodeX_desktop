@@ -318,12 +318,18 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const terminalByIdRef = useRef<Record<string, TerminalClientState>>({});
   const providerModelPreferencesRef = useRef<ProviderModelPreferences>({});
   const providerModelsRef = useRef<Partial<Record<ProviderKind, ProviderModelDescriptor[]>>>({});
+  const providerImageInputRef = useRef<Record<string, { status: 'loading' | 'ready' | 'error'; imageInput?: boolean; reason?: string }>>({});
   const pendingLocalStartsRef = useRef(new Map<string, PendingLocalStart>());
   const pendingThreadStartsRef = useRef(new Map<string, PendingThreadStart>());
   const pendingThreadListsRef = useRef(new Map<string, PendingThreadList>());
   const pendingThreadActionsRef = useRef(new Map<string, PendingThreadAction>());
   const pendingV2ConversationCreatesRef = useRef(new Map<string, Promise<ConversationRecord | null>>());
   const pendingV2FirstPromptsRef = useRef(new Set<string>());
+  const pendingV2SubmissionsRef = useRef(new Map<string, {
+    text: string;
+    skills: SelectedSkillAttachment[];
+    attachments: ComposerAttachmentDraft[];
+  }>());
   const pendingGitDiffsRef = useRef(new Map<string, PendingGitDiff>());
   const pendingSkillListsRef = useRef(new Map<string, PendingSkillList>());
   const pendingModelListRef = useRef<PendingModelList | null>(null);
@@ -396,6 +402,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const [v2Conversations, setV2Conversations] = useState<ConversationManifest[]>([]);
   const [capabilityCatalogs, setCapabilityCatalogs] = useState<Partial<Record<ProviderKind, CatalogState>>>({});
   const [providerModels, setProviderModels] = useState<Partial<Record<ProviderKind, ProviderModelDescriptor[]>>>({});
+  const [providerImageInput, setProviderImageInput] = useState<Record<string, { status: 'loading' | 'ready' | 'error'; imageInput?: boolean; reason?: string }>>({});
   const [providerModelPreferences, setProviderModelPreferences] = useState<ProviderModelPreferences>({});
   const [providerCommands, setProviderCommands] = useState<Partial<Record<ProviderKind, ProviderCommandDescriptor[]>>>({});
   const [contextUsageByConversation, setContextUsageByConversation] = useState<Record<string, ConversationContextUsage>>({});
@@ -909,6 +916,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   }, [providerModelPreferences]);
 
   useEffect(() => {
+    providerImageInputRef.current = providerImageInput;
+  }, [providerImageInput]);
+
+  useEffect(() => {
     if (!hydrated) {
       return;
     }
@@ -1215,6 +1226,45 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     () => conversations.find((item) => item.id === activeConversationId) ?? null,
     [activeConversationId, conversations],
   );
+
+  useEffect(() => {
+    if (!hydrated || !activeConversation || !activeWorkspace?.path) return;
+    const descriptor = v2Providers.find((item) => item.id === activeConversation.provider);
+    if (descriptor?.capabilities.imageInputMode !== 'profile') return;
+    const conversationId = activeConversation.id;
+    let cancelled = false;
+    setProviderImageInput((current) => ({
+      ...current,
+      [conversationId]: { status: 'loading' },
+    }));
+    const api = new V2ApiClient({ serverUrl: settings.serverUrl, authToken: settings.authToken });
+    void api.getProviderImageInput(
+      descriptor.id,
+      activeWorkspace.path,
+      activeConversation.providerProfile,
+      activeConversation.model,
+    ).then((result) => {
+      if (cancelled) return;
+      setProviderImageInput((current) => ({
+        ...current,
+        [conversationId]: {
+          status: 'ready',
+          imageInput: result.imageInput,
+          reason: result.reason,
+        },
+      }));
+    }).catch((error) => {
+      if (cancelled) return;
+      setProviderImageInput((current) => ({
+        ...current,
+        [conversationId]: {
+          status: 'error',
+          reason: error instanceof Error ? error.message : '无法确认当前 ACP 配置的图片能力。',
+        },
+      }));
+    });
+    return () => { cancelled = true; };
+  }, [activeConversation, activeWorkspace?.path, hydrated, settings.authToken, settings.serverUrl, v2Providers]);
 
   useEffect(() => {
     if (!hydrated || !activeConversation?.v2ConversationId || !settings.serverUrl.trim()) {
@@ -2459,6 +2509,25 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
             setConversationThinking(conversation.id, true);
           }
           if (event.type === 'turn.completed' || event.type === 'turn.cancelled' || event.type === 'turn.failed') {
+            const pendingSubmission = pendingV2SubmissionsRef.current.get(conversation.id);
+            const eventData = event.payload && typeof event.payload === 'object' && !Array.isArray(event.payload)
+              ? event.payload as Record<string, unknown>
+              : {};
+            if (
+              event.type === 'turn.failed'
+              && eventData.code === 'IMAGE_INPUT_UNSUPPORTED'
+              && pendingSubmission
+            ) {
+              setConversationChatDraft(conversation.id, (current) => current || pendingSubmission.text);
+              if (pendingSubmission.skills.length > 0) {
+                setConversationSelectedSkills(conversation.id, (current) => current.length > 0 ? current : pendingSubmission.skills);
+              }
+              if (pendingSubmission.attachments.length > 0) {
+                setConversationAttachments(conversation.id, (current) => current.length > 0 ? current : pendingSubmission.attachments);
+              }
+              setLastError(typeof eventData.message === 'string' ? eventData.message : '当前 Agent 不支持图片输入');
+            }
+            pendingV2SubmissionsRef.current.delete(conversation.id);
             setConversationThinking(conversation.id, false);
             setConversationTurnId(conversation.id, '');
           }
@@ -4949,12 +5018,18 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         }
       };
       if (attachments.some((attachment) => attachment.kind === 'image')) {
-        const imageSupport = conversationImageInputSupport(conversation, v2ProvidersRef.current);
+        const imageSupport = conversationImageInputSupport(conversation, v2ProvidersRef.current, {
+          models: conversation.provider
+            ? providerModelsRef.current[conversation.provider as ProviderKind]
+            : undefined,
+          profileCapability: providerImageInputRef.current[conversation.id],
+        });
         if (!imageSupport.supported) {
           setLastError(imageSupport.reason || '当前 Agent 不支持图片输入');
           restoreSubmission();
           return false;
         }
+        pendingV2SubmissionsRef.current.set(conversation.id, { text, skills, attachments });
       }
       if (
         isFirstPrompt
@@ -6224,7 +6299,12 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     }
     const { workspace, conversation } = context;
     if (attachments.some((attachment) => attachment.kind === 'image')) {
-      const imageSupport = conversationImageInputSupport(conversation, v2ProvidersRef.current);
+      const imageSupport = conversationImageInputSupport(conversation, v2ProvidersRef.current, {
+        models: conversation.provider
+          ? providerModelsRef.current[conversation.provider as ProviderKind]
+          : undefined,
+        profileCapability: providerImageInputRef.current[conversation.id],
+      });
       if (!imageSupport.supported) {
         setLastError(imageSupport.reason || '当前 Agent 不支持图片输入');
         return;
@@ -6557,6 +6637,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     v2Conversations,
     capabilityCatalogs,
     providerModels,
+    providerImageInput,
     providerCommands,
     contextUsageByConversation,
     usageRecords,

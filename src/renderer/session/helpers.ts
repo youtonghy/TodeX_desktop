@@ -1722,6 +1722,10 @@ export function isV2Conversation(conversation: ConversationRecord | null | undef
 export function conversationImageInputSupport(
   conversation: ConversationRecord | null | undefined,
   providers: ProviderDescriptor[],
+  options: {
+    models?: ProviderModelDescriptor[];
+    profileCapability?: { status: 'loading' | 'ready' | 'error'; imageInput?: boolean; reason?: string };
+  } = {},
 ): { supported: boolean; reason?: string } {
   if (!conversation) {
     return { supported: false, reason: '请先选择一个对话。' };
@@ -1731,6 +1735,36 @@ export function conversationImageInputSupport(
     return { supported: true };
   }
   const descriptor = providers.find((item) => item.id === conversation.provider);
+  const mode = descriptor?.capabilities.imageInputMode;
+  if (mode === 'model') {
+    const models = options.models?.length ? options.models : descriptor?.models ?? [];
+    const model = conversation.model
+      ? models.find((item) => item.id === conversation.model)
+      : models.find((item) => item.isDefault);
+    if (model?.imageInput === true) return { supported: true };
+    return {
+      supported: false,
+      reason: model
+        ? `当前模型 ${model.displayName || model.id} 不支持图片输入，请切换模型。`
+        : '尚未确认当前模型是否支持图片输入，请等待模型列表加载完成。',
+    };
+  }
+  if (mode === 'profile') {
+    if (options.profileCapability?.status === 'ready') {
+      return options.profileCapability.imageInput
+        ? { supported: true }
+        : { supported: false, reason: options.profileCapability.reason || '当前 ACP 配置不支持图片输入。' };
+    }
+    return {
+      supported: false,
+      reason: options.profileCapability?.status === 'error'
+        ? options.profileCapability.reason || '无法确认当前 ACP 配置的图片能力。'
+        : '正在确认当前 ACP 配置的图片能力…',
+    };
+  }
+  if (mode === 'none') {
+    return { supported: false, reason: '当前 Agent 不支持图片输入。' };
+  }
   if (descriptor?.capabilities.imageInput === true) {
     return { supported: true };
   }
