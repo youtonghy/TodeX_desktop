@@ -25,6 +25,14 @@ export default defineConfig({
     },
   },
   renderer: {
+    esbuild: {
+      tsconfigRaw: JSON.stringify({
+        compilerOptions: {
+          jsx: 'react-jsx',
+          useDefineForClassFields: true,
+        },
+      }),
+    },
     define: {
       __TODEX_BUILD_VERSION__: JSON.stringify(buildVersion),
     },
