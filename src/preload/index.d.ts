@@ -26,6 +26,18 @@ export type TodeXDesktopApi = {
     shouldUseDark: () => Promise<boolean>;
     onUpdated: (listener: (dark: boolean) => void) => () => void;
   };
+  debug: {
+    info: () => Promise<DesktopDebugLogInfo>;
+    log: (level: string, event: string, data?: unknown) => void;
+  };
+};
+
+export type DesktopDebugLogInfo = {
+  enabled: boolean;
+  buildVersion: string;
+  configPath: string;
+  logPath: string;
+  chromiumLogPath: string;
 };
 
 export type GitRepositorySummary = {

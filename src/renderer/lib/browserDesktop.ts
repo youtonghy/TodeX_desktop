@@ -54,6 +54,10 @@ export function installBrowserDesktopBridge(): void {
         return () => media.removeEventListener('change', handler);
       },
     },
+    debug: {
+      info: async () => ({ enabled: false, buildVersion: 'browser', configPath: '', logPath: '', chromiumLogPath: '' }),
+      log: () => undefined,
+    },
   };
 
   window.todexDesktop = api;

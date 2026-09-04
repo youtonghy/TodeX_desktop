@@ -18,6 +18,13 @@ export type GitRepositorySummary = {
   initialEligible?: boolean;
   error?: string;
 };
+export type DesktopDebugLogInfo = {
+  enabled: boolean;
+  buildVersion: string;
+  configPath: string;
+  logPath: string;
+  chromiumLogPath: string;
+};
 
 const api = {
   store: {
@@ -44,6 +51,12 @@ const api = {
       return () => {
         ipcRenderer.removeListener('theme:updated', handler);
       };
+    },
+  },
+  debug: {
+    info: () => ipcRenderer.invoke('debug:info') as Promise<DesktopDebugLogInfo>,
+    log: (level: string, event: string, data?: unknown) => {
+      ipcRenderer.send('debug:log', { level, event, data });
     },
   },
 };

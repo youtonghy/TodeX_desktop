@@ -8,9 +8,15 @@ const buildVersion = process.env.TODEX_BUILD_VERSION?.trim() || 'DEV0.0.0';
 
 export default defineConfig({
   main: {
+    define: {
+      __TODEX_BUILD_VERSION__: JSON.stringify(buildVersion),
+    },
     plugins: [externalizeDepsPlugin()],
   },
   preload: {
+    define: {
+      __TODEX_BUILD_VERSION__: JSON.stringify(buildVersion),
+    },
     plugins: [externalizeDepsPlugin()],
     build: {
       rollupOptions: {

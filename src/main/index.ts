@@ -4,6 +4,16 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import {
+  DEBUG_BUILD_VERSION,
+  DEBUG_LOG_PATH_KEY,
+  DebugLogger,
+  chromiumLogPath,
+  installConsoleCapture,
+  isDebugBuild,
+  normalizeConfiguredLogPath,
+  type DebugLogLevel,
+} from './debugLogger';
 
 const execFileAsync = promisify(execFile);
 
@@ -12,8 +22,33 @@ const MAX_FILE_ATTACHMENT_BYTES = 512 * 1024;
 const APP_IDENTITY = 'todex-desktop';
 const PROTOCOL_VERSION = 'v2';
 const DEFAULT_BACKEND_URL = process.env.TODEX_BACKEND_URL?.trim() || 'http://127.0.0.1:7345';
+const BUILD_VERSION = typeof __TODEX_BUILD_VERSION__ === 'string'
+  ? __TODEX_BUILD_VERSION__
+  : process.env.TODEX_BUILD_VERSION?.trim() || (app.isPackaged ? app.getVersion() : DEBUG_BUILD_VERSION);
+const DEBUG_BUILD = isDebugBuild(BUILD_VERSION);
 
 type StoreShape = Record<string, unknown>;
+
+let debugLogger: DebugLogger | null = null;
+
+function debugLog(level: DebugLogLevel, event: string, data?: unknown): void {
+  debugLogger?.write(level, event, data);
+}
+
+function handleIpc(channel: string, handler: (event: Electron.IpcMainInvokeEvent, ...args: any[]) => unknown): void {
+  ipcMain.handle(channel, async (event, ...args: any[]) => {
+    const started = Date.now();
+    debugLog('trace', 'ipc.request', { channel, senderId: event.sender.id, args });
+    try {
+      const result = await handler(event, ...args);
+      debugLog('trace', 'ipc.response', { channel, senderId: event.sender.id, durationMs: Date.now() - started, result });
+      return result;
+    } catch (error) {
+      debugLog('error', 'ipc.error', { channel, senderId: event.sender.id, durationMs: Date.now() - started, error });
+      throw error;
+    }
+  });
+}
 
 function sourceRoot(): string {
   try {
@@ -48,10 +83,13 @@ function assertElectronBinary(): void {
 
 async function probeDefaultBackend(): Promise<void> {
   const target = `${DEFAULT_BACKEND_URL.replace(/\/+$/, '')}/v2/version`;
+  debugLog('debug', 'backend.probe.request', { target });
   try {
     const response = await fetch(target, { signal: AbortSignal.timeout(2000) });
+    debugLog('debug', 'backend.probe.response', { target, status: response.status });
     console.log(`[${APP_IDENTITY}] backendProbe ${target} -> ${response.status}`);
   } catch (error) {
+    debugLog('warn', 'backend.probe.error', { target, error });
     console.warn(`[${APP_IDENTITY}] backendProbe ${target} failed: ${error instanceof Error ? error.message : error}`);
   }
 }
@@ -74,6 +112,58 @@ function writeStore(value: StoreShape): void {
   writeFileSync(target, JSON.stringify(value, null, 2), 'utf8');
 }
 
+function initializeDebugLogging(): void {
+  if (!DEBUG_BUILD) return;
+  const userDataPath = app.getPath('userData');
+  const configuredPath = readStore()[DEBUG_LOG_PATH_KEY];
+  const logPath = normalizeConfiguredLogPath(
+    process.env.TODEX_DESKTOP_LOG_PATH?.trim() || configuredPath,
+    userDataPath,
+  );
+  const info = {
+    enabled: true,
+    buildVersion: BUILD_VERSION,
+    configPath: storePath(),
+    logPath,
+    chromiumLogPath: chromiumLogPath(logPath),
+  };
+  try {
+    const store = readStore();
+    if (store[DEBUG_LOG_PATH_KEY] !== logPath) {
+      store[DEBUG_LOG_PATH_KEY] = logPath;
+      writeStore(store);
+    }
+  } catch {
+    // The logger itself remains usable even when the store cannot be updated.
+  }
+  debugLogger = new DebugLogger(info);
+  debugLogger.start();
+  installConsoleCapture(debugLogger, 'main');
+  debugLog('info', 'app.start', {
+    app: APP_IDENTITY,
+    buildVersion: BUILD_VERSION,
+    electron: process.versions.electron,
+    chrome: process.versions.chrome,
+    platform: process.platform,
+    arch: process.arch,
+    execPath: process.execPath,
+    userData: userDataPath,
+  });
+  process.on('unhandledRejection', (reason) => debugLog('error', 'process.unhandledRejection', { reason }));
+  process.on('uncaughtException', (error) => {
+    debugLog('fatal', 'process.uncaughtException', { error });
+    setImmediate(() => process.exit(1));
+  });
+  app.commandLine.appendSwitch('enable-logging', 'file');
+  app.commandLine.appendSwitch('log-file', info.chromiumLogPath);
+  app.commandLine.appendSwitch('v', '1');
+  try {
+    app.setAppLogsPath(dirname(logPath));
+  } catch (error) {
+    debugLog('warn', 'app.logsPath.error', { error });
+  }
+}
+
 function createWindow(): BrowserWindow {
   const window = new BrowserWindow({
     width: 1280,
@@ -91,9 +181,26 @@ function createWindow(): BrowserWindow {
   });
 
   window.webContents.setWindowOpenHandler(({ url }) => {
+    debugLog('debug', 'window.open.request', { url });
     void shell.openExternal(url);
     return { action: 'deny' };
   });
+
+  window.webContents.on('console-message', (_event, level, message, line, sourceId) => {
+    debugLog(level >= 3 ? 'error' : level === 2 ? 'warn' : level === 1 ? 'info' : 'debug', 'renderer.console', {
+      level,
+      message,
+      line,
+      sourceId,
+      webContentsId: window.webContents.id,
+    });
+  });
+  window.webContents.on('did-start-loading', () => debugLog('debug', 'renderer.did-start-loading', { id: window.webContents.id }));
+  window.webContents.on('dom-ready', () => debugLog('debug', 'renderer.dom-ready', { id: window.webContents.id }));
+  window.webContents.on('did-stop-loading', () => debugLog('debug', 'renderer.did-stop-loading', { id: window.webContents.id }));
+  window.webContents.on('render-process-gone', (_event, details) => debugLog('fatal', 'renderer.process-gone', { id: window.webContents.id, details }));
+  window.webContents.on('unresponsive', () => debugLog('error', 'renderer.unresponsive', { id: window.webContents.id }));
+  window.webContents.on('responsive', () => debugLog('info', 'renderer.responsive', { id: window.webContents.id }));
 
   if (process.env.ELECTRON_RENDERER_URL) {
     console.log(`[${APP_IDENTITY}] loading renderer URL ${process.env.ELECTRON_RENDERER_URL}`);
@@ -107,12 +214,15 @@ function createWindow(): BrowserWindow {
   logIdentity(window);
 
   window.webContents.on('preload-error', (_event, path, error) => {
+    debugLog('error', 'renderer.preload-error', { path, error });
     console.error('TodeX preload error', path, error);
   });
   window.webContents.on('did-finish-load', () => {
+    debugLog('info', 'renderer.did-finish-load', { id: window.webContents.id, url: window.webContents.getURL() });
     console.log('TodeX renderer loaded');
   });
   window.webContents.on('did-fail-load', (_event, code, description, url) => {
+    debugLog('error', 'renderer.did-fail-load', { code, description, url });
     console.error('TodeX renderer failed to load', code, description, url);
   });
 
@@ -212,18 +322,38 @@ async function findGitRepositories(workspacePath: string): Promise<string[]> {
   return [...roots];
 }
 
+initializeDebugLogging();
+
 app.whenReady().then(() => {
+  debugLog('info', 'app.ready', { readyAt: new Date().toISOString() });
   try {
     assertElectronBinary();
   } catch (error) {
     console.error(`[${APP_IDENTITY}] ${error instanceof Error ? error.message : error}`);
   }
   void probeDefaultBackend();
-  ipcMain.handle('store:get', (_event, key: string) => {
+  ipcMain.on('debug:log', (event, payload: { level?: unknown; event?: unknown; data?: unknown }) => {
+    if (!DEBUG_BUILD) return;
+    const level = payload?.level;
+    const accepted: DebugLogLevel[] = ['trace', 'debug', 'info', 'warn', 'error', 'fatal'];
+    debugLog(accepted.includes(level as DebugLogLevel) ? level as DebugLogLevel : 'debug', typeof payload?.event === 'string' ? payload.event : 'renderer.event', {
+      source: 'renderer',
+      webContentsId: event.sender.id,
+      data: payload?.data,
+    });
+  });
+  handleIpc('debug:info', () => debugLogger?.info ?? {
+    enabled: false,
+    buildVersion: BUILD_VERSION,
+    configPath: storePath(),
+    logPath: '',
+    chromiumLogPath: '',
+  });
+  handleIpc('store:get', (_event, key: string) => {
     return readStore()[key] ?? null;
   });
 
-  ipcMain.handle('store:set', (_event, key: string, value: unknown) => {
+  handleIpc('store:set', (_event, key: string, value: unknown) => {
     const next = readStore();
     if (value === undefined) {
       delete next[key];
@@ -233,14 +363,14 @@ app.whenReady().then(() => {
     writeStore(next);
   });
 
-  ipcMain.handle('dialog:openDirectory', async () => {
+  handleIpc('dialog:openDirectory', async () => {
     const result = await dialog.showOpenDialog({
       properties: ['openDirectory', 'createDirectory'],
     });
     return result.canceled ? null : result.filePaths[0] ?? null;
   });
 
-  ipcMain.handle('dialog:openFiles', async (_event, options?: { images?: boolean }) => {
+  handleIpc('dialog:openFiles', async (_event, options?: { images?: boolean }) => {
     const result = await dialog.showOpenDialog({
       properties: ['openFile', 'multiSelections'],
       filters: options?.images
@@ -250,7 +380,7 @@ app.whenReady().then(() => {
     return result.canceled ? [] : result.filePaths;
   });
 
-  ipcMain.handle('fs:readFile', async (_event, filePath: string) => {
+  handleIpc('fs:readFile', async (_event, filePath: string) => {
     if (!existsSync(filePath)) {
       throw new Error('文件不存在');
     }
@@ -274,7 +404,7 @@ app.whenReady().then(() => {
     };
   });
 
-  ipcMain.handle('git:scan', async (_event, workspacePath: string) => {
+  handleIpc('git:scan', async (_event, workspacePath: string) => {
     const repos = await findGitRepositories(workspacePath);
     const summaries = await Promise.all(repos.map(async (repoPath) => {
       try { return await gitSummary(repoPath); }
@@ -295,7 +425,7 @@ app.whenReady().then(() => {
     return summaries;
   });
 
-  ipcMain.handle('git:run', async (_event, workspacePath: string, action: 'commit' | 'commit-push' | 'push' | 'initial', message?: string, includeUnstaged = true) => {
+  handleIpc('git:run', async (_event, workspacePath: string, action: 'commit' | 'commit-push' | 'push' | 'initial', message?: string, includeUnstaged = true) => {
     const outputs: string[] = [];
     const repositoryRoot = await gitText(workspacePath, ['rev-parse', '--show-toplevel']).catch(() => '');
     const targets = [repositoryRoot || workspacePath];
@@ -314,9 +444,10 @@ app.whenReady().then(() => {
     return { output: outputs.filter(Boolean).join('\n') || '操作完成' };
   });
 
-  ipcMain.handle('theme:shouldUseDark', () => nativeTheme.shouldUseDarkColors);
+  handleIpc('theme:shouldUseDark', () => nativeTheme.shouldUseDarkColors);
 
   nativeTheme.on('updated', () => {
+    debugLog('info', 'theme.updated', { dark: nativeTheme.shouldUseDarkColors });
     for (const window of BrowserWindow.getAllWindows()) {
       window.webContents.send('theme:updated', nativeTheme.shouldUseDarkColors);
     }
@@ -331,7 +462,10 @@ app.whenReady().then(() => {
   });
 });
 
+app.on('before-quit', () => debugLog('info', 'app.before-quit'));
+app.on('child-process-gone', (_event, details) => debugLog('error', 'app.child-process-gone', { details }));
 app.on('window-all-closed', () => {
+  debugLog('info', 'app.window-all-closed', { platform: process.platform });
   if (process.platform !== 'darwin') {
     app.quit();
   }

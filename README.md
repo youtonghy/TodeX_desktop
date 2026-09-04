@@ -161,6 +161,16 @@ and SHA-256 checksums to the `v1.2.3` GitHub Release.
 Development builds display `DEV0.0.0`; `package.json` keeps the valid placeholder
 version `0.0.0` until packaging receives a release version from CI.
 
+### Development logs
+
+Detailed desktop diagnostics are enabled only for builds whose version is exactly
+`DEV0.0.0`. By default they are written to
+`Electron userData/logs/todex-desktop-debug.log`; the resolved path is persisted in
+`todex-desktop-store.json` under `todex.desktop.debug.logPath`. Set
+`TODEX_DESKTOP_LOG_PATH` to override it for a local run. Logs include window, IPC,
+HTTP, WebSocket, and uncaught-error events, while redacting or truncating tokens,
+cookies, keys, and attachment contents.
+
 The Windows and macOS packages are currently unsigned, so SmartScreen or Gatekeeper
 may require the user to approve the first launch. The build checks out the mobile
 repository's `main` branch beside this repository because the desktop client shares

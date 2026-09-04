@@ -160,6 +160,14 @@ x64 AppImage 和 SHA-256 校验文件。
 开发构建显示 `DEV0.0.0`；`package.json` 保留格式合法的 `0.0.0` 占位版本，
 直到 CI 打包时传入正式版本。
 
+### 开发日志
+
+只有版本为 `DEV0.0.0` 的开发构建会启用详细桌面诊断日志。默认日志写入
+`Electron userData/logs/todex-desktop-debug.log`，实际路径会保存到
+`todex-desktop-store.json` 的 `todex.desktop.debug.logPath` 键中；也可以通过
+`TODEX_DESKTOP_LOG_PATH` 临时指定日志文件。日志包含窗口、IPC、HTTP、WebSocket
+和未捕获异常等运行信息，并会对 Token、Cookie、密钥和附件内容脱敏或截断。
+
 Windows 与 macOS 安装包目前没有代码签名，首次运行时可能需要用户手动通过
 SmartScreen 或 Gatekeeper。由于桌面端直接共享移动端协议源码，构建时会把移动端
 仓库的 `main` 分支检出到相邻目录，并将验证时解析出的提交固定用于全部平台。如果
