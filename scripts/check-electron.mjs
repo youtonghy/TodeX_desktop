@@ -50,13 +50,22 @@ if (!binary) {
   fail(`electron binary missing in ${join(electronRoot, 'dist')}`);
 }
 
-const result = spawnSync(binary, ['--version'], {
-  encoding: 'utf8',
-  timeout: 15_000,
-  env: { ...process.env, ELECTRON_RUN_AS_NODE: undefined },
-});
+const result = spawnSync(
+  binary,
+  ['-e', "process.stdout.write(process.versions.electron || '')"],
+  {
+    encoding: 'utf8',
+    timeout: 15_000,
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+  },
+);
 if (result.status !== 0) {
-  fail(`electron --version exited ${result.status}: ${result.stderr || result.stdout || result.signal || 'no output'}`);
+  fail(`electron executable exited ${result.status}: ${result.stderr || result.stdout || result.signal || 'no output'}`);
 }
 
-console.log(`[todex-desktop] electron preflight ok ${String(result.stdout).trim()} (${binary})`);
+const electronVersion = String(result.stdout).trim();
+if (!electronVersion) {
+  fail('electron executable did not report an Electron version');
+}
+
+console.log(`[todex-desktop] electron preflight ok ${electronVersion} (${binary})`);
