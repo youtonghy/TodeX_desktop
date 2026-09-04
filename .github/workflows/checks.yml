@@ -1,0 +1,63 @@
+name: Desktop checks
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-checks-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "22"
+  PNPM_VERSION: "11.24.0"
+
+jobs:
+  validate:
+    name: Typecheck and build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      HEROUI_AUTH_TOKEN: ${{ secrets.HEROUI_AUTH_TOKEN }}
+    steps:
+      - name: Checkout desktop
+        uses: actions/checkout@v6
+        with:
+          path: TodeX_desktop
+
+      - name: Checkout shared protocol
+        uses: actions/checkout@v6
+        with:
+          repository: youtonghy/TodeX
+          ref: main
+          path: TodeX_app
+          token: ${{ secrets.PROTOCOL_REPO_TOKEN || github.token }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install pnpm
+        run: npm install --global pnpm@${PNPM_VERSION}
+
+      - name: Install dependencies
+        working-directory: TodeX_desktop
+        run: pnpm install --frozen-lockfile
+
+      - name: Check Electron
+        working-directory: TodeX_desktop
+        run: pnpm run check:electron
+
+      - name: Typecheck
+        working-directory: TodeX_desktop
+        run: pnpm run typecheck
+
+      - name: Build
+        working-directory: TodeX_desktop
+        run: pnpm run build
