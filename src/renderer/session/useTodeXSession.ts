@@ -4730,6 +4730,37 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     return true;
   }, [getConversationContext, sendNativeThreadAction]);
 
+  // Only local, never-started placeholders are disposable. A remote ID may
+  // represent history that has not been loaded yet.
+  const isUnusedConversation = useCallback((conversation: ConversationRecord) => (
+    !conversation.archived
+    && !conversation.preview?.trim()
+    && !turnIdsRef.current[conversation.id]
+    && !pendingV2ConversationCreatesRef.current.has(conversation.id)
+    && !pendingV2FirstPromptsRef.current.has(conversation.id)
+    && canSwitchConversationAgent(conversation, {
+      timeline: timelineRef.current,
+      thinking: thinkingConversationsRef.current[conversation.id] === true,
+    })
+  ), []);
+
+  useEffect(() => {
+    if (!hydrated || !conversations.some((item) => item.id === activeConversationId && item.workspaceId === activeWorkspaceId)) return;
+    const unusedIds = new Set(conversations
+      .filter((item) => item.id !== activeConversationId && isUnusedConversation(item))
+      .map((item) => item.id));
+    if (unusedIds.size === 0) return;
+    conversationsRef.current = conversationsRef.current.filter((item) => !unusedIds.has(item.id));
+    setConversations((current) => current.filter((item) => !unusedIds.has(item.id)));
+    const withoutUnused = <T,>(current: Record<string, T>): Record<string, T> =>
+      Object.fromEntries(Object.entries(current).filter(([id]) => !unusedIds.has(id)));
+    setChatDrafts(withoutUnused);
+    setQueuedChatDrafts(withoutUnused);
+    setComposerSelections(withoutUnused);
+    setComposerAttachments(withoutUnused);
+    setSelectedSkills(withoutUnused);
+  }, [activeConversationId, activeWorkspaceId, conversations, hydrated, isUnusedConversation]);
+
   const createConversation = useCallback((
     workspaceId: string,
     options?: { provider?: ProviderKind; providerProfile?: string; title?: string; backendConnectionId?: string },
@@ -4758,9 +4789,18 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     const backendProfile = backendConnections.find((item) => item.id === options?.backendConnectionId) ?? backendConnections.find((item) => item.id === workspace.backendConnectionId);
     const backendConnectionId = backendProfile?.id ?? workspace.backendConnectionId ?? null;
     const rememberedSelection = resolveRememberedProviderSelection(backendConnectionId, agent.provider);
+    const existing = conversationsRef.current.find((item) =>
+      item.workspaceId === workspaceId
+      && item.backendConnectionId === backendConnectionId
+      && isUnusedConversation(item));
+    if (existing && existing.provider && !options?.provider && !options?.title) {
+      setActiveWorkspaceId(workspace.id);
+      setActiveConversationId(existing.id);
+      return existing;
+    }
     const now = Date.now();
     const placeholder = {
-      ...createDefaultConversation(workspace),
+      ...(existing ?? createDefaultConversation(workspace)),
       title: options?.title?.trim() || '新对话',
       provider: agent.provider,
       providerProfile: agent.providerProfile,
@@ -4770,12 +4810,12 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       createdAt: now,
       updatedAt: now,
     };
-    conversationsRef.current = [placeholder, ...conversationsRef.current];
-    setConversations((current) => [placeholder, ...current]);
+    conversationsRef.current = [placeholder, ...conversationsRef.current.filter((item) => item.id !== placeholder.id)];
+    setConversations((current) => [placeholder, ...current.filter((item) => item.id !== placeholder.id)]);
     setActiveWorkspaceId(workspace.id);
     setActiveConversationId(placeholder.id);
     return placeholder;
-  }, [backendConnections, resolveRememberedProviderSelection]);
+  }, [backendConnections, isUnusedConversation, resolveRememberedProviderSelection]);
 
   const switchConversationAgent = useCallback((conversationId: string, provider: ProviderKind) => {
     const context = getConversationContext(conversationId);
