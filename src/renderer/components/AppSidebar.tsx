@@ -120,10 +120,11 @@ export function AppSidebar({
   // Stable sorting for conversations: based on last message/updated time, never jumps upon clicking
   const sortedConversations = useMemo(() => {
     return [...workspaceConversations].sort((a, b) => {
-      const aTime = Math.max(a.updatedAt || 0, a.createdAt || 0, timelineInfoMap[a.id]?.latestAt || 0);
-      const bTime = Math.max(b.updatedAt || 0, b.createdAt || 0, timelineInfoMap[b.id]?.latestAt || 0);
+      const aTime = Math.max(a.updatedAt || 0, a.createdAt || 0);
+      const bTime = Math.max(b.updatedAt || 0, b.createdAt || 0);
       if (bTime !== aTime) return bTime - aTime;
-      return (b.title || '').localeCompare(a.title || '');
+      if ((b.createdAt || 0) !== (a.createdAt || 0)) return (b.createdAt || 0) - (a.createdAt || 0);
+      return a.id.localeCompare(b.id);
     });
   }, [workspaceConversations, timelineInfoMap]);
 
@@ -287,7 +288,7 @@ export function AppSidebar({
                         id={workspace.id}
                         className={`sidebar-item ${isSelected ? 'is-selected' : ''}`}
                         textValue={workspaceDisplayName(workspace)}
-                        {...({ draggable: true, onDragStart: () => setDraggedWorkspaceId(workspace.id), onDragOver: (event: DragEvent) => event.preventDefault(), onDrop: () => { if (!draggedWorkspaceId || draggedWorkspaceId === workspace.id) return; const from = orderedWorkspaces.findIndex((item) => item.id === draggedWorkspaceId); const to = orderedWorkspaces.findIndex((item) => item.id === workspace.id); const next = [...orderedWorkspaces]; const [moved] = next.splice(from, 1); next.splice(to, 0, moved); next.forEach((item, index) => session.updateWorkspace(item.id, { sortOrder: index })); setDraggedWorkspaceId(null); }} as any)} onContextMenu={(event) => openContextMenu(event, 'workspace', workspace.id)}
+                        {...({ draggable: true, onDragStart: (event: DragEvent) => { event.dataTransfer?.setData('text/plain', workspace.id); if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'; setDraggedWorkspaceId(workspace.id); }, onDragOver: (event: DragEvent) => { event.preventDefault(); if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'; }, onDrop: (event: DragEvent) => { event.preventDefault(); const sourceId = draggedWorkspaceId || event.dataTransfer?.getData('text/plain'); if (!sourceId || sourceId === workspace.id) { setDraggedWorkspaceId(null); return; } const from = orderedWorkspaces.findIndex((item) => item.id === sourceId); const to = orderedWorkspaces.findIndex((item) => item.id === workspace.id); if (from < 0 || to < 0) { setDraggedWorkspaceId(null); return; } const next = [...orderedWorkspaces]; const [moved] = next.splice(from, 1); next.splice(to, 0, moved); next.forEach((item, index) => session.updateWorkspace(item.id, { sortOrder: index })); setDraggedWorkspaceId(null); }, onDragEnd: () => setDraggedWorkspaceId(null) } as any)} onContextMenu={(event) => openContextMenu(event, 'workspace', workspace.id)}
                       >
                         <ChatListView.ItemContent>
                           <ChatListView.Icon>
