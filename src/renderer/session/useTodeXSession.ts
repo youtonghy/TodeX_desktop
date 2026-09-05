@@ -276,6 +276,7 @@ import {
   isCollapsibleProgressEntry,
   executionGroupId,
   buildConversationRenderItems,
+  buildConversationControlMessage,
   type ConversationContextUsage,
   type UsageRecord,
   normalizeUsageRecords,
@@ -6368,11 +6369,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         setLastError('第一条消息正在创建对话，请稍候。');
         return;
       }
-      if (sendRawProtocolFrame({
-        id: createRequestId('cancel'),
-        type: 'conversation.cancel',
-        payload: { conversationId: v2Id },
-      })) {
+      if (sendRawProtocolFrame(buildConversationControlMessage(v2Id, 'cancel'))) {
         appendTimeline(makeSystemEntry('已发送停止', '正在请求 Backend 取消当前回合。', workspace.id, conversation.id));
       } else {
         setLastError('请先连接 Backend。');

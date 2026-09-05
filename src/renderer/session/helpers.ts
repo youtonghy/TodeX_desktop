@@ -23,6 +23,18 @@ export type ResolvedSessionConfig = {
   approvalPolicy?: import('@todex/protocol/v2').ResolvedConfigValue<string>;
   sandboxMode?: import('@todex/protocol/v2').ResolvedConfigValue<string>;
 };
+
+export function buildConversationControlMessage(
+  conversationId: string,
+  action: import('@todex/protocol/v2').ConversationControlAction,
+  payload: Record<string, unknown> = {},
+): { id: string; type: string; payload: Record<string, unknown> } {
+  return {
+    id: createRequestId(`conversation-${action}`),
+    type: action === 'cancel' ? 'conversation.cancel' : `conversation.${action}`,
+    payload: { conversationId, ...payload },
+  };
+}
 import { providerDisplayName } from '@todex/protocol/v2';
 import type { ConnectionFailureCode } from '@todex/protocol/connectionError';
 import {
