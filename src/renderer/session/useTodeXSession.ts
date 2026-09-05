@@ -6,7 +6,8 @@ import {
   useState,
   type SetStateAction,
 } from 'react';
-import type { ProviderDescriptor, ProviderKind, ConversationManifest, PromptContentRef, PromptSkillRef, SkillCatalogDescriptor, ProviderModelDescriptor, ProviderCommandDescriptor } from '@todex/protocol/v2';
+import type { ProviderDescriptor, ProviderKind, ConversationManifest, PromptContentRef, PromptSkillRef, SkillCatalogDescriptor, ProviderModelDescriptor, ProviderCommandDescriptor, ContextCompactionState } from '@todex/protocol/v2';
+import { contextCompactionStatus } from '@todex/protocol/v2';
 import { V2ApiClient, buildV2WebSocketUrlWithOptions } from '@todex/protocol/v2';
 import { probeBackendConnection, nextReconnectDelayMs, inspectServerUrl, tokenMatchesOrigin } from '@todex/protocol/connectionProbe';
 import {
@@ -417,7 +418,25 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const [providerModelPreferences, setProviderModelPreferences] = useState<ProviderModelPreferences>({});
   const [providerCommands, setProviderCommands] = useState<Partial<Record<ProviderKind, ProviderCommandDescriptor[]>>>({});
   const [contextUsageByConversation, setContextUsageByConversation] = useState<Record<string, ConversationContextUsage>>({});
+  const [compactionByConversation, setCompactionByConversation] = useState<Record<string, ContextCompactionState>>({});
   const [usageRecords, setUsageRecords] = useState<UsageRecord[]>([]);
+
+  useEffect(() => {
+    setCompactionByConversation((current) => {
+      const next = { ...current };
+      for (const [conversationId, usage] of Object.entries(contextUsageByConversation)) {
+        const status = contextCompactionStatus(usage.usedTokens, usage.contextWindow);
+        next[conversationId] = {
+          ...next[conversationId],
+          status,
+          usedTokens: usage.usedTokens,
+          contextWindow: usage.contextWindow,
+          updatedAt: new Date(usage.updatedAt).toISOString(),
+        };
+      }
+      return next;
+    });
+  }, [contextUsageByConversation]);
 
   useEffect(() => {
     if (!hydrated || !settings.serverUrl.trim()) {
@@ -6748,6 +6767,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     providerImageInput,
     providerCommands,
     contextUsageByConversation,
+    compactionByConversation,
     usageRecords,
     pendingRequests,
     selectedRequest,
