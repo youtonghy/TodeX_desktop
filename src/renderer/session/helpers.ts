@@ -1939,6 +1939,7 @@ export type V2ConversationReplayState = {
   timeline: TimelineEntry[];
   activeTurnId: string;
   lastSequence: number;
+  missingSequences: number[];
 };
 
 export function reduceV2ConversationEvents(
@@ -1948,8 +1949,16 @@ export function reduceV2ConversationEvents(
   const timeline: TimelineEntry[] = [];
   let activeTurnId = '';
   let lastSequence = 0;
+  const missingSequences: number[] = [];
+  const seenEvents = new Set<string>();
 
   for (const event of [...events].sort((left, right) => left.sequence - right.sequence)) {
+    const eventKey = event.eventId || `${event.conversationId}:${event.sequence}:${event.type}`;
+    if (seenEvents.has(eventKey)) continue;
+    seenEvents.add(eventKey);
+    if (event.sequence > lastSequence + 1) {
+      for (let sequence = lastSequence + 1; sequence < event.sequence; sequence += 1) missingSequences.push(sequence);
+    }
     const payload = event.payload && typeof event.payload === 'object' && !Array.isArray(event.payload)
       ? event.payload as Record<string, unknown>
       : {};
@@ -1981,7 +1990,7 @@ export function reduceV2ConversationEvents(
     lastSequence = Math.max(lastSequence, event.sequence);
   }
 
-  return { timeline, activeTurnId, lastSequence };
+  return { timeline, activeTurnId, lastSequence, missingSequences };
 }
 
 export function mergeConversationTimeline(
