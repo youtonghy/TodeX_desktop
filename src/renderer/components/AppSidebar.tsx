@@ -1,7 +1,7 @@
 import { RiAddLine, RiArrowDownSLine, RiBarChartBoxLine, RiFolder3Line, RiInformationLine, RiKanbanView2, RiPuzzle2Line, RiSettings3Line, RiTerminalBoxLine } from '@remixicon/react';
 import { Badge, Button, Chip, Dropdown, Label } from '@heroui/react';
 import { useEffect, useMemo, useState } from 'react';
-import type { MouseEvent } from 'react';
+import type { DragEvent, MouseEvent } from 'react';
 import { ChatListView, Sidebar, useSidebar } from '@heroui-pro/react';
 import { ProviderIcon } from './ProviderIcon';
 import type { TodeXSession } from '../session/useTodeXSession';
@@ -60,6 +60,8 @@ export function AppSidebar({
     )
   ), [session.activeWorkspaceId, session.conversations]);
 
+  const orderedWorkspaces = [...session.workspaces].sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || (a.createdAt - b.createdAt) || a.id.localeCompare(b.id));
+  const [draggedWorkspaceId, setDraggedWorkspaceId] = useState<string | null>(null);
   const healthColor = session.connectionState !== 'open'
     ? 'danger'
     : session.connectionHealth.latencyMs !== null && session.connectionHealth.latencyMs <= 100
@@ -291,7 +293,7 @@ export function AppSidebar({
                         id={workspace.id}
                         className={`sidebar-item ${isSelected ? 'is-selected' : ''}`}
                         textValue={workspaceDisplayName(workspace)}
-                        onContextMenu={(event) => openContextMenu(event, 'workspace', workspace.id)}
+                        {...({ draggable: true, onDragStart: () => setDraggedWorkspaceId(workspace.id), onDragOver: (event: DragEvent) => event.preventDefault(), onDrop: () => { if (!draggedWorkspaceId || draggedWorkspaceId === workspace.id) return; const from = orderedWorkspaces.findIndex((item) => item.id === draggedWorkspaceId); const to = orderedWorkspaces.findIndex((item) => item.id === workspace.id); const next = [...orderedWorkspaces]; const [moved] = next.splice(from, 1); next.splice(to, 0, moved); next.forEach((item, index) => session.updateWorkspace(item.id, { sortOrder: index })); setDraggedWorkspaceId(null); }} as any)} onContextMenu={(event) => openContextMenu(event, 'workspace', workspace.id)}
                       >
                         <ChatListView.ItemContent>
                           <ChatListView.Icon>

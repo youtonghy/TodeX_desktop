@@ -303,6 +303,14 @@ export type OpenPanelFn = (name: string, params?: OpenPanelOptions) => void;
 
 export type TodeXSession = ReturnType<typeof useTodeXSession>;
 
+type PendingProtocolCommand = {
+  message: { id: string; type: string; payload: Record<string, unknown> };
+  sent: boolean;
+  timeoutId: ReturnType<typeof setTimeout>;
+  resolve: (payload: Record<string, unknown>) => void;
+  reject: (error: Error) => void;
+};
+
 export type { CatalogState };
 export function useTodeXSession(openPanel: OpenPanelFn) {
   const socketRef = useRef<WebSocket | null>(null);
@@ -338,6 +346,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const pendingServerEventFrameRef = useRef<number | null>(null);
   const pendingSocketFramesRef = useRef<PendingSocketFrame[]>([]);
   const pendingSocketFrameDrainRef = useRef<number | null>(null);
+  const pendingProtocolCommandsRef = useRef(new Map<string, PendingProtocolCommand>());
   const capabilityWorkspaceRef = useRef('');
   const socketGenerationRef = useRef(0);
   const autoConnectAttemptedRef = useRef(false);
@@ -2445,8 +2454,16 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       const parsed = JSON.parse(text) as Record<string, unknown>;
       const messageType = typeof parsed.type === 'string' ? parsed.type : '';
       if (messageType === 'server.result') {
-        // v2 command acknowledgements (session.resume, conversation.*). The
-        // legacy plane answers through ServerEvents, nothing to enqueue.
+        const requestId = typeof parsed.id === 'string' ? parsed.id : '';
+        const pending = requestId ? pendingProtocolCommandsRef.current.get(requestId) : undefined;
+        if (pending) {
+          clearTimeout(pending.timeoutId);
+          pendingProtocolCommandsRef.current.delete(requestId);
+          const payload = parsed.payload && typeof parsed.payload === 'object' && !Array.isArray(parsed.payload)
+            ? parsed.payload as Record<string, unknown>
+            : {};
+          pending.resolve(payload);
+        }
         return;
       }
       if (messageType === 'server.error' && parsed.id !== undefined) {
@@ -2454,6 +2471,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         const payload = parsed.payload as { code?: unknown; message?: unknown } | undefined;
         const code = typeof payload?.code === 'string' ? payload.code : '';
         const detail = typeof payload?.message === 'string' ? payload.message : 'v2 命令失败';
+        const requestId = typeof parsed.id === 'string' ? parsed.id : '';
+        const pending = requestId ? pendingProtocolCommandsRef.current.get(requestId) : undefined;
+        if (pending) {
+          clearTimeout(pending.timeoutId);
+          pendingProtocolCommandsRef.current.delete(requestId);
+          pending.reject(new Error(code ? `[${code}] ${detail}` : detail));
+        }
         setLastError(code ? `[${code}] ${detail}` : detail);
         return;
       }
@@ -2513,11 +2537,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
             const eventData = event.payload && typeof event.payload === 'object' && !Array.isArray(event.payload)
               ? event.payload as Record<string, unknown>
               : {};
-            if (
-              event.type === 'turn.failed'
-              && eventData.code === 'IMAGE_INPUT_UNSUPPORTED'
-              && pendingSubmission
-            ) {
+            if (event.type === 'turn.failed' && pendingSubmission) {
               setConversationChatDraft(conversation.id, (current) => current || pendingSubmission.text);
               if (pendingSubmission.skills.length > 0) {
                 setConversationSelectedSkills(conversation.id, (current) => current.length > 0 ? current : pendingSubmission.skills);
@@ -2525,7 +2545,11 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
               if (pendingSubmission.attachments.length > 0) {
                 setConversationAttachments(conversation.id, (current) => current.length > 0 ? current : pendingSubmission.attachments);
               }
-              setLastError(typeof eventData.message === 'string' ? eventData.message : '当前 Agent 不支持图片输入');
+              setLastError(typeof eventData.message === 'string'
+                ? eventData.message
+                : eventData.code === 'IMAGE_INPUT_UNSUPPORTED'
+                  ? '当前 Agent 不支持图片输入'
+                  : '当前任务执行失败，请重试');
             }
             pendingV2SubmissionsRef.current.delete(conversation.id);
             setConversationThinking(conversation.id, false);
@@ -2624,6 +2648,46 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     socket.send(frame);
     return message;
   }, []);
+
+  const sendProtocolCommand = useCallback((
+    message: { id: string; type: string; payload: Record<string, unknown> },
+    timeoutMs = 15000,
+  ): Promise<Record<string, unknown>> => new Promise((resolve, reject) => {
+    const timeoutId = setTimeout(() => {
+      const pending = pendingProtocolCommandsRef.current.get(message.id);
+      if (!pending) return;
+      pendingProtocolCommandsRef.current.delete(message.id);
+      reject(new Error(pending.sent ? '后端未确认消息，请重试。' : '连接后端超时，请重试。'));
+    }, timeoutMs);
+    const pending: PendingProtocolCommand = {
+      message,
+      sent: false,
+      timeoutId,
+      resolve,
+      reject,
+    };
+    pendingProtocolCommandsRef.current.set(message.id, pending);
+    try {
+      pending.sent = Boolean(sendRawProtocolFrame(message));
+    } catch (error) {
+      clearTimeout(timeoutId);
+      pendingProtocolCommandsRef.current.delete(message.id);
+      reject(error instanceof Error ? error : new Error('消息发送失败'));
+    }
+  }), [sendRawProtocolFrame]);
+
+  const flushQueuedProtocolCommands = useCallback(() => {
+    for (const pending of pendingProtocolCommandsRef.current.values()) {
+      if (pending.sent) continue;
+      try {
+        pending.sent = Boolean(sendRawProtocolFrame(pending.message));
+      } catch (error) {
+        clearTimeout(pending.timeoutId);
+        pendingProtocolCommandsRef.current.delete(pending.message.id);
+        pending.reject(error instanceof Error ? error : new Error('消息发送失败'));
+      }
+    }
+  }, [sendRawProtocolFrame]);
 
   const sendSessionResume = useCallback((sessionCursors: Record<string, number>) => {
     try {
@@ -2845,6 +2909,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
               }
             }
           }
+          flushQueuedProtocolCommands();
         };
 
         socket.onmessage = (event) => {
@@ -2870,7 +2935,14 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         socket.onclose = () => {
           setConnectionState((current) => (current === 'open' || current === 'connecting' ? 'closed' : current));
           if (socketRef.current === socket) {
+            socketRef.current = null;
             socketCryptoRef.current = null;
+          }
+          for (const [requestId, pending] of pendingProtocolCommandsRef.current) {
+            if (!pending.sent) continue;
+            clearTimeout(pending.timeoutId);
+            pendingProtocolCommandsRef.current.delete(requestId);
+            pending.reject(new Error('连接在后端确认消息前中断，请重试。'));
           }
         };
       } catch (error) {
@@ -2880,7 +2952,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         setLastError(error instanceof Error ? error.message : ConnectionError.websocketFailed(wsUrl).userMessage);
       }
     })();
-  }, [checkConnectionHealth, closeSocket, enqueueSocketFrame, getSessionCursorSnapshot, refreshServerVersion, sendRawProtocolFrame, sendSessionResume, settings, syncWorkspacesFromBackend]);
+  }, [checkConnectionHealth, closeSocket, enqueueSocketFrame, flushQueuedProtocolCommands, getSessionCursorSnapshot, refreshServerVersion, sendRawProtocolFrame, sendSessionResume, settings, syncWorkspacesFromBackend]);
 
   useEffect(() => {
     if (!hydrated || !autoConnectEnabled || manualDisconnectRef.current) {
@@ -5029,20 +5101,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           restoreSubmission();
           return false;
         }
-        pendingV2SubmissionsRef.current.set(conversation.id, { text, skills, attachments });
       }
-      if (
-        isFirstPrompt
-        && (
-          connectionState !== 'open'
-          || !socketRef.current
-          || socketRef.current.readyState !== WebSocket.OPEN
-        )
-      ) {
-        setLastError('请先连接 Backend。');
-        restoreSubmission();
-        return false;
-      }
+      pendingV2SubmissionsRef.current.set(conversation.id, { text, skills, attachments });
 
       if (isFirstPrompt) {
         pendingV2FirstPromptsRef.current.add(conversation.id);
@@ -5068,24 +5128,22 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           ? readyConversation.model || workspace.model || settings.defaultModel || undefined
           : readyConversation.model || undefined;
         const reasoningEffort = readyConversation.reasoningEffort || undefined;
-        const sent = sendRawProtocolFrame({
-          id: createRequestId('prompt'),
+        const requestId = createRequestId('prompt');
+        await sendProtocolCommand({
+          id: requestId,
           type: 'conversation.prompt',
           payload: {
             conversationId: v2Id,
             text,
+            ...(workspace.permissionProfile ? { permissionProfile: workspace.permissionProfile } : {}),
+            ...(workspace.sandboxMode ? { sandboxMode: workspace.sandboxMode } : {}),
+            ...(workspace.approvalPolicy ? { approvalPolicy: workspace.approvalPolicy } : {}),
             ...(model ? { model } : {}),
             ...(reasoningEffort ? { reasoningEffort } : {}),
             ...(skillRefs.length ? { skills: skillRefs } : {}),
             ...(content.length ? { content } : {}),
           },
         });
-        if (!sent) {
-          setConversationThinking(conversation.id, false);
-          setLastError('请先连接 Backend。');
-          restoreSubmission();
-          return false;
-        }
         if (!isFirstPrompt && conversation.title === '新对话' && text.trim()) {
           updateConversation(conversation.id, { title: text.slice(0, 18), updatedAt: Date.now() });
         }
@@ -5096,6 +5154,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           ? error.userMessage
           : error instanceof Error ? error.message : '消息发送失败';
         setLastError(message);
+        pendingV2SubmissionsRef.current.delete(conversation.id);
         restoreSubmission();
         return false;
       } finally {
@@ -5104,7 +5163,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         }
       }
     },
-    [connectionState, getConversationContext, materializeV2Conversation, promptContentFromAttachments, promptSkillsFromAttachments, sendRawProtocolFrame, setConversationAttachments, setConversationChatDraft, setConversationSelectedSkills, setConversationThinking, settings.defaultModel, updateConversation],
+    [getConversationContext, materializeV2Conversation, promptContentFromAttachments, promptSkillsFromAttachments, sendProtocolCommand, setConversationAttachments, setConversationChatDraft, setConversationSelectedSkills, setConversationThinking, settings.defaultModel, updateConversation],
   );
 
   const sendLocalTurn = useCallback(
@@ -6325,11 +6384,14 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     if (skills.length > 0) {
       appendTimeline(makeSystemEntry('已选择 Skill', selectedSkillSummary(skills), workspace.id, conversationId));
     }
-    setConversationChatDraft(conversationId, '');
-    setConversationComposerSelection(conversationId, DEFAULT_COMPOSER_SELECTION);
-    setConversationAttachments(conversationId, []);
-    setConversationSelectedSkills(conversationId, []);
+    const clearSubmittedComposer = () => {
+      setConversationChatDraft(conversationId, (current) => current.trim() === text ? '' : current);
+      setConversationAttachments(conversationId, (current) => current === attachments ? [] : current);
+      setConversationSelectedSkills(conversationId, (current) => current === skills ? [] : current);
+      setConversationComposerSelection(conversationId, DEFAULT_COMPOSER_SELECTION);
+    };
     if (isThinking) {
+      clearSubmittedComposer();
       setQueuedChatDrafts((current) => ({
         ...current,
         [conversationId]: [
@@ -6346,9 +6408,12 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       return;
     }
     if (isV2Conversation(conversation)) {
-      void sendV2Prompt(text, conversationId, skills, attachments);
+      void sendV2Prompt(text, conversationId, skills, attachments).then((accepted) => {
+        if (accepted) clearSubmittedComposer();
+      });
       return;
     }
+    clearSubmittedComposer();
     if (attachments.length > 0 || skills.length > 0) {
       void sendLocalTurn(text, 'implement', conversationId, attachments, skills);
       return;
@@ -6650,6 +6715,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     createWorkspace,
     selectWorkspace,
     renameWorkspace,
+    updateWorkspace,
     forkWorkspace,
     removeWorkspace,
     createConversation,

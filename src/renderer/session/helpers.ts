@@ -1231,7 +1231,11 @@ export const SOCKET_EVENT_BATCH_SIZE = 24;
 export const SOCKET_FRAME_DECODE_BATCH_SIZE = 8;
 export const SOCKET_FRAME_DECODE_BUDGET_MS = 10;
 export const MAX_TRANSPORT_HELLO_SESSION_CURSORS = 12;
-export const MAX_TIMELINE_ITEMS = 260;
+// Keep enough local history for completed execution traces to remain
+// inspectable after a long Claude Code turn. The backend remains the source
+// of truth for replay, while the desktop cache avoids silently evicting the
+// context users are currently reviewing.
+export const MAX_TIMELINE_ITEMS = 1000;
 export const MAX_USAGE_RECORDS = 2_000;
 export const MAX_EVENTS = 220;
 export const RECONNECT_DELAY_MS = 2000;

@@ -459,20 +459,18 @@ export function ChatPanel({ session }: Props) {
                   <ChainOfThought.Trigger>
                     {progressGroupLabel(item.entries, thinking && item.id === latestProcessGroupId, pendingCount)} · {item.entries.length}
                   </ChainOfThought.Trigger>
-                  {expanded ? (
-                    <ChainOfThought.Content>
-                      <ChainOfThought.Steps>
-                        {item.entries.map((entry) => (
-                          <ChainOfThought.Step key={entry.id} label={entry.title}>
-                            {isToolCallEntry(entry) ? (() => {
-                              const { toolName, argsText } = toolPresentation(entry.subtitle);
-                              return <ChatTool defaultExpanded={false} state={entry.phase === 'completed' ? 'output-available' : 'input-streaming'} toolName={toolName} argsText={argsText} />;
-                            })() : <p className="max-w-full overflow-x-auto whitespace-pre-wrap break-words text-xs">{entry.subtitle || entry.title}</p>}
-                          </ChainOfThought.Step>
-                        ))}
-                      </ChainOfThought.Steps>
-                    </ChainOfThought.Content>
-                  ) : null}
+                  <ChainOfThought.Content>
+                    <ChainOfThought.Steps>
+                      {item.entries.map((entry) => (
+                        <ChainOfThought.Step key={entry.id} label={entry.title}>
+                          {isToolCallEntry(entry) ? (() => {
+                            const { toolName, argsText } = toolPresentation(entry.subtitle);
+                            return <ChatTool defaultExpanded={false} state={entry.phase === 'completed' ? 'output-available' : 'input-streaming'} toolName={toolName} argsText={argsText} />;
+                          })() : <p className="max-w-full overflow-x-auto whitespace-pre-wrap break-words text-xs">{entry.subtitle || entry.title}</p>}
+                        </ChainOfThought.Step>
+                      ))}
+                    </ChainOfThought.Steps>
+                  </ChainOfThought.Content>
                 </ChainOfThought>
               );
             }
