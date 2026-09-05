@@ -283,12 +283,35 @@ export function AppSidebar({
                   {displayedWorkspaces.map((workspace) => {
                     const isSelected = workspace.id === session.activeWorkspaceId;
                     return (
+                      <div
+                        key={workspace.id}
+                        draggable
+                        onDragStart={(event) => {
+                          event.dataTransfer.setData('text/plain', workspace.id);
+                          event.dataTransfer.effectAllowed = 'move';
+                          setDraggedWorkspaceId(workspace.id);
+                        }}
+                        onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; }}
+                        onDrop={(event) => {
+                          event.preventDefault();
+                          const sourceId = draggedWorkspaceId || event.dataTransfer.getData('text/plain');
+                          if (!sourceId || sourceId === workspace.id) { setDraggedWorkspaceId(null); return; }
+                          const from = orderedWorkspaces.findIndex((item) => item.id === sourceId);
+                          const to = orderedWorkspaces.findIndex((item) => item.id === workspace.id);
+                          if (from < 0 || to < 0) { setDraggedWorkspaceId(null); return; }
+                          const next = [...orderedWorkspaces];
+                          const [moved] = next.splice(from, 1);
+                          next.splice(to, 0, moved);
+                          next.forEach((item, index) => session.updateWorkspace(item.id, { sortOrder: index }));
+                          setDraggedWorkspaceId(null);
+                        }}
+                        onDragEnd={() => setDraggedWorkspaceId(null)}
+                      >
                       <ChatListView.Item
                         key={workspace.id}
                         id={workspace.id}
                         className={`sidebar-item ${isSelected ? 'is-selected' : ''}`}
-                        textValue={workspaceDisplayName(workspace)}
-                        {...({ draggable: true, onDragStart: (event: DragEvent) => { event.dataTransfer?.setData('text/plain', workspace.id); if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'; setDraggedWorkspaceId(workspace.id); }, onDragOver: (event: DragEvent) => { event.preventDefault(); if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'; }, onDrop: (event: DragEvent) => { event.preventDefault(); const sourceId = draggedWorkspaceId || event.dataTransfer?.getData('text/plain'); if (!sourceId || sourceId === workspace.id) { setDraggedWorkspaceId(null); return; } const from = orderedWorkspaces.findIndex((item) => item.id === sourceId); const to = orderedWorkspaces.findIndex((item) => item.id === workspace.id); if (from < 0 || to < 0) { setDraggedWorkspaceId(null); return; } const next = [...orderedWorkspaces]; const [moved] = next.splice(from, 1); next.splice(to, 0, moved); next.forEach((item, index) => session.updateWorkspace(item.id, { sortOrder: index })); setDraggedWorkspaceId(null); }, onDragEnd: () => setDraggedWorkspaceId(null) } as any)} onContextMenu={(event) => openContextMenu(event, 'workspace', workspace.id)}
+                        textValue={workspaceDisplayName(workspace)} onContextMenu={(event) => openContextMenu(event, 'workspace', workspace.id)}
                       >
                         <ChatListView.ItemContent>
                           <ChatListView.Icon>
@@ -302,6 +325,7 @@ export function AppSidebar({
                           </ChatListView.Text>
                         </ChatListView.ItemContent>
                       </ChatListView.Item>
+                      </div>
                     );
                   })}
                 </ChatListView>
