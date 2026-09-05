@@ -800,3 +800,17 @@ body {
   }
 }
 
+.sidebar-chat-list .list-view__item.drop-before::after,
+.sidebar-chat-list .list-view__item.drop-after::after {
+  content: '';
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--accent);
+  pointer-events: none;
+  z-index: 3;
+}
+.sidebar-chat-list .list-view__item.drop-before::after { top: -3px; }
+.sidebar-chat-list .list-view__item.drop-after::after { bottom: -3px; }

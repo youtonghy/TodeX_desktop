@@ -63,6 +63,7 @@ export function AppSidebar({
 
   const orderedWorkspaces = [...session.workspaces].sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || (a.createdAt - b.createdAt) || a.id.localeCompare(b.id));
   const [draggedWorkspaceId, setDraggedWorkspaceId] = useState<string | null>(null);
+  const [dragIndicator, setDragIndicator] = useState<{ id: string; position: 'before' | 'after' } | null>(null);
   const healthColor = session.connectionState !== 'open'
     ? 'danger'
     : session.connectionHealth.latencyMs !== null && session.connectionHealth.latencyMs <= 100
@@ -142,16 +143,16 @@ export function AppSidebar({
       const id = row.dataset.workspaceId || '';
       row.draggable = true;
       const start = (event: globalThis.DragEvent) => { event.dataTransfer?.setData('text/plain', id); if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'; setDraggedWorkspaceId(id); };
-      const over = (event: globalThis.DragEvent) => { event.preventDefault(); if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'; };
+      const over = (event: globalThis.DragEvent) => { event.preventDefault(); if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'; const rect = row.getBoundingClientRect(); setDragIndicator({ id, position: event.clientY < rect.top + rect.height / 2 ? 'before' : 'after' }); };
       const drop = (event: globalThis.DragEvent) => {
         event.preventDefault();
         const sourceId = draggedWorkspaceId || event.dataTransfer?.getData('text/plain');
-        if (!sourceId || sourceId === id) { setDraggedWorkspaceId(null); return; }
+        if (!sourceId || sourceId === id) { setDraggedWorkspaceId(null); setDragIndicator(null); return; }
         const from = orderedWorkspaces.findIndex((item) => item.id === sourceId);
         const to = orderedWorkspaces.findIndex((item) => item.id === id);
         if (from < 0 || to < 0) { setDraggedWorkspaceId(null); return; }
         const next = [...orderedWorkspaces]; const [moved] = next.splice(from, 1); next.splice(to, 0, moved);
-        next.forEach((item, index) => session.updateWorkspace(item.id, { sortOrder: index })); setDraggedWorkspaceId(null);
+        next.forEach((item, index) => session.updateWorkspace(item.id, { sortOrder: index })); setDraggedWorkspaceId(null); setDragIndicator(null);
       };
       row.addEventListener('dragstart', start); row.addEventListener('dragover', over); row.addEventListener('drop', drop);
       return () => { row.removeEventListener('dragstart', start); row.removeEventListener('dragover', over); row.removeEventListener('drop', drop); };
@@ -309,10 +310,10 @@ export function AppSidebar({
                       <ChatListView.Item
                         key={workspace.id}
                         id={workspace.id}
-                        className={`sidebar-item ${isSelected ? 'is-selected' : ''}`}
+                        className={`sidebar-item ${isSelected ? 'is-selected' : ''} ${dragIndicator?.id === workspace.id ? `drop-${dragIndicator.position}` : ''}`}
                         textValue={workspaceDisplayName(workspace)}
                         data-workspace-id={workspace.id}
-                        {...({ draggable: true, onDragStart: (event: globalThis.DragEvent) => { event.dataTransfer?.setData('text/plain', workspace.id); if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'; setDraggedWorkspaceId(workspace.id); }, onDragOver: (event: globalThis.DragEvent) => { event.preventDefault(); if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'; }, onDrop: (event: globalThis.DragEvent) => { event.preventDefault(); const sourceId = draggedWorkspaceId || event.dataTransfer?.getData('text/plain'); if (!sourceId || sourceId === workspace.id) { setDraggedWorkspaceId(null); return; } const from = orderedWorkspaces.findIndex((item) => item.id === sourceId); const to = orderedWorkspaces.findIndex((item) => item.id === workspace.id); if (from < 0 || to < 0) { setDraggedWorkspaceId(null); return; } const next = [...orderedWorkspaces]; const [moved] = next.splice(from, 1); next.splice(to, 0, moved); next.forEach((item, index) => session.updateWorkspace(item.id, { sortOrder: index })); setDraggedWorkspaceId(null); }, onDragEnd: () => setDraggedWorkspaceId(null) } as any)} onContextMenu={(event) => openContextMenu(event, 'workspace', workspace.id)}
+                        {...({ draggable: true, onDragStart: (event: globalThis.DragEvent) => { event.dataTransfer?.setData('text/plain', workspace.id); if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'; setDraggedWorkspaceId(workspace.id); }, onDragOver: (event: globalThis.DragEvent) => { event.preventDefault(); if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'; }, onDrop: (event: globalThis.DragEvent) => { event.preventDefault(); const sourceId = draggedWorkspaceId || event.dataTransfer?.getData('text/plain'); if (!sourceId || sourceId === workspace.id) { setDraggedWorkspaceId(null); return; } const from = orderedWorkspaces.findIndex((item) => item.id === sourceId); const to = orderedWorkspaces.findIndex((item) => item.id === workspace.id); if (from < 0 || to < 0) { setDraggedWorkspaceId(null); return; } const next = [...orderedWorkspaces]; const [moved] = next.splice(from, 1); next.splice(to, 0, moved); next.forEach((item, index) => session.updateWorkspace(item.id, { sortOrder: index })); setDraggedWorkspaceId(null); setDragIndicator(null); }, onDragEnd: () => { setDraggedWorkspaceId(null); setDragIndicator(null); } } as any)} onContextMenu={(event) => openContextMenu(event, 'workspace', workspace.id)}
                       >
                         <ChatListView.ItemContent>
                           <ChatListView.Icon>
