@@ -16,6 +16,13 @@ import type {
   WorkspaceRecord,
 } from '@todex/protocol/todex';
 import type { ConversationEvent, ConversationManifest, ProviderDescriptor, ProviderKind, ProviderModelDescriptor } from '@todex/protocol/v2';
+
+export type ResolvedSessionConfig = {
+  model?: import('@todex/protocol/v2').ResolvedConfigValue<string>;
+  reasoningEffort?: import('@todex/protocol/v2').ResolvedConfigValue<string | null>;
+  approvalPolicy?: import('@todex/protocol/v2').ResolvedConfigValue<string>;
+  sandboxMode?: import('@todex/protocol/v2').ResolvedConfigValue<string>;
+};
 import { providerDisplayName } from '@todex/protocol/v2';
 import type { ConnectionFailureCode } from '@todex/protocol/connectionError';
 import {
