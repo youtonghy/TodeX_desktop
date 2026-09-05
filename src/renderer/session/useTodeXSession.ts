@@ -5849,6 +5849,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       }
 
       if (lower === 'compact') {
+        setCompactionByConversation((current) => ({ ...current, [conversation.id]: { ...current[conversation.id], status: 'running', updatedAt: new Date().toISOString() } }));
         sendThreadMethod('thread/compact/start', (threadId) => ({ threadId }), 'Compact started', '已请求 Codex app-server 压缩当前 thread 上下文。');
         return;
       }
@@ -6536,6 +6537,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       return;
     }
     if (action === 'compact') {
+      setCompactionByConversation((current) => ({ ...current, [conversationId]: { ...current[conversationId], status: 'running', updatedAt: new Date().toISOString() } }));
       void sendNativeThreadAction(conversationId, 'read', 'thread/compact/start', (threadId) => ({ threadId }), {
         showResult: true,
         resultTitle: 'Compact started',
