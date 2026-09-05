@@ -6,7 +6,7 @@ import {
   useState,
   type SetStateAction,
 } from 'react';
-import type { ProviderDescriptor, ProviderKind, ConversationManifest, PromptContentRef, PromptSkillRef, SkillCatalogDescriptor, ProviderModelDescriptor, ProviderCommandDescriptor, ContextCompactionState } from '@todex/protocol/v2';
+import type { ProviderDescriptor, ProviderKind, ConversationManifest, PromptContentRef, PromptSkillRef, SkillCatalogDescriptor, ProviderModelDescriptor, ProviderCommandDescriptor, ContextCompactionState, SubagentRun } from '@todex/protocol/v2';
 import { contextCompactionStatus } from '@todex/protocol/v2';
 import { V2ApiClient, buildV2WebSocketUrlWithOptions } from '@todex/protocol/v2';
 import { probeBackendConnection, nextReconnectDelayMs, inspectServerUrl, tokenMatchesOrigin } from '@todex/protocol/connectionProbe';
@@ -419,6 +419,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const [providerCommands, setProviderCommands] = useState<Partial<Record<ProviderKind, ProviderCommandDescriptor[]>>>({});
   const [contextUsageByConversation, setContextUsageByConversation] = useState<Record<string, ConversationContextUsage>>({});
   const [compactionByConversation, setCompactionByConversation] = useState<Record<string, ContextCompactionState>>({});
+  const [subagentsByConversation, setSubagentsByConversation] = useState<Record<string, SubagentRun[]>>({});
   const [usageRecords, setUsageRecords] = useState<UsageRecord[]>([]);
 
   useEffect(() => {
@@ -2514,6 +2515,28 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         const conversation = conversationsRef.current.find((item) => item.id === conversationId || item.v2ConversationId === conversationId);
         if (conversation && typeof payload.type === 'string') {
           const event = payload as unknown as import('@todex/protocol/v2').ConversationEvent;
+          if (/subagent|child.?agent/i.test(event.type)) {
+            const data = event.payload && typeof event.payload === 'object' && !Array.isArray(event.payload)
+              ? event.payload as Record<string, unknown> : {};
+            const runId = typeof data.subagentId === 'string' ? data.subagentId : typeof data.agentId === 'string' ? data.agentId : event.eventId;
+            const status: SubagentRun['status'] = /fail|error/i.test(event.type) ? 'failed' : /complete|finish|done/i.test(event.type) ? 'completed' : /cancel/i.test(event.type) ? 'cancelled' : /start|run/i.test(event.type) ? 'running' : 'queued';
+            const run: SubagentRun = {
+              id: runId, conversationId: conversation.id,
+              title: typeof data.title === 'string' ? data.title : 'Subagent',
+              task: typeof data.task === 'string' ? data.task : typeof data.prompt === 'string' ? data.prompt : '',
+              status,
+              ...(typeof data.result === 'string' ? { result: data.result } : {}),
+              ...(typeof data.error === 'string' ? { error: data.error } : {}),
+              ...(status === 'running' ? { startedAt: event.time } : { finishedAt: event.time }),
+            };
+            setSubagentsByConversation((current) => {
+              const previous = current[conversation.id] ?? [];
+              const index = previous.findIndex((item) => item.id === run.id);
+              const next = [...previous];
+              if (index < 0) next.unshift(run); else next[index] = { ...next[index], ...run };
+              return { ...current, [conversation.id]: next.slice(0, 50) };
+            });
+          }
           if (/compact/i.test(event.type)) {
             const status = /fail|error/i.test(event.type) ? 'failed' : /complete|finish|done/i.test(event.type) ? 'completed' : /cancel/i.test(event.type) ? 'idle' : 'running';
             setCompactionByConversation((current) => ({ ...current, [conversation.id]: { ...current[conversation.id], status, updatedAt: new Date().toISOString(), ...(status === 'failed' ? { error: '上下文压缩失败' } : {}) } }));
@@ -6774,6 +6797,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     providerCommands,
     contextUsageByConversation,
     compactionByConversation,
+    subagentsByConversation,
     usageRecords,
     pendingRequests,
     selectedRequest,
