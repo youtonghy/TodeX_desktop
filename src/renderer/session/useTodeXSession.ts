@@ -2514,6 +2514,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         const conversation = conversationsRef.current.find((item) => item.id === conversationId || item.v2ConversationId === conversationId);
         if (conversation && typeof payload.type === 'string') {
           const event = payload as unknown as import('@todex/protocol/v2').ConversationEvent;
+          if (/compact/i.test(event.type)) {
+            const status = /fail|error/i.test(event.type) ? 'failed' : /complete|finish|done/i.test(event.type) ? 'completed' : /cancel/i.test(event.type) ? 'idle' : 'running';
+            setCompactionByConversation((current) => ({ ...current, [conversation.id]: { ...current[conversation.id], status, updatedAt: new Date().toISOString(), ...(status === 'failed' ? { error: '上下文压缩失败' } : {}) } }));
+          }
           const contextUsage = contextUsageFromV2Event(event);
           if (contextUsage) {
             setContextUsageByConversation((current) => ({ ...current, [conversation.id]: contextUsage }));
