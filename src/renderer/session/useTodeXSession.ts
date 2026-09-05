@@ -368,6 +368,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const [activeBackendConnectionId, setActiveBackendConnectionId] = useState('default-backend');
   const [workspaces, setWorkspaces] = useState<WorkspaceRecord[]>([]);
   const [conversations, setConversations] = useState<ConversationRecord[]>([]);
+  const [directorySyncStatus, setDirectorySyncStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [activeWorkspaceId, setActiveWorkspaceId] = useState('');
   const [activeConversationId, setActiveConversationId] = useState('');
   const [connectionState, setConnectionState] = useState<ConnectionState>('idle');
@@ -419,19 +420,23 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
 
   useEffect(() => {
     if (!hydrated || !settings.serverUrl.trim()) {
+      if (hydrated) setDirectorySyncStatus('ready');
       return;
     }
     const api = new V2ApiClient({ serverUrl: settings.serverUrl, authToken: settings.authToken });
     let active = true;
+    setDirectorySyncStatus('loading');
     void Promise.all([api.listProviders(), api.listConversations()])
       .then(([providers, conversations]) => {
         if (!active) return;
         setV2Providers(providers.providers);
         setV2Conversations(conversations.conversations);
         setConversations((current) => mergeManifestConversations(current, conversations.conversations, workspacesRef.current));
+        setDirectorySyncStatus('ready');
       })
       .catch(() => {
         if (!active) return;
+        setDirectorySyncStatus('error');
         setV2Providers([]);
         setV2Conversations([]);
       });
@@ -6642,6 +6647,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   }, [sendNativeThreadAction, sendTrackedLocalMethod]);
   return {
     hydrated,
+    directorySyncStatus,
     settings,
     setSettings,
     backendConnections,

@@ -53,6 +53,7 @@ export function AppSidebar({
   onOpenKanban,
 }: Props) {
   const { isMobile, setMobileOpen } = useSidebar();
+  if (session.directorySyncStatus === 'loading') return <Sidebar><Sidebar.Content><p className="text-muted px-3 py-4 text-sm">正在同步目录…</p></Sidebar.Content></Sidebar>;
 
   const workspaceConversations = useMemo(() => (
     session.conversations.filter(
@@ -113,15 +114,8 @@ export function AppSidebar({
     return map;
   }, [session.conversations, timelineInfoMap]);
 
-  // Stable sorting for workspaces: based on last message/updated time, never jumps upon clicking
-  const sortedWorkspaces = useMemo(() => {
-    return [...session.workspaces].sort((a, b) => {
-      const aTime = Math.max(workspaceLastActiveMap[a.id] || 0, a.updatedAt || 0, a.createdAt || 0);
-      const bTime = Math.max(workspaceLastActiveMap[b.id] || 0, b.updatedAt || 0, b.createdAt || 0);
-      if (bTime !== aTime) return bTime - aTime;
-      return a.name.localeCompare(b.name);
-    });
-  }, [session.workspaces, workspaceLastActiveMap]);
+  // Workspaces use an explicit manual order and never move when a conversation updates.
+  const sortedWorkspaces = useMemo(() => [...session.workspaces].sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || (a.createdAt - b.createdAt) || a.id.localeCompare(b.id)), [session.workspaces]);
 
   // Stable sorting for conversations: based on last message/updated time, never jumps upon clicking
   const sortedConversations = useMemo(() => {
