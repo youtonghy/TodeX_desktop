@@ -6,7 +6,7 @@ import {
   useState,
   type SetStateAction,
 } from 'react';
-import type { ProviderDescriptor, ProviderKind, ConversationManifest, PromptContentRef, PromptSkillRef, SkillCatalogDescriptor, ProviderModelDescriptor, ProviderCommandDescriptor, ContextCompactionState, SubagentRun } from '@todex/protocol/v2';
+import type { ProviderDescriptor, ProviderKind, ConversationManifest, PromptContentRef, PromptSkillRef, SkillCatalogDescriptor, ProviderModelDescriptor, ProviderCommandDescriptor, ContextCompactionState, SubagentRun, MemoryEntry } from '@todex/protocol/v2';
 import { contextCompactionStatus } from '@todex/protocol/v2';
 import { V2ApiClient, buildV2WebSocketUrlWithOptions } from '@todex/protocol/v2';
 import { probeBackendConnection, nextReconnectDelayMs, inspectServerUrl, tokenMatchesOrigin } from '@todex/protocol/connectionProbe';
@@ -420,6 +420,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const [contextUsageByConversation, setContextUsageByConversation] = useState<Record<string, ConversationContextUsage>>({});
   const [compactionByConversation, setCompactionByConversation] = useState<Record<string, ContextCompactionState>>({});
   const [subagentsByConversation, setSubagentsByConversation] = useState<Record<string, SubagentRun[]>>({});
+  const [memoryEntriesByConversation, setMemoryEntriesByConversation] = useState<Record<string, MemoryEntry[]>>({});
   const [usageRecords, setUsageRecords] = useState<UsageRecord[]>([]);
 
   useEffect(() => {
@@ -2515,6 +2516,21 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         const conversation = conversationsRef.current.find((item) => item.id === conversationId || item.v2ConversationId === conversationId);
         if (conversation && typeof payload.type === 'string') {
           const event = payload as unknown as import('@todex/protocol/v2').ConversationEvent;
+          if (/memory/i.test(event.type)) {
+            const data = event.payload && typeof event.payload === 'object' && !Array.isArray(event.payload) ? event.payload as Record<string, unknown> : {};
+            const content = typeof data.content === 'string' ? data.content : typeof data.text === 'string' ? data.text : '';
+            const memoryId = typeof data.memoryId === 'string' ? data.memoryId : typeof data.id === 'string' ? data.id : event.eventId;
+            if (content) {
+              const entry: MemoryEntry = { id: memoryId, scope: data.scope === 'user' || data.scope === 'workspace' ? data.scope : 'conversation', content, source: typeof data.source === 'string' ? data.source : undefined, createdAt: event.time, updatedAt: event.time };
+              setMemoryEntriesByConversation((current) => {
+                const previous = current[conversation.id] ?? [];
+                const index = previous.findIndex((item) => item.id === entry.id);
+                const next = [...previous];
+                if (index < 0) next.unshift(entry); else next[index] = { ...next[index], ...entry };
+                return { ...current, [conversation.id]: next.slice(0, 100) };
+              });
+            }
+          }
           if (/subagent|child.?agent/i.test(event.type)) {
             const data = event.payload && typeof event.payload === 'object' && !Array.isArray(event.payload)
               ? event.payload as Record<string, unknown> : {};
@@ -6798,6 +6814,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     contextUsageByConversation,
     compactionByConversation,
     subagentsByConversation,
+    memoryEntriesByConversation,
     usageRecords,
     pendingRequests,
     selectedRequest,
