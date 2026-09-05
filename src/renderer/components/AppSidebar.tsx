@@ -121,8 +121,8 @@ export function AppSidebar({
   // Stable sorting for conversations: based on last message/updated time, never jumps upon clicking
   const sortedConversations = useMemo(() => {
     return [...workspaceConversations].sort((a, b) => {
-      const aTime = Math.max(a.updatedAt || 0, a.createdAt || 0);
-      const bTime = Math.max(b.updatedAt || 0, b.createdAt || 0);
+      const aTime = timelineInfoMap[a.id]?.latestAt || a.createdAt || 0;
+      const bTime = timelineInfoMap[b.id]?.latestAt || b.createdAt || 0;
       if (bTime !== aTime) return bTime - aTime;
       if ((b.createdAt || 0) !== (a.createdAt || 0)) return (b.createdAt || 0) - (a.createdAt || 0);
       return a.id.localeCompare(b.id);

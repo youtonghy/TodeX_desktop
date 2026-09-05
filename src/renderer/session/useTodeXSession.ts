@@ -2561,7 +2561,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
             setConversationTurnId(conversation.id, '');
           }
           if (typeof event.sequence === 'number') {
-            updateConversation(conversation.id, { lastSequence: event.sequence, updatedAt: Date.now() });
+            updateConversation(conversation.id, { lastSequence: event.sequence });
           }
           if (event.type === 'permission.requested') {
             const inner = event.payload && typeof event.payload === 'object' && !Array.isArray(event.payload)
