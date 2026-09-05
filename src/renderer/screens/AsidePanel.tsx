@@ -272,6 +272,24 @@ function TerminalAside({ session, terminalId }: { session: TodeXSession; termina
 
 function SlashActionAside({ session, command, conversationId }: { session: TodeXSession; command: string; conversationId: string }) {
   const [value, setValue] = useState('');
+  const subagents = command === '/subagents' ? session.subagentsByConversation[conversationId] ?? [] : [];
+  if (command === '/subagents') {
+    return (
+      <div className="flex h-full min-h-0 flex-col gap-4 p-5">
+        <h2 className="text-lg font-semibold">Subagents</h2>
+        <ScrollShadow className="min-h-0 flex-1">
+          {subagents.length ? subagents.map((run) => (
+            <Card key={run.id} className="mb-2 p-3">
+              <div className="flex items-center justify-between gap-2"><span className="font-medium">{run.title}</span><span className="text-muted text-xs">{run.status}</span></div>
+              {run.task ? <p className="text-muted mt-1 text-xs whitespace-pre-wrap">{run.task}</p> : null}
+              {run.result ? <p className="mt-2 text-sm whitespace-pre-wrap">{run.result}</p> : null}
+              {run.error ? <p className="mt-2 text-danger text-xs">{run.error}</p> : null}
+            </Card>
+          )) : <p className="text-muted text-sm">当前对话暂无子 Agent 运行记录。</p>}
+        </ScrollShadow>
+      </div>
+    );
+  }
   return (
     <div className="flex flex-col gap-4 p-5">
       <h2 className="text-lg font-semibold">{command}</h2>
