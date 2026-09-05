@@ -8,7 +8,7 @@ import {
 } from 'react';
 import type { ProviderDescriptor, ProviderKind, ConversationManifest, PromptContentRef, PromptSkillRef, SkillCatalogDescriptor, ProviderModelDescriptor, ProviderCommandDescriptor, ContextCompactionState, SubagentRun, MemoryEntry } from '@todex/protocol/v2';
 import { contextCompactionStatus } from '@todex/protocol/v2';
-import { V2ApiClient, buildV2WebSocketUrlWithOptions } from '@todex/protocol/v2';
+import { V2ApiClient, buildV2WebSocketUrlWithOptions, normalizeConversationEvent } from '@todex/protocol/v2';
 import { probeBackendConnection, nextReconnectDelayMs, inspectServerUrl, tokenMatchesOrigin } from '@todex/protocol/connectionProbe';
 import {
   ConnectionSettings,
@@ -2515,7 +2515,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         const conversationId = typeof payload.conversationId === 'string' ? payload.conversationId : '';
         const conversation = conversationsRef.current.find((item) => item.id === conversationId || item.v2ConversationId === conversationId);
         if (conversation && typeof payload.type === 'string') {
-          const event = payload as unknown as import('@todex/protocol/v2').ConversationEvent;
+          const event = normalizeConversationEvent(payload) ?? payload as unknown as import('@todex/protocol/v2').ConversationEvent;
           if (/memory/i.test(event.type)) {
             const data = event.payload && typeof event.payload === 'object' && !Array.isArray(event.payload) ? event.payload as Record<string, unknown> : {};
             const content = typeof data.content === 'string' ? data.content : typeof data.text === 'string' ? data.text : '';
