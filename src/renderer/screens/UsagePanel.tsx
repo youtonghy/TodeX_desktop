@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Card, Label, ListBox, Select } from '@heroui/react';
 import { RiBarChartBoxLine, RiDatabase2Line, RiDownloadCloud2Line, RiFlashlightLine, RiUploadCloud2Line } from '@remixicon/react';
+import { usageTotalTokens } from '@todex/protocol/conversationRuntime';
 import type { TodeXSession } from '../session/useTodeXSession';
 import type { UsageRecord } from '../session/helpers';
 
@@ -9,6 +10,7 @@ type Props = {
 };
 
 type UsageTotals = {
+  totalTokens: number;
   inputTokens: number;
   outputTokens: number;
   cachedInputTokens: number;
@@ -16,6 +18,7 @@ type UsageTotals = {
 };
 
 const EMPTY_TOTALS: UsageTotals = {
+  totalTokens: 0,
   inputTokens: 0,
   outputTokens: 0,
   cachedInputTokens: 0,
@@ -23,11 +26,12 @@ const EMPTY_TOTALS: UsageTotals = {
 };
 
 function totalOf(record: UsageRecord): number {
-  return record.inputTokens + record.outputTokens + record.cachedInputTokens + record.cacheWriteTokens;
+  return usageTotalTokens(record);
 }
 
 function addUsage(current: UsageTotals, record: UsageRecord): UsageTotals {
   return {
+    totalTokens: current.totalTokens + totalOf(record),
     inputTokens: current.inputTokens + record.inputTokens,
     outputTokens: current.outputTokens + record.outputTokens,
     cachedInputTokens: current.cachedInputTokens + record.cachedInputTokens,
@@ -74,18 +78,12 @@ function MetricCard({ label, value, detail, icon: Icon, tone }: {
 }
 
 function UsageBar({ label, totals, max }: { label: string; totals: UsageTotals; max: number }) {
-  const total = totals.inputTokens + totals.outputTokens + totals.cachedInputTokens + totals.cacheWriteTokens;
-  const widthOf = (value: number) => `${total ? (value / total) * 100 : 0}%`;
+  const total = totals.totalTokens;
   return (
     <div className="grid grid-cols-[minmax(7rem,0.8fr)_minmax(10rem,2fr)_4rem] items-center gap-3">
       <span className="truncate text-sm font-medium" title={label}>{label}</span>
       <div className="bg-surface-secondary h-3 overflow-hidden rounded-sm" style={{ width: `${max ? Math.max((total / max) * 100, 2) : 0}%` }}>
-        <div className="flex h-full w-full">
-          <span className="bg-success h-full" style={{ width: widthOf(totals.inputTokens) }} />
-          <span className="bg-primary h-full" style={{ width: widthOf(totals.outputTokens) }} />
-          <span className="bg-warning h-full" style={{ width: widthOf(totals.cachedInputTokens) }} />
-          <span className="bg-muted h-full" style={{ width: widthOf(totals.cacheWriteTokens) }} />
-        </div>
+        <div className="bg-accent h-full w-full" />
       </div>
       <span className="text-muted text-right text-xs tabular-nums">{formatTokens(total)}</span>
     </div>
@@ -106,28 +104,31 @@ export function UsagePanel({ session }: Props) {
     [model, providerRecords],
   );
   const totals = useMemo(() => sum(filtered), [filtered]);
-  const totalTokens = totals.inputTokens + totals.outputTokens + totals.cachedInputTokens + totals.cacheWriteTokens;
-  const cacheBase = totals.inputTokens + totals.cachedInputTokens;
-  const cacheRate = cacheBase ? Math.round((totals.cachedInputTokens / cacheBase) * 100) : 0;
+  const totalTokens = totals.totalTokens;
+  const knownCacheRecords = filtered.filter(record => record.cacheSemantics === 'included' || record.cacheSemantics === 'additional');
+  const cacheBase = knownCacheRecords.reduce((total, record) => total + record.inputTokens
+    + (record.cacheSemantics === 'additional' ? record.cachedInputTokens + record.cacheWriteTokens : 0), 0);
+  const cacheRead = knownCacheRecords.reduce((total, record) => total + record.cachedInputTokens, 0);
+  const cacheRate = cacheBase ? Math.min(100, Math.round((cacheRead / cacheBase) * 100)) : null;
   const byProvider = useMemo(() => {
     const values = new Map<string, UsageRecord[]>();
     for (const record of filtered) values.set(record.provider, [...(values.get(record.provider) ?? []), record]);
-    return [...values].map(([name, records]) => ({ name: titleCase(name), totals: sum(records) })).sort((a, b) => Object.values(b.totals).reduce((x, y) => x + y, 0) - Object.values(a.totals).reduce((x, y) => x + y, 0));
+    return [...values].map(([name, records]) => ({ name: titleCase(name), totals: sum(records) })).sort((a, b) => b.totals.totalTokens - a.totals.totalTokens);
   }, [filtered]);
   const byModel = useMemo(() => {
     const values = new Map<string, UsageRecord[]>();
     for (const record of filtered) values.set(record.model, [...(values.get(record.model) ?? []), record]);
-    return [...values].map(([name, records]) => ({ name, totals: sum(records) })).sort((a, b) => Object.values(b.totals).reduce((x, y) => x + y, 0) - Object.values(a.totals).reduce((x, y) => x + y, 0));
+    return [...values].map(([name, records]) => ({ name, totals: sum(records) })).sort((a, b) => b.totals.totalTokens - a.totals.totalTokens);
   }, [filtered]);
   const chartRows = provider === 'all' ? byProvider : byModel;
-  const chartMax = Math.max(0, ...chartRows.map((row) => Object.values(row.totals).reduce((x, y) => x + y, 0)));
+  const chartMax = Math.max(0, ...chartRows.map((row) => row.totals.totalTokens));
 
   return (
     <div className="flex flex-col gap-5 p-6">
       <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
         <div>
           <h2 className="text-xl font-semibold">使用统计</h2>
-          <p className="text-muted mt-1 text-sm">按 Agent 和模型汇总当前设备收到的 token usage 事件。</p>
+          <p className="text-muted mt-1 text-sm">按 Agent 和模型汇总已确认的用量。缓存属于输入时不会重复计入总量。</p>
         </div>
         <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
           <Select selectedKey={provider} onSelectionChange={(key) => { if (typeof key === 'string') { setProvider(key); setModel('all'); } }}>
@@ -147,7 +148,7 @@ export function UsagePanel({ session }: Props) {
         <MetricCard label="总用量" value={totalTokens} detail={`${filtered.length} 条记录`} icon={RiBarChartBoxLine} tone="bg-accent-soft text-accent" />
         <MetricCard label="输入" value={totals.inputTokens} detail="Input tokens" icon={RiDownloadCloud2Line} tone="bg-success-soft text-success" />
         <MetricCard label="输出" value={totals.outputTokens} detail="Output tokens" icon={RiUploadCloud2Line} tone="bg-primary-soft text-primary" />
-        <MetricCard label="缓存读取" value={totals.cachedInputTokens} detail={`命中率 ${cacheRate}%`} icon={RiFlashlightLine} tone="bg-warning-soft text-warning" />
+        <MetricCard label="缓存读取" value={totals.cachedInputTokens} detail={cacheRate === null ? '缓存口径待确认' : `已知口径命中率 ${cacheRate}%`} icon={RiFlashlightLine} tone="bg-warning-soft text-warning" />
         <MetricCard label="缓存写入" value={totals.cacheWriteTokens} detail="Cache write" icon={RiDatabase2Line} tone="bg-surface-secondary text-muted" />
       </div>
 
@@ -155,7 +156,7 @@ export function UsagePanel({ session }: Props) {
         <Card className="p-5">
           <div className="mb-5">
             <h3 className="font-semibold">{provider === 'all' ? 'Agent 用量' : '模型用量'}</h3>
-            <p className="text-muted mt-1 text-xs">颜色分别代表输入、输出、缓存读取和缓存写入。</p>
+            <p className="text-muted mt-1 text-xs">按已确认的 token 总量比较，缓存明细单独列出。</p>
           </div>
           {chartRows.length ? (
             <div className="flex flex-col gap-4">
@@ -171,14 +172,14 @@ export function UsagePanel({ session }: Props) {
         </Card>
         <Card className="p-5">
           <h3 className="font-semibold">缓存构成</h3>
-          <p className="text-muted mt-1 text-xs">缓存读取占输入相关 token 的比例。</p>
+          <p className="text-muted mt-1 text-xs">仅计算已知缓存计数口径的记录；旧记录或未知口径不参与比例计算。</p>
           <div className="mt-6 flex items-end justify-between gap-4">
             <div>
-              <p className="text-3xl font-semibold tabular-nums">{cacheRate}%</p>
+              <p className="text-3xl font-semibold tabular-nums">{cacheRate === null ? '—' : `${cacheRate}%`}</p>
               <p className="text-muted mt-1 text-xs">缓存命中率</p>
             </div>
-            <div className="bg-surface-secondary flex h-24 w-16 items-end overflow-hidden rounded-sm" aria-label={`缓存命中率 ${cacheRate}%`}>
-              <div className="bg-warning w-full" style={{ height: `${cacheRate}%` }} />
+            <div className="bg-surface-secondary flex h-24 w-16 items-end overflow-hidden rounded-sm" aria-label={cacheRate === null ? '缓存口径待确认' : `缓存命中率 ${cacheRate}%`}>
+              <div className="bg-warning w-full" style={{ height: `${cacheRate ?? 0}%` }} />
             </div>
           </div>
           <dl className="mt-6 grid grid-cols-2 gap-3 text-xs">

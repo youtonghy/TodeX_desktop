@@ -1,3 +1,4 @@
+import { normalizeUsageRecords as normalizeSharedUsageRecords } from '@todex/protocol/mobileParity';
 import type {
   CodexHooksListEntry,
   CodexMcpServerStatus,
@@ -1003,51 +1004,10 @@ export type ConversationContextUsage = {
   updatedAt: number;
 };
 
-export type UsageRecord = {
-  id: string;
-  conversationId: string;
-  provider: string;
-  model: string;
-  inputTokens: number;
-  outputTokens: number;
-  cachedInputTokens: number;
-  cacheWriteTokens: number;
-  updatedAt: number;
-};
+export type UsageRecord = import('@todex/protocol/mobileParity').UsageRecord;
 
 export function normalizeUsageRecords(value: unknown): UsageRecord[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  const seen = new Set<string>();
-  const records: UsageRecord[] = [];
-  for (const item of value) {
-    if (!item || typeof item !== 'object' || Array.isArray(item)) {
-      continue;
-    }
-    const raw = item as Record<string, unknown>;
-    const id = typeof raw.id === 'string' ? raw.id.trim() : '';
-    if (!id || seen.has(id)) {
-      continue;
-    }
-    seen.add(id);
-    records.push({
-      id,
-      conversationId: typeof raw.conversationId === 'string' ? raw.conversationId : '',
-      provider: typeof raw.provider === 'string' && raw.provider.trim() ? raw.provider.trim() : 'unknown',
-      model: typeof raw.model === 'string' && raw.model.trim() ? raw.model.trim() : 'unknown',
-      inputTokens: usageNumber(raw.inputTokens),
-      outputTokens: usageNumber(raw.outputTokens),
-      cachedInputTokens: usageNumber(raw.cachedInputTokens),
-      cacheWriteTokens: usageNumber(raw.cacheWriteTokens),
-      updatedAt: usageNumber(raw.updatedAt) || Date.now(),
-    });
-    if (records.length >= MAX_USAGE_RECORDS) {
-      break;
-    }
-  }
-  return records;
+  return normalizeSharedUsageRecords(value, { limit: MAX_USAGE_RECORDS });
 }
 
 function usageNumber(value: unknown): number {

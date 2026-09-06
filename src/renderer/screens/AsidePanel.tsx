@@ -273,6 +273,11 @@ function TerminalAside({ session, terminalId }: { session: TodeXSession; termina
 function SlashActionAside({ session, command, conversationId }: { session: TodeXSession; command: string; conversationId: string }) {
   const [value, setValue] = useState('');
   const subagents = command === '/subagents' ? session.subagentsByConversation[conversationId] ?? [] : [];
+  const subagentLabels = { queued: '等待执行', running: '执行中', completed: '已完成', failed: '失败', cancelled: '已取消' };
+  const memoryEntries = session.memoryEntriesByConversation[conversationId] ?? [];
+  if (command === '/memory') {
+    return <div className="flex h-full flex-col gap-3 p-5"><h2 className="text-lg font-semibold">记忆内容</h2><p className="text-muted text-sm">这里只显示 Agent 已提供的记忆内容，配置开关不代表支持读取内容。</p><ScrollShadow className="min-h-0 flex-1 overflow-y-auto">{memoryEntries.length ? memoryEntries.map(entry => <Card key={entry.id} className="mb-2 p-3"><p className="whitespace-pre-wrap text-sm">{entry.content}</p><p className="text-muted mt-2 text-xs">{entry.scope === 'user' ? '用户记忆' : entry.scope === 'workspace' ? '工作区记忆' : '对话记忆'}</p></Card>) : <p className="text-muted text-sm">当前 Agent 尚未提供可读取的记忆记录，无法据此判断是否存在记忆。</p>}</ScrollShadow></div>;
+  }
   if (command === '/subagents') {
     return (
       <div className="flex h-full min-h-0 flex-col gap-4 p-5">
@@ -280,12 +285,12 @@ function SlashActionAside({ session, command, conversationId }: { session: TodeX
         <ScrollShadow className="min-h-0 flex-1">
           {subagents.length ? subagents.map((run) => (
             <Card key={run.id} className="mb-2 p-3">
-              <div className="flex items-center justify-between gap-2"><span className="font-medium">{run.title}</span><span className="text-muted text-xs">{run.status}</span></div>
+              <div className="flex items-center justify-between gap-2"><span className="font-medium">{run.title}</span><span className="text-muted text-xs">{subagentLabels[run.status]}</span></div>
               {run.task ? <p className="text-muted mt-1 text-xs whitespace-pre-wrap">{run.task}</p> : null}
               {run.result ? <p className="mt-2 text-sm whitespace-pre-wrap">{run.result}</p> : null}
               {run.error ? <p className="mt-2 text-danger text-xs">{run.error}</p> : null}
             </Card>
-          )) : <p className="text-muted text-sm">当前对话暂无子 Agent 运行记录。</p>}
+          )) : <p className="text-muted text-sm">当前对话尚未收到子 Agent 运行记录。</p>}
         </ScrollShadow>
       </div>
     );

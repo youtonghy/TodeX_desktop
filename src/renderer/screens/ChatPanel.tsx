@@ -8,7 +8,8 @@ import { ChatTool } from '@heroui-pro/react/chat-tool';
 import { Markdown } from '@heroui-pro/react/markdown';
 import { providerDisplayName, type ProviderKind } from '@todex/protocol/v2';
 import { progressGroupLabel } from '@todex/protocol/mobileParity';
-import { permissionActions } from '@todex/protocol/todex';
+import { ConversationPermissionActions, ConversationPromptInput, ConversationRunStatus, TurnUsageSummary } from '../components/ConversationRunStatus';
+import { isChatTimelineEntry, isChatToolEntry } from '../components/conversationTimeline';
 import { ModelReasoningCard } from '../components/ModelReasoningCard';
 import { ProviderIcon } from '../components/ProviderIcon';
 import type { TodeXSession } from '../session/useTodeXSession';
@@ -137,14 +138,15 @@ function ContextUsageIndicator({
   return (
     <Tooltip delay={100}>
       <Tooltip.Trigger>
-        <button
-          type="button"
-          className="context-usage-ring"
+        <Button
+          isIconOnly
+          variant="ghost"
+          className="context-usage-ring min-w-0 p-0"
           aria-label={percent === null ? '上下文用量等待 Provider 返回' : `上下文已使用 ${percent.toFixed(1)}%`}
           style={{ background: `conic-gradient(var(--accent) ${progress}%, var(--separator) ${progress}% 100%)` }}
         >
           <span />
-        </button>
+        </Button>
       </Tooltip.Trigger>
       <Tooltip.Content>
         <div className="min-w-48 space-y-1 p-1 text-xs">
@@ -168,16 +170,15 @@ function AgentMessageActions({
   session,
 }: {
   conversationId: string;
-  entry: { id: string; subtitle: string; at: number };
+  entry: { id: string; subtitle: string; at: number; turnId?: string };
   session: TodeXSession;
 }) {
-  const records = session.usageRecords.filter((record) => record.conversationId === conversationId);
-  const usage = records.sort((left, right) => right.updatedAt - left.updatedAt)[0];
-  const totalTokens = usage
-    ? usage.inputTokens + usage.outputTokens
-    : 0;
-  const elapsedSeconds = usage ? Math.max(0.001, (usage.updatedAt - entry.at) / 1000) : 0;
-  const outputTps = usage && elapsedSeconds > 0 ? usage.outputTokens / elapsedSeconds : 0;
+  const conversation = session.conversations.find(item => item.id === conversationId);
+  const provider = session.v2Providers.find(item => item.id === conversation?.provider);
+  const canFork = provider?.capabilities.controlActions?.includes('fork') === true;
+  const records = entry.turnId ? session.usageRecords.filter(record =>
+    (record.conversationId === conversationId || record.conversationId === conversation?.v2ConversationId)
+    && record.turnId === entry.turnId) : [];
 
   return (
     <ChatMessageActions className="mt-1">
@@ -195,7 +196,8 @@ function AgentMessageActions({
         size="sm"
         variant="ghost"
         aria-label="Fork 对话"
-        tooltip="Fork 对话"
+        tooltip={canFork ? "Fork 对话" : "当前 Agent 未声明支持分叉"}
+        isDisabled={!canFork}
         onPress={() => session.forkConversation(conversationId)}
       >
         <RiGitBranchLine aria-hidden="true" />
@@ -208,17 +210,7 @@ function AgentMessageActions({
         </HoverCard.Trigger>
         <HoverCard.Content>
           <HoverCard.Arrow />
-          <div className="min-w-52 space-y-1 p-1 text-xs">
-            <p className="font-medium">回复统计</p>
-            {usage ? (
-              <>
-                <p className="text-muted">模型：{usage.model}</p>
-                <p>输入 {formatTokenCount(usage.inputTokens)} · 输出 {formatTokenCount(usage.outputTokens)}</p>
-                <p>缓存读取 {formatTokenCount(usage.cachedInputTokens)} · 写入 {formatTokenCount(usage.cacheWriteTokens)}</p>
-                <p>总计 {formatTokenCount(totalTokens)} tokens · 输出 TPS {outputTps.toFixed(1)}</p>
-              </>
-            ) : <p className="text-muted">暂无该回复的 usage 数据。</p>}
-          </div>
+          <TurnUsageSummary records={records} />
         </HoverCard.Content>
       </HoverCard>
     </ChatMessageActions>
@@ -262,11 +254,7 @@ export function ChatPanel({ session }: Props) {
     return buildConversationRenderItems(
       session.timeline
         .filter((entry) => entry.conversationId === conversation.id)
-        .filter((entry) => (
-          entry.kind !== 'system'
-          || isStepProgressEntry(entry)
-          || entry.category === 'error'
-        ) && !isChatReminderEntry(entry))
+        .filter((entry) => isChatTimelineEntry(entry) && !isChatReminderEntry(entry))
         .slice()
         .sort((left, right) => {
           if (left.sequence !== undefined && right.sequence !== undefined && left.sequence !== right.sequence) {
@@ -331,6 +319,10 @@ export function ChatPanel({ session }: Props) {
   };
   const capability = findCapabilityHashTrigger(draft, session.composerSelections[conversation.id]?.end ?? draft.length);
   const thinking = session.thinkingConversations[conversation.id] === true;
+  const submissionStatus = session.submissionStatusByConversation[conversation.id];
+  const executionUnknown = submissionStatus === 'unknown';
+  const runtime = session.conversationRuntimeById[conversation.id];
+  const compaction = session.compactionByConversation[conversation.id];
   const latestProcessGroupId = [...items].reverse().find((item) => item.type === 'executionGroup')?.id ?? '';
   const conversationTimeline = session.timeline.filter((entry) => entry.conversationId === conversation.id);
   const canSwitchAgent = canSwitchConversationAgent(conversation, {
@@ -374,10 +366,27 @@ export function ChatPanel({ session }: Props) {
   ) ?? PERMISSION_PRESETS.find((preset) =>
     preset.approvalPolicy === workspace.approvalPolicy && preset.sandboxMode === workspace.sandboxMode,
   ) ?? PERMISSION_PRESETS[1];
-  const canChoosePermission = currentProvider === 'codex' || currentProvider === 'claude-code';
-  const isToolCallEntry = (entry: (typeof session.timeline)[number]) => {
-    return entry.category ? entry.category === 'tool' : entry.kind === 'system' && entry.title === '工具调用';
-  };
+  const permissionConfig = providerDescriptor?.capabilities.permissionConfig;
+  const canChoosePermission = Boolean(permissionConfig);
+  const supportsPermissionPreset = (preset: (typeof PERMISSION_PRESETS)[number]) =>
+    Boolean(preset.approvalsReviewer !== 'auto_review' && permissionConfig?.sandboxModes?.includes(preset.sandboxMode)
+      && permissionConfig?.approvalPolicies?.includes(preset.approvalPolicy)
+      && (!preset.profileId || permissionConfig?.permissionProfiles?.includes(preset.sandboxMode)));
+  const usesAgentDefaults = !workspace.permissionProfile && !workspace.sandboxMode && !workspace.approvalPolicy;
+  const useAgentDefaultPermissions = () => session.updateWorkspace(workspace.id, {
+    permissionProfile: null, sandboxMode: '', approvalPolicy: '', approvalsReviewer: null,
+  });
+  const permissionEnforcement = permissionConfig?.enforcement === 'sandbox' ? '系统沙箱'
+    : permissionConfig?.enforcement === 'agent-policy' ? 'Agent 权限策略，不提供系统沙箱'
+      : permissionConfig?.enforcement === 'unsupported' ? '权限由 Agent 管理' : '';
+  const canCompact = providerDescriptor?.capabilities.controlActions?.includes('compact') === true;
+  const effectiveConfig = runtime?.effectiveConfig;
+  const effectivePermission = effectiveConfig?.source === 'provider-confirmed'
+    ? [effectiveConfig.permissionProfile, effectiveConfig.sandboxMode, effectiveConfig.approvalPolicy]
+      .filter((value): value is string => typeof value === 'string' && Boolean(value)).join(' · ')
+    : '';
+
+  const isToolCallEntry = isChatToolEntry;
 
   const addBrowserFiles = async (files: File[], source: 'clipboard' | 'file' = 'file') => {
     const remaining = MAX_COMPOSER_ATTACHMENTS - attachments.length;
@@ -519,18 +528,7 @@ export function ChatPanel({ session }: Props) {
                   {entry.kind === 'incoming' ? <AgentMessageActions conversationId={conversation.id} entry={entry} session={session} /> : null}
                   {request ? (
                     <ChatMessage.Actions>
-                      {permissionActions(request).map((option) => (
-                        <Button
-                          key={typeof option === 'boolean' ? String(option) : option.optionId}
-                          size="sm"
-                          variant={typeof option === 'boolean'
-                            ? (option ? 'primary' : 'danger-soft')
-                            : (option.kind.startsWith('reject') ? 'danger-soft' : 'primary')}
-                          onPress={() => session.sendApprovalResponse(option, request)}
-                        >
-                          {typeof option === 'boolean' ? (option ? '同意' : '拒绝') : option.name}
-                        </Button>
-                      ))}
+                      <ConversationPermissionActions request={request} onSelect={(option) => { session.sendApprovalResponse(option, request); }} />
                     </ChatMessage.Actions>
                   ) : null}
                 </div>
@@ -596,6 +594,17 @@ export function ChatPanel({ session }: Props) {
               ))}
             </div>
           ) : null}
+          <ConversationRunStatus
+            submissionStatus={submissionStatus}
+            runtime={runtime}
+            compaction={compaction}
+            effectivePermission={effectivePermission}
+            permissionEnforcement={permissionEnforcement}
+            canCompact={canCompact}
+            thinking={thinking}
+            onRecover={() => session.recoverConversation(conversation.id)}
+            onCompact={() => session.sendSlashCommand('/compact', conversation.id)}
+          />
           {hasBlockedImageAttachment ? (
             <Alert status="warning" className="mb-2">
               <Alert.Indicator />
@@ -607,13 +616,15 @@ export function ChatPanel({ session }: Props) {
           ) : null}
           <ChatAttachmentInput
             accept={attachmentAccept}
-            disabled={attachments.length >= MAX_COMPOSER_ATTACHMENTS}
+            disabled={executionUnknown || attachments.length >= MAX_COMPOSER_ATTACHMENTS}
             multiple
             onFilesSelected={(files) => { void addBrowserFiles(files); }}
           >
-            <PromptInput
+            <ConversationPromptInput
+              submissionStatus={submissionStatus}
               value={draft}
-              status={thinking ? 'streaming' : 'ready'}
+              status={submissionStatus === 'sending' ? 'submitted' : thinking ? 'streaming' : 'ready'}
+              isDisabled={executionUnknown}
               onKeyDownCapture={(event) => {
                 if (event.key === 'Enter' && (isComposingRef.current || isImeCompositionKey(event))) {
                   event.stopPropagation();
@@ -621,6 +632,7 @@ export function ChatPanel({ session }: Props) {
               }}
               onValueChange={(value: string) => { setSuggestionIndex(0); session.setConversationChatDraft(conversation.id, value); }}
               onSubmit={() => {
+                if (executionUnknown || submissionStatus === 'sending') return;
                 if (hasBlockedImageAttachment) {
                   toast.danger('当前无法发送图片', { description: imageInputSupport.reason });
                   return;
@@ -778,10 +790,11 @@ export function ChatPanel({ session }: Props) {
                     {canChoosePermission ? <Select
                       className="composer-control"
                       variant="secondary"
-                      selectedKey={currentPermission.id}
+                      selectedKey={usesAgentDefaults ? 'agent-default' : currentPermission.id}
                       onSelectionChange={(key) => {
+                        if (key === 'agent-default') { useAgentDefaultPermissions(); return; }
                         const preset = PERMISSION_PRESETS.find((item) => item.id === key);
-                        if (preset) {
+                        if (preset && supportsPermissionPreset(preset)) {
                           void session.applyPermissionProfile(
                             conversation.id,
                             preset.profileId,
@@ -793,20 +806,21 @@ export function ChatPanel({ session }: Props) {
                     >
                       <Label className="hidden">选择权限</Label>
                       <Select.Trigger className="composer-control__trigger">
-                        <Select.Value><RiShieldLine className="composer-control__icon" /><span className="composer-control__text">{PERMISSION_LABELS.get(currentPermission.id) || currentPermission.title}</span></Select.Value>
+                        <Select.Value><RiShieldLine className="composer-control__icon" /><span className="composer-control__text">{usesAgentDefaults ? 'Agent 默认权限' : PERMISSION_LABELS.get(currentPermission.id) || currentPermission.title}</span></Select.Value>
                         <Select.Indicator className="composer-control__indicator" />
                       </Select.Trigger>
                       <Select.Popover>
                         <ListBox>
+                          <ListBox.Item id="agent-default" textValue="使用 Agent 默认权限">使用 Agent 默认权限<ListBox.ItemIndicator /></ListBox.Item>
                           {PERMISSION_PRESETS.map((preset) => (
-                            <ListBox.Item key={preset.id} id={preset.id} textValue={PERMISSION_LABELS.get(preset.id) || preset.title}>
+                            <ListBox.Item key={preset.id} id={preset.id} isDisabled={!supportsPermissionPreset(preset)} textValue={PERMISSION_LABELS.get(preset.id) || preset.title}>
                               {PERMISSION_LABELS.get(preset.id) || preset.title}
                               <ListBox.ItemIndicator />
                             </ListBox.Item>
                           ))}
                         </ListBox>
                       </Select.Popover>
-                    </Select> : <Button className="composer-control composer-control__static" size="sm" variant="tertiary" isDisabled aria-label="完全访问权限"><RiShieldLine className="composer-control__icon" /><span className="composer-control__text">完全访问</span></Button>}
+                    </Select> : <Button className="composer-control composer-control__static" size="sm" variant="tertiary" onPress={useAgentDefaultPermissions} aria-label="使用 Agent 默认权限"><RiShieldLine className="composer-control__icon" /><span className="composer-control__text">{usesAgentDefaults ? 'Agent 默认权限' : '使用 Agent 默认权限'}</span></Button>}
                   </PromptInput.ToolbarStart>
                   <PromptInput.ToolbarEnd className="gap-2">
                     <ChatAttachmentInput.Trigger
@@ -843,7 +857,7 @@ export function ChatPanel({ session }: Props) {
                   </PromptInput.ToolbarEnd>
                 </PromptInput.Toolbar>
               </PromptInput.Shell>
-            </PromptInput>
+            </ConversationPromptInput>
           </ChatAttachmentInput>
         </div>
       </div>

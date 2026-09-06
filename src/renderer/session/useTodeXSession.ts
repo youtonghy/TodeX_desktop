@@ -1,3 +1,8 @@
+import { LegacyEventRecovery } from './legacyEventRecovery';
+import { ConversationRecovery } from './conversationRecovery';
+import { type ConversationRuntime } from '@todex/protocol/conversationRuntime';
+import { canonicalConversationEventType, type ConversationEvent } from '@todex/protocol/v2';
+import { ProtocolCommands, ProtocolCommandError, type ProtocolCommand } from './protocolCommands';
 import {
   useCallback,
   useEffect,
@@ -305,17 +310,15 @@ export type OpenPanelFn = (name: string, params?: OpenPanelOptions) => void;
 
 export type TodeXSession = ReturnType<typeof useTodeXSession>;
 
-type PendingProtocolCommand = {
-  message: { id: string; type: string; payload: Record<string, unknown> };
-  sent: boolean;
-  timeoutId: ReturnType<typeof setTimeout>;
-  resolve: (payload: Record<string, unknown>) => void;
-  reject: (error: Error) => void;
-};
+
 
 export type { CatalogState };
 export function useTodeXSession(openPanel: OpenPanelFn) {
   const socketRef = useRef<WebSocket | null>(null);
+  const rawProtocolSenderRef = useRef<(message: ProtocolCommand) => boolean>(() => false);
+  const protocolCommandsRef = useRef<ProtocolCommands | null>(null);
+  if (!protocolCommandsRef.current) protocolCommandsRef.current = new ProtocolCommands((message) => rawProtocolSenderRef.current(message));
+  useEffect(() => () => protocolCommandsRef.current?.dispose(), []);
   const socketCryptoRef = useRef<TransportCryptoSession | null>(null);
   const activeWorkspaceRef = useRef('');
   const activeConversationRef = useRef('');
@@ -339,6 +342,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     text: string;
     skills: SelectedSkillAttachment[];
     attachments: ComposerAttachmentDraft[];
+    requestId: string;
+    turnId?: string;
+    phase: 'sending' | 'running' | 'unknown';
   }>());
   const pendingGitDiffsRef = useRef(new Map<string, PendingGitDiff>());
   const pendingSkillListsRef = useRef(new Map<string, PendingSkillList>());
@@ -348,10 +354,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const pendingServerEventFrameRef = useRef<number | null>(null);
   const pendingSocketFramesRef = useRef<PendingSocketFrame[]>([]);
   const pendingSocketFrameDrainRef = useRef<number | null>(null);
-  const pendingProtocolCommandsRef = useRef(new Map<string, PendingProtocolCommand>());
   const capabilityWorkspaceRef = useRef('');
   const socketGenerationRef = useRef(0);
   const autoConnectAttemptedRef = useRef(false);
+  const legacyRecoveryRef = useRef(new LegacyEventRecovery<ServerEvent>());
   const sessionCursorsRef = useRef(new Map<string, number>());
   const reconnectAttemptRef = useRef(0);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -418,10 +424,24 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const [providerModelPreferences, setProviderModelPreferences] = useState<ProviderModelPreferences>({});
   const [providerCommands, setProviderCommands] = useState<Partial<Record<ProviderKind, ProviderCommandDescriptor[]>>>({});
   const [contextUsageByConversation, setContextUsageByConversation] = useState<Record<string, ConversationContextUsage>>({});
-  const [compactionByConversation, setCompactionByConversation] = useState<Record<string, ContextCompactionState>>({});
+  const [compactionByConversation, setCompactionByConversation] = useState<Record<string, ContextCompactionState & { recommended?: boolean }>>({});
   const [subagentsByConversation, setSubagentsByConversation] = useState<Record<string, SubagentRun[]>>({});
   const [memoryEntriesByConversation, setMemoryEntriesByConversation] = useState<Record<string, MemoryEntry[]>>({});
   const [usageRecords, setUsageRecords] = useState<UsageRecord[]>([]);
+  const [conversationRuntimeById, setConversationRuntimeById] = useState<Record<string, ConversationRuntime>>({});
+  const [recoveringConversations, setRecoveringConversations] = useState<Record<string, boolean>>({});
+  const [submissionStatusByConversation, setSubmissionStatusByConversation] = useState<Record<string, 'sending' | 'running' | 'unknown' | undefined>>({});
+  const settledV2TurnsRef = useRef(new Map<string, string>());
+  const runtimeReplayRef = useRef((id: string, after: number, limit: number) =>
+    new V2ApiClient({ serverUrl: settings.serverUrl, authToken: settings.authToken }).replayEvents(id, after, limit));
+  runtimeReplayRef.current = (id, after, limit) => new V2ApiClient({ serverUrl: settings.serverUrl, authToken: settings.authToken }).replayEvents(id, after, limit);
+  const runtimeUpdateRef = useRef<(state: ConversationRuntime, applied: ConversationEvent[], recovering: boolean) => void>(() => {});
+  const conversationRecoveryRef = useRef<ConversationRecovery | null>(null);
+  if (!conversationRecoveryRef.current) conversationRecoveryRef.current = new ConversationRecovery(
+    (id, after, limit) => runtimeReplayRef.current(id, after, limit),
+    (state, applied, recovering) => runtimeUpdateRef.current(state, applied, recovering), setLastError,
+  );
+
 
   useEffect(() => {
     setCompactionByConversation((current) => {
@@ -430,7 +450,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         const status = contextCompactionStatus(usage.usedTokens, usage.contextWindow);
         next[conversationId] = {
           ...next[conversationId],
-          status,
+          status: next[conversationId]?.status && !['idle', 'recommended'].includes(next[conversationId].status) ? next[conversationId].status : status,
+          recommended: status === 'recommended',
           usedTokens: usage.usedTokens,
           contextWindow: usage.contextWindow,
           updatedAt: new Date(usage.updatedAt).toISOString(),
@@ -1302,103 +1323,87 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     return () => { cancelled = true; };
   }, [activeConversation, activeWorkspace?.path, hydrated, settings.authToken, settings.serverUrl, v2Providers]);
 
-  useEffect(() => {
-    if (!hydrated || !activeConversation?.v2ConversationId || !settings.serverUrl.trim()) {
-      return;
+  const restorePendingSubmission = useCallback((conversationId: string) => {
+    const submission = pendingV2SubmissionsRef.current.get(conversationId);
+    if (!submission) return;
+    setConversationChatDraft(conversationId, (current) => current || submission.text);
+    setConversationAttachments(conversationId, (current) => current.length ? current : submission.attachments);
+    setConversationSelectedSkills(conversationId, (current) => current.length ? current : submission.skills);
+  }, [setConversationChatDraft, setConversationAttachments, setConversationSelectedSkills]);
+
+  runtimeUpdateRef.current = (state, appliedEvents, recovering) => {
+    const conversation = conversationsRef.current.find((item) => item.v2ConversationId === state.conversationId || item.id === state.conversationId);
+    if (!conversation) return;
+    const localId = conversation.id;
+    setConversationRuntimeById((current) => ({ ...current, [localId]: state }));
+    setRecoveringConversations((current) => ({ ...current, [localId]: recovering }));
+    setTimeline((current) => [
+      ...state.timeline.map((entry) => ({ ...entry, conversationId: localId })),
+      ...current.filter((entry) => entry.conversationId !== localId),
+    ].slice(0, MAX_TIMELINE_ITEMS));
+    if (state.contextUsage) setContextUsageByConversation((current) => ({ ...current, [localId]: state.contextUsage! }));
+    setCompactionByConversation((current) => ({ ...current, [localId]: state.compaction }));
+    setSubagentsByConversation((current) => ({ ...current, [localId]: state.subagents.map((run) => ({ ...run, conversationId: localId })) }));
+    setMemoryEntriesByConversation((current) => ({ ...current, [localId]: state.memoryEntries }));
+    setUsageRecords((current) => [
+      ...state.usageRecords.map((record) => ({ ...record, conversationId: localId,
+        provider: record.provider === 'unknown' ? conversation.provider || 'unknown' : record.provider,
+        model: record.model === 'unknown' ? conversation.model || 'unknown' : record.model,
+      })),
+      ...current.filter((record) => record.conversationId !== localId),
+    ].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, MAX_USAGE_RECORDS));
+    for (const event of appliedEvents) {
+      const data = event.payload && typeof event.payload === 'object' && !Array.isArray(event.payload)
+        ? event.payload as Record<string, unknown> : {};
+      const type = canonicalConversationEventType(event);
+      const turnId = typeof data.turnId === 'string' ? data.turnId : '';
+      const requestId = data.clientRequestId ?? data.requestId;
+      const submission = pendingV2SubmissionsRef.current.get(localId);
+      if (submission && requestId === submission.requestId && turnId) {
+        submission.turnId = turnId;
+        submission.phase = 'running';
+        setSubmissionStatusByConversation((current) => ({ ...current, [localId]: 'running' }));
+      }
+      if (['turn.completed', 'turn.cancelled', 'turn.failed', 'turn.interrupted'].includes(type)) {
+        if (turnId) {
+          settledV2TurnsRef.current.set(`${state.conversationId}:${turnId}`, type);
+          if (settledV2TurnsRef.current.size > 2000) settledV2TurnsRef.current.delete(settledV2TurnsRef.current.keys().next().value!);
+        }
+        if (submission && turnId && submission.turnId === turnId) {
+          if (type === 'turn.failed') {
+            restorePendingSubmission(localId);
+            setLastError(typeof data.message === 'string' ? data.message : '当前任务执行失败，请核对记录后重试。');
+          }
+          pendingV2SubmissionsRef.current.delete(localId);
+          setSubmissionStatusByConversation((current) => ({ ...current, [localId]: undefined }));
+        }
+      }
     }
+    setConversationTurnId(localId, state.activeTurnId);
+    const pending = pendingV2SubmissionsRef.current.get(localId);
+    setConversationThinking(localId, Boolean(state.activeTurnId) || pending?.phase === 'sending');
+    setConversations((current) => current.map((item) => item.id === localId
+      ? { ...item, lastSequence: Math.max(item.lastSequence ?? 0, state.appliedSequence) } : item));
+  };
 
-    let active = true;
-    const conversationId = activeConversation.id;
-    const v2ConversationId = activeConversation.v2ConversationId;
-    const workspaceId = activeConversation.workspaceId;
-    const api = new V2ApiClient({ serverUrl: settings.serverUrl, authToken: settings.authToken });
+  const recoverConversation = useCallback(async (conversationId: string) => {
+    const conversation = conversationsRef.current.find((item) => item.id === conversationId || item.v2ConversationId === conversationId);
+    if (conversation?.v2ConversationId) await conversationRecoveryRef.current!.recover(conversation.v2ConversationId, conversation.workspaceId);
+  }, []);
 
-    void (async () => {
-      const events: import('@todex/protocol/v2').ConversationEvent[] = [];
-      let afterSequence = 0;
-      let hasMore = true;
-      while (hasMore) {
-        const replay = await api.replayEvents(v2ConversationId, afterSequence, 200);
-        events.push(...replay.events);
-        hasMore = replay.hasMore && replay.nextSequence > afterSequence;
-        afterSequence = replay.nextSequence;
-      }
-      if (!active) return;
+  useEffect(() => {
+    conversationRecoveryRef.current?.reset();
+    legacyRecoveryRef.current = new LegacyEventRecovery<ServerEvent>();
+    protocolCommandsRef.current?.dispose();
+    setConversationRuntimeById({});
+    setRecoveringConversations({});
+    settledV2TurnsRef.current.clear();
+  }, [settings.serverUrl, settings.authToken]);
 
-      const replayState = reduceV2ConversationEvents(events, workspaceId);
-      const replayTimeline = replayState.timeline.map((entry) => (
-        entry.conversationId === conversationId
-          ? entry
-          : { ...entry, conversationId }
-      ));
-      const restoredUsage = events.reduce<ConversationContextUsage | null>(
-        (latest, event) => contextUsageFromV2Event(event) ?? latest,
-        null,
-      );
-      const restoredUsageRecords = events.flatMap<UsageRecord>((event) => {
-        const usage = contextUsageFromV2Event(event);
-        if (!usage) return [];
-        return [{
-          id: `${conversationId}:${event.eventId}`,
-          conversationId,
-          provider: activeConversation.provider || 'unknown',
-          model: usage.model || activeConversation.model || 'unknown',
-          inputTokens: usage.inputTokens,
-          outputTokens: usage.outputTokens,
-          cachedInputTokens: usage.cachedInputTokens,
-          cacheWriteTokens: usage.cacheWriteTokens,
-          updatedAt: usage.updatedAt,
-        }];
-      });
-      if (restoredUsage) {
-        setContextUsageByConversation((current) => ({ ...current, [conversationId]: restoredUsage }));
-      }
-      if (restoredUsageRecords.length > 0) {
-        setUsageRecords((current) => {
-          const merged = [...restoredUsageRecords, ...current];
-          return merged
-            .filter((record, index) => merged.findIndex((item) => item.id === record.id) === index)
-            .sort((left, right) => right.updatedAt - left.updatedAt)
-            .slice(0, MAX_USAGE_RECORDS);
-        });
-      }
-      setTimeline((current) => [
-        ...mergeConversationTimeline(
-          replayTimeline,
-          current.filter((entry) => entry.conversationId === conversationId),
-        ),
-        ...current.filter((entry) => entry.conversationId !== conversationId),
-      ].slice(0, MAX_TIMELINE_ITEMS));
-      setConversationTurnId(conversationId, replayState.activeTurnId);
-      setConversationThinking(conversationId, Boolean(replayState.activeTurnId));
-      if (replayState.lastSequence > 0) {
-        setConversations((current) => current.map((item) => (
-          item.id === conversationId
-            ? { ...item, lastSequence: replayState.lastSequence, updatedAt: Date.now() }
-            : item
-        )));
-      }
-    })().catch((error) => {
-      if (active) {
-        setLastError(error instanceof Error ? error.message : '对话历史加载失败');
-      }
-    });
-
-    return () => {
-      active = false;
-    };
-  }, [
-    activeConversation?.id,
-    activeConversation?.model,
-    activeConversation?.provider,
-    activeConversation?.v2ConversationId,
-    activeConversation?.workspaceId,
-    hydrated,
-    setConversationThinking,
-    setConversationTurnId,
-    settings.authToken,
-    settings.serverUrl,
-  ]);
+  useEffect(() => {
+    if (!hydrated || !activeConversation?.v2ConversationId || !settings.serverUrl.trim()) return;
+    void recoverConversation(activeConversation.id);
+  }, [activeConversation?.id, activeConversation?.v2ConversationId, hydrated, recoverConversation, settings.serverUrl, settings.authToken]);
 
   const runtimeStatus = useMemo<RuntimeStatusState>(() => ({
     socket: connectionState,
@@ -1420,6 +1425,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     const resolved = new Set<string>();
 
     for (const event of events) {
+      if (event.type === 'conversation.permission.request') continue;
       if (event.type === 'codex.serverRequest.resolved' || event.type === 'permission.resolved') {
         const data = eventPayloadData(event);
         const resolvedId = data.requestId ?? data.request_id ?? data.permissionId;
@@ -1434,8 +1440,19 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       }
     }
 
+    for (const [localId, state] of Object.entries(conversationRuntimeById)) {
+      if (recoveringConversations[localId] || state.appliedSequence < state.highWaterSequence) continue;
+      const conversation = conversations.find((item) => item.id === localId);
+      for (const permission of state.pendingPermissions) {
+        const request = classifyPendingRequest({ type: 'conversation.permission.request', payload: {
+          ...permission.payload, requestId: permission.id, permissionId: permission.id,
+          conversationId: state.conversationId, sessionId: conversation?.sessionId,
+        } });
+        if (request) open.set(request.requestId, request);
+      }
+    }
     return [...open.values()].filter((request) => !resolved.has(request.requestId));
-  }, [events]);
+  }, [events, conversationRuntimeById, recoveringConversations, conversations]);
 
   useEffect(() => {
     if (!pendingRequests.length) {
@@ -1991,19 +2008,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     return true;
   }, [appendTerminalOutput, settings.tenantId]);
 
-  const appendEvent = useCallback(
+  const projectLegacyEvent = useCallback(
     (event: ServerEvent) => {
       const data = eventPayloadData(event);
       const sessionId = sessionIdFromEvent(event, data);
-      const cursor = cursorFromEvent(event);
-      if (sessionId && cursor !== null) {
-        const previousCursor = sessionCursorsRef.current.get(sessionId) ?? 0;
-        if (cursor <= previousCursor) {
-          return;
-        }
-        sessionCursorsRef.current.set(sessionId, cursor);
-        persistSessionCursors();
-      }
       setEvents((current) => [event, ...current].slice(0, MAX_EVENTS));
       if (handleTerminalEvent(event, data)) {
         return;
@@ -2450,6 +2458,21 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     [appendTimeline, findPendingLocalStart, finishPendingGitDiff, finishPendingSkillList, finishPendingThreadAction, finishPendingThreadList, handleTerminalEvent, persistSessionCursors, resetWorkspaceSession, resolveTimelineTarget, settlePendingLocalStart, settlePendingThreadStart, setConversationThinking, setConversationTurnId, updateConversation, upsertChatTimeline, upsertNativeThreads],
   );
 
+  const appendEvent = useCallback((event: ServerEvent) => {
+    const sessionId = sessionIdFromEvent(event, eventPayloadData(event));
+    const cursor = cursorFromEvent(event);
+    if (!sessionId || cursor === null) {
+      projectLegacyEvent(event);
+      return;
+    }
+    legacyRecoveryRef.current.receive(sessionId, cursor, event,
+      () => sessionCursorsRef.current.get(sessionId) ?? 0,
+      projectLegacyEvent,
+      (next) => { sessionCursorsRef.current.set(sessionId, next); persistSessionCursors(); },
+      (after) => rawProtocolSenderRef.current({ id: createRequestId('resume'), type: 'session.resume', payload: { sessionCursors: { [sessionId]: after } } }),
+    );
+  }, [persistSessionCursors, projectLegacyEvent]);
+
   const scheduleServerEventDrain = useCallback(() => {
     if (pendingServerEventFrameRef.current !== null) {
       return;
@@ -2481,174 +2504,26 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       const parsed = JSON.parse(text) as Record<string, unknown>;
       const messageType = typeof parsed.type === 'string' ? parsed.type : '';
       if (messageType === 'server.result') {
-        const requestId = typeof parsed.id === 'string' ? parsed.id : '';
-        const pending = requestId ? pendingProtocolCommandsRef.current.get(requestId) : undefined;
-        if (pending) {
-          clearTimeout(pending.timeoutId);
-          pendingProtocolCommandsRef.current.delete(requestId);
-          const payload = parsed.payload && typeof parsed.payload === 'object' && !Array.isArray(parsed.payload)
-            ? parsed.payload as Record<string, unknown>
-            : {};
-          pending.resolve(payload);
-        }
+        const id = typeof parsed.id === 'string' ? parsed.id : '';
+        const payload = parsed.payload && typeof parsed.payload === 'object' && !Array.isArray(parsed.payload)
+          ? parsed.payload as Record<string, unknown> : {};
+        protocolCommandsRef.current?.resolve(id, payload);
         return;
       }
       if (messageType === 'server.error' && parsed.id !== undefined) {
-        // v2 command error envelope; surface the structured message.
         const payload = parsed.payload as { code?: unknown; message?: unknown } | undefined;
         const code = typeof payload?.code === 'string' ? payload.code : '';
         const detail = typeof payload?.message === 'string' ? payload.message : 'v2 命令失败';
-        const requestId = typeof parsed.id === 'string' ? parsed.id : '';
-        const pending = requestId ? pendingProtocolCommandsRef.current.get(requestId) : undefined;
-        if (pending) {
-          clearTimeout(pending.timeoutId);
-          pendingProtocolCommandsRef.current.delete(requestId);
-          pending.reject(new Error(code ? `[${code}] ${detail}` : detail));
-        }
-        setLastError(code ? `[${code}] ${detail}` : detail);
+        const message = code ? `[${code}] ${detail}` : detail;
+        protocolCommandsRef.current?.reject(typeof parsed.id === 'string' ? parsed.id : '', message);
+        setLastError(message);
         return;
       }
       if (messageType === 'conversation.event') {
-        const payload = parsed.payload && typeof parsed.payload === 'object'
-          ? parsed.payload as Record<string, unknown>
-          : parsed;
-        const conversationId = typeof payload.conversationId === 'string' ? payload.conversationId : '';
-        const conversation = conversationsRef.current.find((item) => item.id === conversationId || item.v2ConversationId === conversationId);
-        if (conversation && typeof payload.type === 'string') {
-          const event = normalizeConversationEvent(payload) ?? payload as unknown as import('@todex/protocol/v2').ConversationEvent;
-          if (/memory/i.test(event.type)) {
-            const data = event.payload && typeof event.payload === 'object' && !Array.isArray(event.payload) ? event.payload as Record<string, unknown> : {};
-            const content = typeof data.content === 'string' ? data.content : typeof data.text === 'string' ? data.text : '';
-            const memoryId = typeof data.memoryId === 'string' ? data.memoryId : typeof data.id === 'string' ? data.id : event.eventId;
-            if (content) {
-              const entry: MemoryEntry = { id: memoryId, scope: data.scope === 'user' || data.scope === 'workspace' ? data.scope : 'conversation', content, source: typeof data.source === 'string' ? data.source : undefined, createdAt: event.time, updatedAt: event.time };
-              setMemoryEntriesByConversation((current) => {
-                const previous = current[conversation.id] ?? [];
-                const index = previous.findIndex((item) => item.id === entry.id);
-                const next = [...previous];
-                if (index < 0) next.unshift(entry); else next[index] = { ...next[index], ...entry };
-                return { ...current, [conversation.id]: next.slice(0, 100) };
-              });
-            }
-          }
-          if (/subagent|child.?agent/i.test(event.type)) {
-            const data = event.payload && typeof event.payload === 'object' && !Array.isArray(event.payload)
-              ? event.payload as Record<string, unknown> : {};
-            const runId = typeof data.subagentId === 'string' ? data.subagentId : typeof data.agentId === 'string' ? data.agentId : event.eventId;
-            const status: SubagentRun['status'] = /fail|error/i.test(event.type) ? 'failed' : /complete|finish|done/i.test(event.type) ? 'completed' : /cancel/i.test(event.type) ? 'cancelled' : /start|run/i.test(event.type) ? 'running' : 'queued';
-            const run: SubagentRun = {
-              id: runId, conversationId: conversation.id,
-              title: typeof data.title === 'string' ? data.title : 'Subagent',
-              task: typeof data.task === 'string' ? data.task : typeof data.prompt === 'string' ? data.prompt : '',
-              status,
-              ...(typeof data.result === 'string' ? { result: data.result } : {}),
-              ...(typeof data.error === 'string' ? { error: data.error } : {}),
-              ...(status === 'running' ? { startedAt: event.time } : { finishedAt: event.time }),
-            };
-            setSubagentsByConversation((current) => {
-              const previous = current[conversation.id] ?? [];
-              const index = previous.findIndex((item) => item.id === run.id);
-              const next = [...previous];
-              if (index < 0) next.unshift(run); else next[index] = { ...next[index], ...run };
-              return { ...current, [conversation.id]: next.slice(0, 50) };
-            });
-          }
-          if (/compact/i.test(event.type)) {
-            const status = /fail|error/i.test(event.type) ? 'failed' : /complete|finish|done/i.test(event.type) ? 'completed' : /cancel/i.test(event.type) ? 'idle' : 'running';
-            setCompactionByConversation((current) => ({ ...current, [conversation.id]: { ...current[conversation.id], status, updatedAt: new Date().toISOString(), ...(status === 'failed' ? { error: '上下文压缩失败' } : {}) } }));
-          }
-          const contextUsage = contextUsageFromV2Event(event);
-          if (contextUsage) {
-            setContextUsageByConversation((current) => ({ ...current, [conversation.id]: contextUsage }));
-            const usageRecord: UsageRecord = {
-              id: `${conversation.id}:${event.eventId}`,
-              conversationId: conversation.id,
-              provider: conversation.provider || 'unknown',
-              model: contextUsage.model || conversation.model || 'unknown',
-              inputTokens: contextUsage.inputTokens,
-              outputTokens: contextUsage.outputTokens,
-              cachedInputTokens: contextUsage.cachedInputTokens,
-              cacheWriteTokens: contextUsage.cacheWriteTokens,
-              updatedAt: contextUsage.updatedAt,
-            };
-            setUsageRecords((current) => {
-              if (current.some((record) => record.id === usageRecord.id)) {
-                return current;
-              }
-              return [usageRecord, ...current].slice(0, MAX_USAGE_RECORDS);
-            });
-          }
-          const payloadTurnId = event.payload && typeof event.payload === 'object' && !Array.isArray(event.payload)
-            ? (event.payload as Record<string, unknown>).turnId
-            : '';
-          if (event.type === 'turn.started' && typeof payloadTurnId === 'string') {
-            setConversationTurnId(conversation.id, payloadTurnId);
-          }
-          const entry = classifyV2ConversationEvent(
-            event,
-            conversation.workspaceId,
-            typeof payloadTurnId === 'string' && payloadTurnId ? payloadTurnId : turnIdsRef.current[conversation.id] ?? '',
-          );
-          if (entry) {
-            upsertChatTimeline(
-              entry.conversationId === conversation.id
-                ? entry
-                : { ...entry, conversationId: conversation.id },
-              shouldAppendV2ConversationEvent(event),
-            );
-          }
-          if (event.type === 'turn.started') {
-            setConversationThinking(conversation.id, true);
-          }
-          if (event.type === 'turn.completed' || event.type === 'turn.cancelled' || event.type === 'turn.failed') {
-            const pendingSubmission = pendingV2SubmissionsRef.current.get(conversation.id);
-            const eventData = event.payload && typeof event.payload === 'object' && !Array.isArray(event.payload)
-              ? event.payload as Record<string, unknown>
-              : {};
-            if (event.type === 'turn.failed' && pendingSubmission) {
-              setConversationChatDraft(conversation.id, (current) => current || pendingSubmission.text);
-              if (pendingSubmission.skills.length > 0) {
-                setConversationSelectedSkills(conversation.id, (current) => current.length > 0 ? current : pendingSubmission.skills);
-              }
-              if (pendingSubmission.attachments.length > 0) {
-                setConversationAttachments(conversation.id, (current) => current.length > 0 ? current : pendingSubmission.attachments);
-              }
-              setLastError(typeof eventData.message === 'string'
-                ? eventData.message
-                : eventData.code === 'IMAGE_INPUT_UNSUPPORTED'
-                  ? '当前 Agent 不支持图片输入'
-                  : '当前任务执行失败，请重试');
-            }
-            pendingV2SubmissionsRef.current.delete(conversation.id);
-            setConversationThinking(conversation.id, false);
-            setConversationTurnId(conversation.id, '');
-          }
-          if (typeof event.sequence === 'number') {
-            updateConversation(conversation.id, { lastSequence: event.sequence });
-          }
-          if (event.type === 'permission.requested') {
-            const inner = event.payload && typeof event.payload === 'object' && !Array.isArray(event.payload)
-              ? event.payload as Record<string, unknown>
-              : {};
-            const permissionId = typeof inner.permissionId === 'string' ? inner.permissionId : '';
-            if (permissionId) {
-              enqueueServerEvent({
-                type: 'conversation.permission.request',
-                payload: {
-                  requestId: permissionId,
-                  permissionId,
-                  conversationId,
-                  sessionId: conversation.sessionId,
-                  title: inner.title,
-                  kind: inner.kind,
-                  details: inner.details,
-                  options: inner.options,
-                  providerRequestId: inner.providerRequestId,
-                },
-              });
-            }
-          }
-        }
+        const event = normalizeConversationEvent(parsed.payload ?? parsed);
+        if (!event) throw new Error('收到无效的对话事件，未推进恢复位置。');
+        const conversation = conversationsRef.current.find((item) => item.v2ConversationId === event.conversationId || item.id === event.conversationId);
+        if (conversation) conversationRecoveryRef.current!.receive(event.conversationId, conversation.workspaceId, [event]);
         return;
       }
       enqueueServerEvent(parsed as unknown as ServerEvent);
@@ -2717,45 +2592,12 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     return message;
   }, []);
 
-  const sendProtocolCommand = useCallback((
-    message: { id: string; type: string; payload: Record<string, unknown> },
-    timeoutMs = 15000,
-  ): Promise<Record<string, unknown>> => new Promise((resolve, reject) => {
-    const timeoutId = setTimeout(() => {
-      const pending = pendingProtocolCommandsRef.current.get(message.id);
-      if (!pending) return;
-      pendingProtocolCommandsRef.current.delete(message.id);
-      reject(new Error(pending.sent ? '后端未确认消息，请重试。' : '连接后端超时，请重试。'));
-    }, timeoutMs);
-    const pending: PendingProtocolCommand = {
-      message,
-      sent: false,
-      timeoutId,
-      resolve,
-      reject,
-    };
-    pendingProtocolCommandsRef.current.set(message.id, pending);
-    try {
-      pending.sent = Boolean(sendRawProtocolFrame(message));
-    } catch (error) {
-      clearTimeout(timeoutId);
-      pendingProtocolCommandsRef.current.delete(message.id);
-      reject(error instanceof Error ? error : new Error('消息发送失败'));
-    }
-  }), [sendRawProtocolFrame]);
+  rawProtocolSenderRef.current = (message) => Boolean(sendRawProtocolFrame(message));
 
-  const flushQueuedProtocolCommands = useCallback(() => {
-    for (const pending of pendingProtocolCommandsRef.current.values()) {
-      if (pending.sent) continue;
-      try {
-        pending.sent = Boolean(sendRawProtocolFrame(pending.message));
-      } catch (error) {
-        clearTimeout(pending.timeoutId);
-        pendingProtocolCommandsRef.current.delete(pending.message.id);
-        pending.reject(error instanceof Error ? error : new Error('消息发送失败'));
-      }
-    }
-  }, [sendRawProtocolFrame]);
+  const sendProtocolCommand = useCallback((message: ProtocolCommand, timeoutMs = 15_000) =>
+    protocolCommandsRef.current!.request(message, timeoutMs), []);
+
+  const flushQueuedProtocolCommands = useCallback(() => protocolCommandsRef.current?.flush(), []);
 
   const sendSessionResume = useCallback((sessionCursors: Record<string, number>) => {
     try {
@@ -2960,6 +2802,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           for (const conversation of conversationsRef.current) {
             if (conversation.v2ConversationId) {
               try {
+                void recoverConversation(conversation.id);
                 sendRawProtocolFrame({
                   id: createRequestId('sub'),
                   type: 'conversation.subscribe',
@@ -2968,7 +2811,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
                     // lastSequence is the backend high-water mark, not this
                     // device's applied cursor. Replay from zero on reconnect
                     // so a fresh device cannot skip persisted history.
-                    afterSequence: 0,
+                    afterSequence: conversationRecoveryRef.current?.get(conversation.v2ConversationId)?.appliedSequence ?? 0,
                     limit: 200,
                   },
                 });
@@ -3006,12 +2849,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
             socketRef.current = null;
             socketCryptoRef.current = null;
           }
-          for (const [requestId, pending] of pendingProtocolCommandsRef.current) {
-            if (!pending.sent) continue;
-            clearTimeout(pending.timeoutId);
-            pendingProtocolCommandsRef.current.delete(requestId);
-            pending.reject(new Error('连接在后端确认消息前中断，请重试。'));
-          }
+          protocolCommandsRef.current?.disconnect();
         };
       } catch (error) {
         lastFailureRetryableRef.current = true;
@@ -3020,7 +2858,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         setLastError(error instanceof Error ? error.message : ConnectionError.websocketFailed(wsUrl).userMessage);
       }
     })();
-  }, [checkConnectionHealth, closeSocket, enqueueSocketFrame, flushQueuedProtocolCommands, getSessionCursorSnapshot, refreshServerVersion, sendRawProtocolFrame, sendSessionResume, settings, syncWorkspacesFromBackend]);
+  }, [checkConnectionHealth, closeSocket, enqueueSocketFrame, flushQueuedProtocolCommands, getSessionCursorSnapshot, recoverConversation, refreshServerVersion, sendRawProtocolFrame, sendSessionResume, settings, syncWorkspacesFromBackend]);
 
   useEffect(() => {
     if (!hydrated || !autoConnectEnabled || manualDisconnectRef.current) {
@@ -4961,6 +4799,38 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       return null;
     }
     const { workspace, conversation } = context;
+    if (conversation.v2ConversationId) {
+      const provider = v2ProvidersRef.current.find((item) => item.id === conversation.provider);
+      if (!provider?.capabilities.controlActions?.includes('fork')) {
+        setLastError('当前 Agent 未提供已验证的原生分叉能力。');
+        return null;
+      }
+      if (thinkingConversationsRef.current[conversation.id]) {
+        setLastError('请先结束当前任务再分叉对话。');
+        return null;
+      }
+      void (async () => {
+        try {
+          const result = await sendProtocolCommand({ id: createRequestId('fork'), type: 'conversation.fork', payload: {
+            conversationId: conversation.v2ConversationId, title: `${conversation.title || '对话'} · 分叉`,
+          } }, 45_000);
+          if (typeof result.conversationId !== 'string') throw new Error('分叉已响应，但未返回新对话标识，请刷新对话列表核对。');
+          const api = new V2ApiClient({ serverUrl: settings.serverUrl, authToken: settings.authToken });
+          const created = await api.getConversation(result.conversationId);
+          const record = { ...conversationFromManifest(created, workspace.id), backendConnectionId: conversation.backendConnectionId,
+            model: conversation.model, reasoningEffort: conversation.reasoningEffort };
+          conversationsRef.current = [record, ...conversationsRef.current.filter((item) => item.id !== record.id)];
+          setConversations((current) => [record, ...current.filter((item) => item.id !== record.id)]);
+          setActiveWorkspaceId(workspace.id);
+          setActiveConversationId(record.id);
+          await recoverConversation(record.id);
+          await sendProtocolCommand({ id: createRequestId('sub'), type: 'conversation.subscribe', payload: {
+            conversationId: created.id, afterSequence: conversationRecoveryRef.current?.get(created.id)?.appliedSequence ?? 0, limit: 500,
+          } });
+        } catch (error) { setLastError(error instanceof Error ? error.message : '分叉失败'); }
+      })();
+      return null;
+    }
     const threadId = normalizeThreadId(conversation.threadId);
     if (!threadId) {
       setLastError('当前记录还没有可 fork 的原生 thread。');
@@ -4991,7 +4861,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       { selectResult: true, resultConversationId: nextConversation.id },
     );
     return nextConversation;
-  }, [getConversationContext, sendNativeThreadAction, settings.approvalPolicy, settings.approvalsReviewer, settings.defaultModel, settings.sandboxMode]);
+  }, [getConversationContext, recoverConversation, sendProtocolCommand, settings.serverUrl, settings.authToken, sendNativeThreadAction, settings.approvalPolicy, settings.approvalsReviewer, settings.defaultModel, settings.sandboxMode]);
 
   const removeConversation = useCallback((conversationId: string) => {
     const context = getConversationContext(conversationId);
@@ -5140,6 +5010,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           created,
           ...current.filter((item) => item.id !== created.id),
         ]);
+        void recoverConversation(record.id);
         sendRawProtocolFrame({
           id: createRequestId('sub'),
           type: 'conversation.subscribe',
@@ -5164,7 +5035,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         pendingV2ConversationCreatesRef.current.delete(conversationId);
       }
     }
-  }, [backendConnections, getConversationContext, sendRawProtocolFrame, settings.authToken, settings.serverUrl]);
+  }, [backendConnections, getConversationContext, recoverConversation, sendRawProtocolFrame, settings.authToken, settings.serverUrl]);
 
   const sendV2Prompt = useCallback(
     async (
@@ -5184,6 +5055,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         return false;
       }
 
+      if (pendingV2SubmissionsRef.current.has(conversation.id)) {
+        setLastError('上一条请求尚未结束或确认，请先核对记录。');
+        return false;
+      }
       const isFirstPrompt = !conversation.v2ConversationId;
       if (isFirstPrompt && pendingV2FirstPromptsRef.current.has(conversation.id)) {
         return false;
@@ -5210,7 +5085,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           return false;
         }
       }
-      pendingV2SubmissionsRef.current.set(conversation.id, { text, skills, attachments });
+      const requestId = createRequestId('prompt');
+      const submission = { text, skills, attachments, requestId, phase: 'sending' as 'sending' | 'running' | 'unknown', turnId: undefined as string | undefined };
+      pendingV2SubmissionsRef.current.set(conversation.id, submission);
+      setSubmissionStatusByConversation((current) => ({ ...current, [conversation.id]: 'sending' }));
 
       if (isFirstPrompt) {
         pendingV2FirstPromptsRef.current.add(conversation.id);
@@ -5226,6 +5104,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         const v2Id = readyConversation?.v2ConversationId;
         if (!readyConversation || !v2Id) {
           setConversationThinking(conversation.id, false);
+          pendingV2SubmissionsRef.current.delete(conversation.id);
+          setSubmissionStatusByConversation((current) => ({ ...current, [conversation.id]: undefined }));
           restoreSubmission();
           return false;
         }
@@ -5236,12 +5116,12 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           ? readyConversation.model || workspace.model || settings.defaultModel || undefined
           : readyConversation.model || undefined;
         const reasoningEffort = readyConversation.reasoningEffort || undefined;
-        const requestId = createRequestId('prompt');
-        await sendProtocolCommand({
+        const result = await sendProtocolCommand({
           id: requestId,
           type: 'conversation.prompt',
           payload: {
             conversationId: v2Id,
+            clientRequestId: requestId,
             text,
             ...(workspace.permissionProfile ? { permissionProfile: workspace.permissionProfile } : {}),
             ...(workspace.sandboxMode ? { sandboxMode: workspace.sandboxMode } : {}),
@@ -5252,17 +5132,46 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
             ...(content.length ? { content } : {}),
           },
         });
+        if (typeof result.turnId === 'string') submission.turnId = result.turnId;
+        const terminal = submission.turnId ? settledV2TurnsRef.current.get(`${v2Id}:${submission.turnId}`) : undefined;
+        if (terminal) {
+          if (terminal === 'turn.failed') restoreSubmission();
+          pendingV2SubmissionsRef.current.delete(conversation.id);
+          setSubmissionStatusByConversation((current) => ({ ...current, [conversation.id]: undefined }));
+          if (terminal === 'turn.failed') return false;
+        } else if (pendingV2SubmissionsRef.current.get(conversation.id) === submission) {
+          submission.phase = 'running';
+          setSubmissionStatusByConversation((current) => ({ ...current, [conversation.id]: 'running' }));
+        }
         if (!isFirstPrompt && conversation.title === '新对话' && text.trim()) {
           updateConversation(conversation.id, { title: text.slice(0, 18), updatedAt: Date.now() });
         }
         return true;
       } catch (error) {
+        if (error instanceof ProtocolCommandError && error.state === 'unknown') {
+          if (submission.phase === 'running') {
+            const v2Id = conversationsRef.current.find((item) => item.id === conversation.id)?.v2ConversationId;
+            const terminal = submission.turnId ? settledV2TurnsRef.current.get(`${v2Id}:${submission.turnId}`) : undefined;
+            return terminal !== 'turn.failed';
+          }
+          submission.phase = 'unknown';
+          setSubmissionStatusByConversation((current) => ({ ...current, [conversation.id]: 'unknown' }));
+          setLastError(error.message);
+          setConversationThinking(conversation.id, false);
+          await recoverConversation(conversation.id);
+          const latest = pendingV2SubmissionsRef.current.get(conversation.id);
+          const v2Id = conversationsRef.current.find((item) => item.id === conversation.id)?.v2ConversationId;
+          const terminal = v2Id && submission.turnId ? settledV2TurnsRef.current.get(`${v2Id}:${submission.turnId}`) : undefined;
+          if (terminal) return terminal !== 'turn.failed';
+          return latest?.phase === 'running';
+        }
         setConversationThinking(conversation.id, false);
         const message = error instanceof ConnectionError
           ? error.userMessage
           : error instanceof Error ? error.message : '消息发送失败';
         setLastError(message);
         pendingV2SubmissionsRef.current.delete(conversation.id);
+        setSubmissionStatusByConversation((current) => ({ ...current, [conversation.id]: undefined }));
         restoreSubmission();
         return false;
       } finally {
@@ -5271,7 +5180,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         }
       }
     },
-    [getConversationContext, materializeV2Conversation, promptContentFromAttachments, promptSkillsFromAttachments, sendProtocolCommand, setConversationAttachments, setConversationChatDraft, setConversationSelectedSkills, setConversationThinking, settings.defaultModel, updateConversation],
+    [getConversationContext, materializeV2Conversation, recoverConversation, promptContentFromAttachments, promptSkillsFromAttachments, sendProtocolCommand, setConversationAttachments, setConversationChatDraft, setConversationSelectedSkills, setConversationThinking, settings.defaultModel, updateConversation],
   );
 
   const sendLocalTurn = useCallback(
@@ -5469,7 +5378,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           desktopAlert('权限请求无效', '找不到对应的对话。');
           return false;
         }
-        return Boolean(sendRawProtocolFrame({
+        void sendProtocolCommand({
           id: createRequestId('perm'),
           type: 'conversation.permission.respond',
           payload: {
@@ -5477,7 +5386,11 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
             permissionId,
             decision: permissionDecision(selection),
           },
-        }));
+        }).then(() => recoverConversation(conversation?.id || conversationId)).catch((error: unknown) => {
+          setLastError(error instanceof Error ? error.message : '审批结果尚未确认。');
+          void recoverConversation(conversation?.id || conversationId);
+        });
+        return true;
       }
       const requestSessionId = sessionIdFromEvent(request.event, data);
       const conversation = requestSessionId
@@ -5507,7 +5420,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         conversationId: conversation.id,
       });
     },
-    [sendProtocolMessage, sendRawProtocolFrame],
+    [recoverConversation, sendProtocolCommand, sendProtocolMessage],
   );
 
   const applyPermissionPreset = useCallback(
@@ -5773,7 +5686,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     (input: string, conversationId = activeConversationRef.current) => {
       const trimmed = input.trim();
       if (!trimmed.startsWith('/')) {
-        sendLocalTurn(trimmed, 'implement', conversationId);
+        const conversation = conversationsRef.current.find((item) => item.id === conversationId);
+        if (isV2Conversation(conversation)) { void sendV2Prompt(trimmed, conversationId); return; }
+        void sendLocalTurn(trimmed, 'implement', conversationId);
         return;
       }
 
@@ -5787,6 +5702,26 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       }
 
       const { workspace, conversation } = context;
+      if (isV2Conversation(conversation)) {
+        if (lower === 'memory' || lower === 'memories') {
+          openSlashCommandActionPage(workspace, conversation, '/memory');
+          return;
+        }
+        if (lower === 'compact' || lower === 'retry' || lower === 'resume') {
+          const provider = v2ProvidersRef.current.find((item) => item.id === conversation.provider);
+          if (!conversation.v2ConversationId || !provider?.capabilities.controlActions?.includes(lower)) {
+            setLastError(lower === 'resume' ? '请发送明确的后续消息继续对话；当前 Agent 不支持独立恢复操作。' : '当前 Agent 不支持此操作。');
+            return;
+          }
+          void sendProtocolCommand({ id: createRequestId(lower), type: `conversation.${lower}`, payload: {
+            conversationId: conversation.v2ConversationId,
+          } }).then(() => recoverConversation(conversation.id)).catch((error: unknown) => {
+            setLastError(error instanceof Error ? error.message : '操作失败');
+            void recoverConversation(conversation.id);
+          });
+          return;
+        }
+      }
       const addCommandNotice = (title: string, detail: string) => {
         appendTimeline(makeSystemEntry(title, detail, workspace.id, conversation.id));
       };
@@ -6279,6 +6214,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       openPanel,
       providerCommands,
       sendV2Prompt,
+      sendProtocolCommand,
+      recoverConversation,
       setConversationChatDraft,
       setConversationComposerSelection,
       setLastError,
@@ -6432,11 +6369,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         setLastError('第一条消息正在创建对话，请稍候。');
         return;
       }
-      if (sendRawProtocolFrame(buildConversationControlMessage(v2Id, 'cancel'))) {
-        appendTimeline(makeSystemEntry('已发送停止', '正在请求 Backend 取消当前回合。', workspace.id, conversation.id));
-      } else {
-        setLastError('请先连接 Backend。');
-      }
+      void sendProtocolCommand(buildConversationControlMessage(v2Id, 'cancel')).then(() => {
+        appendTimeline(makeSystemEntry('停止请求已确认', '正在同步当前回合状态。', workspace.id, conversation.id));
+        return recoverConversation(conversation.id);
+      }).catch((error: unknown) => {
+        setLastError(error instanceof Error ? error.message : '停止结果尚未确认。');
+        void recoverConversation(conversation.id);
+      });
       return;
     }
     const threadId = normalizeThreadId(conversation.threadId);
@@ -6447,7 +6386,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     if (sendWorkspaceCommand(workspace, 'codex.local.interrupt', { threadId, turnId: turnIds[conversationId] || '' }, conversation)) {
       appendTimeline(makeSystemEntry('已发送停止', '正在请求 Codex 中断当前思考。', workspace.id, conversation.id));
     }
-  }, [appendTimeline, sendRawProtocolFrame, sendWorkspaceCommand, turnIds]);
+  }, [appendTimeline, recoverConversation, sendProtocolCommand, sendWorkspaceCommand, turnIds]);
 
   const submitChat = useCallback((conversationId: string) => {
     const text = (chatDrafts[conversationId] ?? '').trim();
@@ -6571,6 +6510,17 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       removeConversation(conversationId);
       return;
     }
+    const conversation = conversationsRef.current.find((item) => item.id === conversationId);
+    if (conversation && isV2Conversation(conversation)) {
+      if (action === 'compact' || action === 'resume') {
+        sendSlashCommand(`/${action}`, conversationId);
+      } else if (action === 'history' || action === 'detail' || action === 'turns') {
+        void recoverConversation(conversationId);
+      } else {
+        setLastError('当前 Agent 未提供此对话操作。');
+      }
+      return;
+    }
     if (action === 'resume') {
       void sendNativeThreadAction(conversationId, 'resume', 'thread/resume', (threadId) => ({ threadId }), { restoreHistory: true });
       return;
@@ -6640,7 +6590,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       return;
     }
     openThreadCommandPrompt(conversationId, action);
-  }, [forkConversation, openThreadCommandPrompt, removeConversation, sendNativeThreadAction, sendTrackedLocalMethod]);
+  }, [forkConversation, openThreadCommandPrompt, recoverConversation, removeConversation, sendNativeThreadAction, sendSlashCommand, sendTrackedLocalMethod]);
 
   const submitThreadCommandPrompt = useCallback((prompt: ThreadCommandPromptState, value: string) => {
     const trimmed = value.trim();
@@ -6814,6 +6764,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     contextUsageByConversation,
     compactionByConversation,
     subagentsByConversation,
+    conversationRuntimeById,
+    submissionStatusByConversation,
+    recoverConversation,
     memoryEntriesByConversation,
     usageRecords,
     pendingRequests,
