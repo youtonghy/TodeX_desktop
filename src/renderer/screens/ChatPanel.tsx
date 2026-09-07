@@ -1,3 +1,4 @@
+import { ConversationControls } from '../components/ConversationControls';
 import { RiAttachment2, RiBarChartBoxLine, RiClipboardLine, RiCpuLine, RiGitBranchLine, RiShieldLine, RiStopCircleLine } from '@remixicon/react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
@@ -528,7 +529,7 @@ export function ChatPanel({ session }: Props) {
                   {entry.kind === 'incoming' ? <AgentMessageActions conversationId={conversation.id} entry={entry} session={session} /> : null}
                   {request ? (
                     <ChatMessage.Actions>
-                      <ConversationPermissionActions request={request} onSelect={(option) => { session.sendApprovalResponse(option, request); }} />
+                      <ConversationPermissionActions request={request} onSelect={(option, data) => { session.sendApprovalResponse(option, request, data); }} />
                     </ChatMessage.Actions>
                   ) : null}
                 </div>
@@ -605,6 +606,29 @@ export function ChatPanel({ session }: Props) {
             onRecover={() => session.recoverConversation(conversation.id)}
             onCompact={() => session.sendSlashCommand('/compact', conversation.id)}
           />
+          {conversation.v2ConversationId ? <ConversationControls
+            runtime={runtime}
+            running={thinking}
+            canConfigure={providerDescriptor?.capabilities.liveConfiguration === true}
+            canSteer={providerDescriptor?.capabilities.steering === true}
+            canUseNativeQueue={providerDescriptor?.capabilities.followUpQueue === true}
+            piQueue={currentProvider === 'pi'}
+            controlStatus={session.controlStatusByConversation[conversation.id]}
+            nextModel={currentModel}
+            nextEffort={conversation.reasoningEffort}
+            canSendText={Boolean(draft.trim()) && !attachments.length && !(session.selectedSkills[conversation.id]?.length)}
+            localQueue={session.queuedChatDrafts[conversation.id] ?? []}
+            localPaused={session.queuePausedByConversation[conversation.id] === true}
+            onApply={() => { void session.controlConversation(conversation.id, { action: 'configure', model: currentModel,
+              ...(conversation.reasoningEffort ? { reasoningEffort: conversation.reasoningEffort } : {}) }); }}
+            onSteer={() => { const text = draft.trim(); void session.controlConversation(conversation.id, { action: 'steer', text })
+              .then(ok => { if (ok) session.setConversationChatDraft(conversation.id, current => current.trim() === text ? '' : current); }); }}
+            onRecover={() => { void session.recoverConversation(conversation.id); }}
+            onRemoveNative={itemId => { void session.controlConversation(conversation.id, { action: 'queueRemove', itemId }); }}
+            onClearNative={() => { void session.controlConversation(conversation.id, { action: 'queueClear' }); }}
+            onRemoveLocal={itemId => session.removeQueuedFollowUp(conversation.id, itemId)}
+            onResumeLocal={() => { void session.resumeQueuedFollowUps(conversation.id); }}
+          /> : null}
           {hasBlockedImageAttachment ? (
             <Alert status="warning" className="mb-2">
               <Alert.Indicator />

@@ -243,3 +243,7 @@ Pi 默认没有原生逐工具权限系统，`--approve` 是信任本地资源�
 - Web `pnpm typecheck`：通过。原始日志见[证据记录](/Users/youtonghy/github/Project/Todex/TodeX_desktop/docs/agent-integration-audit-2026-09-07/evidence.md)。
 
 仍需真实安装版验证：两轮审批恢复、真实扩展命令/pre-ack 时序、MCP elicitation、并发扩展对话超时、取消后的原生历史恢复，以及新 live settings 接口。未构建三家完整上游，也没有执行付费推理；本报告的代码问题和功能机会据此限定，不把潜在后果写成已发生事故。
+
+## 后续实施
+
+A、B、C 阶段的交付内容、验证和剩余边界见 [实施记录](./implementation.md)。本审查正文保留实施前的发现作为追踪依据。

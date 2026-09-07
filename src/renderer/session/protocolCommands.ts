@@ -53,10 +53,11 @@ export class ProtocolCommands {
     return true;
   }
 
-  reject(id: string, message: string): boolean {
+  reject(id: string, message: string, code = ''): boolean {
     const entry = this.take(id);
     if (!entry) return false;
-    entry.reject(new ProtocolCommandError(message, 'rejected', id));
+    const uncertain = entry.message.type === 'conversation.control' && ['PROVIDER_UNAVAILABLE', 'IO_ERROR', 'INTERNAL_ERROR', 'EVENT_STREAM_CLOSED', 'CONTROL_OUTCOME_UNKNOWN'].includes(code);
+    entry.reject(new ProtocolCommandError(message, uncertain ? 'unknown' : 'rejected', id));
     return true;
   }
 

@@ -1,3 +1,4 @@
+import { QueuedFollowUps, restoreQueuedFollowUps } from './queuedFollowUps';
 import { LegacyEventRecovery } from './legacyEventRecovery';
 import { ConversationRecovery } from './conversationRecovery';
 import { type ConversationRuntime } from '@todex/protocol/conversationRuntime';
@@ -308,6 +309,12 @@ import {
 
 export type OpenPanelFn = (name: string, params?: OpenPanelOptions) => void;
 
+type LiveConversationControl =
+  | { action: 'steer'; text: string }
+  | { action: 'configure'; model?: string; reasoningEffort?: string }
+  | { action: 'queueAdd'; itemId: string; text: string }
+  | { action: 'queueRemove'; itemId: string }
+  | { action: 'queueList' | 'queueClear' };
 export type TodeXSession = ReturnType<typeof useTodeXSession>;
 
 
@@ -393,6 +400,12 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const [selectedRequestId, setSelectedRequestId] = useState('');
   const [chatDrafts, setChatDrafts] = useState<Record<string, string>>({});
   const [queuedChatDrafts, setQueuedChatDrafts] = useState<Record<string, QueuedChatSubmission[]>>({});
+  const [queueHydrated, setQueueHydrated] = useState(false);
+  const [queuePausedByConversation, setQueuePausedByConversation] = useState<Record<string, boolean>>({});
+  const [controlStatusByConversation, setControlStatusByConversation] = useState<Record<string, 'pending' | 'unknown' | undefined>>({});
+  const controlRequestsRef = useRef(new Map<string, string>());
+  const controlDraftsRef = useRef(new Map<string, { conversationId: string; text: string }>());
+  const followUpsRef = useRef(new QueuedFollowUps());
   const [composerAttachments, setComposerAttachments] = useState<Record<string, ComposerAttachmentDraft[]>>({});
   const [composerSelections, setComposerSelections] = useState<Record<string, ComposerSelection>>({});
   const [selectedSkills, setSelectedSkills] = useState<Record<string, SelectedSkillAttachment[]>>({});
@@ -618,6 +631,41 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   useEffect(() => {
     queuedChatDraftsRef.current = queuedChatDrafts;
   }, [queuedChatDrafts]);
+
+  useEffect(() => {
+    let disposed = false;
+    void loadJson<unknown>('todex.queued-follow-ups.v1', {}).then((value) => {
+      if (disposed) return;
+      const queues = restoreQueuedFollowUps<QueuedChatSubmission>(value);
+      for (const id of Object.keys(queues)) followUpsRef.current.pause(id);
+      queuedChatDraftsRef.current = { ...queues, ...queuedChatDraftsRef.current };
+      setQueuedChatDrafts(queuedChatDraftsRef.current);
+      setQueuePausedByConversation(Object.fromEntries(Object.keys(queues).map(id => [id, true])));
+      setQueueHydrated(true);
+    }).catch(() => {
+      if (!disposed) setLastError('无法恢复候选消息，请检查本地存储。');
+    });
+    return () => { disposed = true; };
+  }, []);
+  useEffect(() => {
+    if (queueHydrated) void saveJson('todex.queued-follow-ups.v1', queuedChatDrafts)
+      .catch(() => setLastError('候选消息未能保存。关闭页面前请保留输入内容。'));
+  }, [queueHydrated, queuedChatDrafts]);
+
+  const removeQueuedFollowUp = useCallback((conversationId: string, itemId: string) => {
+    const items = (queuedChatDraftsRef.current[conversationId] ?? []).filter(item => item.id !== itemId);
+    queuedChatDraftsRef.current = { ...queuedChatDraftsRef.current, [conversationId]: items };
+    setQueuedChatDrafts(queuedChatDraftsRef.current);
+  }, []);
+
+  const resumeQueuedFollowUps = useCallback(async (conversationId: string) => {
+    if (thinkingConversationsRef.current[conversationId] || pendingV2SubmissionsRef.current.has(conversationId)) return;
+    await followUpsRef.current.resume(conversationId,
+      () => queuedChatDraftsRef.current[conversationId]?.[0],
+      (item) => sendQueuedChatDraftRef.current(item, conversationId),
+      (itemId) => removeQueuedFollowUp(conversationId, itemId));
+    setQueuePausedByConversation(current => ({ ...current, [conversationId]: followUpsRef.current.isPaused(conversationId) }));
+  }, [removeQueuedFollowUp]);
 
   const setConversationComposerSelection = useCallback((conversationId: string, value: SetStateAction<ComposerSelection>) => {
     if (!conversationId) {
@@ -1336,6 +1384,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     if (!conversation) return;
     const localId = conversation.id;
     setConversationRuntimeById((current) => ({ ...current, [localId]: state }));
+    if (state.pendingControl) {
+      controlRequestsRef.current.set(localId, state.pendingControl.requestId);
+      setControlStatusByConversation(current => ({ ...current, [localId]: state.pendingControl!.status }));
+    } else if (!state.activeTurnId) {
+      controlRequestsRef.current.delete(localId);
+      setControlStatusByConversation(current => ({ ...current, [localId]: undefined }));
+    }
     setRecoveringConversations((current) => ({ ...current, [localId]: recovering }));
     setTimeline((current) => [
       ...state.timeline.map((entry) => ({ ...entry, conversationId: localId })),
@@ -1364,12 +1419,38 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         submission.phase = 'running';
         setSubmissionStatusByConversation((current) => ({ ...current, [localId]: 'running' }));
       }
+      if (type === 'control.completed' || type === 'control.rejected') {
+        const id = typeof data.requestId === 'string' ? data.requestId : '';
+        const draft = controlDraftsRef.current.get(id);
+        if (draft && type === 'control.completed') {
+          setConversationChatDraft(draft.conversationId, current => current.trim() === draft.text.trim() ? '' : current);
+        }
+        controlDraftsRef.current.delete(id);
+      }
+      if (type === 'control.unknown' && data.requestId === controlRequestsRef.current.get(localId)) {
+        setControlStatusByConversation(current => ({ ...current, [localId]: 'unknown' }));
+      }
+      if ((type === 'control.completed' || type === 'control.rejected')
+        && data.requestId === controlRequestsRef.current.get(localId)) {
+        controlRequestsRef.current.delete(localId);
+        setControlStatusByConversation(current => ({ ...current, [localId]: undefined }));
+        if (type === 'control.rejected') setLastError(typeof data.message === 'string' ? data.message : 'Agent 未应用控制请求');
+      }
       if (['turn.completed', 'turn.cancelled', 'turn.failed', 'turn.interrupted'].includes(type)) {
         if (turnId) {
           settledV2TurnsRef.current.set(`${state.conversationId}:${turnId}`, type);
           if (settledV2TurnsRef.current.size > 2000) settledV2TurnsRef.current.delete(settledV2TurnsRef.current.keys().next().value!);
         }
         if (submission && turnId && submission.turnId === turnId) {
+          if (type === 'turn.completed') removeQueuedFollowUp(localId, submission.requestId);
+          queueMicrotask(() => {
+            void followUpsRef.current.settle(localId, turnId, type, true, recovering,
+              () => queuedChatDraftsRef.current[localId]?.[0],
+              (item) => sendQueuedChatDraftRef.current(item, localId),
+              (itemId) => removeQueuedFollowUp(localId, itemId)).then(() => {
+                setQueuePausedByConversation(current => ({ ...current, [localId]: followUpsRef.current.isPaused(localId) }));
+              });
+          });
           if (type === 'turn.failed') {
             restorePendingSubmission(localId);
             setLastError(typeof data.message === 'string' ? data.message : '当前任务执行失败，请核对记录后重试。');
@@ -2515,7 +2596,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         const code = typeof payload?.code === 'string' ? payload.code : '';
         const detail = typeof payload?.message === 'string' ? payload.message : 'v2 命令失败';
         const message = code ? `[${code}] ${detail}` : detail;
-        protocolCommandsRef.current?.reject(typeof parsed.id === 'string' ? parsed.id : '', message);
+        protocolCommandsRef.current?.reject(typeof parsed.id === 'string' ? parsed.id : '', message, code);
         setLastError(message);
         return;
       }
@@ -2596,6 +2677,42 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
 
   const sendProtocolCommand = useCallback((message: ProtocolCommand, timeoutMs = 15_000) =>
     protocolCommandsRef.current!.request(message, timeoutMs), []);
+
+  const controlConversation = useCallback(async (conversationId: string, control: LiveConversationControl): Promise<boolean> => {
+    const conversation = conversationsRef.current.find(item => item.id === conversationId);
+    const turnId = turnIdsRef.current[conversationId];
+    if (!conversation?.v2ConversationId || !turnId || controlRequestsRef.current.has(conversationId)) {
+      setLastError('当前回合已结束或上一条控制尚未确认，请核对记录后继续。');
+      return false;
+    }
+    const requestId = createRequestId('control');
+    controlRequestsRef.current.set(conversationId, requestId);
+    if (control.action === 'queueAdd' || control.action === 'steer') {
+      controlDraftsRef.current.set(requestId, { conversationId, text: control.text });
+      if (controlDraftsRef.current.size > 64) controlDraftsRef.current.delete(controlDraftsRef.current.keys().next().value!);
+    }
+    setControlStatusByConversation(current => ({ ...current, [conversationId]: 'pending' }));
+    try {
+      const result = await sendProtocolCommand({ id: requestId, type: 'conversation.control', payload: {
+        conversationId: conversation.v2ConversationId, expectedTurnId: turnId, control,
+      } }, 35_000);
+      if (result.status === 'targetUnavailable') throw new Error('回合已结束，配置未应用；下轮仍使用你的选择。');
+      if (controlRequestsRef.current.get(conversationId) === requestId) {
+        controlRequestsRef.current.delete(conversationId);
+        setControlStatusByConversation(current => ({ ...current, [conversationId]: undefined }));
+      }
+      return true;
+    } catch (error) {
+      const unknown = error instanceof ProtocolCommandError && error.state === 'unknown';
+      if (controlRequestsRef.current.get(conversationId) === requestId) {
+        if (!unknown) controlRequestsRef.current.delete(conversationId);
+        setControlStatusByConversation(current => ({ ...current, [conversationId]: unknown ? 'unknown' : undefined }));
+      }
+      setLastError(error instanceof Error ? error.message : 'Agent 控制失败');
+      if (unknown) await recoverConversation(conversationId);
+      return false;
+    }
+  }, [recoverConversation, sendProtocolCommand]);
 
   const flushQueuedProtocolCommands = useCallback(() => protocolCommandsRef.current?.flush(), []);
 
@@ -5043,6 +5160,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       conversationId = activeConversationRef.current,
       skills: SelectedSkillAttachment[] = [],
       attachments: ComposerAttachmentDraft[] = [],
+      queuedRequestId?: string,
     ): Promise<boolean> => {
       const context = getConversationContext(conversationId);
       if (!context) {
@@ -5085,7 +5203,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           return false;
         }
       }
-      const requestId = createRequestId('prompt');
+      const requestId = queuedRequestId ?? createRequestId('prompt');
       const submission = { text, skills, attachments, requestId, phase: 'sending' as 'sending' | 'running' | 'unknown', turnId: undefined as string | undefined };
       pendingV2SubmissionsRef.current.set(conversation.id, submission);
       setSubmissionStatusByConversation((current) => ({ ...current, [conversation.id]: 'sending' }));
@@ -5273,7 +5391,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     sendQueuedChatDraftRef.current = async (submission, conversationId) => {
       const conversation = conversationsRef.current.find((item) => item.id === conversationId) ?? null;
       if (isV2Conversation(conversation)) {
-        return sendV2Prompt(submission.text, conversationId, submission.skills, submission.attachments);
+        return sendV2Prompt(submission.text, conversationId, submission.skills, submission.attachments, submission.id);
       }
       return sendLocalTurn(submission.text, 'implement', conversationId, submission.attachments, submission.skills);
     };
@@ -5367,7 +5485,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   }, [appendTimeline, sendRawProtocolFrame]);
 
   const sendApprovalResponse = useCallback(
-    (selection: boolean | PermissionOption, request: PendingRequest) => {
+    (selection: boolean | PermissionOption, request: PendingRequest, answerData?: Record<string, unknown>) => {
       const data = eventPayloadData(request.event);
       if (request.requestType === 'conversation.permission.request') {
         const conversationId = typeof data.conversationId === 'string' ? data.conversationId : '';
@@ -5384,7 +5502,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           payload: {
             conversationId: v2Id,
             permissionId,
-            decision: permissionDecision(selection),
+            decision: permissionDecision(selection, answerData),
           },
         }).then(() => recoverConversation(conversation?.id || conversationId)).catch((error: unknown) => {
           setLastError(error instanceof Error ? error.message : '审批结果尚未确认。');
@@ -6435,19 +6553,22 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       setConversationComposerSelection(conversationId, DEFAULT_COMPOSER_SELECTION);
     };
     if (isThinking) {
+      const nativeQueue = v2ProvidersRef.current.find(item => item.id === conversation.provider)?.capabilities.followUpQueue === true;
+      if (conversation.v2ConversationId && nativeQueue && !attachments.length && !skills.length) {
+        void controlConversation(conversationId, { action: 'queueAdd', itemId: createRequestId('queue'), text })
+          .then(accepted => { if (accepted) clearSubmittedComposer(); });
+        return;
+      }
+      if ((queuedChatDraftsRef.current[conversationId]?.length ?? 0) >= 32) {
+        setLastError('候选队列最多保存 32 条消息。'); return;
+      }
       clearSubmittedComposer();
-      setQueuedChatDrafts((current) => ({
-        ...current,
-        [conversationId]: [
-          ...(current[conversationId] ?? []),
-          {
-            id: createRequestId('queued'),
-            text,
-            attachments,
-            skills,
-          },
-        ],
-      }));
+      queuedChatDraftsRef.current = {
+        ...queuedChatDraftsRef.current,
+        [conversationId]: [...(queuedChatDraftsRef.current[conversationId] ?? []),
+          { id: createRequestId('queued'), text, attachments, skills }],
+      };
+      setQueuedChatDrafts(queuedChatDraftsRef.current);
       appendTimeline(makeSystemEntry('消息已加入候选', '当前任务完成后会自动继续发送。', workspace.id, conversationId));
       return;
     }
@@ -6463,7 +6584,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       return;
     }
     sendSlashCommand(text, conversationId);
-  }, [appendTimeline, chatDrafts, composerAttachments, getConversationContext, rememberMentionReferences, selectedSkills, sendLocalTurn, sendSlashCommand, sendV2Prompt, setConversationAttachments, setConversationChatDraft, setConversationComposerSelection, setConversationSelectedSkills, thinkingConversations]);
+  }, [appendTimeline, chatDrafts, composerAttachments, controlConversation, getConversationContext, rememberMentionReferences, selectedSkills, sendLocalTurn, sendSlashCommand, sendV2Prompt, setConversationAttachments, setConversationChatDraft, setConversationComposerSelection, setConversationSelectedSkills, thinkingConversations]);
 
   const runWorkspaceCommand = useCallback((workspace: WorkspaceRecord, conversation: ConversationRecord, command: 'start' | 'status' | 'attach' | 'stop' | 'interrupt') => {
     if (command === 'start') {
@@ -6728,6 +6849,11 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     setSelectedRequestId,
     chatDrafts,
     queuedChatDrafts,
+    queuePausedByConversation,
+    removeQueuedFollowUp,
+    resumeQueuedFollowUps,
+    controlConversation,
+    controlStatusByConversation,
     composerAttachments,
     composerSelections,
     selectedSkills,
