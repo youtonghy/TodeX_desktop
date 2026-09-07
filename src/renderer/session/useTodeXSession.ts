@@ -6532,6 +6532,15 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       }
     }
     const isThinking = thinkingConversations[conversationId] === true;
+    if (text === '/compact') {
+      if (isThinking || pendingV2SubmissionsRef.current.has(conversationId)) {
+        setLastError('请等待当前任务结束后再压缩上下文。');
+        return;
+      }
+      sendSlashCommand(text, conversationId);
+      setConversationChatDraft(conversationId, '');
+      return;
+    }
     const mentionReferences = parseMentionReferences(text);
     if (mentionReferences.length > 0) {
       rememberMentionReferences(workspace.id, mentionReferences);

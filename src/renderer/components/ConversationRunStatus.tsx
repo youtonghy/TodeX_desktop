@@ -15,14 +15,12 @@ type Props = {
   effectivePermission: string;
   permissionEnforcement?: string;
   permissionsManagedByAgent?: boolean;
-  canCompact: boolean;
   thinking: boolean;
   onRecover: () => Promise<void>;
-  onCompact: () => void;
 };
 
 export function ConversationRunStatus({ submissionStatus, runtime, compaction, effectivePermission,
-  permissionEnforcement, permissionsManagedByAgent = false, canCompact, thinking, onRecover, onCompact }: Props) {
+  permissionEnforcement, permissionsManagedByAgent = false, thinking, onRecover }: Props) {
   const [now, setNow] = useState(Date.now);
   const [recovering, setRecovering] = useState(false);
   const [recoveryError, setRecoveryError] = useState('');
@@ -63,13 +61,12 @@ export function ConversationRunStatus({ submissionStatus, runtime, compaction, e
         <Alert.Description>已超过两分钟没有收到新进展。任务可能仍在运行，你可以继续等待，或使用停止按钮取消。</Alert.Description>
       </Alert.Content>
     </Alert> : null}
-    {runtime && (thinking || compactionLabel || canCompact) ? <div className="text-muted mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs" role="status">
+    {runtime && (thinking || compactionLabel) ? <div className="text-muted mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs" role="status">
       {permissionsManagedByAgent ? (thinking ? <span>权限由 Agent 管理</span> : null) : thinking ? <>
         <span>{effectivePermission ? `本轮权限：${effectivePermission}` : '本轮权限尚未回读'}</span>
         {permissionEnforcement ? <span>{permissionEnforcement}</span> : null}
       </> : null}
       {compactionLabel ? <span className={compaction?.status === 'failed' ? 'text-danger' : undefined}>{compactionLabel}</span> : null}
-      {canCompact ? <Button size="sm" variant="ghost" className="ml-auto" isDisabled={thinking || unknown || compaction?.status === 'running'} onPress={onCompact}>压缩上下文</Button> : null}
     </div> : null}
   </>;
 }

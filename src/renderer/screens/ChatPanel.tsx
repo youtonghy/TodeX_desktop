@@ -280,7 +280,7 @@ export function ChatPanel({ session }: Props) {
   const agentProvider = conversation.provider || (isV2Conversation(conversation) ? '' : 'codex');
   const slashTrigger = draft.trim().startsWith('/') ? draft.trim() : '';
   const liveCommands = currentProvider ? (session.providerCommands[currentProvider as ProviderKind] ?? []) : [];
-  const slashCatalog = liveCommands.length > 0
+  const providerSlashCatalog = liveCommands.length > 0
     ? liveCommands.map((item) => ({
       command: `/${item.name}`,
       title: item.name,
@@ -288,6 +288,19 @@ export function ChatPanel({ session }: Props) {
       category: 'context' as const,
     }))
     : SLASH_COMMANDS;
+  const canCompact = !isV2Conversation(conversation)
+    || session.v2Providers.find(item => item.id === currentProvider)?.capabilities.controlActions?.includes('compact') === true;
+  const slashCatalog = [
+    ...(canCompact ? [{ command: '/compact', title: '压缩上下文', description: '压缩上下文，保留关键进展', category: 'thread' as const }] : []),
+    ...providerSlashCatalog.filter(item => canonicalSlashCommand(item.command) !== '/compact'),
+  ];
+  const chooseSlashCommand = (command: string) => {
+    if (command === '/compact') {
+      if (thinking || executionUnknown || submissionStatus === 'sending' || compaction?.status === 'running') return;
+      session.sendSlashCommand(command, conversation.id);
+      session.setConversationChatDraft(conversation.id, '');
+    } else session.setConversationChatDraft(conversation.id, `${command} `);
+  };
   const slashSuggestions = slashTrigger
     ? slashCatalog.filter((item) => canonicalSlashCommand(item.command).startsWith(canonicalSlashCommand(slashTrigger.split(/\s+/)[0] || slashTrigger)))
     : [];
@@ -295,7 +308,7 @@ export function ChatPanel({ session }: Props) {
   const applySuggestion = (index: number) => {
     if (slashSuggestions.length > 0) {
       const item = slashSuggestions[index];
-      if (item) session.setConversationChatDraft(conversation.id, `${item.command} `);
+      if (item) chooseSlashCommand(item.command);
       return;
     }
     const item = mentionSuggestions[index];
@@ -381,7 +394,6 @@ export function ChatPanel({ session }: Props) {
   const permissionEnforcement = permissionConfig?.enforcement === 'sandbox' ? '系统沙箱'
     : permissionConfig?.enforcement === 'agent-policy' ? 'Agent 权限策略，不提供系统沙箱'
       : permissionConfig?.enforcement === 'unsupported' ? '权限由 Agent 管理' : '';
-  const canCompact = providerDescriptor?.capabilities.controlActions?.includes('compact') === true;
   const effectiveConfig = runtime?.effectiveConfig;
   const effectivePermission = effectiveConfig?.source === 'provider-confirmed'
     ? [effectiveConfig.permissionProfile, effectiveConfig.sandboxMode, effectiveConfig.approvalPolicy]
@@ -549,11 +561,11 @@ export function ChatPanel({ session }: Props) {
                   aria-label="命令建议"
                   onAction={(key) => {
                     const item = slashSuggestions.find((candidate) => candidate.command === String(key));
-                    if (item) session.setConversationChatDraft(conversation.id, `${item.command} `);
+                    if (item) chooseSlashCommand(item.command);
                   }}
                 >
                   {slashSuggestions.slice(0, 12).map((item, index) => (
-                    <ListBox.Item key={item.command} id={item.command} textValue={`${item.command} ${item.description}`} className={`composer-suggestion-item ${index === suggestionIndex ? 'composer-suggestion-item--active' : ''}`}>
+                    <ListBox.Item key={item.command} id={item.command} isDisabled={item.command === '/compact' && (thinking || executionUnknown || submissionStatus === 'sending' || compaction?.status === 'running')} textValue={`${item.command} ${item.description}`} className={`composer-suggestion-item ${index === suggestionIndex ? 'composer-suggestion-item--active' : ''}`}>
                       <span className="composer-suggestion-command">{item.command}</span>
                       <span className="composer-suggestion-description">{item.description}</span>
                     </ListBox.Item>
@@ -603,10 +615,8 @@ export function ChatPanel({ session }: Props) {
             effectivePermission={effectivePermission}
             permissionEnforcement={permissionEnforcement}
             permissionsManagedByAgent={permissionsManagedByAgent}
-            canCompact={canCompact}
             thinking={thinking}
             onRecover={() => session.recoverConversation(conversation.id)}
-            onCompact={() => session.sendSlashCommand('/compact', conversation.id)}
           />
           {conversation.v2ConversationId ? <ConversationControls
             runtime={runtime}
