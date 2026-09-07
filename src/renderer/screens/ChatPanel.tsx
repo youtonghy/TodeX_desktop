@@ -368,6 +368,7 @@ export function ChatPanel({ session }: Props) {
     preset.approvalPolicy === workspace.approvalPolicy && preset.sandboxMode === workspace.sandboxMode,
   ) ?? PERMISSION_PRESETS[1];
   const permissionConfig = providerDescriptor?.capabilities.permissionConfig;
+  const permissionsManagedByAgent = permissionConfig?.enforcement === 'unsupported';
   const canChoosePermission = Boolean(permissionConfig);
   const supportsPermissionPreset = (preset: (typeof PERMISSION_PRESETS)[number]) =>
     Boolean(preset.approvalsReviewer !== 'auto_review' && permissionConfig?.sandboxModes?.includes(preset.sandboxMode)
@@ -601,6 +602,7 @@ export function ChatPanel({ session }: Props) {
             compaction={compaction}
             effectivePermission={effectivePermission}
             permissionEnforcement={permissionEnforcement}
+            permissionsManagedByAgent={permissionsManagedByAgent}
             canCompact={canCompact}
             thinking={thinking}
             onRecover={() => session.recoverConversation(conversation.id)}
@@ -830,7 +832,7 @@ export function ChatPanel({ session }: Props) {
                     >
                       <Label className="hidden">选择权限</Label>
                       <Select.Trigger className="composer-control__trigger">
-                        <Select.Value><RiShieldLine className="composer-control__icon" /><span className="composer-control__text">{usesAgentDefaults ? 'Agent 默认权限' : PERMISSION_LABELS.get(currentPermission.id) || currentPermission.title}</span></Select.Value>
+                        <Select.Value><RiShieldLine className="composer-control__icon" /><span className="composer-control__text">{permissionsManagedByAgent ? 'Agent 管理' : usesAgentDefaults ? 'Agent 默认权限' : PERMISSION_LABELS.get(currentPermission.id) || currentPermission.title}</span></Select.Value>
                         <Select.Indicator className="composer-control__indicator" />
                       </Select.Trigger>
                       <Select.Popover>

@@ -32,18 +32,24 @@ export function ConversationControls({ runtime, running, canConfigure, canSteer,
   const confirmed = effective?.source === 'provider-confirmed';
   const model = confirmed && typeof effective.model === 'string' ? effective.model : '';
   const effort = confirmed ? effective?.reasoningEffort ?? effective?.effort ?? effective?.thinkingLevel : undefined;
+  const selectionChanged = Boolean(model && nextModel && (model !== nextModel
+    || (nextEffort && nextEffort !== effort)));
+  const showApply = running && canConfigure && Boolean(nextModel) && (!model || selectionChanged);
+  const showSteer = running && canSteer && canSendText;
+  if (!running && !runtime?.configurationError && controlStatus !== 'unknown'
+    && !nativeItems.length && !localQueue.length) return null;
   return <div className="mb-2 space-y-2">
-    <div className="text-muted flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-      <span>本轮模型：{model || '等待 Agent 确认'}{typeof effort === 'string' ? ` · ${effort}` : ''}</span>
-      {nextModel ? <span>下轮选择：{nextModel}{nextEffort ? ` · ${nextEffort}` : ''}</span> : null}
-      {runtime?.configurationStatus === 'pending' ? <span>配置待确认</span> : null}
-      {running && canConfigure ? <Button size="sm" variant="ghost" isDisabled={disabled || !nextModel}
-        isPending={controlStatus === 'pending'} onPress={onApply}>应用到本轮后续步骤</Button> : null}
-      {running && canSteer ? <Button size="sm" variant="secondary" isDisabled={disabled || !canSendText}
+    {running ? <div className="text-muted flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+      <span>{model ? `本轮：${model}${typeof effort === 'string' ? ` · ${effort}` : ''}` : '正在读取本轮配置…'}</span>
+      {selectionChanged ? <span>下轮：{nextModel}{nextEffort ? ` · ${nextEffort}` : ''}</span> : null}
+      {runtime?.configurationStatus === 'pending' ? <span>正在应用配置…</span> : null}
+      {showApply ? <Button size="sm" variant="ghost" isDisabled={disabled}
+        isPending={controlStatus === 'pending'} onPress={onApply}>应用到本轮</Button> : null}
+      {showSteer ? <Button size="sm" variant="secondary" isDisabled={disabled}
         onPress={onSteer}>发送纠偏</Button> : null}
-    </div>
-    {running && (canSteer || canConfigure) ? <p className="text-muted text-xs">
-      纠偏使用输入框中的文字；配置在 Agent 后续读取设置时生效，已发出的模型请求保持原设置。
+    </div> : null}
+    {showApply || showSteer ? <p className="text-muted text-xs">
+      {showSteer ? '纠偏使用输入框中的文字。' : ''}{showApply ? '配置对后续步骤生效。' : ''}
     </p> : null}
     {runtime?.configurationError || controlStatus === 'unknown' ? <Alert status="warning">
       <Alert.Indicator /><Alert.Content>
