@@ -1,5 +1,5 @@
 import { ConversationControls } from '../components/ConversationControls';
-import { RiAttachment2, RiBarChartBoxLine, RiClipboardLine, RiCpuLine, RiGitBranchLine, RiShieldLine, RiStopCircleLine } from '@remixicon/react';
+import { RiAttachment2, RiBarChartBoxLine, RiClipboardLine, RiCpuLine, RiGitBranchLine, RiListCheck2, RiShieldLine, RiStopCircleLine } from '@remixicon/react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import { Alert, Button, Label, ListBox, Popover, ScrollShadow, Select, Tooltip, toast } from '@heroui/react';
@@ -7,7 +7,7 @@ import { ChainOfThought, ChatAttachment, ChatAttachmentGroup, ChatAttachmentInpu
 import { ChatMessageActions } from '@heroui-pro/react/chat-message-actions';
 import { ChatTool } from '@heroui-pro/react/chat-tool';
 import { Markdown } from '@heroui-pro/react/markdown';
-import { providerDisplayName, type ProviderKind } from '@todex/protocol/v2';
+import { providerDisplayName, type ProviderKind, type PermissionMode } from '@todex/protocol/v2';
 import { progressGroupLabel } from '@todex/protocol/mobileParity';
 import { ConversationPermissionActions, ConversationPromptInput, ConversationRunStatus, TurnUsageSummary } from '../components/ConversationRunStatus';
 import { isChatTimelineEntry, isChatToolEntry } from '../components/conversationTimeline';
@@ -15,7 +15,8 @@ import { ModelReasoningCard } from '../components/ModelReasoningCard';
 import { ProviderIcon } from '../components/ProviderIcon';
 import type { TodeXSession } from '../session/useTodeXSession';
 import {
-  PERMISSION_PRESETS,
+  conversationPermissionMode,
+  conversationPermissionCapabilities,
   attachmentId,
   buildConversationRenderItems,
   canSwitchConversationAgent,
@@ -32,7 +33,6 @@ import {
   canonicalSlashCommand,
   modelDisplayLabel,
   reasoningEffortLabel,
-  permissionPresetForProfile,
   workspaceLinkTarget,
 } from '../session/helpers';
 import { findCapabilityHashTrigger } from '@todex/protocol/todex';
@@ -97,12 +97,11 @@ function toolPresentation(raw: string) {
   }
 }
 
-const PERMISSION_LABELS = new Map([
-  ['read-only', '只读'],
-  ['default', '请求审批'],
-  ['auto-review', '自动审批'],
-  ['full-access', '完全访问'],
-]);
+const PERMISSION_LABELS: Record<PermissionMode, string> = {
+  ask: '请求审批',
+  auto: '自动审批',
+  'full-access': '完全访问',
+};
 
 function formatTokenCount(value: number): string {
   return new Intl.NumberFormat('zh-CN', { notation: value >= 10_000 ? 'compact' : 'standard', maximumFractionDigits: 1 }).format(value);
@@ -374,29 +373,25 @@ export function ChatPanel({ session }: Props) {
   const contextModelId = contextUsage?.model || currentModel;
   const currentContextWindow = contextUsage?.contextWindow
     ?? providerModels.find((item) => item.id === contextModelId || item.id.endsWith(`/${contextModelId}`))?.contextWindow;
-  const currentPermission = permissionPresetForProfile(
-    workspace.permissionProfile,
-    workspace.approvalsReviewer || session.settings.approvalsReviewer,
-  ) ?? PERMISSION_PRESETS.find((preset) =>
-    preset.approvalPolicy === workspace.approvalPolicy && preset.sandboxMode === workspace.sandboxMode,
-  ) ?? PERMISSION_PRESETS[1];
-  const permissionConfig = providerDescriptor?.capabilities.permissionConfig;
-  const permissionsManagedByAgent = permissionConfig?.enforcement === 'unsupported';
-  const canChoosePermission = Boolean(permissionConfig);
-  const supportsPermissionPreset = (preset: (typeof PERMISSION_PRESETS)[number]) =>
-    Boolean(preset.approvalsReviewer !== 'auto_review' && permissionConfig?.sandboxModes?.includes(preset.sandboxMode)
-      && permissionConfig?.approvalPolicies?.includes(preset.approvalPolicy)
-      && (!preset.profileId || permissionConfig?.permissionProfiles?.includes(preset.sandboxMode)));
-  const usesAgentDefaults = !workspace.permissionProfile && !workspace.sandboxMode && !workspace.approvalPolicy;
-  const useAgentDefaultPermissions = () => session.updateWorkspace(workspace.id, {
-    permissionProfile: null, sandboxMode: '', approvalPolicy: '', approvalsReviewer: null,
-  });
-  const permissionEnforcement = permissionConfig?.enforcement === 'sandbox' ? '系统沙箱'
-    : permissionConfig?.enforcement === 'agent-policy' ? 'Agent 权限策略，不提供系统沙箱'
-      : permissionConfig?.enforcement === 'unsupported' ? '权限由 Agent 管理' : '';
+  const permissionConfig = conversationPermissionCapabilities(conversation, session.v2Providers);
+  const permissionModes = (permissionConfig?.modes ?? []).filter((mode) => Object.hasOwn(PERMISSION_LABELS, mode));
+  const currentPermission = conversationPermissionMode(conversation, workspace, session.v2Providers);
+  const fixedPermission = permissionModes.length === 1;
+  const permissionsManagedByAgent = permissionModes.length === 0;
+  const canChoosePermission = permissionModes.length > 0;
+  const permissionEnforcement = agentProvider === 'pi' ? '工具直接执行，访问范围由运行环境限制'
+    : permissionConfig?.enforcement === 'sandbox' ? '系统沙箱'
+      : permissionConfig?.enforcement === 'agent-policy' ? 'Agent 权限策略' : '';
+  const permissionHint = agentProvider === 'pi' ? 'Pi 固定完全访问，无内建审批机制；访问范围由运行环境限制。'
+    : !canChoosePermission ? '当前后端尚未提供权限模式能力，请升级或检查 Agent 配置。'
+      : !currentPermission ? '当前权限配置需要重新选择后才能执行。'
+        : '权限和工作模式将在下次发送时应用。';
   const effectiveConfig = runtime?.effectiveConfig;
+  const effectiveMode = typeof effectiveConfig?.permissionMode === 'string'
+    && Object.hasOwn(PERMISSION_LABELS, effectiveConfig.permissionMode)
+    ? PERMISSION_LABELS[effectiveConfig.permissionMode as PermissionMode] : '';
   const effectivePermission = effectiveConfig?.source === 'provider-confirmed'
-    ? [effectiveConfig.permissionProfile, effectiveConfig.sandboxMode, effectiveConfig.approvalPolicy]
+    ? effectiveMode || [effectiveConfig.permissionProfile, effectiveConfig.sandboxMode, effectiveConfig.approvalPolicy]
       .filter((value): value is string => typeof value === 'string' && Boolean(value)).join(' · ')
     : '';
 
@@ -608,6 +603,7 @@ export function ChatPanel({ session }: Props) {
               ))}
             </div>
           ) : null}
+          {!currentPermission || agentProvider === 'pi' ? <p className="text-muted mb-2 text-xs">{permissionHint}</p> : null}
           <ConversationRunStatus
             submissionStatus={submissionStatus}
             runtime={runtime}
@@ -823,40 +819,56 @@ export function ChatPanel({ session }: Props) {
                         </Popover.Dialog>
                       </Popover.Content>
                     </Popover>
-                    {canChoosePermission ? <Select
+                    <Select
                       className="composer-control"
                       variant="secondary"
-                      selectedKey={usesAgentDefaults ? 'agent-default' : currentPermission.id}
+                      selectedKey={currentPermission}
+                      isDisabled={thinking || executionUnknown || !canChoosePermission || (fixedPermission && currentPermission !== null)}
                       onSelectionChange={(key) => {
-                        if (key === 'agent-default') { useAgentDefaultPermissions(); return; }
-                        const preset = PERMISSION_PRESETS.find((item) => item.id === key);
-                        if (preset && supportsPermissionPreset(preset)) {
-                          void session.applyPermissionProfile(
-                            conversation.id,
-                            preset.profileId,
-                            preset.description,
-                            preset.approvalsReviewer,
-                          );
+                        if (typeof key === 'string' && permissionModes.includes(key as PermissionMode)) {
+                          void session.applyConversationPermissionMode(conversation.id, key as PermissionMode);
                         }
                       }}
                     >
                       <Label className="hidden">选择权限</Label>
                       <Select.Trigger className="composer-control__trigger">
-                        <Select.Value><RiShieldLine className="composer-control__icon" /><span className="composer-control__text">{permissionsManagedByAgent ? 'Agent 管理' : usesAgentDefaults ? 'Agent 默认权限' : PERMISSION_LABELS.get(currentPermission.id) || currentPermission.title}</span></Select.Value>
-                        <Select.Indicator className="composer-control__indicator" />
+                        <Select.Value><RiShieldLine className="composer-control__icon" /><span className="composer-control__text" title={permissionHint}>{currentPermission ? PERMISSION_LABELS[currentPermission] : canChoosePermission ? '请选择权限' : '权限不可配置'}</span></Select.Value>
+                        {!fixedPermission ? <Select.Indicator className="composer-control__indicator" /> : null}
                       </Select.Trigger>
                       <Select.Popover>
                         <ListBox>
-                          <ListBox.Item id="agent-default" textValue="使用 Agent 默认权限">使用 Agent 默认权限<ListBox.ItemIndicator /></ListBox.Item>
-                          {PERMISSION_PRESETS.map((preset) => (
-                            <ListBox.Item key={preset.id} id={preset.id} isDisabled={!supportsPermissionPreset(preset)} textValue={PERMISSION_LABELS.get(preset.id) || preset.title}>
-                              {PERMISSION_LABELS.get(preset.id) || preset.title}
+                          {permissionModes.map((mode) => (
+                            <ListBox.Item key={mode} id={mode} textValue={PERMISSION_LABELS[mode]}>
+                              {PERMISSION_LABELS[mode]}
                               <ListBox.ItemIndicator />
                             </ListBox.Item>
                           ))}
                         </ListBox>
                       </Select.Popover>
-                    </Select> : <Button className="composer-control composer-control__static" size="sm" variant="tertiary" onPress={useAgentDefaultPermissions} aria-label="使用 Agent 默认权限"><RiShieldLine className="composer-control__icon" /><span className="composer-control__text">{usesAgentDefaults ? 'Agent 默认权限' : '使用 Agent 默认权限'}</span></Button>}
+                    </Select>
+                    {permissionConfig?.supportsPlan ? <Select
+                      className="composer-control"
+                      variant="secondary"
+                      selectedKey={conversation.mode === 'plan' ? 'plan' : 'implement'}
+                      isDisabled={thinking || executionUnknown}
+                      onSelectionChange={(key) => {
+                        if (key === 'plan' || key === 'implement') {
+                          void session.applyConversationWorkMode(conversation.id, key);
+                        }
+                      }}
+                    >
+                      <Label className="hidden">选择工作模式</Label>
+                      <Select.Trigger className="composer-control__trigger">
+                        <Select.Value><RiListCheck2 className="composer-control__icon" /><span className="composer-control__text" title="工作模式将在下次发送时应用">{conversation.mode === 'plan' ? '计划' : '执行'}</span></Select.Value>
+                        <Select.Indicator className="composer-control__indicator" />
+                      </Select.Trigger>
+                      <Select.Popover>
+                        <ListBox>
+                          <ListBox.Item id="implement" textValue="执行">执行<ListBox.ItemIndicator /></ListBox.Item>
+                          <ListBox.Item id="plan" textValue="计划">计划<ListBox.ItemIndicator /></ListBox.Item>
+                        </ListBox>
+                      </Select.Popover>
+                    </Select> : null}
                   </PromptInput.ToolbarStart>
                   <PromptInput.ToolbarEnd className="gap-2">
                     <ChatAttachmentInput.Trigger

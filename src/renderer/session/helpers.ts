@@ -122,6 +122,7 @@ export type ConversationRecord = {
   threadId: string;
   localAdapterState?: LocalAdapterState;
   mode?: 'plan' | 'implement';
+  permissionMode?: 'ask' | 'auto' | 'full-access';
   goalStatus?: string;
   goalObjective?: string;
   provider?: ProviderKind | string;
@@ -1385,15 +1386,6 @@ export function serviceTierSlashCommandsForModel(model: string | null | undefine
 
 export const PERMISSION_PRESETS: PermissionPreset[] = [
   {
-    id: 'read-only',
-    title: 'Read Only',
-    description: 'Codex can read files. Approval is required to edit files or access the internet.',
-    approvalPolicy: 'on-request',
-    approvalsReviewer: 'user',
-    sandboxMode: 'read-only',
-    profileId: ':read-only',
-  },
-  {
     id: 'default',
     title: 'Ask for approval',
     description: 'Codex can read and edit files in the current workspace. Approval is required for network or outside edits.',
@@ -1421,6 +1413,8 @@ export const PERMISSION_PRESETS: PermissionPreset[] = [
     profileId: ':danger-full-access',
   },
 ];
+
+export { conversationPermissionCapabilities, conversationPermissionMode } from './permissions';
 
 export function permissionPresetForProfile(
   profileId: string | null | undefined,
@@ -1915,6 +1909,7 @@ export function mergeManifestConversations(
         ...next[existing],
         ...record,
         id: localId,
+        mode: next[existing].mode ?? record.mode,
         sessionId: next[existing].sessionId || record.sessionId,
       };
     } else {

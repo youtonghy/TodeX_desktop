@@ -256,6 +256,8 @@ import {
   stringFromUnknown,
   parseWorkspaceDirectorySnapshot,
   permissionPresetForProfile,
+  conversationPermissionCapabilities,
+  conversationPermissionMode,
   permissionProfileLabel,
   permissionPresetSelected,
   approvalsReviewerValue,
@@ -4392,74 +4394,57 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     return true;
   }, [appendTimeline, finishPendingThreadAction, getConversationContext, sendLocalMethodRequest, startLocalAdapter]);
 
+  const applyConversationPermissionMode = useCallback(async (
+    conversationId: string,
+    mode: 'ask' | 'auto' | 'full-access',
+  ): Promise<boolean> => {
+    const context = getConversationContext(conversationId);
+    if (!context) return false;
+    const config = conversationPermissionCapabilities(context.conversation, v2ProvidersRef.current);
+    if (!config?.modes?.includes(mode)) {
+      setLastError('当前 Agent 不支持此权限模式。');
+      return false;
+    }
+    if (pendingV2SubmissionsRef.current.has(conversationId) || thinkingConversationsRef.current[conversationId] === true) {
+      setLastError('请等待当前请求完成后再更改权限。');
+      return false;
+    }
+    conversationsRef.current = conversationsRef.current.map((item) => item.id === conversationId ? { ...item, permissionMode: mode } : item);
+    updateConversation(conversationId, { permissionMode: mode });
+    return true;
+  }, [getConversationContext, updateConversation]);
+
+  const applyConversationWorkMode = useCallback(async (
+    conversationId: string,
+    mode: 'plan' | 'implement',
+  ): Promise<boolean> => {
+    const context = getConversationContext(conversationId);
+    if (!context) return false;
+    const config = conversationPermissionCapabilities(context.conversation, v2ProvidersRef.current);
+    if (mode === 'plan' && !config?.supportsPlan) {
+      setLastError('当前 Agent 不支持此工作模式。');
+      return false;
+    }
+    if (pendingV2SubmissionsRef.current.has(conversationId) || thinkingConversationsRef.current[conversationId] === true) {
+      setLastError('请等待当前请求完成后再更改工作模式。');
+      return false;
+    }
+    conversationsRef.current = conversationsRef.current.map((item) => item.id === conversationId ? { ...item, mode } : item);
+    updateConversation(conversationId, { mode });
+    return true;
+  }, [getConversationContext, updateConversation]);
+
   const applyPermissionProfile = useCallback(async (
     conversationId: string,
     profileId: string,
-    description = '',
+    _description = '',
     approvalsReviewer?: string | null,
   ) => {
-    const context = getConversationContext(conversationId);
-    if (!context) {
-      desktopAlert('未选择对话', '请先选择一个 Codex 对话。');
-      return false;
-    }
-    const { workspace, conversation } = context;
-    const nextApprovalsReviewer = approvalsReviewer ?? workspace.approvalsReviewer ?? settings.approvalsReviewer ?? 'user';
-    const preset = permissionPresetForProfile(profileId, nextApprovalsReviewer);
-    updateWorkspace(workspace.id, {
-      approvalPolicy: preset?.approvalPolicy ?? workspace.approvalPolicy,
-      sandboxMode: preset?.sandboxMode ?? workspace.sandboxMode,
-      permissionProfile: profileId,
-      approvalsReviewer: nextApprovalsReviewer,
-    });
-    appendTimeline(makeSystemEntry(
-      `Permissions updated to ${permissionProfileLabel(profileId, nextApprovalsReviewer)}`,
-      description || preset?.description || profileId,
-      workspace.id,
-      conversation.id,
-    ));
-
-    const threadId = normalizeThreadId(conversation.threadId);
-    if (!threadId) {
-      return true;
-    }
-    try {
-      await startLocalAdapter(workspace, conversation);
-    } catch (error) {
-      setLastError(error instanceof Error ? localTurnErrorMessage(error.message) : '本地会话未启动');
-      return false;
-    }
-    const requestId = createRequestId('permission-set');
-    const timeoutId = setTimeout(() => {
-      const pending = pendingThreadActionsRef.current.get(requestId);
-      if (pending) {
-        finishPendingThreadAction(pending, 'thread/settings/update 请求超时');
-      }
-    }, 10000);
-    pendingThreadActionsRef.current.set(requestId, {
-      workspaceId: workspace.id,
-      conversationId: conversation.id,
-      requestId,
-      action: 'permission',
-      timeoutId,
-      sourceConversationId: conversation.id,
-      showResult: false,
-    });
-    const sent = sendLocalMethodRequest(workspace, conversation, 'thread/settings/update', {
-      threadId,
-      permissions: profileId,
-      approvalPolicy: preset?.approvalPolicy ?? workspace.approvalPolicy,
-      approvalsReviewer: nextApprovalsReviewer,
-    }, requestId);
-    if (!sent) {
-      const pending = pendingThreadActionsRef.current.get(requestId);
-      if (pending) {
-        finishPendingThreadAction(pending, '请先在设置里连接后端。');
-      }
-      return false;
-    }
-    return true;
-  }, [appendTimeline, finishPendingThreadAction, getConversationContext, sendLocalMethodRequest, settings.approvalsReviewer, startLocalAdapter, updateWorkspace]);
+    const preset = permissionPresetForProfile(profileId, approvalsReviewer);
+    if (!preset) { setLastError('请选择请求审批、自动审批或完全访问。'); return false; }
+    return applyConversationPermissionMode(conversationId,
+      preset.id === 'full-access' ? 'full-access' : preset.id === 'auto-review' ? 'auto' : 'ask');
+  }, [applyConversationPermissionMode]);
 
   const setWorkspaceServiceTier = useCallback((conversationId: string, nextTier: string, title: string) => {
     const context = getConversationContext(conversationId);
@@ -4822,6 +4807,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       title: options?.title?.trim() || '新对话',
       provider: agent.provider,
       providerProfile: agent.providerProfile,
+      permissionMode: v2ProvidersRef.current.find((item) => item.id === agent.provider)?.capabilities.permissionConfig?.defaultMode,
+      mode: 'implement' as const,
       backendConnectionId,
       model: rememberedSelection.model || undefined,
       reasoningEffort: rememberedSelection.reasoningEffort,
@@ -4870,6 +4857,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     const patch: Partial<ConversationRecord> = {
       provider,
       providerProfile: descriptor.profiles[0],
+      permissionMode: descriptor.capabilities.permissionConfig?.defaultMode,
+      mode: 'implement' as const,
       backendConnectionId,
       model: rememberedSelection.model || undefined,
       reasoningEffort: rememberedSelection.reasoningEffort,
@@ -4935,7 +4924,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           const api = new V2ApiClient({ serverUrl: settings.serverUrl, authToken: settings.authToken });
           const created = await api.getConversation(result.conversationId);
           const record = { ...conversationFromManifest(created, workspace.id), backendConnectionId: conversation.backendConnectionId,
-            model: conversation.model, reasoningEffort: conversation.reasoningEffort };
+            model: conversation.model, reasoningEffort: conversation.reasoningEffort,
+            permissionMode: conversation.permissionMode, mode: conversation.mode };
           conversationsRef.current = [record, ...conversationsRef.current.filter((item) => item.id !== record.id)];
           setConversations((current) => [record, ...current.filter((item) => item.id !== record.id)]);
           setActiveWorkspaceId(workspace.id);
@@ -5112,6 +5102,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           backendConnectionId,
           model: latestConversation.model,
           reasoningEffort: latestConversation.reasoningEffort,
+          permissionMode: latestConversation.permissionMode,
+          mode: latestConversation.mode,
         };
         const replaceConversation = (items: ConversationRecord[]) => [
           record,
@@ -5170,6 +5162,17 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       const { workspace, conversation } = context;
       if (!isV2Conversation(conversation) || !conversation.provider) {
         desktopAlert('当前不是 v2 对话', '请新建对话后再发送。');
+        return false;
+      }
+
+      const permissionMode = conversationPermissionMode(conversation, workspace, v2ProvidersRef.current);
+      if (!permissionMode) {
+        setLastError('请先为当前对话选择权限模式；旧版只读配置不会自动扩大权限。');
+        return false;
+      }
+      const permissionConfig = conversationPermissionCapabilities(conversation, v2ProvidersRef.current);
+      if (conversation.mode === 'plan' && !permissionConfig?.supportsPlan) {
+        setLastError('当前 Agent 不支持计划模式，请切换到执行模式。');
         return false;
       }
 
@@ -5241,15 +5244,15 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
             conversationId: v2Id,
             clientRequestId: requestId,
             text,
-            ...(workspace.permissionProfile ? { permissionProfile: workspace.permissionProfile } : {}),
-            ...(workspace.sandboxMode ? { sandboxMode: workspace.sandboxMode } : {}),
-            ...(workspace.approvalPolicy ? { approvalPolicy: workspace.approvalPolicy } : {}),
+            permissionMode,
+            workMode: readyConversation.mode === 'plan' ? 'plan' : 'implement',
             ...(model ? { model } : {}),
             ...(reasoningEffort ? { reasoningEffort } : {}),
             ...(skillRefs.length ? { skills: skillRefs } : {}),
             ...(content.length ? { content } : {}),
           },
         });
+        updateConversation(readyConversation.id, { permissionMode, mode: readyConversation.mode === 'plan' ? 'plan' : 'implement' });
         if (typeof result.turnId === 'string') submission.turnId = result.turnId;
         const terminal = submission.turnId ? settledV2TurnsRef.current.get(`${v2Id}:${submission.turnId}`) : undefined;
         if (terminal) {
@@ -5316,6 +5319,17 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       }
 
       const { workspace, conversation } = context;
+      const permissionMode = conversationPermissionMode(conversation, workspace, v2ProvidersRef.current);
+      const preset = PERMISSION_PRESETS.find((item) => item.id === (permissionMode === 'ask' ? 'default' : permissionMode === 'auto' ? 'auto-review' : permissionMode));
+      if (!preset) {
+        setLastError('请先为当前对话明确选择支持的权限模式。');
+        return false;
+      }
+      const workMode = conversation.mode ?? mode;
+      if (workMode === 'plan' && !conversationPermissionCapabilities(conversation, v2ProvidersRef.current)?.supportsPlan) {
+        setLastError('当前 Agent 不支持计划模式，请切换到执行模式。');
+        return false;
+      }
       const sessionId = sessionIdForConversation(workspace, conversation);
       const commandWorkspace = commandWorkspaceForConversation(workspace, conversation);
       const conversationThreadId = normalizeThreadId(conversation.threadId);
@@ -5344,13 +5358,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         tenantId: workspace.tenantId,
         threadId,
         input: codexInputFromComposer(text, attachments, skills),
-        approvalPolicy: workspace.approvalPolicy || settings.approvalPolicy || undefined,
-        approvalsReviewer: workspace.approvalsReviewer || settings.approvalsReviewer || undefined,
-        sandboxPolicy: workspace.permissionProfile ? undefined : sandboxPolicyForMode(workspace.sandboxMode || settings.sandboxMode),
-        permissions: workspace.permissionProfile || undefined,
+        approvalPolicy: preset.approvalPolicy,
+        approvalsReviewer: preset.approvalsReviewer,
+        sandboxPolicy: preset.profileId ? undefined : sandboxPolicyForMode(preset.sandboxMode),
+        permissions: preset.profileId,
         serviceTier: workspace.serviceTier || undefined,
         collaborationMode: {
-          mode: 'default',
+          mode: workMode === 'plan' ? 'plan' : 'default',
           settings: {
             model: workspace.model || settings.defaultModel,
             reasoningEffort: workspace.reasoningEffort || settings.defaultReasoningEffort || undefined,
@@ -5371,7 +5385,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
                   ...conversation,
                   sessionId: commandWorkspace.sessionId,
                   threadId,
-                  mode,
+                  mode: workMode,
+                  permissionMode: permissionMode ?? undefined,
                   title: conversation.title === '默认对话' ? text.slice(0, 18) || attachmentPrompt(attachments).slice(0, 18) || selectedSkillSummary(skills).slice(0, 18) || conversation.title : conversation.title,
                   updatedAt: Date.now(),
                 }
@@ -5547,21 +5562,26 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         desktopAlert('未选择工作区', '请先选择一个工作区。');
         return;
       }
-      void applyPermissionProfile(activeConversation.id, preset.profileId, preset.description);
+      void applyPermissionProfile(activeConversation.id, preset.profileId, preset.description, preset.approvalsReviewer);
     },
     [activeConversation, applyPermissionProfile],
   );
 
-  const openPermissionsMenu = useCallback(() => {
+  const openPermissionsMenu = useCallback((conversationId = activeConversationRef.current) => {
+    const context = getConversationContext(conversationId);
+    if (!context) return;
+    const config = conversationPermissionCapabilities(context.conversation, v2ProvidersRef.current);
+    const selected = conversationPermissionMode(context.conversation, context.workspace, v2ProvidersRef.current);
+    const labels = { ask: '请求审批', auto: '自动审批', 'full-access': '完全访问' };
     desktopAlert(
-      'Update Model Permissions',
-      '选择 Codex 可以执行的操作范围。',
-      PERMISSION_PRESETS.map((preset) => ({
-        text: preset.title,
-        onPress: () => applyPermissionPreset(preset),
+      '权限设置',
+      config?.modes?.length ? '所选权限将在下次发送时应用。' : '当前 Agent 尚未提供权限设置能力。',
+      (config?.modes ?? []).map((mode) => ({
+        text: `${selected === mode ? '✓ ' : ''}${labels[mode]}`,
+        onPress: () => { void applyConversationPermissionMode(conversationId, mode); },
       })),
     );
-  }, [applyPermissionPreset]);
+  }, [applyConversationPermissionMode, getConversationContext]);
 
   const openModelPicker = useCallback((conversationId = activeConversationRef.current) => {
     setModelPickerPrompt({
@@ -5865,12 +5885,12 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
 
       if (lower === 'permissions') {
         const presetName = rest[0]?.toLowerCase() ?? '';
-        const preset = PERMISSION_PRESETS.find((candidate) => candidate.id === presetName || candidate.profileId.toLowerCase() === presetName || candidate.title.toLowerCase() === presetName);
+        const preset = PERMISSION_PRESETS.find((candidate) => candidate.id === presetName || (presetName === 'ask' && candidate.id === 'default') || (presetName === 'auto' && candidate.id === 'auto-review') || candidate.profileId.toLowerCase() === presetName || candidate.title.toLowerCase() === presetName);
         if (preset) {
           void applyPermissionProfile(conversation.id, preset.profileId, preset.description, preset.approvalsReviewer);
           return;
         }
-        openSlashCommandActionPage(workspace, conversation, '/permissions');
+        openPermissionsMenu(conversation.id);
         return;
       }
 
@@ -6207,7 +6227,11 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       }
 
       if (lower === 'plan') {
-        sendLocalTurn(rest.length > 0 ? `make a plan for: ${rest.join(' ')}` : 'switch into planning mode and create a concise implementation plan', 'plan', conversation.id);
+        void applyConversationWorkMode(conversation.id, 'plan').then((selected) => {
+          if (!selected || rest.length === 0) return;
+          if (isV2Conversation(conversation)) void sendV2Prompt(rest.join(' '), conversation.id);
+          else void sendLocalTurn(rest.join(' '), 'plan', conversation.id);
+        });
         return;
       }
 
@@ -6301,6 +6325,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     },
     [
       applyPermissionProfile,
+      applyConversationWorkMode,
+      openPermissionsMenu,
       applyServiceTier,
       applyModelCommand,
       appendTimeline,
@@ -6971,6 +6997,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     updateMemorySettings,
     resetMemories,
     applyPermissionProfile,
+    applyConversationPermissionMode,
+    applyConversationWorkMode,
     seedTerminalState,
     resizeTerminalSession,
     requestTerminalStatus,
