@@ -5412,6 +5412,36 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     };
   }, [sendLocalTurn, sendV2Prompt]);
 
+  // Action menus send a separate message without replacing the composer's draft.
+  const sendAgentMessage = useCallback(async (text: string, conversationId: string): Promise<'sent' | 'queued' | false> => {
+    const context = getConversationContext(conversationId);
+    if (!context || !text.trim()) return false;
+    const pending = pendingV2SubmissionsRef.current.get(conversationId);
+    if (pending?.phase === 'unknown') {
+      setLastError('请先核对当前对话的发送状态。');
+      return false;
+    }
+    if (thinkingConversationsRef.current[conversationId] || pending) {
+      if (!queueHydrated) {
+        setLastError('候选消息正在恢复，请稍后再发送。');
+        return false;
+      }
+      const items = queuedChatDraftsRef.current[conversationId] ?? [];
+      if (items.length >= 32) {
+        setLastError('候选队列最多保存 32 条消息。');
+        return false;
+      }
+      queuedChatDraftsRef.current = { ...queuedChatDraftsRef.current,
+        [conversationId]: [...items, { id: createRequestId('queued'), text, attachments: [], skills: [] }] };
+      setQueuedChatDrafts(queuedChatDraftsRef.current);
+      return 'queued';
+    }
+    const accepted = isV2Conversation(context.conversation)
+      ? await sendV2Prompt(text, conversationId)
+      : await sendLocalTurn(text, context.conversation.mode ?? 'implement', conversationId);
+    return accepted ? 'sent' : false;
+  }, [getConversationContext, queueHydrated, sendLocalTurn, sendV2Prompt]);
+
   const toggleSelectedSkill = useCallback((conversationId: string, skill: SkillListItem) => {
     if (!skill.enabled) {
       desktopAlert('Skill 已禁用', '该 Skill 当前未启用，不能添加到下一条消息。');
@@ -6950,6 +6980,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     removeConversation,
     requestNativeThreadList,
     submitChat,
+    sendAgentMessage,
     setConversationChatDraft,
     setConversationAttachments,
     setConversationSelectedSkills,

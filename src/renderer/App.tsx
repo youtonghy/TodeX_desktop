@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Button, Chip, Label, ListBox, Modal, Select, Toast, toast, Checkbox, TextArea, TextField } from '@heroui/react';
+import { Button, Chip, Label, ListBox, Modal, Select, Toast, toast } from '@heroui/react';
 import { AppLayout, Navbar } from '@heroui-pro/react';
-import { RiAddLine, RiGitBranchLine, RiGitCommitLine, RiGithubLine, RiLayoutLeftLine, RiUploadCloud2Line } from '@remixicon/react';
-import type { GitRepositorySummary } from '../preload';
+import { RiAddLine, RiGithubLine, RiLayoutLeftLine } from '@remixicon/react';
 import { useTodeXSession, type TodeXSession } from './session/useTodeXSession';
+import { GitActionsModal } from './components/GitActionsModal';
 import { DesktopAlertHost } from './components/DesktopAlertHost';
 import { AppSidebar } from './components/AppSidebar';
 import { ChatPanel } from './screens/ChatPanel';
@@ -260,99 +260,10 @@ export function App() {
       <Modal isOpen={capabilitiesOpen} onOpenChange={setCapabilitiesOpen}>
         <Modal.Backdrop><Modal.Container><Modal.Dialog className="max-h-[90vh] sm:max-w-2xl"><Modal.CloseTrigger /><Modal.Header><Modal.Heading>MCP / Skill 管理</Modal.Heading></Modal.Header><Modal.Body className="max-h-[75vh] overflow-y-auto"><CapabilitiesPanel workspacePath={session.activeWorkspace?.path ?? session.settings.defaultWorkspacePath} providers={session.v2Providers} catalogs={session.capabilityCatalogs} onRefresh={(provider) => void session.refreshCapabilityCatalog(provider)} conversationId={session.activeConversation?.id} selectedSkills={session.activeConversation ? session.selectedSkills[session.activeConversation.id] ?? [] : []} canInvoke={Boolean(session.activeConversation?.v2ConversationId)} onToggleSkill={(skill, provider) => session.activeConversation && session.toggleCatalogSkill(session.activeConversation.id, skill, provider)} onPreviewSkill={(skill, provider) => session.previewSkillResource(provider, skill.resourceId)} onRefreshMcp={(resourceId) => session.activeConversation && session.refreshMcpServer(session.activeConversation.id, resourceId)} onCallMcp={(resourceId, toolName) => session.activeConversation && session.callMcpTool(session.activeConversation.id, resourceId, toolName)} /></Modal.Body></Modal.Dialog></Modal.Container></Modal.Backdrop>
       </Modal>
-      <GitHubModal session={session} isOpen={gitOpen} onOpenChange={setGitOpen} />
+      <GitActionsModal key={session.activeConversation?.id} session={session} isOpen={gitOpen} onOpenChange={setGitOpen} />
       <CreateWorkspaceModal session={session} isOpen={createOpen} onOpenChange={setCreateOpen} />
     </div>
   );
-}
-
-function GitHubModal({ session, isOpen, onOpenChange }: { session: TodeXSession; isOpen: boolean; onOpenChange: (open: boolean) => void }) {
-  const [repos, setRepos] = useState<GitRepositorySummary[]>([]);
-  const [activeRepoPath, setActiveRepoPath] = useState('');
-  const [message, setMessage] = useState('');
-  const [includeUnstaged, setIncludeUnstaged] = useState(true);
-  const [loading, setLoading] = useState(false);
-  const workspacePath = session.activeWorkspace?.path || session.settings.defaultWorkspacePath;
-  const activeRepo = repos.find((repo) => repo.path === activeRepoPath) ?? repos[0];
-
-  const refresh = useCallback(async () => {
-    if (!workspacePath) return;
-    setLoading(true);
-    try {
-      const next = await window.todexDesktop.git.scan(workspacePath);
-      setRepos(next);
-      setActiveRepoPath((current) => next.some((repo) => repo.path === current) ? current : next.find((repo) => repo.files.length > 0)?.path ?? next[0]?.path ?? '');
-    } catch (error) {
-      toast.danger(error instanceof Error ? error.message : 'Git 状态读取失败');
-    } finally { setLoading(false); }
-  }, [workspacePath]);
-
-  useEffect(() => { if (isOpen) void refresh(); }, [isOpen, refresh]);
-
-  const run = async (action: 'commit' | 'commit-push' | 'push' | 'initial') => {
-    if (!activeRepo) return;
-    setLoading(true);
-    try {
-      await window.todexDesktop.git.run(activeRepo.path, action, message, includeUnstaged);
-      toast.success(action === 'initial' ? '已初始化并创建提交' : action === 'push' ? '已推送' : action === 'commit-push' ? '已提交并推送' : '已创建提交');
-      await refresh();
-    } catch (error) { toast.danger(error instanceof Error ? error.message : 'Git 操作失败'); }
-    finally { setLoading(false); }
-  };
-
-  return <Modal isOpen={isOpen} onOpenChange={onOpenChange}>
-    <Modal.Backdrop><Modal.Container className="justify-center"><Modal.Dialog className="sm:max-w-md">
-      <Modal.CloseTrigger />
-      <Modal.Header>
-        <Modal.Icon className="bg-default text-foreground"><RiGithubLine className="size-5" /></Modal.Icon>
-        {repos.length > 1 ? <><Modal.Heading className="sr-only">GitHub 操作</Modal.Heading><Select className="w-full" aria-label="选择仓库" selectedKey={activeRepo?.path} onSelectionChange={(key) => { if (typeof key === 'string') setActiveRepoPath(key); }}>
-          <Select.Trigger className="min-w-0"><RiGitBranchLine className="size-4" /><Select.Value /><Select.Indicator /></Select.Trigger>
-          <Select.Popover><ListBox>{repos.map((repo) => <ListBox.Item key={repo.path} id={repo.path} textValue={`${repo.name} ${repo.branch}`}>{repo.name} · {repo.branch}</ListBox.Item>)}</ListBox></Select.Popover>
-        </Select></> : <Modal.Heading className="flex min-w-0 items-center gap-2"><RiGitBranchLine className="size-4" /><span className="truncate">{activeRepo?.branch || '未初始化'}</span></Modal.Heading>}
-      </Modal.Header>
-      <Modal.Body className="space-y-2 pt-1 pb-2">
-        {activeRepo?.error ? <p className="text-danger text-xs">{activeRepo.error}</p> : null}
-        <Button
-          variant="secondary"
-          className="h-12 w-full justify-between px-4 text-base"
-          onPress={() => void run(activeRepo?.initialEligible ? 'initial' : 'commit')}
-          isDisabled={loading || !activeRepo}
-        >
-          <div className="flex items-center gap-3">
-            <RiGitCommitLine className="size-5" />
-            <span>{activeRepo?.initialEligible ? '初始化仓库' : '提交'}</span>
-          </div>
-          <div className="flex items-center gap-1.5 font-mono text-sm tabular-nums">
-            <span className="text-success font-medium">+{activeRepo?.additions ?? 0}</span>
-            <span className="text-danger font-medium">-{activeRepo?.deletions ?? 0}</span>
-          </div>
-        </Button>
-        <Button
-          variant="ghost"
-          className="h-12 w-full justify-start gap-3 px-4 text-base"
-          onPress={() => void run('commit-push')}
-          isDisabled={loading || !activeRepo || Boolean(activeRepo.initialEligible)}
-        >
-          <RiUploadCloud2Line className="size-5" />
-          <span>提交并推送</span>
-        </Button>
-        <Button
-          variant="ghost"
-          className="h-12 w-full justify-between px-4 text-base"
-          onPress={() => void run('push')}
-          isDisabled={loading || !activeRepo || Boolean(activeRepo.initialEligible)}
-        >
-          <div className="flex items-center gap-3">
-            <RiUploadCloud2Line className="size-5" />
-            <span>推送</span>
-          </div>
-          <div className="text-muted text-xs font-normal">
-            <span>{activeRepo?.ahead ?? 0} 个 commit</span>
-          </div>
-        </Button>
-      </Modal.Body>
-    </Modal.Dialog></Modal.Container></Modal.Backdrop>
-  </Modal>;
 }
 
 function CreateWorkspaceModal({
