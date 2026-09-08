@@ -383,6 +383,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const [settings, setSettings] = useState<ConnectionSettings>(defaultSettings);
   const [backendConnections, setBackendConnections] = useState<BackendConnectionProfile[]>([]);
   const [activeBackendConnectionId, setActiveBackendConnectionId] = useState('default-backend');
+  const activeBackendConnectionIdRef = useRef(activeBackendConnectionId);
+  activeBackendConnectionIdRef.current = activeBackendConnectionId;
   const [workspaces, setWorkspaces] = useState<WorkspaceRecord[]>([]);
   const [conversations, setConversations] = useState<ConversationRecord[]>([]);
   const [directorySyncStatus, setDirectorySyncStatus] = useState<'loading' | 'ready' | 'error'>('loading');
@@ -4822,6 +4824,67 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     return placeholder;
   }, [backendConnections, isUnusedConversation, resolveRememberedProviderSelection]);
 
+  /** Open a backend-validated worktree as a separate workspace/conversation. */
+  const openGitWorktree = useCallback((path: string, sourceConversationId: string): {
+    workspace: WorkspaceRecord; conversation: ConversationRecord;
+  } | null => {
+    const source = conversationsRef.current.find(item => item.id === sourceConversationId);
+    const sourceWorkspace = source && workspacesRef.current.find(item => item.id === source.workspaceId);
+    const targetPath = path.trim();
+    if (!source || !sourceWorkspace || !targetPath || targetPath.includes('\0')
+      || !(/^(?:\/|[A-Za-z]:[\\/]|\\\\)/.test(targetPath))) {
+      setLastError('无法打开 worktree：源对话或目录路径无效。');
+      return null;
+    }
+    const backendId = source.backendConnectionId ?? sourceWorkspace.backendConnectionId
+      ?? activeBackendConnectionIdRef.current;
+    if (backendId !== activeBackendConnectionIdRef.current
+      || (source.backendConnectionId && sourceWorkspace.backendConnectionId
+        && source.backendConnectionId !== sourceWorkspace.backendConnectionId)) {
+      setLastError('后端已切换，请在源对话的后端重新读取 worktree 列表。');
+      return null;
+    }
+    const pathKey = (value: string) => value.replace(/[\\/]+$/, '') || '/';
+    let workspace = workspacesRef.current.find(item =>
+      (item.backendConnectionId ?? activeBackendConnectionIdRef.current) === backendId
+      && pathKey(item.path) === pathKey(targetPath));
+    let conversation = workspace && conversationsRef.current.find(item =>
+      item.workspaceId === workspace!.id
+      && (item.backendConnectionId ?? workspace!.backendConnectionId ?? backendId) === backendId);
+    if (!workspace) {
+      // createWorkspace owns the normal defaults and sidebar selection. Publish
+      // its records to refs immediately so a second click cannot create duplicates.
+      const created = createWorkspace(displayNameFromPath(targetPath), targetPath);
+      if (!created) return null;
+      workspace = { ...created.workspace, backendConnectionId: backendId,
+        model: sourceWorkspace.model, reasoningEffort: sourceWorkspace.reasoningEffort,
+        approvalPolicy: sourceWorkspace.approvalPolicy, approvalsReviewer: sourceWorkspace.approvalsReviewer,
+        sandboxMode: sourceWorkspace.sandboxMode, permissionProfile: sourceWorkspace.permissionProfile,
+        serviceTier: sourceWorkspace.serviceTier, personality: sourceWorkspace.personality };
+      workspacesRef.current = [workspace, ...workspacesRef.current.filter(item => item.id !== workspace!.id)];
+      const record = workspace;
+      setWorkspaces(current => [record, ...current.filter(item => item.id !== record.id)]);
+      conversation = created.conversation;
+    }
+    if (!conversation || !conversationsRef.current.some(item => item.id === conversation!.id)) {
+      conversation = { ...(conversation ?? createDefaultConversation(workspace)),
+        backendConnectionId: backendId, provider: source.provider, providerProfile: source.providerProfile,
+        model: source.model, reasoningEffort: source.reasoningEffort, mode: source.mode,
+        permissionMode: source.permissionMode };
+      const record = conversation;
+      conversationsRef.current = [record, ...conversationsRef.current.filter(item => item.id !== record.id)];
+      setConversations(current => [record, ...current.filter(item => item.id !== record.id)]);
+    }
+    // Use current refs so rapid clicks reuse the same records. The backend
+    // remains the source backend; the source native thread is never moved.
+    activeWorkspaceRef.current = workspace.id;
+    activeConversationRef.current = conversation.id;
+    setActiveWorkspaceId(workspace.id);
+    setActiveConversationId(conversation.id);
+    setLastError('');
+    return { workspace, conversation };
+  }, [createWorkspace]);
+
   const switchConversationAgent = useCallback((conversationId: string, provider: ProviderKind) => {
     const context = getConversationContext(conversationId);
     if (!context) {
@@ -6967,6 +7030,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     connect,
     closeSocket,
     createWorkspace,
+    openGitWorktree,
     selectWorkspace,
     renameWorkspace,
     updateWorkspace,
