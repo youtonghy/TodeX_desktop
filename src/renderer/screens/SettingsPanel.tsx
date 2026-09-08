@@ -1,10 +1,12 @@
-import { useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { Button, Chip, Description, Label, ListBox, Select, Surface, TextArea, TextField, toast } from '@heroui/react';
 import { RadioButtonGroup } from '@heroui-pro/react';
 import { RiAttachment2 } from '@remixicon/react';
 import jsQR from 'jsqr';
-import { applyPairingToSettings, assemblePairingQrChunkPayload, parsePairingQrFrame, resolvePairingPayload, type PairingQrChunk } from '@todex/protocol/transportCrypto';
+import { assemblePairingQrChunkPayload, parsePairingQrFrame, resolvePairingPayload, type PairingQrChunk, type ParsedPairing } from '@todex/protocol/transportCrypto';
 import { Field } from '../components/Field';
+import { DevicePairingPanel } from '../components/DevicePairingPanel';
+import { pairingConnectionPatch } from '../session/pairingImport';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { connectionStateLabel, healthLabelOf, settingsFromProfile } from '../session/helpers';
 import { connectionFailureLabel } from '@todex/protocol/connectionError';
@@ -35,6 +37,14 @@ export function SettingsPanel({ session }: Props) {
   const connected = connectionState === 'open' || connectionState === 'connecting';
   const classified = connectionFailureLabel(connectionHealth.code);
   const activeProfile = backendConnections.find((item) => item.id === activeBackendConnectionId);
+  const latestSession = useRef(session);
+  latestSession.current = session;
+  const pairingGeneration = useRef(0);
+  useLayoutEffect(() => {
+    setChunks(new Map());
+    return () => { pairingGeneration.current += 1; };
+  }, [activeProfile?.id, activeProfile?.serverUrl, settings.serverUrl]);
+
 
   const selectBackend = (id: string) => {
     const profile = backendConnections.find((item) => item.id === id);
@@ -44,6 +54,23 @@ export function SettingsPanel({ session }: Props) {
   };
 
   const applyRawPairing = async (raw: string) => {
+    if (!activeProfile) return;
+    const sourceId = activeProfile.id;
+    const sourceUrl = activeProfile.serverUrl;
+    const sourceSettingsUrl = settings.serverUrl;
+    const generation = ++pairingGeneration.current;
+    const applyResolvedPairing = (pairing: ParsedPairing) => {
+      const current = latestSession.current;
+      const target = current.backendConnections.find(item => item.id === sourceId);
+      if (generation !== pairingGeneration.current || current.activeBackendConnectionId !== sourceId
+        || target?.serverUrl !== sourceUrl || current.settings.serverUrl !== sourceSettingsUrl) return;
+      const patch = pairingConnectionPatch(target, pairing);
+      current.updateBackendConnection(sourceId, patch);
+      current.setSettings(value => value.serverUrl === sourceSettingsUrl
+        && latestSession.current.activeBackendConnectionId === sourceId ? { ...value, ...patch } : value);
+      setChunks(new Map());
+      toast.success('配对信息已导入');
+    };
     try {
       const frame = parsePairingQrFrame(raw);
       if (frame.kind === 'chunk') {
@@ -56,15 +83,13 @@ export function SettingsPanel({ session }: Props) {
         }
         const assembled = assemblePairingQrChunkPayload([...next.values()]);
         const pairing = await resolvePairingPayload(assembled);
-        setSettings((current) => applyPairingToSettings(current, pairing));
-        setChunks(new Map());
-        toast.success('配对信息已导入');
+        applyResolvedPairing(pairing);
         return;
       }
       const pairing = await resolvePairingPayload(frame.raw);
-      setSettings((current) => applyPairingToSettings(current, pairing));
-      toast.success('配对信息已导入');
+      applyResolvedPairing(pairing);
     } catch (error) {
+      if (generation !== pairingGeneration.current) return;
       toast.danger(error instanceof Error ? error.message : '配对失败');
     }
   };
@@ -114,7 +139,8 @@ export function SettingsPanel({ session }: Props) {
               <Label>传输加密</Label><Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
               <Select.Popover><ListBox><ListBox.Item id="none" textValue="none">none</ListBox.Item><ListBox.Item id="x25519" textValue="x25519">x25519</ListBox.Item><ListBox.Item id="ml-kem-768" textValue="ml-kem-768">ml-kem-768</ListBox.Item></ListBox></Select.Popover>
             </Select>
-            {activeProfile.encryptionProtocol !== 'none' ? <Field label="加密公钥" value={activeProfile.encryptionPublicKey} onChange={(encryptionPublicKey) => updateBackendConnection(activeProfile.id, { encryptionPublicKey })} /> : null}
+            {activeProfile.encryptionProtocol !== 'none' ? <Field label="加密公钥" value={activeProfile.encryptionPublicKey} onChange={(encryptionPublicKey) => { updateBackendConnection(activeProfile.id, { encryptionPublicKey }); setSettings((current) => ({ ...current, encryptionPublicKey })); }} /> : null}
+            <DevicePairingPanel session={session} deviceName="TodeX Desktop" />
             <div className="flex gap-2"><Button onPress={() => (connected ? closeSocket(true) : connect())}>{connected ? '断开' : connectionState === 'error' ? '重试' : '连接'}</Button>{backendConnections.length > 1 ? <Button variant="danger-soft" onPress={() => removeBackendConnection(activeProfile.id)}>删除后端</Button> : null}</div>
           </>
         ) : null}

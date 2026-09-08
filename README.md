@@ -33,6 +33,7 @@ Built with **Electron 44**, **React 19**, **Vite 7**, **Tailwind CSS v4**, and *
 - **Pairing & Connection Management**:
   - Inspect the active Backend's Codex, Pi, Claude Code, Grok Build, and ACP CLI inventory, compare installed and latest versions, and start managed CLI upgrades.
   - Connect via direct host/port URL with Bearer token authentication.
+  - [Device verification](docs/device-verification.md): compare a random code with the backend TUI and approve once to save the token; encryption public keys still require QR or manual import.
   - Paste pairing JSON or multi-frame segmented QR payloads.
   - **Drag & Drop QR pairing**: Drop QR screenshot/image files directly into the window (parsed locally via `jsqr`).
   - Clear connection diagnostic states (categorizes connection errors such as unstarted backend, port mismatch, token error, deprecated `/v1` endpoints, or handshake issues).
