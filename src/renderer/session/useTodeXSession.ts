@@ -1,3 +1,4 @@
+import { ENCRYPTION_VERIFICATION_ERROR, validateTransportEncryption, verifyEncryptedSocket } from './transportVerification';
 import { QueuedFollowUps, restoreQueuedFollowUps } from './queuedFollowUps';
 import { LegacyEventRecovery } from './legacyEventRecovery';
 import { ConversationRecovery } from './conversationRecovery';
@@ -324,6 +325,9 @@ export type TodeXSession = ReturnType<typeof useTodeXSession>;
 export type { CatalogState };
 export function useTodeXSession(openPanel: OpenPanelFn) {
   const socketRef = useRef<WebSocket | null>(null);
+  const connectionAttemptRef = useRef<AbortController | null>(null);
+  const socketVerifiedRef = useRef(false);
+  const transportFailureRef = useRef(false);
   const rawProtocolSenderRef = useRef<(message: ProtocolCommand) => boolean>(() => false);
   const protocolCommandsRef = useRef<ProtocolCommands | null>(null);
   if (!protocolCommandsRef.current) protocolCommandsRef.current = new ProtocolCommands((message) => rawProtocolSenderRef.current(message));
@@ -804,6 +808,11 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
 
   const closeSocket = useCallback((manual = true) => {
     socketGenerationRef.current += 1;
+    connectionAttemptRef.current?.abort();
+    connectionAttemptRef.current = null;
+    socketVerifiedRef.current = false;
+    healthProbeSeqRef.current += 1;
+    protocolCommandsRef.current?.disconnect();
     if (manual) {
       manualDisconnectRef.current = true;
       setAutoConnectEnabled(false);
@@ -2658,7 +2667,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
    * left (socket closed) and throws ConnectionError on oversize payloads. */
   const sendRawProtocolFrame = useCallback((message: { id: string; type: string; payload: Record<string, unknown> }) => {
     const socket = socketRef.current;
-    if (!socket || socket.readyState !== WebSocket.OPEN) {
+    if (!socket || socket.readyState !== WebSocket.OPEN || !socketVerifiedRef.current) {
       return null;
     }
     let frame: string;
@@ -2754,6 +2763,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   }, [settings.serverUrl]);
 
   const checkConnectionHealth = useCallback(async () => {
+    if (transportFailureRef.current) return;
     const probeId = healthProbeSeqRef.current + 1;
     healthProbeSeqRef.current = probeId;
     const startedAt = Date.now();
@@ -2772,7 +2782,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         signal: controller.signal,
       });
       const latencyMs = Date.now() - startedAt;
-      if (healthProbeSeqRef.current !== probeId) {
+      if (healthProbeSeqRef.current !== probeId || transportFailureRef.current) {
         return;
       }
       if (!response.ok) {
@@ -2785,7 +2795,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         error: '',
       });
     } catch (error) {
-      if (healthProbeSeqRef.current !== probeId) {
+      if (healthProbeSeqRef.current !== probeId || transportFailureRef.current) {
         return;
       }
       const isAbort = error instanceof Error && error.name === 'AbortError';
@@ -2824,6 +2834,22 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     autoConnectAttemptedRef.current = true;
     setAutoConnectEnabled(true);
     closeSocket(false);
+    const generation = socketGenerationRef.current;
+    const attempt = new AbortController();
+    connectionAttemptRef.current = attempt;
+    transportFailureRef.current = false;
+    const isAttemptCurrent = () => socketGenerationRef.current === generation
+      && connectionAttemptRef.current === attempt && !attempt.signal.aborted;
+    const failTransport = (error: unknown) => {
+      if (!isAttemptCurrent()) return;
+      const message = error instanceof Error ? error.message : ENCRYPTION_VERIFICATION_ERROR;
+      lastFailureRetryableRef.current = false;
+      transportFailureRef.current = true;
+      closeSocket(false);
+      setConnectionState('error');
+      setLastError(message);
+      setConnectionHealth({ status: 'offline', latencyMs: null, lastCheckedAt: Date.now(), error: message, code: 'protocol_mismatch' });
+    };
     setLastError('');
     setConnectionState('connecting');
     setConnectionHealth((current) => ({ ...current, status: 'checking', error: '', code: '' }));
@@ -2844,10 +2870,18 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         return;
       }
 
+      try {
+        await validateTransportEncryption({ ...settings, serverUrl: inspected.origin }, attempt.signal);
+      } catch (error) {
+        failTransport(error);
+        return;
+      }
+      if (!isAttemptCurrent()) return;
       const probe = await probeBackendConnection({
         serverUrl: inspected.origin,
         authToken: settings.authToken,
       });
+      if (!isAttemptCurrent()) return;
       if (!probe.ok || probe.error) {
         const error = probe.error ?? ConnectionError.unreachable('backend probe failed');
         lastFailureRetryableRef.current = error.retryable;
@@ -2884,7 +2918,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         });
       }
       setConnectionHealth({
-        status: 'online',
+        status: 'checking',
         latencyMs: null,
         lastCheckedAt: Date.now(),
         error: '',
@@ -2895,9 +2929,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       try {
         crypto = createTransportCryptoSession({ ...settings, serverUrl: inspected.origin });
       } catch (error) {
-        lastFailureRetryableRef.current = false;
-        setConnectionState('error');
-        setLastError(error instanceof Error ? error.message : '无法初始化加密连接');
+        failTransport(new Error(`${ENCRYPTION_VERIFICATION_ERROR}${error instanceof Error && error.message ? `（${error.message}）` : ''}`));
         return;
       }
 
@@ -2908,11 +2940,24 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
 
       try {
         const socket = new WebSocket(wsUrl);
-        const generation = socketGenerationRef.current;
         socketRef.current = socket;
         socketCryptoRef.current = crypto;
+        let verified = false;
+        const isSocketCurrent = () => isAttemptCurrent() && socketRef.current === socket;
 
-        socket.onopen = () => {
+        socket.onopen = async () => {
+          if (!isSocketCurrent()) return;
+          if (crypto) {
+            try {
+              await verifyEncryptedSocket(socket, crypto, attempt.signal);
+            } catch (error) {
+              if (isSocketCurrent()) failTransport(error);
+              return;
+            }
+          }
+          if (!isSocketCurrent() || socket.readyState !== WebSocket.OPEN) return;
+          verified = true;
+          socketVerifiedRef.current = true;
           reconnectAttemptRef.current = 0;
           lastFailureRetryableRef.current = true;
           setConnectionState('open');
@@ -2945,14 +2990,21 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         };
 
         socket.onmessage = (event) => {
+          // The verifier alone decrypts frames until its challenge succeeds.
+          if (!isSocketCurrent() || !verified) return;
           enqueueSocketFrame({
             data: String(event.data),
             generation,
-            crypto: socketCryptoRef.current,
+            crypto,
           });
         };
 
         socket.onerror = () => {
+          if (!isSocketCurrent()) return;
+          if (crypto && !verified) {
+            failTransport(new Error(ENCRYPTION_VERIFICATION_ERROR));
+            return;
+          }
           lastFailureRetryableRef.current = true;
           setConnectionState('error');
           setLastError(ConnectionError.websocketFailed(wsUrl).userMessage);
@@ -2965,20 +3017,35 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         };
 
         socket.onclose = () => {
-          setConnectionState((current) => (current === 'open' || current === 'connecting' ? 'closed' : current));
-          if (socketRef.current === socket) {
-            socketRef.current = null;
-            socketCryptoRef.current = null;
+          if (!isSocketCurrent()) return;
+          if (crypto && !verified) {
+            // Publish verification failure before clearing socket identity;
+            // the verifier's rejection may run after this event callback.
+            failTransport(new Error(ENCRYPTION_VERIFICATION_ERROR));
+            return;
           }
+          socketVerifiedRef.current = false;
+          setConnectionState((current) => (current === 'open' || current === 'connecting' ? 'closed' : current));
+          socketRef.current = null;
+          socketCryptoRef.current = null;
+          attempt.abort();
           protocolCommandsRef.current?.disconnect();
         };
       } catch (error) {
+        if (!isAttemptCurrent()) return;
         lastFailureRetryableRef.current = true;
         setConnectionState('error');
         socketCryptoRef.current = null;
         setLastError(error instanceof Error ? error.message : ConnectionError.websocketFailed(wsUrl).userMessage);
       }
-    })();
+    })().catch((error: unknown) => {
+      if (!isAttemptCurrent()) return;
+      lastFailureRetryableRef.current = true;
+      setConnectionState('error');
+      const message = error instanceof Error ? error.message : '连接后端失败，请重试。';
+      setLastError(message);
+      setConnectionHealth({ status: 'offline', latencyMs: null, lastCheckedAt: Date.now(), error: message, code: 'backend_unreachable' });
+    });
   }, [checkConnectionHealth, closeSocket, enqueueSocketFrame, flushQueuedProtocolCommands, getSessionCursorSnapshot, recoverConversation, refreshServerVersion, sendRawProtocolFrame, sendSessionResume, settings, syncWorkspacesFromBackend]);
 
   useEffect(() => {
