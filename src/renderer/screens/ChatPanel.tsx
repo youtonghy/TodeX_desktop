@@ -603,7 +603,7 @@ export function ChatPanel({ session }: Props) {
               ))}
             </div>
           ) : null}
-          {!currentPermission || agentProvider === 'pi' ? <p className="text-muted mb-2 text-xs">{permissionHint}</p> : null}
+          {!currentPermission && agentProvider !== 'pi' ? <p className="text-muted mb-2 text-xs">{permissionHint}</p> : null}
           <ConversationRunStatus
             submissionStatus={submissionStatus}
             runtime={runtime}
