@@ -1,15 +1,14 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Button, Chip, Label, ListBox, Modal, Select, Toast, toast } from '@heroui/react';
+import { Button, Label, ListBox, Modal, Select, Toast, toast } from '@heroui/react';
 import { AppLayout, Navbar } from '@heroui-pro/react';
-import { RiAddLine, RiGithubLine, RiLayoutLeftLine } from '@remixicon/react';
+import { RiAddLine, RiGithubLine, RiLayoutLeftLine, RiLayoutRightLine } from '@remixicon/react';
 import { useTodeXSession, type TodeXSession } from './session/useTodeXSession';
-import { GitStatusIndicator } from './components/GitStatusIndicator';
+import { ConversationHeaderDetails } from './components/ConversationHeaderDetails';
 import { GitActionsModal } from './components/GitActionsModal';
 import { DesktopAlertHost } from './components/DesktopAlertHost';
 import { AppSidebar } from './components/AppSidebar';
 import { ChatPanel } from './screens/ChatPanel';
 import { SettingsPanel } from './screens/SettingsPanel';
-import { ProviderIcon } from './components/ProviderIcon';
 import { AsidePanel } from './screens/AsidePanel';
 import { CapabilitiesPanel } from './screens/CapabilitiesPanel';
 import { WorkbenchPanel } from './screens/WorkbenchPanel';
@@ -18,8 +17,7 @@ import { AboutPanel } from './screens/AboutPanel';
 import { CliManagerPanel } from './screens/CliManagerPanel';
 import { KanbanPanel } from './screens/KanbanPanel';
 import { Field } from './components/Field';
-import { connectionStateLabel, fetchWorkspaceDirectorySnapshot, isV2Conversation } from './session/helpers';
-import { providerDisplayName } from '@todex/protocol/v2';
+import { connectionStateLabel, fetchWorkspaceDirectorySnapshot } from './session/helpers';
 import { isWorkbenchTab, panelFromRoute, type DesktopPanel, type OpenPanelOptions, type WorkbenchTab } from './lib/panels';
 
 const LAYOUT_AUTO_SAVE_ID = 'todex-desktop-app-layout';
@@ -130,6 +128,7 @@ export function App() {
           sidebarMinSize="200px"
           sidebarMaxSize="320px"
           sidebarResizeBehavior="preserve-pixel-size"
+          asideMobile="sheet"
           asideResizable
           asideDefaultSize="420px"
           asideMinSize="320px"
@@ -171,28 +170,19 @@ export function App() {
           }
           navbar={
             <Navbar maxWidth="full">
-              <Navbar.Header className="h-auto min-h-16 flex-wrap gap-x-3 gap-y-1 py-2">
-                <Button isIconOnly size="sm" variant="ghost" aria-label={sidebarOpen ? '折叠侧栏' : '展开侧栏'} onPress={() => persistSidebarOpen(!sidebarOpen)}>
+              <Navbar.Header className="flex-nowrap gap-2 px-3 sm:px-6 [&>button]:shrink-0">
+                <AppLayout.MenuToggle className="inline-flex min-[769px]:hidden" aria-label="打开导航侧栏"><RiLayoutLeftLine className="size-4" /></AppLayout.MenuToggle>
+                <Button className="hidden min-[769px]:inline-flex" isIconOnly size="sm" variant="ghost" aria-label={sidebarOpen ? '折叠侧栏' : '展开侧栏'} onPress={() => persistSidebarOpen(!sidebarOpen)}>
                   <RiLayoutLeftLine className="size-4" />
                 </Button>
-                <span className="max-w-[min(16rem,22vw)] truncate text-sm font-medium">
-                  {panel === 'kanban' ? '今日看板' : session.activeConversation?.title ?? '对话'}
-                </span>
-                {session.activeConversation ? (
-                  <Chip size="sm" variant="soft" className="whitespace-nowrap">
-                    <ProviderIcon provider={isV2Conversation(session.activeConversation) ? session.activeConversation.provider : 'codex'} />
-                    {isV2Conversation(session.activeConversation)
-                      ? providerDisplayName(session.activeConversation.provider || '', 'Agent')
-                      : '历史 Codex'}
-                  </Chip>
-                ) : null}
-                <GitStatusIndicator session={session} gitOpen={gitOpen} onOpenGit={() => setGitOpen(true)} />
-                <Navbar.Spacer />
-                <Navbar.Content>
+                <ConversationHeaderDetails session={session} title={panel === 'kanban' ? '今日看板' : session.activeConversation?.title ?? '对话'} gitOpen={gitOpen} onOpenGit={() => setGitOpen(true)} />
+                <Navbar.Content className="shrink-0 gap-2">
                   <Button isIconOnly size="sm" variant="ghost" aria-label="GitHub 操作" onPress={() => setGitOpen(true)}>
                     <RiGithubLine className="size-4" />
                   </Button>
-                  <AppLayout.AsideTrigger />
+                  <Button isIconOnly size="sm" variant="ghost" aria-label={asideOpen ? '关闭右侧面板' : '打开右侧面板'} aria-expanded={asideOpen} onPress={() => persistAsideOpen(!asideOpen)}>
+                    <RiLayoutRightLine className="size-4" />
+                  </Button>
                 </Navbar.Content>
               </Navbar.Header>
             </Navbar>

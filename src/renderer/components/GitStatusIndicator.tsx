@@ -5,7 +5,7 @@ import { useGitStatus } from '../session/useGitStatus';
 
 type Props = { session: TodeXSession; gitOpen: boolean; onOpenGit: () => void };
 
-export function GitStatusIndicator({ session, gitOpen, onOpenGit }: Props) {
+export function useConversationGitStatus(session: TodeXSession, gitOpen: boolean) {
   const conversation = session.activeConversation;
   const workspace = session.workspaces.find(item => item.id === conversation?.workspaceId);
   const connected = session.connectionState === 'open' && Boolean(workspace?.path)
@@ -15,18 +15,28 @@ export function GitStatusIndicator({ session, gitOpen, onOpenGit }: Props) {
     scopeKey: `${session.activeBackendConnectionId}:${conversation?.id || ''}`,
     enabled: connected, thinking: Boolean(conversation && session.thinkingConversations[conversation.id]), refreshKey: gitOpen,
   });
+  return { workspace, connected, data, error, loading, refresh };
+}
+
+export function GitStatusIndicator({ session, gitOpen, onOpenGit }: Props) {
+  const state = useConversationGitStatus(session, gitOpen);
+  return <GitStatusDisplay state={state} onOpenGit={onOpenGit} />;
+}
+
+export function GitStatusDisplay({ state, onOpenGit, wrap = true }: { state: ReturnType<typeof useConversationGitStatus>; onOpenGit: () => void; wrap?: boolean }) {
+  const { workspace, connected, data, error, loading, refresh } = state;
   if (!workspace?.path) return null;
   const branch = data?.branch || '分离 HEAD';
   const worktree = data?.worktreeKind === 'linked' ? '关联工作树' : '主工作树';
   const summary = data?.initialized
     ? `${branch}，${worktree}，${data.changedFiles} 个变更文件，新增 ${data.additions} 行，删除 ${data.deletions} 行${data.statsTruncated ? '，统计为部分结果' : ''}`
     : !connected ? 'Git 未连接' : error ? 'Git 状态不可用，点击重试' : loading ? '正在读取 Git 状态' : '未初始化 Git';
-  return <div className="min-w-0 shrink max-sm:order-last max-sm:basis-full" data-testid="git-status">
+  return <div className="min-w-0" data-testid="git-status">
     <Tooltip delay={300}>
       <Button size="sm" variant="ghost" className="h-auto min-h-8 min-w-0 max-w-full justify-start gap-2 px-2 py-1 text-xs font-normal"
         aria-label={summary} onPress={error ? refresh : onOpenGit}>
         {loading ? <Spinner size="sm" /> : <RiGitBranchLine className="size-3.5 shrink-0 text-muted" />}
-        {data?.initialized ? <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+        {data?.initialized ? <span className={`flex min-w-0 items-center gap-x-3 gap-y-1 ${wrap ? 'flex-wrap' : 'flex-nowrap whitespace-nowrap'}`}>
           <span className="max-w-40 truncate font-medium">{branch}</span>
           <span className="flex shrink-0 items-center gap-1 text-muted"><RiStackLine className="size-3.5" />{worktree}</span>
           <span className="flex shrink-0 items-center gap-2 tabular-nums">
