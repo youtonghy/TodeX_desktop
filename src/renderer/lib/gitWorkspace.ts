@@ -106,3 +106,20 @@ export function runGitWorkspaceOperation(settings: ConnectionSettings, workspace
   operation: GitWorkspaceOperation): Promise<GitWorkspaceOperationResult> {
   return request(settings, buildHttpUrl(settings.serverUrl, '/v2/git/operation'), operation, workspacePath);
 }
+
+export interface GitStatusSummary {
+  repositoryPath: string;
+  initialized: boolean;
+  branch: string | null;
+  worktreeKind: 'main' | 'linked' | null;
+  changedFiles: number;
+  additions: number;
+  deletions: number;
+  statsTruncated: boolean;
+}
+
+export function readGitStatus(settings: ConnectionSettings, workspacePath: string, signal?: AbortSignal): Promise<GitStatusSummary> {
+  const url = new URL(buildHttpUrl(settings.serverUrl, '/v2/git/status'));
+  url.searchParams.set('workspacePath', workspacePath);
+  return request(settings, url.toString(), undefined, undefined, signal);
+}
