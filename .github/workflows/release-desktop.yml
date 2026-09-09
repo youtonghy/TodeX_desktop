@@ -39,6 +39,11 @@ jobs:
             exit 1
           fi
 
+          if [[ "${version}" == "0.0.0" ]]; then
+            echo "0.0.0 is reserved for unversioned builds." >&2
+            exit 1
+          fi
+
           echo "version=${version}" >> "${GITHUB_OUTPUT}"
           echo "tag=v${version}" >> "${GITHUB_OUTPUT}"
 
@@ -118,6 +123,7 @@ jobs:
         run: |
           pnpm run check:electron
           pnpm run typecheck
+          pnpm run test:updates
           pnpm run build
 
   build:
@@ -134,20 +140,16 @@ jobs:
           - os: windows-2025
             label: windows
             args: --win nsis --x64 --arm64
-            files: release/*.exe
           - os: macos-15
             label: macos-arm64
-            args: --mac dmg --arm64
-            files: release/*.dmg
+            args: --mac dmg zip --arm64 -c.forceCodeSigning=true
           - os: ubuntu-24.04
             label: linux-x64
             args: --linux AppImage --x64
-            files: release/*.AppImage
     defaults:
       run:
         working-directory: TodeX_desktop
     env:
-      CSC_IDENTITY_AUTO_DISCOVERY: "false"
       HEROUI_KEY: ${{ secrets.HEROUI_AUTH_TOKEN }}
     steps:
       - name: Checkout desktop
@@ -190,11 +192,27 @@ jobs:
           fi
           pnpm rebuild
 
+      - name: Require macOS signing certificate
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+        run: |
+          if [ -z "$CSC_LINK" ]; then
+            echo "MAC_CSC_LINK must contain a Developer ID Application certificate for macOS auto-updates." >&2
+            exit 1
+          fi
+
       - name: Package desktop application
         shell: bash
         env:
           BUILD_ARGS: ${{ matrix.args }}
           TODEX_BUILD_VERSION: ${{ needs.prepare.outputs.version }}
+          CSC_LINK: ${{ runner.os == 'macOS' && secrets.MAC_CSC_LINK || '' }}
+          CSC_KEY_PASSWORD: ${{ runner.os == 'macOS' && secrets.MAC_CSC_KEY_PASSWORD || '' }}
+          APPLE_ID: ${{ runner.os == 'macOS' && secrets.APPLE_ID || '' }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ runner.os == 'macOS' && secrets.APPLE_APP_SPECIFIC_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ runner.os == 'macOS' && secrets.APPLE_TEAM_ID || '' }}
         run: pnpm run package ${BUILD_ARGS} -c.extraMetadata.version=${TODEX_BUILD_VERSION} --publish never
 
       - name: Verify injected version
@@ -203,11 +221,22 @@ jobs:
           RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
         run: grep -R --fixed-strings --quiet "${RELEASE_VERSION}" out/renderer
 
+      - name: Verify update metadata and checksums
+        env:
+          TODEX_BUILD_VERSION: ${{ needs.prepare.outputs.version }}
+        run: node scripts/verify-update-assets.mjs
+
       - name: Upload packages
         uses: actions/upload-artifact@v4
         with:
           name: TodeX-v${{ needs.prepare.outputs.version }}-${{ matrix.label }}
-          path: TodeX_desktop/${{ matrix.files }}
+          path: |
+            TodeX_desktop/release/*.exe
+            TodeX_desktop/release/*.dmg
+            TodeX_desktop/release/*.zip
+            TodeX_desktop/release/*.AppImage
+            TodeX_desktop/release/*.blockmap
+            TodeX_desktop/release/latest*.yml
           if-no-files-found: error
           retention-days: 7
 

@@ -66,6 +66,10 @@ jobs:
         working-directory: TodeX_desktop
         run: pnpm run typecheck
 
+      - name: Test updates
+        working-directory: TodeX_desktop
+        run: pnpm run test:updates
+
       - name: Build
         working-directory: TodeX_desktop
         run: pnpm run build

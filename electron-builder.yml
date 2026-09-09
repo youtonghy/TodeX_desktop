@@ -10,10 +10,18 @@ files:
 
 asar: true
 
+publish:
+  provider: github
+  owner: youtonghy
+  repo: TodeX_desktop
+  releaseType: release
+
 mac:
-  identity: null
   target:
     - target: dmg
+      arch:
+        - arm64
+    - target: zip
       arch:
         - arm64
   artifactName: TodeX-v${version}-macos-${arch}.${ext}

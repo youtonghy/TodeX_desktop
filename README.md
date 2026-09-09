@@ -172,8 +172,10 @@ Detailed desktop diagnostics are enabled only for builds whose version is exactl
 HTTP, WebSocket, and uncaught-error events, while redacting or truncating tokens,
 cookies, keys, and attachment contents.
 
-The Windows and macOS packages are currently unsigned, so SmartScreen or Gatekeeper
-may require the user to approve the first launch. The build checks out the mobile
+Windows packages are unsigned, so SmartScreen may require approval on first launch.
+macOS releases now require signing; see [automatic updates](docs/automatic-updates.md)
+for the required GitHub Actions secrets and migration from unsigned installations.
+The build checks out the mobile
 repository's `main` branch beside this repository because the desktop client shares
 its protocol source, then pins the resolved commit across every platform. If that
 repository is private, configure a `PROTOCOL_REPO_TOKEN` Actions secret with read

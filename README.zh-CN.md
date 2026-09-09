@@ -1,5 +1,7 @@
 # TodeX 桌面端 (`TodeX_desktop`)
 
+正式打包版本支持 GitHub Release 自动更新，详见[自动更新与发布配置](docs/automatic-updates.md)。
+
 <p align="center">
   <strong>基于 Electron、React 19 与 HeroUI Pro 构建的原生 macOS 桌面客户端，连接 <code>todex-agentd</code>。</strong>
 </p>

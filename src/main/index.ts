@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { startAutoUpdates } from './autoUpdates';
 import {
   DEBUG_BUILD_VERSION,
   DEBUG_LOG_PATH_KEY,
@@ -454,6 +455,7 @@ app.whenReady().then(() => {
   });
 
   createWindow();
+  startAutoUpdates(BUILD_VERSION);
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

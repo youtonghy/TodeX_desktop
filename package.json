@@ -13,6 +13,7 @@
     "build": "electron-vite build",
     "package": "pnpm run build && electron-builder",
     "preview": "electron-vite preview",
+    "test:updates": "node --experimental-strip-types --test scripts/update-policy.test.ts",
     "typecheck": "tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.node.json"
   },
   "dependencies": {
@@ -39,6 +40,7 @@
     "@tiptap/suggestion": "^3.31.2",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
+    "electron-updater": "^6.8.9",
     "embla-carousel": "^8.6.0",
     "embla-carousel-react": "^8.6.0",
     "jsqr": "^1.4.0",
