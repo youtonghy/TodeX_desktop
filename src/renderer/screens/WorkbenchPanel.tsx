@@ -17,23 +17,26 @@ import {
   terminalStatusLabel,
 } from '../session/helpers';
 import type { OpenPanelOptions, WorkbenchTab } from '../lib/panels';
+import { normalizeWorkbenchLayout } from '../session/workbenchLayout';
+import { SETTINGS_STORAGE_KEY } from '../session/helpers';
 import { V2ApiClient } from '@todex/protocol/v2';
 
 type Props = {
+  scopeKey?: string;
+  onTargetConsumed?: () => void;
   session: TodeXSession;
   tab: WorkbenchTab;
   target?: OpenPanelOptions;
   onTabChange: (tab: WorkbenchTab) => void;
 };
 
-type WorkbenchItem = { id: string; type: WorkbenchTab; title: string };
+type WorkbenchItem = { id: string; type: WorkbenchTab; title: string; target?: OpenPanelOptions };
 
 type StoredWorkbenchState = {
   items: WorkbenchItem[];
   activeId: string;
 };
 
-const WORKBENCH_STORAGE_KEY = 'todex.desktop.workbench.v2';
 const WORKBENCH_TYPES = new Set<WorkbenchTab>(['terminal', 'browser', 'files', 'git-diff']);
 
 const WORKBENCH_LABELS: Record<WorkbenchTab, string> = {
@@ -60,7 +63,7 @@ function parseStoredWorkbenchState(value: unknown): StoredWorkbenchState {
   const activeId = typeof candidate.activeId === 'string' && items.some((item) => item.id === candidate.activeId)
     ? candidate.activeId
     : items[0]?.id ?? '';
-  return { items, activeId };
+  return { items: items.map(item => ({ ...item, target: normalizeWorkbenchLayout({ target: item.target }).target })), activeId };
 }
 
 const PLACEHOLDER_FILES: Record<string, { title: string; language: string; body: string }> = {
@@ -81,8 +84,8 @@ const PLACEHOLDER_FILES: Record<string, { title: string; language: string; body:
   },
 };
 
-export function WorkbenchPanel({ session, tab, target, onTabChange }: Props) {
-  const conversationId = session.activeConversation?.id ?? '';
+export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = session.activeConversation?.id || '', onTargetConsumed }: Props) {
+  const storageKey = `${SETTINGS_STORAGE_KEY}.workbenchTabs.v1:${scopeKey}`;
   const [items, setItems] = useState<WorkbenchItem[]>([]);
   const [activeId, setActiveId] = useState('');
   const [restored, setRestored] = useState(false);
@@ -92,7 +95,7 @@ export function WorkbenchPanel({ session, tab, target, onTabChange }: Props) {
 
   useEffect(() => {
     let cancelled = false;
-    void window.todexDesktop.store.get(WORKBENCH_STORAGE_KEY)
+    void window.todexDesktop.store.get(storageKey)
       .then((value) => {
         if (cancelled) return;
         const stored = parseStoredWorkbenchState(value);
@@ -108,18 +111,19 @@ export function WorkbenchPanel({ session, tab, target, onTabChange }: Props) {
         if (!cancelled) setRestored(true);
       });
     return () => { cancelled = true; };
-  }, [onTabChange]);
+  }, [onTabChange, storageKey]);
 
   useEffect(() => {
     if (!restored) return;
-    void window.todexDesktop.store.set(WORKBENCH_STORAGE_KEY, { items, activeId } satisfies StoredWorkbenchState)
+    void window.todexDesktop.store.set(storageKey, { items: items.map(item => ({ ...item, target: normalizeWorkbenchLayout({ target: item.target }).target })), activeId } satisfies StoredWorkbenchState)
       .catch((reason) => {
         console.error('Failed to persist workbench tabs', reason);
       });
-  }, [activeId, items, restored]);
+  }, [activeId, items, restored, storageKey]);
 
   useEffect(() => {
     if (!restored) return;
+    if (items.some(item => item.id === activeId && item.type === tab)) return;
     const next = items.find((item) => item.type === tab);
     if (next && next.id !== activeId) {
       setActiveId(next.id);
@@ -131,7 +135,7 @@ export function WorkbenchPanel({ session, tab, target, onTabChange }: Props) {
       || tab === 'browser' && (target.url || target.filePath))) return;
     if (openedTargetRef.current?.target === target && openedTargetRef.current.tab === tab) return;
     openedTargetRef.current = { target, tab };
-    const existing = items.find(item => item.type === tab);
+    const existing = items.find(item => item.id === activeId && item.type === tab) ?? items.find(item => item.type === tab);
     if (existing) {
       setActiveId(existing.id);
       return;
@@ -143,8 +147,16 @@ export function WorkbenchPanel({ session, tab, target, onTabChange }: Props) {
     // Tab-list changes alone must not steal focus from a manually selected tab.
   }, [restored, tab, target]);
 
+  const updateTabTarget = useCallback((id: string, nextTarget: OpenPanelOptions) => {
+    setItems(current => current.some(item => item.id === id && item.target !== nextTarget)
+      ? current.map(item => item.id === id ? { ...item, target: nextTarget } : item) : current);
+    if (id === activeId && items.some(item => item.id === id && item.type === tab)
+      && nextTarget === requestedTargetRef.current) onTargetConsumed?.();
+  }, [activeId, items, onTargetConsumed, tab]);
+
   const active = items.find((item) => item.id === activeId) ?? null;
   const addTab = (type: WorkbenchTab) => {
+    if (!restored) return;
     const count = items.filter((item) => item.type === type).length + 1;
     const item = { id: `${type}-${Date.now()}`, type, title: `${WORKBENCH_LABELS[type]} ${count}` };
     setItems((current) => [...current, item]);
@@ -176,7 +188,7 @@ export function WorkbenchPanel({ session, tab, target, onTabChange }: Props) {
         </div>
         <Dropdown>
           <Dropdown.Trigger
-            aria-label="新建工作台标签"
+            isDisabled={!restored} aria-label="新建工作台标签"
             className="inline-flex size-8 items-center justify-center rounded-lg text-muted hover:text-foreground hover:bg-surface-secondary transition-colors cursor-pointer"
           >
             <RiAddLine className="size-4" />
@@ -201,11 +213,11 @@ export function WorkbenchPanel({ session, tab, target, onTabChange }: Props) {
               <TerminalPane
                 isActive={item.id === active?.id}
                 session={session}
-                terminalId={terminalIdForConversation(conversationId, item.id)}
+                terminalId={terminalIdForConversation(scopeKey, item.id)}
               />
             ) : null}
-            {item.type === 'browser' ? <BrowserPane workspacePath={session.activeWorkspace?.path} session={session} target={item.id === active?.id ? target : undefined} /> : null}
-            {item.type === 'files' ? <FilesPane session={session} target={item.id === active?.id ? target : undefined} /> : null}
+            {item.type === 'browser' ? <BrowserPane workspacePath={session.activeWorkspace?.path} session={session} target={item.type === tab && item.id === active?.id && (target?.filePath || target?.url) ? target : item.target} onTargetChange={next => updateTabTarget(item.id, next)} /> : null}
+            {item.type === 'files' ? <FilesPane session={session} target={item.type === tab && item.id === active?.id && (target?.filePath || target?.url) ? target : item.target} onTargetChange={next => updateTabTarget(item.id, next)} /> : null}
             {item.type === 'git-diff' ? <GitDiffPane session={session} /> : null}
           </div>
         ))}
@@ -217,6 +229,7 @@ export function WorkbenchPanel({ session, tab, target, onTabChange }: Props) {
 function TerminalPane({ session, terminalId, isActive }: { session: TodeXSession; terminalId: string; isActive: boolean }) {
   const workspace = session.activeWorkspace;
   const conversation = session.activeConversation;
+  const backendIdentity = workspace?.backendConnectionId || session.activeBackendConnectionId || session.settings.serverUrl;
   const autoStartAttempts = useRef(new Set<string>());
   const manualStopRef = useRef(false);
   const reconnectTimerRef = useRef<number | null>(null);
@@ -235,7 +248,7 @@ function TerminalPane({ session, terminalId, isActive }: { session: TodeXSession
       window.clearTimeout(reconnectTimerRef.current);
       reconnectTimerRef.current = null;
     }
-  }, [conversation?.id]);
+  }, [terminalId, backendIdentity]);
 
   useEffect(() => {
     if (!terminal) return;
@@ -403,7 +416,9 @@ function TerminalPane({ session, terminalId, isActive }: { session: TodeXSession
   );
 }
 
-function BrowserPane({ workspacePath, session, target }: { workspacePath?: string; session: TodeXSession; target?: OpenPanelOptions }) {
+function BrowserPane({ workspacePath, session, target, onTargetChange }: { workspacePath?: string; session: TodeXSession; target?: OpenPanelOptions; onTargetChange?: (target: OpenPanelOptions) => void }) {
+  const targetChangeRef = useRef(onTargetChange);
+  targetChangeRef.current = onTargetChange;
   const defaultUrl = target?.url ? target.url : (target?.filePath ? '' : 'http://127.0.0.1:7345');
   const [draft, setDraft] = useState(defaultUrl || 'http://127.0.0.1:7345');
   const [url, setUrl] = useState(defaultUrl);
@@ -424,6 +439,7 @@ function BrowserPane({ workspacePath, session, target }: { workspacePath?: strin
       if (!loopback) throw new Error('浏览器预览仅允许访问本机地址');
       setUrl(parsed.toString());
       setDraft(parsed.toString());
+      targetChangeRef.current?.({ url: parsed.toString() });
       setSrcDoc('');
       setError('');
     } catch (reason) {
@@ -443,6 +459,7 @@ function BrowserPane({ workspacePath, session, target }: { workspacePath?: strin
 
   useEffect(() => {
     if (target?.url) {
+      targetChangeRef.current?.(target);
       setDraft(target.url);
       setUrl(target.url);
       setSrcDoc('');
@@ -450,6 +467,7 @@ function BrowserPane({ workspacePath, session, target }: { workspacePath?: strin
       return;
     }
     if (!target?.filePath) return;
+    targetChangeRef.current?.(target);
     setDraft(target.filePath);
     setUrl('');
     setSrcDoc('');
@@ -742,7 +760,9 @@ function replaceFileTreeChildren(entries: FileTreeEntry[], path: string, childre
   });
 }
 
-function FilesPane({ session, target }: { session: TodeXSession; target?: OpenPanelOptions }) {
+function FilesPane({ session, target, onTargetChange }: { session: TodeXSession; target?: OpenPanelOptions; onTargetChange?: (target: OpenPanelOptions) => void }) {
+  const targetChangeRef = useRef(onTargetChange);
+  targetChangeRef.current = onTargetChange;
   const [entries, setEntries] = useState<FileTreeEntry[]>([]);
   const [selected, setSelected] = useState('');
   const [expandedKeys, setExpandedKeys] = useState<Selection>(new Set());
@@ -769,7 +789,8 @@ function FilesPane({ session, target }: { session: TodeXSession; target?: OpenPa
     return currentPath.split(/[/\\]/).filter(Boolean).pop() || currentPath;
   }, [currentPath]);
 
-  const readFile = useCallback(async (path: string) => {
+  const readFile = useCallback(async (path: string, sourceTarget?: OpenPanelOptions) => {
+    targetChangeRef.current?.(sourceTarget ?? { filePath: path });
     const request = ++fileRequestRef.current;
     setSelected(path);
     setFile(null);
@@ -826,7 +847,7 @@ function FilesPane({ session, target }: { session: TodeXSession; target?: OpenPa
   useEffect(() => {
     if (!target?.filePath || target === appliedTargetRef.current) return;
     appliedTargetRef.current = target;
-    void readFile(target.filePath);
+    void readFile(target.filePath, target);
   }, [readFile, target]);
 
   const handleAction = async (key: string) => {

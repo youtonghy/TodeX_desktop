@@ -146,6 +146,36 @@ export function SettingsPanel({ session }: Props) {
         ) : null}
       </Surface>
       <Surface className="flex flex-col gap-4 rounded-2xl p-5">
+        <h3 className="font-semibold">右侧面板</h3>
+        <Select
+          value={session.workbenchSharing}
+          isDisabled={!session.workbenchSharingHydrated}
+          onChange={(value) => {
+            if (value === 'conversation' || value === 'workspace') session.setWorkbenchSharing(value);
+          }}
+        >
+          <Label>面板共享方式</Label>
+          <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
+          <Select.Popover>
+            <ListBox>
+              <ListBox.Item id="conversation" textValue="每个对话独立">
+                每个对话独立
+                <ListBox.ItemIndicator />
+              </ListBox.Item>
+              <ListBox.Item id="workspace" textValue="同一工作区共享">
+                同一工作区共享
+                <ListBox.ItemIndicator />
+              </ListBox.Item>
+            </ListBox>
+          </Select.Popover>
+          <Description>
+            {session.workbenchSharing === 'workspace'
+              ? '同一工作区的对话复用终端、浏览器和文件标签，以及面板展开状态。'
+              : '默认每个对话独立保存面板。新对话的面板为空，并保持收起。'}
+          </Description>
+        </Select>
+      </Surface>
+      <Surface className="flex flex-col gap-4 rounded-2xl p-5">
         <h3 className="font-semibold">配对</h3>
         <p className="text-muted text-sm">粘贴后端 TUI 配对 JSON，或把二维码图片拖到这里。</p>
         <TextField className="w-full" value={pairingText} onChange={setPairingText}>

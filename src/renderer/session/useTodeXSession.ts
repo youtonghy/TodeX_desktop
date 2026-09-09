@@ -1,3 +1,4 @@
+import { useWorkbenchSharing } from './useWorkbenchSharing';
 import { bindSentAttachmentEvents, prepareSentAttachments, projectSentAttachments, pruneSentAttachmentRecords, type SentAttachmentRecord } from './sentAttachments';
 import { ENCRYPTION_VERIFICATION_ERROR, validateTransportEncryption, verifyEncryptedSocket } from './transportVerification';
 import { QueuedFollowUps, restoreQueuedFollowUps } from './queuedFollowUps';
@@ -327,6 +328,7 @@ export type TodeXSession = ReturnType<typeof useTodeXSession>;
 
 export type { CatalogState };
 export function useTodeXSession(openPanel: OpenPanelFn) {
+  const workbenchSharingState = useWorkbenchSharing();
   const socketRef = useRef<WebSocket | null>(null);
   const connectionAttemptRef = useRef<AbortController | null>(null);
   const socketVerifiedRef = useRef(false);
@@ -7055,6 +7057,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   [timeline, sentAttachmentRecords]);
 
   return {
+    ...workbenchSharingState,
     hydrated,
     directorySyncStatus,
     settings,

@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button, Label, ListBox, Modal, Select, Toast, toast } from '@heroui/react';
 import { AppLayout, Navbar } from '@heroui-pro/react';
 import { RiAddLine, RiGithubLine, RiLayoutLeftLine, RiLayoutRightLine } from '@remixicon/react';
+import { useWorkbenchLayout } from './session/useWorkbenchLayout';
+import { workbenchScopeKey } from './session/workbenchLayout';
 import { useTodeXSession, type TodeXSession } from './session/useTodeXSession';
 import { ConversationHeaderDetails } from './components/ConversationHeaderDetails';
 import { GitActionsModal } from './components/GitActionsModal';
@@ -53,10 +55,8 @@ function writeLayoutOpen(next: LayoutOpenState) {
 
 export function App() {
   const [panel, setPanel] = useState<DesktopPanel | null>(null);
-  const [panelTarget, setPanelTarget] = useState<OpenPanelOptions>({});
-  const [workbenchTab, setWorkbenchTab] = useState<WorkbenchTab>('terminal');
+  const panelScopeRef = useRef('');
   const [slashCommand, setSlashCommand] = useState<string>();
-  const [asideOpen, setAsideOpen] = useState(() => readLayoutOpen().asideOpen);
   const [sidebarOpen, setSidebarOpen] = useState(() => readLayoutOpen().sidebarOpen);
   const [createOpen, setCreateOpen] = useState(false);
   const [capabilitiesOpen, setCapabilitiesOpen] = useState(false);
@@ -67,16 +67,24 @@ export function App() {
     writeLayoutOpen({ ...readLayoutOpen(), sidebarOpen: open });
   }, []);
 
-  const persistAsideOpen = useCallback((open: boolean) => {
-    setAsideOpen(open);
-    writeLayoutOpen({ ...readLayoutOpen(), asideOpen: open });
-  }, []);
+  const openPanelHandlerRef = useRef<(name: string, params?: OpenPanelOptions) => void>(() => {});
+  const forwardOpenPanel = useCallback((name: string, params?: OpenPanelOptions) => openPanelHandlerRef.current(name, params), []);
+  const session = useTodeXSession(forwardOpenPanel);
+  const scopeKey = session.hydrated && session.workbenchSharingHydrated ? workbenchScopeKey(
+    session.workbenchSharing,
+    session.activeWorkspace?.backendConnectionId || session.activeBackendConnectionId || session.settings.serverUrl,
+    session.activeWorkspace?.id || '', session.activeConversation?.id || '',
+  ) : '';
+  const layout = useWorkbenchLayout(scopeKey);
+  const { isOpen: asideOpen, setOpen: persistAsideOpen, tab: workbenchTab, setTab: setWorkbenchTab,
+    target: panelTarget, setTarget: setPanelTarget } = layout;
 
   const openPanel = useCallback((name: string, params?: OpenPanelOptions) => {
     const next = panelFromRoute(name);
     if (!next) {
       return;
     }
+    panelScopeRef.current = scopeKey;
     setSlashCommand(params?.command);
     setPanelTarget({ url: params?.url, filePath: params?.filePath });
     setPanel(next);
@@ -86,9 +94,19 @@ export function App() {
     if (next !== 'settings' && next !== 'usage' && next !== 'about' && next !== 'cli-manager') {
       persistAsideOpen(true);
     }
-  }, [persistAsideOpen]);
+  }, [persistAsideOpen, scopeKey, setPanelTarget, setWorkbenchTab]);
+  openPanelHandlerRef.current = openPanel;
 
-  const session = useTodeXSession(openPanel);
+  useEffect(() => {
+    setPanel(current => current && ['settings', 'usage', 'about', 'cli-manager', 'kanban'].includes(current) ? current : null);
+    setSlashCommand(undefined);
+  }, [scopeKey]);
+
+  const consumePanelTarget = useCallback(() => setPanelTarget({}), [setPanelTarget]);
+  const changeWorkbenchTab = useCallback((next: WorkbenchTab) => {
+    setWorkbenchTab(next);
+    setPanelTarget({});
+  }, [setWorkbenchTab, setPanelTarget]);
 
   useEffect(() => {
     let unsubscribe: (() => void) | undefined;
@@ -110,7 +128,7 @@ export function App() {
   const aboutOpen = panel === 'about';
   const cliManagerOpen = panel === 'cli-manager';
   const modalPanel = settingsOpen || usageOpen || aboutOpen || cliManagerOpen;
-  const overlayPanel = panel && panel !== 'kanban' && !modalPanel && !isWorkbenchTab(panel) ? panel : null;
+  const overlayPanel = panelScopeRef.current === scopeKey && panel && panel !== 'kanban' && !modalPanel && !isWorkbenchTab(panel) ? panel : null;
 
   return (
     <div className="bg-background text-foreground h-full">
@@ -135,10 +153,10 @@ export function App() {
           asideMaxSize="640px"
           asideResizeBehavior="preserve-pixel-size"
           resizableAutoSaveId={LAYOUT_AUTO_SAVE_ID}
-          asideOpen={asideOpen}
+          asideOpen={Boolean(scopeKey) && layout.hydrated && asideOpen}
           onAsideOpenChange={persistAsideOpen}
           aside={
-            overlayPanel ? (
+            !scopeKey || !layout.hydrated ? null : overlayPanel ? (
               <AsidePanel
                 session={session}
                 panel={overlayPanel}
@@ -146,7 +164,7 @@ export function App() {
                 onBack={() => setPanel(workbenchTab)}
               />
             ) : (
-              <WorkbenchPanel session={session} tab={workbenchTab} target={panelTarget} onTabChange={setWorkbenchTab} />
+              <WorkbenchPanel key={scopeKey} scopeKey={scopeKey} session={session} tab={workbenchTab} target={panelTarget} onTabChange={changeWorkbenchTab} onTargetConsumed={consumePanelTarget} />
             )
           }
           sidebar={
