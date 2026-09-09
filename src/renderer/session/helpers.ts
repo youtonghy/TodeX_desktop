@@ -912,6 +912,7 @@ export function extractProtocolError(eventType: string, data: Record<string, unk
 }
 
 export type TimelineEntry = {
+  sentAttachments?: import('./sentAttachments').SentAttachment[];
   id: string;
   kind: 'incoming' | 'outgoing' | 'system';
   title: string;

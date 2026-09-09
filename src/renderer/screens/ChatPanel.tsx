@@ -491,7 +491,26 @@ export function ChatPanel({ session }: Props) {
                 <div className={`min-w-0 max-w-[85%] ${isUser ? 'text-right' : ''}`}>
                   {isUser ? <p className="text-muted text-xs font-medium">You</p> : null}
                   <div className={`${isUser ? 'mt-1' : ''} text-sm leading-6`}>
-                    {isUser ? <p className="whitespace-pre-wrap">{entry.subtitle}</p> : (
+                    {isUser ? <div className="flex flex-col items-end gap-2">
+                      {entry.sentAttachments?.length ? (
+                        <ChatAttachmentGroup aria-label="已发送的附件" className="justify-end text-left" role="list">
+                          {entry.sentAttachments.map((attachment) => (
+                            <ChatAttachment
+                              key={attachment.id}
+                              mimeType={attachment.mimeType}
+                              name={attachment.name}
+                              role="listitem"
+                              size={attachment.sizeBytes ?? undefined}
+                              src={attachment.previewUrl}
+                            >
+                              <ChatAttachment.Preview />
+                              <ChatAttachment.Info />
+                            </ChatAttachment>
+                          ))}
+                        </ChatAttachmentGroup>
+                      ) : null}
+                      {entry.subtitle ? <p className="whitespace-pre-wrap break-words">{entry.subtitle}</p> : null}
+                    </div> : (
                       <Markdown
                         id={entry.id}
                         components={{

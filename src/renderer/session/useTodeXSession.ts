@@ -1,3 +1,4 @@
+import { bindSentAttachmentEvents, prepareSentAttachments, projectSentAttachments, pruneSentAttachmentRecords, type SentAttachmentRecord } from './sentAttachments';
 import { ENCRYPTION_VERIFICATION_ERROR, validateTransportEncryption, verifyEncryptedSocket } from './transportVerification';
 import { QueuedFollowUps, restoreQueuedFollowUps } from './queuedFollowUps';
 import { LegacyEventRecovery } from './legacyEventRecovery';
@@ -310,6 +311,8 @@ import {
   MAX_COMPOSER_ATTACHMENTS,
 } from './helpers';
 
+const SENT_ATTACHMENTS_STORAGE_KEY = `${TIMELINE_STORAGE_KEY}.attachments`;
+
 export type OpenPanelFn = (name: string, params?: OpenPanelOptions) => void;
 
 type LiveConversationControl =
@@ -403,6 +406,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const [serverVersion, setServerVersion] = useState<ServerVersion | null>(null);
   const [events, setEvents] = useState<ServerEvent[]>([]);
   const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
+  const [sentAttachmentRecords, setSentAttachmentRecords] = useState<SentAttachmentRecord[]>([]);
+  const sentAttachmentRecordsRef = useRef<SentAttachmentRecord[]>([]);
   const [mentionHistory, setMentionHistory] = useState<WorkspaceMentionHistory[]>([]);
   const [experimentalFeatures, setExperimentalFeatures] = useState<ExperimentalFeatureSettings>(EXPERIMENTAL_FEATURE_DEFAULTS);
   const [selectedRequestId, setSelectedRequestId] = useState('');
@@ -848,6 +853,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     }
   }, []);
 
+  const updateSentAttachmentRecords = useCallback((next: SentAttachmentRecord[]) => {
+    const pruned = pruneSentAttachmentRecords(next);
+    sentAttachmentRecordsRef.current = pruned;
+    setSentAttachmentRecords(pruned);
+    scheduleJsonSave(SENT_ATTACHMENTS_STORAGE_KEY, pruned);
+  }, [scheduleJsonSave]);
+
   useEffect(() => {
     return () => {
       flushJsonSave();
@@ -882,6 +894,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         storedWorkspaces,
         storedConversations,
         storedTimeline,
+        storedSentAttachments,
         storedActiveSelection,
         storedMentionHistory,
         storedSessionCursors,
@@ -896,6 +909,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         loadJson<WorkspaceRecord[]>(WORKSPACES_STORAGE_KEY, []),
         loadJson<ConversationRecord[]>(CONVERSATIONS_STORAGE_KEY, []),
         loadJson<TimelineEntry[]>(TIMELINE_STORAGE_KEY, []),
+        loadJson<SentAttachmentRecord[]>(SENT_ATTACHMENTS_STORAGE_KEY, []),
         loadJson<{ workspaceId?: string; conversationId?: string } | null>(ACTIVE_SELECTION_STORAGE_KEY, null),
         loadJson<WorkspaceMentionHistory[]>(MENTION_HISTORY_STORAGE_KEY, []),
         loadJson<Record<string, number>>(SESSION_CURSORS_STORAGE_KEY, {}),
@@ -979,6 +993,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       setWorkspaces(normalizedWorkspaces);
       setConversations(normalizedConversations);
       setTimeline(storedTimeline.slice(0, MAX_TIMELINE_ITEMS));
+      const attachmentRecords = pruneSentAttachmentRecords(Array.isArray(storedSentAttachments) ? storedSentAttachments : []);
+      sentAttachmentRecordsRef.current = attachmentRecords;
+      setSentAttachmentRecords(attachmentRecords);
       setMentionHistory(storedMentionHistory);
       setExperimentalFeatures(normalizeExperimentalFeatures(storedExperimentalFeatures));
       setUsageRecords(normalizeUsageRecords(storedUsageRecords));
@@ -1405,6 +1422,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       setControlStatusByConversation(current => ({ ...current, [localId]: undefined }));
     }
     setRecoveringConversations((current) => ({ ...current, [localId]: recovering }));
+    const boundAttachments = bindSentAttachmentEvents(sentAttachmentRecordsRef.current, localId, appliedEvents);
+    if (boundAttachments !== sentAttachmentRecordsRef.current) updateSentAttachmentRecords(boundAttachments);
     setTimeline((current) => [
       ...state.timeline.map((entry) => ({ ...entry, conversationId: localId })),
       ...current.filter((entry) => entry.conversationId !== localId),
@@ -5361,6 +5380,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           return false;
         }
 
+        if (attachments.length) {
+          const previews = await prepareSentAttachments(attachments);
+          updateSentAttachmentRecords([
+            ...sentAttachmentRecordsRef.current.filter((record) => record.requestId !== requestId || record.conversationId !== conversation.id),
+            { conversationId: conversation.id, requestId, text, attachments: previews },
+          ]);
+        }
         const skillRefs = promptSkillsFromAttachments(skills);
         const content = promptContentFromAttachments(attachments);
         const model = readyConversation.provider === 'codex'
@@ -5416,6 +5442,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           if (terminal) return terminal !== 'turn.failed';
           return latest?.phase === 'running';
         }
+        updateSentAttachmentRecords(sentAttachmentRecordsRef.current.filter((record) =>
+          record.conversationId !== conversation.id || record.requestId !== requestId || Boolean(record.eventId)));
         setConversationThinking(conversation.id, false);
         const message = error instanceof ConnectionError
           ? error.userMessage
@@ -5431,7 +5459,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         }
       }
     },
-    [getConversationContext, materializeV2Conversation, recoverConversation, promptContentFromAttachments, promptSkillsFromAttachments, sendProtocolCommand, setConversationAttachments, setConversationChatDraft, setConversationSelectedSkills, setConversationThinking, settings.defaultModel, updateConversation],
+    [updateSentAttachmentRecords, getConversationContext, materializeV2Conversation, recoverConversation, promptContentFromAttachments, promptSkillsFromAttachments, sendProtocolCommand, setConversationAttachments, setConversationChatDraft, setConversationSelectedSkills, setConversationThinking, settings.defaultModel, updateConversation],
   );
 
   const sendLocalTurn = useCallback(
@@ -5503,7 +5531,14 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         },
       };
 
-      if (sendProtocolMessage('codex.local.turn', payload, createRequestId('msg'), {
+      const requestId = createRequestId('msg');
+      if (attachments.length) {
+        const previews = await prepareSentAttachments(attachments);
+        updateSentAttachmentRecords([...sentAttachmentRecordsRef.current, {
+          conversationId: conversation.id, requestId, eventId: requestId, text, attachments: previews,
+        }]);
+      }
+      if (sendProtocolMessage('codex.local.turn', payload, requestId, {
         workspaceId: workspace.id,
         conversationId: conversation.id,
       })) {
@@ -5527,9 +5562,11 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       }
 
       setConversationThinking(conversation.id, false);
+      updateSentAttachmentRecords(sentAttachmentRecordsRef.current.filter((record) =>
+        record.conversationId !== conversation.id || record.requestId !== requestId));
       return false;
     },
-    [appendTimeline, ensureThreadId, getConversationContext, sendProtocolMessage, setConversationThinking, settings.approvalPolicy, settings.approvalsReviewer, settings.defaultModel, settings.defaultReasoningEffort, settings.sandboxMode, startLocalAdapter],
+    [updateSentAttachmentRecords, appendTimeline, ensureThreadId, getConversationContext, sendProtocolMessage, setConversationThinking, settings.approvalPolicy, settings.approvalsReviewer, settings.defaultModel, settings.defaultReasoningEffort, settings.sandboxMode, startLocalAdapter],
   );
 
   useEffect(() => {
@@ -7012,6 +7049,11 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       }
     }
   }, [sendNativeThreadAction, sendTrackedLocalMethod]);
+
+  const visibleTimeline = useMemo(() => timeline.map((entry) =>
+    projectSentAttachments([entry], sentAttachmentRecords, entry.conversationId ?? '')[0]),
+  [timeline, sentAttachmentRecords]);
+
   return {
     hydrated,
     directorySyncStatus,
@@ -7036,7 +7078,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     lastError,
     serverVersion,
     events,
-    timeline,
+    timeline: visibleTimeline,
     mentionHistory,
     experimentalFeatures,
     setExperimentalFeatures,

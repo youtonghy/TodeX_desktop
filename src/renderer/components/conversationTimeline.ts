@@ -1,4 +1,5 @@
-import { isStepProgressEntry, type TimelineEntry } from '@todex/protocol/mobileParity';
+import { isStepProgressEntry } from '@todex/protocol/mobileParity';
+import type { TimelineEntry } from '../session/helpers';
 
 /** Both clients render semantic errors and tools from the same projection. */
 export function isChatTimelineEntry(entry: TimelineEntry): boolean {
