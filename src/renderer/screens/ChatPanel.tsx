@@ -611,6 +611,8 @@ export function ChatPanel({ session }: Props) {
           ) : null}
           {!currentPermission && agentProvider !== 'pi' ? <p className="text-muted mb-2 text-xs">{permissionHint}</p> : null}
           <ConversationRunStatus
+            isRecovering={session.recoveringConversations[conversation.id] === true}
+            isConnected={session.connectionState === 'open'}
             submissionStatus={submissionStatus}
             runtime={runtime}
             compaction={compaction}

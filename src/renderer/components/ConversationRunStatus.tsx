@@ -1,33 +1,53 @@
-import React, { useEffect, useState, type ComponentProps } from 'react';
-import { Alert, Button, Description, Form, Input, Label, Link, TextArea, TextField } from '@heroui/react';
+import React, { useEffect, useRef, useState, type ComponentProps } from 'react';
+import { Alert, toast, Button, Description, Form, Input, Label, Link, TextArea, TextField } from '@heroui/react';
 import { NativeSelect } from '@heroui-pro/react/native-select';
 import { PromptInput } from '@heroui-pro/react/prompt-input';
 import { usageTotalTokens, type ConversationRuntime } from '@todex/protocol/conversationRuntime';
 import type { ContextCompactionState } from '@todex/protocol/v2';
 import { permissionActions, type PendingRequest, type PermissionOption } from '@todex/protocol/todex';
 import type { UsageRecord } from '@todex/protocol/mobileParity';
+import { hasActiveConversationWork } from './conversationProgress';
 
 type SubmissionStatus = 'sending' | 'running' | 'unknown' | undefined;
 type Props = {
   submissionStatus?: SubmissionStatus;
-  runtime?: Pick<ConversationRuntime, 'status' | 'lastProgressAt'>;
+  runtime?: ConversationRuntime;
+  isRecovering?: boolean;
+  isConnected?: boolean;
   compaction?: ContextCompactionState & { recommended?: boolean };
   onRecover: () => Promise<void>;
 };
 
-export function ConversationRunStatus({ submissionStatus, runtime, compaction, onRecover }: Props) {
-  const [now, setNow] = useState(Date.now);
+export function ConversationRunStatus({ submissionStatus, runtime, compaction, onRecover, isRecovering = false, isConnected = true }: Props) {
+  const progressToastRef = useRef<string | null>(null);
   const [recovering, setRecovering] = useState(false);
   const [recoveryError, setRecoveryError] = useState('');
   const unknown = submissionStatus === 'unknown';
   const running = runtime?.status === 'running';
+  const activeWork = runtime ? hasActiveConversationWork(runtime, compaction) : false;
+  const observeQuiet = running && !unknown && !activeWork && !isRecovering && isConnected;
   useEffect(() => {
-    if (!running || unknown) return;
-    const timer = window.setInterval(() => setNow(Date.now()), 15_000);
-    return () => window.clearInterval(timer);
-  }, [running, unknown]);
-  const lastProgressAt = Date.parse(runtime?.lastProgressAt ?? '');
-  const stalled = running && !unknown && Number.isFinite(lastProgressAt) && now - lastProgressAt >= 120_000;
+    if (!observeQuiet) return;
+    // Measure time observed on this client, so replayed timestamps and server
+    // clock differences cannot produce an immediate stale warning.
+    const observedAt = Date.now();
+    let notified = false;
+    const timer = window.setInterval(() => {
+      if (notified || Date.now() - observedAt < 120_000) return;
+      notified = true;
+      progressToastRef.current = toast.info('暂未收到新的运行状态', {
+        description: '可以继续等待；如需结束本轮，可使用停止按钮。',
+        timeout: 6000,
+      });
+    }, 15_000);
+    return () => {
+      window.clearInterval(timer);
+      if (progressToastRef.current !== null) {
+        toast.close(progressToastRef.current);
+        progressToastRef.current = null;
+      }
+    };
+  }, [observeQuiet, runtime?.conversationId, runtime?.activeTurnId, runtime?.lastProgressAt]);
   const compactionLabel = compaction?.status === 'running' ? '正在压缩上下文'
     : compaction?.status === 'failed' ? `上下文压缩失败${compaction.error ? `：${compaction.error}` : ''}`
       : compaction?.status === 'completed' ? '上下文压缩完成'
@@ -47,13 +67,6 @@ export function ConversationRunStatus({ submissionStatus, runtime, compaction, o
         <Alert.Description>尚未确认这次提交的执行结果。核对记录后再发送，避免重复执行。</Alert.Description>
         <Button className="mt-2" size="sm" variant="secondary" isPending={recovering} onPress={() => { void recover(); }}>核对记录</Button>
         {recoveryError ? <p className="text-danger mt-1 text-xs" role="alert">{recoveryError}</p> : null}
-      </Alert.Content>
-    </Alert> : null}
-    {stalled ? <Alert status="warning" className="mb-2">
-      <Alert.Indicator />
-      <Alert.Content>
-        <Alert.Title>暂未收到进展</Alert.Title>
-        <Alert.Description>已超过两分钟没有收到新进展。任务可能仍在运行，你可以继续等待，或使用停止按钮取消。</Alert.Description>
       </Alert.Content>
     </Alert> : null}
     {runtime && compactionLabel ? <div className="text-muted mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs" role="status">

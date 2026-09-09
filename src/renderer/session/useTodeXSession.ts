@@ -7128,6 +7128,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     compactionByConversation,
     subagentsByConversation,
     conversationRuntimeById,
+    recoveringConversations,
     submissionStatusByConversation,
     recoverConversation,
     memoryEntriesByConversation,
