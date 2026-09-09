@@ -1,8 +1,9 @@
-import { RiAddLine, RiArrowDownSLine, RiBarChartBoxLine, RiFolder3Line, RiInformationLine, RiKanbanView2, RiPuzzle2Line, RiSettings3Line, RiTerminalBoxLine } from '@remixicon/react';
+import { RiPushpin2Fill, RiAddLine, RiPencilLine, RiEdit2Line, RiGitBranchLine, RiDeleteBinLine, RiArrowDownSLine, RiBarChartBoxLine, RiFolder3Line, RiInformationLine, RiKanbanView2, RiPuzzle2Line, RiSettings3Line, RiTerminalBoxLine } from '@remixicon/react';
 import { Badge, Button, Chip, Dropdown, Label } from '@heroui/react';
 import { useEffect, useMemo, useState } from 'react';
 import type { DragEvent, MouseEvent } from 'react';
-import { ChatListView, Sidebar, useSidebar } from '@heroui-pro/react';
+import { ContextMenu as HeroContextMenu, ChatListView, Sidebar, useSidebar } from '@heroui-pro/react';
+import { useSidebarPins } from '../session/useSidebarPins';
 import { ProviderIcon } from './ProviderIcon';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { conversationDisplayTitle, isConversationHighlighted, workspaceDisplayName } from '../session/helpers';
@@ -10,6 +11,7 @@ import { conversationDisplayTitle, isConversationHighlighted, workspaceDisplayNa
 type Props = {
   session: TodeXSession;
   onCreateWorkspace: () => void;
+  onEditWorkspace: (workspaceId: string) => void;
   onCreateConversation: () => void;
   onOpenSettings: () => void;
   onOpenCapabilities: () => void;
@@ -44,6 +46,7 @@ function getConversationStatus(
 export function AppSidebar({
   session,
   onCreateWorkspace,
+  onEditWorkspace,
   onCreateConversation,
   onOpenSettings,
   onOpenCapabilities,
@@ -53,7 +56,7 @@ export function AppSidebar({
   onOpenKanban,
 }: Props) {
   const { isMobile, setMobileOpen } = useSidebar();
-  if (session.directorySyncStatus === 'loading') return <Sidebar><Sidebar.Content><p className="text-muted px-3 py-4 text-sm">正在同步目录…</p></Sidebar.Content></Sidebar>;
+  const { pins, togglePin } = useSidebarPins();
 
   const workspaceConversations = useMemo(() => (
     session.conversations.filter(
@@ -61,7 +64,7 @@ export function AppSidebar({
     )
   ), [session.activeWorkspaceId, session.conversations]);
 
-  const orderedWorkspaces = [...session.workspaces].sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || (a.createdAt - b.createdAt) || a.id.localeCompare(b.id));
+  const orderedWorkspaces = [...session.workspaces].sort((a, b) => Number(pins.workspace.includes(b.id)) - Number(pins.workspace.includes(a.id)) || (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || (a.createdAt - b.createdAt) || a.id.localeCompare(b.id));
   const [draggedWorkspaceId, setDraggedWorkspaceId] = useState<string | null>(null);
   const [dragIndicator, setDragIndicator] = useState<{ id: string; position: 'before' | 'after' } | null>(null);
   const healthColor = session.connectionState !== 'open'
@@ -116,18 +119,20 @@ export function AppSidebar({
   }, [session.conversations, timelineInfoMap]);
 
   // Workspaces use an explicit manual order and never move when a conversation updates.
-  const sortedWorkspaces = useMemo(() => [...session.workspaces].sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || (a.createdAt - b.createdAt) || a.id.localeCompare(b.id)), [session.workspaces]);
+  const sortedWorkspaces = useMemo(() => [...session.workspaces].sort((a, b) => Number(pins.workspace.includes(b.id)) - Number(pins.workspace.includes(a.id)) || (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || (a.createdAt - b.createdAt) || a.id.localeCompare(b.id)), [session.workspaces, pins.workspace]);
 
   // Stable sorting for conversations: based on last message/updated time, never jumps upon clicking
   const sortedConversations = useMemo(() => {
     return [...workspaceConversations].sort((a, b) => {
+      const pinOrder = Number(pins.conversation.includes(b.id)) - Number(pins.conversation.includes(a.id));
+      if (pinOrder) return pinOrder;
       const aTime = timelineInfoMap[a.id]?.latestAt || a.createdAt || 0;
       const bTime = timelineInfoMap[b.id]?.latestAt || b.createdAt || 0;
       if (bTime !== aTime) return bTime - aTime;
       if ((b.createdAt || 0) !== (a.createdAt || 0)) return (b.createdAt || 0) - (a.createdAt || 0);
       return a.id.localeCompare(b.id);
     });
-  }, [workspaceConversations, timelineInfoMap]);
+  }, [workspaceConversations, timelineInfoMap, pins.conversation]);
 
   const displayedWorkspaces = useMemo(() => {
     return sortedWorkspaces.slice(0, workspaceLimit);
@@ -176,16 +181,21 @@ export function AppSidebar({
     setContextMenu({ kind, id, x: event.clientX, y: event.clientY });
   };
 
-  const runContextAction = (action: 'rename' | 'fork' | 'delete') => {
+  const runContextAction = (action: 'rename' | 'edit' | 'fork' | 'pin' | 'delete') => {
     if (!contextMenu) return;
+    if (action === 'pin') {
+      togglePin(contextMenu.kind, contextMenu.id);
+      setContextMenu(null);
+      return;
+    }
     if (contextMenu.kind === 'workspace') {
       const workspace = session.workspaces.find((item) => item.id === contextMenu.id);
       if (!workspace) return;
       if (action === 'rename') {
         const name = window.prompt('新的工作区名称', workspace.name);
         if (name) session.renameWorkspace(workspace.id, name);
-      } else if (action === 'fork') session.forkWorkspace(workspace.id);
-      else session.removeWorkspace(workspace.id);
+      } else if (action === 'edit') onEditWorkspace(workspace.id);
+      else if (action === 'delete') session.removeWorkspace(workspace.id);
     } else {
       const conversation = session.conversations.find((item) => item.id === contextMenu.id);
       if (!conversation) return;
@@ -193,10 +203,12 @@ export function AppSidebar({
         const title = window.prompt('新的对话标题', conversation.title);
         if (title) session.renameConversation(conversation.id, title);
       } else if (action === 'fork') session.forkConversation(conversation.id);
-      else session.removeConversation(conversation.id);
+      else if (action === 'delete') session.removeConversation(conversation.id);
     }
     setContextMenu(null);
   };
+
+  if (session.directorySyncStatus === 'loading') return <Sidebar><Sidebar.Content><p className="text-muted px-3 py-4 text-sm">正在同步目录…</p></Sidebar.Content></Sidebar>;
 
   return (
     <Sidebar>
@@ -321,7 +333,7 @@ export function AppSidebar({
                           </ChatListView.Icon>
                           <ChatListView.Text>
                             <ChatListView.Title className={isSelected ? 'text-accent font-semibold' : ''}>
-                              {workspaceDisplayName(workspace)}
+                              {workspaceDisplayName(workspace)}{pins.workspace.includes(workspace.id) ? <RiPushpin2Fill className="ml-1 inline size-3 text-muted" aria-label="已置顶" /> : null}
                             </ChatListView.Title>
                             <ChatListView.Preview>{workspace.path}</ChatListView.Preview>
                           </ChatListView.Text>
@@ -445,7 +457,7 @@ export function AppSidebar({
                           </ChatListView.Icon>
                           <ChatListView.Text>
                             <ChatListView.Title className={isSelected ? 'text-accent font-semibold' : ''}>
-                              {conversationDisplayTitle(conversation, session.timeline)}
+                              {conversationDisplayTitle(conversation, session.timeline)}{pins.conversation.includes(conversation.id) ? <RiPushpin2Fill className="ml-1 inline size-3 text-muted" aria-label="已置顶" /> : null}
                             </ChatListView.Title>
                             <ChatListView.Preview>{conversation.preview || '还没有消息'}</ChatListView.Preview>
                           </ChatListView.Text>
@@ -490,17 +502,22 @@ export function AppSidebar({
       </Sidebar.Content>
 
       {contextMenu ? (
-        <div
-          role="menu"
-          aria-label="上下文菜单"
-          className="fixed z-50 min-w-36 rounded-lg border border-separator bg-surface p-1 shadow-lg"
-          style={{ left: contextMenu.x, top: contextMenu.y }}
-          onClick={(event) => event.stopPropagation()}
-        >
-          <button type="button" role="menuitem" className="context-menu-item" onClick={() => runContextAction('rename')}>改名</button>
-          <button type="button" role="menuitem" className="context-menu-item" onClick={() => runContextAction('fork')}>Fork</button>
-          <button type="button" role="menuitem" className="context-menu-item text-danger" onClick={() => runContextAction('delete')}>删除</button>
-        </div>
+        <HeroContextMenu open onOpenChange={(open) => { if (!open) setContextMenu(null); }}>
+          <div
+            className="fixed z-50 w-44 rounded-xl border border-separator bg-overlay p-1 shadow-overlay"
+            style={{ left: Math.max(8, Math.min(contextMenu.x, window.innerWidth - 184)), top: Math.max(8, Math.min(contextMenu.y, window.innerHeight - 200)) }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <HeroContextMenu.Menu aria-label={contextMenu.kind === 'workspace' ? '工作区菜单' : '对话菜单'} autoFocus="first" onClose={() => setContextMenu(null)}>
+              {contextMenu.kind === 'conversation' ? <HeroContextMenu.Item id="fork" textValue="Fork" onAction={() => runContextAction('fork')}><RiGitBranchLine className="size-4 text-muted" /><Label>Fork</Label></HeroContextMenu.Item> : null}
+              <HeroContextMenu.Item id="rename" textValue="改名" onAction={() => runContextAction('rename')}><RiPencilLine className="size-4 text-muted" /><Label>改名</Label></HeroContextMenu.Item>
+              {contextMenu.kind === 'workspace' ? <HeroContextMenu.Item id="edit" textValue="编辑" onAction={() => runContextAction('edit')}><RiEdit2Line className="size-4 text-muted" /><Label>编辑</Label></HeroContextMenu.Item> : null}
+              <HeroContextMenu.Item id="pin" textValue={pins[contextMenu.kind].includes(contextMenu.id) ? '取消置顶' : '置顶'} onAction={() => runContextAction('pin')}><RiPushpin2Fill className="size-4 text-muted" /><Label>{pins[contextMenu.kind].includes(contextMenu.id) ? '取消置顶' : '置顶'}</Label></HeroContextMenu.Item>
+              <HeroContextMenu.Separator />
+              <HeroContextMenu.Item id="delete" textValue="删除" variant="danger" onAction={() => runContextAction('delete')}><RiDeleteBinLine className="size-4 text-danger" /><Label>删除</Label></HeroContextMenu.Item>
+            </HeroContextMenu.Menu>
+          </div>
+        </HeroContextMenu>
       ) : null}
     </Sidebar>
   );

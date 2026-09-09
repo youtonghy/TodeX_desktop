@@ -59,6 +59,7 @@ export function App() {
   const [slashCommand, setSlashCommand] = useState<string>();
   const [sidebarOpen, setSidebarOpen] = useState(() => readLayoutOpen().sidebarOpen);
   const [createOpen, setCreateOpen] = useState(false);
+  const [editingWorkspaceId, setEditingWorkspaceId] = useState<string | null>(null);
   const [capabilitiesOpen, setCapabilitiesOpen] = useState(false);
   const [gitOpen, setGitOpen] = useState(false);
 
@@ -170,7 +171,8 @@ export function App() {
           sidebar={
             <AppSidebar
               session={session}
-              onCreateWorkspace={() => setCreateOpen(true)}
+              onCreateWorkspace={() => { setEditingWorkspaceId(null); setCreateOpen(true); }}
+              onEditWorkspace={(workspaceId) => { setEditingWorkspaceId(workspaceId); setCreateOpen(true); }}
               onCreateConversation={() => {
                 if (!session.activeWorkspaceId) {
                   return;
@@ -271,29 +273,37 @@ export function App() {
         <Modal.Backdrop><Modal.Container><Modal.Dialog className="max-h-[90vh] sm:max-w-2xl"><Modal.CloseTrigger /><Modal.Header><Modal.Heading>MCP / Skill 管理</Modal.Heading></Modal.Header><Modal.Body className="max-h-[75vh] overflow-y-auto"><CapabilitiesPanel workspacePath={session.activeWorkspace?.path ?? session.settings.defaultWorkspacePath} providers={session.v2Providers} catalogs={session.capabilityCatalogs} onRefresh={(provider) => void session.refreshCapabilityCatalog(provider)} conversationId={session.activeConversation?.id} selectedSkills={session.activeConversation ? session.selectedSkills[session.activeConversation.id] ?? [] : []} canInvoke={Boolean(session.activeConversation?.v2ConversationId)} onToggleSkill={(skill, provider) => session.activeConversation && session.toggleCatalogSkill(session.activeConversation.id, skill, provider)} onPreviewSkill={(skill, provider) => session.previewSkillResource(provider, skill.resourceId)} onRefreshMcp={(resourceId) => session.activeConversation && session.refreshMcpServer(session.activeConversation.id, resourceId)} onCallMcp={(resourceId, toolName) => session.activeConversation && session.callMcpTool(session.activeConversation.id, resourceId, toolName)} /></Modal.Body></Modal.Dialog></Modal.Container></Modal.Backdrop>
       </Modal>
       <GitActionsModal key={session.activeConversation?.id} session={session} isOpen={gitOpen} onOpenChange={setGitOpen} />
-      <CreateWorkspaceModal session={session} isOpen={createOpen} onOpenChange={setCreateOpen} />
+      {createOpen ? <CreateWorkspaceModal
+        key={editingWorkspaceId ?? 'create'}
+        session={session}
+        workspace={session.workspaces.find((workspace) => workspace.id === editingWorkspaceId)}
+        isOpen={createOpen}
+        onOpenChange={setCreateOpen}
+      /> : null}
     </div>
   );
 }
 
 function CreateWorkspaceModal({
   session,
+  workspace,
   isOpen,
   onOpenChange,
 }: {
   session: TodeXSession;
+  workspace?: TodeXSession['workspaces'][number];
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  const [name, setName] = useState('');
-  const [path, setPath] = useState(session.settings.defaultWorkspacePath);
-  const [backendId, setBackendId] = useState(session.activeBackendConnectionId);
+  const [name, setName] = useState(workspace?.name ?? '');
+  const [path, setPath] = useState(workspace?.path ?? session.settings.defaultWorkspacePath);
+  const [backendId, setBackendId] = useState(workspace?.backendConnectionId ?? session.activeBackendConnectionId);
   const [entries, setEntries] = useState<string[]>([]);
   const selectedBackend = session.backendConnections.find((profile) => profile.id === backendId);
   const directorySettings = selectedBackend ? { ...session.settings, serverUrl: selectedBackend.serverUrl, authToken: selectedBackend.authToken, tenantId: selectedBackend.tenantId, encryptionProtocol: selectedBackend.encryptionProtocol, encryptionPublicKey: selectedBackend.encryptionPublicKey } : session.settings;
 
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen || workspace) return;
     const defaultPath = session.settings.defaultWorkspacePath;
     setBackendId(session.activeBackendConnectionId);
     const backendRoot = session.serverVersion?.workspace_root || '';
@@ -316,7 +326,7 @@ function CreateWorkspaceModal({
           setEntries([]);
         }
       });
-  }, [isOpen, session.activeBackendConnectionId, session.serverVersion?.workspace_root, session.settings]);
+  }, [isOpen, workspace, session.activeBackendConnectionId, session.serverVersion?.workspace_root, session.settings]);
 
   return (
     <Modal isOpen={isOpen} onOpenChange={onOpenChange}>
@@ -325,11 +335,11 @@ function CreateWorkspaceModal({
           <Modal.Dialog className="sm:max-w-lg">
             <Modal.CloseTrigger />
             <Modal.Header>
-              <Modal.Heading>新建工作区</Modal.Heading>
+              <Modal.Heading>{workspace ? '编辑工作区' : '新建工作区'}</Modal.Heading>
             </Modal.Header>
             <Modal.Body className="flex flex-col gap-4">
               <Field label="名称" value={name} onChange={setName} />
-              <Select selectedKey={backendId} onSelectionChange={(key) => { if (typeof key === 'string') setBackendId(key); }}>
+              <Select isDisabled={Boolean(workspace)} selectedKey={backendId} onSelectionChange={(key) => { if (typeof key === 'string') setBackendId(key); }}>
                 <Label>连接后端</Label><Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
                 <Select.Popover><ListBox>{session.backendConnections.map((profile) => <ListBox.Item key={profile.id} id={profile.id} textValue={profile.name}>{profile.name} · {profile.serverUrl}</ListBox.Item>)}</ListBox></Select.Popover>
               </Select>
@@ -382,13 +392,17 @@ function CreateWorkspaceModal({
                       return;
                     }
                   }
-                  session.setActiveBackendConnectionId(backendId);
-                  session.createWorkspace(name || validatedPath, validatedPath);
+                  if (workspace) {
+                    session.updateWorkspace(workspace.id, { name: name.trim() || validatedPath, path: validatedPath });
+                  } else {
+                    session.setActiveBackendConnectionId(backendId);
+                    session.createWorkspace(name.trim() || validatedPath, validatedPath);
+                  }
                   onOpenChange(false);
                 }}
               >
-                <RiAddLine className="size-4" />
-                创建
+                {workspace ? null : <RiAddLine className="size-4" />}
+                {workspace ? '保存' : '创建'}
               </Button>
             </Modal.Footer>
           </Modal.Dialog>
