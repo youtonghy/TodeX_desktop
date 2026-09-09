@@ -10,7 +10,7 @@ import { Markdown } from '@heroui-pro/react/markdown';
 import { providerDisplayName, type ProviderKind, type PermissionMode } from '@todex/protocol/v2';
 import { progressGroupLabel } from '@todex/protocol/mobileParity';
 import { ConversationPermissionActions, ConversationPromptInput, ConversationRunStatus, TurnUsageSummary } from '../components/ConversationRunStatus';
-import { isChatTimelineEntry, isChatToolEntry } from '../components/conversationTimeline';
+import { activeChatProcessId, buildChatRenderItems, isChatTimelineEntry, isChatToolEntry } from '../components/conversationTimeline';
 import { ModelReasoningCard } from '../components/ModelReasoningCard';
 import { ProviderIcon } from '../components/ProviderIcon';
 import type { TodeXSession } from '../session/useTodeXSession';
@@ -18,7 +18,6 @@ import {
   conversationPermissionMode,
   conversationPermissionCapabilities,
   attachmentId,
-  buildConversationRenderItems,
   canSwitchConversationAgent,
   conversationImageInputSupport,
   inferMimeType,
@@ -251,7 +250,7 @@ export function ChatPanel({ session }: Props) {
   }, [mention?.query, mention?.start, workspace?.path, session.fetchWorkspaceEntries]);
   const items = useMemo(() => {
     if (!conversation) return [];
-    return buildConversationRenderItems(
+    return buildChatRenderItems(
       session.timeline
         .filter((entry) => entry.conversationId === conversation.id)
         .filter((entry) => isChatTimelineEntry(entry) && !isChatReminderEntry(entry))
@@ -336,7 +335,7 @@ export function ChatPanel({ session }: Props) {
   const executionUnknown = submissionStatus === 'unknown';
   const runtime = session.conversationRuntimeById[conversation.id];
   const compaction = session.compactionByConversation[conversation.id];
-  const latestProcessGroupId = [...items].reverse().find((item) => item.type === 'executionGroup')?.id ?? '';
+  const latestProcessGroupId = activeChatProcessId(items, runtime?.activeTurnId || session.turnIds[conversation.id]);
   const conversationTimeline = session.timeline.filter((entry) => entry.conversationId === conversation.id);
   const canSwitchAgent = canSwitchConversationAgent(conversation, {
     timeline: conversationTimeline,
@@ -439,7 +438,7 @@ export function ChatPanel({ session }: Props) {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <ScrollShadow className="min-h-0 flex-1 px-5 py-5">
-        <div className="mx-auto flex max-w-2xl flex-col gap-4">
+        <div className="mx-auto flex max-w-2xl flex-col gap-3">
           {items.length === 0 ? (
             <p className="text-muted py-16 text-center text-sm" role="status">
               {thinking ? '正在工作' : '还没有消息。输入内容后发送。'}
@@ -460,10 +459,10 @@ export function ChatPanel({ session }: Props) {
                     return next;
                   })}
                   isStreaming={thinking && item.id === latestProcessGroupId}
-                  className="chat-process-trace"
+                  className="chat-process-trace min-w-0"
                 >
-                  <ChainOfThought.Trigger>
-                    {progressGroupLabel(item.entries, thinking && item.id === latestProcessGroupId, pendingCount)} · {item.entries.length}
+                  <ChainOfThought.Trigger className="min-h-7 py-1 text-xs">
+                    {progressGroupLabel(item.entries, thinking && item.id === latestProcessGroupId, pendingCount)}
                   </ChainOfThought.Trigger>
                   <ChainOfThought.Content>
                     <ChainOfThought.Steps>
@@ -488,7 +487,7 @@ export function ChatPanel({ session }: Props) {
             const request = session.pendingRequests.find((pendingItem) => pendingItem.requestId && (entry.requestId === pendingItem.requestId || entry.raw.includes(pendingItem.requestId)));
             const isUser = entry.kind === 'outgoing';
             return (
-              <div key={entry.id} className={`flex gap-3 py-2 ${isUser ? 'justify-end' : 'justify-start'}`}>
+              <div key={entry.id} className={`flex gap-3 py-1 ${isUser ? 'justify-end' : 'justify-start'}`}>
                 <div className={`min-w-0 max-w-[85%] ${isUser ? 'text-right' : ''}`}>
                   {isUser ? <p className="text-muted text-xs font-medium">You</p> : null}
                   <div className={`${isUser ? 'mt-1' : ''} text-sm leading-6`}>
