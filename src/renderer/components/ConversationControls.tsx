@@ -36,11 +36,11 @@ export function ConversationControls({ runtime, running, canConfigure, canSteer,
     || (nextEffort && nextEffort !== effort)));
   const showApply = running && canConfigure && Boolean(nextModel) && (!model || selectionChanged);
   const showSteer = running && canSteer && canSendText;
-  if (!running && !runtime?.configurationError && controlStatus !== 'unknown'
+  const showConfiguration = running && (selectionChanged || runtime?.configurationStatus === 'pending' || showApply || showSteer);
+  if (!showConfiguration && !runtime?.configurationError && controlStatus !== 'unknown'
     && !nativeItems.length && !localQueue.length) return null;
   return <div className="mb-2 space-y-2">
-    {running ? <div className="text-muted flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-      <span>{model ? `本轮：${model}${typeof effort === 'string' ? ` · ${effort}` : ''}` : '正在读取本轮配置…'}</span>
+    {showConfiguration ? <div className="text-muted flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
       {selectionChanged ? <span>下轮：{nextModel}{nextEffort ? ` · ${nextEffort}` : ''}</span> : null}
       {runtime?.configurationStatus === 'pending' ? <span>正在应用配置…</span> : null}
       {showApply ? <Button size="sm" variant="ghost" isDisabled={disabled}

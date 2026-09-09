@@ -377,23 +377,11 @@ export function ChatPanel({ session }: Props) {
   const permissionModes = (permissionConfig?.modes ?? []).filter((mode) => Object.hasOwn(PERMISSION_LABELS, mode));
   const currentPermission = conversationPermissionMode(conversation, workspace, session.v2Providers);
   const fixedPermission = permissionModes.length === 1;
-  const permissionsManagedByAgent = permissionModes.length === 0;
   const canChoosePermission = permissionModes.length > 0;
-  const permissionEnforcement = agentProvider === 'pi' ? '工具直接执行，访问范围由运行环境限制'
-    : permissionConfig?.enforcement === 'sandbox' ? '系统沙箱'
-      : permissionConfig?.enforcement === 'agent-policy' ? 'Agent 权限策略' : '';
   const permissionHint = agentProvider === 'pi' ? 'Pi 固定完全访问，无内建审批机制；访问范围由运行环境限制。'
     : !canChoosePermission ? '当前后端尚未提供权限模式能力，请升级或检查 Agent 配置。'
       : !currentPermission ? '当前权限配置需要重新选择后才能执行。'
         : '权限和工作模式将在下次发送时应用。';
-  const effectiveConfig = runtime?.effectiveConfig;
-  const effectiveMode = typeof effectiveConfig?.permissionMode === 'string'
-    && Object.hasOwn(PERMISSION_LABELS, effectiveConfig.permissionMode)
-    ? PERMISSION_LABELS[effectiveConfig.permissionMode as PermissionMode] : '';
-  const effectivePermission = effectiveConfig?.source === 'provider-confirmed'
-    ? effectiveMode || [effectiveConfig.permissionProfile, effectiveConfig.sandboxMode, effectiveConfig.approvalPolicy]
-      .filter((value): value is string => typeof value === 'string' && Boolean(value)).join(' · ')
-    : '';
 
   const isToolCallEntry = isChatToolEntry;
 
@@ -608,10 +596,6 @@ export function ChatPanel({ session }: Props) {
             submissionStatus={submissionStatus}
             runtime={runtime}
             compaction={compaction}
-            effectivePermission={effectivePermission}
-            permissionEnforcement={permissionEnforcement}
-            permissionsManagedByAgent={permissionsManagedByAgent}
-            thinking={thinking}
             onRecover={() => session.recoverConversation(conversation.id)}
           />
           {conversation.v2ConversationId ? <ConversationControls
