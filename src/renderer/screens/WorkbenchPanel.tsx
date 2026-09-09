@@ -1,13 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { RiAddLine, RiArrowLeftDoubleLine, RiArrowRightDoubleLine, RiFileTextLine, RiFolder3Line, RiGlobalLine, RiFocus3Line, RiRefreshLine, RiStopCircleLine } from '@remixicon/react';
-import { Button, Chip, Dropdown, Input, Popover, ScrollShadow, TextField } from '@heroui/react';
+import { Button, Chip, Dropdown, Input, Popover, ScrollShadow, Spinner, TextField } from '@heroui/react';
 import type { Selection } from '@heroui/react';
 import { FileTree } from '@heroui-pro/react';
 import { Resizable } from '@heroui-pro/react/resizable';
 import type { PanelImperativeHandle } from '@heroui-pro/react/resizable';
-import { CodeBlock } from '@heroui-pro/react/code-block';
-import { Markdown } from '@heroui-pro/react/markdown';
+import { WorkspaceFilePreview, type PreviewFile } from '../components/WorkspaceFilePreview';
 import { XtermTerminal } from '../components/XtermTerminal';
 import type { TodeXSession } from '../session/useTodeXSession';
 import {
@@ -87,6 +86,9 @@ export function WorkbenchPanel({ session, tab, target, onTabChange }: Props) {
   const [items, setItems] = useState<WorkbenchItem[]>([]);
   const [activeId, setActiveId] = useState('');
   const [restored, setRestored] = useState(false);
+  const requestedTargetRef = useRef(target);
+  const openedTargetRef = useRef<{ target: OpenPanelOptions; tab: WorkbenchTab } | null>(null);
+  requestedTargetRef.current = target;
 
   useEffect(() => {
     let cancelled = false;
@@ -97,7 +99,7 @@ export function WorkbenchPanel({ session, tab, target, onTabChange }: Props) {
         setItems(stored.items);
         setActiveId(stored.activeId);
         const active = stored.items.find((item) => item.id === stored.activeId);
-        if (active) onTabChange(active.type);
+        if (active && !requestedTargetRef.current?.filePath && !requestedTargetRef.current?.url) onTabChange(active.type);
       })
       .catch((reason) => {
         console.error('Failed to restore workbench tabs', reason);
@@ -123,6 +125,23 @@ export function WorkbenchPanel({ session, tab, target, onTabChange }: Props) {
       setActiveId(next.id);
     }
   }, [activeId, items, restored, tab]);
+
+  useEffect(() => {
+    if (!restored || !target || !(tab === 'files' && target.filePath
+      || tab === 'browser' && (target.url || target.filePath))) return;
+    if (openedTargetRef.current?.target === target && openedTargetRef.current.tab === tab) return;
+    openedTargetRef.current = { target, tab };
+    const existing = items.find(item => item.type === tab);
+    if (existing) {
+      setActiveId(existing.id);
+      return;
+    }
+    const item = { id: `${tab}-${Date.now()}`, type: tab, title: `${WORKBENCH_LABELS[tab]} 1` };
+    setItems(current => [...current, item]);
+    setActiveId(item.id);
+    // Consume an explicit open request, including repeated clicks on one path.
+    // Tab-list changes alone must not steal focus from a manually selected tab.
+  }, [restored, tab, target]);
 
   const active = items.find((item) => item.id === activeId) ?? null;
   const addTab = (type: WorkbenchTab) => {
@@ -185,8 +204,8 @@ export function WorkbenchPanel({ session, tab, target, onTabChange }: Props) {
                 terminalId={terminalIdForConversation(conversationId, item.id)}
               />
             ) : null}
-            {item.type === 'browser' ? <BrowserPane workspacePath={session.activeWorkspace?.path} session={session} target={target} /> : null}
-            {item.type === 'files' ? <FilesPane session={session} target={target} /> : null}
+            {item.type === 'browser' ? <BrowserPane workspacePath={session.activeWorkspace?.path} session={session} target={item.id === active?.id ? target : undefined} /> : null}
+            {item.type === 'files' ? <FilesPane session={session} target={item.id === active?.id ? target : undefined} /> : null}
             {item.type === 'git-diff' ? <GitDiffPane session={session} /> : null}
           </div>
         ))}
@@ -723,66 +742,18 @@ function replaceFileTreeChildren(entries: FileTreeEntry[], path: string, childre
   });
 }
 
-function fileExtension(path: string): string {
-  return path.split(/[\\/]/).pop()?.split('.').pop()?.toLowerCase() || '';
-}
-
-function codeLanguage(path: string): string {
-  const extension = fileExtension(path);
-  const languages: Record<string, string> = {
-    c: 'c',
-    cpp: 'cpp',
-    css: 'css',
-    go: 'go',
-    html: 'html',
-    java: 'java',
-    js: 'javascript',
-    json: 'json',
-    jsx: 'jsx',
-    mdx: 'mdx',
-    py: 'python',
-    rb: 'ruby',
-    rs: 'rust',
-    sh: 'shellscript',
-    sql: 'sql',
-    swift: 'swift',
-    ts: 'typescript',
-    tsx: 'tsx',
-    vue: 'vue',
-    xml: 'xml',
-    yaml: 'yaml',
-    yml: 'yaml',
-  };
-  return languages[extension] || 'plaintext';
-}
-
-function isMarkdownFile(path: string): boolean {
-  return ['md', 'markdown', 'mdx'].includes(fileExtension(path));
-}
-
-function FilePreview({ file }: { file: { path: string; text?: string; mimeType: string } | null }) {
-  if (!file?.text) return <pre className="font-mono text-xs whitespace-pre-wrap">该文件不可作为文本预览。</pre>;
-  if (isMarkdownFile(file.path)) return <Markdown>{file.text}</Markdown>;
-  return (
-    <CodeBlock className="min-w-0">
-      <CodeBlock.Header>
-        <span className="text-muted text-xs uppercase">{codeLanguage(file.path)}</span>
-      </CodeBlock.Header>
-      <CodeBlock.Code code={file.text} language={codeLanguage(file.path)} />
-    </CodeBlock>
-  );
-}
-
 function FilesPane({ session, target }: { session: TodeXSession; target?: OpenPanelOptions }) {
   const [entries, setEntries] = useState<FileTreeEntry[]>([]);
   const [selected, setSelected] = useState('');
   const [expandedKeys, setExpandedKeys] = useState<Selection>(new Set());
-  const [file, setFile] = useState<{ name: string; path: string; text?: string; mimeType: string } | null>(null);
+  const [file, setFile] = useState<PreviewFile | null>(null);
+  const [fileLoading, setFileLoading] = useState(false);
+  const fileRequestRef = useRef(0);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [treeCollapsed, setTreeCollapsed] = useState(false);
   const treePanelRef = useRef<PanelImperativeHandle>(null);
-  const appliedTargetRef = useRef('');
+  const appliedTargetRef = useRef<OpenPanelOptions | undefined>(undefined);
   const defaultPath = session.activeWorkspace?.path || '';
   const [currentPath, setCurrentPath] = useState(defaultPath);
   const [pathDraft, setPathDraft] = useState(defaultPath);
@@ -799,16 +770,23 @@ function FilesPane({ session, target }: { session: TodeXSession; target?: OpenPa
   }, [currentPath]);
 
   const readFile = useCallback(async (path: string) => {
+    const request = ++fileRequestRef.current;
     setSelected(path);
+    setFile(null);
+    setFileLoading(true);
     setError('');
     const api = new V2ApiClient({ serverUrl: session.settings.serverUrl, authToken: session.settings.authToken });
     try {
-      setFile(await api.readWorkspaceFile(path));
+      const next = await api.readWorkspaceFile(path);
+      if (request === fileRequestRef.current) setFile(next);
     } catch (reason) {
-      setFile(null);
-      setError(reason instanceof Error ? reason.message : '文件读取失败');
+      if (request === fileRequestRef.current) setError(reason instanceof Error ? reason.message : '文件读取失败');
+    } finally {
+      if (request === fileRequestRef.current) setFileLoading(false);
     }
   }, [session.settings.authToken, session.settings.serverUrl]);
+
+  useEffect(() => () => { fileRequestRef.current += 1; }, []);
 
   const loadDirectory = useCallback(async (directory: string) => {
     setLoading(true);
@@ -833,7 +811,9 @@ function FilesPane({ session, target }: { session: TodeXSession; target?: OpenPa
     setSelected('');
     setFile(null);
     setExpandedKeys(new Set());
-    appliedTargetRef.current = '';
+    appliedTargetRef.current = undefined;
+    fileRequestRef.current += 1;
+    setFileLoading(false);
     if (currentPath) void loadDirectory(currentPath);
   }, [currentPath, loadDirectory]);
 
@@ -844,10 +824,10 @@ function FilesPane({ session, target }: { session: TodeXSession; target?: OpenPa
   };
 
   useEffect(() => {
-    if (!target?.filePath || target.filePath === appliedTargetRef.current) return;
-    appliedTargetRef.current = target.filePath;
+    if (!target?.filePath || target === appliedTargetRef.current) return;
+    appliedTargetRef.current = target;
     void readFile(target.filePath);
-  }, [readFile, target?.filePath]);
+  }, [readFile, target]);
 
   const handleAction = async (key: string) => {
     const entry = findFileTreeEntry(entries, key);
@@ -957,8 +937,8 @@ function FilesPane({ session, target }: { session: TodeXSession; target?: OpenPa
         <Resizable.Handle type="pill" withIndicator aria-label="调整文件树宽度" />
         <Resizable.Panel defaultSize="70%" minSize="50%" className="min-h-0">
           <ScrollShadow className="bg-surface-secondary h-full min-h-0 rounded-xl p-3">
-            <p className="text-muted mb-2 truncate text-xs">{file?.path || '选择文件预览'}</p>
-            {error ? <p className="text-danger text-xs">{error}</p> : <FilePreview file={file} />}
+            <p className="text-muted mb-2 truncate text-xs">{selected || '选择文件预览'}</p>
+            {fileLoading ? <Spinner size="sm" aria-label="正在读取文件" /> : error ? <p className="text-danger text-xs" role="alert">{error}</p> : <WorkspaceFilePreview file={file} />}
           </ScrollShadow>
         </Resizable.Panel>
       </Resizable>

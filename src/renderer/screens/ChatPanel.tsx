@@ -523,8 +523,8 @@ export function ChatPanel({ session }: Props) {
                                 onClick={(event) => {
                                   if (!target) return;
                                   event.preventDefault();
-                                  if (target.kind === 'browser-url' || target.kind === 'browser-file') {
-                                    session.openPanel('Browser', target.kind === 'browser-url' ? { url: target.url } : { filePath: target.filePath });
+                                  if (target.kind === 'browser-url') {
+                                    session.openPanel('Browser', { url: target.url });
                                   } else {
                                     session.openPanel('Files', { filePath: target.filePath });
                                   }
