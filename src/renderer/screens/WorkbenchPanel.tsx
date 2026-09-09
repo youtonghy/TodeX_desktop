@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { RiAddLine, RiArrowLeftDoubleLine, RiArrowRightDoubleLine, RiFileTextLine, RiFolder3Line, RiGlobalLine, RiFocus3Line, RiRefreshLine, RiStopCircleLine } from '@remixicon/react';
-import { Button, Chip, Dropdown, Input, Popover, ScrollShadow, Spinner, TextField } from '@heroui/react';
+import { RiCloseLine, RiTerminalBoxLine, RiGitBranchLine, RiAddLine, RiArrowLeftDoubleLine, RiArrowRightDoubleLine, RiFileTextLine, RiFolder3Line, RiGlobalLine, RiFocus3Line, RiRefreshLine, RiStopCircleLine } from '@remixicon/react';
+import { Button, Chip, Dropdown, Input, Popover, ScrollShadow, Spinner, TextField, Tooltip } from '@heroui/react';
 import type { Selection } from '@heroui/react';
 import { FileTree } from '@heroui-pro/react';
 import { Resizable } from '@heroui-pro/react/resizable';
@@ -44,6 +44,13 @@ const WORKBENCH_LABELS: Record<WorkbenchTab, string> = {
   browser: '浏览器',
   files: '文件',
   'git-diff': 'Git Diff',
+};
+
+const WORKBENCH_ICONS = {
+  terminal: RiTerminalBoxLine,
+  browser: RiGlobalLine,
+  files: RiFileTextLine,
+  'git-diff': RiGitBranchLine,
 };
 
 function parseStoredWorkbenchState(value: unknown): StoredWorkbenchState {
@@ -179,12 +186,39 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex min-h-10 items-center border-b border-separator px-2">
         <div className="flex min-w-0 flex-1 overflow-x-auto">
-          {items.map((item) => (
-            <button key={item.id} type="button" className={`flex h-10 shrink-0 items-center gap-2 border-r border-separator px-3 text-xs ${item.id === activeId ? 'bg-surface font-medium' : 'text-muted'}`} onClick={() => { setActiveId(item.id); onTabChange(item.type); }}>
-              {item.title}
-              <span role="button" aria-label={`关闭${item.title}`} className="text-muted hover:text-foreground" onClick={(event) => { event.stopPropagation(); closeTab(item.id); }}>×</span>
-            </button>
-          ))}
+          {items.map((item) => {
+            const Icon = WORKBENCH_ICONS[item.type];
+            const workspacePath = session.activeWorkspace?.path;
+            const location = item.type === 'terminal'
+              ? session.terminalById[terminalIdForConversation(scopeKey, item.id)]?.cwd || workspacePath
+              : item.type === 'browser'
+                ? item.target?.url || item.target?.filePath || 'http://127.0.0.1:7345'
+                : item.target?.filePath || workspacePath;
+            const title = location ? `${WORKBENCH_LABELS[item.type]} ${location}` : item.title;
+            return (
+              <div key={item.id} className={`group flex h-10 shrink-0 items-center border-r border-separator ${item.id === activeId ? 'bg-surface text-foreground' : 'text-muted'}`}>
+                <Tooltip delay={200}>
+                  <Button
+                    isIconOnly variant="ghost" aria-label={title} aria-pressed={item.id === activeId}
+                    className="size-10 min-w-10 rounded-none text-inherit"
+                    onPress={() => { setActiveId(item.id); onTabChange(item.type); }}
+                  >
+                    <Icon aria-hidden="true" className="size-4" />
+                  </Button>
+                  <Tooltip.Content placement="bottom" className="max-w-sm break-all text-xs">
+                    {title}
+                  </Tooltip.Content>
+                </Tooltip>
+                <Button
+                  isIconOnly size="sm" variant="ghost" aria-label={`关闭${title}`}
+                  className="mr-1 size-5 min-w-5 rounded-sm text-muted opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100"
+                  onPress={() => closeTab(item.id)}
+                >
+                  <RiCloseLine aria-hidden="true" className="size-3" />
+                </Button>
+              </div>
+            );
+          })}
         </div>
         <Dropdown>
           <Dropdown.Trigger
