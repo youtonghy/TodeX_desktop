@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Alert, Button, Input, Label, Modal, Spinner, TextField, toast } from '@heroui/react';
+import { Alert, Button, Checkbox, Input, Label, Modal, Spinner, TextArea, TextField, toast } from '@heroui/react';
 import { Command } from '@heroui-pro/react/command';
 import { RiArrowRightLine, RiCloseLine, RiGitBranchLine, RiGitCommitLine, RiGitMergeLine,
   RiGitPullRequestLine, RiGithubLine, RiSearchLine, RiStackLine, RiUploadCloud2Line } from '@remixicon/react';
@@ -23,6 +23,11 @@ export function GitActionsModal({ session, isOpen, onOpenChange }: Props) {
   const [path, setPath] = useState('');
   const [removePath, setRemovePath] = useState('');
   const [output, setOutput] = useState('');
+  const [prTitle, setPrTitle] = useState('');
+  const [prBody, setPrBody] = useState('');
+  const [prRepository, setPrRepository] = useState('');
+  const [prBase, setPrBase] = useState('');
+  const [prDraft, setPrDraft] = useState(false);
   const [failure, setFailure] = useState<{ id: GitAgentActionId; operation?: unknown; error: string; unknown: boolean } | null>(null);
   const outcomeUnknown = useRef(false);
   const generation = useRef(0);
@@ -68,7 +73,9 @@ export function GitActionsModal({ session, isOpen, onOpenChange }: Props) {
     if (sendingRef.current || unavailable || !conversation || !workspace || (operation && (writingBlocked || outcomeUnknown.current))) return;
     sendingRef.current = true;
     const revision = generation.current;
-    setSending(id); setError(''); setFailure(null); setOutput('');
+    setSending(id); setError('');
+    if (id !== 'create-pr' || operation || !outcomeUnknown.current) setFailure(null);
+    if (id !== 'create-pr' || operation) setOutput('');
     try {
       if (operation) {
         const result = await runGitWorkspaceOperation(session.settings, workspace.path, operation);
@@ -77,7 +84,7 @@ export function GitActionsModal({ session, isOpen, onOpenChange }: Props) {
         setRemovePath('');
       }
       const result = await readGitWorkspace(session.settings, workspace.path);
-      if (revision === generation.current) { setSnapshot(result); outcomeUnknown.current = false; }
+      if (revision === generation.current) { setSnapshot(result); if (id !== 'create-pr' || operation) outcomeUnknown.current = false; }
     } catch (cause) {
       if (revision !== generation.current) return;
       const message = cause instanceof Error ? cause.message : 'Git 操作失败';
@@ -93,6 +100,7 @@ export function GitActionsModal({ session, isOpen, onOpenChange }: Props) {
     if (allActions.find(action => action.id === id)?.mode === 'agent') { void send(id); return; }
     setView(id); setSnapshot(null); setError(''); setFailure(null); setOutput(''); setRemovePath('');
     setBranchName(''); setStartPoint(''); setPath('');
+    setPrTitle(''); setPrBody(''); setPrRepository(''); setPrBase(''); setPrDraft(false);
     if (id === 'init' || id === 'push') void direct(id, { action: id });
     else void direct(id);
   };
@@ -109,10 +117,26 @@ export function GitActionsModal({ session, isOpen, onOpenChange }: Props) {
         <Modal.Body className="space-y-4 overflow-y-auto">
           <p className="text-muted text-xs">由工作区后端直接执行 Git{snapshot ? ` · ${snapshot.currentBranch || '未提交或分离 HEAD'}${snapshot.dirty ? ' · 有未提交更改' : ''}` : ''}</p>
           {errorPanel}
+          {!error && failure?.unknown ? <Alert status="warning"><Alert.Content><Alert.Description>创建结果未知，请交给 Agent 核对 PR 后再操作。</Alert.Description><Button size="sm" variant="secondary" isDisabled={unavailable || Boolean(sending)} onPress={() => void send(failure.id, true)}>交给 Agent 处理</Button></Alert.Content></Alert> : null}
           {snapshot && !snapshot.initialized ? <p className="text-warning text-sm">当前目录尚未初始化为 Git 仓库，请返回菜单选择初始化仓库。</p> : null}
           {sending ? <div role="status" className="flex items-center gap-2"><Spinner size="sm" />处理中…</div> : null}
           {output ? <pre role="status" className="whitespace-pre-wrap break-all rounded-xl bg-default p-3 text-xs">{output}</pre> : null}
           {writingBlocked ? <p className="text-warning text-sm">当前对话正在运行或等待确认，暂时不能修改 Git 状态。</p> : null}
+          {view === 'create-pr' ? <form className="space-y-3" onSubmit={event => {
+            event.preventDefault();
+            if (!prTitle.trim() || !prBase.trim() || !prRepository.trim() || output) return;
+            void direct('create-pr', { action: 'create-pr', title: prTitle.trim(), body: prBody,
+              baseBranch: prBase.trim(), repository: prRepository.trim(), draft: prDraft });
+          }}>
+            <p className="text-muted text-sm">为已推送的当前分支创建 PR。未提交的更改不会包含在 PR 中；请先通过提交与推送操作准备分支。</p>
+            <TextField isRequired value={prRepository} onChange={setPrRepository}><Label>GitHub 仓库</Label><Input placeholder="owner/repository 或 host/owner/repository" /></TextField>
+            <TextField isRequired value={prBase} onChange={setPrBase}><Label>目标分支</Label><Input placeholder="例如 main" /></TextField>
+            <TextField isRequired value={prTitle} onChange={setPrTitle}><Label>PR 标题</Label><Input placeholder="概括本次更改" maxLength={256} /></TextField>
+            <TextField value={prBody} onChange={setPrBody}><Label>PR 描述</Label><TextArea rows={5} placeholder="更改内容、原因与验证结果" /></TextField>
+            <Checkbox isSelected={prDraft} onChange={setPrDraft}><Checkbox.Content><Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>创建为草稿</Checkbox.Content></Checkbox>
+            <Button type="submit" isDisabled={writingBlocked || Boolean(sending) || outcomeUnknown.current || Boolean(output) || !snapshot?.initialized || !snapshot.currentBranch || !prTitle.trim() || !prBase.trim() || !prRepository.trim()}>创建 PR</Button>
+            {output ? <Button variant="secondary" isDisabled={unavailable || Boolean(sending)} onPress={() => void send('view-pr')}>交给 Agent 查看 PR</Button> : null}
+          </form> : null}
           {isBranchForm ? <form className="space-y-3" onSubmit={event => {
             event.preventDefault();
             if (!branchName.trim() || (view === 'create-worktree' && !path.trim())) return;
@@ -179,7 +203,7 @@ export function GitActionsModal({ session, isOpen, onOpenChange }: Props) {
               const GroupIcon = groupIcons[group.id as keyof typeof groupIcons] || RiGitBranchLine;
               return <Command.Group key={group.id} id={group.id} heading={group.title}>
                 {group.actions.map(action => {
-                  const Icon = action.id === 'create-pr' ? RiGitPullRequestLine
+                  const Icon = group.id.startsWith('pr-') || group.id === 'pull-requests' ? RiGitPullRequestLine
                     : action.id === 'push' || action.id === 'commit-and-push' ? RiUploadCloud2Line : GroupIcon;
                   return <Command.Item key={action.id} id={action.id} textValue={`${action.title} ${action.description} ${action.id}`}
                     className="group flex min-h-14 items-center gap-3 rounded-xl px-3 py-2">

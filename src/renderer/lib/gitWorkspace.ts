@@ -28,6 +28,7 @@ export interface GitWorkspaceSnapshot {
 
 export type GitWorkspaceOperation =
   | { action: 'init' | 'push' }
+  | { action: 'create-pr'; title: string; body: string; baseBranch: string; repository: string; draft: boolean }
   | { action: 'create-branch'; branchName: string; startPoint?: string }
   | { action: 'switch-branch'; branchName: string }
   | { action: 'create-worktree'; path: string; branchName: string; startPoint?: string }
