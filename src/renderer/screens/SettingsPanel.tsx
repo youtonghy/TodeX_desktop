@@ -1,9 +1,10 @@
 import { useLayoutEffect, useRef, useState } from 'react';
-import { Button, Chip, Description, Label, ListBox, Select, Surface, TextArea, TextField, toast } from '@heroui/react';
+import { Button, Chip, ColorSwatchPicker, Description, Label, ListBox, Select, Surface, TextArea, TextField, toast } from '@heroui/react';
 import { RadioButtonGroup } from '@heroui-pro/react';
 import { RiAttachment2 } from '@remixicon/react';
 import jsQR from 'jsqr';
 import { assemblePairingQrChunkPayload, parsePairingQrFrame, resolvePairingPayload, type PairingQrChunk, type ParsedPairing } from '@todex/protocol/transportCrypto';
+import { BACKEND_LABEL_COLORS, backendLabelColor } from '../session/backendColors';
 import { Field } from '../components/Field';
 import { DevicePairingPanel } from '../components/DevicePairingPanel';
 import { pairingConnectionPatch } from '../session/pairingImport';
@@ -123,7 +124,7 @@ export function SettingsPanel({ session }: Props) {
             <RadioButtonGroup.Item key={profile.id} value={profile.id}>
               <RadioButtonGroup.Indicator />
               <RadioButtonGroup.ItemContent>
-                <Label>{profile.name}</Label>
+                <Label className="flex items-center gap-2"><span aria-hidden="true" className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: backendLabelColor(profile) }} />{profile.name}</Label>
                 <Description className="truncate">{profile.tenantId ? `${profile.serverUrl} · ${profile.tenantId}` : profile.serverUrl}</Description>
               </RadioButtonGroup.ItemContent>
             </RadioButtonGroup.Item>
@@ -132,6 +133,22 @@ export function SettingsPanel({ session }: Props) {
         {activeProfile ? (
           <>
             <Field label="名称" value={activeProfile.name} onChange={(name) => updateBackendConnection(activeProfile.id, { name })} />
+            <div className="flex flex-col gap-2">
+              <span className="text-sm font-medium">标签颜色</span>
+              <ColorSwatchPicker
+                aria-label="后端标签颜色"
+                value={backendLabelColor(activeProfile)}
+                onChange={(color) => updateBackendConnection(activeProfile.id, { labelColor: color.toString('hex') })}
+              >
+                {BACKEND_LABEL_COLORS.map(({ value, label }) => (
+                  <ColorSwatchPicker.Item key={value} color={value} aria-label={label}>
+                    <ColorSwatchPicker.Swatch />
+                    <ColorSwatchPicker.Indicator />
+                  </ColorSwatchPicker.Item>
+                ))}
+              </ColorSwatchPicker>
+              <p className="text-muted text-xs">工作区旁的圆点使用此颜色，悬停可查看对应后端。颜色自动保存。</p>
+            </div>
             <Field label="后端地址" value={activeProfile.serverUrl} onChange={(serverUrl) => { updateBackendConnection(activeProfile.id, { serverUrl }); setSettings((current) => ({ ...current, serverUrl })); }} />
             <Field label="Auth token" value={activeProfile.authToken} type="password" onChange={(authToken) => { updateBackendConnection(activeProfile.id, { authToken }); setSettings((current) => ({ ...current, authToken })); }} />
             <Field label="Tenant" value={activeProfile.tenantId} onChange={(tenantId) => { updateBackendConnection(activeProfile.id, { tenantId }); setSettings((current) => ({ ...current, tenantId })); }} />

@@ -1,3 +1,4 @@
+import { normalizeBackendLabelColor, type BackendConnectionProfile } from './backendColors';
 import { normalizeUsageRecords as normalizeSharedUsageRecords } from '@todex/protocol/mobileParity';
 import type {
   CodexHooksListEntry,
@@ -9,7 +10,6 @@ import type {
   CodexPluginListResult,
   CodexReasoningEffortOption,
   CodexServiceTierOption,
-  BackendConnectionProfile,
   ConnectionSettings,
   LocalAdapterState,
   PendingRequest,
@@ -1611,7 +1611,7 @@ export function normalizeBackendConnectionProfile(value: unknown): BackendConnec
   const serverUrl = typeof raw.serverUrl === 'string' ? raw.serverUrl.trim() : '';
   if (!id || !serverUrl) return null;
   const now = Date.now();
-  return { id, name: typeof raw.name === 'string' && raw.name.trim() ? raw.name.trim() : '后端', serverUrl: normalizeServerUrl(serverUrl), authToken: typeof raw.authToken === 'string' ? raw.authToken : '', tenantId: typeof raw.tenantId === 'string' && raw.tenantId.trim() ? raw.tenantId.trim() : 'local', encryptionProtocol: raw.encryptionProtocol === 'x25519' || raw.encryptionProtocol === 'ml-kem-768' ? raw.encryptionProtocol : 'none', encryptionPublicKey: typeof raw.encryptionPublicKey === 'string' ? raw.encryptionPublicKey : '', createdAt: typeof raw.createdAt === 'number' ? raw.createdAt : now, updatedAt: typeof raw.updatedAt === 'number' ? raw.updatedAt : now };
+  return { id, labelColor: normalizeBackendLabelColor(raw.labelColor), name: typeof raw.name === 'string' && raw.name.trim() ? raw.name.trim() : '后端', serverUrl: normalizeServerUrl(serverUrl), authToken: typeof raw.authToken === 'string' ? raw.authToken : '', tenantId: typeof raw.tenantId === 'string' && raw.tenantId.trim() ? raw.tenantId.trim() : 'local', encryptionProtocol: raw.encryptionProtocol === 'x25519' || raw.encryptionProtocol === 'ml-kem-768' ? raw.encryptionProtocol : 'none', encryptionPublicKey: typeof raw.encryptionPublicKey === 'string' ? raw.encryptionPublicKey : '', createdAt: typeof raw.createdAt === 'number' ? raw.createdAt : now, updatedAt: typeof raw.updatedAt === 'number' ? raw.updatedAt : now };
 }
 
 export function authHeaders(settings: ConnectionSettings, extra: Record<string, string> = {}): Record<string, string> {

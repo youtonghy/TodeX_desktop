@@ -1,3 +1,4 @@
+import type { BackendConnectionProfile } from './backendColors';
 import { useWorkbenchSharing } from './useWorkbenchSharing';
 import { bindSentAttachmentEvents, prepareSentAttachments, projectSentAttachments, pruneSentAttachmentRecords, type SentAttachmentRecord } from './sentAttachments';
 import { ENCRYPTION_VERIFICATION_ERROR, validateTransportEncryption, verifyEncryptedSocket } from './transportVerification';
@@ -21,7 +22,6 @@ import { V2ApiClient, buildV2WebSocketUrlWithOptions, normalizeConversationEvent
 import { probeBackendConnection, nextReconnectDelayMs, inspectServerUrl, tokenMatchesOrigin } from '@todex/protocol/connectionProbe';
 import {
   ConnectionSettings,
-  BackendConnectionProfile,
   CodexMemorySettings,
   CodexModelCatalogItem,
   CodexNativeThread,

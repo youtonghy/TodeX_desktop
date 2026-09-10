@@ -1,9 +1,10 @@
 import { RiPushpin2Fill, RiAddLine, RiPencilLine, RiEdit2Line, RiGitBranchLine, RiDeleteBinLine, RiArrowDownSLine, RiBarChartBoxLine, RiFolder3Line, RiInformationLine, RiKanbanView2, RiPuzzle2Line, RiSettings3Line, RiTerminalBoxLine } from '@remixicon/react';
-import { Badge, Button, Chip, Dropdown, Label } from '@heroui/react';
+import { Badge, Button, Chip, Dropdown, Label, Tooltip } from '@heroui/react';
 import { useEffect, useMemo, useState } from 'react';
 import type { DragEvent, MouseEvent } from 'react';
 import { ContextMenu as HeroContextMenu, ChatListView, Sidebar, useSidebar } from '@heroui-pro/react';
 import { useSidebarPins } from '../session/useSidebarPins';
+import { backendLabelColor } from '../session/backendColors';
 import { ProviderIcon } from './ProviderIcon';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { conversationDisplayTitle, isConversationHighlighted, workspaceDisplayName } from '../session/helpers';
@@ -318,6 +319,8 @@ export function AppSidebar({
                 >
                   {displayedWorkspaces.map((workspace) => {
                     const isSelected = workspace.id === session.activeWorkspaceId;
+                    const backend = session.backendConnections.find((profile) => profile.id === (workspace.backendConnectionId || session.activeBackendConnectionId));
+                    const backendLabel = backend ? `后端：${backend.name} · ${backend.serverUrl}` : '后端配置已移除';
                     return (
                       <ChatListView.Item
                         key={workspace.id}
@@ -337,6 +340,17 @@ export function AppSidebar({
                             </ChatListView.Title>
                             <ChatListView.Preview>{workspace.path}</ChatListView.Preview>
                           </ChatListView.Text>
+                          <Tooltip delay={300}>
+                            <Tooltip.Trigger
+                              aria-label={backendLabel}
+                              className="flex size-6 shrink-0 items-center justify-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                            >
+                              <span aria-hidden="true" className="size-2.5 rounded-full ring-1 ring-foreground/10" style={{ backgroundColor: backendLabelColor(backend) }} />
+                            </Tooltip.Trigger>
+                            <Tooltip.Content placement="right" className="max-w-xs break-all">
+                              {backendLabel}
+                            </Tooltip.Content>
+                          </Tooltip>
                         </ChatListView.ItemContent>
                       </ChatListView.Item>
                     );
