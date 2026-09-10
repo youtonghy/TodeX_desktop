@@ -1,0 +1,1258 @@
+{
+  "date": "2026-09-11",
+  "piVersion": "0.84.4",
+  "nodeVersion": "24.15.0",
+  "desktopHead": "e909d69",
+  "backendHead": "9ddf9dd",
+  "scope": "7 installed packages, 15 command invocations, plus one protocol fixture; isolated configuration; no model calls. Not a Todex GUI E2E test.",
+  "pathRedactions": {
+    "<installed-packages>": "Installed npm package directory",
+    "<probe-dir>": "Disposable probe directory"
+  },
+  "configuredPackages": [
+    {
+      "package": "pi-mcp-adapter",
+      "version": "2.32.1",
+      "entrypoints": [
+        "./index.ts"
+      ]
+    },
+    {
+      "package": "pi-web-access",
+      "version": "0.27.0",
+      "entrypoints": [
+        "./index.ts"
+      ]
+    },
+    {
+      "package": "@tintinweb/pi-subagents",
+      "version": "0.19.0",
+      "entrypoints": [
+        "./src/index.ts"
+      ]
+    },
+    {
+      "package": "pi-context-prune",
+      "version": "1.4.0",
+      "entrypoints": [
+        "./dist/index.js"
+      ]
+    },
+    {
+      "package": "@plannotator/pi-extension",
+      "version": "0.27.11",
+      "entrypoints": [
+        "./"
+      ]
+    },
+    {
+      "package": "pi-context-usage",
+      "version": "1.0.2",
+      "entrypoints": [
+        "./src/index.ts"
+      ]
+    },
+    {
+      "package": "pi-cache-graph",
+      "version": "1.0.2",
+      "entrypoints": [
+        "./index.ts"
+      ]
+    },
+    {
+      "package": "@tmustier/pi-usage-extension",
+      "version": "0.9.4",
+      "entrypoints": [
+        "index.ts"
+      ]
+    },
+    {
+      "package": "better-custom",
+      "version": "0.4.1",
+      "entrypoints": [
+        "./index.ts"
+      ]
+    },
+    {
+      "package": "pi-exa",
+      "version": "0.6.1",
+      "entrypoints": [
+        "./src/index.ts"
+      ]
+    },
+    {
+      "package": "@tintinweb/pi-tasks",
+      "version": "0.9.0",
+      "entrypoints": [
+        "./src/index.ts"
+      ]
+    },
+    {
+      "package": "pi-agenticoding",
+      "version": "0.5.0",
+      "entrypoints": [
+        "./index.ts"
+      ]
+    },
+    {
+      "package": "pi-observability",
+      "version": "1.3.2",
+      "entrypoints": [
+        "./extensions/observability.ts"
+      ]
+    }
+  ],
+  "runs": [
+    {
+      "package": "pi-cache-graph",
+      "version": "1.0.2",
+      "discovery": [
+        {
+          "name": "cache",
+          "description": "Show cache hit graph, token/cache statistics, or export CSV",
+          "source": "extension",
+          "sourceInfo": {
+            "path": "<installed-packages>/pi-cache-graph/index.ts",
+            "source": "cli",
+            "scope": "temporary",
+            "origin": "top-level"
+          }
+        },
+        {
+          "name": "llama",
+          "description": "Manage llama.cpp router models",
+          "source": "extension",
+          "sourceInfo": {
+            "path": "<inline:llama.cpp>",
+            "source": "inline",
+            "scope": "temporary",
+            "origin": "top-level"
+          }
+        }
+      ],
+      "files": [
+        "agent",
+        "session.csv"
+      ],
+      "stderr": "",
+      "commands": [
+        {
+          "message": "/cache",
+          "ack": {
+            "id": "probe-2",
+            "type": "response",
+            "command": "prompt",
+            "success": true
+          },
+          "state": {
+            "isStreaming": false,
+            "isCompacting": false,
+            "sessionId": "01a08c2d-e8cf-7f8c-8fa1-89cfd167da14",
+            "messageCount": 0,
+            "pendingMessageCount": 0
+          },
+          "events": [
+            {
+              "type": "extension_ui_request",
+              "id": "e3664369-05aa-4800-ae56-6b200fd75b11",
+              "method": "notify",
+              "message": "Usage: /cache graph | /cache stats | /cache export",
+              "notifyType": "info"
+            },
+            {
+              "id": "probe-2",
+              "type": "response",
+              "command": "prompt",
+              "success": true
+            },
+            {
+              "id": "probe-3",
+              "type": "response",
+              "command": "get_state",
+              "success": true,
+              "data": {
+                "isStreaming": false,
+                "isCompacting": false,
+                "sessionId": "01a08c2d-e8cf-7f8c-8fa1-89cfd167da14",
+                "messageCount": 0,
+                "pendingMessageCount": 0
+              }
+            }
+          ]
+        },
+        {
+          "message": "/cache graph",
+          "ack": {
+            "id": "probe-4",
+            "type": "response",
+            "command": "prompt",
+            "success": true
+          },
+          "state": {
+            "isStreaming": false,
+            "isCompacting": false,
+            "sessionId": "01a08c2d-e8cf-7f8c-8fa1-89cfd167da14",
+            "messageCount": 0,
+            "pendingMessageCount": 0
+          },
+          "events": [
+            {
+              "id": "probe-4",
+              "type": "response",
+              "command": "prompt",
+              "success": true
+            },
+            {
+              "id": "probe-5",
+              "type": "response",
+              "command": "get_state",
+              "success": true,
+              "data": {
+                "isStreaming": false,
+                "isCompacting": false,
+                "sessionId": "01a08c2d-e8cf-7f8c-8fa1-89cfd167da14",
+                "messageCount": 0,
+                "pendingMessageCount": 0
+              }
+            }
+          ]
+        },
+        {
+          "message": "/cache stats",
+          "ack": {
+            "id": "probe-6",
+            "type": "response",
+            "command": "prompt",
+            "success": true
+          },
+          "state": {
+            "isStreaming": false,
+            "isCompacting": false,
+            "sessionId": "01a08c2d-e8cf-7f8c-8fa1-89cfd167da14",
+            "messageCount": 0,
+            "pendingMessageCount": 0
+          },
+          "events": [
+            {
+              "id": "probe-6",
+              "type": "response",
+              "command": "prompt",
+              "success": true
+            },
+            {
+              "id": "probe-7",
+              "type": "response",
+              "command": "get_state",
+              "success": true,
+              "data": {
+                "isStreaming": false,
+                "isCompacting": false,
+                "sessionId": "01a08c2d-e8cf-7f8c-8fa1-89cfd167da14",
+                "messageCount": 0,
+                "pendingMessageCount": 0
+              }
+            }
+          ]
+        },
+        {
+          "message": "/cache export",
+          "ack": {
+            "id": "probe-8",
+            "type": "response",
+            "command": "prompt",
+            "success": true
+          },
+          "state": {
+            "isStreaming": false,
+            "isCompacting": false,
+            "sessionId": "01a08c2d-e8cf-7f8c-8fa1-89cfd167da14",
+            "messageCount": 0,
+            "pendingMessageCount": 0
+          },
+          "events": [
+            {
+              "type": "extension_ui_request",
+              "id": "63a6bb8e-5253-4635-b813-4378c38af1b3",
+              "method": "notify",
+              "message": "Exported cache stats CSV to <probe-dir>/0/session.csv",
+              "notifyType": "info"
+            },
+            {
+              "id": "probe-8",
+              "type": "response",
+              "command": "prompt",
+              "success": true
+            },
+            {
+              "id": "probe-9",
+              "type": "response",
+              "command": "get_state",
+              "success": true,
+              "data": {
+                "isStreaming": false,
+                "isCompacting": false,
+                "sessionId": "01a08c2d-e8cf-7f8c-8fa1-89cfd167da14",
+                "messageCount": 0,
+                "pendingMessageCount": 0
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "package": "@tmustier/pi-usage-extension",
+      "version": "0.9.4",
+      "discovery": [
+        {
+          "name": "usage",
+          "description": "Show usage statistics dashboard",
+          "source": "extension",
+          "sourceInfo": {
+            "path": "<installed-packages>/@tmustier/pi-usage-extension/index.ts",
+            "source": "cli",
+            "scope": "temporary",
+            "origin": "top-level"
+          }
+        },
+        {
+          "name": "llama",
+          "description": "Manage llama.cpp router models",
+          "source": "extension",
+          "sourceInfo": {
+            "path": "<inline:llama.cpp>",
+            "source": "inline",
+            "scope": "temporary",
+            "origin": "top-level"
+          }
+        }
+      ],
+      "files": [
+        "agent"
+      ],
+      "stderr": "",
+      "commands": [
+        {
+          "message": "/usage",
+          "ack": {
+            "id": "probe-2",
+            "type": "response",
+            "command": "prompt",
+            "success": true
+          },
+          "state": {
+            "isStreaming": false,
+            "isCompacting": false,
+            "sessionId": "01a08c2d-e9af-7859-ad22-f461f068d5bd",
+            "messageCount": 0,
+            "pendingMessageCount": 0
+          },
+          "events": [
+            {
+              "id": "probe-2",
+              "type": "response",
+              "command": "prompt",
+              "success": true
+            },
+            {
+              "id": "probe-3",
+              "type": "response",
+              "command": "get_state",
+              "success": true,
+              "data": {
+                "isStreaming": false,
+                "isCompacting": false,
+                "sessionId": "01a08c2d-e9af-7859-ad22-f461f068d5bd",
+                "messageCount": 0,
+                "pendingMessageCount": 0
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "package": "better-custom",
+      "version": "0.4.1",
+      "discovery": [
+        {
+          "name": "better-custom",
+          "description": "Wizard for adding, editing, or deleting custom providers in ~/.pi/agent/models.json",
+          "source": "extension",
+          "sourceInfo": {
+            "path": "<installed-packages>/better-custom/index.ts",
+            "source": "cli",
+            "scope": "temporary",
+            "origin": "top-level"
+          }
+        },
+        {
+          "name": "llama",
+          "description": "Manage llama.cpp router models",
+          "source": "extension",
+          "sourceInfo": {
+            "path": "<inline:llama.cpp>",
+            "source": "inline",
+            "scope": "temporary",
+            "origin": "top-level"
+          }
+        }
+      ],
+      "files": [
+        "agent"
+      ],
+      "stderr": "",
+      "commands": [
+        {
+          "message": "/better-custom",
+          "ack": {
+            "id": "probe-2",
+            "type": "response",
+            "command": "prompt",
+            "success": true
+          },
+          "state": {
+            "isStreaming": false,
+            "isCompacting": false,
+            "sessionId": "01a08c2d-ea7a-7763-bb16-10981a495a71",
+            "messageCount": 0,
+            "pendingMessageCount": 0
+          },
+          "events": [
+            {
+              "id": "probe-2",
+              "type": "response",
+              "command": "prompt",
+              "success": true
+            },
+            {
+              "id": "probe-3",
+              "type": "response",
+              "command": "get_state",
+              "success": true,
+              "data": {
+                "isStreaming": false,
+                "isCompacting": false,
+                "sessionId": "01a08c2d-ea7a-7763-bb16-10981a495a71",
+                "messageCount": 0,
+                "pendingMessageCount": 0
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "package": "pi-context-usage",
+      "version": "1.0.2",
+      "discovery": [
+        {
+          "name": "context",
+          "description": "Show context usage summary or /context details breakdown",
+          "source": "extension",
+          "sourceInfo": {
+            "path": "<installed-packages>/pi-context-usage/src/index.ts",
+            "source": "cli",
+            "scope": "temporary",
+            "origin": "top-level"
+          }
+        },
+        {
+          "name": "release",
+          "description": "Bump package version, commit it, and push the git tag for GitHub Actions publishing",
+          "source": "extension",
+          "sourceInfo": {
+            "path": "<installed-packages>/pi-context-usage/src/index.ts",
+            "source": "cli",
+            "scope": "temporary",
+            "origin": "top-level"
+          }
+        },
+        {
+          "name": "llama",
+          "description": "Manage llama.cpp router models",
+          "source": "extension",
+          "sourceInfo": {
+            "path": "<inline:llama.cpp>",
+            "source": "inline",
+            "scope": "temporary",
+            "origin": "top-level"
+          }
+        }
+      ],
+      "files": [
+        "agent"
+      ],
+      "stderr": "",
+      "commands": [
+        {
+          "message": "/context",
+          "ack": {
+            "id": "probe-2",
+            "type": "response",
+            "command": "prompt",
+            "success": true
+          },
+          "state": {
+            "isStreaming": false,
+            "isCompacting": false,
+            "sessionId": "01a08c2d-eb4b-71b4-b8c2-74cead4bae0c",
+            "messageCount": 0,
+            "pendingMessageCount": 0
+          },
+          "events": [
+            {
+              "type": "extension_ui_request",
+              "id": "8f8cda01-93ba-4f97-ae4c-ba7ff4175bc6",
+              "method": "notify",
+              "message": "No context usage data available. Send a message first.",
+              "notifyType": "warning"
+            },
+            {
+              "id": "probe-2",
+              "type": "response",
+              "command": "prompt",
+              "success": true
+            },
+            {
+              "id": "probe-3",
+              "type": "response",
+              "command": "get_state",
+              "success": true,
+              "data": {
+                "isStreaming": false,
+                "isCompacting": false,
+                "sessionId": "01a08c2d-eb4b-71b4-b8c2-74cead4bae0c",
+                "messageCount": 0,
+                "pendingMessageCount": 0
+              }
+            }
+          ]
+        },
+        {
+          "message": "/context details",
+          "ack": {
+            "id": "probe-4",
+            "type": "response",
+            "command": "prompt",
+            "success": true
+          },
+          "state": {
+            "isStreaming": false,
+            "isCompacting": false,
+            "sessionId": "01a08c2d-eb4b-71b4-b8c2-74cead4bae0c",
+            "messageCount": 0,
+            "pendingMessageCount": 0
+          },
+          "events": [
+            {
+              "type": "extension_ui_request",
+              "id": "c3b030f2-3166-4c6a-9c13-8cf898edbf17",
+              "method": "notify",
+              "message": "No context usage data available. Send a message first.",
+              "notifyType": "warning"
+            },
+            {
+              "id": "probe-4",
+              "type": "response",
+              "command": "prompt",
+              "success": true
+            },
+            {
+              "id": "probe-5",
+              "type": "response",
+              "command": "get_state",
+              "success": true,
+              "data": {
+                "isStreaming": false,
+                "isCompacting": false,
+                "sessionId": "01a08c2d-eb4b-71b4-b8c2-74cead4bae0c",
+                "messageCount": 0,
+                "pendingMessageCount": 0
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "package": "pi-context-prune",
+      "version": "1.4.0",
+      "discovery": [
+        {
+          "name": "pruner",
+          "description": "Context-prune settings and commands",
+          "source": "extension",
+          "sourceInfo": {
+            "path": "<installed-packages>/pi-context-prune/dist/index.js",
+            "source": "cli",
+            "scope": "temporary",
+            "origin": "top-level"
+          }
+        },
+        {
+          "name": "llama",
+          "description": "Manage llama.cpp router models",
+          "source": "extension",
+          "sourceInfo": {
+            "path": "<inline:llama.cpp>",
+            "source": "inline",
+            "scope": "temporary",
+            "origin": "top-level"
+          }
+        }
+      ],
+      "files": [
+        "agent"
+      ],
+      "stderr": "",
+      "commands": [
+        {
+          "message": "/pruner stats",
+          "ack": {
+            "id": "probe-2",
+            "type": "response",
+            "command": "prompt",
+            "success": true
+          },
+          "state": {
+            "isStreaming": false,
+            "isCompacting": false,
+            "sessionId": "01a08c2d-ec02-7709-a240-ce6cf5c9a55b",
+            "messageCount": 0,
+            "pendingMessageCount": 0
+          },
+          "events": [
+            {
+              "type": "extension_ui_request",
+              "id": "e4134f19-fea4-42a5-95b9-4900daf9eb59",
+              "method": "notify",
+              "message": "pruner stats: no summarizer calls yet."
+            },
+            {
+              "id": "probe-2",
+              "type": "response",
+              "command": "prompt",
+              "success": true
+            },
+            {
+              "id": "probe-3",
+              "type": "response",
+              "command": "get_state",
+              "success": true,
+              "data": {
+                "isStreaming": false,
+                "isCompacting": false,
+                "sessionId": "01a08c2d-ec02-7709-a240-ce6cf5c9a55b",
+                "messageCount": 0,
+                "pendingMessageCount": 0
+              }
+            }
+          ]
+        },
+        {
+          "message": "/pruner settings",
+          "ack": {
+            "id": "probe-4",
+            "type": "response",
+            "command": "prompt",
+            "success": true
+          },
+          "state": {
+            "isStreaming": false,
+            "isCompacting": false,
+            "sessionId": "01a08c2d-ec02-7709-a240-ce6cf5c9a55b",
+            "messageCount": 0,
+            "pendingMessageCount": 0
+          },
+          "events": [
+            {
+              "id": "probe-4",
+              "type": "response",
+              "command": "prompt",
+              "success": true
+            },
+            {
+              "id": "probe-5",
+              "type": "response",
+              "command": "get_state",
+              "success": true,
+              "data": {
+                "isStreaming": false,
+                "isCompacting": false,
+                "sessionId": "01a08c2d-ec02-7709-a240-ce6cf5c9a55b",
+                "messageCount": 0,
+                "pendingMessageCount": 0
+              }
+            }
+          ]
+        },
+        {
+          "message": "/pruner",
+          "ack": {
+            "id": "probe-6",
+            "type": "response",
+            "command": "prompt",
+            "success": true
+          },
+          "state": {
+            "isStreaming": false,
+            "isCompacting": false,
+            "sessionId": "01a08c2d-ec02-7709-a240-ce6cf5c9a55b",
+            "messageCount": 0,
+            "pendingMessageCount": 0
+          },
+          "events": [
+            {
+              "type": "extension_ui_request",
+              "id": "ec3c3c57-756d-45d9-86fb-f2c71563d68d",
+              "method": "select",
+              "title": "pruner — choose a subcommand",
+              "options": [
+                "settings  — interactive settings overlay",
+                "on        — enable context pruning",
+                "off       — disable context pruning",
+                "status    — show status, model, thinking, prune trigger, and status line",
+                "model     — show or set the summarizer model",
+                "thinking  — show or set the summarizer thinking level",
+                "prune-on  — show or set the trigger mode",
+                "batching  — show or set the batching mode (turn / agent-message)",
+                "stats     — show cumulative summarizer token/cost stats",
+                "tree      — browse pruned tool calls in a foldable tree",
+                "now       — flush pending tool calls immediately (widget progress)",
+                "help      — show this help"
+              ]
+            },
+            {
+              "type": "extension_ui_request",
+              "id": "406c639e-9872-4e33-a5c9-d8a969b7b7a9",
+              "method": "notify",
+              "message": "pruner stats: no summarizer calls yet."
+            },
+            {
+              "id": "probe-6",
+              "type": "response",
+              "command": "prompt",
+              "success": true
+            },
+            {
+              "id": "probe-7",
+              "type": "response",
+              "command": "get_state",
+              "success": true,
+              "data": {
+                "isStreaming": false,
+                "isCompacting": false,
+                "sessionId": "01a08c2d-ec02-7709-a240-ce6cf5c9a55b",
+                "messageCount": 0,
+                "pendingMessageCount": 0
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "package": "@tintinweb/pi-tasks",
+      "version": "0.9.0",
+      "discovery": [
+        {
+          "name": "tasks",
+          "description": "Manage tasks — view, create, clear completed",
+          "source": "extension",
+          "sourceInfo": {
+            "path": "<installed-packages>/@tintinweb/pi-tasks/src/index.ts",
+            "source": "cli",
+            "scope": "temporary",
+            "origin": "top-level"
+          }
+        },
+        {
+          "name": "llama",
+          "description": "Manage llama.cpp router models",
+          "source": "extension",
+          "sourceInfo": {
+            "path": "<inline:llama.cpp>",
+            "source": "inline",
+            "scope": "temporary",
+            "origin": "top-level"
+          }
+        }
+      ],
+      "files": [
+        "agent",
+        "tasks.json"
+      ],
+      "stderr": "",
+      "taskData": {
+        "nextId": 2,
+        "tasks": [
+          {
+            "id": "1",
+            "subject": "Todex RPC probe",
+            "description": "Disposable compatibility task",
+            "status": "pending",
+            "metadata": {},
+            "blocks": [],
+            "blockedBy": [],
+            "createdAt": 1789058215188,
+            "updatedAt": 1789058215188
+          }
+        ]
+      },
+      "commands": [
+        {
+          "message": "/tasks",
+          "ack": {
+            "id": "probe-2",
+            "type": "response",
+            "command": "prompt",
+            "success": true
+          },
+          "state": {
+            "isStreaming": false,
+            "isCompacting": false,
+            "sessionId": "01a08c2d-ecc7-72f1-b0bc-6613f2c8853b",
+            "messageCount": 0,
+            "pendingMessageCount": 0
+          },
+          "events": [
+            {
+              "type": "extension_ui_request",
+              "id": "111ba240-a3ae-4cd9-bff2-dc8692a9f397",
+              "method": "select",
+              "title": "Tasks",
+              "options": [
+                "View all tasks (0)",
+                "Create task",
+                "Settings"
+              ]
+            },
+            {
+              "type": "extension_ui_request",
+              "id": "f7930b12-bc33-4bd5-afd8-99ae3f3253b8",
+              "method": "input",
+              "title": "Task subject"
+            },
+            {
+              "type": "extension_ui_request",
+              "id": "eb188697-015c-4cd4-a192-d2e60a1ce5ab",
+              "method": "input",
+              "title": "Task description"
+            },
+            {
+              "type": "extension_ui_request",
+              "id": "2e1f5997-01cc-41bc-acf8-87eecc6b9c75",
+              "method": "select",
+              "title": "Tasks",
+              "options": [
+                "View all tasks (1)",
+                "Create task",
+                "Clear all (1)",
+                "Settings"
+              ]
+            },
+            {
+              "id": "probe-2",
+              "type": "response",
+              "command": "prompt",
+              "success": true
+            },
+            {
+              "id": "probe-3",
+              "type": "response",
+              "command": "get_state",
+              "success": true,
+              "data": {
+                "isStreaming": false,
+                "isCompacting": false,
+                "sessionId": "01a08c2d-ecc7-72f1-b0bc-6613f2c8853b",
+                "messageCount": 0,
+                "pendingMessageCount": 0
+              }
+            }
+          ]
+        },
+        {
+          "message": "/tasks",
+          "ack": {
+            "id": "probe-4",
+            "type": "response",
+            "command": "prompt",
+            "success": true
+          },
+          "state": {
+            "isStreaming": false,
+            "isCompacting": false,
+            "sessionId": "01a08c2d-ecc7-72f1-b0bc-6613f2c8853b",
+            "messageCount": 0,
+            "pendingMessageCount": 0
+          },
+          "events": [
+            {
+              "type": "extension_ui_request",
+              "id": "7b385559-22e0-45ad-9fe9-dbfa44755fbc",
+              "method": "select",
+              "title": "Tasks",
+              "options": [
+                "View all tasks (1)",
+                "Create task",
+                "Clear all (1)",
+                "Settings"
+              ]
+            },
+            {
+              "type": "extension_ui_request",
+              "id": "e698a68e-8e58-46dd-accc-64f2f3ccbfae",
+              "method": "select",
+              "title": "Tasks",
+              "options": [
+                "View all tasks (1)",
+                "Create task",
+                "Clear all (1)",
+                "Settings"
+              ]
+            },
+            {
+              "id": "probe-4",
+              "type": "response",
+              "command": "prompt",
+              "success": true
+            },
+            {
+              "id": "probe-5",
+              "type": "response",
+              "command": "get_state",
+              "success": true,
+              "data": {
+                "isStreaming": false,
+                "isCompacting": false,
+                "sessionId": "01a08c2d-ecc7-72f1-b0bc-6613f2c8853b",
+                "messageCount": 0,
+                "pendingMessageCount": 0
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "package": "pi-mcp-adapter",
+      "version": "2.32.1",
+      "discovery": [
+        {
+          "name": "mcp",
+          "description": "Show MCP server status",
+          "source": "extension",
+          "sourceInfo": {
+            "path": "<probe-dir>/6/empty-mcp.ts",
+            "source": "cli",
+            "scope": "temporary",
+            "origin": "top-level"
+          }
+        },
+        {
+          "name": "pi-mcp",
+          "description": "Show MCP server status",
+          "source": "extension",
+          "sourceInfo": {
+            "path": "<probe-dir>/6/empty-mcp.ts",
+            "source": "cli",
+            "scope": "temporary",
+            "origin": "top-level"
+          }
+        },
+        {
+          "name": "mcp-auth",
+          "description": "Authenticate with an MCP server (OAuth)",
+          "source": "extension",
+          "sourceInfo": {
+            "path": "<probe-dir>/6/empty-mcp.ts",
+            "source": "cli",
+            "scope": "temporary",
+            "origin": "top-level"
+          }
+        },
+        {
+          "name": "llama",
+          "description": "Manage llama.cpp router models",
+          "source": "extension",
+          "sourceInfo": {
+            "path": "<inline:llama.cpp>",
+            "source": "inline",
+            "scope": "temporary",
+            "origin": "top-level"
+          }
+        }
+      ],
+      "files": [
+        "agent",
+        "empty-mcp.ts"
+      ],
+      "stderr": "",
+      "commands": [
+        {
+          "message": "/mcp",
+          "ack": {
+            "id": "probe-2",
+            "type": "response",
+            "command": "prompt",
+            "success": true
+          },
+          "state": {
+            "isStreaming": false,
+            "isCompacting": false,
+            "sessionId": "01a08c2d-eda2-76c1-bf86-d3f6ba2cbbe4",
+            "messageCount": 0,
+            "pendingMessageCount": 0
+          },
+          "events": [
+            {
+              "type": "extension_ui_request",
+              "id": "b0274e01-a7be-4caa-93ad-cf04cb30ec0e",
+              "method": "notify",
+              "message": "MCP status is shown from the in-memory SDK config; configuration discovery is unavailable.",
+              "notifyType": "info"
+            },
+            {
+              "type": "extension_ui_request",
+              "id": "c1eda7d0-362a-4b55-92a8-85b48b2ec2db",
+              "method": "notify",
+              "message": "MCP Server Status:\n\nNo MCP servers configured\nRun /mcp setup to add a server to .mcp.json or ~/.config/mcp/mcp.json",
+              "notifyType": "info"
+            },
+            {
+              "id": "probe-2",
+              "type": "response",
+              "command": "prompt",
+              "success": true
+            },
+            {
+              "id": "probe-3",
+              "type": "response",
+              "command": "get_state",
+              "success": true,
+              "data": {
+                "isStreaming": false,
+                "isCompacting": false,
+                "sessionId": "01a08c2d-eda2-76c1-bf86-d3f6ba2cbbe4",
+                "messageCount": 0,
+                "pendingMessageCount": 0
+              }
+            }
+          ]
+        },
+        {
+          "message": "/mcp tools",
+          "ack": {
+            "id": "probe-4",
+            "type": "response",
+            "command": "prompt",
+            "success": true
+          },
+          "state": {
+            "isStreaming": false,
+            "isCompacting": false,
+            "sessionId": "01a08c2d-eda2-76c1-bf86-d3f6ba2cbbe4",
+            "messageCount": 0,
+            "pendingMessageCount": 0
+          },
+          "events": [
+            {
+              "type": "extension_ui_request",
+              "id": "07a2ab68-8c6d-4883-8481-a7759fdb335f",
+              "method": "notify",
+              "message": "No MCP tools available",
+              "notifyType": "info"
+            },
+            {
+              "id": "probe-4",
+              "type": "response",
+              "command": "prompt",
+              "success": true
+            },
+            {
+              "id": "probe-5",
+              "type": "response",
+              "command": "get_state",
+              "success": true,
+              "data": {
+                "isStreaming": false,
+                "isCompacting": false,
+                "sessionId": "01a08c2d-eda2-76c1-bf86-d3f6ba2cbbe4",
+                "messageCount": 0,
+                "pendingMessageCount": 0
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "package": "protocol-fixture",
+      "version": "local-fixture",
+      "discovery": [
+        {
+          "name": "todex-probe",
+          "description": "Deterministic protocol probe",
+          "source": "extension",
+          "sourceInfo": {
+            "path": "<probe-dir>/7/protocol-fixture.ts",
+            "source": "cli",
+            "scope": "temporary",
+            "origin": "top-level"
+          }
+        },
+        {
+          "name": "llama",
+          "description": "Manage llama.cpp router models",
+          "source": "extension",
+          "sourceInfo": {
+            "path": "<inline:llama.cpp>",
+            "source": "inline",
+            "scope": "temporary",
+            "origin": "top-level"
+          }
+        }
+      ],
+      "files": [
+        "agent",
+        "protocol-fixture.ts"
+      ],
+      "stderr": "",
+      "commands": [
+        {
+          "message": "/todex-probe",
+          "ack": {
+            "id": "probe-2",
+            "type": "response",
+            "command": "prompt",
+            "success": true
+          },
+          "state": {
+            "isStreaming": false,
+            "isCompacting": false,
+            "sessionId": "01a08c2d-eee7-7580-92f7-7e76cee7be6e",
+            "messageCount": 1,
+            "pendingMessageCount": 0
+          },
+          "events": [
+            {
+              "type": "extension_ui_request",
+              "id": "54bed12b-1559-498e-963a-4c21658f6fde",
+              "method": "select",
+              "title": "Select probe",
+              "options": [
+                "A",
+                "B"
+              ]
+            },
+            {
+              "type": "extension_ui_request",
+              "id": "0c6aba5d-dccf-4a54-92c5-0f2ad4ea7456",
+              "method": "confirm",
+              "title": "Confirm probe",
+              "message": "Continue?"
+            },
+            {
+              "type": "extension_ui_request",
+              "id": "b53527a4-7785-47c3-b73c-d802b7099aa5",
+              "method": "input",
+              "title": "Input probe",
+              "placeholder": "placeholder"
+            },
+            {
+              "type": "extension_ui_request",
+              "id": "7de6d788-b66a-4fa4-bc01-e57604412d31",
+              "method": "editor",
+              "title": "Editor probe",
+              "prefill": "prefill"
+            },
+            {
+              "type": "extension_ui_request",
+              "id": "b70eaac8-a659-455c-89ef-bf19e9252845",
+              "method": "setStatus",
+              "statusKey": "probe",
+              "statusText": "Ready"
+            },
+            {
+              "type": "extension_ui_request",
+              "id": "0d209c29-3d36-4323-ad8d-acbe51c6c28b",
+              "method": "setWidget",
+              "widgetKey": "probe",
+              "widgetLines": [
+                "Line 1",
+                "Line 2"
+              ]
+            },
+            {
+              "type": "extension_ui_request",
+              "id": "02c8fa5e-6865-4cac-85d7-d7d6f2c033b7",
+              "method": "setTitle",
+              "title": "Probe title"
+            },
+            {
+              "type": "extension_ui_request",
+              "id": "5a449c93-13f6-4b39-86be-ca715dc12cc2",
+              "method": "set_editor_text",
+              "text": "Draft from extension"
+            },
+            {
+              "type": "message_start",
+              "message": {
+                "role": "custom",
+                "customType": "todex-probe",
+                "content": "Custom message before prompt ack",
+                "display": true,
+                "timestamp": 1789058215751
+              }
+            },
+            {
+              "type": "message_end",
+              "message": {
+                "role": "custom",
+                "customType": "todex-probe",
+                "content": "Custom message before prompt ack",
+                "display": true,
+                "timestamp": 1789058215751
+              }
+            },
+            {
+              "type": "extension_ui_request",
+              "id": "57222cbd-8ae4-4793-b99b-6aa71639b96d",
+              "method": "notify",
+              "message": "{\"mode\":\"rpc\",\"hasUI\":true,\"selected\":\"B\",\"confirmed\":true,\"input\":\"typed\",\"editor\":\"edited\",\"customCalled\":false,\"customUndefined\":true}"
+            },
+            {
+              "id": "probe-2",
+              "type": "response",
+              "command": "prompt",
+              "success": true
+            },
+            {
+              "id": "probe-3",
+              "type": "response",
+              "command": "get_state",
+              "success": true,
+              "data": {
+                "isStreaming": false,
+                "isCompacting": false,
+                "sessionId": "01a08c2d-eee7-7580-92f7-7e76cee7be6e",
+                "messageCount": 1,
+                "pendingMessageCount": 0
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "backendRegression": {
+    "command": "cargo test --locked provider::pi::tests::rpc_ -- --test-threads=1",
+    "passed": 7,
+    "failed": 0,
+    "filteredOut": 306,
+    "testSeconds": 5.8,
+    "exitCode": 0
+  }
+}
