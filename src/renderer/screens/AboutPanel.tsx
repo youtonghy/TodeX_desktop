@@ -1,5 +1,6 @@
 import { Button, Card, Chip, toast } from '@heroui/react';
-import { RiFileCopyLine, RiGithubLine, RiInformationLine, RiServerLine } from '@remixicon/react';
+import { RiFileCopyLine, RiGithubLine, RiServerLine } from '@remixicon/react';
+import { AppIcon } from '../components/AppIcon';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { connectionStateLabel } from '../session/helpers';
 
@@ -34,9 +35,7 @@ export function AboutPanel({ session }: Props) {
   return (
     <div className="flex flex-col gap-5 p-6">
       <div className="flex items-center gap-4">
-        <div className="bg-accent flex size-12 shrink-0 items-center justify-center rounded-full text-accent-foreground">
-          <RiInformationLine className="size-6" />
-        </div>
+        <AppIcon className="size-16" />
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="text-xl font-semibold">TodeX Desktop</h2>

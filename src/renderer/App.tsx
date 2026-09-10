@@ -9,6 +9,7 @@ import { ConversationHeaderDetails } from './components/ConversationHeaderDetail
 import { GitActionsModal } from './components/GitActionsModal';
 import { DesktopAlertHost } from './components/DesktopAlertHost';
 import { AppSidebar } from './components/AppSidebar';
+import { AppIcon } from './components/AppIcon';
 import { ChatPanel } from './screens/ChatPanel';
 import { SettingsPanel } from './screens/SettingsPanel';
 import { AsidePanel } from './screens/AsidePanel';
@@ -214,9 +215,7 @@ export function App() {
         </AppLayout>
       ) : (
         <div className="flex h-full flex-col items-center justify-center gap-3">
-          <div className="bg-accent flex size-10 items-center justify-center rounded-lg">
-            <span className="text-accent-foreground text-lg font-semibold">T</span>
-          </div>
+          <AppIcon className="size-16" />
           <p className="text-lg font-semibold">TodeX</p>
           <p className="text-muted text-sm">正在加载设置和工作区...</p>
         </div>

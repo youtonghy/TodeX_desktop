@@ -3,10 +3,18 @@ productName: TodeX
 
 directories:
   output: release
+  buildResources: build
 
 files:
   - out/**/*
   - package.json
+
+extraResources:
+  - from: build
+    to: icons
+    filter:
+      - icon.png
+      - icon.ico
 
 asar: true
 
@@ -17,6 +25,7 @@ publish:
   releaseType: release
 
 mac:
+  icon: build/icon.icns
   target:
     - target: dmg
       arch:
@@ -27,6 +36,7 @@ mac:
   artifactName: TodeX-v${version}-macos-${arch}.${ext}
 
 win:
+  icon: build/icon.ico
   target:
     - target: nsis
       arch:
@@ -39,6 +49,7 @@ nsis:
   allowToChangeInstallationDirectory: true
 
 linux:
+  icon: build/icons
   category: Development
   target:
     - target: AppImage

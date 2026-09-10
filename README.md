@@ -1,6 +1,14 @@
 # TodeX Desktop
 
 <p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="src/renderer/assets/brand/t-icon-dark-beige.png" />
+    <source media="(prefers-color-scheme: light)" srcset="src/renderer/assets/brand/t-icon-light.png" />
+    <img src="src/renderer/assets/brand/t-icon-dark-beige.png" alt="TodeX" width="160" height="160" />
+  </picture>
+</p>
+
+<p align="center">
   <strong>Native macOS desktop client for <code>todex-agentd</code> built with Electron, React 19, and HeroUI Pro.</strong>
 </p>
 
@@ -217,3 +225,7 @@ The Settings screen in TodeX Desktop provides clear diagnostic feedback:
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## App icons
+
+Desktop and Web share the same T artwork, with light and dark variants for the interface and documentation. See [app icon assets](docs/app-icons.md) for previews, file roles, and update instructions.

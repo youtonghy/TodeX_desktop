@@ -165,6 +165,13 @@ function initializeDebugLogging(): void {
   }
 }
 
+function appIconPath(): string {
+  const fileName = process.platform === 'win32' ? 'icon.ico' : 'icon.png';
+  return app.isPackaged
+    ? join(process.resourcesPath, 'icons', fileName)
+    : join(__dirname, '../../build', fileName);
+}
+
 function createWindow(): BrowserWindow {
   const window = new BrowserWindow({
     width: 1280,
@@ -172,6 +179,7 @@ function createWindow(): BrowserWindow {
     minWidth: 960,
     minHeight: 640,
     title: 'TodeX',
+    icon: appIconPath(),
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#12151c' : '#f4f7f8',
     webPreferences: {
       preload: join(__dirname, '../preload/index.cjs'),
@@ -327,6 +335,9 @@ initializeDebugLogging();
 
 app.whenReady().then(() => {
   debugLog('info', 'app.ready', { readyAt: new Date().toISOString() });
+  if (process.platform === 'darwin') {
+    app.dock?.setIcon(appIconPath());
+  }
   try {
     assertElectronBinary();
   } catch (error) {

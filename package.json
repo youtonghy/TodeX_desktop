@@ -7,6 +7,7 @@
   "main": "./out/main/index.js",
   "type": "module",
   "scripts": {
+    "icons:generate": "node ./scripts/generate-app-icons.mjs",
     "check:electron": "node ./scripts/check-electron.mjs",
     "predev": "node ./scripts/check-electron.mjs",
     "dev": "electron-vite dev",

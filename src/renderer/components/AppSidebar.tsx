@@ -6,6 +6,7 @@ import { ContextMenu as HeroContextMenu, ChatListView, Sidebar, useSidebar } fro
 import { useSidebarPins } from '../session/useSidebarPins';
 import { backendLabelColor } from '../session/backendColors';
 import { ProviderIcon } from './ProviderIcon';
+import { AppIcon } from './AppIcon';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { conversationDisplayTitle, isConversationHighlighted, workspaceDisplayName } from '../session/helpers';
 
@@ -220,7 +221,7 @@ export function AppSidebar({
             className="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left hover:bg-surface-secondary active:bg-surface-secondary/70 transition-colors cursor-pointer select-none outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
           >
             <Badge.Anchor className="shrink-0">
-              <div className="bg-accent size-8 rounded-full" aria-hidden="true" />
+              <AppIcon />
               <Badge color={healthColor} placement="bottom-right" size="sm" aria-label={session.connectionState === 'open' ? '后端已连接' : '后端未连接'} />
             </Badge.Anchor>
             <span className="flex min-w-0 flex-1 items-center gap-1.5" data-sidebar="label">

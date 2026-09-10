@@ -1,5 +1,13 @@
 # TodeX 桌面端 (`TodeX_desktop`)
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="src/renderer/assets/brand/t-icon-dark-beige.png" />
+    <source media="(prefers-color-scheme: light)" srcset="src/renderer/assets/brand/t-icon-light.png" />
+    <img src="src/renderer/assets/brand/t-icon-dark-beige.png" alt="TodeX" width="160" height="160" />
+  </picture>
+</p>
+
 正式打包版本支持 GitHub Release 自动更新，详见[自动更新与发布配置](docs/automatic-updates.md)。
 
 <p align="center">
@@ -212,3 +220,7 @@ SmartScreen 或 Gatekeeper。由于桌面端直接共享移动端协议源码，
 ## 开源协议
 
 本项目采用 MIT 许可证 - 详情参见 [LICENSE](LICENSE) 文件。
+
+## 应用图标
+
+桌面端与 Web 端使用同一套 T 图标，界面和文档按明暗主题展示。图标预览、文件用途与更新步骤见[图标资源说明](docs/app-icons.md)。
