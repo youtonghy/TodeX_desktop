@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, useState } from 'react';
 import { Button, Spinner } from '@heroui/react';
 import { beginDevicePairing, type DevicePairingRequest } from '../session/devicePairing';
 import type { TodeXSession } from '../session/useTodeXSession';
+import { useNoticeToast } from './NoticeToast';
 
 type Props = { session: TodeXSession; deviceName: string };
 type Phase = 'idle' | 'requesting' | 'pending' | 'approved' | 'rejected' | 'expired' | 'cancelled' | 'error';
@@ -121,6 +122,20 @@ export function DevicePairingPanel({ session, deviceName }: Props) {
 
   const waiting = phase === 'requesting' || phase === 'pending';
   const missingPublicKey = profile?.encryptionProtocol !== 'none' && !profile?.encryptionPublicKey?.trim();
+  const noticeScope = `${profile?.id}:${profile?.serverUrl}:${session.settings.serverUrl}`;
+  const phaseMessage = phase === 'approved' ? '已批准，可连接。连接凭据已保存到此后端。'
+    : phase === 'rejected' ? '后端已拒绝申请。请与后端管理员核对后重新申请。'
+    : phase === 'expired' ? '申请已过期，请重新申请设备验证。'
+    : phase === 'cancelled' ? '已取消本次设备验证。'
+    : phase === 'error' ? error : null;
+  useNoticeToast(phaseMessage, {
+    variant: phase === 'approved' ? 'success' : phase === 'error' ? 'danger' : phase === 'cancelled' ? 'info' : 'warning',
+    scope: noticeScope,
+  });
+  useNoticeToast(missingPublicKey ? '已启用传输加密，但缺少加密公钥。' : null, {
+    description: '设备验证只保存连接凭据；仍需通过下方二维码或粘贴配对内容导入公钥，再使用“连接”按钮。',
+    scope: noticeScope,
+  });
   return (
     <section aria-label="设备验证" className="border-separator flex flex-col gap-3 rounded-xl border p-4">
       <div>
@@ -135,14 +150,6 @@ export function DevicePairingPanel({ session, deviceName }: Props) {
           <p className="text-muted text-xs">剩余 {remaining} 秒</p>
         </div>
       ) : null}
-      <div aria-live="polite" className="text-sm">
-        {phase === 'approved' ? <p className="text-success">已批准，可连接。连接凭据已保存到此后端。</p> : null}
-        {phase === 'rejected' ? <p className="text-warning">后端已拒绝申请。请与后端管理员核对后重新申请。</p> : null}
-        {phase === 'expired' ? <p className="text-warning">申请已过期，请重新申请设备验证。</p> : null}
-        {phase === 'cancelled' ? <p className="text-muted">已取消本次设备验证。</p> : null}
-        {phase === 'error' ? <p className="text-danger" role="alert">{error}</p> : null}
-      </div>
-      {missingPublicKey ? <p className="text-warning text-xs">已启用传输加密，但缺少加密公钥。设备验证只保存连接凭据；仍需通过下方二维码或粘贴配对内容导入公钥，再使用“连接”按钮。</p> : null}
       <div className="flex gap-2">
         {phase !== 'pending' ? <Button size="sm" variant="secondary" isPending={phase === 'requesting'} isDisabled={!profile?.serverUrl.trim()} onPress={() => { void start(); }}>
           {({ isPending }) => <>{isPending ? <Spinner size="sm" color="current" /> : null}{isPending ? '正在申请' : phase === 'idle' ? '设备验证' : '重新申请'}</>}

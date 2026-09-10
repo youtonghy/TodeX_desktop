@@ -1,8 +1,9 @@
 import { ConversationControls } from '../components/ConversationControls';
+import { NoticeToast } from '../components/NoticeToast';
 import { RiAttachment2, RiBarChartBoxLine, RiClipboardLine, RiCpuLine, RiGitBranchLine, RiListCheck2, RiShieldLine, RiStopCircleLine } from '@remixicon/react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
-import { Alert, Button, Label, ListBox, Popover, ScrollShadow, Select, Tooltip, toast } from '@heroui/react';
+import { Button, Label, ListBox, Popover, ScrollShadow, Select, Tooltip, toast } from '@heroui/react';
 import { ChainOfThought, ChatAttachment, ChatAttachmentGroup, ChatAttachmentInput, ChatMessage, HoverCard, PromptInput } from '@heroui-pro/react';
 import { ChatMessageActions } from '@heroui-pro/react/chat-message-actions';
 import { ChatTool } from '@heroui-pro/react/chat-tool';
@@ -226,13 +227,6 @@ export function ChatPanel({ session }: Props) {
   const [expandedProcessIds, setExpandedProcessIds] = useState<Set<string>>(() => new Set());
   const [isDraggingAttachment, setIsDraggingAttachment] = useState(false);
   const isComposingRef = useRef(false);
-  const lastToastErrorRef = useRef('');
-  useEffect(() => {
-    if (session.lastError && session.lastError !== lastToastErrorRef.current) {
-      lastToastErrorRef.current = session.lastError;
-      toast.danger(session.lastError);
-    }
-  }, [session.lastError]);
   useEffect(() => {
     let active = true;
     if (!mention || !workspace) {
@@ -609,7 +603,11 @@ export function ChatPanel({ session }: Props) {
               ))}
             </div>
           ) : null}
-          {!currentPermission && agentProvider !== 'pi' ? <p className="text-muted mb-2 text-xs">{permissionHint}</p> : null}
+          <NoticeToast
+            message={!currentPermission && agentProvider !== 'pi' && session.connectionState === 'open'
+              && session.v2Providers.some(provider => provider.id === agentProvider) ? permissionHint : null}
+            scope={conversation.id}
+          />
           <ConversationRunStatus
             isRecovering={session.recoveringConversations[conversation.id] === true}
             isConnected={session.connectionState === 'open'}
@@ -620,6 +618,7 @@ export function ChatPanel({ session }: Props) {
           />
           {conversation.v2ConversationId ? <ConversationControls
             runtime={runtime}
+            reportedError={session.lastError}
             running={thinking}
             canConfigure={providerDescriptor?.capabilities.liveConfiguration === true}
             canSteer={providerDescriptor?.capabilities.steering === true}
@@ -641,15 +640,8 @@ export function ChatPanel({ session }: Props) {
             onRemoveLocal={itemId => session.removeQueuedFollowUp(conversation.id, itemId)}
             onResumeLocal={() => { void session.resumeQueuedFollowUps(conversation.id); }}
           /> : null}
-          {hasBlockedImageAttachment ? (
-            <Alert status="warning" className="mb-2">
-              <Alert.Indicator />
-              <Alert.Content>
-                <Alert.Title>当前无法发送图片</Alert.Title>
-                <Alert.Description>{imageInputSupport.reason}</Alert.Description>
-              </Alert.Content>
-            </Alert>
-          ) : null}
+          <NoticeToast message={hasBlockedImageAttachment ? '当前无法发送图片' : null}
+            description={imageInputSupport.reason} scope={conversation.id} />
           <ChatAttachmentInput
             accept={attachmentAccept}
             disabled={executionUnknown || attachments.length >= MAX_COMPOSER_ATTACHMENTS}

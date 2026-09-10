@@ -1,8 +1,10 @@
-import { Alert, Button } from '@heroui/react';
+import { Button } from '@heroui/react';
+import { useNoticeToast } from './NoticeToast';
 import type { ConversationRuntime } from '@todex/protocol/conversationRuntime';
 
 type Props = {
   runtime?: ConversationRuntime;
+  reportedError?: string;
   running: boolean;
   canConfigure: boolean;
   canSteer: boolean;
@@ -23,9 +25,14 @@ type Props = {
   onResumeLocal: () => void;
 };
 
-export function ConversationControls({ runtime, running, canConfigure, canSteer, canUseNativeQueue,
+export function ConversationControls({ runtime, reportedError, running, canConfigure, canSteer, canUseNativeQueue,
   piQueue, controlStatus, nextModel, nextEffort, canSendText, localQueue, localPaused,
   onApply, onSteer, onRecover, onRemoveNative, onClearNative, onRemoveLocal, onResumeLocal }: Props) {
+  useNoticeToast(controlStatus === 'unknown' ? '控制请求待确认'
+    : runtime?.configurationError && runtime.configurationError !== reportedError ? '配置未应用' : null, {
+    description: controlStatus === 'unknown' ? '请求可能已送达。核对记录后再继续，避免重复纠偏或排队。' : runtime?.configurationError,
+    scope: runtime?.conversationId,
+  });
   const effective = runtime?.effectiveConfig;
   const nativeItems = runtime?.queueItems.filter(item => ['queued', 'pending', 'delivering', 'unknown'].includes(item.status)) ?? [];
   const disabled = Boolean(controlStatus);
@@ -37,7 +44,7 @@ export function ConversationControls({ runtime, running, canConfigure, canSteer,
   const showApply = running && canConfigure && Boolean(nextModel) && (!model || selectionChanged);
   const showSteer = running && canSteer && canSendText;
   const showConfiguration = running && (selectionChanged || runtime?.configurationStatus === 'pending' || showApply || showSteer);
-  if (!showConfiguration && !runtime?.configurationError && controlStatus !== 'unknown'
+  if (!showConfiguration && controlStatus !== 'unknown'
     && !nativeItems.length && !localQueue.length) return null;
   return <div className="mb-2 space-y-2">
     {showConfiguration ? <div className="text-muted flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
@@ -51,13 +58,7 @@ export function ConversationControls({ runtime, running, canConfigure, canSteer,
     {showApply || showSteer ? <p className="text-muted text-xs">
       {showSteer ? '纠偏使用输入框中的文字。' : ''}{showApply ? '配置对后续步骤生效。' : ''}
     </p> : null}
-    {runtime?.configurationError || controlStatus === 'unknown' ? <Alert status="warning">
-      <Alert.Indicator /><Alert.Content>
-        <Alert.Title>{controlStatus === 'unknown' ? '控制请求待确认' : '配置未应用'}</Alert.Title>
-        <Alert.Description>{controlStatus === 'unknown' ? '请求可能已送达。核对记录后再继续，避免重复纠偏或排队。' : runtime?.configurationError}</Alert.Description>
-        {controlStatus === 'unknown' ? <Button size="sm" variant="secondary" onPress={onRecover}>核对记录</Button> : null}
-      </Alert.Content>
-    </Alert> : null}
+    {controlStatus === 'unknown' ? <Button size="sm" variant="secondary" onPress={onRecover}>核对记录</Button> : null}
     {nativeItems.length > 0 ? <div className="border-border rounded-lg border p-2 text-xs">
       <div className="mb-1 flex items-center justify-between gap-2">
         <span>Agent 队列 · {nativeItems.length}{runtime?.queuePaused ? ' · 已暂停，请核对' : ''}</span>

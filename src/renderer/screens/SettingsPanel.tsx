@@ -10,7 +10,6 @@ import { DevicePairingPanel } from '../components/DevicePairingPanel';
 import { pairingConnectionPatch } from '../session/pairingImport';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { connectionStateLabel, healthLabelOf, settingsFromProfile } from '../session/helpers';
-import { connectionFailureLabel } from '@todex/protocol/connectionError';
 
 type Props = {
   session: TodeXSession;
@@ -32,11 +31,10 @@ async function decodeQrFromFile(file: File): Promise<string | null> {
 }
 
 export function SettingsPanel({ session }: Props) {
-  const { settings, setSettings, backendConnections, activeBackendConnectionId, setActiveBackendConnectionId, updateBackendConnection, addBackendConnection, removeBackendConnection, connectionState, connectionHealth, serverVersion, lastError, connect, closeSocket } = session;
+  const { settings, setSettings, backendConnections, activeBackendConnectionId, setActiveBackendConnectionId, updateBackendConnection, addBackendConnection, removeBackendConnection, connectionState, connectionHealth, serverVersion, connect, closeSocket } = session;
   const [pairingText, setPairingText] = useState('');
   const [chunks, setChunks] = useState<Map<number, PairingQrChunk>>(new Map());
   const connected = connectionState === 'open' || connectionState === 'connecting';
-  const classified = connectionFailureLabel(connectionHealth.code);
   const activeProfile = backendConnections.find((item) => item.id === activeBackendConnectionId);
   const latestSession = useRef(session);
   latestSession.current = session;
@@ -100,8 +98,6 @@ export function SettingsPanel({ session }: Props) {
       <div>
         <h2 className="text-xl font-semibold">连接</h2>
         <p className="text-muted mt-1 text-sm">{healthLabelOf(connectionHealth)} · {connectionStateLabel(connectionState)}</p>
-        {classified ? <p className="text-danger mt-1 text-sm">{classified}</p> : null}
-        {lastError && lastError !== connectionHealth.error ? <p className="text-danger mt-1 text-sm">{lastError}</p> : null}
         {serverVersion ? (
           <Chip className="mt-2" variant="soft">{serverVersion.name} {serverVersion.version}{settings.tenantId ? ` · ${settings.tenantId}` : ''}</Chip>
         ) : null}

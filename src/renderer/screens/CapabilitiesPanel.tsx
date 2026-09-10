@@ -4,6 +4,7 @@ import { RiArrowDownSLine, RiFlashlightLine, RiGitlabLine, RiRefreshLine } from 
 import type { McpCatalog, McpServerCatalogDescriptor, ProviderDescriptor, ProviderKind, SkillCatalog, SkillCatalogDescriptor } from '@todex/protocol/v2';
 import { providerDisplayName } from '@todex/protocol/v2';
 import { ProviderIcon } from '../components/ProviderIcon';
+import { useNoticeToast } from '../components/NoticeToast';
 import type { SelectedSkillAttachment } from '../session/helpers';
 
 export type CatalogState = {
@@ -56,6 +57,8 @@ export function CapabilitiesPanel({
     ? providerKeys.map((key) => catalogs[key]).filter(Boolean) as CatalogState[]
     : catalogs[providerChoice] ? [catalogs[providerChoice] as CatalogState] : [];
   const state = selectedCatalogs.find((item) => item.status === 'loading') ?? selectedCatalogs[0];
+  const catalogError = [...new Set(selectedCatalogs.map(item => item.error).filter(Boolean))].join('\n');
+  useNoticeToast(catalogError, { variant: 'danger', scope: `${workspacePath}:${providerChoice}` });
   const skills = useMemo(() => {
     const items = selectedCatalogs.flatMap((item) => (item.skills?.skills ?? []).map((skill) => ({
       skill,
@@ -126,7 +129,6 @@ export function CapabilitiesPanel({
           <p className="text-muted mt-2 text-xs">正在读取目录…</p>
         </div>
       ) : null}
-      {state?.error ? <p className="text-danger mt-3 text-sm">{state.error}</p> : null}
       <ScrollShadow className="mt-3 min-h-0 flex-1">
         {viewMode === 'skills' && state?.status !== 'loading' ? (
           skills.length ? skills.map((item) => (

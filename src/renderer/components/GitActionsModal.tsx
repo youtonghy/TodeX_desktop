@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Alert, Button, Checkbox, Input, Label, Modal, Spinner, TextArea, TextField, toast } from '@heroui/react';
+import { Button, Checkbox, Input, Label, Modal, Spinner, TextArea, TextField, toast } from '@heroui/react';
 import { Command } from '@heroui-pro/react/command';
 import { RiArrowRightLine, RiCloseLine, RiGitBranchLine, RiGitCommitLine, RiGitMergeLine,
   RiGitPullRequestLine, RiGithubLine, RiSearchLine, RiStackLine, RiUploadCloud2Line } from '@remixicon/react';
@@ -8,6 +8,7 @@ import type { TodeXSession } from '../session/useTodeXSession';
 import { buildGitAgentPrompt, buildGitFailurePrompt, gitAgentActionGroups, type GitAgentActionId } from '../session/gitAgentActions';
 import { GitWorkspaceError, readGitWorkspace, runGitWorkspaceOperation, type GitWorkspaceOperation, type GitWorkspaceSnapshot } from '../lib/gitWorkspace';
 import { ProviderIcon } from './ProviderIcon';
+import { useNoticeToast } from './NoticeToast';
 
 type Props = { session: TodeXSession; isOpen: boolean; onOpenChange: (open: boolean) => void };
 const groupIcons = { repository: RiGitCommitLine, branches: RiGitBranchLine, worktrees: RiStackLine,
@@ -104,10 +105,16 @@ export function GitActionsModal({ session, isOpen, onOpenChange }: Props) {
     if (id === 'init' || id === 'push') void direct(id, { action: id });
     else void direct(id);
   };
-  const errorPanel = error ? <Alert status="warning"><Alert.Content>
-    <Alert.Description>{failure?.unknown ? '操作结果未知，请先核对实际状态。' : ''}{error}</Alert.Description>
-    {failure ? <Button size="sm" variant="secondary" className="mt-2" isDisabled={unavailable || Boolean(sending)} onPress={() => void send(failure.id, true)}>交给 Agent 处理</Button> : null}
-  </Alert.Content></Alert> : null;
+  const noticeScope = `${conversation?.id}:${session.activeBackendConnectionId}:${session.settings?.serverUrl}`;
+  useNoticeToast(isOpen && error ? error : null, {
+    variant: failure?.unknown ? 'warning' : 'danger',
+    description: failure?.unknown ? '操作结果未知，请先核对实际状态。' : undefined,
+    scope: noticeScope,
+  });
+  useNoticeToast(isOpen && view && !error && failure?.unknown ? '创建结果未知，请交给 Agent 核对 PR 后再操作。' : null, { scope: noticeScope });
+  useNoticeToast(isOpen && view && snapshot && !snapshot.initialized ? '当前目录尚未初始化为 Git 仓库，请返回菜单选择初始化仓库。' : null, { scope: noticeScope });
+  useNoticeToast(isOpen && view && writingBlocked ? '当前对话正在运行或等待确认，暂时不能修改 Git 状态。' : null, { scope: noticeScope });
+  useNoticeToast(isOpen && !view && unknown ? '请先在对话中核对上一条消息的发送状态。' : null, { scope: noticeScope });
   const title = allActions.find(action => action.id === view)?.title || 'Git 操作';
   const isBranchForm = view === 'create-branch' || view === 'create-worktree';
   if (view) return <Modal>
@@ -116,12 +123,9 @@ export function GitActionsModal({ session, isOpen, onOpenChange }: Props) {
         <Modal.Header><Modal.Heading>{title}</Modal.Heading><p className="text-muted break-all text-xs">{workspace?.path}</p></Modal.Header>
         <Modal.Body className="space-y-4 overflow-y-auto">
           <p className="text-muted text-xs">由工作区后端直接执行 Git{snapshot ? ` · ${snapshot.currentBranch || '未提交或分离 HEAD'}${snapshot.dirty ? ' · 有未提交更改' : ''}` : ''}</p>
-          {errorPanel}
-          {!error && failure?.unknown ? <Alert status="warning"><Alert.Content><Alert.Description>创建结果未知，请交给 Agent 核对 PR 后再操作。</Alert.Description><Button size="sm" variant="secondary" isDisabled={unavailable || Boolean(sending)} onPress={() => void send(failure.id, true)}>交给 Agent 处理</Button></Alert.Content></Alert> : null}
-          {snapshot && !snapshot.initialized ? <p className="text-warning text-sm">当前目录尚未初始化为 Git 仓库，请返回菜单选择初始化仓库。</p> : null}
+          {failure ? <Button size="sm" variant="secondary" isDisabled={unavailable || Boolean(sending)} onPress={() => void send(failure.id, true)}>交给 Agent 处理</Button> : null}
           {sending ? <div role="status" className="flex items-center gap-2"><Spinner size="sm" />处理中…</div> : null}
           {output ? <pre role="status" className="whitespace-pre-wrap break-all rounded-xl bg-default p-3 text-xs">{output}</pre> : null}
-          {writingBlocked ? <p className="text-warning text-sm">当前对话正在运行或等待确认，暂时不能修改 Git 状态。</p> : null}
           {view === 'create-pr' ? <form className="space-y-3" onSubmit={event => {
             event.preventDefault();
             if (!prTitle.trim() || !prBase.trim() || !prRepository.trim() || output) return;
@@ -188,8 +192,6 @@ export function GitActionsModal({ session, isOpen, onOpenChange }: Props) {
             <ProviderIcon provider={provider} className="size-4" />
             <span className="truncate">{conversation ? `需推理的操作发送到 ${providerDisplayName(provider)} · ${conversation.title}` : '请先选择一个 Agent 对话'}</span>
           </div>
-          {unknown ? <p role="status" className="text-warning px-5 pb-3 text-sm">请先在对话中核对上一条消息的发送状态。</p> : null}
-          {error ? <Alert status="warning" className="mx-4 mb-2"><Alert.Content><Alert.Description>{error}</Alert.Description></Alert.Content></Alert> : null}
           <Command.InputGroup aria-label="搜索 Git 操作" className="mx-3">
             <Command.InputGroup.Prefix><RiSearchLine className="size-4" /></Command.InputGroup.Prefix>
             <Command.InputGroup.Input placeholder="搜索分支、工作树、PR…" />

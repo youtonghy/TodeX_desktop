@@ -9,6 +9,7 @@ import {
   type ManagedCliProvider,
 } from '@todex/protocol/v2';
 import { ProviderIcon } from '../components/ProviderIcon';
+import { NoticeToast } from '../components/NoticeToast';
 import type { TodeXSession } from '../session/useTodeXSession';
 
 const STATUS: Record<CliVersionStatus, { label: string; color: 'success' | 'warning' | 'default' | 'danger' }> = {
@@ -144,7 +145,8 @@ export function CliManagerPanel({ session }: { session: TodeXSession }) {
                       <dt className="text-muted">当前版本</dt><dd className="truncate font-medium tabular-nums">{cli.currentVersion || '不可用'}</dd>
                       <dt className="text-muted">最新版本</dt><dd className="truncate font-medium tabular-nums">{cli.latestVersion || '未获取'}</dd>
                     </dl>
-                    {cli.error ? <p className="text-danger mt-2 line-clamp-2 text-xs" title={cli.error}>{cli.error}</p> : null}
+                    <NoticeToast message={cli.error && cli.error !== operation?.error ? `${cli.name}：${cli.error}` : null}
+                      variant="danger" scope={session.activeBackendConnectionId} />
                   </div>
                 </div>
                 {cli.kind === 'managed' ? (

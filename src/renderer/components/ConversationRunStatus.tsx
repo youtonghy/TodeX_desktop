@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, type ComponentProps } from 'react';
-import { Alert, toast, Button, Description, Form, Input, Label, Link, TextArea, TextField } from '@heroui/react';
+import { toast, Button, Description, Form, Input, Label, Link, TextArea, TextField } from '@heroui/react';
 import { NativeSelect } from '@heroui-pro/react/native-select';
 import { PromptInput } from '@heroui-pro/react/prompt-input';
 import { usageTotalTokens, type ConversationRuntime } from '@todex/protocol/conversationRuntime';
@@ -7,6 +7,7 @@ import type { ContextCompactionState } from '@todex/protocol/v2';
 import { permissionActions, type PendingRequest, type PermissionOption } from '@todex/protocol/todex';
 import type { UsageRecord } from '@todex/protocol/mobileParity';
 import { hasActiveConversationWork } from './conversationProgress';
+import { useNoticeToast } from './NoticeToast';
 
 type SubmissionStatus = 'sending' | 'running' | 'unknown' | undefined;
 type Props = {
@@ -21,7 +22,6 @@ type Props = {
 export function ConversationRunStatus({ submissionStatus, runtime, compaction, onRecover, isRecovering = false, isConnected = true }: Props) {
   const progressToastRef = useRef<string | null>(null);
   const [recovering, setRecovering] = useState(false);
-  const [recoveryError, setRecoveryError] = useState('');
   const unknown = submissionStatus === 'unknown';
   const running = runtime?.status === 'running';
   const activeWork = runtime ? hasActiveConversationWork(runtime, compaction) : false;
@@ -48,30 +48,28 @@ export function ConversationRunStatus({ submissionStatus, runtime, compaction, o
       }
     };
   }, [observeQuiet, runtime?.conversationId, runtime?.activeTurnId, runtime?.lastProgressAt]);
-  const compactionLabel = compaction?.status === 'running' ? '正在压缩上下文'
-    : compaction?.status === 'failed' ? `上下文压缩失败${compaction.error ? `：${compaction.error}` : ''}`
-      : compaction?.status === 'completed' ? '上下文压缩完成'
-        : compaction?.recommended ? '建议压缩上下文' : '';
+  useNoticeToast(unknown ? '执行状态待确认' : null, {
+    description: '尚未确认这次提交的执行结果。核对记录后再发送，避免重复执行。',
+    scope: runtime?.conversationId,
+  });
+  useNoticeToast(compaction?.status === 'failed' ? '上下文压缩失败'
+    : compaction?.status === 'completed' ? '上下文压缩完成'
+      : compaction?.recommended && compaction.status !== 'running' ? '建议压缩上下文' : null, {
+    variant: compaction?.status === 'failed' ? 'danger' : compaction?.status === 'completed' ? 'success' : 'info',
+    description: compaction?.status === 'failed' ? compaction.error : undefined,
+    scope: runtime?.conversationId,
+  });
   const recover = async () => {
+    if (recovering) return;
     setRecovering(true);
-    setRecoveryError('');
     try { await onRecover(); }
-    catch (error) { setRecoveryError(error instanceof Error ? error.message : '核对失败，请重试'); }
+    catch (error) { toast.danger(error instanceof Error ? error.message : '核对失败，请重试'); }
     finally { setRecovering(false); }
   };
   return <>
-    {unknown ? <Alert status="warning" className="mb-2">
-      <Alert.Indicator />
-      <Alert.Content>
-        <Alert.Title>执行状态待确认</Alert.Title>
-        <Alert.Description>尚未确认这次提交的执行结果。核对记录后再发送，避免重复执行。</Alert.Description>
-        <Button className="mt-2" size="sm" variant="secondary" isPending={recovering} onPress={() => { void recover(); }}>核对记录</Button>
-        {recoveryError ? <p className="text-danger mt-1 text-xs" role="alert">{recoveryError}</p> : null}
-      </Alert.Content>
-    </Alert> : null}
-    {runtime && compactionLabel ? <div className="text-muted mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs" role="status">
-      {compactionLabel ? <span className={compaction?.status === 'failed' ? 'text-danger' : undefined}>{compactionLabel}</span> : null}
-    </div> : null}
+    {unknown ? <Button className="mb-2" size="sm" variant="secondary" isPending={recovering}
+      onPress={() => { void recover(); }}>核对记录</Button> : null}
+    {compaction?.status === 'running' ? <div className="text-muted mb-2 text-xs" role="status">正在压缩上下文</div> : null}
   </>;
 }
 
@@ -237,23 +235,22 @@ function permissionFormAnswer(form: PermissionForm, values: Record<string, strin
 function PermissionResponseForm({ request, form, onSelect }: { request: PendingRequest; form: PermissionForm;
   onSelect: (option: boolean | PermissionOption, data?: PermissionAnswerData) => void }) {
   const [values, setValues] = useState<Record<string, string>>({});
-  const [error, setError] = useState('');
   const inputPrefix = React.useId();
   const options = permissionActions(request);
   const submit = options.find(option => typeof option !== 'boolean' && option.kind === 'answer');
-  const update = (id: string, value: string) => { setValues(previous => ({ ...previous, [id]: value })); setError(''); };
+  const update = (id: string, value: string) => setValues(previous => ({ ...previous, [id]: value }));
+  useNoticeToast(form.unsupported ? '这项请求包含暂不支持的输入格式，请取消或让 Agent 改用简单字段。' : null);
   return <Form className="flex w-full min-w-0 flex-col gap-3 py-2" onSubmit={event => {
     event.preventDefault();
     if (!submit) return;
     const answer = permissionFormAnswer(form, values);
-    if (answer.error) { setError(answer.error); return; }
+    if (answer.error) { toast.danger(answer.error); return; }
     onSelect(submit, answer.data);
   }}>
     {form.mode === 'url' && form.url ? <div className="space-y-2 text-sm">
       <Link href={form.url} target="_blank" rel="noopener noreferrer">打开验证页面<Link.Icon /></Link>
       <p className="text-muted">在页面完成操作后，再点击“已完成，继续”。</p>
     </div> : null}
-    {form.unsupported ? <p className="text-warning text-sm" role="status">这项请求包含暂不支持的输入格式，请取消或让 Agent 改用简单字段。</p> : null}
     {form.fields.map((field, index) => {
       const value = values[field.id] ?? field.initial ?? '';
       const inputId = `${inputPrefix}-${index}`;
@@ -273,7 +270,6 @@ function PermissionResponseForm({ request, form, onSelect }: { request: PendingR
         {field.description ? <Description>{field.description}</Description> : null}
       </TextField>;
     })}
-    {error ? <p className="text-danger text-sm" role="alert">{error}</p> : null}
     <div className="flex flex-wrap gap-2">
       {submit ? <Button size="sm" type="submit" isDisabled={form.unsupported}>{form.mode === 'url' ? '已完成，继续' : '提交回答'}</Button> : null}
       {options.filter(option => typeof option === 'boolean' ? !option : option.kind.startsWith('reject') || option.kind === 'abort_turn').map(option => <Button

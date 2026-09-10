@@ -8,6 +8,7 @@ import { useTodeXSession, type TodeXSession } from './session/useTodeXSession';
 import { ConversationHeaderDetails } from './components/ConversationHeaderDetails';
 import { GitActionsModal } from './components/GitActionsModal';
 import { DesktopAlertHost } from './components/DesktopAlertHost';
+import { SessionNoticeToasts } from './components/SessionNoticeToasts';
 import { AppSidebar } from './components/AppSidebar';
 import { AppIcon } from './components/AppIcon';
 import { ChatPanel } from './screens/ChatPanel';
@@ -135,6 +136,8 @@ export function App() {
   return (
     <div className="bg-background text-foreground h-full">
       <Toast.Provider placement="top" />
+      <SessionNoticeToasts lastError={session.lastError} health={session.connectionHealth}
+        scope={`${session.activeBackendConnectionId}:${session.settings.serverUrl}`} />
       <DesktopAlertHost />
       {session.hydrated ? (
         <AppLayout

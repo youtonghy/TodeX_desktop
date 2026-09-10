@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { RiCloseLine, RiTerminalBoxLine, RiGitBranchLine, RiAddLine, RiArrowLeftDoubleLine, RiArrowRightDoubleLine, RiFileTextLine, RiFolder3Line, RiGlobalLine, RiFocus3Line, RiRefreshLine, RiStopCircleLine } from '@remixicon/react';
-import { Button, Chip, Dropdown, Input, Popover, ScrollShadow, Spinner, TextField, Tooltip } from '@heroui/react';
+import { Button, Chip, Dropdown, Input, Popover, ScrollShadow, Spinner, TextField, Tooltip, toast } from '@heroui/react';
 import type { Selection } from '@heroui/react';
 import { FileTree } from '@heroui-pro/react';
 import { Resizable } from '@heroui-pro/react/resizable';
 import type { PanelImperativeHandle } from '@heroui-pro/react/resizable';
 import { WorkspaceFilePreview, type PreviewFile } from '../components/WorkspaceFilePreview';
+import { useNoticeToast } from '../components/NoticeToast';
 import { XtermTerminal } from '../components/XtermTerminal';
 import type { TodeXSession } from '../session/useTodeXSession';
 import {
@@ -462,6 +463,7 @@ function BrowserPane({ workspacePath, session, target, onTargetChange }: { works
   const frameRef = useRef<HTMLIFrameElement>(null);
   const selectedRef = useRef<HTMLElement | null>(null);
   const selectionAnchorRef = useRef<HTMLElement | null>(null);
+  useNoticeToast(error, { variant: 'danger', scope: workspacePath });
 
   const navigateTo = useCallback((input: string) => {
     const trimmed = input.trim();
@@ -477,7 +479,7 @@ function BrowserPane({ workspacePath, session, target, onTargetChange }: { works
       setSrcDoc('');
       setError('');
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '请输入有效的网址');
+      toast.danger(reason instanceof Error ? reason.message : '请输入有效的网址');
     }
   }, []);
 
@@ -628,7 +630,7 @@ function BrowserPane({ workspacePath, session, target, onTargetChange }: { works
           hoverOverlay.remove();
           selectedOverlay.remove();
         };
-      } catch { setError('该页面禁止读取元素，无法使用检查功能'); }
+      } catch { toast.danger('该页面禁止读取元素，无法使用检查功能'); }
       return undefined;
     };
     let cleanup = bind();
@@ -695,7 +697,6 @@ function BrowserPane({ workspacePath, session, target, onTargetChange }: { works
           </Button>
         </div>
       </div>
-      {error ? <p className="text-danger mb-2 text-xs">{error}</p> : null}
       {url || srcDoc ? (
         <div className="bg-surface min-h-0 flex-1 overflow-hidden rounded-xl border border-separator">
           <iframe ref={frameRef} title="网页预览" src={url || undefined} srcDoc={srcDoc || undefined} className="size-full border-0" sandbox="allow-forms allow-modals allow-popups allow-same-origin allow-scripts" />
@@ -719,6 +720,7 @@ function GitDiffPane({ session }: { session: TodeXSession }) {
   const state = conversation ? session.gitDiffByConversation[conversation.id] : undefined;
   const workspacePath = session.activeWorkspace?.path || '';
   const [pathDraft, setPathDraft] = useState(workspacePath);
+  useNoticeToast(state?.error !== session.lastError ? state?.error : null, { variant: 'danger', scope: conversation?.id });
 
   useEffect(() => {
     setPathDraft(workspacePath);
@@ -761,7 +763,7 @@ function GitDiffPane({ session }: { session: TodeXSession }) {
         </div>
       </div>
       <ScrollShadow className="bg-surface-secondary min-h-0 flex-1 rounded-xl p-3">
-        {state?.error ? <p className="text-danger text-xs">{state.error}</p> : <pre className="font-mono text-xs whitespace-pre-wrap">{state?.diff || '暂无 diff。'}</pre>}
+        {state?.error ? null : <pre className="font-mono text-xs whitespace-pre-wrap">{state?.diff || '暂无 diff。'}</pre>}
       </ScrollShadow>
     </div>
   );
@@ -811,6 +813,7 @@ function FilesPane({ session, target, onTargetChange }: { session: TodeXSession;
   const defaultPath = session.activeWorkspace?.path || '';
   const [currentPath, setCurrentPath] = useState(defaultPath);
   const [pathDraft, setPathDraft] = useState(defaultPath);
+  useNoticeToast(error, { variant: 'danger', scope: currentPath });
 
   useEffect(() => {
     const next = session.activeWorkspace?.path || '';
@@ -954,7 +957,6 @@ function FilesPane({ session, target, onTargetChange }: { session: TodeXSession;
           </Button>
         </div>
       </div>
-      {error ? <p className="text-danger mb-2 text-xs">{error}</p> : null}
       <Resizable autoSaveId="todex.files-pane" className="min-h-0 flex-1 gap-3" onLayoutChange={() => setTreeCollapsed(Boolean(treePanelRef.current?.isCollapsed()))}>
         <Resizable.Panel
           id="file-tree"
@@ -993,7 +995,7 @@ function FilesPane({ session, target, onTargetChange }: { session: TodeXSession;
         <Resizable.Panel defaultSize="70%" minSize="50%" className="min-h-0">
           <ScrollShadow className="bg-surface-secondary h-full min-h-0 rounded-xl p-3">
             <p className="text-muted mb-2 truncate text-xs">{selected || '选择文件预览'}</p>
-            {fileLoading ? <Spinner size="sm" aria-label="正在读取文件" /> : error ? <p className="text-danger text-xs" role="alert">{error}</p> : <WorkspaceFilePreview file={file} />}
+            {fileLoading ? <Spinner size="sm" aria-label="正在读取文件" /> : error ? null : <WorkspaceFilePreview file={file} />}
           </ScrollShadow>
         </Resizable.Panel>
       </Resizable>
