@@ -1,3 +1,8 @@
+import { toast } from '@heroui/react';
+import { PiExtensionEffects, canApplyPluginDraft } from './piExtensionEffects';
+import { commandContextKey, routePiSlashCommand, type ProviderCommandCatalog } from './providerCommands';
+import { piExtensionPlainText } from '../components/piExtensionPresentation';
+import type { ExtensionEditorRequest } from '@todex/protocol/conversationRuntime';
 import type { BackendConnectionProfile } from './backendColors';
 import { useWorkbenchSharing } from './useWorkbenchSharing';
 import { bindSentAttachmentEvents, prepareSentAttachments, projectSentAttachments, pruneSentAttachmentRecords, type SentAttachmentRecord } from './sentAttachments';
@@ -16,7 +21,7 @@ import {
   useState,
   type SetStateAction,
 } from 'react';
-import type { ProviderDescriptor, ProviderKind, ConversationManifest, PromptContentRef, PromptSkillRef, SkillCatalogDescriptor, ProviderModelDescriptor, ProviderCommandDescriptor, ContextCompactionState, SubagentRun, MemoryEntry } from '@todex/protocol/v2';
+import type { ProviderDescriptor, ProviderKind, ConversationManifest, PromptContentRef, PromptSkillRef, SkillCatalogDescriptor, ProviderModelDescriptor, ContextCompactionState, SubagentRun, MemoryEntry } from '@todex/protocol/v2';
 import { contextCompactionStatus } from '@todex/protocol/v2';
 import { V2ApiClient, buildV2WebSocketUrlWithOptions, normalizeConversationEvent } from '@todex/protocol/v2';
 import { probeBackendConnection, nextReconnectDelayMs, inspectServerUrl, tokenMatchesOrigin } from '@todex/protocol/connectionProbe';
@@ -413,7 +418,16 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const [mentionHistory, setMentionHistory] = useState<WorkspaceMentionHistory[]>([]);
   const [experimentalFeatures, setExperimentalFeatures] = useState<ExperimentalFeatureSettings>(EXPERIMENTAL_FEATURE_DEFAULTS);
   const [selectedRequestId, setSelectedRequestId] = useState('');
-  const [chatDrafts, setChatDrafts] = useState<Record<string, string>>({});
+  const [chatDrafts, setChatDraftsState] = useState<Record<string, string>>({});
+  const chatDraftsRef = useRef<Record<string, string>>({});
+  const setChatDrafts = useCallback((value: SetStateAction<Record<string, string>>) => {
+    const next = typeof value === 'function' ? value(chatDraftsRef.current) : value;
+    chatDraftsRef.current = next;
+    setChatDraftsState(next);
+  }, []);
+  const extensionEffectsRef = useRef(new PiExtensionEffects());
+  const [pendingPluginDrafts, setPendingPluginDrafts] = useState<Record<string, ExtensionEditorRequest | undefined>>({});
+  const [stoppingProviderRuntimes, setStoppingProviderRuntimes] = useState<Record<string, boolean>>({});
   const [queuedChatDrafts, setQueuedChatDrafts] = useState<Record<string, QueuedChatSubmission[]>>({});
   const [queueHydrated, setQueueHydrated] = useState(false);
   const [queuePausedByConversation, setQueuePausedByConversation] = useState<Record<string, boolean>>({});
@@ -450,7 +464,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const [providerModels, setProviderModels] = useState<Partial<Record<ProviderKind, ProviderModelDescriptor[]>>>({});
   const [providerImageInput, setProviderImageInput] = useState<Record<string, { status: 'loading' | 'ready' | 'error'; imageInput?: boolean; reason?: string }>>({});
   const [providerModelPreferences, setProviderModelPreferences] = useState<ProviderModelPreferences>({});
-  const [providerCommands, setProviderCommands] = useState<Partial<Record<ProviderKind, ProviderCommandDescriptor[]>>>({});
+  const [providerCommandCatalogs, setProviderCommandCatalogs] = useState<Record<string, ProviderCommandCatalog>>({});
+  const [commandEpochs, setCommandEpochs] = useState<Record<string, number>>({});
+  const [commandCatalogRevision, setCommandCatalogRevision] = useState(0);
+  const refreshProviderCommands = useCallback(() => setCommandCatalogRevision(value => value + 1), []);
   const [contextUsageByConversation, setContextUsageByConversation] = useState<Record<string, ConversationContextUsage>>({});
   const [compactionByConversation, setCompactionByConversation] = useState<Record<string, ContextCompactionState & { recommended?: boolean }>>({});
   const [subagentsByConversation, setSubagentsByConversation] = useState<Record<string, SubagentRun[]>>({});
@@ -1344,25 +1361,45 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     return () => { cancelled = true; };
   }, [activeBackendConnectionId, activeWorkspace?.path, hydrated, rememberProviderModelSelection, resolveRememberedProviderSelection, settings.authToken, settings.serverUrl, v2Providers]);
 
-  useEffect(() => {
-    if (!hydrated || !activeWorkspace?.path || v2Providers.length === 0) return;
-    let cancelled = false;
-    const api = new V2ApiClient({ serverUrl: settings.serverUrl, authToken: settings.authToken });
-    void Promise.all(v2Providers.filter((item) => item.available).map(async (provider) => {
-      try {
-        const result = await api.listProviderCommands(provider.id, activeWorkspace.path);
-        if (!cancelled) setProviderCommands((current) => ({ ...current, [provider.id]: result.commands }));
-      } catch {
-        // Keep the last successful command catalog while the backend recovers.
-      }
-    }));
-    return () => { cancelled = true; };
-  }, [activeWorkspace?.path, hydrated, settings.authToken, settings.serverUrl, v2Providers]);
-
   const activeConversation = useMemo(
     () => conversations.find((item) => item.id === activeConversationId) ?? null,
     [activeConversationId, conversations],
   );
+
+  const providerCommandContext = useCallback((conversationId: string) => {
+    const conversation = conversations.find(item => item.id === conversationId);
+    if (!conversation?.provider) return;
+    const workspace = workspaces.find(item => item.id === conversation.workspaceId);
+    if (!workspace) return;
+    const runtime = conversationRuntimeById[conversationId]?.providerRuntime;
+    return { backend: `${activeBackendConnectionId}:${settings.serverUrl}`, workspace: workspace.path,
+      provider: conversation.provider, conversationId: conversation.v2ConversationId,
+      runtimeId: runtime?.runtimeId, runtimeStatus: runtime?.status, commandEpoch: commandEpochs[conversationId] };
+  }, [conversations, workspaces, conversationRuntimeById, activeBackendConnectionId, settings.serverUrl, commandEpochs]);
+  const getProviderCommandCatalog = useCallback((conversationId: string) => {
+    const context = providerCommandContext(conversationId);
+    const catalog = context && providerCommandCatalogs[commandContextKey(context)];
+    return catalog || undefined;
+  }, [providerCommandContext, providerCommandCatalogs]);
+  const activeCommandContext = activeConversation && providerCommandContext(activeConversation.id);
+  const activeCommandKey = activeCommandContext ? commandContextKey(activeCommandContext) : '';
+  useEffect(() => {
+    if (!hydrated || !activeCommandKey) return;
+    const [, workspace, provider, conversationId] = JSON.parse(activeCommandKey) as string[];
+    let cancelled = false;
+    setProviderCommandCatalogs(current => ({ ...current,
+      [activeCommandKey]: { contextKey: activeCommandKey, status: 'loading', commands: [] } }));
+    const api = new V2ApiClient({ serverUrl: settings.serverUrl, authToken: settings.authToken });
+    void api.listProviderCommands(provider as ProviderKind, workspace, conversationId || undefined).then(result => {
+      if (!cancelled) setProviderCommandCatalogs(current => ({ ...current,
+        [activeCommandKey]: { contextKey: activeCommandKey, status: 'ready', commands: result.commands, source: result.catalogSource } }));
+    }).catch((error: unknown) => {
+      if (!cancelled) setProviderCommandCatalogs(current => ({ ...current,
+        [activeCommandKey]: { contextKey: activeCommandKey, status: 'error', commands: [],
+          error: error instanceof Error ? error.message : '命令目录加载失败' } }));
+    });
+    return () => { cancelled = true; };
+  }, [hydrated, activeCommandKey, commandCatalogRevision, settings.serverUrl, settings.authToken]);
 
   useEffect(() => {
     if (!hydrated || !activeConversation || !activeWorkspace?.path) return;
@@ -1416,6 +1453,26 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     if (!conversation) return;
     const localId = conversation.id;
     setConversationRuntimeById((current) => ({ ...current, [localId]: state }));
+    setPendingPluginDrafts(current => {
+      const request = current[localId];
+      return request && (request.runtimeId !== state.extensionUi.runtimeId || request.eventId !== state.extensionUi.editorRequest?.eventId || state.providerRuntime?.status === 'stopped')
+        ? { ...current, [localId]: undefined } : current;
+    });
+    for (const event of appliedEvents) {
+      const effect = extensionEffectsRef.current.consume(event, state);
+      if (effect?.kind === 'notice') {
+        const title = `${conversation.title || 'Pi 会话'} · 插件${effect.notice.level === 'error' ? '错误' : effect.notice.level === 'warning' ? '提醒' : '通知'}`;
+        const options = { description: piExtensionPlainText(effect.notice.message).slice(0, 300), timeout: 6000 };
+        if (effect.notice.level === 'error') toast.danger(title, options);
+        else if (effect.notice.level === 'warning') toast.warning(title, options);
+        else toast.info(title, options);
+      } else if (effect?.kind === 'editor') {
+        if (canApplyPluginDraft(chatDraftsRef.current[localId] ?? '')) {
+          setConversationChatDraft(localId, effect.request.text);
+          setPendingPluginDrafts(current => ({ ...current, [localId]: undefined }));
+        } else setPendingPluginDrafts(current => ({ ...current, [localId]: effect.request }));
+      }
+    }
     if (state.pendingControl) {
       controlRequestsRef.current.set(localId, state.pendingControl.requestId);
       setControlStatusByConversation(current => ({ ...current, [localId]: state.pendingControl!.status }));
@@ -1471,6 +1528,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         if (type === 'control.rejected') setLastError(typeof data.message === 'string' ? data.message : 'Agent 未应用控制请求');
       }
       if (['turn.completed', 'turn.cancelled', 'turn.failed', 'turn.interrupted'].includes(type)) {
+        // Extensions can change their catalog or native session during a turn.
+        if (conversation.provider === 'pi') setCommandEpochs(current => (current[localId] ?? 0) >= event.sequence
+          ? current : { ...current, [localId]: event.sequence });
         if (turnId) {
           settledV2TurnsRef.current.set(`${state.conversationId}:${turnId}`, type);
           if (settledV2TurnsRef.current.size > 2000) settledV2TurnsRef.current.delete(settledV2TurnsRef.current.keys().next().value!);
@@ -1511,6 +1571,11 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     legacyRecoveryRef.current = new LegacyEventRecovery<ServerEvent>();
     protocolCommandsRef.current?.dispose();
     setConversationRuntimeById({});
+    extensionEffectsRef.current.reset();
+    setPendingPluginDrafts({});
+    setProviderCommandCatalogs({});
+    setCommandEpochs({});
+    setStoppingProviderRuntimes({});
     setRecoveringConversations({});
     settledV2TurnsRef.current.clear();
   }, [settings.serverUrl, settings.authToken]);
@@ -2638,7 +2703,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         const event = normalizeConversationEvent(parsed.payload ?? parsed);
         if (!event) throw new Error('收到无效的对话事件，未推进恢复位置。');
         const conversation = conversationsRef.current.find((item) => item.v2ConversationId === event.conversationId || item.id === event.conversationId);
-        if (conversation) conversationRecoveryRef.current!.receive(event.conversationId, conversation.workspaceId, [event]);
+        if (conversation) {
+          if (parsed.delivery === 'live') extensionEffectsRef.current.markLive(event);
+          conversationRecoveryRef.current!.receive(event.conversationId, conversation.workspaceId, [event]);
+        }
         return;
       }
       enqueueServerEvent(parsed as unknown as ServerEvent);
@@ -2711,6 +2779,28 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
 
   const sendProtocolCommand = useCallback((message: ProtocolCommand, timeoutMs = 15_000) =>
     protocolCommandsRef.current!.request(message, timeoutMs), []);
+
+  const handlePluginDraft = useCallback((conversationId: string, request: ExtensionEditorRequest, replace: boolean) => {
+    const current = pendingPluginDrafts[conversationId];
+    const runtime = conversationRuntimeById[conversationId];
+    if (current?.eventId !== request.eventId || current.eventId !== runtime?.extensionUi.editorRequest?.eventId || current.runtimeId !== runtime?.extensionUi.runtimeId
+      || runtime.providerRuntime?.status === 'stopped') return;
+    if (replace) setConversationChatDraft(conversationId, current.text);
+    setPendingPluginDrafts(items => ({ ...items, [conversationId]: undefined }));
+  }, [pendingPluginDrafts, conversationRuntimeById, setConversationChatDraft]);
+
+  const stopProviderRuntime = useCallback(async (conversationId: string) => {
+    const conversation = conversationsRef.current.find(item => item.id === conversationId);
+    if (!conversation?.v2ConversationId) return;
+    setStoppingProviderRuntimes(current => ({ ...current, [conversationId]: true }));
+    try {
+      await sendProtocolCommand({ id: createRequestId('runtime-stop'), type: 'conversation.runtime.stop',
+        payload: { conversationId: conversation.v2ConversationId } });
+      await recoverConversation(conversationId);
+    } catch (error) {
+      setLastError(error instanceof Error ? error.message : '无法停止 Pi 后台运行');
+    } finally { setStoppingProviderRuntimes(current => ({ ...current, [conversationId]: false })); }
+  }, [sendProtocolCommand, recoverConversation, setLastError]);
 
   const controlConversation = useCallback(async (conversationId: string, control: LiveConversationControl): Promise<boolean> => {
     const conversation = conversationsRef.current.find(item => item.id === conversationId);
@@ -6030,7 +6120,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       }
 
       const [command, ...rest] = trimmed.slice(1).trim().split(/\s+/);
-      const lower = command.toLowerCase();
+      let lower = command.toLowerCase();
       const context = getConversationContext(conversationId);
 
       if (!context) {
@@ -6039,6 +6129,18 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       }
 
       const { workspace, conversation } = context;
+      if (conversation.provider === 'pi' && isV2Conversation(conversation)) {
+        const route = routePiSlashCommand(input, getProviderCommandCatalog(conversation.id));
+        if (route.kind === 'blocked') { toast.warning('Pi 命令', { description: route.message }); return; }
+        if (route.kind === 'native') {
+          void sendV2Prompt(route.input, conversation.id).then(accepted => {
+            if (accepted) setConversationChatDraft(conversation.id, current => current.trim() === input.trim() ? '' : current);
+          });
+          return;
+        }
+        if (route.command === 'commands') { refreshProviderCommands(); return; }
+        lower = route.command;
+      }
       if (isV2Conversation(conversation)) {
         if (lower === 'memory' || lower === 'memories') {
           openSlashCommandActionPage(workspace, conversation, '/memory');
@@ -6496,11 +6598,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         return;
       }
 
-      const dynamicCommand = conversation.provider
-        ? providerCommands[conversation.provider as ProviderKind]?.find(
-        (item) => item.name.toLowerCase() === lower && item.invocation === 'prompt',
-          )
-        : undefined;
+      const dynamicCommand = getProviderCommandCatalog(conversation.id)?.commands.find(
+        item => item.name.toLowerCase() === lower && item.invocation === 'prompt');
       if (dynamicCommand) {
         void sendV2Prompt(trimmed, conversation.id);
         return;
@@ -6555,7 +6654,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       settings,
       modelCatalog,
       openPanel,
-      providerCommands,
+      getProviderCommandCatalog,
+      refreshProviderCommands,
       sendV2Prompt,
       sendProtocolCommand,
       recoverConversation,
@@ -6757,7 +6857,11 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       }
     }
     const isThinking = thinkingConversations[conversationId] === true;
-    if (text === '/compact') {
+    if (conversation.provider === 'pi' && text.startsWith('/')) {
+      const route = routePiSlashCommand(text, getProviderCommandCatalog(conversation.id));
+      if (route.kind !== 'native') { sendSlashCommand(text, conversationId); return; }
+    }
+    if (text === '/compact' && conversation.provider !== 'pi') {
       if (isThinking || pendingV2SubmissionsRef.current.has(conversationId)) {
         setLastError('请等待当前任务结束后再压缩上下文。');
         return;
@@ -6818,7 +6922,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       return;
     }
     sendSlashCommand(text, conversationId);
-  }, [appendTimeline, chatDrafts, composerAttachments, controlConversation, getConversationContext, rememberMentionReferences, selectedSkills, sendLocalTurn, sendSlashCommand, sendV2Prompt, setConversationAttachments, setConversationChatDraft, setConversationComposerSelection, setConversationSelectedSkills, thinkingConversations]);
+  }, [appendTimeline, chatDrafts, composerAttachments, controlConversation, getConversationContext, getProviderCommandCatalog, rememberMentionReferences, selectedSkills, sendLocalTurn, sendSlashCommand, sendV2Prompt, setConversationAttachments, setConversationChatDraft, setConversationComposerSelection, setConversationSelectedSkills, thinkingConversations]);
 
   const runWorkspaceCommand = useCallback((workspace: WorkspaceRecord, conversation: ConversationRecord, command: 'start' | 'status' | 'attach' | 'stop' | 'interrupt') => {
     if (command === 'start') {
@@ -7126,7 +7230,12 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     capabilityCatalogs,
     providerModels,
     providerImageInput,
-    providerCommands,
+    getProviderCommandCatalog,
+    refreshProviderCommands,
+    pendingPluginDrafts,
+    handlePluginDraft,
+    stoppingProviderRuntimes,
+    stopProviderRuntime,
     contextUsageByConversation,
     compactionByConversation,
     subagentsByConversation,

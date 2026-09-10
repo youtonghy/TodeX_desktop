@@ -1,3 +1,5 @@
+import { PiExtensionPanel } from '../components/PiExtensionPanel';
+import { piCommandCompatibility, piTodexCommands } from '../session/providerCommands';
 import { ConversationControls } from '../components/ConversationControls';
 import { NoticeToast } from '../components/NoticeToast';
 import { RiAttachment2, RiBarChartBoxLine, RiClipboardLine, RiCpuLine, RiGitBranchLine, RiListCheck2, RiShieldLine, RiStopCircleLine } from '@remixicon/react';
@@ -271,30 +273,34 @@ export function ChatPanel({ session }: Props) {
   const currentProvider = isV2Conversation(conversation) ? conversation.provider || '' : '';
   const agentProvider = conversation.provider || (isV2Conversation(conversation) ? '' : 'codex');
   const slashTrigger = draft.trim().startsWith('/') ? draft.trim() : '';
-  const liveCommands = currentProvider ? (session.providerCommands[currentProvider as ProviderKind] ?? []) : [];
+  const commandCatalog = session.getProviderCommandCatalog(conversation.id);
+  const liveCommands = commandCatalog?.status === 'ready' ? commandCatalog.commands : [];
   const providerSlashCatalog = liveCommands.length > 0
     ? liveCommands.map((item) => ({
       command: `/${item.name}`,
       title: item.name,
-      description: item.description || `${item.source} command`,
+      description: `${item.description || `${item.source} command`}${currentProvider === 'pi' ? ` · ${piCommandCompatibility(item).label}` : ''}`,
       category: 'context' as const,
     }))
-    : SLASH_COMMANDS;
+    : currentProvider === 'pi' ? [] : SLASH_COMMANDS;
   const canCompact = !isV2Conversation(conversation)
     || session.v2Providers.find(item => item.id === currentProvider)?.capabilities.controlActions?.includes('compact') === true;
-  const slashCatalog = [
+  const slashCatalog = currentProvider === 'pi' ? [...providerSlashCatalog, ...piTodexCommands] : [
     ...(canCompact ? [{ command: '/compact', title: '压缩上下文', description: '压缩上下文，保留关键进展', category: 'thread' as const }] : []),
     ...providerSlashCatalog.filter(item => canonicalSlashCommand(item.command) !== '/compact'),
   ];
   const chooseSlashCommand = (command: string) => {
-    if (command === '/compact') {
+    if (command === '/compact' && currentProvider !== 'pi') {
       if (thinking || executionUnknown || submissionStatus === 'sending' || compaction?.status === 'running') return;
       session.sendSlashCommand(command, conversation.id);
       session.setConversationChatDraft(conversation.id, '');
     } else session.setConversationChatDraft(conversation.id, `${command} `);
   };
-  const slashSuggestions = slashTrigger
-    ? slashCatalog.filter((item) => canonicalSlashCommand(item.command).startsWith(canonicalSlashCommand(slashTrigger.split(/\s+/)[0] || slashTrigger)))
+  const selectingPiCommand = /^\/[^\s]*$/.test(draft.trimStart()) || /^\/todex [^\s]*$/.test(draft.trimStart());
+  const slashSuggestions = slashTrigger && (currentProvider !== 'pi' || selectingPiCommand)
+    ? slashCatalog.filter(item => currentProvider === 'pi'
+      ? item.command.startsWith(slashTrigger.startsWith('/todex ') ? slashTrigger : slashTrigger.split(/\s+/)[0])
+      : canonicalSlashCommand(item.command).startsWith(canonicalSlashCommand(slashTrigger.split(/\s+/)[0] || slashTrigger)))
     : [];
   const suggestionCount = slashSuggestions.length > 0 ? Math.min(12, slashSuggestions.length) : mentionSuggestions.length;
   const applySuggestion = (index: number) => {
@@ -328,6 +334,8 @@ export function ChatPanel({ session }: Props) {
   const submissionStatus = session.submissionStatusByConversation[conversation.id];
   const executionUnknown = submissionStatus === 'unknown';
   const runtime = session.conversationRuntimeById[conversation.id];
+  const sessionPermissionIds = new Set(runtime?.pendingPermissions.filter(item => item.scope === 'session').map(item => item.id));
+  const sessionPermissions = session.pendingRequests.filter(item => sessionPermissionIds.has(item.requestId));
   const compaction = session.compactionByConversation[conversation.id];
   const latestProcessGroupId = activeChatProcessId(items, runtime?.activeTurnId || session.turnIds[conversation.id]);
   const conversationTimeline = session.timeline.filter((entry) => entry.conversationId === conversation.id);
@@ -478,12 +486,12 @@ export function ChatPanel({ session }: Props) {
               const { toolName, argsText } = toolPresentation(entry.subtitle);
               return <ChatTool key={entry.id} defaultExpanded={false} state={entry.phase === 'completed' ? 'output-available' : 'input-streaming'} toolName={toolName} argsText={argsText} triggerPrefix={thinking ? '正在调用：' : '已调用：'} />;
             }
-            const request = session.pendingRequests.find((pendingItem) => pendingItem.requestId && (entry.requestId === pendingItem.requestId || entry.raw.includes(pendingItem.requestId)));
+            const request = session.pendingRequests.find((pendingItem) => !sessionPermissionIds.has(pendingItem.requestId) && pendingItem.requestId && (entry.requestId === pendingItem.requestId || entry.raw.includes(pendingItem.requestId)));
             const isUser = entry.kind === 'outgoing';
             return (
               <div key={entry.id} className={`flex gap-3 py-1 ${isUser ? 'justify-end' : 'justify-start'}`}>
                 <div className={`min-w-0 max-w-[85%] ${isUser ? 'text-right' : ''}`}>
-                  {isUser ? <p className="text-muted text-xs font-medium">You</p> : null}
+                  {isUser ? <p className="text-muted text-xs font-medium">You</p> : entry.category === 'extension' ? <p className="text-muted text-xs font-medium">Pi 插件 · {entry.title}</p> : null}
                   <div className={`${isUser ? 'mt-1' : ''} text-sm leading-6`}>
                     {isUser ? <div className="flex flex-col items-end gap-2">
                       {entry.sentAttachments?.length ? (
@@ -549,6 +557,24 @@ export function ChatPanel({ session }: Props) {
       </ScrollShadow>
       <div className="border-separator border-t px-5 py-4">
         <div className="composer-container mx-auto max-w-2xl">
+          {currentProvider === 'pi' && runtime ? <PiExtensionPanel placement="aboveEditor"
+            extensionUi={runtime.extensionUi} providerRuntime={runtime.providerRuntime}
+            pendingEditorRequest={session.pendingPluginDrafts[conversation.id]}
+            onReplaceEditor={request => session.handlePluginDraft(conversation.id, request, true)}
+            onDismissEditor={request => session.handlePluginDraft(conversation.id, request, false)}
+            onStopRuntime={providerDescriptor?.capabilities.runtimeStop ? () => { void session.stopProviderRuntime(conversation.id); } : undefined}
+            isStopping={session.stoppingProviderRuntimes[conversation.id]}
+            isConnected={session.connectionState === 'open'} /> : null}
+          {sessionPermissions.map(request => <div key={request.requestId} className="mb-3 rounded-xl border border-separator p-3">
+            <p className="mb-2 text-xs font-medium">Pi 插件请求</p>
+            <ConversationPermissionActions request={request} onSelect={(option, data) => { session.sendApprovalResponse(option, request, data); }} />
+          </div>)}
+          {currentProvider === 'pi' && slashTrigger ? <div className="mb-2 flex items-center gap-2 text-xs text-muted">
+            <span>{commandCatalog?.status === 'ready' ? `Pi 命令 · ${commandCatalog.source === 'session' ? '当前会话' : '工作区发现'}`
+              : commandCatalog?.status === 'error' ? '命令目录加载失败，草稿已保留' : '正在加载 Pi 命令…'}</span>
+            <Button size="sm" variant="ghost" isDisabled={commandCatalog?.status === 'loading'}
+              onPress={session.refreshProviderCommands}>刷新命令</Button>
+          </div> : null}
           {(slashSuggestions.length > 0 || mentionSuggestions.length > 0 || (mention && mentionSuggestions.length === 0)) ? (
             <div className="composer-suggestions-popover">
               {slashSuggestions.length > 0 ? (
@@ -560,7 +586,7 @@ export function ChatPanel({ session }: Props) {
                   }}
                 >
                   {slashSuggestions.slice(0, 12).map((item, index) => (
-                    <ListBox.Item key={item.command} id={item.command} isDisabled={item.command === '/compact' && (thinking || executionUnknown || submissionStatus === 'sending' || compaction?.status === 'running')} textValue={`${item.command} ${item.description}`} className={`composer-suggestion-item ${index === suggestionIndex ? 'composer-suggestion-item--active' : ''}`}>
+                    <ListBox.Item key={item.command} id={item.command} isDisabled={currentProvider !== 'pi' && item.command === '/compact' && (thinking || executionUnknown || submissionStatus === 'sending' || compaction?.status === 'running')} textValue={`${item.command} ${item.description}`} className={`composer-suggestion-item ${index === suggestionIndex ? 'composer-suggestion-item--active' : ''}`}>
                       <span className="composer-suggestion-command">{item.command}</span>
                       <span className="composer-suggestion-description">{item.description}</span>
                     </ListBox.Item>
@@ -656,6 +682,13 @@ export function ChatPanel({ session }: Props) {
               onKeyDownCapture={(event) => {
                 if (event.key === 'Enter' && (isComposingRef.current || isImeCompositionKey(event))) {
                   event.stopPropagation();
+                  return;
+                }
+                // Pro's textarea submits in its own key handler. Resolve Pi
+                // suggestions first so choosing a command only fills the draft.
+                if (currentProvider === 'pi' && event.target instanceof HTMLTextAreaElement) {
+                  handleSuggestionKeyDown(event);
+                  if (event.defaultPrevented) event.stopPropagation();
                 }
               }}
               onValueChange={(value: string) => { setSuggestionIndex(0); session.setConversationChatDraft(conversation.id, value); }}
@@ -665,11 +698,9 @@ export function ChatPanel({ session }: Props) {
                   toast.danger('当前无法发送图片', { description: imageInputSupport.reason });
                   return;
                 }
-                if (draft.trim().startsWith('/')) {
+                if (currentProvider !== 'pi' && draft.trim().startsWith('/')) {
                   session.sendSlashCommand(draft, conversation.id);
-                } else {
-                  session.submitChat(conversation.id);
-                }
+                } else session.submitChat(conversation.id);
               }}
               onStop={() => session.stopThinking(conversation.id)}
             >
@@ -737,7 +768,7 @@ export function ChatPanel({ session }: Props) {
                       : '发送消息，或粘贴 / 拖入文本文件'}
                     onCompositionStart={() => { isComposingRef.current = true; }}
                     onCompositionEnd={() => { isComposingRef.current = false; }}
-                    onKeyDown={handleSuggestionKeyDown}
+                    onKeyDown={currentProvider === 'pi' ? undefined : handleSuggestionKeyDown}
                   />
                 </PromptInput.Content>
                 <PromptInput.Toolbar className="composer-toolbar">
@@ -903,6 +934,8 @@ export function ChatPanel({ session }: Props) {
               </PromptInput.Shell>
             </ConversationPromptInput>
           </ChatAttachmentInput>
+          {currentProvider === 'pi' && runtime ? <PiExtensionPanel placement="belowEditor"
+            extensionUi={runtime.extensionUi} /> : null}
         </div>
       </div>
     </div>
