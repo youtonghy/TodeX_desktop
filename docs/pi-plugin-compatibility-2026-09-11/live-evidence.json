@@ -1,0 +1,1751 @@
+{
+  "createdAt": "2026-09-10T17:33:35.881Z",
+  "scope": "real Pi RPC plus Todex HTTP event journal",
+  "raw": {
+    "passed": true,
+    "summary": {
+      "marker": "smoke-results",
+      "mode": "rpc",
+      "hasUI": true,
+      "selected": "B",
+      "confirmed": true,
+      "input": "typed text",
+      "editor": "edited\ntext",
+      "cancelled": true,
+      "customCalled": false,
+      "customUndefined": true
+    },
+    "dialogCount": 7,
+    "idleAfterAck": true,
+    "abortAcknowledgedAndIdle": true,
+    "pendingDialogAtStop": true,
+    "noModelRun": true,
+    "frames": [
+      {
+        "type": "extension_ui_request",
+        "id": "5bbf1a18-3762-43af-9bfc-0afdb9259d90",
+        "method": "select",
+        "title": "Smoke select",
+        "options": [
+          "A",
+          "B"
+        ]
+      },
+      {
+        "type": "extension_ui_request",
+        "id": "c7f49c3b-3279-4125-8cde-cc7deffbe7dc",
+        "method": "confirm",
+        "title": "Smoke confirm",
+        "message": "Continue smoke test?"
+      },
+      {
+        "type": "extension_ui_request",
+        "id": "28a7a188-7781-4730-83b5-aecf25da99ac",
+        "method": "input",
+        "title": "Smoke input",
+        "placeholder": "Type text"
+      },
+      {
+        "type": "extension_ui_request",
+        "id": "824678e1-8830-4b86-94c5-cb9f9130cf84",
+        "method": "editor",
+        "title": "Smoke editor",
+        "prefill": "prefilled\ntext"
+      },
+      {
+        "type": "extension_ui_request",
+        "id": "f2026bb0-51e6-49fa-823f-895f4e7f1972",
+        "method": "input",
+        "title": "Smoke cancel",
+        "placeholder": "Cancel this request"
+      },
+      {
+        "type": "extension_ui_request",
+        "id": "ff92a2fe-5d3d-463e-9a06-5b992c6a2d55",
+        "method": "setStatus",
+        "statusKey": "smoke",
+        "statusText": "\u001b[32mReady\u001b[0m"
+      },
+      {
+        "type": "extension_ui_request",
+        "id": "f6f37440-f2a7-43f4-b865-ceb614c9c3b3",
+        "method": "setWidget",
+        "widgetKey": "smoke-above",
+        "widgetLines": [
+          "Above editor",
+          "Second line"
+        ]
+      },
+      {
+        "type": "extension_ui_request",
+        "id": "8dc4373b-6925-44a5-b715-9004879bb2be",
+        "method": "setWidget",
+        "widgetKey": "smoke-below",
+        "widgetLines": [
+          "Below editor"
+        ],
+        "widgetPlacement": "belowEditor"
+      },
+      {
+        "type": "extension_ui_request",
+        "id": "5a1ad844-a519-4e8f-a4e7-79aebc4a884e",
+        "method": "setTitle",
+        "title": "Smoke plugin title"
+      },
+      {
+        "type": "extension_ui_request",
+        "id": "889e5fc7-8c70-4895-ab31-9a1afc0f9673",
+        "method": "set_editor_text",
+        "text": "Draft from plugin\nsecond line"
+      },
+      {
+        "type": "message_start",
+        "message": {
+          "role": "custom",
+          "customType": "todex-smoke-visible",
+          "content": "Visible custom message",
+          "display": true,
+          "timestamp": 1789061616050
+        }
+      },
+      {
+        "type": "message_end",
+        "message": {
+          "role": "custom",
+          "customType": "todex-smoke-visible",
+          "content": "Visible custom message",
+          "display": true,
+          "timestamp": 1789061616050
+        }
+      },
+      {
+        "type": "message_start",
+        "message": {
+          "role": "custom",
+          "customType": "todex-smoke-hidden",
+          "content": "Hidden custom message",
+          "display": false,
+          "timestamp": 1789061616050
+        }
+      },
+      {
+        "type": "message_end",
+        "message": {
+          "role": "custom",
+          "customType": "todex-smoke-hidden",
+          "content": "Hidden custom message",
+          "display": false,
+          "timestamp": 1789061616050
+        }
+      },
+      {
+        "type": "extension_ui_request",
+        "id": "338dc2b0-0e38-45c5-b6ab-ee39eb3760ba",
+        "method": "notify",
+        "message": "{\"marker\":\"smoke-results\",\"mode\":\"rpc\",\"hasUI\":true,\"selected\":\"B\",\"confirmed\":true,\"input\":\"typed text\",\"editor\":\"edited\\ntext\",\"cancelled\":true,\"customCalled\":false,\"customUndefined\":true}"
+      },
+      {
+        "type": "extension_ui_request",
+        "id": "b3ba1b82-3468-4de9-8426-dfcb91fc8dc0",
+        "method": "notify",
+        "message": "Idle notification"
+      },
+      {
+        "type": "extension_ui_request",
+        "id": "86dc7fbd-9473-4017-a381-6926735e201b",
+        "method": "setStatus",
+        "statusKey": "smoke",
+        "statusText": "Idle update"
+      },
+      {
+        "type": "message_start",
+        "message": {
+          "role": "custom",
+          "customType": "todex-smoke-background",
+          "content": "Idle custom message",
+          "display": true,
+          "timestamp": 1789061616403
+        }
+      },
+      {
+        "type": "message_end",
+        "message": {
+          "role": "custom",
+          "customType": "todex-smoke-background",
+          "content": "Idle custom message",
+          "display": true,
+          "timestamp": 1789061616403
+        }
+      },
+      {
+        "type": "extension_ui_request",
+        "id": "5cb2d14d-4d39-4957-9a2f-0519a0cf7e4c",
+        "method": "select",
+        "title": "Smoke idle select",
+        "options": [
+          "A",
+          "B"
+        ]
+      },
+      {
+        "type": "extension_ui_request",
+        "id": "d651a014-27c1-4300-b776-ad10754c40fc",
+        "method": "notify",
+        "message": "{\"marker\":\"smoke-idle-answer\",\"selected\":\"B\",\"idle\":true}"
+      },
+      {
+        "type": "extension_ui_request",
+        "id": "4cf42085-6c19-46f1-8916-82180430b9b4",
+        "method": "setStatus",
+        "statusKey": "smoke"
+      },
+      {
+        "type": "extension_ui_request",
+        "id": "ed4cb34b-fefa-47e2-b157-c19ff47ed668",
+        "method": "setWidget",
+        "widgetKey": "smoke-above"
+      },
+      {
+        "type": "extension_ui_request",
+        "id": "a4e4d60b-a201-4036-bb7d-13df5526ab44",
+        "method": "setWidget",
+        "widgetKey": "smoke-below"
+      },
+      {
+        "type": "extension_ui_request",
+        "id": "a3b4195a-4565-48eb-83ae-2172b09ef2b5",
+        "method": "notify",
+        "message": "Smoke cleared"
+      },
+      {
+        "type": "extension_ui_request",
+        "id": "55abba8a-6d12-4537-91fe-3d9d7c1e24a1",
+        "method": "input",
+        "title": "Smoke stop pending",
+        "placeholder": "The test stops this runtime without replying"
+      }
+    ],
+    "processStopped": true,
+    "stderr": ""
+  },
+  "backend": {
+    "passed": true,
+    "conversationRetainedAfterStop": true,
+    "idleScope": "session",
+    "dialogResponses": 16,
+    "pendingInputSettledOnStop": true,
+    "sessionCommandCatalog": true,
+    "workspaceCount": 1,
+    "installed": [
+      {
+        "name": "@tintinweb/pi-tasks",
+        "version": "0.9.0"
+      },
+      {
+        "name": "pi-context-prune",
+        "version": "1.4.0"
+      },
+      {
+        "name": "pi-cache-graph",
+        "version": "1.0.2"
+      },
+      {
+        "name": "pi-mcp-adapter",
+        "version": "2.32.1"
+      }
+    ],
+    "packageCatalog": [
+      {
+        "name": "cache",
+        "packageName": "pi-cache-graph",
+        "packageVersion": "1.0.2",
+        "sourceInfo": {
+          "path": "$PACKAGES/pi-cache-graph/index.ts",
+          "source": "cli",
+          "scope": "temporary",
+          "origin": "top-level"
+        }
+      },
+      {
+        "name": "mcp",
+        "packageName": "pi-mcp-adapter",
+        "packageVersion": "2.32.1",
+        "sourceInfo": {
+          "path": "$PACKAGES/pi-mcp-adapter/index.ts",
+          "source": "cli",
+          "scope": "temporary",
+          "origin": "top-level"
+        }
+      },
+      {
+        "name": "tasks",
+        "packageName": "@tintinweb/pi-tasks",
+        "packageVersion": "0.9.0",
+        "sourceInfo": {
+          "path": "$PACKAGES/@tintinweb/pi-tasks/src/index.ts",
+          "source": "cli",
+          "scope": "temporary",
+          "origin": "top-level"
+        }
+      },
+      {
+        "name": "pruner",
+        "packageName": "pi-context-prune",
+        "packageVersion": "1.4.0",
+        "sourceInfo": {
+          "path": "$PACKAGES/pi-context-prune/dist/index.js",
+          "source": "cli",
+          "scope": "temporary",
+          "origin": "top-level"
+        }
+      }
+    ],
+    "packageChecks": [
+      {
+        "command": "/tasks create and view",
+        "passed": true,
+        "tasksPersisted": 1
+      },
+      {
+        "command": "/pruner stats",
+        "passed": true,
+        "notifications": [
+          "pruner stats: no summarizer calls yet."
+        ]
+      },
+      {
+        "command": "/pruner",
+        "passed": true,
+        "notifications": [
+          "pruner stats: no summarizer calls yet."
+        ]
+      },
+      {
+        "command": "/mcp",
+        "passed": true,
+        "notifications": [
+          "MCP Server Status:\n\nShared MCP config: .mcp.json for this project/team or ~/.config/mcp/mcp.json for all projects.\nPi-owned files hold compatibility imports and adapter-specific overrides.\n\nNo MCP servers configured\nRun /mcp setup to add a server to .mcp.json or ~/.config/mcp/mcp.json"
+        ]
+      },
+      {
+        "command": "/mcp tools",
+        "passed": true,
+        "notifications": [
+          "No MCP tools available"
+        ]
+      },
+      {
+        "command": "/cache export",
+        "passed": true,
+        "csvLines": 4
+      }
+    ],
+    "stop": {
+      "provider": "pi",
+      "conversationId": "00efb3fb-39a5-4bdb-a686-5bab118a9a86",
+      "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+      "status": "stopped",
+      "reason": "user_closed"
+    },
+    "events": [
+      {
+        "sequence": 4,
+        "type": "provider.runtime",
+        "payload": {
+          "provider": "pi",
+          "status": "ready",
+          "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+          "scope": "session"
+        }
+      },
+      {
+        "sequence": 5,
+        "type": "extension.ui",
+        "payload": {
+          "type": "extension_ui_request",
+          "id": "5d587def-e515-4c9c-b609-194d86fed24b",
+          "method": "setStatus",
+          "statusKey": "context-prune",
+          "statusText": "prune: OFF (On agent message)",
+          "provider": "pi",
+          "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+          "scope": "session"
+        }
+      },
+      {
+        "sequence": 6,
+        "type": "extension.ui",
+        "payload": {
+          "type": "extension_ui_request",
+          "id": "f3b211f1-bee7-49ef-805e-db20e771f223",
+          "method": "notify",
+          "message": "pruner loaded — pruning OFF | model: default",
+          "notifyType": "info",
+          "provider": "pi",
+          "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+          "scope": "session"
+        }
+      },
+      {
+        "sequence": 7,
+        "type": "extension.ui",
+        "payload": {
+          "type": "extension_ui_request",
+          "id": "fa0c0637-2684-43f4-a786-2f88f7d406a2",
+          "method": "setStatus",
+          "statusKey": "mcp",
+          "provider": "pi",
+          "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+          "scope": "session"
+        }
+      },
+      {
+        "sequence": 9,
+        "type": "permission.requested",
+        "payload": {
+          "permissionId": "perm_0f14bece248d44848aa7d577ec2f4f67",
+          "providerRequestId": "aec1a27d-27e9-4b17-a9db-6cea34cdf44a",
+          "kind": "extension_ui",
+          "title": "Smoke select",
+          "details": {
+            "type": "extension_ui_request",
+            "id": "aec1a27d-27e9-4b17-a9db-6cea34cdf44a",
+            "method": "select",
+            "title": "Smoke select",
+            "options": [
+              "A",
+              "B"
+            ],
+            "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+            "scope": "turn"
+          },
+          "options": [
+            {
+              "optionId": "answer",
+              "id": "answer",
+              "name": "Respond",
+              "label": "Respond",
+              "kind": "answer"
+            },
+            {
+              "optionId": "reject_once",
+              "id": "reject_once",
+              "name": "Cancel",
+              "label": "Cancel",
+              "kind": "reject_once"
+            }
+          ],
+          "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+          "scope": "turn",
+          "turnId": "turn_0857f9ba7f0c49318a37f378fa0e4043"
+        }
+      },
+      {
+        "sequence": 10,
+        "type": "permission.resolved",
+        "payload": {
+          "permissionId": "perm_0f14bece248d44848aa7d577ec2f4f67",
+          "outcome": "answer",
+          "optionId": "answer",
+          "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+          "scope": "turn",
+          "turnId": "turn_0857f9ba7f0c49318a37f378fa0e4043"
+        }
+      },
+      {
+        "sequence": 11,
+        "type": "permission.requested",
+        "payload": {
+          "permissionId": "perm_dc5b0c8daa264d43b618608a01e88b24",
+          "providerRequestId": "85079d0a-90ff-443e-afeb-82d8fffa64bf",
+          "kind": "extension_ui",
+          "title": "Smoke confirm",
+          "details": {
+            "type": "extension_ui_request",
+            "id": "85079d0a-90ff-443e-afeb-82d8fffa64bf",
+            "method": "confirm",
+            "title": "Smoke confirm",
+            "message": "Continue smoke test?",
+            "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+            "scope": "turn"
+          },
+          "options": [
+            {
+              "optionId": "answer",
+              "id": "answer",
+              "name": "Respond",
+              "label": "Respond",
+              "kind": "answer"
+            },
+            {
+              "optionId": "reject_once",
+              "id": "reject_once",
+              "name": "Cancel",
+              "label": "Cancel",
+              "kind": "reject_once"
+            }
+          ],
+          "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+          "scope": "turn",
+          "turnId": "turn_0857f9ba7f0c49318a37f378fa0e4043"
+        }
+      },
+      {
+        "sequence": 12,
+        "type": "permission.resolved",
+        "payload": {
+          "permissionId": "perm_dc5b0c8daa264d43b618608a01e88b24",
+          "outcome": "answer",
+          "optionId": "answer",
+          "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+          "scope": "turn",
+          "turnId": "turn_0857f9ba7f0c49318a37f378fa0e4043"
+        }
+      },
+      {
+        "sequence": 13,
+        "type": "permission.requested",
+        "payload": {
+          "permissionId": "perm_bdaab86b4fef4b09b4e3292f06779db8",
+          "providerRequestId": "0f98ff11-f1e1-4c56-b777-47af8265cc93",
+          "kind": "extension_ui",
+          "title": "Smoke input",
+          "details": {
+            "type": "extension_ui_request",
+            "id": "0f98ff11-f1e1-4c56-b777-47af8265cc93",
+            "method": "input",
+            "title": "Smoke input",
+            "placeholder": "Type text",
+            "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+            "scope": "turn"
+          },
+          "options": [
+            {
+              "optionId": "answer",
+              "id": "answer",
+              "name": "Respond",
+              "label": "Respond",
+              "kind": "answer"
+            },
+            {
+              "optionId": "reject_once",
+              "id": "reject_once",
+              "name": "Cancel",
+              "label": "Cancel",
+              "kind": "reject_once"
+            }
+          ],
+          "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+          "scope": "turn",
+          "turnId": "turn_0857f9ba7f0c49318a37f378fa0e4043"
+        }
+      },
+      {
+        "sequence": 14,
+        "type": "permission.resolved",
+        "payload": {
+          "permissionId": "perm_bdaab86b4fef4b09b4e3292f06779db8",
+          "outcome": "answer",
+          "optionId": "answer",
+          "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+          "scope": "turn",
+          "turnId": "turn_0857f9ba7f0c49318a37f378fa0e4043"
+        }
+      },
+      {
+        "sequence": 15,
+        "type": "permission.requested",
+        "payload": {
+          "permissionId": "perm_a3f62c420570462985884e2415afbc98",
+          "providerRequestId": "18501787-311c-493e-b3e3-70e796008414",
+          "kind": "extension_ui",
+          "title": "Smoke editor",
+          "details": {
+            "type": "extension_ui_request",
+            "id": "18501787-311c-493e-b3e3-70e796008414",
+            "method": "editor",
+            "title": "Smoke editor",
+            "prefill": "prefilled\ntext",
+            "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+            "scope": "turn"
+          },
+          "options": [
+            {
+              "optionId": "answer",
+              "id": "answer",
+              "name": "Respond",
+              "label": "Respond",
+              "kind": "answer"
+            },
+            {
+              "optionId": "reject_once",
+              "id": "reject_once",
+              "name": "Cancel",
+              "label": "Cancel",
+              "kind": "reject_once"
+            }
+          ],
+          "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+          "scope": "turn",
+          "turnId": "turn_0857f9ba7f0c49318a37f378fa0e4043"
+        }
+      },
+      {
+        "sequence": 16,
+        "type": "permission.resolved",
+        "payload": {
+          "permissionId": "perm_a3f62c420570462985884e2415afbc98",
+          "outcome": "answer",
+          "optionId": "answer",
+          "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+          "scope": "turn",
+          "turnId": "turn_0857f9ba7f0c49318a37f378fa0e4043"
+        }
+      },
+      {
+        "sequence": 17,
+        "type": "permission.requested",
+        "payload": {
+          "permissionId": "perm_2b6d3596721b42dd8c183ce3a1c7eb89",
+          "providerRequestId": "11575553-c385-49e2-8956-1c637cbdef58",
+          "kind": "extension_ui",
+          "title": "Smoke cancel",
+          "details": {
+            "type": "extension_ui_request",
+            "id": "11575553-c385-49e2-8956-1c637cbdef58",
+            "method": "input",
+            "title": "Smoke cancel",
+            "placeholder": "Cancel this request",
+            "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+            "scope": "turn"
+          },
+          "options": [
+            {
+              "optionId": "answer",
+              "id": "answer",
+              "name": "Respond",
+              "label": "Respond",
+              "kind": "answer"
+            },
+            {
+              "optionId": "reject_once",
+              "id": "reject_once",
+              "name": "Cancel",
+              "label": "Cancel",
+              "kind": "reject_once"
+            }
+          ],
+          "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+          "scope": "turn",
+          "turnId": "turn_0857f9ba7f0c49318a37f378fa0e4043"
+        }
+      },
+      {
+        "sequence": 18,
+        "type": "permission.resolved",
+        "payload": {
+          "permissionId": "perm_2b6d3596721b42dd8c183ce3a1c7eb89",
+          "outcome": "reject_once",
+          "optionId": null,
+          "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+          "scope": "turn",
+          "turnId": "turn_0857f9ba7f0c49318a37f378fa0e4043"
+        }
+      },
+      {
+        "sequence": 19,
+        "type": "extension.ui",
+        "payload": {
+          "type": "extension_ui_request",
+          "id": "4e2c5681-272c-48ba-802f-5c4d0e002974",
+          "method": "setStatus",
+          "statusKey": "smoke",
+          "statusText": "\u001b[32mReady\u001b[0m",
+          "provider": "pi",
+          "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+          "scope": "turn",
+          "turnId": "turn_0857f9ba7f0c49318a37f378fa0e4043"
+        }
+      },
+      {
+        "sequence": 20,
+        "type": "extension.ui",
+        "payload": {
+          "type": "extension_ui_request",
+          "id": "beb1637a-3302-4e97-b2f7-932ffe9386b3",
+          "method": "setWidget",
+          "widgetKey": "smoke-above",
+          "widgetLines": [
+            "Above editor",
+            "Second line"
+          ],
+          "provider": "pi",
+          "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+          "scope": "turn",
+          "turnId": "turn_0857f9ba7f0c49318a37f378fa0e4043"
+        }
+      },
+      {
+        "sequence": 21,
+        "type": "extension.ui",
+        "payload": {
+          "type": "extension_ui_request",
+          "id": "09d02042-a59f-4c27-80c0-4d3103a76f53",
+          "method": "setWidget",
+          "widgetKey": "smoke-below",
+          "widgetLines": [
+            "Below editor"
+          ],
+          "widgetPlacement": "belowEditor",
+          "provider": "pi",
+          "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+          "scope": "turn",
+          "turnId": "turn_0857f9ba7f0c49318a37f378fa0e4043"
+        }
+      },
+      {
+        "sequence": 22,
+        "type": "extension.ui",
+        "payload": {
+          "type": "extension_ui_request",
+          "id": "ffb0c4d5-b2da-4f2a-baed-68a3ffaf4ecd",
+          "method": "setTitle",
+          "title": "Smoke plugin title",
+          "provider": "pi",
+          "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+          "scope": "turn",
+          "turnId": "turn_0857f9ba7f0c49318a37f378fa0e4043"
+        }
+      },
+      {
+        "sequence": 23,
+        "type": "extension.ui",
+        "payload": {
+          "type": "extension_ui_request",
+          "id": "fc761982-b6cc-4c25-ac64-013f554a7633",
+          "method": "set_editor_text",
+          "text": "Draft from plugin\nsecond line",
+          "provider": "pi",
+          "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+          "scope": "turn",
+          "turnId": "turn_0857f9ba7f0c49318a37f378fa0e4043"
+        }
+      },
+      {
+        "sequence": 24,
+        "type": "extension.message",
+        "payload": {
+          "provider": "pi",
+          "messageId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3-custom-1",
+          "message": {
+            "role": "custom",
+            "customType": "todex-smoke-visible",
+            "content": "Visible custom message",
+            "display": true,
+            "timestamp": 1789061619593
+          },
+          "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+          "scope": "turn",
+          "turnId": "turn_0857f9ba7f0c49318a37f378fa0e4043"
+        }
+      },
+      {
+        "sequence": 25,
+        "type": "extension.message",
+        "payload": {
+          "provider": "pi",
+          "messageId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3-custom-2",
+          "message": {
+            "role": "custom",
+            "customType": "todex-smoke-hidden",
+            "content": "Hidden custom message",
+            "display": false,
+            "timestamp": 1789061619593
+          },
+          "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+          "scope": "turn",
+          "turnId": "turn_0857f9ba7f0c49318a37f378fa0e4043"
+        }
+      },
+      {
+        "sequence": 26,
+        "type": "extension.ui",
+        "payload": {
+          "type": "extension_ui_request",
+          "id": "95715605-4771-4900-a8eb-5deb503dcd71",
+          "method": "notify",
+          "message": "{\"marker\":\"smoke-results\",\"mode\":\"rpc\",\"hasUI\":true,\"selected\":\"B\",\"confirmed\":true,\"input\":\"typed text\",\"editor\":\"edited\\ntext\",\"cancelled\":true,\"customCalled\":false,\"customUndefined\":true}",
+          "provider": "pi",
+          "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+          "scope": "turn",
+          "turnId": "turn_0857f9ba7f0c49318a37f378fa0e4043"
+        }
+      },
+      {
+        "sequence": 28,
+        "type": "turn.completed",
+        "payload": {
+          "turnId": "turn_0857f9ba7f0c49318a37f378fa0e4043",
+          "clientRequestId": "live-command-1",
+          "stopReason": "completed",
+          "nativeSessionId": "00efb3fb-39a5-4bdb-a686-5bab118a9a86"
+        }
+      },
+      {
+        "sequence": 33,
+        "type": "turn.completed",
+        "payload": {
+          "turnId": "turn_c92432b0e88d47c38e970090da847233",
+          "clientRequestId": "live-command-2",
+          "stopReason": "completed",
+          "nativeSessionId": "00efb3fb-39a5-4bdb-a686-5bab118a9a86"
+        }
+      },
+      {
+        "sequence": 34,
+        "type": "extension.ui",
+        "payload": {
+          "type": "extension_ui_request",
+          "id": "f3046137-e0de-4c0f-9f35-f36aaa8ad51f",
+          "method": "notify",
+          "message": "Idle notification",
+          "provider": "pi",
+          "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+          "scope": "session"
+        }
+      },
+      {
+        "sequence": 35,
+        "type": "extension.ui",
+        "payload": {
+          "type": "extension_ui_request",
+          "id": "d0240c56-cf1e-4fa7-b13f-cbe719081abe",
+          "method": "setStatus",
+          "statusKey": "smoke",
+          "statusText": "Idle update",
+          "provider": "pi",
+          "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+          "scope": "session"
+        }
+      },
+      {
+        "sequence": 36,
+        "type": "extension.message",
+        "payload": {
+          "provider": "pi",
+          "messageId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3-custom-3",
+          "message": {
+            "role": "custom",
+            "customType": "todex-smoke-background",
+            "content": "Idle custom message",
+            "display": true,
+            "timestamp": 1789061620176
+          },
+          "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+          "scope": "session"
+        }
+      },
+      {
+        "sequence": 37,
+        "type": "permission.requested",
+        "payload": {
+          "permissionId": "perm_dd5ba36c7a724b54bf2c492a9dce2e5d",
+          "providerRequestId": "fea5ddf1-1fff-482a-9afb-72e52a3ddd3e",
+          "kind": "extension_ui",
+          "title": "Smoke idle select",
+          "details": {
+            "type": "extension_ui_request",
+            "id": "fea5ddf1-1fff-482a-9afb-72e52a3ddd3e",
+            "method": "select",
+            "title": "Smoke idle select",
+            "options": [
+              "A",
+              "B"
+            ],
+            "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+            "scope": "session"
+          },
+          "options": [
+            {
+              "optionId": "answer",
+              "id": "answer",
+              "name": "Respond",
+              "label": "Respond",
+              "kind": "answer"
+            },
+            {
+              "optionId": "reject_once",
+              "id": "reject_once",
+              "name": "Cancel",
+              "label": "Cancel",
+              "kind": "reject_once"
+            }
+          ],
+          "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+          "scope": "session"
+        }
+      },
+      {
+        "sequence": 38,
+        "type": "permission.resolved",
+        "payload": {
+          "permissionId": "perm_dd5ba36c7a724b54bf2c492a9dce2e5d",
+          "outcome": "answer",
+          "optionId": "answer",
+          "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+          "scope": "session"
+        }
+      },
+      {
+        "sequence": 39,
+        "type": "extension.ui",
+        "payload": {
+          "type": "extension_ui_request",
+          "id": "578f35ee-70d5-403e-8007-13b7d0647906",
+          "method": "notify",
+          "message": "{\"marker\":\"smoke-idle-answer\",\"selected\":\"B\",\"idle\":true}",
+          "provider": "pi",
+          "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+          "scope": "session"
+        }
+      },
+      {
+        "sequence": 43,
+        "type": "permission.requested",
+        "payload": {
+          "permissionId": "perm_7ee1094e9f9f454a84781462e5bf6184",
+          "providerRequestId": "31a36be3-1ac4-4a8d-83a9-b51e8c461820",
+          "kind": "extension_ui",
+          "title": "Tasks",
+          "details": {
+            "type": "extension_ui_request",
+            "id": "31a36be3-1ac4-4a8d-83a9-b51e8c461820",
+            "method": "select",
+            "title": "Tasks",
+            "options": [
+              "View all tasks (0)",
+              "Create task",
+              "Settings"
+            ],
+            "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+            "scope": "turn"
+          },
+          "options": [
+            {
+              "optionId": "answer",
+              "id": "answer",
+              "name": "Respond",
+              "label": "Respond",
+              "kind": "answer"
+            },
+            {
+              "optionId": "reject_once",
+              "id": "reject_once",
+              "name": "Cancel",
+              "label": "Cancel",
+              "kind": "reject_once"
+            }
+          ],
+          "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+          "scope": "turn",
+          "turnId": "turn_e57598b9751e4491b5d75b467576a759"
+        }
+      },
+      {
+        "sequence": 44,
+        "type": "permission.resolved",
+        "payload": {
+          "permissionId": "perm_7ee1094e9f9f454a84781462e5bf6184",
+          "outcome": "answer",
+          "optionId": "answer",
+          "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+          "scope": "turn",
+          "turnId": "turn_e57598b9751e4491b5d75b467576a759"
+        }
+      },
+      {
+        "sequence": 45,
+        "type": "permission.requested",
+        "payload": {
+          "permissionId": "perm_a4c8137bf6be4692967afbd56daca5ce",
+          "providerRequestId": "3c1bd575-2037-46bb-ac24-59c51d566467",
+          "kind": "extension_ui",
+          "title": "Task subject",
+          "details": {
+            "type": "extension_ui_request",
+            "id": "3c1bd575-2037-46bb-ac24-59c51d566467",
+            "method": "input",
+            "title": "Task subject",
+            "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+            "scope": "turn"
+          },
+          "options": [
+            {
+              "optionId": "answer",
+              "id": "answer",
+              "name": "Respond",
+              "label": "Respond",
+              "kind": "answer"
+            },
+            {
+              "optionId": "reject_once",
+              "id": "reject_once",
+              "name": "Cancel",
+              "label": "Cancel",
+              "kind": "reject_once"
+            }
+          ],
+          "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+          "scope": "turn",
+          "turnId": "turn_e57598b9751e4491b5d75b467576a759"
+        }
+      },
+      {
+        "sequence": 46,
+        "type": "permission.resolved",
+        "payload": {
+          "permissionId": "perm_a4c8137bf6be4692967afbd56daca5ce",
+          "outcome": "answer",
+          "optionId": "answer",
+          "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+          "scope": "turn",
+          "turnId": "turn_e57598b9751e4491b5d75b467576a759"
+        }
+      },
+      {
+        "sequence": 47,
+        "type": "permission.requested",
+        "payload": {
+          "permissionId": "perm_02df75b9ebe049108b781f428c0f01c1",
+          "providerRequestId": "b53d60c0-e0c8-4e91-9b38-b5c5c9ff2b49",
+          "kind": "extension_ui",
+          "title": "Task description",
+          "details": {
+            "type": "extension_ui_request",
+            "id": "b53d60c0-e0c8-4e91-9b38-b5c5c9ff2b49",
+            "method": "input",
+            "title": "Task description",
+            "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+            "scope": "turn"
+          },
+          "options": [
+            {
+              "optionId": "answer",
+              "id": "answer",
+              "name": "Respond",
+              "label": "Respond",
+              "kind": "answer"
+            },
+            {
+              "optionId": "reject_once",
+              "id": "reject_once",
+              "name": "Cancel",
+              "label": "Cancel",
+              "kind": "reject_once"
+            }
+          ],
+          "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+          "scope": "turn",
+          "turnId": "turn_e57598b9751e4491b5d75b467576a759"
+        }
+      },
+      {
+        "sequence": 48,
+        "type": "permission.resolved",
+        "payload": {
+          "permissionId": "perm_02df75b9ebe049108b781f428c0f01c1",
+          "outcome": "answer",
+          "optionId": "answer",
+          "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+          "scope": "turn",
+          "turnId": "turn_e57598b9751e4491b5d75b467576a759"
+        }
+      },
+      {
+        "sequence": 49,
+        "type": "permission.requested",
+        "payload": {
+          "permissionId": "perm_2cf04ef9a5d545a6944a46282b63e009",
+          "providerRequestId": "5bef593f-b194-4d88-a6d0-e61f747065bb",
+          "kind": "extension_ui",
+          "title": "Tasks",
+          "details": {
+            "type": "extension_ui_request",
+            "id": "5bef593f-b194-4d88-a6d0-e61f747065bb",
+            "method": "select",
+            "title": "Tasks",
+            "options": [
+              "View all tasks (1)",
+              "Create task",
+              "Clear all (1)",
+              "Settings"
+            ],
+            "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+            "scope": "turn"
+          },
+          "options": [
+            {
+              "optionId": "answer",
+              "id": "answer",
+              "name": "Respond",
+              "label": "Respond",
+              "kind": "answer"
+            },
+            {
+              "optionId": "reject_once",
+              "id": "reject_once",
+              "name": "Cancel",
+              "label": "Cancel",
+              "kind": "reject_once"
+            }
+          ],
+          "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+          "scope": "turn",
+          "turnId": "turn_e57598b9751e4491b5d75b467576a759"
+        }
+      },
+      {
+        "sequence": 50,
+        "type": "permission.resolved",
+        "payload": {
+          "permissionId": "perm_2cf04ef9a5d545a6944a46282b63e009",
+          "outcome": "reject_once",
+          "optionId": null,
+          "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+          "scope": "turn",
+          "turnId": "turn_e57598b9751e4491b5d75b467576a759"
+        }
+      },
+      {
+        "sequence": 52,
+        "type": "turn.completed",
+        "payload": {
+          "turnId": "turn_e57598b9751e4491b5d75b467576a759",
+          "clientRequestId": "live-command-3",
+          "stopReason": "completed",
+          "nativeSessionId": "00efb3fb-39a5-4bdb-a686-5bab118a9a86"
+        }
+      },
+      {
+        "sequence": 56,
+        "type": "permission.requested",
+        "payload": {
+          "permissionId": "perm_6ea282fcb64741faa4b70379c4ed3928",
+          "providerRequestId": "ae56db03-6098-4972-ae19-5467487a46b2",
+          "kind": "extension_ui",
+          "title": "Tasks",
+          "details": {
+            "type": "extension_ui_request",
+            "id": "ae56db03-6098-4972-ae19-5467487a46b2",
+            "method": "select",
+            "title": "Tasks",
+            "options": [
+              "View all tasks (1)",
+              "Create task",
+              "Clear all (1)",
+              "Settings"
+            ],
+            "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+            "scope": "turn"
+          },
+          "options": [
+            {
+              "optionId": "answer",
+              "id": "answer",
+              "name": "Respond",
+              "label": "Respond",
+              "kind": "answer"
+            },
+            {
+              "optionId": "reject_once",
+              "id": "reject_once",
+              "name": "Cancel",
+              "label": "Cancel",
+              "kind": "reject_once"
+            }
+          ],
+          "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+          "scope": "turn",
+          "turnId": "turn_e2c989183e3f432c9620abc09acf3b7f"
+        }
+      },
+      {
+        "sequence": 57,
+        "type": "permission.resolved",
+        "payload": {
+          "permissionId": "perm_6ea282fcb64741faa4b70379c4ed3928",
+          "outcome": "answer",
+          "optionId": "answer",
+          "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+          "scope": "turn",
+          "turnId": "turn_e2c989183e3f432c9620abc09acf3b7f"
+        }
+      },
+      {
+        "sequence": 58,
+        "type": "permission.requested",
+        "payload": {
+          "permissionId": "perm_eabea7027cd945dd9216bea0b82029e9",
+          "providerRequestId": "089cab2a-bd14-46bf-833b-34ba28ee35f5",
+          "kind": "extension_ui",
+          "title": "Tasks",
+          "details": {
+            "type": "extension_ui_request",
+            "id": "089cab2a-bd14-46bf-833b-34ba28ee35f5",
+            "method": "select",
+            "title": "Tasks",
+            "options": [
+              "◻ #1 [pending] Todex backend smoke",
+              "← Back"
+            ],
+            "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+            "scope": "turn"
+          },
+          "options": [
+            {
+              "optionId": "answer",
+              "id": "answer",
+              "name": "Respond",
+              "label": "Respond",
+              "kind": "answer"
+            },
+            {
+              "optionId": "reject_once",
+              "id": "reject_once",
+              "name": "Cancel",
+              "label": "Cancel",
+              "kind": "reject_once"
+            }
+          ],
+          "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+          "scope": "turn",
+          "turnId": "turn_e2c989183e3f432c9620abc09acf3b7f"
+        }
+      },
+      {
+        "sequence": 59,
+        "type": "permission.resolved",
+        "payload": {
+          "permissionId": "perm_eabea7027cd945dd9216bea0b82029e9",
+          "outcome": "answer",
+          "optionId": "answer",
+          "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+          "scope": "turn",
+          "turnId": "turn_e2c989183e3f432c9620abc09acf3b7f"
+        }
+      },
+      {
+        "sequence": 60,
+        "type": "permission.requested",
+        "payload": {
+          "permissionId": "perm_02f9f56ae34447e9bde038aa6980681d",
+          "providerRequestId": "f4ed01a0-45e3-4b4c-bef7-3b19bc8f3da5",
+          "kind": "extension_ui",
+          "title": "#1 [pending] Todex backend smoke\nDisposable local task created through Todex HTTP",
+          "details": {
+            "type": "extension_ui_request",
+            "id": "f4ed01a0-45e3-4b4c-bef7-3b19bc8f3da5",
+            "method": "select",
+            "title": "#1 [pending] Todex backend smoke\nDisposable local task created through Todex HTTP",
+            "options": [
+              "▸ Start (in_progress)",
+              "✗ Delete",
+              "← Back"
+            ],
+            "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+            "scope": "turn"
+          },
+          "options": [
+            {
+              "optionId": "answer",
+              "id": "answer",
+              "name": "Respond",
+              "label": "Respond",
+              "kind": "answer"
+            },
+            {
+              "optionId": "reject_once",
+              "id": "reject_once",
+              "name": "Cancel",
+              "label": "Cancel",
+              "kind": "reject_once"
+            }
+          ],
+          "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+          "scope": "turn",
+          "turnId": "turn_e2c989183e3f432c9620abc09acf3b7f"
+        }
+      },
+      {
+        "sequence": 61,
+        "type": "permission.resolved",
+        "payload": {
+          "permissionId": "perm_02f9f56ae34447e9bde038aa6980681d",
+          "outcome": "reject_once",
+          "optionId": null,
+          "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+          "scope": "turn",
+          "turnId": "turn_e2c989183e3f432c9620abc09acf3b7f"
+        }
+      },
+      {
+        "sequence": 62,
+        "type": "permission.requested",
+        "payload": {
+          "permissionId": "perm_87c9a15b4b9e4f03b5a6e41dd95554f3",
+          "providerRequestId": "628639a3-3376-41bd-9db2-a1ae0a413528",
+          "kind": "extension_ui",
+          "title": "Tasks",
+          "details": {
+            "type": "extension_ui_request",
+            "id": "628639a3-3376-41bd-9db2-a1ae0a413528",
+            "method": "select",
+            "title": "Tasks",
+            "options": [
+              "◻ #1 [pending] Todex backend smoke",
+              "← Back"
+            ],
+            "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+            "scope": "turn"
+          },
+          "options": [
+            {
+              "optionId": "answer",
+              "id": "answer",
+              "name": "Respond",
+              "label": "Respond",
+              "kind": "answer"
+            },
+            {
+              "optionId": "reject_once",
+              "id": "reject_once",
+              "name": "Cancel",
+              "label": "Cancel",
+              "kind": "reject_once"
+            }
+          ],
+          "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+          "scope": "turn",
+          "turnId": "turn_e2c989183e3f432c9620abc09acf3b7f"
+        }
+      },
+      {
+        "sequence": 63,
+        "type": "permission.resolved",
+        "payload": {
+          "permissionId": "perm_87c9a15b4b9e4f03b5a6e41dd95554f3",
+          "outcome": "reject_once",
+          "optionId": null,
+          "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+          "scope": "turn",
+          "turnId": "turn_e2c989183e3f432c9620abc09acf3b7f"
+        }
+      },
+      {
+        "sequence": 64,
+        "type": "permission.requested",
+        "payload": {
+          "permissionId": "perm_8ce821f5668140829c387f43e1673a41",
+          "providerRequestId": "eeb013fc-259b-4285-899b-2881f6792700",
+          "kind": "extension_ui",
+          "title": "Tasks",
+          "details": {
+            "type": "extension_ui_request",
+            "id": "eeb013fc-259b-4285-899b-2881f6792700",
+            "method": "select",
+            "title": "Tasks",
+            "options": [
+              "View all tasks (1)",
+              "Create task",
+              "Clear all (1)",
+              "Settings"
+            ],
+            "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+            "scope": "turn"
+          },
+          "options": [
+            {
+              "optionId": "answer",
+              "id": "answer",
+              "name": "Respond",
+              "label": "Respond",
+              "kind": "answer"
+            },
+            {
+              "optionId": "reject_once",
+              "id": "reject_once",
+              "name": "Cancel",
+              "label": "Cancel",
+              "kind": "reject_once"
+            }
+          ],
+          "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+          "scope": "turn",
+          "turnId": "turn_e2c989183e3f432c9620abc09acf3b7f"
+        }
+      },
+      {
+        "sequence": 65,
+        "type": "permission.resolved",
+        "payload": {
+          "permissionId": "perm_8ce821f5668140829c387f43e1673a41",
+          "outcome": "reject_once",
+          "optionId": null,
+          "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+          "scope": "turn",
+          "turnId": "turn_e2c989183e3f432c9620abc09acf3b7f"
+        }
+      },
+      {
+        "sequence": 67,
+        "type": "turn.completed",
+        "payload": {
+          "turnId": "turn_e2c989183e3f432c9620abc09acf3b7f",
+          "clientRequestId": "live-command-4",
+          "stopReason": "completed",
+          "nativeSessionId": "00efb3fb-39a5-4bdb-a686-5bab118a9a86"
+        }
+      },
+      {
+        "sequence": 71,
+        "type": "extension.ui",
+        "payload": {
+          "type": "extension_ui_request",
+          "id": "3964a33b-3a69-4a17-ab26-26a2d278b9cc",
+          "method": "notify",
+          "message": "pruner stats: no summarizer calls yet.",
+          "provider": "pi",
+          "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+          "scope": "turn",
+          "turnId": "turn_d4c5a0a5849b4b7dabca6be11c9d91a7"
+        }
+      },
+      {
+        "sequence": 73,
+        "type": "turn.completed",
+        "payload": {
+          "turnId": "turn_d4c5a0a5849b4b7dabca6be11c9d91a7",
+          "clientRequestId": "live-command-5",
+          "stopReason": "completed",
+          "nativeSessionId": "00efb3fb-39a5-4bdb-a686-5bab118a9a86"
+        }
+      },
+      {
+        "sequence": 77,
+        "type": "permission.requested",
+        "payload": {
+          "permissionId": "perm_29b1e1d2c35347fa9d4413b8343a6ee3",
+          "providerRequestId": "bce6d30c-ec6f-430a-925e-5cc1b2b40010",
+          "kind": "extension_ui",
+          "title": "pruner — choose a subcommand",
+          "details": {
+            "type": "extension_ui_request",
+            "id": "bce6d30c-ec6f-430a-925e-5cc1b2b40010",
+            "method": "select",
+            "title": "pruner — choose a subcommand",
+            "options": [
+              "settings  — interactive settings overlay",
+              "on        — enable context pruning",
+              "off       — disable context pruning",
+              "status    — show status, model, thinking, prune trigger, and status line",
+              "model     — show or set the summarizer model",
+              "thinking  — show or set the summarizer thinking level",
+              "prune-on  — show or set the trigger mode",
+              "batching  — show or set the batching mode (turn / agent-message)",
+              "stats     — show cumulative summarizer token/cost stats",
+              "tree      — browse pruned tool calls in a foldable tree",
+              "now       — flush pending tool calls immediately (widget progress)",
+              "help      — show this help"
+            ],
+            "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+            "scope": "turn"
+          },
+          "options": [
+            {
+              "optionId": "answer",
+              "id": "answer",
+              "name": "Respond",
+              "label": "Respond",
+              "kind": "answer"
+            },
+            {
+              "optionId": "reject_once",
+              "id": "reject_once",
+              "name": "Cancel",
+              "label": "Cancel",
+              "kind": "reject_once"
+            }
+          ],
+          "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+          "scope": "turn",
+          "turnId": "turn_7da9a15baa72419d955101da545d7301"
+        }
+      },
+      {
+        "sequence": 78,
+        "type": "permission.resolved",
+        "payload": {
+          "permissionId": "perm_29b1e1d2c35347fa9d4413b8343a6ee3",
+          "outcome": "answer",
+          "optionId": "answer",
+          "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+          "scope": "turn",
+          "turnId": "turn_7da9a15baa72419d955101da545d7301"
+        }
+      },
+      {
+        "sequence": 79,
+        "type": "extension.ui",
+        "payload": {
+          "type": "extension_ui_request",
+          "id": "70a97015-eb56-48d7-87fa-e34cfbc41490",
+          "method": "notify",
+          "message": "pruner stats: no summarizer calls yet.",
+          "provider": "pi",
+          "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+          "scope": "turn",
+          "turnId": "turn_7da9a15baa72419d955101da545d7301"
+        }
+      },
+      {
+        "sequence": 81,
+        "type": "turn.completed",
+        "payload": {
+          "turnId": "turn_7da9a15baa72419d955101da545d7301",
+          "clientRequestId": "live-command-6",
+          "stopReason": "completed",
+          "nativeSessionId": "00efb3fb-39a5-4bdb-a686-5bab118a9a86"
+        }
+      },
+      {
+        "sequence": 85,
+        "type": "extension.ui",
+        "payload": {
+          "type": "extension_ui_request",
+          "id": "cd069af2-ba42-4986-804b-636e415920f7",
+          "method": "notify",
+          "message": "MCP Server Status:\n\nShared MCP config: .mcp.json for this project/team or ~/.config/mcp/mcp.json for all projects.\nPi-owned files hold compatibility imports and adapter-specific overrides.\n\nNo MCP servers configured\nRun /mcp setup to add a server to .mcp.json or ~/.config/mcp/mcp.json",
+          "notifyType": "info",
+          "provider": "pi",
+          "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+          "scope": "turn",
+          "turnId": "turn_52aec811af204e9eb12c23d8fc90483b"
+        }
+      },
+      {
+        "sequence": 87,
+        "type": "turn.completed",
+        "payload": {
+          "turnId": "turn_52aec811af204e9eb12c23d8fc90483b",
+          "clientRequestId": "live-command-7",
+          "stopReason": "completed",
+          "nativeSessionId": "00efb3fb-39a5-4bdb-a686-5bab118a9a86"
+        }
+      },
+      {
+        "sequence": 91,
+        "type": "extension.ui",
+        "payload": {
+          "type": "extension_ui_request",
+          "id": "72f0854e-27af-4e59-ad56-035ebf9471af",
+          "method": "notify",
+          "message": "No MCP tools available",
+          "notifyType": "info",
+          "provider": "pi",
+          "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+          "scope": "turn",
+          "turnId": "turn_b9d70ef050884220a2843a41d7508ce0"
+        }
+      },
+      {
+        "sequence": 93,
+        "type": "turn.completed",
+        "payload": {
+          "turnId": "turn_b9d70ef050884220a2843a41d7508ce0",
+          "clientRequestId": "live-command-8",
+          "stopReason": "completed",
+          "nativeSessionId": "00efb3fb-39a5-4bdb-a686-5bab118a9a86"
+        }
+      },
+      {
+        "sequence": 97,
+        "type": "extension.ui",
+        "payload": {
+          "type": "extension_ui_request",
+          "id": "788bc25d-d8bf-4cb4-aa0e-4e1b4e9d3f5a",
+          "method": "notify",
+          "message": "Exported cache stats CSV to $WORKSPACE/2026-09-10T17-33-39-155Z_00efb3fb-39a5-4bdb-a686-5bab118a9a86.csv",
+          "notifyType": "info",
+          "provider": "pi",
+          "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+          "scope": "turn",
+          "turnId": "turn_fe22a458ff08497e80e94db6553f6721"
+        }
+      },
+      {
+        "sequence": 99,
+        "type": "turn.completed",
+        "payload": {
+          "turnId": "turn_fe22a458ff08497e80e94db6553f6721",
+          "clientRequestId": "live-command-9",
+          "stopReason": "completed",
+          "nativeSessionId": "00efb3fb-39a5-4bdb-a686-5bab118a9a86"
+        }
+      },
+      {
+        "sequence": 103,
+        "type": "extension.ui",
+        "payload": {
+          "type": "extension_ui_request",
+          "id": "2c1e168a-e017-4c17-99f1-0b0462011f93",
+          "method": "setStatus",
+          "statusKey": "smoke",
+          "provider": "pi",
+          "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+          "scope": "turn",
+          "turnId": "turn_3ffd54fe86314d97a08be910efb268c6"
+        }
+      },
+      {
+        "sequence": 104,
+        "type": "extension.ui",
+        "payload": {
+          "type": "extension_ui_request",
+          "id": "f44436fe-96dd-45c8-977b-1ec847ef31d1",
+          "method": "setWidget",
+          "widgetKey": "smoke-above",
+          "provider": "pi",
+          "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+          "scope": "turn",
+          "turnId": "turn_3ffd54fe86314d97a08be910efb268c6"
+        }
+      },
+      {
+        "sequence": 105,
+        "type": "extension.ui",
+        "payload": {
+          "type": "extension_ui_request",
+          "id": "51d90e33-01b0-4aca-b21f-9f5b9ca3b1f8",
+          "method": "setWidget",
+          "widgetKey": "smoke-below",
+          "provider": "pi",
+          "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+          "scope": "turn",
+          "turnId": "turn_3ffd54fe86314d97a08be910efb268c6"
+        }
+      },
+      {
+        "sequence": 106,
+        "type": "extension.ui",
+        "payload": {
+          "type": "extension_ui_request",
+          "id": "ff180621-d0f2-4c4d-8f67-b4d2ba8f79be",
+          "method": "notify",
+          "message": "Smoke cleared",
+          "provider": "pi",
+          "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+          "scope": "turn",
+          "turnId": "turn_3ffd54fe86314d97a08be910efb268c6"
+        }
+      },
+      {
+        "sequence": 108,
+        "type": "turn.completed",
+        "payload": {
+          "turnId": "turn_3ffd54fe86314d97a08be910efb268c6",
+          "clientRequestId": "live-command-10",
+          "stopReason": "completed",
+          "nativeSessionId": "00efb3fb-39a5-4bdb-a686-5bab118a9a86"
+        }
+      },
+      {
+        "sequence": 113,
+        "type": "turn.completed",
+        "payload": {
+          "turnId": "turn_7cb179cfb0eb4e22b6b6697da2ac1943",
+          "clientRequestId": "live-command-11",
+          "stopReason": "completed",
+          "nativeSessionId": "00efb3fb-39a5-4bdb-a686-5bab118a9a86"
+        }
+      },
+      {
+        "sequence": 114,
+        "type": "permission.requested",
+        "payload": {
+          "permissionId": "perm_dc477c52251f476c8b6ac29aba70d4a7",
+          "providerRequestId": "3f942623-125b-41a8-a02f-92311ca08593",
+          "kind": "extension_ui",
+          "title": "Smoke stop pending",
+          "details": {
+            "type": "extension_ui_request",
+            "id": "3f942623-125b-41a8-a02f-92311ca08593",
+            "method": "input",
+            "title": "Smoke stop pending",
+            "placeholder": "The test stops this runtime without replying",
+            "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+            "scope": "session"
+          },
+          "options": [
+            {
+              "optionId": "answer",
+              "id": "answer",
+              "name": "Respond",
+              "label": "Respond",
+              "kind": "answer"
+            },
+            {
+              "optionId": "reject_once",
+              "id": "reject_once",
+              "name": "Cancel",
+              "label": "Cancel",
+              "kind": "reject_once"
+            }
+          ],
+          "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+          "scope": "session"
+        }
+      },
+      {
+        "sequence": 115,
+        "type": "permission.resolved",
+        "payload": {
+          "permissionId": "perm_dc477c52251f476c8b6ac29aba70d4a7",
+          "outcome": "cancelled",
+          "optionId": null,
+          "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+          "scope": "session"
+        }
+      },
+      {
+        "sequence": 116,
+        "type": "provider.runtime",
+        "payload": {
+          "provider": "pi",
+          "status": "stopped",
+          "reason": "user_closed",
+          "runtimeId": "pi-runtime-767be9c3d7f34658bcc73186c14babe3",
+          "scope": "session"
+        }
+      }
+    ],
+    "eventCounts": {
+      "conversation.created": 1,
+      "message.created": 11,
+      "turn.started": 11,
+      "provider.runtime": 2,
+      "extension.ui": 21,
+      "turn.configuration": 22,
+      "permission.requested": 17,
+      "permission.resolved": 17,
+      "extension.message": 3,
+      "turn.completed": 11
+    }
+  },
+  "piVersion": "0.84.4",
+  "backendBuild": "Final task working-tree debug binary after keyed UI coalescing, shutdown and package metadata fixes; see task commits for delivered revision",
+  "limitations": [
+    "HTTP event-journal integration, not a browser or desktop UI end-to-end run",
+    "Four explicitly loaded installed packages and local fixture only; no real MCP servers, models or child agents",
+    "Custom display flags preserved in journal; UI visibility is covered by component/projection tests"
+  ]
+}

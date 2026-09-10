@@ -149,4 +149,36 @@ node docs/pi-plugin-compatibility-2026-09-11/probe.mjs /absolute/path/to/pi /abs
 
 脚本输出“success”表示原命令返回成功，不能当作完整兼容性通过。随着插件版本变化，需重新审查这些命令分支；此脚本不是用于执行任意未知插件的沙箱。
 
-现有后端回归测试覆盖纯命令、pre-ACK 事件、复用、错误/重试、并发表单/超时、配置/队列、压缩/克隆/恢复与关闭队列；不覆盖前端映射、真实插件 TUI 或浏览器工作流。只新增调研文档和探针，因此未运行无关的双端 UI 构建。
+现有后端回归测试覆盖纯命令、pre-ACK 事件、复用、错误/重试、并发表单/超时、配置/队列、压缩/克隆/恢复与关闭队列；不覆盖前端映射、真实插件 TUI 或浏览器工作流。调研阶段只新增文档和探针，当时未运行双端 UI 构建；实施后的构建与界面验证见 [IMPLEMENTATION.md](IMPLEMENTATION.md)。
+
+## 实现后的真实 Pi 联调（2026-09-11）
+
+以上表格保留调研时的原生 RPC 结果。兼容层实施后，另使用本机 **Pi 0.84.4** 和当前任务新构建的 Todex 后端完成了无模型 HTTP 联调。证据在 [live-evidence.json](live-evidence.json)，脚本为 [live-smoke.mjs](live-smoke.mjs)，确定性扩展为 [live-fixture.ts](live-fixture.ts)。
+
+本轮实际经过 `POST /prompt` → Pi 插件 → Todex 事件日志 → `POST /permissions/:id` → Pi handler，完成 **11 个命令回合**。后端记录 **17 个交互请求**：16 个得到回答或取消；最后一个空闲输入保持挂起，再由独立的停止后台运行操作结清。
+
+| 验收对象 | 本轮证据 |
+|---|---|
+| 四类标准表单及取消 | select、confirm、input、editor 的回复值都回到真实 Pi handler；多行文本完整；取消返回 undefined |
+| 状态、文本组件、标题、草稿 | `extension.ui` 保留 `setStatus`、上下两个 placement 的 `setWidget`、`setTitle` 和 `set_editor_text`；clear 省略值字段 |
+| custom 消息 | 3 个 `extension.message` 保留正文与 `display`，包含显式隐藏消息和后台消息 |
+| 空闲消息及表单 | 原生事件出现在命令 ACK 之后；Todex 事件带 `scope=session`、同一 runtimeId，且没有错误归属上一轮的 turnId；后台表单可回答 |
+| 活动进程命令目录 | 通过 conversationId 查询返回 `catalogSource=session`，runtimeId 与该会话事件一致；cache、mcp、tasks、pruner 四包的 packageName/packageVersion 与实际 manifest 精确匹配 |
+| `@tintinweb/pi-tasks@0.9.0` | 创建 1 个任务，临时 JSON 落盘；再次打开列表及详情，题目和描述完整往返 |
+| `pi-context-prune@1.4.0` | `/pruner stats` 与 `/pruner` → stats 均完成并在 Todex 日志产生通知 |
+| `pi-cache-graph@1.0.2` | `/cache export` 在临时工作区生成 4 行 CSV，并产生包含导出路径的通知 |
+| `pi-mcp-adapter@2.32.1` | 显式空配置下 `/mcp` 和 `/mcp tools` 均完成并产生通知；不连接真实 MCP 服务 |
+| 停止后台运行 | 挂起空闲输入时调用 `POST /runtime/stop`，请求结清，`provider.runtime` 变为 stopped，原有会话日志仍可读取 |
+| 原生 abort 与进程结束 | 原生 abort 返回成功后 get_state 仍为空闲；结束有挂起输入的测试 Pi 进程后确认退出 |
+
+复现完整联调：
+
+```sh
+node docs/pi-plugin-compatibility-2026-09-11/live-smoke.mjs /absolute/path/to/pi \
+  --backend /absolute/path/to/todex-agentd \
+  --packages /absolute/path/to/npm/node_modules
+```
+
+不传 `--backend` 时只测原生 Pi RPC。`--packages` 限定上述 4 个已审查版本，版本变化时脚本会要求重新审查命令分支。每次运行创建新的临时 Pi 配置、后端数据目录和工作区，仅监听 `127.0.0.1`；不传递模型密钥、不加载其他用户扩展。直接加载 MCP 原包入口，并通过该版本支持的 `PI_MCP_CONFIG_MODE=exclusive` 限定只读取临时 Pi 配置目录内的空 `mcp.json`，跳过真实共享、项目和包配置。`PI_TASKS`、MCP exclusive 与内存鉴权缓存覆盖写在测试可执行包装器中，因为后端会过滤不在白名单内的继承环境变量。所有任务、CSV 和临时配置均留在测试目录中便于检查。
+
+这组证据覆盖真实插件与后端 HTTP/日志协议，**不等同于浏览器或桌面 UI 的端到端实测**。custom 消息的显隐标志在此验证至日志层；隐藏消息不显示、草稿不自动覆盖、通知不重复弹出由共享状态与界面测试验证。未调用付费模型、真实搜索服务、真实 MCP 服务或子 agent，任意自定义 TUI 的兼容边界不变。

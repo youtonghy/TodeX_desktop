@@ -1,0 +1,71 @@
+{
+  "base": "Web working tree snapshot taken before Pi compatibility implementation; no Git metadata available",
+  "verification": "Patch applied to independent baseline copy; all result hashes match current Web source",
+  "files": [
+    {
+      "path": "src/renderer/components/PiExtensionPanel.tsx",
+      "beforeSha256": null,
+      "afterSha256": "96669b855402f83bede3433c9f075f721ce47f5b96ed400159f3f4ad9ac2bec6"
+    },
+    {
+      "path": "src/renderer/components/piExtensionPresentation.ts",
+      "beforeSha256": null,
+      "afterSha256": "03edf7ce0ffd196fbf5bbf375d92baf31ce006b2f793f0157fdda6d607f2206f"
+    },
+    {
+      "path": "src/renderer/components/conversationTimeline.ts",
+      "beforeSha256": "9310f3d02dbbabd5d87d78698cb0d9c6fb2966a979c8646dff4efcde6c4693fd",
+      "afterSha256": "08d79075806db6c13599f50222f0a9ba957aec0f234b7fffcf29e1d273ddc451"
+    },
+    {
+      "path": "src/renderer/screens/ChatPanel.tsx",
+      "beforeSha256": "24b9e1b2b7041277b61fa00dd126140c7adb0e2cf347636f7d9268a1b06fafca",
+      "afterSha256": "ab03cac48ca682a61ea862f727e7182e8d5420da9bbad869a89916aee5131d5b"
+    },
+    {
+      "path": "src/renderer/session/useTodeXSession.ts",
+      "beforeSha256": "4ae9b840da111d172c43cb54c3900c71e37f30ca1bef91613329ebaa27fff2c8",
+      "afterSha256": "0771395ada23e1a081a0b93e34077c3f297ba4ec951eb0b681a01e4a7685661d"
+    },
+    {
+      "path": "src/renderer/session/providerCommands.ts",
+      "beforeSha256": null,
+      "afterSha256": "39a1631783d7a2f896c120a18ba83015bae919cab2c0eadf1e2e281306020f41"
+    },
+    {
+      "path": "src/renderer/session/piExtensionEffects.ts",
+      "beforeSha256": null,
+      "afterSha256": "b1f2dccf82aeeb8105b8f6e3d76e7da03dbebcdaf4643bf5398dfd724b5c7b7b"
+    },
+    {
+      "path": "tests/unit/piExtensionPanel.test.ts",
+      "beforeSha256": null,
+      "afterSha256": "fe9401afd31e1c85c2e3465b5863c5df3877a543e39cbbc588169447d49de572"
+    },
+    {
+      "path": "tests/unit/providerCommands.test.ts",
+      "beforeSha256": null,
+      "afterSha256": "452ca6fdd5f9695ef17356fc81c5a35c3551d6a0e603b6e5087fd4cf3e47920a"
+    },
+    {
+      "path": "tests/unit/piExtensionEffects.test.ts",
+      "beforeSha256": null,
+      "afterSha256": "687654a452b9240cc18385ee776fd79a09b054ba6c2f8067f2f4c71d087435eb"
+    },
+    {
+      "path": "tests/unit/piSessionIntegration.test.ts",
+      "beforeSha256": null,
+      "afterSha256": "d1e46d7d9c232d0d70e43ccfb892df69ace2a65670cbf115082f721564704d8a"
+    },
+    {
+      "path": "tests/unit/chatPermissions.test.ts",
+      "beforeSha256": "fb4bf66d23a7b9e509867a08f91a855f677a018e3594c3dbe79a3d7b39b07a8d",
+      "afterSha256": "e7c373a64fe3067b1f139c410a2c2ae9a4fc24ba4cf95148de17651bc3b4fe36"
+    },
+    {
+      "path": "tests/e2e/pi-extensions.spec.ts",
+      "beforeSha256": null,
+      "afterSha256": "ea2f777d0528074ddf4007a3bdbba28fdac5dc4a4c1ade57bc394dd4753bed2c"
+    }
+  ]
+}

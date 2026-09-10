@@ -1,0 +1,1237 @@
+--- /dev/null
++++ b/src/renderer/components/PiExtensionPanel.tsx
+@@ -0,0 +1,119 @@
++import { Accordion, Button, ScrollShadow } from '@heroui/react';
++import { Widget } from '@heroui-pro/react/widget';
++import type { ConversationRuntime } from '@todex/protocol/conversationRuntime';
++import { piExtensionPlainText, piRuntimeStopReason } from './piExtensionPresentation';
++
++type ExtensionUi = ConversationRuntime['extensionUi'];
++type EditorRequest = NonNullable<ExtensionUi['editorRequest']>;
++
++export type PiExtensionPanelProps = {
++  extensionUi: ExtensionUi;
++  placement: 'aboveEditor' | 'belowEditor';
++  providerRuntime?: ConversationRuntime['providerRuntime'];
++  /** Only pass a live editor request that the user has not already handled. */
++  pendingEditorRequest?: EditorRequest;
++  onReplaceEditor?: (request: EditorRequest) => void;
++  onDismissEditor?: (request: EditorRequest) => void;
++  onStopRuntime?: () => void;
++  isStopping?: boolean;
++  isConnected?: boolean;
++};
++
++const noticeLabels = { info: '通知', warning: '提醒', error: '错误' } as const;
++const noticeColors = { info: 'text-muted', warning: 'text-warning', error: 'text-danger' } as const;
++
++/** A presentation of the shared projection. Toasts, draft writes, and RPCs belong to the caller. */
++export function PiExtensionPanel({ extensionUi, placement, providerRuntime, pendingEditorRequest,
++  onReplaceEditor, onDismissEditor, onStopRuntime, isStopping = false, isConnected = true }: PiExtensionPanelProps) {
++  const above = placement === 'aboveEditor';
++  const widgets = Object.values(extensionUi.widgets).filter(widget => widget.placement === placement);
++  const statuses = above ? Object.values(extensionUi.statuses) : [];
++  const notices = above ? extensionUi.notices : [];
++  const editorRequest = above ? pendingEditorRequest : undefined;
++  const running = above && providerRuntime?.status === 'ready';
++  const stopped = above && providerRuntime?.status === 'stopped';
++  const title = above ? piExtensionPlainText(extensionUi.title || 'Pi 插件') : '插件补充信息';
++  const contentCount = widgets.length + statuses.length + notices.length;
++  if (!contentCount && !editorRequest && !running && !stopped && !(above && extensionUi.title)) return null;
++
++  return <Widget className="my-2 min-w-0 gap-2 rounded-2xl p-2" data-testid={`pi-extension-${placement}`}>
++    <Accordion hideSeparator defaultExpandedKeys={['content']}>
++      <Accordion.Item id="content">
++        <Widget.Header className="min-w-0 gap-2 px-1 py-0">
++          <Accordion.Heading className="min-w-0 flex-1">
++            <Accordion.Trigger className="min-w-0 gap-2 py-1.5 text-xs">
++              <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-0.5 text-left">
++                <Widget.Title className="min-w-0 break-words text-xs font-medium">{title}</Widget.Title>
++                {running ? <span className="text-muted">{isConnected ? '后台运行中' : '连接中断，运行状态待确认'}</span> : null}
++                {stopped ? <span className="text-muted">后台已停止</span> : null}
++                {notices.length ? <span className="text-muted">{notices.length} 条通知</span> : null}
++              </span>
++              <Accordion.Indicator className="size-3.5 shrink-0" />
++            </Accordion.Trigger>
++          </Accordion.Heading>
++          {running ? <Button size="sm" variant="ghost" className="shrink-0 text-xs"
++            isPending={isStopping} isDisabled={!isConnected || !onStopRuntime || isStopping}
++            aria-label="停止 Pi 后台运行，保留聊天历史"
++            onPress={onStopRuntime}>停止后台运行</Button> : null}
++        </Widget.Header>
++        <Accordion.Panel>
++          <Accordion.Body className="p-0 pt-1">
++            <Widget.Content className="min-w-0 space-y-3 p-3 text-xs shadow-none">
++              {statuses.length ? <dl className="space-y-2" aria-label="插件状态">
++                {statuses.map(status => <div key={status.key} className="grid min-w-0 grid-cols-[minmax(0,7rem)_minmax(0,1fr)] gap-2">
++                  <dt className="break-words text-muted">{piExtensionPlainText(status.key)}</dt>
++                  <dd className="min-w-0 whitespace-pre-wrap break-words">{piExtensionPlainText(status.text)}</dd>
++                </div>)}
++              </dl> : null}
++              {widgets.length ? <ScrollShadow className="max-h-52 overflow-y-auto" size={16}>
++                <div className="space-y-3" aria-label="插件文本组件">
++                  {widgets.map(widget => <section key={widget.key} aria-label={piExtensionPlainText(widget.key)}>
++                    <p className="mb-1 break-words text-muted">{piExtensionPlainText(widget.key)}</p>
++                    <p className="whitespace-pre-wrap break-words font-mono leading-relaxed">{piExtensionPlainText(widget.lines.join('\n'))}</p>
++                  </section>)}
++                </div>
++              </ScrollShadow> : null}
++              {notices.length ? <Accordion hideSeparator>
++                <Accordion.Item id="notices">
++                  <Accordion.Heading>
++                    <Accordion.Trigger className="gap-2 py-0 text-xs">
++                      <span className="flex-1 text-left">查看通知记录（{notices.length}）</span>
++                      <Accordion.Indicator className="size-3.5" />
++                    </Accordion.Trigger>
++                  </Accordion.Heading>
++                  <Accordion.Panel>
++                    <Accordion.Body className="p-0 pt-2">
++                      <ScrollShadow className="max-h-52 overflow-y-auto" size={16}>
++                        <ol className="space-y-3" aria-label="插件通知记录">
++                          {notices.map(notice => <li key={notice.eventId} className="space-y-0.5">
++                            <p className={`text-[11px] ${noticeColors[notice.level]}`}>{noticeLabels[notice.level]}</p>
++                            <p className="whitespace-pre-wrap break-words leading-relaxed">{piExtensionPlainText(notice.message)}</p>
++                          </li>)}
++                        </ol>
++                      </ScrollShadow>
++                    </Accordion.Body>
++                  </Accordion.Panel>
++                </Accordion.Item>
++              </Accordion> : null}
++              {!contentCount ? <p className="text-muted">{running ? '等待插件消息。停止后台运行会结束插件任务，聊天历史会保留。' : '聊天历史已保留。'}</p> : null}
++              {stopped && providerRuntime?.reason ? <p className="whitespace-pre-wrap break-words text-muted">{piRuntimeStopReason(providerRuntime.reason)}</p> : null}
++            </Widget.Content>
++          </Accordion.Body>
++        </Accordion.Panel>
++      </Accordion.Item>
++    </Accordion>
++    {editorRequest ? <Widget.Content className="space-y-2 p-3 text-xs shadow-none" aria-label="插件草稿建议">
++      <p className="font-medium">插件希望替换当前草稿</p>
++      <p className="text-muted">当前内容会保留，直到你选择替换。</p>
++      <ScrollShadow className="max-h-32 overflow-y-auto" size={12}>
++        <p className="whitespace-pre-wrap break-words">{piExtensionPlainText(editorRequest.text) || '（清空草稿）'}</p>
++      </ScrollShadow>
++      <div className="flex flex-wrap gap-2">
++        <Button size="sm" variant="secondary" isDisabled={!onReplaceEditor}
++          onPress={() => onReplaceEditor?.(editorRequest)}>替换草稿</Button>
++        <Button size="sm" variant="ghost" isDisabled={!onDismissEditor}
++          onPress={() => onDismissEditor?.(editorRequest)}>取消</Button>
++      </div>
++    </Widget.Content> : null}
++  </Widget>;
++}
+--- /dev/null
++++ b/src/renderer/components/piExtensionPresentation.ts
+@@ -0,0 +1,31 @@
++/* eslint-disable no-control-regex -- These expressions deliberately remove terminal control sequences. */
++/** Terminal decoration is presentation only; keep the original event and editor text intact. */
++export function piExtensionPlainText(value: string): string {
++  return value
++    // OSC (including hyperlinks and title changes) and other terminal string commands.
++    .replace(/(?:\u001b\]|\u009d)[\s\S]*?(?:\u0007|\u001b\\|\u009c|$)/g, '')
++    .replace(/(?:\u001b[P^_]|[\u0090\u009e\u009f])[\s\S]*?(?:\u001b\\|\u009c|$)/g, '')
++    .replace(/(?:\u001b\[|\u009b)[0-?]*[ -/]*[@-~]/g, '')
++    .replace(/\u001b[ -/]*[@-~]/g, '')
++    .replace(/\r\n?/g, '\n')
++    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/g, '');
++}
++
++const runtimeStopReasons: Record<string, string> = {
++  user_closed: '你已停止 Pi 后台运行。',
++  maintenance_compact: '上下文压缩需要重启 Pi 插件；下次发送消息时会重新启动。',
++  maintenance_clone: '会话复制需要重启 Pi 插件；下次发送消息时会重新启动。',
++  daemon_shutdown: '后端已关闭，Pi 插件运行已结束。',
++  daemon_restarted: '后端已重新启动，之前的 Pi 插件运行已结束。',
++  workspace_access_revoked: '工作区执行权限已撤销，Pi 插件运行已结束。',
++  conversation_deleted: '会话已删除，Pi 插件运行已结束。',
++  conversation_expired: '会话已过期，Pi 插件运行已结束。',
++  expired: 'Pi 插件会话已过期。',
++  session_closed: 'Pi 会话已关闭。',
++  native_session_closed: 'Pi 进程已退出。',
++  protocol_error: 'Pi 连接异常，后台运行已停止。',
++};
++
++export function piRuntimeStopReason(reason: string): string {
++  return Object.hasOwn(runtimeStopReasons, reason) ? runtimeStopReasons[reason] : piExtensionPlainText(reason);
++}
+--- a/src/renderer/components/conversationTimeline.ts
++++ b/src/renderer/components/conversationTimeline.ts
+@@ -3,7 +3,7 @@
+ 
+ /** Both clients render semantic errors and tools from the same projection. */
+ export function isChatTimelineEntry(entry: TimelineEntry): boolean {
+-  return entry.kind !== 'system' || isStepProgressEntry(entry) || entry.category === 'error'
++  return entry.kind !== 'system' || isStepProgressEntry(entry) || entry.category === 'error' || entry.category === 'extension'
+     || entry.title === 'turn.failed';
+ }
+ 
+--- a/src/renderer/screens/ChatPanel.tsx
++++ b/src/renderer/screens/ChatPanel.tsx
+@@ -1,3 +1,5 @@
++import { PiExtensionPanel } from '../components/PiExtensionPanel';
++import { piCommandCompatibility, piTodexCommands } from '../session/providerCommands';
+ import { ConversationControls } from '../components/ConversationControls';
+ import { NoticeToast } from '../components/NoticeToast';
+ import { RiAttachment2, RiBarChartBoxLine, RiClipboardLine, RiCpuLine, RiGitBranchLine, RiListCheck2, RiShieldLine, RiStopCircleLine } from '@remixicon/react';
+@@ -263,30 +265,34 @@
+   const currentProvider = isV2Conversation(conversation) ? conversation.provider || '' : '';
+   const agentProvider = conversation.provider || (isV2Conversation(conversation) ? '' : 'codex');
+   const slashTrigger = draft.trim().startsWith('/') ? draft.trim() : '';
+-  const liveCommands = currentProvider ? (session.providerCommands[currentProvider as ProviderKind] ?? []) : [];
++  const commandCatalog = session.getProviderCommandCatalog(conversation.id);
++  const liveCommands = commandCatalog?.status === 'ready' ? commandCatalog.commands : [];
+   const providerSlashCatalog = liveCommands.length > 0
+     ? liveCommands.map((item) => ({
+       command: `/${item.name}`,
+       title: item.name,
+-      description: item.description || `${item.source} command`,
++      description: `${item.description || `${item.source} command`}${currentProvider === 'pi' ? ` · ${piCommandCompatibility(item).label}` : ''}`,
+       category: 'context' as const,
+     }))
+-    : SLASH_COMMANDS;
++    : currentProvider === 'pi' ? [] : SLASH_COMMANDS;
+   const canCompact = !isV2Conversation(conversation)
+     || session.v2Providers.find(item => item.id === currentProvider)?.capabilities.controlActions?.includes('compact') === true;
+-  const slashCatalog = [
++  const slashCatalog = currentProvider === 'pi' ? [...providerSlashCatalog, ...piTodexCommands] : [
+     ...(canCompact ? [{ command: '/compact', title: '压缩上下文', description: '压缩上下文，保留关键进展', category: 'thread' as const }] : []),
+     ...providerSlashCatalog.filter(item => canonicalSlashCommand(item.command) !== '/compact'),
+   ];
+   const chooseSlashCommand = (command: string) => {
+-    if (command === '/compact') {
++    if (command === '/compact' && currentProvider !== 'pi') {
+       if (thinking || executionUnknown || submissionStatus === 'sending' || compaction?.status === 'running') return;
+       session.sendSlashCommand(command, conversation.id);
+       session.setConversationChatDraft(conversation.id, '');
+     } else session.setConversationChatDraft(conversation.id, `${command} `);
+   };
+-  const slashSuggestions = slashTrigger
+-    ? slashCatalog.filter((item) => canonicalSlashCommand(item.command).startsWith(canonicalSlashCommand(slashTrigger.split(/\s+/)[0] || slashTrigger)))
++  const selectingPiCommand = /^\/[^\s]*$/.test(draft.trimStart()) || /^\/todex [^\s]*$/.test(draft.trimStart());
++  const slashSuggestions = slashTrigger && (currentProvider !== 'pi' || selectingPiCommand)
++    ? slashCatalog.filter(item => currentProvider === 'pi'
++      ? item.command.startsWith(slashTrigger.startsWith('/todex ') ? slashTrigger : slashTrigger.split(/\s+/)[0])
++      : canonicalSlashCommand(item.command).startsWith(canonicalSlashCommand(slashTrigger.split(/\s+/)[0] || slashTrigger)))
+     : [];
+   const suggestionCount = slashSuggestions.length > 0 ? Math.min(12, slashSuggestions.length) : mentionSuggestions.length;
+   const applySuggestion = (index: number) => {
+@@ -320,6 +326,8 @@
+   const submissionStatus = session.submissionStatusByConversation[conversation.id];
+   const executionUnknown = submissionStatus === 'unknown';
+   const runtime = session.conversationRuntimeById[conversation.id];
++  const sessionPermissionIds = new Set(runtime?.pendingPermissions.filter(item => item.scope === 'session').map(item => item.id));
++  const sessionPermissions = session.pendingRequests.filter(item => sessionPermissionIds.has(item.requestId));
+   const compaction = session.compactionByConversation[conversation.id];
+   const conversationTimeline = session.timeline.filter((entry) => entry.conversationId === conversation.id);
+   const canSwitchAgent = canSwitchConversationAgent(conversation, {
+@@ -452,12 +460,12 @@
+               const { toolName, argsText } = toolPresentation(entry.subtitle);
+               return <ChatTool key={entry.id} defaultExpanded={thinking} state={thinking ? 'input-streaming' : 'output-available'} toolName={toolName} argsText={argsText} triggerPrefix={thinking ? '正在调用：' : '已调用：'} />;
+             }
+-            const request = session.pendingRequests.find((pendingItem) => pendingItem.requestId && (entry.requestId === pendingItem.requestId || entry.raw.includes(pendingItem.requestId)));
++            const request = session.pendingRequests.find((pendingItem) => !sessionPermissionIds.has(pendingItem.requestId) && pendingItem.requestId && (entry.requestId === pendingItem.requestId || entry.raw.includes(pendingItem.requestId)));
+             const isUser = entry.kind === 'outgoing';
+             return (
+               <div key={entry.id} className={`flex gap-3 py-1 ${isUser ? 'justify-end' : 'justify-start'}`}>
+                 <div className={`min-w-0 max-w-[85%] ${isUser ? 'text-right' : ''}`}>
+-                  {isUser ? <p className="text-muted text-xs font-medium">You</p> : null}
++                  {isUser ? <p className="text-muted text-xs font-medium">You</p> : entry.category === 'extension' ? <p className="text-muted text-xs font-medium">Pi 插件 · {entry.title}</p> : null}
+                   <div className={`${isUser ? 'mt-1' : ''} text-sm leading-6`}>
+                     {isUser ? <div className="flex flex-col items-end gap-2">
+                       {entry.sentAttachments?.length ? (
+@@ -523,6 +531,24 @@
+       </ScrollShadow>
+       <div className="border-separator border-t px-5 py-4">
+         <div className="composer-container mx-auto max-w-2xl">
++          {currentProvider === 'pi' && runtime ? <PiExtensionPanel placement="aboveEditor"
++            extensionUi={runtime.extensionUi} providerRuntime={runtime.providerRuntime}
++            pendingEditorRequest={session.pendingPluginDrafts[conversation.id]}
++            onReplaceEditor={request => session.handlePluginDraft(conversation.id, request, true)}
++            onDismissEditor={request => session.handlePluginDraft(conversation.id, request, false)}
++            onStopRuntime={providerDescriptor?.capabilities.runtimeStop ? () => { void session.stopProviderRuntime(conversation.id); } : undefined}
++            isStopping={session.stoppingProviderRuntimes[conversation.id]}
++            isConnected={session.connectionState === 'open'} /> : null}
++          {sessionPermissions.map(request => <div key={request.requestId} className="mb-3 rounded-xl border border-separator p-3">
++            <p className="mb-2 text-xs font-medium">Pi 插件请求</p>
++            <ConversationPermissionActions request={request} onSelect={(option, data) => { session.sendApprovalResponse(option, request, data); }} />
++          </div>)}
++          {currentProvider === 'pi' && slashTrigger ? <div className="mb-2 flex items-center gap-2 text-xs text-muted">
++            <span>{commandCatalog?.status === 'ready' ? `Pi 命令 · ${commandCatalog.source === 'session' ? '当前会话' : '工作区发现'}`
++              : commandCatalog?.status === 'error' ? '命令目录加载失败，草稿已保留' : '正在加载 Pi 命令…'}</span>
++            <Button size="sm" variant="ghost" isDisabled={commandCatalog?.status === 'loading'}
++              onPress={session.refreshProviderCommands}>刷新命令</Button>
++          </div> : null}
+           {(slashSuggestions.length > 0 || mentionSuggestions.length > 0 || (mention && mentionSuggestions.length === 0)) ? (
+             <div className="composer-suggestions-popover">
+               {slashSuggestions.length > 0 ? (
+@@ -534,7 +560,7 @@
+                   }}
+                 >
+                   {slashSuggestions.slice(0, 12).map((item, index) => (
+-                    <ListBox.Item key={item.command} id={item.command} isDisabled={item.command === '/compact' && (thinking || executionUnknown || submissionStatus === 'sending' || compaction?.status === 'running')} textValue={`${item.command} ${item.description}`} className={`composer-suggestion-item ${index === suggestionIndex ? 'composer-suggestion-item--active' : ''}`}>
++                    <ListBox.Item key={item.command} id={item.command} isDisabled={currentProvider !== 'pi' && item.command === '/compact' && (thinking || executionUnknown || submissionStatus === 'sending' || compaction?.status === 'running')} textValue={`${item.command} ${item.description}`} className={`composer-suggestion-item ${index === suggestionIndex ? 'composer-suggestion-item--active' : ''}`}>
+                       <span className="composer-suggestion-command">{item.command}</span>
+                       <span className="composer-suggestion-description">{item.description}</span>
+                     </ListBox.Item>
+@@ -630,6 +656,13 @@
+               onKeyDownCapture={(event) => {
+                 if (event.key === 'Enter' && (isComposingRef.current || isImeCompositionKey(event))) {
+                   event.stopPropagation();
++                  return;
++                }
++                // Pro's textarea submits in its own key handler. Resolve Pi
++                // suggestions first so choosing a command only fills the draft.
++                if (currentProvider === 'pi' && event.target instanceof HTMLTextAreaElement) {
++                  handleSuggestionKeyDown(event);
++                  if (event.defaultPrevented) event.stopPropagation();
+                 }
+               }}
+               onValueChange={(value: string) => { setSuggestionIndex(0); session.setConversationChatDraft(conversation.id, value); }}
+@@ -639,11 +672,9 @@
+                   toast.danger('当前无法发送图片', { description: imageInputSupport.reason });
+                   return;
+                 }
+-                if (draft.trim().startsWith('/')) {
++                if (currentProvider !== 'pi' && draft.trim().startsWith('/')) {
+                   session.sendSlashCommand(draft, conversation.id);
+-                } else {
+-                  session.submitChat(conversation.id);
+-                }
++                } else session.submitChat(conversation.id);
+               }}
+               onStop={() => session.stopThinking(conversation.id)}
+             >
+@@ -711,7 +742,7 @@
+                       : '发送消息，或粘贴 / 拖入文本文件'}
+                     onCompositionStart={() => { isComposingRef.current = true; }}
+                     onCompositionEnd={() => { isComposingRef.current = false; }}
+-                    onKeyDown={handleSuggestionKeyDown}
++                    onKeyDown={currentProvider === 'pi' ? undefined : handleSuggestionKeyDown}
+                   />
+                 </PromptInput.Content>
+                 <PromptInput.Toolbar className="composer-toolbar">
+@@ -877,6 +908,8 @@
+               </PromptInput.Shell>
+             </ConversationPromptInput>
+           </ChatAttachmentInput>
++          {currentProvider === 'pi' && runtime ? <PiExtensionPanel placement="belowEditor"
++            extensionUi={runtime.extensionUi} /> : null}
+         </div>
+       </div>
+     </div>
+--- a/src/renderer/session/useTodeXSession.ts
++++ b/src/renderer/session/useTodeXSession.ts
+@@ -1,3 +1,8 @@
++import { toast } from '@heroui/react';
++import { PiExtensionEffects, canApplyPluginDraft } from './piExtensionEffects';
++import { commandContextKey, routePiSlashCommand, type ProviderCommandCatalog } from './providerCommands';
++import { piExtensionPlainText } from '../components/piExtensionPresentation';
++import type { ExtensionEditorRequest } from '@todex/protocol/conversationRuntime';
+ import type { BackendConnectionProfile } from './backendColors';
+ import { useWorkbenchSharing } from './useWorkbenchSharing';
+ import { bindSentAttachmentEvents, prepareSentAttachments, projectSentAttachments, pruneSentAttachmentRecords, type SentAttachmentRecord } from './sentAttachments';
+@@ -17,7 +22,7 @@
+   type Dispatch,
+   type SetStateAction,
+ } from 'react';
+-import type { ProviderDescriptor, ProviderKind, ConversationManifest, PromptContentRef, PromptSkillRef, SkillCatalogDescriptor, ProviderModelDescriptor, ProviderCommandDescriptor, ContextCompactionState, SubagentRun, MemoryEntry } from '@todex/protocol/v2';
++import type { ProviderDescriptor, ProviderKind, ConversationManifest, PromptContentRef, PromptSkillRef, SkillCatalogDescriptor, ProviderModelDescriptor, ContextCompactionState, SubagentRun, MemoryEntry } from '@todex/protocol/v2';
+ import { contextCompactionStatus } from '@todex/protocol/v2';
+ import { V2ApiClient, buildV2WebSocketUrlWithOptions, normalizeConversationEvent } from '@todex/protocol/v2';
+ import { probeBackendConnection, nextReconnectDelayMs, inspectServerUrl, tokenMatchesOrigin } from '@todex/protocol/connectionProbe';
+@@ -423,7 +428,16 @@
+   const [mentionHistory, setMentionHistory] = useState<WorkspaceMentionHistory[]>([]);
+   const [experimentalFeatures, setExperimentalFeatures] = useState<ExperimentalFeatureSettings>(EXPERIMENTAL_FEATURE_DEFAULTS);
+   const [selectedRequestId, setSelectedRequestId] = useState('');
+-  const [chatDrafts, setChatDrafts] = useState<Record<string, string>>({});
++  const [chatDrafts, setChatDraftsState] = useState<Record<string, string>>({});
++  const chatDraftsRef = useRef<Record<string, string>>({});
++  const setChatDrafts = useCallback((value: SetStateAction<Record<string, string>>) => {
++    const next = typeof value === 'function' ? value(chatDraftsRef.current) : value;
++    chatDraftsRef.current = next;
++    setChatDraftsState(next);
++  }, []);
++  const extensionEffectsRef = useRef(new PiExtensionEffects());
++  const [pendingPluginDrafts, setPendingPluginDrafts] = useState<Record<string, ExtensionEditorRequest | undefined>>({});
++  const [stoppingProviderRuntimes, setStoppingProviderRuntimes] = useState<Record<string, boolean>>({});
+   const [queuedChatDrafts, setQueuedChatDrafts] = useState<Record<string, QueuedChatSubmission[]>>({});
+   const [queueHydrated, setQueueHydrated] = useState(false);
+   const [queuePausedByConversation, setQueuePausedByConversation] = useState<Record<string, boolean>>({});
+@@ -460,7 +474,10 @@
+   const [providerModels, setProviderModels] = useState<Partial<Record<ProviderKind, ProviderModelDescriptor[]>>>({});
+   const [providerImageInput, setProviderImageInput] = useState<Record<string, { status: 'loading' | 'ready' | 'error'; imageInput?: boolean; reason?: string }>>({});
+   const [providerModelPreferences, setProviderModelPreferences] = useState<ProviderModelPreferences>({});
+-  const [providerCommands, setProviderCommands] = useState<Partial<Record<ProviderKind, ProviderCommandDescriptor[]>>>({});
++  const [providerCommandCatalogs, setProviderCommandCatalogs] = useState<Record<string, ProviderCommandCatalog>>({});
++  const [commandEpochs, setCommandEpochs] = useState<Record<string, number>>({});
++  const [commandCatalogRevision, setCommandCatalogRevision] = useState(0);
++  const refreshProviderCommands = useCallback(() => setCommandCatalogRevision(value => value + 1), []);
+   const [contextUsageByConversation, setContextUsageByConversation] = useState<Record<string, ConversationContextUsage>>({});
+   const [compactionByConversation, setCompactionByConversation] = useState<Record<string, ContextCompactionState & { recommended?: boolean }>>({});
+   const [subagentsByConversation, setSubagentsByConversation] = useState<Record<string, SubagentRun[]>>({});
+@@ -1348,25 +1365,45 @@
+     return () => { cancelled = true; };
+   }, [activeBackendConnectionId, activeWorkspace?.path, hydrated, rememberProviderModelSelection, resolveRememberedProviderSelection, settings.authToken, settings.serverUrl, v2Providers]);
+ 
+-  useEffect(() => {
+-    if (!hydrated || !activeWorkspace?.path || v2Providers.length === 0) return;
+-    let cancelled = false;
+-    const api = new V2ApiClient({ serverUrl: settings.serverUrl, authToken: settings.authToken });
+-    void Promise.all(v2Providers.filter((item) => item.available).map(async (provider) => {
+-      try {
+-        const result = await api.listProviderCommands(provider.id, activeWorkspace.path);
+-        if (!cancelled) setProviderCommands((current) => ({ ...current, [provider.id]: result.commands }));
+-      } catch {
+-        // Keep the last successful command catalog while the backend recovers.
+-      }
+-    }));
+-    return () => { cancelled = true; };
+-  }, [activeWorkspace?.path, hydrated, settings.authToken, settings.serverUrl, v2Providers]);
+-
+   const activeConversation = useMemo(
+     () => conversations.find((item) => item.id === activeConversationId) ?? null,
+     [activeConversationId, conversations],
+   );
++
++  const providerCommandContext = useCallback((conversationId: string) => {
++    const conversation = conversations.find(item => item.id === conversationId);
++    if (!conversation?.provider) return;
++    const workspace = workspaces.find(item => item.id === conversation.workspaceId);
++    if (!workspace) return;
++    const runtime = conversationRuntimeById[conversationId]?.providerRuntime;
++    return { backend: `${activeBackendConnectionId}:${settings.serverUrl}`, workspace: workspace.path,
++      provider: conversation.provider, conversationId: conversation.v2ConversationId,
++      runtimeId: runtime?.runtimeId, runtimeStatus: runtime?.status, commandEpoch: commandEpochs[conversationId] };
++  }, [conversations, workspaces, conversationRuntimeById, activeBackendConnectionId, settings.serverUrl, commandEpochs]);
++  const getProviderCommandCatalog = useCallback((conversationId: string) => {
++    const context = providerCommandContext(conversationId);
++    const catalog = context && providerCommandCatalogs[commandContextKey(context)];
++    return catalog || undefined;
++  }, [providerCommandContext, providerCommandCatalogs]);
++  const activeCommandContext = activeConversation && providerCommandContext(activeConversation.id);
++  const activeCommandKey = activeCommandContext ? commandContextKey(activeCommandContext) : '';
++  useEffect(() => {
++    if (!hydrated || !activeCommandKey) return;
++    const [, workspace, provider, conversationId] = JSON.parse(activeCommandKey) as string[];
++    let cancelled = false;
++    setProviderCommandCatalogs(current => ({ ...current,
++      [activeCommandKey]: { contextKey: activeCommandKey, status: 'loading', commands: [] } }));
++    const api = new V2ApiClient({ serverUrl: settings.serverUrl, authToken: settings.authToken });
++    void api.listProviderCommands(provider as ProviderKind, workspace, conversationId || undefined).then(result => {
++      if (!cancelled) setProviderCommandCatalogs(current => ({ ...current,
++        [activeCommandKey]: { contextKey: activeCommandKey, status: 'ready', commands: result.commands, source: result.catalogSource } }));
++    }).catch((error: unknown) => {
++      if (!cancelled) setProviderCommandCatalogs(current => ({ ...current,
++        [activeCommandKey]: { contextKey: activeCommandKey, status: 'error', commands: [],
++          error: error instanceof Error ? error.message : '命令目录加载失败' } }));
++    });
++    return () => { cancelled = true; };
++  }, [hydrated, activeCommandKey, commandCatalogRevision, settings.serverUrl, settings.authToken]);
+ 
+   useEffect(() => {
+     if (!hydrated || !activeConversation || !activeWorkspace?.path) return;
+@@ -1413,6 +1450,26 @@
+     if (!conversation) return;
+     const localId = conversation.id;
+     setConversationRuntimeById((current) => ({ ...current, [localId]: state }));
++    setPendingPluginDrafts(current => {
++      const request = current[localId];
++      return request && (request.runtimeId !== state.extensionUi.runtimeId || request.eventId !== state.extensionUi.editorRequest?.eventId || state.providerRuntime?.status === 'stopped')
++        ? { ...current, [localId]: undefined } : current;
++    });
++    for (const event of appliedEvents) {
++      const effect = extensionEffectsRef.current.consume(event, state);
++      if (effect?.kind === 'notice') {
++        const title = `${conversation.title || 'Pi 会话'} · 插件${effect.notice.level === 'error' ? '错误' : effect.notice.level === 'warning' ? '提醒' : '通知'}`;
++        const options = { description: piExtensionPlainText(effect.notice.message).slice(0, 300), timeout: 6000 };
++        if (effect.notice.level === 'error') toast.danger(title, options);
++        else if (effect.notice.level === 'warning') toast.warning(title, options);
++        else toast.info(title, options);
++      } else if (effect?.kind === 'editor') {
++        if (canApplyPluginDraft(chatDraftsRef.current[localId] ?? '')) {
++          setConversationChatDraft(localId, effect.request.text);
++          setPendingPluginDrafts(current => ({ ...current, [localId]: undefined }));
++        } else setPendingPluginDrafts(current => ({ ...current, [localId]: effect.request }));
++      }
++    }
+     if (state.pendingControl) {
+       controlRequestsRef.current.set(localId, state.pendingControl.requestId);
+       setControlStatusByConversation(current => ({ ...current, [localId]: state.pendingControl!.status }));
+@@ -1468,6 +1525,9 @@
+         if (type === 'control.rejected') setLastError(typeof data.message === 'string' ? data.message : 'Agent 未应用控制请求');
+       }
+       if (['turn.completed', 'turn.cancelled', 'turn.failed', 'turn.interrupted'].includes(type)) {
++        // Extensions can change their catalog or native session during a turn.
++        if (conversation.provider === 'pi') setCommandEpochs(current => (current[localId] ?? 0) >= event.sequence
++          ? current : { ...current, [localId]: event.sequence });
+         if (turnId) {
+           settledV2TurnsRef.current.set(`${state.conversationId}:${turnId}`, type);
+           if (settledV2TurnsRef.current.size > 2000) settledV2TurnsRef.current.delete(settledV2TurnsRef.current.keys().next().value!);
+@@ -1508,6 +1568,11 @@
+     legacyRecoveryRef.current = new LegacyEventRecovery<ServerEvent>();
+     protocolCommandsRef.current?.dispose();
+     setConversationRuntimeById({});
++    extensionEffectsRef.current.reset();
++    setPendingPluginDrafts({});
++    setProviderCommandCatalogs({});
++    setCommandEpochs({});
++    setStoppingProviderRuntimes({});
+     setRecoveringConversations({});
+     settledV2TurnsRef.current.clear();
+   }, [settings.serverUrl, settings.authToken]);
+@@ -2640,7 +2705,10 @@
+         const event = normalizeConversationEvent(parsed.payload ?? parsed);
+         if (!event) throw new Error('收到无效的对话事件，未推进恢复位置。');
+         const conversation = conversationsRef.current.find((item) => item.v2ConversationId === event.conversationId || item.id === event.conversationId);
+-        if (conversation) conversationRecoveryRef.current!.receive(event.conversationId, conversation.workspaceId, [event]);
++        if (conversation) {
++          if (parsed.delivery === 'live') extensionEffectsRef.current.markLive(event);
++          conversationRecoveryRef.current!.receive(event.conversationId, conversation.workspaceId, [event]);
++        }
+         return;
+       }
+       enqueueServerEvent(parsed as unknown as ServerEvent);
+@@ -2713,6 +2781,28 @@
+ 
+   const sendProtocolCommand = useCallback((message: ProtocolCommand, timeoutMs = 15_000) =>
+     protocolCommandsRef.current!.request(message, timeoutMs), []);
++
++  const handlePluginDraft = useCallback((conversationId: string, request: ExtensionEditorRequest, replace: boolean) => {
++    const current = pendingPluginDrafts[conversationId];
++    const runtime = conversationRuntimeById[conversationId];
++    if (current?.eventId !== request.eventId || current.eventId !== runtime?.extensionUi.editorRequest?.eventId || current.runtimeId !== runtime?.extensionUi.runtimeId
++      || runtime.providerRuntime?.status === 'stopped') return;
++    if (replace) setConversationChatDraft(conversationId, current.text);
++    setPendingPluginDrafts(items => ({ ...items, [conversationId]: undefined }));
++  }, [pendingPluginDrafts, conversationRuntimeById, setConversationChatDraft]);
++
++  const stopProviderRuntime = useCallback(async (conversationId: string) => {
++    const conversation = conversationsRef.current.find(item => item.id === conversationId);
++    if (!conversation?.v2ConversationId) return;
++    setStoppingProviderRuntimes(current => ({ ...current, [conversationId]: true }));
++    try {
++      await sendProtocolCommand({ id: createRequestId('runtime-stop'), type: 'conversation.runtime.stop',
++        payload: { conversationId: conversation.v2ConversationId } });
++      await recoverConversation(conversationId);
++    } catch (error) {
++      setLastError(error instanceof Error ? error.message : '无法停止 Pi 后台运行');
++    } finally { setStoppingProviderRuntimes(current => ({ ...current, [conversationId]: false })); }
++  }, [sendProtocolCommand, recoverConversation, setLastError]);
+ 
+   const controlConversation = useCallback(async (conversationId: string, control: LiveConversationControl): Promise<boolean> => {
+     const conversation = conversationsRef.current.find(item => item.id === conversationId);
+@@ -6067,7 +6157,7 @@
+       }
+ 
+       const [command, ...rest] = trimmed.slice(1).trim().split(/\s+/);
+-      const lower = command.toLowerCase();
++      let lower = command.toLowerCase();
+       const context = getConversationContext(conversationId);
+ 
+       if (!context) {
+@@ -6076,6 +6166,18 @@
+       }
+ 
+       const { workspace, conversation } = context;
++      if (conversation.provider === 'pi' && isV2Conversation(conversation)) {
++        const route = routePiSlashCommand(input, getProviderCommandCatalog(conversation.id));
++        if (route.kind === 'blocked') { toast.warning('Pi 命令', { description: route.message }); return; }
++        if (route.kind === 'native') {
++          void sendV2Prompt(route.input, conversation.id).then(accepted => {
++            if (accepted) setConversationChatDraft(conversation.id, current => current.trim() === input.trim() ? '' : current);
++          });
++          return;
++        }
++        if (route.command === 'commands') { refreshProviderCommands(); return; }
++        lower = route.command;
++      }
+       if (isV2Conversation(conversation)) {
+         if (lower === 'memory' || lower === 'memories') {
+           openSlashCommandActionPage(workspace, conversation, '/memory');
+@@ -6532,11 +6634,8 @@
+         return;
+       }
+ 
+-      const dynamicCommand = conversation.provider
+-        ? providerCommands[conversation.provider as ProviderKind]?.find(
+-        (item) => item.name.toLowerCase() === lower && item.invocation === 'prompt',
+-          )
+-        : undefined;
++      const dynamicCommand = getProviderCommandCatalog(conversation.id)?.commands.find(
++        item => item.name.toLowerCase() === lower && item.invocation === 'prompt');
+       if (dynamicCommand) {
+         sendV2Prompt(trimmed, conversation.id);
+         return;
+@@ -6591,7 +6690,8 @@
+       settings,
+       modelCatalog,
+       openPanel,
+-      providerCommands,
++      getProviderCommandCatalog,
++      refreshProviderCommands,
+       sendV2Prompt,
+       sendProtocolCommand,
+       recoverConversation,
+@@ -6786,7 +6886,11 @@
+       }
+     }
+     const isThinking = thinkingConversations[conversationId] === true;
+-    if (text === '/compact') {
++    if (conversation.provider === 'pi' && text.startsWith('/')) {
++      const route = routePiSlashCommand(text, getProviderCommandCatalog(conversation.id));
++      if (route.kind !== 'native') { sendSlashCommand(text, conversationId); return; }
++    }
++    if (text === '/compact' && conversation.provider !== 'pi') {
+       if (isThinking || pendingV2SubmissionsRef.current.has(conversationId)) {
+         setLastError('请等待当前任务结束后再压缩上下文。');
+         return;
+@@ -6847,7 +6951,7 @@
+       return;
+     }
+     sendSlashCommand(text, conversationId);
+-  }, [appendTimeline, chatDrafts, composerAttachments, controlConversation, getConversationContext, rememberMentionReferences, selectedSkills, sendLocalTurn, sendSlashCommand, sendV2Prompt, setConversationAttachments, setConversationChatDraft, setConversationComposerSelection, setConversationSelectedSkills, thinkingConversations]);
++  }, [appendTimeline, chatDrafts, composerAttachments, controlConversation, getConversationContext, getProviderCommandCatalog, rememberMentionReferences, selectedSkills, sendLocalTurn, sendSlashCommand, sendV2Prompt, setConversationAttachments, setConversationChatDraft, setConversationComposerSelection, setConversationSelectedSkills, thinkingConversations]);
+ 
+   const runWorkspaceCommand = useCallback((workspace: WorkspaceRecord, conversation: ConversationRecord, command: 'start' | 'status' | 'attach' | 'stop' | 'interrupt') => {
+     if (command === 'start') {
+@@ -7154,7 +7258,12 @@
+     capabilityCatalogs,
+     providerModels,
+     providerImageInput,
+-    providerCommands,
++    getProviderCommandCatalog,
++    refreshProviderCommands,
++    pendingPluginDrafts,
++    handlePluginDraft,
++    stoppingProviderRuntimes,
++    stopProviderRuntime,
+     contextUsageByConversation,
+     compactionByConversation,
+     memoryEntriesByConversation,
+--- /dev/null
++++ b/src/renderer/session/providerCommands.ts
+@@ -0,0 +1,58 @@
++import type { ProviderCommandDescriptor, ProviderCommandsResponse } from '@todex/protocol/v2';
++
++export type CommandContext = {
++  backend: string; workspace: string; provider: string; conversationId?: string;
++  runtimeId?: string; runtimeStatus?: string; nativeSessionId?: string; commandEpoch?: number;
++};
++export type ProviderCommandCatalog = {
++  contextKey: string; status: 'loading' | 'ready' | 'error'; commands: ProviderCommandDescriptor[];
++  error?: string; source?: ProviderCommandsResponse['catalogSource'];
++};
++export const commandContextKey = (context: CommandContext) => JSON.stringify([
++  context.backend, context.workspace, context.provider, context.conversationId ?? '',
++  context.runtimeId ?? '', context.runtimeStatus ?? '', context.nativeSessionId ?? '', context.commandEpoch ?? 0,
++]);
++
++/** This is a versioned evidence registry, not an inference from command names. */
++export function piCommandCompatibility(command: ProviderCommandDescriptor, args = ''): { label: string; blocked?: string } {
++  const identity = `${command.packageName ?? ''}@${command.packageVersion ?? ''}/${command.name}`;
++  const subcommand = args.trim().split(/\s+/)[0];
++  const terminal = '此入口依赖 Pi 终端界面，当前 RPC 无法显示。请在 Pi 终端使用此功能。';
++  switch (identity) {
++    case 'pi-cache-graph@1.0.2/cache': return { label: '已验证 export；graph/stats 需终端',
++      ...(['graph', 'stats'].includes(subcommand) ? { blocked: terminal } : {}) };
++    case '@tmustier/pi-usage-extension@0.9.4/usage': return { label: '需 Pi 终端界面', blocked: terminal };
++    case 'better-custom@0.4.1/better-custom': return { label: '需 Pi 终端界面', blocked: terminal };
++    case 'pi-context-usage@1.0.2/context': return { label: '部分可用：details 需终端',
++      ...(subcommand === 'details' ? { blocked: terminal } : {}) };
++    case 'pi-context-prune@1.4.0/pruner': return { label: '已验证 stats；settings/tree 需终端',
++      ...(['settings', 'tree'].includes(subcommand) ? { blocked: terminal } : {}) };
++    case '@tintinweb/pi-tasks@0.9.0/tasks': return { label: '已验证创建/查看；Settings 需终端' };
++    case 'pi-mcp-adapter@2.32.1/mcp': return { label: '已验证空配置通知；其他流程未验证' };
++    default: return { label: '兼容性未验证' };
++  }
++}
++
++const todexCommands = ['compact', 'retry', 'resume', 'memory', 'commands'] as const;
++export const piTodexCommands = todexCommands.map(name => ({ command: `/todex ${name}`, title: name,
++  description: ({ compact: 'Todex 压缩上下文（会重启插件）', retry: 'Todex 重试', resume: 'Todex 继续', memory: 'Todex 记忆管理', commands: '刷新插件命令目录' })[name],
++  category: 'context' as const }));
++
++export function routePiSlashCommand(input: string, catalog?: ProviderCommandCatalog):
++  | { kind: 'native'; input: string } | { kind: 'todex'; command: string }
++  | { kind: 'blocked'; message: string } {
++  const [name, ...args] = input.trim().slice(1).split(/\s+/);
++  // The reserved explicit namespace stays usable while discovery is unavailable.
++  if (name === 'todex') {
++    const command = args[0];
++    return todexCommands.some(item => item === command) && args.length === 1
++      ? { kind: 'todex', command }
++      : { kind: 'blocked', message: '使用 /todex compact、retry、resume、memory 或 commands。' };
++  }
++  if (!catalog || catalog.status !== 'ready') return { kind: 'blocked', message: catalog?.status === 'error'
++    ? 'Pi 命令目录加载失败，请刷新目录后重试。草稿已保留。' : 'Pi 命令目录正在加载，请稍后重试。草稿已保留。' };
++  const command = catalog.commands.find(item => item.name === name && item.invocation === 'prompt');
++  if (!command) return { kind: 'blocked', message: `当前 Pi 会话没有 /${name} 命令。可刷新目录，Todex 操作请使用 /todex。` };
++  const compatibility = piCommandCompatibility(command, args.join(' '));
++  return compatibility.blocked ? { kind: 'blocked', message: compatibility.blocked } : { kind: 'native', input };
++}
+--- /dev/null
++++ b/src/renderer/session/piExtensionEffects.ts
+@@ -0,0 +1,31 @@
++import { canonicalConversationEventType, type ConversationEvent } from '@todex/protocol/v2';
++import type { ConversationRuntime, ExtensionEditorRequest, ExtensionNotice } from '@todex/protocol/conversationRuntime';
++
++/** Journal replay only rebuilds state. One-shot effects need explicit live delivery. */
++export class PiExtensionEffects {
++  private live = new Set<string>();
++  private consumed = new Set<string>();
++  private key(event: ConversationEvent) { return `${event.conversationId}:${event.eventId}`; }
++  markLive(event: ConversationEvent) {
++    if (canonicalConversationEventType(event) !== 'extension.ui') return;
++    const key = this.key(event);
++    if (!this.consumed.has(key)) this.live.add(key);
++    if (this.live.size > 4096) this.live.delete(this.live.values().next().value!);
++  }
++  consume(event: ConversationEvent, state: ConversationRuntime):
++    | { kind: 'notice'; notice: ExtensionNotice } | { kind: 'editor'; request: ExtensionEditorRequest } | undefined {
++    const key = this.key(event);
++    if (!this.live.delete(key) || this.consumed.has(key)) return;
++    this.consumed.add(key);
++    if (this.consumed.size > 8192) this.consumed.delete(this.consumed.values().next().value!);
++    const ui = state.extensionUi;
++    if (!ui.runtimeId || state.providerRuntime?.status === 'stopped') return;
++    const request = ui.editorRequest;
++    if (request?.eventId === event.eventId && request.runtimeId === ui.runtimeId) return { kind: 'editor', request };
++    const notice = ui.notices.find(item => item.eventId === event.eventId && item.runtimeId === ui.runtimeId);
++    if (notice) return { kind: 'notice', notice };
++  }
++  reset() { this.live.clear(); this.consumed.clear(); }
++}
++
++export const canApplyPluginDraft = (draft: string) => draft.length === 0;
+--- /dev/null
++++ b/tests/unit/piExtensionPanel.test.ts
+@@ -0,0 +1,120 @@
++import { afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest';
++import * as React from 'react';
++import { act, createElement } from 'react';
++import { createRoot, type Root } from 'react-dom/client';
++import { PiExtensionPanel, type PiExtensionPanelProps } from '../../src/renderer/components/PiExtensionPanel';
++import { piExtensionPlainText } from '../../src/renderer/components/piExtensionPresentation';
++
++vi.hoisted(() => {
++  window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false, media: '', onchange: null });
++});
++
++let root: Root;
++let container: HTMLDivElement;
++const meta = { runtimeId: 'runtime-a', eventId: 'event-a', sequence: 1 };
++
++function props(overrides: Partial<PiExtensionPanelProps> = {}): PiExtensionPanelProps {
++  return {
++    placement: 'aboveEditor',
++    extensionUi: { runtimeId: 'runtime-a', statuses: {}, widgets: {}, notices: [] },
++    providerRuntime: { provider: 'pi', runtimeId: 'runtime-a', status: 'ready' },
++    ...overrides,
++  };
++}
++async function render(input: PiExtensionPanelProps) {
++  await act(async () => root.render(createElement(PiExtensionPanel, input)));
++}
++function button(text: string): HTMLButtonElement {
++  const result = [...container.querySelectorAll('button')].find(item => item.textContent?.includes(text));
++  if (!result) throw new Error(`Missing button: ${text}`);
++  return result;
++}
++beforeAll(() => {
++  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true, React });
++  HTMLElement.prototype.scrollIntoView ??= () => {};
++});
++beforeEach(() => {
++  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
++  container = document.createElement('div');
++  document.body.append(container);
++  root = createRoot(container);
++});
++afterEach(() => {
++  act(() => root.unmount());
++  container.remove();
++  vi.unstubAllGlobals();
++});
++
++it('shows each text widget at its requested placement and renders plugin text without HTML or terminal commands', async () => {
++  const state = props();
++  state.extensionUi.title = '<img src=x onerror=alert(1)>插件';
++  state.extensionUi.statuses.mcp = { ...meta, key: 'mcp', text: '\u001b[32m已连接\u001b[0m' };
++  state.extensionUi.widgets.top = { ...meta, key: 'top', placement: 'aboveEditor', lines: ['输入框上方', '<script>danger()</script>'] };
++  state.extensionUi.widgets.bottom = { ...meta, key: 'bottom', placement: 'belowEditor', lines: ['输入框下方'] };
++  await render(state);
++  expect(container.textContent).toContain('已连接');
++  expect(container.textContent).toContain('输入框上方');
++  expect(container.textContent).toContain('<script>danger()</script>');
++  expect(container.textContent).not.toContain('输入框下方');
++  expect(container.querySelector('img,script')).toBeNull();
++  expect(container.textContent).not.toContain('\u001b');
++  await render({ ...state, placement: 'belowEditor' });
++  expect(container.textContent).toContain('输入框下方');
++  expect(container.textContent).not.toContain('已连接');
++  expect(container.textContent).not.toContain('停止后台运行');
++});
++
++it('keeps a pending draft actionable when details are collapsed and only replaces it on explicit action', async () => {
++  const pendingEditorRequest = { ...meta, text: '一行\n二行' };
++  const onReplaceEditor = vi.fn();
++  const onDismissEditor = vi.fn();
++  await render(props({ pendingEditorRequest, onReplaceEditor, onDismissEditor }));
++  expect(onReplaceEditor).not.toHaveBeenCalled();
++  await act(async () => button('Pi 插件').click());
++  expect(button('Pi 插件').getAttribute('aria-expanded')).toBe('false');
++  expect(button('替换草稿').closest('[hidden]')).toBeNull();
++  await act(async () => button('替换草稿').click());
++  expect(onReplaceEditor).toHaveBeenCalledExactlyOnceWith(pendingEditorRequest);
++  await act(async () => button('取消').click());
++  expect(onDismissEditor).toHaveBeenCalledExactlyOnceWith(pendingEditorRequest);
++});
++
++it('keeps notifications available for review without an automatic live announcement', async () => {
++  const state = props();
++  state.extensionUi.notices = [
++    { ...meta, message: '导出成功', level: 'info', time: '2026-09-11T00:00:00Z', scope: 'session' },
++    { ...meta, eventId: 'event-b', sequence: 2, message: '设置需 Pi 终端', level: 'warning', time: '2026-09-11T00:00:01Z', scope: 'turn' },
++  ];
++  await render(state);
++  expect(button('查看通知记录').getAttribute('aria-expanded')).toBe('false');
++  await act(async () => button('查看通知记录').click());
++  const history = container.querySelector('ol[aria-label="插件通知记录"]');
++  expect(history?.textContent).toContain('导出成功');
++  expect(history?.textContent).toContain('设置需 Pi 终端');
++  expect(history?.closest('[aria-live]')).toBeNull();
++});
++
++it('exposes a separate runtime stop action and disables it when disconnected', async () => {
++  const onStopRuntime = vi.fn();
++  await render(props({ onStopRuntime }));
++  expect(button('停止后台运行').getAttribute('aria-label')).toContain('保留聊天历史');
++  await act(async () => button('停止后台运行').click());
++  expect(onStopRuntime).toHaveBeenCalledTimes(1);
++  await render(props({ onStopRuntime, isConnected: false }));
++  expect(button('停止后台运行').disabled).toBe(true);
++  expect(container.textContent).toContain('运行状态待确认');
++  await render(props({ providerRuntime: { provider: 'pi', runtimeId: 'runtime-a', status: 'stopped', reason: 'user_closed' }, onStopRuntime }));
++  expect(container.textContent).toContain('后台已停止');
++  expect(container.querySelector('button[aria-label="停止 Pi 后台运行，保留聊天历史"]')).toBeNull();
++  expect(container.textContent).toContain('你已停止 Pi 后台运行。');
++  expect(container.textContent).not.toContain('user_closed');
++  await render(props({ providerRuntime: { provider: 'pi', runtimeId: 'runtime-a', status: 'stopped', reason: '\u001b[31m插件自行结束\u001b[0m' } }));
++  expect(container.textContent).toContain('插件自行结束');
++  expect(container.textContent).not.toContain('\u001b');
++});
++
++it('removes OSC hyperlinks and terminal controls while preserving readable lines and emoji', () => {
++  expect(piExtensionPlainText('\u001b]8;;https://example.test\u0007链接\u001b]8;;\u0007\r\n\t完成 ✅\u0000'))
++    .toBe('链接\n\t完成 ✅');
++  expect(piExtensionPlainText('文本\u001b]0;hidden terminal title')).toBe('文本');
++});
+--- /dev/null
++++ b/tests/unit/providerCommands.test.ts
+@@ -0,0 +1,36 @@
++import { describe, expect, it } from 'vitest';
++import { commandContextKey, piCommandCompatibility, routePiSlashCommand, type ProviderCommandCatalog } from '../../src/renderer/session/providerCommands';
++
++const catalog: ProviderCommandCatalog = { contextKey: 'test', status: 'ready', commands:
++  ['compact', 'memory', 'model', 'status', 'review', 'permissions', 'MixedCase'].map(name => ({ name, source: 'extension', description: '', invocation: 'prompt' })) };
++describe('Pi command routing', () => {
++  it.each(['compact', 'memory', 'model', 'status', 'review', 'permissions'])('routes native /%s before Todex handlers', name => {
++    expect(routePiSlashCommand(`/${name} unchanged  args`, catalog)).toEqual({ kind: 'native', input: `/${name} unchanged  args` });
++  });
++  it('keeps explicit Todex actions available with an empty or failed catalog', () => {
++    expect(routePiSlashCommand('/todex compact')).toEqual({ kind: 'todex', command: 'compact' });
++    expect(routePiSlashCommand('/todex commands', { ...catalog, status: 'error' })).toEqual({ kind: 'todex', command: 'commands' });
++    expect(routePiSlashCommand('/todex model', catalog).kind).toBe('blocked');
++  });
++  it('does not invent native commands or reuse Codex actions when discovery is empty or fails', () => {
++    expect(routePiSlashCommand('/compact', { ...catalog, commands: [] }).kind).toBe('blocked');
++    expect(routePiSlashCommand('/compact', { ...catalog, status: 'error' }).kind).toBe('blocked');
++    expect(routePiSlashCommand('/MixedCase', catalog).kind).toBe('native');
++    expect(routePiSlashCommand('/mixedcase', catalog).kind).toBe('blocked');
++  });
++  it('separates backend, workspace, provider, conversation and runtime generations', () => {
++    const base = { backend: 'b', workspace: 'w', provider: 'pi', conversationId: 'c', runtimeId: 'r', runtimeStatus: 'ready', nativeSessionId: 's' };
++    const keys = Object.keys(base).map(key => commandContextKey({ ...base, [key]: 'other' }));
++    expect(new Set([commandContextKey(base), ...keys]).size).toBe(8);
++    expect(commandContextKey({ ...base, commandEpoch: 10 })).not.toBe(commandContextKey(base));
++  });
++  it('only blocks known terminal entry points with verified package identity and version', () => {
++    const cache = { name: 'cache', source: 'extension', description: '', invocation: 'prompt', packageName: 'pi-cache-graph', packageVersion: '1.0.2' };
++    expect(piCommandCompatibility(cache, 'graph').blocked).toBeTruthy();
++    expect(piCommandCompatibility(cache, 'export').blocked).toBeUndefined();
++    expect(piCommandCompatibility({ ...cache, name: 'different-command' }, 'graph').blocked).toBeUndefined();
++    expect(piCommandCompatibility({ ...cache, packageVersion: '9.0.0' }, 'graph')).toEqual({ label: '兼容性未验证' });
++    expect(piCommandCompatibility({ ...cache, packageName: undefined }, 'graph').blocked).toBeUndefined();
++    expect(routePiSlashCommand('/cache stats', { ...catalog, commands: [cache] }).kind).toBe('blocked');
++  });
++});
+--- /dev/null
++++ b/tests/unit/piExtensionEffects.test.ts
+@@ -0,0 +1,64 @@
++import { describe, expect, it } from 'vitest';
++import { createConversationRuntime, applyConversationRuntimeEvents } from '@todex/protocol/conversationRuntime';
++import type { ConversationEvent, ConversationReplay } from '@todex/protocol/v2';
++import { ConversationRecovery } from '../../src/renderer/session/conversationRecovery';
++import { PiExtensionEffects, canApplyPluginDraft } from '../../src/renderer/session/piExtensionEffects';
++
++const event = (sequence: number, method: string, extra = {}): ConversationEvent => ({
++  schemaVersion: 1, eventId: `e${sequence}`, conversationId: 'c', sequence, time: '2026-09-11T00:00:00Z',
++  type: 'extension.ui', payload: { provider: 'pi', scope: 'session', runtimeId: 'r', method, ...extra },
++});
++const page = (events: ConversationEvent[]): ConversationReplay => ({ conversationId: 'c', fromSequence: 0,
++  nextSequence: events.at(-1)?.sequence ?? 0, hasMore: false, events });
++
++describe('Pi one-shot effects', () => {
++  it('rebuilds replay history without showing toasts or changing the draft', () => {
++    const effects = new PiExtensionEffects();
++    const events = [event(1, 'notify', { message: 'history' }), event(2, 'set_editor_text', { text: 'old' })];
++    const { state } = applyConversationRuntimeEvents(createConversationRuntime('c', 'w'), events);
++    expect(state.extensionUi.notices).toHaveLength(1);
++    expect(events.map(item => effects.consume(item, state))).toEqual([undefined, undefined]);
++  });
++  it('consumes live delivery once even if duplicate frames arrive later', () => {
++    const effects = new PiExtensionEffects(); const notice = event(1, 'notify', { message: 'new' });
++    const { state } = applyConversationRuntimeEvents(createConversationRuntime('c', 'w'), [notice]);
++    effects.markLive(notice);
++    expect(effects.consume(notice, state)).toMatchObject({ kind: 'notice', notice: { message: 'new' } });
++    effects.markLive(notice);
++    expect(effects.consume(notice, state)).toBeUndefined();
++  });
++  it('preserves live delivery identity while a journal gap is filled by HTTP', async () => {
++    const effects = new PiExtensionEffects(); const seen: string[] = [];
++    const old = event(1, 'notify', { message: 'history' }); const live = event(2, 'notify', { message: 'new' });
++    const recovery = new ConversationRecovery(async () => page([old, live]), (state, applied) => {
++      for (const item of applied) {
++        const effect = effects.consume(item, state);
++        if (effect?.kind === 'notice') seen.push(effect.notice.message);
++      }
++    }, error => { throw new Error(error); });
++    effects.markLive(live);
++    recovery.receive('c', 'w', [live]);
++    await recovery.recover('c', 'w');
++    expect(seen).toEqual(['new']);
++    expect(recovery.get('c')?.extensionUi.notices).toHaveLength(2);
++  });
++  it('ignores drafts and notifications from a stopped or replaced instance', () => {
++    const effects = new PiExtensionEffects(); const draft = event(1, 'set_editor_text', { text: 'suggestion' });
++    const { state } = applyConversationRuntimeEvents(createConversationRuntime('c', 'w'), [draft]);
++    effects.markLive(draft);
++    expect(effects.consume(draft, { ...state, providerRuntime: { provider: 'pi', runtimeId: 'r', status: 'stopped' } })).toBeUndefined();
++    const late = event(2, 'notify', { message: 'late' }); effects.markLive(late);
++    expect(effects.consume(late, { ...state, extensionUi: { ...state.extensionUi, runtimeId: 'replacement' } })).toBeUndefined();
++  });
++  it('only automatically fills an entirely empty draft, preserving whitespace and newer user edits', () => {
++    expect(canApplyPluginDraft('')).toBe(true);
++    expect(canApplyPluginDraft(' ')).toBe(false);
++    expect(canApplyPluginDraft('my draft')).toBe(false);
++    const effects = new PiExtensionEffects(); const first = event(1, 'set_editor_text', { text: 'first' });
++    const second = event(2, 'set_editor_text', { text: 'second' });
++    const { state } = applyConversationRuntimeEvents(createConversationRuntime('c', 'w'), [first, second]);
++    effects.markLive(first); effects.markLive(second);
++    expect(effects.consume(first, state)).toBeUndefined();
++    expect(effects.consume(second, state)).toMatchObject({ kind: 'editor', request: { text: 'second' } });
++  });
++});
+--- /dev/null
++++ b/tests/unit/piSessionIntegration.test.ts
+@@ -0,0 +1,154 @@
++import { afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest';
++import * as React from 'react';
++import { act, createElement } from 'react';
++import { createRoot, type Root } from 'react-dom/client';
++import { toast } from '@heroui/react';
++import { useTodeXSession, type TodeXSession } from '../../src/renderer/session/useTodeXSession';
++import { loadJson } from '../../src/renderer/lib/storage';
++import { defaultSettings, SETTINGS_STORAGE_KEY, WORKSPACES_STORAGE_KEY, CONVERSATIONS_STORAGE_KEY,
++  ACTIVE_SELECTION_STORAGE_KEY } from '../../src/renderer/session/helpers';
++
++vi.mock('../../src/renderer/lib/storage', () => ({
++  loadJson: vi.fn(), loadSecret: vi.fn().mockResolvedValue(''),
++  saveJson: vi.fn().mockResolvedValue(undefined), saveSecret: vi.fn().mockResolvedValue(undefined),
++}));
++vi.mock('../../src/renderer/session/transportVerification', () => ({
++  ENCRYPTION_VERIFICATION_ERROR: 'verification failed',
++  validateTransportEncryption: vi.fn().mockResolvedValue(undefined), verifyEncryptedSocket: vi.fn().mockResolvedValue(undefined),
++}));
++vi.mock('@todex/protocol/connectionProbe', async importOriginal => ({
++  ...await importOriginal<typeof import('@todex/protocol/connectionProbe')>(),
++  probeBackendConnection: vi.fn(async () => ({ ok: true, error: null, providers: [provider], version: null })),
++}));
++vi.mock('@todex/protocol/transportCrypto', async importOriginal => ({
++  ...await importOriginal<typeof import('@todex/protocol/transportCrypto')>(), createTransportCryptoSession: vi.fn(() => null),
++}));
++
++const provider = { id: 'pi', displayName: 'Pi', available: true, profiles: [], models: [], capabilities: {
++  nativeResume: true, cancel: true, permissions: true, toolEvents: true, nativeSkills: true, nativeMcp: false,
++  managedMcp: false, modelSelection: true, runtimeStop: true, sessionCommands: true, extensionMessages: true,
++  controlActions: ['compact', 'cancel'], permissionConfig: { modes: ['ask'], defaultMode: 'ask', supportsPlan: false },
++} };
++const workspace = { id: 'w', name: 'Workspace', path: '/workspace', tenantId: 'local', model: '',
++  approvalPolicy: 'on-request', sandboxMode: 'workspace-write', createdAt: 1, updatedAt: 1 };
++const conversation = { id: 'c', workspaceId: 'w', title: 'Pi test', sessionId: 'v2_c', threadId: '',
++  provider: 'pi', v2ConversationId: 'c', permissionMode: 'ask', createdAt: 1, updatedAt: 1 };
++const manifest = { schemaVersion: 2, id: 'c', provider: 'pi', ownerId: 'owner', workspace: '/workspace', workspaceId: 'w',
++  title: 'Pi test', status: 'idle', lastSequence: 0, createdAt: '2026-09-11T00:00:00Z', updatedAt: '2026-09-11T00:00:00Z' };
++
++class TestSocket {
++  static OPEN = 1;
++  static instances: TestSocket[] = [];
++  readyState = 0;
++  onopen: (() => unknown) | null = null;
++  onmessage: ((event: { data: string }) => unknown) | null = null;
++  onerror: (() => unknown) | null = null;
++  onclose: (() => unknown) | null = null;
++  send = vi.fn();
++  close = vi.fn(() => { this.readyState = 3; this.onclose?.(); });
++  constructor(public url: string) { TestSocket.instances.push(this); }
++  open() { this.readyState = 1; void this.onopen?.(); }
++}
++let root: Root;
++let container: HTMLDivElement;
++let session: TodeXSession;
++let catalogStatus: 'ready' | 'loading' | 'error';
++beforeAll(() => { Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true, React }); });
++beforeEach(() => {
++  vi.useFakeTimers();
++  catalogStatus = 'ready';
++  TestSocket.instances = [];
++  vi.stubGlobal('WebSocket', TestSocket);
++  for (const kind of ['warning', 'danger', 'info'] as const) vi.spyOn(toast, kind).mockReturnValue(`toast-${kind}`);
++  vi.mocked(loadJson).mockImplementation(async (key, fallback) => ({
++    [SETTINGS_STORAGE_KEY]: { ...defaultSettings, serverUrl: 'http://backend.test' },
++    [WORKSPACES_STORAGE_KEY]: [workspace], [CONVERSATIONS_STORAGE_KEY]: [conversation],
++    [ACTIVE_SELECTION_STORAGE_KEY]: { workspaceId: 'w', conversationId: 'c' },
++  }[key] ?? fallback) as never);
++  vi.stubGlobal('fetch', vi.fn(async (input: string | URL) => {
++    const url = new URL(String(input));
++    let result: unknown;
++    if (url.pathname === '/v2/providers/commands') {
++      if (catalogStatus === 'loading') return new Promise(() => {});
++      if (catalogStatus === 'error') return new Response(JSON.stringify({ message: 'unavailable' }), { status: 503 });
++      result = { provider: 'pi', source: 'rpc', catalogSource: 'session', conversationId: 'c', runtimeId: 'r1',
++        fetchedAt: '', commands: [{ name: 'compact', description: 'Native compact', source: 'extension', invocation: 'prompt' }] };
++    } else if (url.pathname === '/v2/providers') result = { providers: [provider] };
++    else if (url.pathname === '/v2/conversations') result = { conversations: [manifest] };
++    else if (url.pathname === '/v2/workspaces') result = { workspaces: [workspace] };
++    else if (url.pathname.endsWith('/events')) result = { events: [], lastSequence: 0 };
++    else if (url.pathname === '/v2/providers/models') result = { provider: 'pi', models: [] };
++    else if (url.pathname === '/v2/catalog/skills') result = { provider: 'pi', skills: [] };
++    else if (url.pathname === '/v2/catalog/mcp') result = { provider: 'pi', servers: [] };
++    else if (url.pathname === '/health' || url.pathname === '/v2/version') result = { name: 'test', version: '1' };
++    else return new Promise(() => {});
++    return new Response(JSON.stringify(result), { status: 200 });
++  }));
++});
++afterEach(() => {
++  act(() => root?.unmount());
++  container?.remove();
++  vi.useRealTimers();
++  vi.unstubAllGlobals();
++});
++async function mount() {
++  function Harness() { session = useTodeXSession(() => {}); return null; }
++  container = document.createElement('div'); document.body.append(container); root = createRoot(container);
++  await act(async () => { root.render(createElement(Harness)); });
++  expect(session.hydrated).toBe(true);
++  expect(session.activeConversation?.id).toBe('c');
++  await act(async () => { session.connect(); });
++  const socket = TestSocket.instances.at(-1)!;
++  await act(async () => { socket.open(); });
++  expect(session.connectionState).toBe('open');
++  return socket;
++}
++function sent(socket: TestSocket) { return socket.send.mock.calls.map(([data]) => JSON.parse(String(data))); }
++async function deliver(socket: TestSocket, sequence: number, type: string, payload: object, delivery = 'live') {
++  await act(async () => {
++    socket.onmessage?.({ data: JSON.stringify({ type: 'conversation.event', delivery, payload: {
++      schemaVersion: 2, eventId: `event-${sequence}`, conversationId: 'c', sequence,
++      time: '2026-09-11T00:00:00Z', type, payload,
++    } }) });
++    await vi.advanceTimersByTimeAsync(25);
++  });
++}
++async function draft(text: string) { await act(async () => { session.setConversationChatDraft('c', text); }); }
++
++it.each(['loading', 'error'] as const)('real Pi composer preserves blocked drafts when command catalog is %s', async status => {
++  catalogStatus = status;
++  const socket = await mount();
++  await draft('/compact');
++  await act(async () => { session.submitChat('c'); });
++  expect(session.chatDrafts.c).toBe('/compact');
++  expect(sent(socket).filter(frame => ['conversation.prompt', 'conversation.compact'].includes(frame.type))).toEqual([]);
++  expect(toast.warning).toHaveBeenCalled();
++});
++
++it('real Pi composer sends a native /compact as prompt and never invokes the Todex compact control', async () => {
++  const socket = await mount();
++  expect(session.getProviderCommandCatalog('c')?.status).toBe('ready');
++  await draft('/compact');
++  await act(async () => { session.submitChat('c'); });
++  expect(sent(socket).filter(frame => frame.type === 'conversation.prompt')).toHaveLength(1);
++  expect(sent(socket).find(frame => frame.type === 'conversation.prompt').payload.text).toBe('/compact');
++  expect(sent(socket).some(frame => frame.type === 'conversation.compact')).toBe(false);
++});
++
++it('real event delivery applies live draft suggestions conservatively and keeps replay effects silent', async () => {
++  const socket = await mount();
++  await deliver(socket, 1, 'provider.runtime', { provider: 'pi', runtimeId: 'r1', status: 'ready' });
++  await deliver(socket, 2, 'extension.ui', { provider: 'pi', runtimeId: 'r1', scope: 'session', method: 'set_editor_text', text: 'first' });
++  expect(session.chatDrafts.c).toBe('first');
++  await draft('my draft');
++  await deliver(socket, 3, 'extension.ui', { provider: 'pi', runtimeId: 'r1', scope: 'session', method: 'set_editor_text', text: 'second' });
++  expect(session.chatDrafts.c).toBe('my draft');
++  expect(session.pendingPluginDrafts.c?.text).toBe('second');
++  await deliver(socket, 4, 'extension.ui', { provider: 'pi', runtimeId: 'r1', scope: 'session', method: 'set_editor_text', text: 'replayed' }, 'replay');
++  expect(session.chatDrafts.c).toBe('my draft');
++  expect(session.pendingPluginDrafts.c).toBeUndefined();
++  await deliver(socket, 5, 'extension.ui', { provider: 'pi', runtimeId: 'r1', scope: 'session', method: 'notify', message: 'historical' }, 'replay');
++  expect(toast.info).not.toHaveBeenCalled();
++  await deliver(socket, 6, 'extension.ui', { provider: 'pi', runtimeId: 'r1', scope: 'session', method: 'notify', message: 'live' });
++  expect(toast.info).toHaveBeenCalledOnce();
++});
+--- a/tests/unit/chatPermissions.test.ts
++++ b/tests/unit/chatPermissions.test.ts
+@@ -23,7 +23,7 @@
+     connectionState: 'open', recoveringConversations: {}, settings: {}, timeline: [], pendingRequests: [], conversations: [], usageRecords: [], modelCatalog: [],
+     v2Providers: [{ id: provider, available: true, profiles: [], models: [], capabilities: { permissionConfig: { modes: provider === 'pi' ? ['full-access'] : ['ask', 'auto', 'full-access'], defaultMode: provider === 'pi' ? 'full-access' : 'ask', supportsPlan: provider === 'codex' } } }],
+     applyConversationPermissionMode: vi.fn(async () => true), applyConversationWorkMode: vi.fn(async () => true),
+-    chatDrafts: {}, composerSelections: {}, composerAttachments: {}, providerCommands: {}, thinkingConversations: {}, submissionStatusByConversation: {}, conversationRuntimeById: {}, compactionByConversation: {}, providerModels: {}, providerImageInput: {}, contextUsageByConversation: {}, selectedSkills: {}, queuedChatDrafts: {}, queuePausedByConversation: {}, controlStatusByConversation: {},
++    chatDrafts: {}, composerSelections: {}, composerAttachments: {}, getProviderCommandCatalog: vi.fn(), refreshProviderCommands: vi.fn(), pendingPluginDrafts: {}, stoppingProviderRuntimes: {}, thinkingConversations: {}, submissionStatusByConversation: {}, conversationRuntimeById: {}, compactionByConversation: {}, providerModels: {}, providerImageInput: {}, contextUsageByConversation: {}, selectedSkills: {}, queuedChatDrafts: {}, queuePausedByConversation: {}, controlStatusByConversation: {},
+   } as unknown as TodeXSession;
+   if (missingCapabilities) delete session.v2Providers[0].capabilities.permissionConfig;
+   container = document.createElement('div'); document.body.append(container); root = createRoot(container);
+--- /dev/null
++++ b/tests/e2e/pi-extensions.spec.ts
+@@ -0,0 +1,132 @@
++import { expect, test, type WebSocketRoute } from '@playwright/test';
++
++test('renders Pi plugin state, protects drafts, routes commands and stops the runtime', async ({ page }, testInfo) => {
++  const backend = 'http://127.0.0.1:43119';
++  const manifest = { schemaVersion: 1, id: 'pi-browser', provider: 'pi', ownerId: 'test', workspace: '/tmp/pi-browser',
++    workspaceId: 'workspace-pi', title: 'Pi 插件验证', status: 'idle', lastSequence: 0,
++    createdAt: '2026-09-11T00:00:00Z', updatedAt: '2026-09-11T00:00:00Z' };
++  const provider = { id: 'pi', displayName: 'Pi', available: true, profiles: ['default'], models: [],
++    capabilities: { nativeResume: true, cancel: true, permissions: false, toolEvents: true, nativeSkills: true,
++      nativeMcp: false, managedMcp: false, modelSelection: true, runtimeStop: true, sessionCommands: true,
++      controlActions: ['compact'], permissionConfig: { modes: ['full-access'] } } };
++  const commands = [
++    { name: 'compact', description: '原生插件压缩入口', invocation: 'prompt', source: 'extension' },
++    { name: 'usage', description: '用量面板', invocation: 'prompt', source: 'extension',
++      packageName: '@tmustier/pi-usage-extension', packageVersion: '0.9.4' },
++  ];
++  const journal: Record<string, unknown>[] = [];
++  const requests: { type: string; payload: Record<string, unknown> }[] = [];
++  let socket: WebSocketRoute | undefined;
++  const publish = (type: string, payload: Record<string, unknown>, delivery = 'live') => {
++    const event = { schemaVersion: 1, eventId: `event-${journal.length + 1}`, conversationId: manifest.id,
++      sequence: journal.length + 1, time: new Date().toISOString(), type, payload };
++    journal.push(event);
++    socket?.send(JSON.stringify({ type: 'conversation.event', delivery, payload: event }));
++  };
++  await page.route(`${backend}/**`, async route => {
++    const url = new URL(route.request().url());
++    let body: unknown = {};
++    if (url.pathname === '/v2/transport-policy') body = { requiredProtocol: 'none' };
++    else if (url.pathname === '/v2/version') body = { name: 'todex-agentd', version: 'test' };
++    else if (url.pathname === '/health') body = { status: 'ok' };
++    else if (url.pathname.endsWith('/trust')) body = { workspacePath: manifest.workspace, trusted: true };
++    else if (url.pathname === '/v2/providers') body = { providers: [provider] };
++    else if (url.pathname === '/v2/providers/commands') body = { provider: 'pi', commands, source: 'pi-rpc', catalogSource: 'session', runtimeId: 'runtime-browser' };
++    else if (url.pathname === '/v2/providers/models') body = { models: [] };
++    else if (url.pathname === '/v2/conversations') body = { conversations: [manifest] };
++    else if (url.pathname.endsWith('/events')) {
++      const after = Number(url.searchParams.get('afterSequence') || 0);
++      body = { conversationId: manifest.id, fromSequence: after, nextSequence: journal.length, hasMore: false,
++        events: journal.filter(item => Number(item.sequence) > after) };
++    } else if (url.pathname.startsWith('/v2/catalog/')) body = { skills: [], servers: [], tools: [], plugins: [] };
++    else if (url.pathname === '/v2/workspaces') body = { workspaces: [{ id: 'workspace-pi', path: manifest.workspace, name: 'Pi smoke', trusted: true }] };
++    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body),
++      headers: { 'Access-Control-Allow-Origin': '*' } });
++  });
++  await page.routeWebSocket('ws://127.0.0.1:43119/**', ws => {
++    socket = ws;
++    ws.onMessage(raw => {
++      const message = JSON.parse(String(raw)); requests.push(message);
++      ws.send(JSON.stringify({ id: message.id, type: 'server.result', payload: { accepted: true } }));
++      if (message.type === 'conversation.runtime.stop') publish('provider.runtime', { provider: 'pi', runtimeId: 'runtime-browser', status: 'stopped', reason: '用户停止，聊天历史已保留' });
++      if (message.type === 'conversation.permission.respond') publish('permission.resolved', { permissionId: message.payload.permissionId, scope: 'session', runtimeId: 'runtime-browser' });
++      if (message.type === 'conversation.prompt') {
++        publish('turn.started', { turnId: 'turn-native', clientRequestId: message.id });
++        publish('turn.completed', { turnId: 'turn-native' });
++      }
++    });
++  });
++  await page.addInitScript(({ backend, manifest }) => {
++    localStorage.setItem('todex.web.settings.v1', JSON.stringify({ serverUrl: backend, encryptionProtocol: 'none', defaultWorkspacePath: manifest.workspace }));
++    localStorage.setItem('todex.web.workspaces.v1', JSON.stringify([{ id: 'workspace-pi', name: 'Pi smoke', path: manifest.workspace,
++      backendConnectionId: 'default-backend', trusted: true, model: '', sessionId: 'workspace-session', permissionMode: 'full-access' }]));
++    localStorage.setItem('todex.web.conversations.v1', JSON.stringify([{ ...manifest, workspaceId: 'workspace-pi', v2ConversationId: manifest.id,
++      backendConnectionId: 'default-backend', sessionId: 'v2_pi-browser', mode: 'implement', permissionMode: 'full-access' }]));
++    localStorage.setItem('todex.web.activeSelection.v1', JSON.stringify({ workspaceId: 'workspace-pi', conversationId: manifest.id }));
++  }, { backend, manifest });
++  await page.goto('/app');
++  const composer = page.getByPlaceholder('发送消息，或粘贴 / 拖入文本文件');
++  await expect(composer).toBeVisible();
++  await expect.poll(() => requests.some(item => item.type === 'session.resume')).toBe(true);
++  publish('provider.runtime', { provider: 'pi', runtimeId: 'runtime-browser', status: 'ready' });
++  const ui = (method: string, values: Record<string, unknown>, delivery = 'live') => publish('extension.ui', { provider: 'pi', runtimeId: 'runtime-browser', scope: 'session', method, ...values }, delivery);
++  ui('setTitle', { title: '插件后台' });
++  ui('setStatus', { statusKey: 'MCP', statusText: '已连接' });
++  ui('setWidget', { widgetKey: 'summary', widgetLines: ['任务准备完成', '等待下一步'], widgetPlacement: 'aboveEditor' });
++  ui('setWidget', { widgetKey: 'footer', widgetLines: ['插件补充说明'], widgetPlacement: 'belowEditor' });
++  ui('set_editor_text', { text: '历史建议' }, 'replay');
++  await expect(composer).toHaveValue('');
++  ui('set_editor_text', { text: '新建议' });
++  await expect(composer).toHaveValue('新建议');
++  await composer.fill('用户未发送的草稿');
++  ui('set_editor_text', { text: '替换后的草稿' });
++  await expect(page.getByRole('button', { name: '替换草稿', exact: true })).toBeVisible();
++  await expect(composer).toHaveValue('用户未发送的草稿');
++  await page.getByRole('button', { name: '替换草稿', exact: true }).click();
++  await expect(composer).toHaveValue('替换后的草稿');
++  publish('extension.message', { provider: 'pi', runtimeId: 'runtime-browser', scope: 'session', messageId: 'custom-visible',
++    message: { role: 'custom', customType: 'smoke', content: '插件的 **自定义消息**', display: true } });
++  ui('notify', { message: '后台任务完成', notifyType: 'info' });
++  await expect(page.getByTestId('pi-extension-aboveEditor').getByText('已连接', { exact: true })).toBeVisible();
++  await expect(page.getByTestId('pi-extension-belowEditor').getByText('插件补充说明')).toBeVisible();
++  await expect(page.getByText('Pi 插件 · smoke')).toBeVisible();
++  await composer.fill('/usage ');
++  await composer.press('Enter');
++  await expect(composer).toHaveValue('/usage ');
++  await expect(page.getByText('此入口依赖 Pi 终端界面，当前 RPC 无法显示。请在 Pi 终端使用此功能。', { exact: true })).toBeVisible();
++  expect(requests.some(item => item.type === 'conversation.prompt')).toBe(false);
++  await composer.fill('/compact');
++  await expect(page.getByRole('option', { name: /原生插件压缩入口/ })).toBeVisible();
++  await composer.press('Enter');
++  await expect(composer).toHaveValue('/compact ');
++  expect(requests.some(item => item.type === 'conversation.compact')).toBe(false);
++  await composer.press('Enter');
++  await expect.poll(() => requests.some(item => item.type === 'conversation.prompt' && item.payload.text === '/compact')).toBe(true);
++  await expect(composer).toHaveValue('');
++  for (const method of ['select', 'confirm', 'input', 'editor']) {
++    const permissionId = `permission-${method}`;
++    publish('permission.requested', { permissionId, kind: 'extension_ui', title: `后台 ${method}`, scope: 'session', runtimeId: 'runtime-browser',
++      details: { method, title: `后台 ${method}`, options: ['A', 'B'], prefill: '预填第一行\n预填第二行', scope: 'session', runtimeId: 'runtime-browser' },
++      options: [{ optionId: 'answer', name: 'Respond', kind: 'answer' }, { optionId: 'reject_once', name: 'Cancel', kind: 'reject_once' }] });
++    const field = page.getByLabel(`后台 ${method}`, { exact: false });
++    await expect(field).toBeVisible();
++    if (method === 'select' || method === 'confirm') await field.selectOption(method === 'select' ? '1' : 'false');
++    else {
++      if (method === 'editor') await expect(field).toHaveValue('预填第一行\n预填第二行');
++      await field.fill(method === 'editor' ? '回答第一行\n回答第二行' : '后台输入');
++    }
++    await page.getByRole('button', { name: '提交回答', exact: true }).click();
++    await expect(field).toHaveCount(0);
++    const expected = method === 'select' ? { value: 'B' } : method === 'confirm' ? { confirmed: false }
++      : { value: method === 'editor' ? '回答第一行\n回答第二行' : '后台输入' };
++    expect(requests.find(item => item.type === 'conversation.permission.respond' && item.payload.permissionId === permissionId))
++      .toMatchObject({ payload: { decision: { data: expected } } });
++    await expect(page.getByRole('button', { name: '停止', exact: true })).toHaveCount(0);
++  }
++  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
++  await page.screenshot({ path: testInfo.outputPath(`pi-${testInfo.project.name}.png`), fullPage: true });
++  await page.getByRole('button', { name: '停止 Pi 后台运行，保留聊天历史' }).click();
++  await expect(page.getByText('后台已停止', { exact: true })).toBeVisible();
++  await expect(page.getByText('Pi 插件 · smoke')).toBeVisible();
++  expect(requests.some(item => item.type === 'conversation.stop')).toBe(false);
++});
