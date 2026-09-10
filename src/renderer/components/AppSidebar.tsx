@@ -335,7 +335,7 @@ export function AppSidebar({
                           <ChatListView.Icon>
                             <RiFolder3Line className={`size-4 ${isSelected ? 'text-accent' : ''}`} />
                           </ChatListView.Icon>
-                          <ChatListView.Text>
+                          <ChatListView.Text className="flex-1">
                             <ChatListView.Title className={isSelected ? 'text-accent font-semibold' : ''}>
                               {workspaceDisplayName(workspace)}{pins.workspace.includes(workspace.id) ? <RiPushpin2Fill className="ml-1 inline size-3 text-muted" aria-label="已置顶" /> : null}
                             </ChatListView.Title>
@@ -344,7 +344,7 @@ export function AppSidebar({
                           <Tooltip delay={300}>
                             <Tooltip.Trigger
                               aria-label={backendLabel}
-                              className="flex size-6 shrink-0 items-center justify-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                              className="ml-auto flex size-6 shrink-0 items-center justify-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-accent"
                             >
                               <span aria-hidden="true" className="size-2.5 rounded-full ring-1 ring-foreground/10" style={{ backgroundColor: backendLabelColor(backend) }} />
                             </Tooltip.Trigger>
