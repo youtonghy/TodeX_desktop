@@ -81,7 +81,7 @@ export const gitAgentActionGroups: readonly GitAgentActionGroup[] = [
     id: 'pull-requests', title: 'PR 与代码更改',
     actions: [
       { id: 'create-pr', mode: 'direct', title: '创建 PR', description: '填写信息，为已推送的当前分支创建 PR' },
-      { id: 'view-pr', mode: 'agent', title: '查看 PR', description: '查看摘要、审查和检查状态' },
+      { id: 'view-pr', mode: 'direct', title: '查看 PR', description: '查看摘要、审查和检查状态' },
       { id: 'explain-pr', mode: 'agent', title: '解释代码更改', description: '解释 PR 改了什么、原因与风险' },
     ],
   },
@@ -97,19 +97,19 @@ export const gitAgentActionGroups: readonly GitAgentActionGroup[] = [
   {
     id: 'pr-merge', title: 'PR 合并',
     actions: [
-      { id: 'merge-pr', mode: 'agent', title: '合并 PR', description: '核对审查与检查后执行合并' },
-      { id: 'enable-pr-auto-merge', mode: 'agent', title: '启用自动合并', description: '满足仓库条件后由 GitHub 自动合并' },
-      { id: 'disable-pr-auto-merge', mode: 'agent', title: '取消自动合并', description: '取消当前 PR 的自动合并安排' },
+      { id: 'merge-pr', mode: 'direct', title: '合并 PR', description: '核对状态后按所选方式合并' },
+      { id: 'enable-pr-auto-merge', mode: 'direct', title: '启用自动合并', description: '满足仓库条件后由 GitHub 自动合并' },
+      { id: 'disable-pr-auto-merge', mode: 'direct', title: '取消自动合并', description: '取消当前 PR 的自动合并安排' },
     ],
   },
   {
     id: 'pr-management', title: 'PR 管理',
     actions: [
       { id: 'manage-pr', mode: 'agent', title: '管理 PR', description: '检查标签、审查人和 PR 信息' },
-      { id: 'draft-pr', mode: 'agent', title: '转为草稿', description: '将 PR 状态改为草稿' },
-      { id: 'ready-pr', mode: 'agent', title: '标记可供审查', description: '将草稿 PR 标记为可供审查' },
-      { id: 'close-pr', mode: 'agent', title: '关闭 PR', description: '关闭 PR 并保留分支' },
-      { id: 'reopen-pr', mode: 'agent', title: '重新打开 PR', description: '重新打开已关闭且未合并的 PR' },
+      { id: 'draft-pr', mode: 'direct', title: '转为草稿', description: '将 PR 状态改为草稿' },
+      { id: 'ready-pr', mode: 'direct', title: '标记可供审查', description: '将草稿 PR 标记为可供审查' },
+      { id: 'close-pr', mode: 'direct', title: '关闭 PR', description: '关闭 PR 并保留分支' },
+      { id: 'reopen-pr', mode: 'direct', title: '重新打开 PR', description: '重新打开已关闭且未合并的 PR' },
     ],
   },
 ];

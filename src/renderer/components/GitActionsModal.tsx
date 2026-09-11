@@ -6,13 +6,21 @@ import { RiArrowRightLine, RiCloseLine, RiGitBranchLine, RiGitCommitLine, RiGitM
 import { providerDisplayName } from '@todex/protocol/v2';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { buildGitAgentPrompt, buildGitFailurePrompt, gitAgentActionGroups, type GitAgentActionId } from '../session/gitAgentActions';
-import { GitWorkspaceError, readGitWorkspace, runGitWorkspaceOperation, type GitWorkspaceOperation, type GitWorkspaceSnapshot } from '../lib/gitWorkspace';
+import { GitWorkspaceError, readGitPullRequest, readGitWorkspace, runGitWorkspaceOperation, type GitPullRequestMethod, type GitPullRequestSnapshot, type GitWorkspaceOperation, type GitWorkspaceSnapshot } from '../lib/gitWorkspace';
 import { ProviderIcon } from './ProviderIcon';
 import { useNoticeToast } from './NoticeToast';
 
 type Props = { session: TodeXSession; isOpen: boolean; onOpenChange: (open: boolean) => void };
 const groupIcons = { repository: RiGitCommitLine, branches: RiGitBranchLine, worktrees: RiStackLine,
   collaboration: RiGitMergeLine };
+const prViewActions = new Set<GitAgentActionId>(['view-pr', 'close-pr', 'reopen-pr', 'draft-pr', 'ready-pr',
+  'merge-pr', 'enable-pr-auto-merge', 'disable-pr-auto-merge']);
+const prMutationActions = new Set<GitAgentActionId>(['close-pr', 'reopen-pr', 'draft-pr', 'ready-pr',
+  'merge-pr', 'enable-pr-auto-merge', 'disable-pr-auto-merge']);
+const prMethods: readonly GitPullRequestMethod[] = ['merge', 'squash', 'rebase'];
+const prMethodLabels: Record<GitPullRequestMethod, string> = { merge: '合并提交', squash: '压缩合并', rebase: '变基合并' };
+const prMergeStateLabels: Record<string, string> = { clean: '干净', dirty: '有冲突', blocked: '被保护规则阻止',
+  behind: '落后目标分支', unstable: '检查未通过', unknown: '计算中' };
 
 export function GitActionsModal({ session, isOpen, onOpenChange }: Props) {
   const [sending, setSending] = useState<GitAgentActionId | null>(null);
@@ -29,12 +37,15 @@ export function GitActionsModal({ session, isOpen, onOpenChange }: Props) {
   const [prRepository, setPrRepository] = useState('');
   const [prBase, setPrBase] = useState('');
   const [prDraft, setPrDraft] = useState(false);
+  const [pr, setPr] = useState<GitPullRequestSnapshot | null>(null);
+  const [confirming, setConfirming] = useState<GitAgentActionId | null>(null);
+  const [mergeMethod, setMergeMethod] = useState<GitPullRequestMethod>('merge');
   const [failure, setFailure] = useState<{ id: GitAgentActionId; operation?: unknown; error: string; unknown: boolean } | null>(null);
   const outcomeUnknown = useRef(false);
   const generation = useRef(0);
   useEffect(() => {
     generation.current++;
-    setView(null); setSnapshot(null); setError(''); setFailure(null); setOutput(''); setRemovePath('');
+    setView(null); setSnapshot(null); setPr(null); setConfirming(null); setError(''); setFailure(null); setOutput(''); setRemovePath('');
     outcomeUnknown.current = false;
     return () => { generation.current++; };
   }, [isOpen, session.activeConversation?.id, session.activeBackendConnectionId, session.settings?.serverUrl]);
@@ -97,35 +108,117 @@ export function GitActionsModal({ session, isOpen, onOpenChange }: Props) {
       setSending(null);
     }
   };
+  const prDirect = async (id: GitAgentActionId, operation?: GitWorkspaceOperation) => {
+    if (sendingRef.current || unavailable || !conversation || !workspace || (operation && (writingBlocked || outcomeUnknown.current))) return;
+    sendingRef.current = true;
+    const revision = generation.current;
+    setSending(id); setError('');
+    try {
+      if (operation) {
+        const result = await runGitWorkspaceOperation(session.settings, workspace.path, operation);
+        if (revision !== generation.current) return;
+        setOutput(result.output || '操作已完成');
+        setConfirming(null);
+      }
+      const result = await readGitPullRequest(session.settings, workspace.path);
+      if (revision === generation.current) { setPr(result); outcomeUnknown.current = false; }
+    } catch (cause) {
+      if (revision !== generation.current) return;
+      const message = cause instanceof Error ? cause.message : 'Git 操作失败';
+      const unknown = outcomeUnknown.current || (cause instanceof GitWorkspaceError && cause.unknownOutcome);
+      outcomeUnknown.current = unknown;
+      setError(message); setFailure({ id, operation, error: message, unknown });
+    } finally {
+      sendingRef.current = false;
+      setSending(null);
+    }
+  };
   const choose = (id: GitAgentActionId) => {
     if (allActions.find(action => action.id === id)?.mode === 'agent') { void send(id); return; }
-    setView(id); setSnapshot(null); setError(''); setFailure(null); setOutput(''); setRemovePath('');
+    setView(id); setSnapshot(null); setPr(null); setError(''); setFailure(null); setOutput(''); setRemovePath('');
     setBranchName(''); setStartPoint(''); setPath('');
     setPrTitle(''); setPrBody(''); setPrRepository(''); setPrBase(''); setPrDraft(false);
+    if (prViewActions.has(id)) {
+      setConfirming(prMutationActions.has(id) ? id : null);
+      void prDirect(id);
+      return;
+    }
+    setConfirming(null);
     if (id === 'init' || id === 'push') void direct(id, { action: id });
     else void direct(id);
   };
+  const isPrView = view !== null && prViewActions.has(view);
+  const prItem = pr?.pullRequest ?? null;
+  const workspaceState = isPrView ? pr : snapshot;
   const noticeScope = `${conversation?.id}:${session.activeBackendConnectionId}:${session.settings?.serverUrl}`;
   useNoticeToast(isOpen && error ? error : null, {
     variant: failure?.unknown ? 'warning' : 'danger',
     description: failure?.unknown ? '操作结果未知，请先核对实际状态。' : undefined,
     scope: noticeScope,
   });
-  useNoticeToast(isOpen && view && !error && failure?.unknown ? '创建结果未知，请交给 Agent 核对 PR 后再操作。' : null, { scope: noticeScope });
-  useNoticeToast(isOpen && view && snapshot && !snapshot.initialized ? '当前目录尚未初始化为 Git 仓库，请返回菜单选择初始化仓库。' : null, { scope: noticeScope });
+  useNoticeToast(isOpen && view && !error && failure?.unknown ? '操作结果未知，请交给 Agent 核对实际状态后再重试。' : null, { scope: noticeScope });
+  useNoticeToast(isOpen && view && workspaceState && !workspaceState.initialized ? '当前目录尚未初始化为 Git 仓库，请返回菜单选择初始化仓库。' : null, { scope: noticeScope });
   useNoticeToast(isOpen && view && writingBlocked ? '当前对话正在运行或等待确认，暂时不能修改 Git 状态。' : null, { scope: noticeScope });
   useNoticeToast(isOpen && !view && unknown ? '请先在对话中核对上一条消息的发送状态。' : null, { scope: noticeScope });
   const title = allActions.find(action => action.id === view)?.title || 'Git 操作';
   const isBranchForm = view === 'create-branch' || view === 'create-worktree';
+  const prConfirm = (id: GitAgentActionId, label: string, operation: GitWorkspaceOperation,
+    options?: { danger?: boolean; hint?: string; methodPicker?: boolean }) => confirming === id
+    ? <div className="space-y-2 rounded-xl border border-default p-3">
+        <p className="text-sm">{options?.hint || `确认${label}？`}</p>
+        {options?.methodPicker ? <div className="flex items-center gap-1">
+          <span className="text-muted text-xs">合并方式</span>
+          {prMethods.map(method => <Button key={method} size="sm" variant={mergeMethod === method ? 'secondary' : 'ghost'} onPress={() => setMergeMethod(method)}>{prMethodLabels[method]}</Button>)}
+        </div> : null}
+        <div className="flex gap-2">
+          <Button size="sm" variant={options?.danger ? 'danger' : 'secondary'} isDisabled={writingBlocked || Boolean(sending) || Boolean(failure?.unknown)} onPress={() => void prDirect(id, operation)}>确认{label}</Button>
+          <Button size="sm" variant="ghost" onPress={() => setConfirming(null)}>取消</Button>
+        </div>
+      </div>
+    : <Button size="sm" variant="secondary" isDisabled={writingBlocked || Boolean(sending) || Boolean(failure?.unknown)} onPress={() => setConfirming(id)}>{label}</Button>;
   if (view) return <Modal>
     <Modal.Backdrop isOpen={isOpen} onOpenChange={onOpenChange}>
       <Modal.Container><Modal.Dialog className="w-[calc(100vw-2rem)] max-w-xl max-h-[88dvh]">
         <Modal.Header><Modal.Heading>{title}</Modal.Heading><p className="text-muted break-all text-xs">{workspace?.path}</p></Modal.Header>
         <Modal.Body className="space-y-4 overflow-y-auto">
-          <p className="text-muted text-xs">由工作区后端直接执行 Git{snapshot ? ` · ${snapshot.currentBranch || '未提交或分离 HEAD'}${snapshot.dirty ? ' · 有未提交更改' : ''}` : ''}</p>
+          <p className="text-muted text-xs">{isPrView
+            ? `由工作区后端通过 GitHub API 直接执行${pr ? ` · ${pr.branch || '未提交或分离 HEAD'}` : ''}`
+            : `由工作区后端直接执行 Git${snapshot ? ` · ${snapshot.currentBranch || '未提交或分离 HEAD'}${snapshot.dirty ? ' · 有未提交更改' : ''}` : ''}`}</p>
           {failure ? <Button size="sm" variant="secondary" isDisabled={unavailable || Boolean(sending)} onPress={() => void send(failure.id, true)}>交给 Agent 处理</Button> : null}
           {sending ? <div role="status" className="flex items-center gap-2"><Spinner size="sm" />处理中…</div> : null}
           {output ? <pre role="status" className="whitespace-pre-wrap break-all rounded-xl bg-default p-3 text-xs">{output}</pre> : null}
+          {isPrView ? <div className="space-y-3">
+            {pr?.initialized && !prItem ? <div className="space-y-2">
+              <p className="text-sm">{pr.branch ? `当前分支 ${pr.branch} 没有对应的 PR。` : '当前处于分离 HEAD，没有对应的 PR。'}</p>
+              <Button size="sm" variant="secondary" isDisabled={writingBlocked || Boolean(sending)} onPress={() => choose('create-pr')}>创建 PR</Button>
+            </div> : null}
+            {prItem ? <div className="space-y-2 rounded-xl border border-default p-3">
+              <div className="flex items-start justify-between gap-3">
+                <p className="min-w-0 break-all text-sm font-medium">#{prItem.number} {prItem.title}</p>
+                <Button size="sm" variant="ghost" isDisabled={!prItem.url} onPress={() => session.openPanel('Browser', { url: prItem.url })}>打开</Button>
+              </div>
+              <p className="text-muted break-all text-xs">{prItem.headRef} → {prItem.baseRef}{prItem.draft ? ' · 草稿' : ''}</p>
+              <p className="text-muted text-xs">{prItem.state === 'merged' ? '已合并' : prItem.state === 'closed' ? '已关闭' : '开放'}
+                {' · 检查 通过 '}{prItem.checks.passing}{' / 失败 '}{prItem.checks.failing}{' / 待运行 '}{prItem.checks.pending}
+                {' · 审查 批准 '}{prItem.reviews.approved}{' / 请求修改 '}{prItem.reviews.changesRequested}{' / 评论 '}{prItem.reviews.commented}</p>
+              <p className="text-muted text-xs">合并状态:{prItem.mergeable === 'unknown' ? '计算中' : prItem.mergeable === 'mergeable' ? '可合并' : `不可合并${prMergeStateLabels[prItem.mergeState] ? `(${prMergeStateLabels[prItem.mergeState]})` : ''}`}
+                {prItem.autoMergeMethod ? ` · 自动合并已启用(${prMethodLabels[prItem.autoMergeMethod as GitPullRequestMethod] || prItem.autoMergeMethod})` : ''}</p>
+            </div> : null}
+            {prItem?.state === 'open' ? <div className="flex flex-wrap gap-2">
+              {prItem.draft
+                ? prConfirm('ready-pr', '标记可供审查', { action: 'ready-pr' }, { hint: `将 #${prItem.number} 标记为可供审查？` })
+                : prConfirm('draft-pr', '转为草稿', { action: 'draft-pr' }, { hint: `将 #${prItem.number} 转为草稿？` })}
+              {prConfirm('close-pr', '关闭 PR', { action: 'close-pr' }, { danger: true, hint: `关闭 #${prItem.number}？分支将保留。` })}
+            </div> : null}
+            {prItem?.state === 'closed' ? prConfirm('reopen-pr', '重新打开', { action: 'reopen-pr' }, { hint: `重新打开 #${prItem.number}？` }) : null}
+            {prItem?.state === 'open' ? <div className="space-y-2 rounded-xl border border-default p-3">
+              <p className="text-sm font-medium">合并</p>
+              {prItem.autoMergeMethod
+                ? prConfirm('disable-pr-auto-merge', '取消自动合并', { action: 'disable-pr-auto-merge' }, { hint: '取消此 PR 的自动合并安排？' })
+                : prConfirm('enable-pr-auto-merge', '启用自动合并', { action: 'enable-pr-auto-merge', method: mergeMethod }, { hint: '满足仓库合并条件后由 GitHub 自动合并。', methodPicker: true })}
+              {prConfirm('merge-pr', '合并 PR', { action: 'merge-pr', method: mergeMethod, headSha: prItem.headSha }, { danger: true, hint: `按所选方式合并 #${prItem.number}？GitHub 将校验保护规则与检查状态。`, methodPicker: true })}
+            </div> : null}
+          </div> : null}
           {view === 'create-pr' ? <form className="space-y-3" onSubmit={event => {
             event.preventDefault();
             if (!prTitle.trim() || !prBase.trim() || !prRepository.trim() || output) return;
@@ -171,7 +264,7 @@ export function GitActionsModal({ session, isOpen, onOpenChange }: Props) {
             </div>)}
           </div> : null}
         </Modal.Body>
-        <Modal.Footer><Button variant="ghost" isDisabled={Boolean(sending)} onPress={() => { setView(null); setError(''); setFailure(null); }}>返回菜单</Button><Button variant="secondary" isDisabled={Boolean(sending)} onPress={() => void direct(view)}>刷新状态</Button><Button onPress={() => onOpenChange(false)}>关闭</Button></Modal.Footer>
+        <Modal.Footer><Button variant="ghost" isDisabled={Boolean(sending)} onPress={() => { setView(null); setError(''); setFailure(null); }}>返回菜单</Button><Button variant="secondary" isDisabled={Boolean(sending)} onPress={() => void (isPrView ? prDirect(view) : direct(view))}>刷新状态</Button><Button onPress={() => onOpenChange(false)}>关闭</Button></Modal.Footer>
       </Modal.Dialog></Modal.Container>
     </Modal.Backdrop>
   </Modal>;

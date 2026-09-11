@@ -26,9 +26,14 @@ export interface GitWorkspaceSnapshot {
   dirty: boolean;
 }
 
+export type GitPullRequestMethod = 'merge' | 'squash' | 'rebase';
+
 export type GitWorkspaceOperation =
   | { action: 'init' | 'push' }
   | { action: 'create-pr'; title: string; body: string; baseBranch: string; repository: string; draft: boolean }
+  | { action: 'close-pr' | 'reopen-pr' | 'draft-pr' | 'ready-pr' | 'disable-pr-auto-merge' }
+  | { action: 'merge-pr'; method: GitPullRequestMethod; headSha: string }
+  | { action: 'enable-pr-auto-merge'; method: GitPullRequestMethod }
   | { action: 'create-branch'; branchName: string; startPoint?: string }
   | { action: 'switch-branch'; branchName: string }
   | { action: 'create-worktree'; path: string; branchName: string; startPoint?: string }
@@ -106,6 +111,35 @@ export function readGitWorkspace(settings: ConnectionSettings, workspacePath: st
 export function runGitWorkspaceOperation(settings: ConnectionSettings, workspacePath: string,
   operation: GitWorkspaceOperation): Promise<GitWorkspaceOperationResult> {
   return request(settings, buildHttpUrl(settings.serverUrl, '/v2/git/operation'), operation, workspacePath);
+}
+
+export interface GitPullRequest {
+  number: number;
+  title: string;
+  url: string;
+  state: 'open' | 'closed' | 'merged' | string;
+  draft: boolean;
+  headRef: string;
+  baseRef: string;
+  headSha: string;
+  mergeable: 'mergeable' | 'unmergeable' | 'unknown' | string;
+  mergeState: string;
+  autoMergeMethod?: string;
+  reviews: { approved: number; changesRequested: number; commented: number };
+  checks: { passing: number; failing: number; pending: number };
+}
+
+export interface GitPullRequestSnapshot {
+  repositoryPath: string;
+  initialized: boolean;
+  branch: string;
+  pullRequest: GitPullRequest | null;
+}
+
+export function readGitPullRequest(settings: ConnectionSettings, workspacePath: string, signal?: AbortSignal): Promise<GitPullRequestSnapshot> {
+  const url = new URL(buildHttpUrl(settings.serverUrl, '/v2/git/pull-request'));
+  url.searchParams.set('workspacePath', workspacePath);
+  return request(settings, url.toString(), undefined, undefined, signal);
 }
 
 export interface GitStatusSummary {
