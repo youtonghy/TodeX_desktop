@@ -4,7 +4,7 @@ import { RiArrowRightLine, RiChat3Line, RiFolder3Line, RiMoreFill, RiPushpinLine
 import { Button, Chip, Dropdown, Input, Label, TextField, Tooltip } from '@heroui/react';
 import { EmptyState, Kanban } from '@heroui-pro/react';
 import type { WorkspaceRecord } from '@todex/protocol/todex';
-import { conversationDisplayTitle, type ConversationRecord } from '../session/helpers';
+import { conversationDisplayTitle, workspaceDisplayName, type ConversationRecord } from '../session/helpers';
 import type { TodeXSession } from '../session/useTodeXSession';
 import {
   addKanbanTask,
@@ -248,7 +248,12 @@ function WorkspaceColumn({ workspace, meta, tasks, session, creating, onCreate, 
         >
           <span className={`flex min-w-0 items-center gap-2 rounded-[calc(var(--radius)*infinity)] px-3 py-1 ${meta.pillBg}`}>
             <Kanban.ColumnIndicator className={meta.indicator} />
-            <Kanban.ColumnTitle className="truncate">{workspace.name}</Kanban.ColumnTitle>
+            <Tooltip delay={300}>
+              <Tooltip.Trigger className="min-w-0 cursor-default outline-none">
+                <Kanban.ColumnTitle className="truncate">{workspaceDisplayName(workspace)}</Kanban.ColumnTitle>
+              </Tooltip.Trigger>
+              <Tooltip.Content className="max-w-xs break-all">{workspace.path}</Tooltip.Content>
+            </Tooltip>
           </span>
           <Kanban.ColumnCount className={meta.countColor}>{tasks.length}</Kanban.ColumnCount>
           <Kanban.ColumnActions>
@@ -280,7 +285,7 @@ function WorkspaceColumn({ workspace, meta, tasks, session, creating, onCreate, 
                 {kanbanTaskStatusLabels[status]} · {items.length}
               </p>
               <Kanban.CardList
-                aria-label={`${workspace.name} ${kanbanTaskStatusLabels[status]}任务`}
+                aria-label={`${workspaceDisplayName(workspace)} ${kanbanTaskStatusLabels[status]}任务`}
                 className="pb-1 pt-1"
                 items={items}
                 onAction={(key) => {
