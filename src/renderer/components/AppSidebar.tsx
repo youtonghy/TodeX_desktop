@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { DragEvent, MouseEvent } from 'react';
 import { ContextMenu as HeroContextMenu, ChatListView, Sidebar, useSidebar } from '@heroui-pro/react';
 import { useSidebarPins } from '../session/useSidebarPins';
+import { useKanbanTasks } from '../session/kanbanTasks';
 import { backendLabelColor } from '../session/backendColors';
 import { ProviderIcon } from './ProviderIcon';
 import { AppIcon } from './AppIcon';
@@ -59,6 +60,15 @@ export function AppSidebar({
 }: Props) {
   const { isMobile, setMobileOpen } = useSidebar();
   const { pins, togglePin } = useSidebarPins();
+  const kanbanTasks = useKanbanTasks();
+
+  const conversationTaskCountMap = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const task of kanbanTasks) {
+      if (task.conversationId) map[task.conversationId] = (map[task.conversationId] ?? 0) + 1;
+    }
+    return map;
+  }, [kanbanTasks]);
 
   const workspaceConversations = useMemo(() => (
     session.conversations.filter(
@@ -259,7 +269,7 @@ export function AppSidebar({
         </Button>
         <Button className="mt-1 w-full justify-start" variant="ghost" onPress={onOpenKanban}>
           <RiKanbanView2 className="size-4" />
-          <span data-sidebar="label">今日看板</span>
+          <span data-sidebar="label">任务看板</span>
         </Button>
       </Sidebar.Header>
 
@@ -472,7 +482,7 @@ export function AppSidebar({
                           </ChatListView.Icon>
                           <ChatListView.Text>
                             <ChatListView.Title className={isSelected ? 'text-accent font-semibold' : ''}>
-                              {conversationDisplayTitle(conversation, session.timeline)}{pins.conversation.includes(conversation.id) ? <RiPushpin2Fill className="ml-1 inline size-3 text-muted" aria-label="已置顶" /> : null}
+                              {conversationDisplayTitle(conversation, session.timeline)}{pins.conversation.includes(conversation.id) ? <RiPushpin2Fill className="ml-1 inline size-3 text-muted" aria-label="已置顶" /> : null}{conversationTaskCountMap[conversation.id] ? <RiKanbanView2 className="ml-1 inline size-3 text-accent" aria-label={`${conversationTaskCountMap[conversation.id]} 个关联任务`} /> : null}
                             </ChatListView.Title>
                             <ChatListView.Preview>{conversation.preview || '还没有消息'}</ChatListView.Preview>
                           </ChatListView.Text>

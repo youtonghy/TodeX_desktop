@@ -1226,6 +1226,7 @@ export const SESSION_CURSORS_STORAGE_KEY = 'todex.desktop.sessionCursors.v1';
 export const EXPERIMENTAL_FEATURES_STORAGE_KEY = 'todex.desktop.experimentalFeatures.v1';
 export const USAGE_RECORDS_STORAGE_KEY = 'todex.desktop.usageRecords.v1';
 export const PROVIDER_MODEL_PREFERENCES_STORAGE_KEY = 'todex.desktop.providerModelPreferences.v1';
+export const KANBAN_TASKS_STORAGE_KEY = 'todex.desktop.kanbanTasks.v1';
 export const TOKEN_STORAGE_KEY = 'todex.desktop.token.v1';
 export const TOKEN_ORIGIN_STORAGE_KEY = 'todex.desktop.tokenOrigin.v1';
 export const JSON_SAVE_DEBOUNCE_MS = 350;
