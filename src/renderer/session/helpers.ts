@@ -350,6 +350,7 @@ export type ComposerAttachmentDraft = {
   path?: string;
   lineStart?: number;
   lineEnd?: number;
+  messageId?: string;
 };
 
 export type QueuedChatSubmission = {
@@ -822,6 +823,14 @@ export function codexInputFromComposer(
 
 export function referenceToken(name: string): string {
   return `[引用:${name}]`;
+}
+
+/** Short excerpt preview used as the capsule label (first line, ≤ max chars). */
+export function referencePreview(excerpt: string | undefined, max = 10): string {
+  if (!excerpt) return '';
+  const line = excerpt.split('\n').find((part) => part.trim())?.replace(/\s+/g, ' ').trim() ?? '';
+  const chars = [...line];
+  return chars.length > max ? `${chars.slice(0, max).join('')}…` : line;
 }
 
 export function referenceNamesInText(text: string): string[] {

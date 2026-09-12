@@ -34,6 +34,7 @@ import {
   canonicalSlashCommand,
   modelDisplayLabel,
   reasoningEffortLabel,
+  referencePreview,
   referenceToken,
   uniqueReferenceName,
   workspaceLinkTarget,
@@ -264,11 +265,19 @@ export function ChatPanel({ session }: Props) {
     );
   }, [conversation?.id, session.timeline]);
   const messagesRef = useRef<HTMLDivElement>(null);
-  const [quote, setQuote] = useState<{ text: string; left: number; top: number } | null>(null);
+  const [quote, setQuote] = useState<{ text: string; left: number; top: number; messageId?: string } | null>(null);
   useEffect(() => {
     const update = () => {
       const container = messagesRef.current;
-      setQuote(container ? selectionInside(container) : null);
+      const inside = container ? selectionInside(container) : null;
+      if (!inside) {
+        setQuote(null);
+        return;
+      }
+      const anchor = window.getSelection()?.anchorNode;
+      const element = anchor instanceof Element ? anchor : anchor?.parentElement;
+      const messageId = element?.closest('[data-message-id]')?.getAttribute('data-message-id') ?? undefined;
+      setQuote({ ...inside, messageId });
     };
     const hide = () => setQuote(null);
     document.addEventListener('selectionchange', update);
@@ -519,7 +528,7 @@ export function ChatPanel({ session }: Props) {
             const request = session.pendingRequests.find((pendingItem) => pendingItem.requestId && (entry.requestId === pendingItem.requestId || entry.raw.includes(pendingItem.requestId)));
             const isUser = entry.kind === 'outgoing';
             return (
-              <div key={entry.id} className={`flex gap-3 py-1 ${isUser ? 'justify-end' : 'justify-start'}`}>
+              <div key={entry.id} data-message-id={entry.id} className={`flex gap-3 py-1 ${isUser ? 'justify-end' : 'justify-start'}`}>
                 <div className={`min-w-0 max-w-[85%] ${isUser ? 'text-right' : ''}`}>
                   {isUser ? <p className="text-muted text-xs font-medium">You</p> : null}
                   <div className={`${isUser ? 'mt-1' : ''} text-sm leading-6`}>
@@ -594,6 +603,7 @@ export function ChatPanel({ session }: Props) {
               id: attachmentId(), kind: 'reference', name, mimeType: 'text/plain',
               sizeBytes: new TextEncoder().encode(quote.text).length, dataUrl: '',
               textContent: quote.text, source: 'message',
+              ...(quote.messageId ? { messageId: quote.messageId } : {}),
             }]);
             const token = referenceToken(name);
             const selection = session.composerSelections[conversation.id] ?? { start: draft.length, end: draft.length };
@@ -804,6 +814,23 @@ export function ChatPanel({ session }: Props) {
                     onSelectionChange={(selection) => session.setConversationComposerSelection(conversation.id, selection)}
                     onCompositionStart={() => { isComposingRef.current = true; }}
                     onCompositionEnd={() => { isComposingRef.current = false; }}
+                    resolveReference={(name) => {
+                      const item = attachments.find((entry) => entry.kind === 'reference' && entry.name === name);
+                      return item ? referencePreview(item.textContent) || item.name : undefined;
+                    }}
+                    onReferenceClick={(name) => {
+                      const item = attachments.find((entry) => entry.kind === 'reference' && entry.name === name);
+                      if (!item) return;
+                      if (item.path) {
+                        session.openPanel('Files', { filePath: item.path });
+                        return;
+                      }
+                      if (item.messageId) {
+                        messagesRef.current
+                          ?.querySelector(`[data-message-id="${CSS.escape(item.messageId)}"]`)
+                          ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                      }
+                    }}
                   />
                 </PromptInput.Content>
                 <PromptInput.Toolbar className="composer-toolbar">

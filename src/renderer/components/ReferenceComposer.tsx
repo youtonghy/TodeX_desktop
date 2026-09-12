@@ -35,27 +35,28 @@ function serialize(root: HTMLElement): string {
   return serializeInline(root);
 }
 
-function makeCapsule(name: string): HTMLElement {
+function makeCapsule(name: string, label: string): HTMLElement {
   const el = document.createElement('span');
   el.className = 'composer-ref';
   el.contentEditable = 'false';
   el.dataset.ref = name;
-  const label = document.createElement('span');
-  label.className = 'composer-ref__label';
-  label.textContent = name;
+  el.title = name;
+  const text = document.createElement('span');
+  text.className = 'composer-ref__label';
+  text.textContent = label || name;
   const close = document.createElement('span');
   close.className = 'composer-ref__remove';
   close.setAttribute('aria-hidden', 'true');
   close.textContent = '×';
-  el.append(label, close);
+  el.append(text, close);
   return el;
 }
 
-function appendInline(parent: ParentNode, line: string): void {
+function appendInline(parent: ParentNode, line: string, resolve: (name: string) => string | undefined): void {
   let last = 0;
   for (const match of line.matchAll(TOKEN_PATTERN)) {
     if (match.index > last) parent.append(document.createTextNode(line.slice(last, match.index)));
-    parent.append(makeCapsule(match[1]));
+    parent.append(makeCapsule(match[1], resolve(match[1]) ?? match[1]));
     last = match.index + match[0].length;
   }
   if (last < line.length) parent.append(document.createTextNode(line.slice(last)));
@@ -64,11 +65,11 @@ function appendInline(parent: ParentNode, line: string): void {
   }
 }
 
-function buildChildren(root: HTMLElement, text: string): void {
+function buildChildren(root: HTMLElement, text: string, resolve: (name: string) => string | undefined): void {
   const fragment = document.createDocumentFragment();
   for (const line of text.split('\n')) {
     const div = document.createElement('div');
-    appendInline(div, line);
+    appendInline(div, line, resolve);
     fragment.append(div);
   }
   root.replaceChildren(fragment);
@@ -120,6 +121,8 @@ export const ReferenceComposer = forwardRef<ReferenceComposerHandle, {
   onCompositionEnd?: () => void;
   placeholder?: string;
   isDisabled?: boolean;
+  resolveReference?: (name: string) => string | undefined;
+  onReferenceClick?: (name: string) => void;
 }>(function ReferenceComposer({
   value,
   onChange,
@@ -130,6 +133,8 @@ export const ReferenceComposer = forwardRef<ReferenceComposerHandle, {
   onCompositionEnd,
   placeholder,
   isDisabled,
+  resolveReference,
+  onReferenceClick,
 }, forwardedRef) {
   const rootRef = useRef<HTMLDivElement>(null);
   const renderedRef = useRef<string | null>(null);
@@ -138,6 +143,10 @@ export const ReferenceComposer = forwardRef<ReferenceComposerHandle, {
   const pendingCaretRef = useRef<number | null>(null);
   const valueRef = useRef(value);
   valueRef.current = value;
+  const resolveRef = useRef(resolveReference);
+  resolveRef.current = resolveReference;
+  const clickRef = useRef(onReferenceClick);
+  clickRef.current = onReferenceClick;
 
   const readSelection = useCallback((): ReferenceComposerSelection | null => {
     const root = rootRef.current;
@@ -191,7 +200,7 @@ export const ReferenceComposer = forwardRef<ReferenceComposerHandle, {
       return;
     }
     const previous = document.activeElement === root ? readSelection() : null;
-    buildChildren(root, value);
+    buildChildren(root, value, (name) => resolveRef.current?.(name));
     renderedRef.current = value;
     updateEmpty();
     if (pendingCaretRef.current != null) {
@@ -249,6 +258,10 @@ export const ReferenceComposer = forwardRef<ReferenceComposerHandle, {
           event.preventDefault();
           capsule.remove();
           emitChange();
+          return;
+        }
+        if (capsule instanceof HTMLElement && capsule.dataset.ref != null) {
+          clickRef.current?.(capsule.dataset.ref);
           return;
         }
         if (target === rootRef.current) {
@@ -317,7 +330,7 @@ export const ReferenceComposer = forwardRef<ReferenceComposerHandle, {
         emitChange();
         const root = rootRef.current;
         if (root && renderedRef.current !== valueRef.current) {
-          buildChildren(root, valueRef.current);
+          buildChildren(root, valueRef.current, (name) => resolveRef.current?.(name));
           renderedRef.current = valueRef.current;
           updateEmpty();
         }
