@@ -338,6 +338,7 @@ export function ChatPanel({ session }: Props) {
     session.setConversationChatDraft(conversation.id, insertMention(draft, mention, item.insertText));
     const cursor = mention.start + item.insertText.length;
     session.setConversationComposerSelection(conversation.id, { start: cursor, end: cursor });
+    composerRef.current?.focus(cursor);
   };
   const handleSuggestionKeyDown = (event: KeyboardEvent) => {
     if (isComposingRef.current || isImeCompositionKey(event)) return;
@@ -649,6 +650,7 @@ export function ChatPanel({ session }: Props) {
                     session.setConversationChatDraft(conversation.id, insertMention(draft, mention, item.insertText));
                     const cursor = mention.start + item.insertText.length;
                     session.setConversationComposerSelection(conversation.id, { start: cursor, end: cursor });
+                    composerRef.current?.focus(cursor);
                   }}
                 >
                   {mentionSuggestions.map((item, index) => (

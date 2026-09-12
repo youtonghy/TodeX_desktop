@@ -177,6 +177,8 @@ export const ReferenceComposer = forwardRef<ReferenceComposerHandle, {
   }, []);
 
   const emitChange = useCallback(() => {
+    // User edits supersede any programmatic caret still waiting for a rebuild.
+    pendingCaretRef.current = null;
     const root = rootRef.current;
     if (!root) return;
     const text = serialize(root);
@@ -233,7 +235,9 @@ export const ReferenceComposer = forwardRef<ReferenceComposerHandle, {
       rootRef.current?.focus();
       if (offset != null && renderedRef.current === valueRef.current && rootRef.current) {
         applyCaret(offset);
-        pendingCaretRef.current = null;
+        // Keep pendingCaretRef set: when `value` was updated upstream but the
+        // rebuild effect has not run yet, it must re-apply this caret to the
+        // new tree instead of the stale pre-rebuild position.
       }
     },
   }), [applyCaret]);
