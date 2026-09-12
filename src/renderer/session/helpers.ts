@@ -820,6 +820,44 @@ export function codexInputFromComposer(
   return items;
 }
 
+export function referenceToken(name: string): string {
+  return `[引用:${name}]`;
+}
+
+export function referenceNamesInText(text: string): string[] {
+  const names: string[] = [];
+  for (const match of text.matchAll(/\[引用:([^\]\n]+)\]/g)) {
+    names.push(match[1]);
+  }
+  return names;
+}
+
+export function uniqueReferenceName(
+  base: string,
+  attachments: readonly ComposerAttachmentDraft[],
+  draftText: string,
+): string {
+  const taken = new Set([
+    ...attachments.filter((item) => item.kind === 'reference').map((item) => item.name),
+    ...referenceNamesInText(draftText),
+  ]);
+  let name = base;
+  let index = 2;
+  while (taken.has(name)) {
+    name = `${base} ${index}`;
+    index += 1;
+  }
+  return name;
+}
+
+/** Reference attachments only count while their token still lives in the draft text. */
+export function liveComposerAttachments(
+  text: string,
+  attachments: readonly ComposerAttachmentDraft[],
+): ComposerAttachmentDraft[] {
+  return attachments.filter((item) => item.kind !== 'reference' || text.includes(referenceToken(item.name)));
+}
+
 export function attachmentSummary(attachments: ComposerAttachmentDraft[]): string {
   return attachments
     .map((item) => `${item.kind === 'image' ? '图片' : item.kind === 'reference' ? '引用' : '文件'} ${item.name} (${formatBytes(item.sizeBytes)})`)
