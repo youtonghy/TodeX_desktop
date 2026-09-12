@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState } from 'react';
-import { Button, Chip, ColorSwatchPicker, Description, Label, ListBox, Select, Surface, TextArea, TextField, toast } from '@heroui/react';
+import { Button, Chip, ColorSwatchPicker, Description, Label, ListBox, Select, Surface, Switch, TextArea, TextField, toast } from '@heroui/react';
 import { RadioButtonGroup } from '@heroui-pro/react';
 import { RiAttachment2 } from '@remixicon/react';
 import jsQR from 'jsqr';
@@ -187,6 +187,33 @@ export function SettingsPanel({ session }: Props) {
               : '默认每个对话独立保存面板。新对话的面板为空，并保持收起。'}
           </Description>
         </Select>
+      </Surface>
+      <Surface className="flex flex-col gap-4 rounded-2xl p-5">
+        <h3 className="font-semibold">通知</h3>
+        <Switch
+          isSelected={session.completionNotifications}
+          isDisabled={!session.completionNotificationsHydrated}
+          onChange={(selected) => {
+            void session.setCompletionNotifications(selected).then((result) => {
+              if (result === 'denied') toast.danger('系统拒绝了通知权限，请在系统设置中允许后再开启。');
+              if (result === 'unsupported') toast.danger('当前环境不支持系统通知（需要 HTTPS 或本机访问）。');
+            });
+          }}
+        >
+          <Switch.Content>
+            <Switch.Control>
+              <Switch.Thumb />
+            </Switch.Control>
+            <div>
+              <p className="text-sm font-medium">任务完成提醒</p>
+              <p className="text-muted text-xs">
+                {session.completionNotificationsSupported
+                  ? '对话任务完成并收到回复时发送系统通知。开启时会请求系统通知权限。'
+                  : '当前环境不支持系统通知（需要 HTTPS 或本机访问）。'}
+              </p>
+            </div>
+          </Switch.Content>
+        </Switch>
       </Surface>
       <Surface className="flex flex-col gap-4 rounded-2xl p-5">
         <h3 className="font-semibold">配对</h3>

@@ -456,6 +456,14 @@ app.whenReady().then(() => {
     return { output: outputs.filter(Boolean).join('\n') || '操作完成' };
   });
 
+  ipcMain.on('window:focus', (event) => {
+    const window = BrowserWindow.fromWebContents(event.sender);
+    if (!window) return;
+    if (window.isMinimized()) window.restore();
+    window.show();
+    window.focus();
+  });
+
   handleIpc('theme:shouldUseDark', () => nativeTheme.shouldUseDarkColors);
 
   nativeTheme.on('updated', () => {

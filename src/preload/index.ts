@@ -43,6 +43,11 @@ const api = {
     scan: (workspacePath: string) => ipcRenderer.invoke('git:scan', workspacePath),
     run: (workspacePath: string, action: 'commit' | 'commit-push' | 'push' | 'initial', message?: string, includeUnstaged = true) => ipcRenderer.invoke('git:run', workspacePath, action, message, includeUnstaged),
   },
+  app: {
+    focus: () => {
+      ipcRenderer.send('window:focus');
+    },
+  },
   theme: {
     shouldUseDark: () => ipcRenderer.invoke('theme:shouldUseDark') as Promise<boolean>,
     onUpdated: (listener: (dark: boolean) => void) => {

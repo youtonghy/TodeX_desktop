@@ -22,6 +22,9 @@ export type TodeXDesktopApi = {
     scan: (workspacePath: string) => Promise<GitRepositorySummary[]>;
     run: (workspacePath: string, action: 'commit' | 'commit-push' | 'push' | 'initial', message?: string, includeUnstaged?: boolean) => Promise<{ output: string }>;
   };
+  app: {
+    focus: () => void;
+  };
   theme: {
     shouldUseDark: () => Promise<boolean>;
     onUpdated: (listener: (dark: boolean) => void) => () => void;

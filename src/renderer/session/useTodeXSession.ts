@@ -1,5 +1,11 @@
 import type { BackendConnectionProfile } from './backendColors';
 import { useWorkbenchSharing } from './useWorkbenchSharing';
+import {
+  completionNotificationBody,
+  postCompletionNotification,
+  shouldNotifyCompletion,
+  useCompletionNotifications,
+} from './completionNotifications';
 import { bindSentAttachmentEvents, prepareSentAttachments, projectSentAttachments, pruneSentAttachmentRecords, type SentAttachmentRecord } from './sentAttachments';
 import { ENCRYPTION_VERIFICATION_ERROR, validateTransportEncryption, verifyEncryptedSocket } from './transportVerification';
 import { QueuedFollowUps, restoreQueuedFollowUps } from './queuedFollowUps';
@@ -205,6 +211,7 @@ import {
   attachmentTextBlock,
   codexInputFromComposer,
   attachmentSummary,
+  liveComposerAttachments,
   selectedSkillSummary,
   skillIdFromPath,
   parseSkillListItems,
@@ -329,6 +336,7 @@ export type TodeXSession = ReturnType<typeof useTodeXSession>;
 export type { CatalogState };
 export function useTodeXSession(openPanel: OpenPanelFn) {
   const workbenchSharingState = useWorkbenchSharing();
+  const completionNotificationsState = useCompletionNotifications();
   const socketRef = useRef<WebSocket | null>(null);
   const connectionAttemptRef = useRef<AbortController | null>(null);
   const socketVerifiedRef = useRef(false);
@@ -464,6 +472,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     new V2ApiClient({ serverUrl: settings.serverUrl, authToken: settings.authToken }).replayEvents(id, after, limit));
   runtimeReplayRef.current = (id, after, limit) => new V2ApiClient({ serverUrl: settings.serverUrl, authToken: settings.authToken }).replayEvents(id, after, limit);
   const runtimeUpdateRef = useRef<(state: ConversationRuntime, applied: ConversationEvent[], recovering: boolean) => void>(() => {});
+  const notifyTurnCompletedRef = useRef<(localId: string, state: ConversationRuntime, turnId: string) => void>(() => {});
   const conversationRecoveryRef = useRef<ConversationRecovery | null>(null);
   if (!conversationRecoveryRef.current) conversationRecoveryRef.current = new ConversationRecovery(
     (id, after, limit) => runtimeReplayRef.current(id, after, limit),
@@ -1471,9 +1480,14 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         if (type === 'control.rejected') setLastError(typeof data.message === 'string' ? data.message : 'Agent 未应用控制请求');
       }
       if (['turn.completed', 'turn.cancelled', 'turn.failed', 'turn.interrupted'].includes(type)) {
+        const settledKey = turnId ? `${state.conversationId}:${turnId}` : '';
+        const firstSettle = Boolean(settledKey) && !settledV2TurnsRef.current.has(settledKey);
         if (turnId) {
-          settledV2TurnsRef.current.set(`${state.conversationId}:${turnId}`, type);
+          settledV2TurnsRef.current.set(settledKey, type);
           if (settledV2TurnsRef.current.size > 2000) settledV2TurnsRef.current.delete(settledV2TurnsRef.current.keys().next().value!);
+        }
+        if (type === 'turn.completed' && firstSettle && !recovering) {
+          notifyTurnCompletedRef.current(localId, state, turnId);
         }
         if (submission && turnId && submission.turnId === turnId) {
           if (type === 'turn.completed') removeQueuedFollowUp(localId, submission.requestId);
@@ -3477,6 +3491,25 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     setLastError('');
   }, [backendConnections, conversations, workspaces]);
 
+  notifyTurnCompletedRef.current = (localId, state, turnId) => {
+    const viewingConversation = activeConversationRef.current === localId
+      && document.visibilityState === 'visible'
+      && document.hasFocus();
+    if (!shouldNotifyCompletion({
+      enabled: completionNotificationsState.completionNotifications,
+      supported: completionNotificationsState.completionNotificationsSupported,
+      viewingConversation,
+    })) return;
+    const conversation = conversationsRef.current.find((item) => item.id === localId);
+    const workspace = workspacesRef.current.find((item) => item.id === conversation?.workspaceId);
+    postCompletionNotification({
+      title: conversation?.title?.trim() || workspace?.name?.trim() || 'TodeX',
+      body: completionNotificationBody(state.timeline),
+      tag: `turn-completed-${state.conversationId}-${turnId}`,
+      onActivate: () => { if (conversation) selectConversation(conversation.workspaceId, localId); },
+    });
+  };
+
   const removeWorkspace = useCallback(
     (workspaceId: string) => {
       const removedWorkspace = workspaces.find((workspace) => workspace.id === workspaceId);
@@ -5306,7 +5339,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       text: string,
       conversationId = activeConversationRef.current,
       skills: SelectedSkillAttachment[] = [],
-      attachments: ComposerAttachmentDraft[] = [],
+      rawAttachments: ComposerAttachmentDraft[] = [],
       queuedRequestId?: string,
     ): Promise<boolean> => {
       const context = getConversationContext(conversationId);
@@ -5315,6 +5348,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         return false;
       }
       const { workspace, conversation } = context;
+      // Reference attachments only send while their [引用:name] token is in the text.
+      const attachments = liveComposerAttachments(text, rawAttachments);
       if (!isV2Conversation(conversation) || !conversation.provider) {
         desktopAlert('当前不是 v2 对话', '请新建对话后再发送。');
         return false;
@@ -5473,7 +5508,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       text: string,
       mode: ConversationRecord['mode'] = 'implement',
       conversationId = activeConversationRef.current,
-      attachments: ComposerAttachmentDraft[] = [],
+      rawAttachments: ComposerAttachmentDraft[] = [],
       skills: SelectedSkillAttachment[] = [],
     ) => {
       const context = getConversationContext(conversationId);
@@ -5483,6 +5518,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       }
 
       const { workspace, conversation } = context;
+      const attachments = liveComposerAttachments(text, rawAttachments);
       const permissionMode = conversationPermissionMode(conversation, workspace, v2ProvidersRef.current);
       const preset = PERMISSION_PRESETS.find((item) => item.id === (permissionMode === 'ask' ? 'default' : permissionMode === 'auto' ? 'auto-review' : permissionMode));
       if (!preset) {
@@ -7062,6 +7098,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
 
   return {
     ...workbenchSharingState,
+    ...completionNotificationsState,
     hydrated,
     directorySyncStatus,
     settings,
