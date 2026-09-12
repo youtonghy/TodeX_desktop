@@ -349,6 +349,9 @@ export function ChatPanel({ session }: Props) {
   const submissionStatus = session.submissionStatusByConversation[conversation.id];
   const executionUnknown = submissionStatus === 'unknown';
   const runtime = session.conversationRuntimeById[conversation.id];
+  const sessionPermissionIds = new Set((runtime?.pendingPermissions ?? []).filter(item => item.scope === 'session').map(item => item.id));
+  const pendingPermissionIds = new Set((runtime?.pendingPermissions ?? []).map(item => item.id));
+  const permissionRequests = session.pendingRequests.filter(item => item.requestId && pendingPermissionIds.has(item.requestId));
   const compaction = session.compactionByConversation[conversation.id];
   const latestProcessGroupId = activeChatProcessId(items, runtime?.activeTurnId || session.turnIds[conversation.id]);
   const conversationTimeline = session.timeline.filter((entry) => entry.conversationId === conversation.id);
@@ -606,6 +609,10 @@ export function ChatPanel({ session }: Props) {
       ) : null}
       <div className="border-separator border-t px-5 py-4">
         <div className="composer-container mx-auto max-w-2xl">
+          {permissionRequests.map(request => <div key={request.requestId} className="mb-3 rounded-xl border border-separator p-3">
+            <p className="mb-2 text-xs font-medium">{sessionPermissionIds.has(request.requestId) ? 'Pi 插件请求' : request.title || '权限审批'}</p>
+            <ConversationPermissionActions request={request} onSelect={(option, data) => { session.sendApprovalResponse(option, request, data); }} />
+          </div>)}
           {(slashSuggestions.length > 0 || mentionSuggestions.length > 0 || (mention && mentionSuggestions.length === 0)) ? (
             <div className="composer-suggestions-popover">
               {slashSuggestions.length > 0 ? (
