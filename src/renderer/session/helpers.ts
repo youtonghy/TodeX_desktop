@@ -976,6 +976,7 @@ export function conversationDisplayTitle(
     'claude',
     'claude code',
     'devin',
+    'opencode',
     conversation.provider ? providerDisplayName(conversation.provider).toLowerCase() : '',
   ]);
   if (!genericTitles.has(title.toLowerCase())) {
