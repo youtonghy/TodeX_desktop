@@ -28,11 +28,6 @@ type Props = {
 export function ConversationControls({ runtime, reportedError, running, canConfigure, canSteer, canUseNativeQueue,
   piQueue, controlStatus, nextModel, nextEffort, canSendText, localQueue, localPaused,
   onApply, onSteer, onRecover, onRemoveNative, onClearNative, onRemoveLocal, onResumeLocal }: Props) {
-  useNoticeToast(controlStatus === 'unknown' ? '控制请求待确认'
-    : runtime?.configurationError && runtime.configurationError !== reportedError ? '配置未应用' : null, {
-    description: controlStatus === 'unknown' ? '请求可能已送达。核对记录后再继续，避免重复纠偏或排队。' : runtime?.configurationError,
-    scope: runtime?.conversationId,
-  });
   const effective = runtime?.effectiveConfig;
   const nativeItems = runtime?.queueItems.filter(item => ['queued', 'pending', 'delivering', 'unknown'].includes(item.status)) ?? [];
   const disabled = Boolean(controlStatus);
@@ -43,22 +38,39 @@ export function ConversationControls({ runtime, reportedError, running, canConfi
     || (nextEffort && nextEffort !== effort)));
   const showApply = running && canConfigure && Boolean(nextModel) && (!model || selectionChanged);
   const showSteer = running && canSteer && canSendText;
-  const showConfiguration = running && (selectionChanged || runtime?.configurationStatus === 'pending' || showApply || showSteer);
-  if (!showConfiguration && controlStatus !== 'unknown'
-    && !nativeItems.length && !localQueue.length) return null;
+  const applying = running && runtime?.configurationStatus === 'pending';
+  const scope = runtime?.conversationId;
+  useNoticeToast(controlStatus === 'unknown' ? '控制请求待确认'
+    : runtime?.configurationError && runtime.configurationError !== reportedError ? '配置未应用' : null, {
+    description: controlStatus === 'unknown' ? '请求可能已送达。核对记录后再继续，避免重复纠偏或排队。' : runtime?.configurationError,
+    scope,
+    timeout: controlStatus === 'unknown' ? 0 : undefined,
+    actionLabel: controlStatus === 'unknown' ? '核对记录' : undefined,
+    onAction: onRecover,
+  });
+  useNoticeToast(applying ? '正在应用配置…' : showApply
+    ? selectionChanged ? `下轮：${nextModel}${nextEffort ? ` · ${nextEffort}` : ''}` : '可将所选配置应用到本轮'
+    : null, {
+    variant: 'info',
+    description: applying ? '等待 Agent 确认配置。' : '配置对后续步骤生效。',
+    scope,
+    timeout: 0,
+    actionLabel: showApply && !applying ? '应用到本轮' : undefined,
+    actionPending: controlStatus === 'pending',
+    actionDisabled: disabled,
+    onAction: onApply,
+  });
+  useNoticeToast(showSteer ? '可发送纠偏' : null, {
+    variant: 'info',
+    description: '纠偏使用输入框中的文字。',
+    scope,
+    timeout: 0,
+    actionLabel: '发送纠偏',
+    actionDisabled: disabled,
+    onAction: onSteer,
+  });
+  if (!nativeItems.length && !localQueue.length) return null;
   return <div className="mb-2 space-y-2">
-    {showConfiguration ? <div className="text-muted flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-      {selectionChanged ? <span>下轮：{nextModel}{nextEffort ? ` · ${nextEffort}` : ''}</span> : null}
-      {runtime?.configurationStatus === 'pending' ? <span>正在应用配置…</span> : null}
-      {showApply ? <Button size="sm" variant="ghost" isDisabled={disabled}
-        isPending={controlStatus === 'pending'} onPress={onApply}>应用到本轮</Button> : null}
-      {showSteer ? <Button size="sm" variant="secondary" isDisabled={disabled}
-        onPress={onSteer}>发送纠偏</Button> : null}
-    </div> : null}
-    {showApply || showSteer ? <p className="text-muted text-xs">
-      {showSteer ? '纠偏使用输入框中的文字。' : ''}{showApply ? '配置对后续步骤生效。' : ''}
-    </p> : null}
-    {controlStatus === 'unknown' ? <Button size="sm" variant="secondary" onPress={onRecover}>核对记录</Button> : null}
     {nativeItems.length > 0 ? <div className="border-border rounded-lg border p-2 text-xs">
       <div className="mb-1 flex items-center justify-between gap-2">
         <span>Agent 队列 · {nativeItems.length}{runtime?.queuePaused ? ' · 已暂停，请核对' : ''}</span>

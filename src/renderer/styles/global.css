@@ -98,6 +98,61 @@ body {
   gap: 0.5rem;
 }
 
+.composer-editor {
+  position: relative;
+  max-height: 240px;
+  overflow-y: auto;
+  cursor: text;
+  word-break: break-word;
+  caret-color: var(--foreground);
+}
+
+.composer-editor[data-empty='true']::after {
+  content: attr(data-placeholder);
+  position: absolute;
+  inset-block-start: calc(var(--spacing, 0.25rem) * 3);
+  inset-inline: calc(var(--spacing, 0.25rem) * 3);
+  color: var(--field-placeholder, var(--muted));
+  pointer-events: none;
+}
+
+.composer-ref {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.25rem;
+  max-width: 20rem;
+  margin-inline: 0.0625rem;
+  padding-inline: 0.5rem;
+  border-radius: var(--radius-lg, 0.5rem);
+  background: var(--accent-soft, color-mix(in oklab, var(--accent) 14%, transparent));
+  color: var(--accent);
+  font-weight: 500;
+  vertical-align: baseline;
+  user-select: none;
+}
+
+.composer-ref::before {
+  content: '❝';
+  font-size: 0.85em;
+  opacity: 0.75;
+}
+
+.composer-ref__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-ref__remove {
+  cursor: pointer;
+  opacity: 0.55;
+  margin-inline-start: 0.125rem;
+}
+
+.composer-ref__remove:hover {
+  opacity: 1;
+}
+
 .connection-select {
   width: 100%;
 }

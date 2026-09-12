@@ -11,6 +11,7 @@ import { Markdown } from '@heroui-pro/react/markdown';
 import { providerDisplayName, type ProviderKind, type PermissionMode } from '@todex/protocol/v2';
 import { progressGroupLabel } from '@todex/protocol/mobileParity';
 import { ConversationPermissionActions, ConversationPromptInput, ConversationRunStatus, TurnUsageSummary } from '../components/ConversationRunStatus';
+import { ReferenceComposer, type ReferenceComposerHandle } from '../components/ReferenceComposer';
 import { activeChatProcessId, buildChatRenderItems, isChatTimelineEntry, isChatToolEntry } from '../components/conversationTimeline';
 import { ModelReasoningCard } from '../components/ModelReasoningCard';
 import { ProviderIcon } from '../components/ProviderIcon';
@@ -224,6 +225,7 @@ export function ChatPanel({ session }: Props) {
   const conversation = session.activeConversation;
   const workspace = session.activeWorkspace;
   const draft = conversation ? (session.chatDrafts[conversation.id] ?? '') : '';
+  const composerRef = useRef<ReferenceComposerHandle>(null);
   const mention = findMentionTrigger(draft, conversation ? (session.composerSelections[conversation.id]?.end ?? draft.length) : 0);
   const [mentionSuggestions, setMentionSuggestions] = useState<Array<{ id: string; title: string; description: string; insertText: string }>>([]);
   const [suggestionIndex, setSuggestionIndex] = useState(0);
@@ -448,6 +450,20 @@ export function ChatPanel({ session }: Props) {
     }
   };
 
+  const submitComposer = () => {
+    if (!conversation) return;
+    if (executionUnknown || submissionStatus === 'sending') return;
+    if (hasBlockedImageAttachment) {
+      toast.danger('当前无法发送图片', { description: imageInputSupport.reason });
+      return;
+    }
+    if (draft.trim().startsWith('/')) {
+      session.sendSlashCommand(draft, conversation.id);
+    } else {
+      session.submitChat(conversation.id);
+    }
+  };
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       <ScrollShadow className="min-h-0 flex-1 px-5 py-5">
@@ -581,6 +597,7 @@ export function ChatPanel({ session }: Props) {
             session.setConversationChatDraft(conversation.id, draft.slice(0, selection.start) + token + draft.slice(selection.end));
             const cursor = selection.start + token.length;
             session.setConversationComposerSelection(conversation.id, { start: cursor, end: cursor });
+            composerRef.current?.focus(cursor);
             window.getSelection()?.removeAllRanges();
             setQuote(null);
             toast.success('已添加引用');
@@ -699,18 +716,7 @@ export function ChatPanel({ session }: Props) {
                 }
               }}
               onValueChange={(value: string) => { setSuggestionIndex(0); session.setConversationChatDraft(conversation.id, value); }}
-              onSubmit={() => {
-                if (executionUnknown || submissionStatus === 'sending') return;
-                if (hasBlockedImageAttachment) {
-                  toast.danger('当前无法发送图片', { description: imageInputSupport.reason });
-                  return;
-                }
-                if (draft.trim().startsWith('/')) {
-                  session.sendSlashCommand(draft, conversation.id);
-                } else {
-                  session.submitChat(conversation.id);
-                }
-              }}
+              onSubmit={submitComposer}
               onStop={() => session.stopThinking(conversation.id)}
             >
               <PromptInput.Shell
@@ -746,7 +752,14 @@ export function ChatPanel({ session }: Props) {
                   void addBrowserFiles(files, 'clipboard');
                 }}
               >
-                <PromptInput.Content>
+                <PromptInput.Content
+                  onMouseDown={(event) => {
+                    if (event.target === event.currentTarget) {
+                      event.preventDefault();
+                      composerRef.current?.focus();
+                    }
+                  }}
+                >
                   {fileAttachments.length > 0 ? (
                     <PromptInput.Attachments>
                       <ChatAttachmentGroup aria-label="待发送附件" role="list">
@@ -771,13 +784,19 @@ export function ChatPanel({ session }: Props) {
                       </ChatAttachmentGroup>
                     </PromptInput.Attachments>
                   ) : null}
-                  <PromptInput.TextArea
+                  <ReferenceComposer
+                    ref={composerRef}
+                    value={draft}
+                    isDisabled={executionUnknown}
                     placeholder={imageInputSupport.supported
                       ? '发送消息，或粘贴 / 拖入图片和文件'
                       : '发送消息，或粘贴 / 拖入文本文件'}
+                    onChange={(value) => { setSuggestionIndex(0); session.setConversationChatDraft(conversation.id, value); }}
+                    onSubmit={submitComposer}
+                    onKeyDown={handleSuggestionKeyDown}
+                    onSelectionChange={(selection) => session.setConversationComposerSelection(conversation.id, selection)}
                     onCompositionStart={() => { isComposingRef.current = true; }}
                     onCompositionEnd={() => { isComposingRef.current = false; }}
-                    onKeyDown={handleSuggestionKeyDown}
                   />
                 </PromptInput.Content>
                 <PromptInput.Toolbar className="composer-toolbar">
