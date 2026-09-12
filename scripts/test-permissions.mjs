@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { conversationPermissionMode as resolve, conversationPermissionCapabilities as capabilities } from '../src/renderer/session/permissions.ts';
+import { conversationPermissionMode as resolve, conversationPermissionCapabilities as capabilities, rememberedRunModes } from '../src/renderer/session/permissions.ts';
 const providers = [{ id: 'codex', capabilities: { permissionConfig: { modes: ['ask', 'auto', 'full-access'], defaultMode: 'ask', supportsPlan: true } } }, { id: 'pi', capabilities: { permissionConfig: { modes: ['full-access'], defaultMode: 'full-access', supportsPlan: false } } }];
 test('defaults come only from supported backend capabilities', () => {
   assert.equal(resolve({ provider: 'codex' }, {}, providers), 'ask');
@@ -37,4 +37,18 @@ test('custom legacy combinations never silently lose an approval or sandbox cons
     { permissionProfile: ':workspace', approvalPolicy: 'never' },
     { permissionProfile: ':danger-full-access', sandboxMode: 'workspace-write', approvalPolicy: 'never' },
   ]) assert.equal(resolve({ provider: 'codex' }, config, providers), null);
+});
+
+test('remembered run modes apply only while the provider still supports them', () => {
+  const codex = providers[0].capabilities.permissionConfig;
+  const pi = providers[1].capabilities.permissionConfig;
+  assert.deepEqual(
+    rememberedRunModes({ reasoningByModel: {}, lastPermissionMode: 'auto', lastWorkMode: 'plan' }, codex),
+    { permissionMode: 'auto', mode: 'plan' });
+  assert.deepEqual(
+    rememberedRunModes({ reasoningByModel: {}, lastPermissionMode: 'auto', lastWorkMode: 'plan' }, pi),
+    { permissionMode: 'full-access', mode: 'implement' });
+  assert.deepEqual(rememberedRunModes(undefined, codex), { permissionMode: 'ask', mode: 'implement' });
+  assert.deepEqual(rememberedRunModes({ reasoningByModel: {}, lastWorkMode: 'implement' }, codex), { permissionMode: 'ask', mode: 'implement' });
+  assert.deepEqual(rememberedRunModes({ reasoningByModel: {}, lastPermissionMode: 'auto' }, undefined), { permissionMode: undefined, mode: 'implement' });
 });

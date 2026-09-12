@@ -1,6 +1,6 @@
-import type { ProviderDescriptor } from '@todex/protocol/v2';
+import type { PermissionMode, ProviderDescriptor } from '@todex/protocol/v2';
 import type { WorkspaceRecord } from '@todex/protocol/todex';
-import type { ConversationRecord } from './helpers';
+import type { ConversationRecord, ProviderModelPreference } from './helpers';
 
 export function conversationPermissionCapabilities(
   conversation: ConversationRecord | null | undefined,
@@ -35,4 +35,16 @@ export function conversationPermissionMode(
   if (profile === 'auto-review' || reviewer === 'auto_review') return supported('auto');
   if (profile === ':workspace' || profile === 'default') return supported('ask');
   return config?.defaultMode ? supported(config.defaultMode) : null;
+}
+
+/// Composer run modes for a new conversation: the provider's last-used values
+/// win when the current capability descriptor still supports them.
+export function rememberedRunModes(
+  preference: ProviderModelPreference | undefined,
+  config: ProviderDescriptor['capabilities']['permissionConfig'],
+): { permissionMode?: PermissionMode; mode: 'plan' | 'implement' } {
+  const remembered = preference?.lastPermissionMode;
+  const permissionMode = remembered && config?.modes?.includes(remembered) ? remembered : config?.defaultMode;
+  const mode = preference?.lastWorkMode === 'plan' && config?.supportsPlan ? 'plan' as const : 'implement' as const;
+  return { permissionMode, mode };
 }

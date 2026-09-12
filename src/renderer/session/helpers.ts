@@ -138,6 +138,8 @@ export type ConversationRecord = {
 export type ProviderModelPreference = {
   lastModel?: string;
   reasoningByModel: Record<string, string>;
+  lastPermissionMode?: 'ask' | 'auto' | 'full-access';
+  lastWorkMode?: 'plan' | 'implement';
 };
 
 export type ProviderModelPreferences = Record<string, ProviderModelPreference>;
@@ -158,7 +160,18 @@ export function normalizeProviderModelPreferences(value: unknown): ProviderModel
       ))
       : {};
     const lastModel = typeof record.lastModel === 'string' && record.lastModel.trim() ? record.lastModel.trim() : undefined;
-    return [[key, { ...(lastModel ? { lastModel } : {}), reasoningByModel }]];
+    const lastPermissionMode = ['ask', 'auto', 'full-access'].includes(record.lastPermissionMode as string)
+      ? record.lastPermissionMode as ProviderModelPreference['lastPermissionMode']
+      : undefined;
+    const lastWorkMode = record.lastWorkMode === 'plan' || record.lastWorkMode === 'implement'
+      ? record.lastWorkMode
+      : undefined;
+    return [[key, {
+      ...(lastModel ? { lastModel } : {}),
+      reasoningByModel,
+      ...(lastPermissionMode ? { lastPermissionMode } : {}),
+      ...(lastWorkMode ? { lastWorkMode } : {}),
+    }]];
   }));
 }
 
@@ -1481,7 +1494,7 @@ export const PERMISSION_PRESETS: PermissionPreset[] = [
   },
 ];
 
-export { conversationPermissionCapabilities, conversationPermissionMode } from './permissions';
+export { conversationPermissionCapabilities, conversationPermissionMode, rememberedRunModes } from './permissions';
 
 export function permissionPresetForProfile(
   profileId: string | null | undefined,

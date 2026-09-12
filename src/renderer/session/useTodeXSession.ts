@@ -268,6 +268,7 @@ import {
   permissionPresetForProfile,
   conversationPermissionCapabilities,
   conversationPermissionMode,
+  rememberedRunModes,
   permissionProfileLabel,
   permissionPresetSelected,
   approvalsReviewerValue,
@@ -595,6 +596,28 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           reasoningByModel: reasoningEffort
             ? { ...previous.reasoningByModel, [nextModel]: reasoningEffort }
             : previous.reasoningByModel,
+        },
+      };
+      providerModelPreferencesRef.current = next;
+      return next;
+    });
+  }, []);
+
+  const rememberProviderRunModes = useCallback((
+    backendConnectionId: string | null | undefined,
+    provider: ProviderKind | string | undefined,
+    modes: { permissionMode?: 'ask' | 'auto' | 'full-access'; workMode?: 'plan' | 'implement' },
+  ) => {
+    if (!provider || (!modes.permissionMode && !modes.workMode)) return;
+    const key = providerModelPreferenceKey(backendConnectionId, provider);
+    setProviderModelPreferences((current) => {
+      const previous = current[key] ?? { reasoningByModel: {} };
+      const next = {
+        ...current,
+        [key]: {
+          ...previous,
+          ...(modes.permissionMode ? { lastPermissionMode: modes.permissionMode } : {}),
+          ...(modes.workMode ? { lastWorkMode: modes.workMode } : {}),
         },
       };
       providerModelPreferencesRef.current = next;
@@ -4534,8 +4557,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     }
     conversationsRef.current = conversationsRef.current.map((item) => item.id === conversationId ? { ...item, permissionMode: mode } : item);
     updateConversation(conversationId, { permissionMode: mode });
+    rememberProviderRunModes(
+      context.conversation.backendConnectionId ?? context.workspace.backendConnectionId ?? activeBackendConnectionId,
+      context.conversation.provider,
+      { permissionMode: mode },
+    );
     return true;
-  }, [getConversationContext, updateConversation]);
+  }, [activeBackendConnectionId, getConversationContext, rememberProviderRunModes, updateConversation]);
 
   const applyConversationWorkMode = useCallback(async (
     conversationId: string,
@@ -4554,8 +4582,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     }
     conversationsRef.current = conversationsRef.current.map((item) => item.id === conversationId ? { ...item, mode } : item);
     updateConversation(conversationId, { mode });
+    rememberProviderRunModes(
+      context.conversation.backendConnectionId ?? context.workspace.backendConnectionId ?? activeBackendConnectionId,
+      context.conversation.provider,
+      { workMode: mode },
+    );
     return true;
-  }, [getConversationContext, updateConversation]);
+  }, [activeBackendConnectionId, getConversationContext, rememberProviderRunModes, updateConversation]);
 
   const applyPermissionProfile = useCallback(async (
     conversationId: string,
@@ -4915,6 +4948,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     const backendProfile = backendConnections.find((item) => item.id === options?.backendConnectionId) ?? backendConnections.find((item) => item.id === workspace.backendConnectionId);
     const backendConnectionId = backendProfile?.id ?? workspace.backendConnectionId ?? null;
     const rememberedSelection = resolveRememberedProviderSelection(backendConnectionId, agent.provider);
+    const runModes = rememberedRunModes(
+      providerModelPreferencesRef.current[providerModelPreferenceKey(backendConnectionId, agent.provider)],
+      v2ProvidersRef.current.find((item) => item.id === agent.provider)?.capabilities.permissionConfig,
+    );
     const existing = conversationsRef.current.find((item) =>
       item.workspaceId === workspaceId
       && item.backendConnectionId === backendConnectionId
@@ -4930,8 +4967,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       title: options?.title?.trim() || '新对话',
       provider: agent.provider,
       providerProfile: agent.providerProfile,
-      permissionMode: v2ProvidersRef.current.find((item) => item.id === agent.provider)?.capabilities.permissionConfig?.defaultMode,
-      mode: 'implement' as const,
+      permissionMode: runModes.permissionMode,
+      mode: runModes.mode,
       backendConnectionId,
       model: rememberedSelection.model || undefined,
       reasoningEffort: rememberedSelection.reasoningEffort,
@@ -5037,12 +5074,16 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     }
     const backendConnectionId = conversation.backendConnectionId ?? workspace.backendConnectionId ?? null;
     const rememberedSelection = resolveRememberedProviderSelection(backendConnectionId, provider);
+    const runModes = rememberedRunModes(
+      providerModelPreferencesRef.current[providerModelPreferenceKey(backendConnectionId, provider)],
+      descriptor.capabilities.permissionConfig,
+    );
     const updatedAt = Date.now();
     const patch: Partial<ConversationRecord> = {
       provider,
       providerProfile: descriptor.profiles[0],
-      permissionMode: descriptor.capabilities.permissionConfig?.defaultMode,
-      mode: 'implement' as const,
+      permissionMode: runModes.permissionMode,
+      mode: runModes.mode,
       backendConnectionId,
       model: rememberedSelection.model || undefined,
       reasoningEffort: rememberedSelection.reasoningEffort,
