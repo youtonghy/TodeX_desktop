@@ -975,6 +975,7 @@ export function conversationDisplayTitle(
     'pi',
     'claude',
     'claude code',
+    'devin',
     conversation.provider ? providerDisplayName(conversation.provider).toLowerCase() : '',
   ]);
   if (!genericTitles.has(title.toLowerCase())) {
