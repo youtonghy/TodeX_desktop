@@ -19,7 +19,7 @@ import {
 } from '../session/helpers';
 import type { OpenPanelOptions, WorkbenchTab } from '../lib/panels';
 import { normalizeWorkbenchLayout } from '../session/workbenchLayout';
-import { SETTINGS_STORAGE_KEY, attachmentId } from '../session/helpers';
+import { SETTINGS_STORAGE_KEY, attachmentId, referenceToken, uniqueReferenceName } from '../session/helpers';
 import { V2ApiClient } from '@todex/protocol/v2';
 
 type Props = {
@@ -853,15 +853,19 @@ function FilesPane({ session, target, onTargetChange }: { session: TodeXSession;
       return;
     }
     const baseName = file.name || file.path.split(/[\\/]/).pop() || file.path;
-    const name = selection.lineStart
+    const base = selection.lineStart
       ? `${baseName}:${selection.lineStart}${selection.lineEnd && selection.lineEnd !== selection.lineStart ? `-${selection.lineEnd}` : ''}`
       : `${baseName} 摘录`;
+    const draft = session.chatDrafts[conversationId] ?? '';
+    const name = uniqueReferenceName(base, session.composerAttachments[conversationId] ?? [], draft);
     session.setConversationAttachments(conversationId, (current) => [...current, {
       id: attachmentId(), kind: 'reference', name, mimeType: 'text/plain',
       sizeBytes: new TextEncoder().encode(selection.text).length, dataUrl: '',
       textContent: selection.text, source: 'preview', path: file.path,
       ...(selection.lineStart ? { lineStart: selection.lineStart, lineEnd: selection.lineEnd ?? selection.lineStart } : {}),
     }]);
+    const token = referenceToken(name);
+    session.setConversationChatDraft(conversationId, (current) => current ? `${current}\n${token}` : token);
     toast.success(`已添加引用 ${name}`);
   }, [file, session]);
 

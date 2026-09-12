@@ -6814,8 +6814,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         appendTimeline(makeSystemEntry('已引用文件', mentionSummary, workspace.id, conversationId));
       }
     }
-    if (attachments.length > 0) {
-      appendTimeline(makeSystemEntry('已附加附件', attachmentSummary(attachments), workspace.id, conversationId));
+    const liveAttachments = liveComposerAttachments(text, attachments);
+    if (liveAttachments.length > 0) {
+      appendTimeline(makeSystemEntry('已附加附件', attachmentSummary(liveAttachments), workspace.id, conversationId));
     }
     if (skills.length > 0) {
       appendTimeline(makeSystemEntry('已选择 Skill', selectedSkillSummary(skills), workspace.id, conversationId));
@@ -6828,7 +6829,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     };
     if (isThinking) {
       const nativeQueue = v2ProvidersRef.current.find(item => item.id === conversation.provider)?.capabilities.followUpQueue === true;
-      if (conversation.v2ConversationId && nativeQueue && !attachments.length && !skills.length) {
+      if (conversation.v2ConversationId && nativeQueue && !liveAttachments.length && !skills.length) {
         void controlConversation(conversationId, { action: 'queueAdd', itemId: createRequestId('queue'), text })
           .then(accepted => { if (accepted) clearSubmittedComposer(); });
         return;

@@ -1,9 +1,9 @@
 import { ConversationControls } from '../components/ConversationControls';
 import { NoticeToast } from '../components/NoticeToast';
-import { RiAttachment2, RiBarChartBoxLine, RiChatQuoteLine, RiClipboardLine, RiCloseLine, RiCpuLine, RiGitBranchLine, RiListCheck2, RiShieldLine, RiStopCircleLine } from '@remixicon/react';
+import { RiAttachment2, RiBarChartBoxLine, RiClipboardLine, RiCpuLine, RiGitBranchLine, RiListCheck2, RiShieldLine, RiStopCircleLine } from '@remixicon/react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
-import { Button, Chip, Label, ListBox, Popover, ScrollShadow, Select, Tooltip, toast } from '@heroui/react';
+import { Button, Label, ListBox, Popover, ScrollShadow, Select, Tooltip, toast } from '@heroui/react';
 import { ChainOfThought, ChatAttachment, ChatAttachmentGroup, ChatAttachmentInput, ChatMessage, HoverCard, PromptInput } from '@heroui-pro/react';
 import { ChatMessageActions } from '@heroui-pro/react/chat-message-actions';
 import { ChatTool } from '@heroui-pro/react/chat-tool';
@@ -33,9 +33,10 @@ import {
   canonicalSlashCommand,
   modelDisplayLabel,
   reasoningEffortLabel,
+  referenceToken,
+  uniqueReferenceName,
   workspaceLinkTarget,
 } from '../session/helpers';
-import type { ComposerAttachmentDraft } from '../session/helpers';
 import { selectionInside } from '../lib/selection';
 import { findCapabilityHashTrigger } from '@todex/protocol/todex';
 
@@ -285,6 +286,7 @@ export function ChatPanel({ session }: Props) {
   }
 
   const attachments = session.composerAttachments[conversation.id] ?? [];
+  const fileAttachments = attachments.filter((attachment) => attachment.kind !== 'reference');
   const currentProvider = isV2Conversation(conversation) ? conversation.provider || '' : '';
   const agentProvider = conversation.provider || (isV2Conversation(conversation) ? '' : 'codex');
   const slashTrigger = draft.trim().startsWith('/') ? draft.trim() : '';
@@ -567,11 +569,18 @@ export function ChatPanel({ session }: Props) {
       {quote ? (
         <div className="fixed z-50 -translate-x-1/2" style={{ left: quote.left, top: quote.top }}>
           <Button size="sm" variant="secondary" onPress={() => {
+            const existing = session.composerAttachments[conversation.id] ?? [];
+            const name = uniqueReferenceName('对话摘录', existing, draft);
             session.setConversationAttachments(conversation.id, (current) => [...current, {
-              id: attachmentId(), kind: 'reference', name: '对话摘录', mimeType: 'text/plain',
+              id: attachmentId(), kind: 'reference', name, mimeType: 'text/plain',
               sizeBytes: new TextEncoder().encode(quote.text).length, dataUrl: '',
               textContent: quote.text, source: 'message',
             }]);
+            const token = referenceToken(name);
+            const selection = session.composerSelections[conversation.id] ?? { start: draft.length, end: draft.length };
+            session.setConversationChatDraft(conversation.id, draft.slice(0, selection.start) + token + draft.slice(selection.end));
+            const cursor = selection.start + token.length;
+            session.setConversationComposerSelection(conversation.id, { start: cursor, end: cursor });
             window.getSelection()?.removeAllRanges();
             setQuote(null);
             toast.success('已添加引用');
@@ -738,35 +747,26 @@ export function ChatPanel({ session }: Props) {
                 }}
               >
                 <PromptInput.Content>
-                  {attachments.length > 0 ? (
+                  {fileAttachments.length > 0 ? (
                     <PromptInput.Attachments>
                       <ChatAttachmentGroup aria-label="待发送附件" role="list">
-                        {attachments.map((attachment) => (
-                          attachment.kind === 'reference' ? (
-                            <ReferenceAttachmentChip
-                              key={attachment.id}
-                              attachment={attachment}
-                              onRemove={() => session.setConversationAttachments(conversation.id, (current) =>
+                        {fileAttachments.map((attachment) => (
+                          <ChatAttachment
+                            key={attachment.id}
+                            mimeType={attachment.mimeType}
+                            name={attachment.name}
+                            role="listitem"
+                            size={attachment.sizeBytes ?? undefined}
+                            src={attachment.kind === 'image' ? attachment.dataUrl : undefined}
+                          >
+                            <ChatAttachment.Preview />
+                            <ChatAttachment.Info />
+                            <ChatAttachment.Remove
+                              aria-label={`移除附件 ${attachment.name}`}
+                              onPress={() => session.setConversationAttachments(conversation.id, (current) =>
                                 current.filter((item) => item.id !== attachment.id))}
                             />
-                          ) : (
-                            <ChatAttachment
-                              key={attachment.id}
-                              mimeType={attachment.mimeType}
-                              name={attachment.name}
-                              role="listitem"
-                              size={attachment.sizeBytes ?? undefined}
-                              src={attachment.kind === 'image' ? attachment.dataUrl : undefined}
-                            >
-                              <ChatAttachment.Preview />
-                              <ChatAttachment.Info />
-                              <ChatAttachment.Remove
-                                aria-label={`移除附件 ${attachment.name}`}
-                                onPress={() => session.setConversationAttachments(conversation.id, (current) =>
-                                  current.filter((item) => item.id !== attachment.id))}
-                              />
-                            </ChatAttachment>
-                          )
+                          </ChatAttachment>
                         ))}
                       </ChatAttachmentGroup>
                     </PromptInput.Attachments>
@@ -949,24 +949,3 @@ export function ChatPanel({ session }: Props) {
   );
 }
 
-function ReferenceAttachmentChip({ attachment, onRemove }: {
-  attachment: ComposerAttachmentDraft;
-  onRemove: () => void;
-}) {
-  return (
-    <span role="listitem" className="inline-flex items-center gap-1">
-      <Chip size="sm" variant="soft" color="accent" className="max-w-56 gap-1.5">
-        <RiChatQuoteLine className="size-3.5 shrink-0" />
-        <span className="truncate">{attachment.name}</span>
-      </Chip>
-      <button
-        type="button"
-        aria-label={`移除引用 ${attachment.name}`}
-        onClick={onRemove}
-        className="text-muted hover:text-foreground flex size-5 cursor-pointer items-center justify-center rounded-full outline-none hover:bg-surface-secondary focus-visible:ring-2 focus-visible:ring-accent/40"
-      >
-        <RiCloseLine className="size-3.5" />
-      </button>
-    </span>
-  );
-}
