@@ -350,7 +350,6 @@ export type ComposerAttachmentDraft = {
   path?: string;
   lineStart?: number;
   lineEnd?: number;
-  note?: string;
 };
 
 export type QueuedChatSubmission = {
@@ -776,7 +775,6 @@ export function attachmentTextBlock(attachment: ComposerAttachmentDraft): string
     const location = attachment.path ? `${attachment.path}${lines}` : attachment.name;
     const parts = [`[引用: ${location}]`];
     if (attachment.textContent) parts.push(`Content:\n${attachment.textContent}`);
-    if (attachment.note?.trim()) parts.push(`批注: ${attachment.note.trim()}`);
     return parts.join('\n');
   }
   const header = [

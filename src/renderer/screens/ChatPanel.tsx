@@ -1,9 +1,9 @@
 import { ConversationControls } from '../components/ConversationControls';
 import { NoticeToast } from '../components/NoticeToast';
-import { RiAttachment2, RiBarChartBoxLine, RiChatQuoteLine, RiClipboardLine, RiCpuLine, RiGitBranchLine, RiListCheck2, RiShieldLine, RiStopCircleLine } from '@remixicon/react';
+import { RiAttachment2, RiBarChartBoxLine, RiChatQuoteLine, RiClipboardLine, RiCloseLine, RiCpuLine, RiGitBranchLine, RiListCheck2, RiShieldLine, RiStopCircleLine } from '@remixicon/react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
-import { Button, Label, ListBox, Popover, ScrollShadow, Select, TextArea, TextField, Tooltip, toast } from '@heroui/react';
+import { Button, Chip, Label, ListBox, Popover, ScrollShadow, Select, Tooltip, toast } from '@heroui/react';
 import { ChainOfThought, ChatAttachment, ChatAttachmentGroup, ChatAttachmentInput, ChatMessage, HoverCard, PromptInput } from '@heroui-pro/react';
 import { ChatMessageActions } from '@heroui-pro/react/chat-message-actions';
 import { ChatTool } from '@heroui-pro/react/chat-tool';
@@ -746,8 +746,6 @@ export function ChatPanel({ session }: Props) {
                             <ReferenceAttachmentChip
                               key={attachment.id}
                               attachment={attachment}
-                              onPatch={(patch) => session.setConversationAttachments(conversation.id, (current) =>
-                                current.map((item) => item.id === attachment.id ? { ...item, ...patch } : item))}
                               onRemove={() => session.setConversationAttachments(conversation.id, (current) =>
                                 current.filter((item) => item.id !== attachment.id))}
                             />
@@ -951,41 +949,24 @@ export function ChatPanel({ session }: Props) {
   );
 }
 
-function ReferenceAttachmentChip({ attachment, onPatch, onRemove }: {
+function ReferenceAttachmentChip({ attachment, onRemove }: {
   attachment: ComposerAttachmentDraft;
-  onPatch: (patch: Partial<ComposerAttachmentDraft>) => void;
   onRemove: () => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const location = attachment.path
-    ? `${attachment.path}${attachment.lineStart ? `:${attachment.lineStart}${attachment.lineEnd && attachment.lineEnd !== attachment.lineStart ? `-${attachment.lineEnd}` : ''}` : ''}`
-    : attachment.name;
   return (
-    <span role="listitem" className="contents">
-    <Popover isOpen={open} onOpenChange={setOpen}>
-      <Button size="sm" variant="secondary" className="gap-1.5" aria-label={`引用 ${attachment.name}`}>
-        <RiChatQuoteLine className="size-3.5" />
-        <span className="max-w-40 truncate">{attachment.name}</span>
-        {attachment.note?.trim() ? <span className="text-muted">· 批注</span> : null}
-      </Button>
-      <Popover.Content placement="top start" className="w-[min(24rem,calc(100vw-2rem))]">
-        <Popover.Dialog className="space-y-3 p-3">
-          <Popover.Heading className="break-all text-xs font-semibold">{location}</Popover.Heading>
-          <TextField value={attachment.textContent ?? ''} onChange={(value) => onPatch({ textContent: value })}>
-            <Label className="text-xs">摘录</Label>
-            <TextArea className="w-full text-xs" rows={5} />
-          </TextField>
-          <TextField value={attachment.note ?? ''} onChange={(value) => onPatch({ note: value })}>
-            <Label className="text-xs">批注</Label>
-            <TextArea className="w-full text-xs" placeholder="补充说明或改写要求" rows={2} />
-          </TextField>
-          <div className="flex items-center justify-between">
-            <Button size="sm" variant="ghost" className="text-danger" onPress={() => { onRemove(); setOpen(false); }}>移除</Button>
-            <Button size="sm" variant="secondary" onPress={() => setOpen(false)}>完成</Button>
-          </div>
-        </Popover.Dialog>
-      </Popover.Content>
-    </Popover>
+    <span role="listitem" className="inline-flex items-center gap-1">
+      <Chip size="sm" variant="soft" color="accent" className="max-w-56 gap-1.5">
+        <RiChatQuoteLine className="size-3.5 shrink-0" />
+        <span className="truncate">{attachment.name}</span>
+      </Chip>
+      <button
+        type="button"
+        aria-label={`移除引用 ${attachment.name}`}
+        onClick={onRemove}
+        className="text-muted hover:text-foreground flex size-5 cursor-pointer items-center justify-center rounded-full outline-none hover:bg-surface-secondary focus-visible:ring-2 focus-visible:ring-accent/40"
+      >
+        <RiCloseLine className="size-3.5" />
+      </button>
     </span>
   );
 }
