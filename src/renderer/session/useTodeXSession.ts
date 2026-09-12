@@ -5188,6 +5188,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         }
         continue;
       }
+      if (attachment.kind === 'reference') {
+        content.push({ type: 'text', text: attachmentTextBlock(attachment) });
+        continue;
+      }
       if (typeof attachment.textContent === 'string') {
         content.push({ type: 'text', text: `[附件: ${attachment.name}]\n${attachment.textContent}` });
       }

@@ -340,13 +340,17 @@ export type PairingChunkCollector = {
 
 export type ComposerAttachmentDraft = {
   id: string;
-  kind: 'image' | 'file';
+  kind: 'image' | 'file' | 'reference';
   name: string;
   mimeType: string;
   sizeBytes: number | null;
   dataUrl: string;
   textContent?: string;
-  source: 'clipboard' | 'library' | 'file';
+  source: 'clipboard' | 'library' | 'file' | 'preview' | 'message';
+  path?: string;
+  lineStart?: number;
+  lineEnd?: number;
+  note?: string;
 };
 
 export type QueuedChatSubmission = {
@@ -750,7 +754,11 @@ export function attachmentPrompt(attachments: ComposerAttachmentDraft[]): string
     return '';
   }
   const imageCount = attachments.filter((item) => item.kind === 'image').length;
-  const fileCount = attachments.length - imageCount;
+  const referenceCount = attachments.filter((item) => item.kind === 'reference').length;
+  const fileCount = attachments.length - imageCount - referenceCount;
+  if (imageCount === 0 && fileCount === 0) {
+    return referenceCount === 1 ? '请查看这条引用。' : `请查看这 ${referenceCount} 条引用。`;
+  }
   if (imageCount > 0 && fileCount > 0) {
     return `请查看这 ${attachments.length} 个附件。`;
   }
@@ -761,6 +769,16 @@ export function attachmentPrompt(attachments: ComposerAttachmentDraft[]): string
 }
 
 export function attachmentTextBlock(attachment: ComposerAttachmentDraft): string {
+  if (attachment.kind === 'reference') {
+    const lines = attachment.lineStart
+      ? `:${attachment.lineStart}${attachment.lineEnd && attachment.lineEnd !== attachment.lineStart ? `-${attachment.lineEnd}` : ''}`
+      : '';
+    const location = attachment.path ? `${attachment.path}${lines}` : attachment.name;
+    const parts = [`[引用: ${location}]`];
+    if (attachment.textContent) parts.push(`Content:\n${attachment.textContent}`);
+    if (attachment.note?.trim()) parts.push(`批注: ${attachment.note.trim()}`);
+    return parts.join('\n');
+  }
   const header = [
     `[附件: ${attachment.name}]`,
     `MIME: ${attachment.mimeType}`,
@@ -806,7 +824,7 @@ export function codexInputFromComposer(
 
 export function attachmentSummary(attachments: ComposerAttachmentDraft[]): string {
   return attachments
-    .map((item) => `${item.kind === 'image' ? '图片' : '文件'} ${item.name} (${formatBytes(item.sizeBytes)})`)
+    .map((item) => `${item.kind === 'image' ? '图片' : item.kind === 'reference' ? '引用' : '文件'} ${item.name} (${formatBytes(item.sizeBytes)})`)
     .join('\n');
 }
 

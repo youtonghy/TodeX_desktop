@@ -6,7 +6,7 @@ import type { Selection } from '@heroui/react';
 import { FileTree } from '@heroui-pro/react';
 import { Resizable } from '@heroui-pro/react/resizable';
 import type { PanelImperativeHandle } from '@heroui-pro/react/resizable';
-import { WorkspaceFilePreview, type PreviewFile } from '../components/WorkspaceFilePreview';
+import { WorkspaceFilePreview, type PreviewFile, type ReferenceSelection } from '../components/WorkspaceFilePreview';
 import { useNoticeToast } from '../components/NoticeToast';
 import { XtermTerminal } from '../components/XtermTerminal';
 import type { TodeXSession } from '../session/useTodeXSession';
@@ -19,7 +19,7 @@ import {
 } from '../session/helpers';
 import type { OpenPanelOptions, WorkbenchTab } from '../lib/panels';
 import { normalizeWorkbenchLayout } from '../session/workbenchLayout';
-import { SETTINGS_STORAGE_KEY } from '../session/helpers';
+import { SETTINGS_STORAGE_KEY, attachmentId } from '../session/helpers';
 import { V2ApiClient } from '@todex/protocol/v2';
 
 type Props = {
@@ -846,6 +846,25 @@ function FilesPane({ session, target, onTargetChange }: { session: TodeXSession;
 
   useEffect(() => () => { fileRequestRef.current += 1; }, []);
 
+  const addReferenceToChat = useCallback((selection: ReferenceSelection) => {
+    const conversationId = session.activeConversation?.id;
+    if (!conversationId || !file) {
+      toast.danger('请先选择一个对话，再添加引用');
+      return;
+    }
+    const baseName = file.name || file.path.split(/[\\/]/).pop() || file.path;
+    const name = selection.lineStart
+      ? `${baseName}:${selection.lineStart}${selection.lineEnd && selection.lineEnd !== selection.lineStart ? `-${selection.lineEnd}` : ''}`
+      : `${baseName} 摘录`;
+    session.setConversationAttachments(conversationId, (current) => [...current, {
+      id: attachmentId(), kind: 'reference', name, mimeType: 'text/plain',
+      sizeBytes: new TextEncoder().encode(selection.text).length, dataUrl: '',
+      textContent: selection.text, source: 'preview', path: file.path,
+      ...(selection.lineStart ? { lineStart: selection.lineStart, lineEnd: selection.lineEnd ?? selection.lineStart } : {}),
+    }]);
+    toast.success(`已添加引用 ${name}`);
+  }, [file, session]);
+
   const loadDirectory = useCallback(async (directory: string) => {
     setLoading(true);
     setError('');
@@ -995,7 +1014,7 @@ function FilesPane({ session, target, onTargetChange }: { session: TodeXSession;
         <Resizable.Panel defaultSize="70%" minSize="50%" className="min-h-0">
           <ScrollShadow className="bg-surface-secondary h-full min-h-0 rounded-xl p-3">
             <p className="text-muted mb-2 truncate text-xs">{selected || '选择文件预览'}</p>
-            {fileLoading ? <Spinner size="sm" aria-label="正在读取文件" /> : error ? null : <WorkspaceFilePreview file={file} />}
+            {fileLoading ? <Spinner size="sm" aria-label="正在读取文件" /> : error ? null : <WorkspaceFilePreview file={file} onAddReference={addReferenceToChat} />}
           </ScrollShadow>
         </Resizable.Panel>
       </Resizable>
