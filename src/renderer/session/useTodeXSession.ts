@@ -7,7 +7,7 @@ import {
   useCompletionNotifications,
 } from './completionNotifications';
 import { bindSentAttachmentEvents, prepareSentAttachments, projectSentAttachments, pruneSentAttachmentRecords, type SentAttachmentRecord } from './sentAttachments';
-import { ENCRYPTION_VERIFICATION_ERROR, validateTransportEncryption, verifyEncryptedSocket } from './transportVerification';
+import { ENCRYPTION_VERIFICATION_ERROR, TransportVerificationError, validateTransportEncryption, verifyEncryptedSocket } from './transportVerification';
 import { QueuedFollowUps, restoreQueuedFollowUps } from './queuedFollowUps';
 import { LegacyEventRecovery } from './legacyEventRecovery';
 import { ConversationRecovery } from './conversationRecovery';
@@ -317,6 +317,9 @@ import {
   PERSONALITY_OPTIONS,
   CONNECTION_HEALTH_INTERVAL_MS,
   CONNECTION_HEALTH_TIMEOUT_MS,
+  SOCKET_WATCHDOG_INTERVAL_MS,
+  SOCKET_LIVENESS_TIMEOUT_MS,
+  SOCKET_LIVENESS_MAX_FAILURES,
   MAX_COMPOSER_ATTACHMENTS,
 } from './helpers';
 
@@ -388,6 +391,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const sessionCursorsRef = useRef(new Map<string, number>());
   const reconnectAttemptRef = useRef(0);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const socketWatchdogFailuresRef = useRef(0);
   const manualDisconnectRef = useRef(false);
   const workspaceBackendReadyRef = useRef(false);
   const workspaceBackendSkipNextSaveRef = useRef(false);
@@ -2931,6 +2935,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       try {
         await validateTransportEncryption({ ...settings, serverUrl: inspected.origin }, attempt.signal);
       } catch (error) {
+        if (error instanceof TransportVerificationError && error.retryable) {
+          lastFailureRetryableRef.current = true;
+          setConnectionState('error');
+          setLastError(error.message);
+          setConnectionHealth({ status: 'offline', latencyMs: null, lastCheckedAt: Date.now(), error: error.message, code: 'backend_unreachable' });
+          return;
+        }
         failTransport(error);
         return;
       }
@@ -3009,7 +3020,16 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
             try {
               await verifyEncryptedSocket(socket, crypto, attempt.signal);
             } catch (error) {
-              if (isSocketCurrent()) failTransport(error);
+              if (!isSocketCurrent()) return;
+              if (error instanceof TransportVerificationError && error.retryable) {
+                // Transient drop mid-handshake: supersede this socket so its
+                // onclose no-ops, then let the reconnect effect retry.
+                closeSocket(false);
+                lastFailureRetryableRef.current = true;
+                setConnectionState('closed');
+                return;
+              }
+              failTransport(error);
               return;
             }
           }
@@ -3060,7 +3080,18 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         socket.onerror = () => {
           if (!isSocketCurrent()) return;
           if (crypto && !verified) {
-            failTransport(new Error(ENCRYPTION_VERIFICATION_ERROR));
+            // A transport error before the encrypted handshake finishes is
+            // ambiguous (dropped connection vs rejected key); keep retrying
+            // rather than latching the socket dead.
+            lastFailureRetryableRef.current = true;
+            setConnectionState('error');
+            setLastError(ENCRYPTION_VERIFICATION_ERROR);
+            setConnectionHealth((current) => ({
+              ...current,
+              status: 'offline',
+              error: ENCRYPTION_VERIFICATION_ERROR,
+              code: 'websocket_failed',
+            }));
             return;
           }
           lastFailureRetryableRef.current = true;
@@ -3077,9 +3108,17 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         socket.onclose = () => {
           if (!isSocketCurrent()) return;
           if (crypto && !verified) {
-            // Publish verification failure before clearing socket identity;
-            // the verifier's rejection may run after this event callback.
-            failTransport(new Error(ENCRYPTION_VERIFICATION_ERROR));
+            // A drop before the encrypted handshake finishes is transient;
+            // keep auto-reconnect alive instead of latching a verification
+            // error. The verifier's rejection may run after this callback.
+            lastFailureRetryableRef.current = true;
+            setConnectionState('closed');
+            setLastError(ENCRYPTION_VERIFICATION_ERROR);
+            socketVerifiedRef.current = false;
+            socketRef.current = null;
+            socketCryptoRef.current = null;
+            attempt.abort();
+            protocolCommandsRef.current?.disconnect();
             return;
           }
           socketVerifiedRef.current = false;
@@ -3135,6 +3174,43 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     };
   }, [autoConnectEnabled, connect, connectionState, hydrated]);
 
+  // Backstop for the event-driven reconnect above: a socket can die without a
+  // usable close event (sleep/wake, renderer churn, missed state transitions),
+  // and state latches like manualDisconnectRef can silently suppress retries.
+  // The watchdog reconnects whenever the socket is observably dead, and pings
+  // an open socket so a half-open TCP connection is also detected.
+  useEffect(() => {
+    if (!hydrated || !autoConnectEnabled) return;
+    const tick = () => {
+      if (manualDisconnectRef.current) return;
+      const socket = socketRef.current;
+      if (!socket || socket.readyState === WebSocket.CLOSING || socket.readyState === WebSocket.CLOSED) {
+        socketVerifiedRef.current = false;
+        socketWatchdogFailuresRef.current = 0;
+        setConnectionState((current) => (current === 'open' ? 'closed' : current));
+        if (!lastFailureRetryableRef.current || connectionState === 'connecting') return;
+        connect();
+        return;
+      }
+      if (socket.readyState !== WebSocket.OPEN || !socketVerifiedRef.current) return;
+      const livenessProbe = socket;
+      void sendProtocolCommand({ id: createRequestId('watchdog'), type: 'server.ping', payload: {} }, SOCKET_LIVENESS_TIMEOUT_MS)
+        .then(() => {
+          socketWatchdogFailuresRef.current = 0;
+        })
+        .catch(() => {
+          if (socketRef.current !== livenessProbe) return;
+          socketWatchdogFailuresRef.current += 1;
+          if (socketWatchdogFailuresRef.current < SOCKET_LIVENESS_MAX_FAILURES) return;
+          socketWatchdogFailuresRef.current = 0;
+          closeSocket(false);
+          setConnectionState('closed');
+        });
+    };
+    const intervalId = setInterval(tick, SOCKET_WATCHDOG_INTERVAL_MS);
+    return () => clearInterval(intervalId);
+  }, [autoConnectEnabled, closeSocket, connect, connectionState, hydrated, sendProtocolCommand]);
+
   useEffect(() => {
     if (!hydrated || !autoConnectEnabled || autoConnectAttemptedRef.current) {
       return;
@@ -3152,8 +3228,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       target?: TimelineTarget,
     ) => {
       const socket = socketRef.current;
-      if (!socket || socket.readyState !== WebSocket.OPEN) {
-        setLastError('请先在设置里连接后端。');
+      if (!socket || socket.readyState !== WebSocket.OPEN || !socketVerifiedRef.current) {
+        if (autoConnectEnabled && !manualDisconnectRef.current) {
+          setLastError('后端连接已断开，正在重连；请稍后重试。');
+          connect();
+        } else {
+          setLastError('请先在设置里连接后端。');
+        }
         return false;
       }
 
@@ -3179,7 +3260,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       }
       return true;
     },
-    [appendTimeline, sendRawProtocolFrame],
+    [appendTimeline, autoConnectEnabled, connect, sendRawProtocolFrame],
   );
 
   const seedTerminalState = useCallback((workspace: WorkspaceRecord, conversation: ConversationRecord, patch: Partial<TerminalClientState> = {}) => {
@@ -5424,6 +5505,17 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           setConversationAttachments(conversation.id, (current) => current.length > 0 ? current : attachments);
         }
       };
+      const socket = socketRef.current;
+      if (!socket || socket.readyState !== WebSocket.OPEN || !socketVerifiedRef.current) {
+        if (autoConnectEnabled && !manualDisconnectRef.current) {
+          setLastError('后端连接已断开，正在重连；请稍后重试。');
+          connect();
+        } else {
+          setLastError('请先在设置里连接后端。');
+        }
+        restoreSubmission();
+        return false;
+      }
       if (attachments.some((attachment) => attachment.kind === 'image')) {
         const imageSupport = conversationImageInputSupport(conversation, v2ProvidersRef.current, {
           models: conversation.provider
@@ -5541,7 +5633,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         }
       }
     },
-    [updateSentAttachmentRecords, getConversationContext, materializeV2Conversation, recoverConversation, promptContentFromAttachments, promptSkillsFromAttachments, sendProtocolCommand, setConversationAttachments, setConversationChatDraft, setConversationSelectedSkills, setConversationThinking, settings.defaultModel, updateConversation],
+    [updateSentAttachmentRecords, getConversationContext, materializeV2Conversation, recoverConversation, promptContentFromAttachments, promptSkillsFromAttachments, sendProtocolCommand, setConversationAttachments, setConversationChatDraft, setConversationSelectedSkills, setConversationThinking, settings.defaultModel, updateConversation, autoConnectEnabled, connect],
   );
 
   const sendLocalTurn = useCallback(
