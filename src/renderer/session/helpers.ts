@@ -515,6 +515,39 @@ export const CONNECTION_HEALTH_TIMEOUT_MS = 3500;
 export const SOCKET_WATCHDOG_INTERVAL_MS = 15_000;
 export const SOCKET_LIVENESS_TIMEOUT_MS = 15_000;
 export const SOCKET_LIVENESS_MAX_FAILURES = 3;
+
+/** requestAnimationFrame stops firing while the window is hidden or occluded,
+ * which freezes protocol frame processing even though the socket stays alive.
+ * MessageChannel tasks are not throttled in background pages and still yield
+ * to the event loop between batches. */
+const messageTaskChannel = new MessageChannel();
+const messageTaskQueue = new Map<number, () => void>();
+let nextMessageTaskId = 0;
+messageTaskChannel.port1.onmessage = () => {
+  const first = messageTaskQueue.keys().next();
+  if (first.done) return;
+  const id = first.value;
+  const run = messageTaskQueue.get(id);
+  messageTaskQueue.delete(id);
+  if (!run) return;
+  try {
+    run();
+  } catch (error) {
+    // Surface asynchronously so one failing task cannot wedge the queue.
+    setTimeout(() => { throw error; });
+  }
+};
+
+export function scheduleMessageTask(run: () => void): number {
+  const id = ++nextMessageTaskId;
+  messageTaskQueue.set(id, run);
+  messageTaskChannel.port2.postMessage(null);
+  return id;
+}
+
+export function cancelMessageTask(id: number): void {
+  messageTaskQueue.delete(id);
+}
 export const MAX_COMPOSER_ATTACHMENTS = 8;
 export const MAX_IMAGE_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 export const MAX_FILE_ATTACHMENT_BYTES = 512 * 1024;

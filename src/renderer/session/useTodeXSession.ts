@@ -321,6 +321,8 @@ import {
   SOCKET_LIVENESS_TIMEOUT_MS,
   SOCKET_LIVENESS_MAX_FAILURES,
   MAX_COMPOSER_ATTACHMENTS,
+  scheduleMessageTask,
+  cancelMessageTask,
 } from './helpers';
 
 const SENT_ATTACHMENTS_STORAGE_KEY = `${TIMELINE_STORAGE_KEY}.attachments`;
@@ -881,12 +883,12 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     socketCryptoRef.current = null;
     pendingServerEventsRef.current = [];
     if (pendingServerEventFrameRef.current !== null) {
-      cancelAnimationFrame(pendingServerEventFrameRef.current);
+      cancelMessageTask(pendingServerEventFrameRef.current);
       pendingServerEventFrameRef.current = null;
     }
     pendingSocketFramesRef.current = [];
     if (pendingSocketFrameDrainRef.current !== null) {
-      cancelAnimationFrame(pendingSocketFrameDrainRef.current);
+      cancelMessageTask(pendingSocketFrameDrainRef.current);
       pendingSocketFrameDrainRef.current = null;
     }
   }, []);
@@ -903,12 +905,12 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       flushJsonSave();
       pendingServerEventsRef.current = [];
       if (pendingServerEventFrameRef.current !== null) {
-        cancelAnimationFrame(pendingServerEventFrameRef.current);
+        cancelMessageTask(pendingServerEventFrameRef.current);
         pendingServerEventFrameRef.current = null;
       }
       pendingSocketFramesRef.current = [];
       if (pendingSocketFrameDrainRef.current !== null) {
-        cancelAnimationFrame(pendingSocketFrameDrainRef.current);
+        cancelMessageTask(pendingSocketFrameDrainRef.current);
         pendingSocketFrameDrainRef.current = null;
       }
     };
@@ -2634,7 +2636,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       return;
     }
 
-    pendingServerEventFrameRef.current = requestAnimationFrame(() => {
+    pendingServerEventFrameRef.current = scheduleMessageTask(() => {
       pendingServerEventFrameRef.current = null;
       const batch = pendingServerEventsRef.current.splice(0, SOCKET_EVENT_BATCH_SIZE);
       batch.forEach(appendEvent);
@@ -2693,7 +2695,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       return;
     }
 
-    pendingSocketFrameDrainRef.current = requestAnimationFrame(() => {
+    pendingSocketFrameDrainRef.current = scheduleMessageTask(() => {
       pendingSocketFrameDrainRef.current = null;
       const startedAt = Date.now();
       let processed = 0;
