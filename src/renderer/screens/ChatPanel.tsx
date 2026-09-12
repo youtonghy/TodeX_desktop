@@ -1,9 +1,9 @@
 import { ConversationControls } from '../components/ConversationControls';
 import { NoticeToast } from '../components/NoticeToast';
-import { RiAttachment2, RiBarChartBoxLine, RiClipboardLine, RiCpuLine, RiGitBranchLine, RiListCheck2, RiShieldLine, RiStopCircleLine } from '@remixicon/react';
+import { RiAttachment2, RiBarChartBoxLine, RiChatQuoteLine, RiClipboardLine, RiCpuLine, RiGitBranchLine, RiListCheck2, RiShieldLine, RiStopCircleLine } from '@remixicon/react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
-import { Button, Label, ListBox, Popover, ScrollShadow, Select, Tooltip, toast } from '@heroui/react';
+import { Button, Label, ListBox, Popover, ScrollShadow, Select, TextArea, TextField, Tooltip, toast } from '@heroui/react';
 import { ChainOfThought, ChatAttachment, ChatAttachmentGroup, ChatAttachmentInput, ChatMessage, HoverCard, PromptInput } from '@heroui-pro/react';
 import { ChatMessageActions } from '@heroui-pro/react/chat-message-actions';
 import { ChatTool } from '@heroui-pro/react/chat-tool';
@@ -35,6 +35,8 @@ import {
   reasoningEffortLabel,
   workspaceLinkTarget,
 } from '../session/helpers';
+import type { ComposerAttachmentDraft } from '../session/helpers';
+import { selectionInside } from '../lib/selection';
 import { findCapabilityHashTrigger } from '@todex/protocol/todex';
 
 type Props = {
@@ -258,6 +260,21 @@ export function ChatPanel({ session }: Props) {
         }),
     );
   }, [conversation?.id, session.timeline]);
+  const messagesRef = useRef<HTMLDivElement>(null);
+  const [quote, setQuote] = useState<{ text: string; left: number; top: number } | null>(null);
+  useEffect(() => {
+    const update = () => {
+      const container = messagesRef.current;
+      setQuote(container ? selectionInside(container) : null);
+    };
+    const hide = () => setQuote(null);
+    document.addEventListener('selectionchange', update);
+    document.addEventListener('scroll', hide, true);
+    return () => {
+      document.removeEventListener('selectionchange', update);
+      document.removeEventListener('scroll', hide, true);
+    };
+  }, []);
   if (!conversation || !workspace) {
     return (
       <div className="flex h-full flex-col items-center justify-center px-8 text-center">
@@ -432,7 +449,7 @@ export function ChatPanel({ session }: Props) {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <ScrollShadow className="min-h-0 flex-1 px-5 py-5">
-        <div className="mx-auto flex max-w-2xl flex-col gap-3">
+        <div ref={messagesRef} className="mx-auto flex max-w-2xl flex-col gap-3">
           {items.length === 0 ? (
             <p className="text-muted py-16 text-center text-sm" role="status">
               {thinking ? '正在工作' : '还没有消息。输入内容后发送。'}
@@ -547,6 +564,20 @@ export function ChatPanel({ session }: Props) {
           })}
         </div>
       </ScrollShadow>
+      {quote ? (
+        <div className="fixed z-50 -translate-x-1/2" style={{ left: quote.left, top: quote.top }}>
+          <Button size="sm" variant="secondary" onPress={() => {
+            session.setConversationAttachments(conversation.id, (current) => [...current, {
+              id: attachmentId(), kind: 'reference', name: '对话摘录', mimeType: 'text/plain',
+              sizeBytes: new TextEncoder().encode(quote.text).length, dataUrl: '',
+              textContent: quote.text, source: 'message',
+            }]);
+            window.getSelection()?.removeAllRanges();
+            setQuote(null);
+            toast.success('已添加引用');
+          }}>添加到对话</Button>
+        </div>
+      ) : null}
       <div className="border-separator border-t px-5 py-4">
         <div className="composer-container mx-auto max-w-2xl">
           {(slashSuggestions.length > 0 || mentionSuggestions.length > 0 || (mention && mentionSuggestions.length === 0)) ? (
@@ -711,22 +742,33 @@ export function ChatPanel({ session }: Props) {
                     <PromptInput.Attachments>
                       <ChatAttachmentGroup aria-label="待发送附件" role="list">
                         {attachments.map((attachment) => (
-                          <ChatAttachment
-                            key={attachment.id}
-                            mimeType={attachment.mimeType}
-                            name={attachment.name}
-                            role="listitem"
-                            size={attachment.sizeBytes ?? undefined}
-                            src={attachment.kind === 'image' ? attachment.dataUrl : undefined}
-                          >
-                            <ChatAttachment.Preview />
-                            <ChatAttachment.Info />
-                            <ChatAttachment.Remove
-                              aria-label={`移除附件 ${attachment.name}`}
-                              onPress={() => session.setConversationAttachments(conversation.id, (current) =>
+                          attachment.kind === 'reference' ? (
+                            <ReferenceAttachmentChip
+                              key={attachment.id}
+                              attachment={attachment}
+                              onPatch={(patch) => session.setConversationAttachments(conversation.id, (current) =>
+                                current.map((item) => item.id === attachment.id ? { ...item, ...patch } : item))}
+                              onRemove={() => session.setConversationAttachments(conversation.id, (current) =>
                                 current.filter((item) => item.id !== attachment.id))}
                             />
-                          </ChatAttachment>
+                          ) : (
+                            <ChatAttachment
+                              key={attachment.id}
+                              mimeType={attachment.mimeType}
+                              name={attachment.name}
+                              role="listitem"
+                              size={attachment.sizeBytes ?? undefined}
+                              src={attachment.kind === 'image' ? attachment.dataUrl : undefined}
+                            >
+                              <ChatAttachment.Preview />
+                              <ChatAttachment.Info />
+                              <ChatAttachment.Remove
+                                aria-label={`移除附件 ${attachment.name}`}
+                                onPress={() => session.setConversationAttachments(conversation.id, (current) =>
+                                  current.filter((item) => item.id !== attachment.id))}
+                              />
+                            </ChatAttachment>
+                          )
                         ))}
                       </ChatAttachmentGroup>
                     </PromptInput.Attachments>
@@ -906,5 +948,44 @@ export function ChatPanel({ session }: Props) {
         </div>
       </div>
     </div>
+  );
+}
+
+function ReferenceAttachmentChip({ attachment, onPatch, onRemove }: {
+  attachment: ComposerAttachmentDraft;
+  onPatch: (patch: Partial<ComposerAttachmentDraft>) => void;
+  onRemove: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const location = attachment.path
+    ? `${attachment.path}${attachment.lineStart ? `:${attachment.lineStart}${attachment.lineEnd && attachment.lineEnd !== attachment.lineStart ? `-${attachment.lineEnd}` : ''}` : ''}`
+    : attachment.name;
+  return (
+    <span role="listitem" className="contents">
+    <Popover isOpen={open} onOpenChange={setOpen}>
+      <Button size="sm" variant="secondary" className="gap-1.5" aria-label={`引用 ${attachment.name}`}>
+        <RiChatQuoteLine className="size-3.5" />
+        <span className="max-w-40 truncate">{attachment.name}</span>
+        {attachment.note?.trim() ? <span className="text-muted">· 批注</span> : null}
+      </Button>
+      <Popover.Content placement="top start" className="w-[min(24rem,calc(100vw-2rem))]">
+        <Popover.Dialog className="space-y-3 p-3">
+          <Popover.Heading className="break-all text-xs font-semibold">{location}</Popover.Heading>
+          <TextField value={attachment.textContent ?? ''} onChange={(value) => onPatch({ textContent: value })}>
+            <Label className="text-xs">摘录</Label>
+            <TextArea className="w-full text-xs" rows={5} />
+          </TextField>
+          <TextField value={attachment.note ?? ''} onChange={(value) => onPatch({ note: value })}>
+            <Label className="text-xs">批注</Label>
+            <TextArea className="w-full text-xs" placeholder="补充说明或改写要求" rows={2} />
+          </TextField>
+          <div className="flex items-center justify-between">
+            <Button size="sm" variant="ghost" className="text-danger" onPress={() => { onRemove(); setOpen(false); }}>移除</Button>
+            <Button size="sm" variant="secondary" onPress={() => setOpen(false)}>完成</Button>
+          </div>
+        </Popover.Dialog>
+      </Popover.Content>
+    </Popover>
+    </span>
   );
 }

@@ -17,7 +17,9 @@ export function selectionInside(container: HTMLElement): TextSelectionInfo | nul
   if (!container.contains(range.startContainer) || !container.contains(range.endContainer)) return null;
   const text = selection.toString();
   if (!text.trim()) return null;
-  const rect = range.getBoundingClientRect();
+  const rect = typeof range.getBoundingClientRect === 'function'
+    ? range.getBoundingClientRect()
+    : ({ left: 0, bottom: 0, width: 0 } as DOMRect);
   return { text, left: rect.left + rect.width / 2, top: rect.bottom + 6 };
 }
 
