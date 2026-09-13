@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from 'react';
 import { ChevronRight, Thunderbolt, ThunderboltFill } from '@gravity-ui/icons';
-import { ListBox, Select, Tooltip } from '@heroui/react';
+import { Autocomplete, EmptyState, ListBox, SearchField, Select, Tooltip, useFilter } from '@heroui/react';
 import type { ProviderModelDescriptor } from '@todex/protocol/v2';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { reasoningEffortLabel, modelDisplayLabel } from '../session/helpers';
@@ -36,6 +36,8 @@ export function ModelReasoningCard({
 }: ModelReasoningCardProps) {
   const trackRef = useRef<HTMLDivElement>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [modelSearch, setModelSearch] = useState('');
+  const { contains } = useFilter({ sensitivity: 'base' });
 
   const modelDisplayName =
     currentModelDescriptor?.displayName || modelDisplayLabel(currentModel, modelCatalog);
@@ -166,6 +168,10 @@ export function ModelReasoningCard({
         <Select
           className="composer-model-card__select"
           selectedKey={currentModel || null}
+          allowsEmptyCollection
+          onOpenChange={(isOpen) => {
+            if (isOpen) setModelSearch('');
+          }}
           onSelectionChange={(key) => {
             if (typeof key === 'string' && key) {
               onSelectModel(key);
@@ -183,14 +189,30 @@ export function ModelReasoningCard({
             <ChevronRight className="composer-model-card__chevron" aria-hidden="true" />
           </Select.Trigger>
           <Select.Popover className="composer-model-card__dropdown" placement="bottom" offset={8}>
-            <ListBox className="composer-model-card__listbox">
-              {providerModels.map((item) => (
-                <ListBox.Item key={item.id} id={item.id} textValue={item.displayName} className="composer-model-card__list-item">
-                  <span>{item.displayName}</span>
-                  <ListBox.ItemIndicator />
-                </ListBox.Item>
-              ))}
-            </ListBox>
+            <Autocomplete.Filter
+              inputValue={modelSearch}
+              onInputChange={setModelSearch}
+              filter={(textValue, inputValue) => contains(textValue, inputValue.trim())}
+            >
+              <SearchField autoFocus aria-label="搜索模型" className="composer-model-card__search" variant="secondary">
+                <SearchField.Group>
+                  <SearchField.SearchIcon />
+                  <SearchField.Input placeholder="搜索模型…" />
+                  <SearchField.ClearButton aria-label="清除搜索" />
+                </SearchField.Group>
+              </SearchField>
+              <ListBox
+                className="composer-model-card__listbox"
+                renderEmptyState={() => <EmptyState className="composer-model-card__empty">未找到匹配的模型</EmptyState>}
+              >
+                {providerModels.map((item) => (
+                  <ListBox.Item key={item.id} id={item.id} textValue={item.displayName} className="composer-model-card__list-item">
+                    <span className="composer-model-card__option-name">{item.displayName}</span>
+                    <ListBox.ItemIndicator />
+                  </ListBox.Item>
+                ))}
+              </ListBox>
+            </Autocomplete.Filter>
           </Select.Popover>
         </Select>
       </div>

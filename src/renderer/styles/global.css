@@ -423,6 +423,8 @@ body {
   margin: 0 !important;
   border-radius: 0.5rem;
   min-height: unset !important;
+  min-width: 0;
+  max-width: 100%;
   cursor: pointer;
   transition: opacity 0.15s ease, background 0.15s ease;
 }
@@ -472,7 +474,12 @@ body {
 }
 
 .composer-model-card__dropdown {
-  min-width: 13rem;
+  display: flex;
+  flex-direction: column;
+  width: 24rem;
+  min-width: min(13rem, calc(100vw - 2rem));
+  max-width: calc(100vw - 2rem);
+  overflow: hidden;
   border: 1px solid var(--separator);
   border-radius: 0.75rem;
   background: var(--surface);
@@ -480,8 +487,30 @@ body {
   padding: 0.35rem;
 }
 
+.composer-model-card__search {
+  flex-shrink: 0;
+  padding: 0.25rem 0.25rem 0.55rem;
+  margin-bottom: 0.25rem;
+  border-bottom: 1px solid var(--separator);
+}
+
+.composer-model-card__empty {
+  padding: 1.25rem 0.65rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+  text-align: center;
+}
+
+.composer-model-card__option-name {
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
 .composer-model-card__listbox {
   outline: none;
+  flex: 1;
+  min-height: 0;
   max-height: 14rem;
   overflow-y: auto;
 }
@@ -490,6 +519,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 0.75rem;
   padding: 0.45rem 0.65rem;
   font-size: 0.85rem;
   font-weight: 500;
