@@ -2003,12 +2003,19 @@ export function mergeManifestConversations(
 ): ConversationRecord[] {
   // The backend is authoritative after materialization. Provider-backed local
   // drafts have no v2ConversationId yet and must survive manifest refreshes.
+  // Merge field-by-field and keep the previous array/object identity when
+  // nothing actually changed so the sidebar does not re-render or re-sort on
+  // every poll.
   const manifestIds = new Set(manifests.map((manifest) => manifest.id));
+  let changed = false;
   const next = current.filter((item) => (
     !isV2Conversation(item)
     || !item.v2ConversationId
     || manifestIds.has(item.v2ConversationId)
   ));
+  if (next.length !== current.length) {
+    changed = true;
+  }
   for (const manifest of manifests) {
     const workspace = (manifest.workspaceId
       ? workspaces.find((item) => item.id === manifest.workspaceId)
@@ -2017,22 +2024,49 @@ export function mergeManifestConversations(
     if (!workspace) {
       continue;
     }
-    const record = conversationFromManifest(manifest, workspace.id);
-    const existing = next.findIndex((item) => item.v2ConversationId === manifest.id || item.id === manifest.id);
-    if (existing >= 0) {
-      const localId = next[existing].id;
-      next[existing] = {
-        ...next[existing],
-        ...record,
-        id: localId,
-        mode: next[existing].mode ?? record.mode,
-        sessionId: next[existing].sessionId || record.sessionId,
-      };
+    const existingIndex = next.findIndex((item) => item.v2ConversationId === manifest.id || item.id === manifest.id);
+    if (existingIndex >= 0) {
+      const existing = next[existingIndex];
+      // Local timestamps stay put unless the backend reports a newer one;
+      // a manifest without parseable times must not re-stamp the record.
+      const manifestUpdatedAt = Date.parse(manifest.updatedAt) || 0;
+      const updatedAt = Math.max(existing.updatedAt, manifestUpdatedAt);
+      const lastSequence = Math.max(existing.lastSequence ?? 0, manifest.lastSequence ?? 0);
+      const title = manifest.title || providerDisplayName(manifest.provider);
+      const archived = Boolean(manifest.archivedAt);
+      const same = existing.title === title
+        && existing.archived === archived
+        && existing.nativeStatus === manifest.status
+        && existing.provider === manifest.provider
+        && existing.providerProfile === manifest.providerProfile
+        && existing.v2ConversationId === manifest.id
+        && existing.workspaceId === workspace.id
+        && existing.lastSequence === lastSequence
+        && existing.updatedAt === updatedAt;
+      if (!same) {
+        changed = true;
+        next[existingIndex] = {
+          ...existing,
+          title,
+          archived,
+          nativeStatus: manifest.status,
+          provider: manifest.provider,
+          providerProfile: manifest.providerProfile,
+          v2ConversationId: manifest.id,
+          workspaceId: workspace.id,
+          lastSequence,
+          updatedAt,
+        };
+      }
     } else {
-      next.unshift(record);
+      next.unshift(conversationFromManifest(manifest, workspace.id));
+      changed = true;
     }
   }
-  return next.sort((left, right) => right.updatedAt - left.updatedAt);
+  if (!changed) {
+    return current;
+  }
+  return next.sort((left, right) => (right.updatedAt - left.updatedAt) || (left.id < right.id ? -1 : 1));
 }
 
 export function classifyV2ConversationEvent(

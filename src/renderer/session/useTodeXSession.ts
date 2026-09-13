@@ -1246,7 +1246,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     if (!hydrated) {
       return;
     }
-    void saveJson(WORKSPACES_STORAGE_KEY, workspaces);
+    scheduleJsonSave(WORKSPACES_STORAGE_KEY, workspaces);
     if (workspaceBackendSkipNextSaveRef.current) {
       workspaceBackendSkipNextSaveRef.current = false;
       return;
@@ -1254,14 +1254,14 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     if (connectionState === 'open' && workspaceBackendReadyRef.current) {
       scheduleWorkspaceBackendSave(workspaces);
     }
-  }, [connectionState, hydrated, scheduleWorkspaceBackendSave, workspaces]);
+  }, [connectionState, hydrated, scheduleJsonSave, scheduleWorkspaceBackendSave, workspaces]);
 
   useEffect(() => {
     if (!hydrated) {
       return;
     }
-    void saveJson(CONVERSATIONS_STORAGE_KEY, conversations);
-  }, [conversations, hydrated]);
+    scheduleJsonSave(CONVERSATIONS_STORAGE_KEY, conversations);
+  }, [conversations, hydrated, scheduleJsonSave]);
 
   useEffect(() => {
     if (!hydrated) {
@@ -1462,17 +1462,17 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       controlRequestsRef.current.delete(localId);
       setControlStatusByConversation(current => ({ ...current, [localId]: undefined }));
     }
-    setRecoveringConversations((current) => ({ ...current, [localId]: recovering }));
+    setRecoveringConversations((current) => (current[localId] === recovering ? current : { ...current, [localId]: recovering }));
     const boundAttachments = bindSentAttachmentEvents(sentAttachmentRecordsRef.current, localId, appliedEvents);
     if (boundAttachments !== sentAttachmentRecordsRef.current) updateSentAttachmentRecords(boundAttachments);
     setTimeline((current) => [
       ...state.timeline.map((entry) => ({ ...entry, conversationId: localId })),
       ...current.filter((entry) => entry.conversationId !== localId),
     ].slice(0, MAX_TIMELINE_ITEMS));
-    if (state.contextUsage) setContextUsageByConversation((current) => ({ ...current, [localId]: state.contextUsage! }));
-    setCompactionByConversation((current) => ({ ...current, [localId]: state.compaction }));
+    if (state.contextUsage) setContextUsageByConversation((current) => current[localId] === state.contextUsage ? current : { ...current, [localId]: state.contextUsage! });
+    setCompactionByConversation((current) => current[localId] === state.compaction ? current : { ...current, [localId]: state.compaction });
     setSubagentsByConversation((current) => ({ ...current, [localId]: state.subagents.map((run) => ({ ...run, conversationId: localId })) }));
-    setMemoryEntriesByConversation((current) => ({ ...current, [localId]: state.memoryEntries }));
+    setMemoryEntriesByConversation((current) => current[localId] === state.memoryEntries ? current : { ...current, [localId]: state.memoryEntries });
     setUsageRecords((current) => [
       ...state.usageRecords.map((record) => ({ ...record, conversationId: localId,
         provider: record.provider === 'unknown' ? conversation.provider || 'unknown' : record.provider,
@@ -1541,8 +1541,15 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     setConversationTurnId(localId, state.activeTurnId);
     const pending = pendingV2SubmissionsRef.current.get(localId);
     setConversationThinking(localId, Boolean(state.activeTurnId) || pending?.phase === 'sending');
-    setConversations((current) => current.map((item) => item.id === localId
-      ? { ...item, lastSequence: Math.max(item.lastSequence ?? 0, state.appliedSequence) } : item));
+    setConversations((current) => {
+      const index = current.findIndex((item) => item.id === localId);
+      if (index < 0) return current;
+      const lastSequence = Math.max(current[index].lastSequence ?? 0, state.appliedSequence);
+      if (lastSequence === current[index].lastSequence) return current;
+      const next = [...current];
+      next[index] = { ...next[index], lastSequence };
+      return next;
+    });
   };
 
   const recoverConversation = useCallback(async (conversationId: string) => {
@@ -1665,6 +1672,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           next[existingIndex] = {
             ...next[existingIndex],
             ...patch,
+            createdAt: next[existingIndex].createdAt,
+            updatedAt: Math.max(next[existingIndex].updatedAt, patch.updatedAt ?? 0),
             sessionId: next[existingIndex].sessionId || sessionId,
           };
           continue;
@@ -3045,28 +3054,47 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           sendSessionResume(getSessionCursorSnapshot());
           void checkConnectionHealth();
           void refreshServerVersion();
-          void syncWorkspacesFromBackend();
-          for (const conversation of conversationsRef.current) {
-            if (conversation.v2ConversationId) {
-              try {
-                void recoverConversation(conversation.id);
-                sendRawProtocolFrame({
-                  id: createRequestId('sub'),
-                  type: 'conversation.subscribe',
-                  payload: {
-                    conversationId: conversation.v2ConversationId,
-                    // lastSequence is the backend high-water mark, not this
-                    // device's applied cursor. Replay from zero on reconnect
-                    // so a fresh device cannot skip persisted history.
-                    afterSequence: conversationRecoveryRef.current?.get(conversation.v2ConversationId)?.appliedSequence ?? 0,
-                    limit: 200,
-                  },
-                });
-              } catch {
-                // subscribe is best-effort after resume
+          // Only the open conversation replays history eagerly. Other
+          // conversations subscribe at their known high-water mark and
+          // recover on demand (open, or a live event exposing a gap), so a
+          // reconnect no longer replays every journal at once.
+          const foregroundConversation = conversationsRef.current.find(
+            (item) => item.id === activeConversationRef.current,
+          );
+          if (foregroundConversation?.v2ConversationId) {
+            void recoverConversation(foregroundConversation.id);
+          }
+          void (async () => {
+            await syncWorkspacesFromBackend();
+            if (!isSocketCurrent()) return;
+            for (const conversation of conversationsRef.current) {
+              if (conversation.v2ConversationId) {
+                try {
+                  // Conversations whose last recovery was cut short resume here.
+                  if (conversationRecoveryRef.current?.isRecovering(conversation.v2ConversationId)) {
+                    void recoverConversation(conversation.id);
+                  }
+                  sendRawProtocolFrame({
+                    id: createRequestId('sub'),
+                    type: 'conversation.subscribe',
+                    payload: {
+                      conversationId: conversation.v2ConversationId,
+                      // Subscribe at the known high-water mark instead of
+                      // replaying the backfill; a stale cursor still surfaces
+                      // missed events, and gaps trigger an on-demand recover.
+                      afterSequence: Math.max(
+                        conversationRecoveryRef.current?.get(conversation.v2ConversationId)?.appliedSequence ?? 0,
+                        conversation.lastSequence ?? 0,
+                      ),
+                      limit: 200,
+                    },
+                  });
+                } catch {
+                  // subscribe is best-effort after resume
+                }
               }
             }
-          }
+          })();
           flushQueuedProtocolCommands();
         };
 
