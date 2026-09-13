@@ -52,6 +52,7 @@ import {
   normalizeThreadId,
   normalizeServerUrl,
   mergeWorkspaceRecords,
+  nextWorkspaceSortOrder,
   remapWorkspaceScopedRecords,
   prepareWorkspaceSyncPayload,
   parseCodexModelListResponse,
@@ -3517,6 +3518,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         localAdapterState: 'idle',
         createdAt: Date.now(),
         updatedAt: Date.now(),
+        sortOrder: nextWorkspaceSortOrder(workspacesRef.current),
       };
       const nextConversation = createDefaultConversation(nextWorkspace);
 
@@ -3695,6 +3697,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       localAdapterState: 'idle',
       createdAt: now,
       updatedAt: now,
+      sortOrder: nextWorkspaceSortOrder(workspaces),
     };
     const sourceConversations = conversations.filter((conversation) => conversation.workspaceId === workspaceId);
     const nextConversations = sourceConversations.length > 0
