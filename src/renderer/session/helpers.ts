@@ -131,6 +131,7 @@ export type ConversationRecord = {
   reasoningEffort?: string | null;
   v2ConversationId?: string;
   lastSequence?: number;
+  lastCompletedAt?: number;
   createdAt: number;
   updatedAt: number;
 };

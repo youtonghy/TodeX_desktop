@@ -1480,6 +1480,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       })),
       ...current.filter((record) => record.conversationId !== localId),
     ].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, MAX_USAGE_RECORDS));
+    let completedAt = 0;
     for (const event of appliedEvents) {
       const data = event.payload && typeof event.payload === 'object' && !Array.isArray(event.payload)
         ? event.payload as Record<string, unknown> : {};
@@ -1510,6 +1511,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         if (type === 'control.rejected') setLastError(typeof data.message === 'string' ? data.message : 'Agent 未应用控制请求');
       }
       if (['turn.completed', 'turn.cancelled', 'turn.failed', 'turn.interrupted'].includes(type)) {
+        completedAt = Math.max(completedAt, Date.parse(event.time) || Date.now());
         const settledKey = turnId ? `${state.conversationId}:${turnId}` : '';
         const firstSettle = Boolean(settledKey) && !settledV2TurnsRef.current.has(settledKey);
         if (turnId) {
@@ -1545,9 +1547,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       const index = current.findIndex((item) => item.id === localId);
       if (index < 0) return current;
       const lastSequence = Math.max(current[index].lastSequence ?? 0, state.appliedSequence);
-      if (lastSequence === current[index].lastSequence) return current;
+      const lastCompletedAt = Math.max(current[index].lastCompletedAt ?? 0, completedAt);
+      if (lastSequence === current[index].lastSequence && lastCompletedAt === current[index].lastCompletedAt) return current;
       const next = [...current];
-      next[index] = { ...next[index], lastSequence };
+      next[index] = { ...next[index], lastSequence, lastCompletedAt };
       return next;
     });
   };
@@ -1645,9 +1648,14 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
 
   const updateConversation = useCallback((id: string, patch: Partial<ConversationRecord>) => {
     setConversations((current) =>
-      current.map((conversation) =>
-        conversation.id === id ? { ...conversation, ...patch, updatedAt: Date.now() } : conversation,
-      ),
+      current.map((conversation) => {
+        if (conversation.id !== id) return conversation;
+        // A native adapter leaving the running/starting state counts as a
+        // completed or stopped turn for sidebar ordering.
+        const finished = (conversation.localAdapterState === 'running' || conversation.localAdapterState === 'starting')
+          && (patch.localAdapterState === 'idle' || patch.localAdapterState === 'stopped' || patch.localAdapterState === 'error');
+        return { ...conversation, ...patch, updatedAt: Date.now(), ...(finished ? { lastCompletedAt: Date.now() } : null) };
+      }),
     );
   }, []);
 

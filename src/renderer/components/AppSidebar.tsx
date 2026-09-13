@@ -136,18 +136,20 @@ export function AppSidebar({
   // Workspaces use an explicit manual order and never move when a conversation updates.
   const sortedWorkspaces = useMemo(() => [...session.workspaces].sort((a, b) => Number(pins.workspace.includes(b.id)) - Number(pins.workspace.includes(a.id)) || (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || (a.createdAt - b.createdAt) || a.id.localeCompare(b.id)), [session.workspaces, pins.workspace]);
 
-  // Stable sorting for conversations: based on last message/updated time, never jumps upon clicking
+  // Conversations order by the last finished/stopped turn, so a running
+  // conversation no longer re-sorts while it streams. Items that have never
+  // completed keep their creation order.
   const sortedConversations = useMemo(() => {
     return [...workspaceConversations].sort((a, b) => {
       const pinOrder = Number(pins.conversation.includes(b.id)) - Number(pins.conversation.includes(a.id));
       if (pinOrder) return pinOrder;
-      const aTime = timelineInfoMap[a.id]?.latestAt || a.createdAt || 0;
-      const bTime = timelineInfoMap[b.id]?.latestAt || b.createdAt || 0;
+      const aTime = a.lastCompletedAt || a.createdAt || 0;
+      const bTime = b.lastCompletedAt || b.createdAt || 0;
       if (bTime !== aTime) return bTime - aTime;
       if ((b.createdAt || 0) !== (a.createdAt || 0)) return (b.createdAt || 0) - (a.createdAt || 0);
       return a.id.localeCompare(b.id);
     });
-  }, [workspaceConversations, timelineInfoMap, pins.conversation]);
+  }, [workspaceConversations, pins.conversation]);
 
   const displayedWorkspaces = useMemo(() => {
     return sortedWorkspaces.slice(0, workspaceLimit);
