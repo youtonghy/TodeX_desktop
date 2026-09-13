@@ -1,6 +1,6 @@
 import { ConversationControls } from '../components/ConversationControls';
 import { NoticeToast } from '../components/NoticeToast';
-import { RiAttachment2, RiBarChartBoxLine, RiClipboardLine, RiCpuLine, RiGitBranchLine, RiListCheck2, RiShieldLine, RiStopCircleLine } from '@remixicon/react';
+import { RiArrowDownDoubleLine, RiAttachment2, RiBarChartBoxLine, RiClipboardLine, RiCpuLine, RiGitBranchLine, RiListCheck2, RiShieldLine, RiStopCircleLine } from '@remixicon/react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import { Button, Label, ListBox, Popover, ScrollShadow, Select, Tooltip, toast } from '@heroui/react';
@@ -287,6 +287,28 @@ export function ChatPanel({ session }: Props) {
       document.removeEventListener('scroll', hide, true);
     };
   }, []);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const atBottomRef = useRef(true);
+  const [isAtBottom, setIsAtBottom] = useState(true);
+  const scrollToLatest = (behavior: ScrollBehavior = 'auto') => {
+    const element = scrollRef.current;
+    if (element) element.scrollTo({ top: element.scrollHeight, behavior });
+  };
+  const updateScrollPosition = () => {
+    const element = scrollRef.current;
+    if (!element) return;
+    const atBottom = element.scrollHeight - element.scrollTop - element.clientHeight < 120;
+    atBottomRef.current = atBottom;
+    setIsAtBottom(atBottom);
+  };
+  useEffect(() => {
+    atBottomRef.current = true;
+    setIsAtBottom(true);
+    scrollToLatest();
+  }, [conversation?.id]);
+  useEffect(() => {
+    if (atBottomRef.current) scrollToLatest();
+  }, [session.timeline]);
   if (!conversation || !workspace) {
     return (
       <div className="flex h-full flex-col items-center justify-center px-8 text-center">
@@ -479,7 +501,8 @@ export function ChatPanel({ session }: Props) {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <ScrollShadow className="min-h-0 flex-1 px-5 py-5">
+      <div className="relative min-h-0 flex-1">
+        <ScrollShadow ref={scrollRef} onScroll={updateScrollPosition} className="h-full px-5 py-5">
         <div ref={messagesRef} className="mx-auto flex max-w-2xl flex-col gap-3">
           {items.length === 0 ? (
             <p className="text-muted py-16 text-center text-sm" role="status">
@@ -598,7 +621,19 @@ export function ChatPanel({ session }: Props) {
             );
           })}
         </div>
-      </ScrollShadow>
+        </ScrollShadow>
+        {isAtBottom ? null : (
+          <Button
+            size="sm"
+            variant="secondary"
+            className="absolute right-4 bottom-3 z-10 shadow-md"
+            onPress={() => scrollToLatest('smooth')}
+          >
+            <RiArrowDownDoubleLine className="size-4" />
+            前往最新
+          </Button>
+        )}
+      </div>
       {quote ? (
         <div className="fixed z-50 -translate-x-1/2" style={{ left: quote.left, top: quote.top }}>
           <Button size="sm" variant="secondary" onPress={() => {
