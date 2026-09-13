@@ -749,6 +749,7 @@ export function ChatPanel({ session }: Props) {
             onClearNative={() => { void session.controlConversation(conversation.id, { action: 'queueClear' }); }}
             onRemoveLocal={itemId => session.removeQueuedFollowUp(conversation.id, itemId)}
             onResumeLocal={() => { void session.resumeQueuedFollowUps(conversation.id); }}
+            onRevealPath={filePath => session.openPanel('Files', { filePath })}
           /> : null}
           <NoticeToast message={hasBlockedImageAttachment ? '当前无法发送图片' : null}
             description={imageInputSupport.reason} scope={conversation.id} />
