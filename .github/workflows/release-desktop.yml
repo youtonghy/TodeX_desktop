@@ -219,9 +219,24 @@ jobs:
           CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
         run: |
           if [ -z "$CSC_LINK" ]; then
-            echo "MAC_CSC_LINK must contain a Developer ID Application certificate for macOS auto-updates." >&2
+            echo "MAC_CSC_LINK must contain a code signing certificate (Developer ID Application or self-signed) for macOS auto-updates." >&2
             exit 1
           fi
+
+      - name: Trust self-signed signing certificate
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+        run: |
+          tmpdir="$(mktemp -d)"
+          trap 'rm -rf "$tmpdir"' EXIT
+          echo "$CSC_LINK" | base64 --decode > "$tmpdir/signing.p12"
+          openssl pkcs12 -legacy -in "$tmpdir/signing.p12" -nokeys -clcerts \
+            -passin "pass:${CSC_KEY_PASSWORD}" \
+            | openssl x509 -outform DER -out "$tmpdir/signing.cer"
+          sudo security add-trusted-cert -d -r trustRoot -p codeSign "$tmpdir/signing.cer"
 
       - name: Package desktop application
         shell: bash
