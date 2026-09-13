@@ -165,11 +165,27 @@ function initializeDebugLogging(): void {
   }
 }
 
-function appIconPath(): string {
-  const fileName = process.platform === 'win32' ? 'icon.ico' : 'icon.png';
+function appIconPath(variant: 'dark' | 'light' = 'dark'): string {
+  const fileName = process.platform === 'win32'
+    ? (variant === 'light' ? 'icon-light.ico' : 'icon.ico')
+    : (variant === 'light' ? 'icon-light.png' : 'icon.png');
   return app.isPackaged
     ? join(process.resourcesPath, 'icons', fileName)
     : join(__dirname, '../../build', fileName);
+}
+
+function themedAppIconPath(): string {
+  return appIconPath(nativeTheme.shouldUseDarkColors ? 'dark' : 'light');
+}
+
+function applySystemAppIcon(): void {
+  const icon = themedAppIconPath();
+  if (process.platform === 'darwin') {
+    app.dock?.setIcon(icon);
+  }
+  for (const window of BrowserWindow.getAllWindows()) {
+    window.setIcon(icon);
+  }
 }
 
 function createWindow(): BrowserWindow {
@@ -179,7 +195,7 @@ function createWindow(): BrowserWindow {
     minWidth: 960,
     minHeight: 640,
     title: 'TodeX',
-    icon: appIconPath(),
+    icon: themedAppIconPath(),
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#12151c' : '#f4f7f8',
     webPreferences: {
       preload: join(__dirname, '../preload/index.cjs'),
@@ -335,9 +351,7 @@ initializeDebugLogging();
 
 app.whenReady().then(() => {
   debugLog('info', 'app.ready', { readyAt: new Date().toISOString() });
-  if (process.platform === 'darwin') {
-    app.dock?.setIcon(appIconPath());
-  }
+  applySystemAppIcon();
   try {
     assertElectronBinary();
   } catch (error) {
@@ -468,6 +482,7 @@ app.whenReady().then(() => {
 
   nativeTheme.on('updated', () => {
     debugLog('info', 'theme.updated', { dark: nativeTheme.shouldUseDarkColors });
+    applySystemAppIcon();
     for (const window of BrowserWindow.getAllWindows()) {
       window.webContents.send('theme:updated', nativeTheme.shouldUseDarkColors);
     }

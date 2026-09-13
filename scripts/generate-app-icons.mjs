@@ -13,11 +13,15 @@ if (process.platform !== 'darwin') {
 const projectRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const brandDir = join(projectRoot, 'src/renderer/assets/brand');
 const sourcePath = join(brandDir, 't-icon-dark-beige.png');
+const lightSourcePath = join(brandDir, 't-icon-light.png');
 const source = readFileSync(sourcePath);
+const lightSource = readFileSync(lightSourcePath);
 const pngSignature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
-if (source.length < 33 || !source.subarray(0, 8).equals(pngSignature)
-    || source.readUInt32BE(16) !== 1024 || source.readUInt32BE(20) !== 1024) {
-  throw new Error('The source app icon must be a 1024 × 1024 PNG.');
+for (const [label, buffer] of [['dark', source], ['light', lightSource]]) {
+  if (buffer.length < 33 || !buffer.subarray(0, 8).equals(pngSignature)
+      || buffer.readUInt32BE(16) !== 1024 || buffer.readUInt32BE(20) !== 1024) {
+    throw new Error(`The ${label} app icon must be a 1024 × 1024 PNG.`);
+  }
 }
 
 const outputDir = join(projectRoot, 'build');
@@ -36,6 +40,7 @@ try {
   mkdirSync(linuxDir, { recursive: true });
   mkdirSync(iconsetDir);
   copyFileSync(sourcePath, join(outputDir, 'icon.png'));
+  copyFileSync(lightSourcePath, join(outputDir, 'icon-light.png'));
 
   for (const size of sizes) {
     const target = join(linuxDir, `${size}x${size}.png`);
@@ -56,23 +61,34 @@ try {
 
   // ICO supports PNG-compressed frames, retaining the source's transparency.
   const windowsSizes = sizes.filter((size) => size <= 256);
-  const frames = windowsSizes.map((size) => readFileSync(join(linuxDir, `${size}x${size}.png`)));
-  const directory = Buffer.alloc(6 + frames.length * 16);
-  directory.writeUInt16LE(1, 2); // Image type: icon.
-  directory.writeUInt16LE(frames.length, 4);
-  let offset = directory.length;
-  frames.forEach((frame, index) => {
-    const entry = 6 + index * 16;
-    const size = windowsSizes[index];
-    directory.writeUInt8(size === 256 ? 0 : size, entry);
-    directory.writeUInt8(size === 256 ? 0 : size, entry + 1);
-    directory.writeUInt16LE(1, entry + 4); // Color planes.
-    directory.writeUInt16LE(32, entry + 6); // RGBA bits per pixel.
-    directory.writeUInt32LE(frame.length, entry + 8);
-    directory.writeUInt32LE(offset, entry + 12);
-    offset += frame.length;
+  function writeIco(frames, output) {
+    const directory = Buffer.alloc(6 + frames.length * 16);
+    directory.writeUInt16LE(1, 2); // Image type: icon.
+    directory.writeUInt16LE(frames.length, 4);
+    let offset = directory.length;
+    frames.forEach((frame, index) => {
+      const entry = 6 + index * 16;
+      const size = windowsSizes[index];
+      directory.writeUInt8(size === 256 ? 0 : size, entry);
+      directory.writeUInt8(size === 256 ? 0 : size, entry + 1);
+      directory.writeUInt16LE(1, entry + 4); // Color planes.
+      directory.writeUInt16LE(32, entry + 6); // RGBA bits per pixel.
+      directory.writeUInt32LE(frame.length, entry + 8);
+      directory.writeUInt32LE(offset, entry + 12);
+      offset += frame.length;
+    });
+    writeFileSync(output, Buffer.concat([directory, ...frames]));
+  }
+  writeIco(windowsSizes.map((size) => readFileSync(join(linuxDir, `${size}x${size}.png`))), join(outputDir, 'icon.ico'));
+
+  const lightFramesDir = join(temporaryDir, 'icons-light');
+  mkdirSync(lightFramesDir);
+  const lightFrames = windowsSizes.map((size) => {
+    const target = join(lightFramesDir, `${size}x${size}.png`);
+    resizePng(lightSourcePath, target, size);
+    return readFileSync(target);
   });
-  writeFileSync(join(outputDir, 'icon.ico'), Buffer.concat([directory, ...frames]));
+  writeIco(lightFrames, join(outputDir, 'icon-light.ico'));
 
   resizePng(sourcePath, join(brandDir, 'favicon-dark.png'), 32);
   resizePng(join(brandDir, 't-icon-light.png'), join(brandDir, 'favicon-light.png'), 32);
