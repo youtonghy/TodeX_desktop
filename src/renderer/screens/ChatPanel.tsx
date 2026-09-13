@@ -696,18 +696,13 @@ export function ChatPanel({ session }: Props) {
             runtime={runtime}
             reportedError={session.lastError}
             running={thinking}
-            canConfigure={providerDescriptor?.capabilities.liveConfiguration === true}
             canSteer={providerDescriptor?.capabilities.steering === true}
             canUseNativeQueue={providerDescriptor?.capabilities.followUpQueue === true}
             piQueue={currentProvider === 'pi'}
             controlStatus={session.controlStatusByConversation[conversation.id]}
-            nextModel={currentModel}
-            nextEffort={conversation.reasoningEffort}
             canSendText={Boolean(draft.trim()) && !attachments.length && !(session.selectedSkills[conversation.id]?.length)}
             localQueue={session.queuedChatDrafts[conversation.id] ?? []}
             localPaused={session.queuePausedByConversation[conversation.id] === true}
-            onApply={() => { void session.controlConversation(conversation.id, { action: 'configure', model: currentModel,
-              ...(conversation.reasoningEffort ? { reasoningEffort: conversation.reasoningEffort } : {}) }); }}
             onSteer={() => { const text = draft.trim(); void session.controlConversation(conversation.id, { action: 'steer', text })
               .then(ok => { if (ok) session.setConversationChatDraft(conversation.id, current => current.trim() === text ? '' : current); }); }}
             onRecover={() => { void session.recoverConversation(conversation.id); }}
