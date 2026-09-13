@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { Button, Label, ListBox, Modal, Select, Toast, toast } from '@heroui/react';
 import { AppLayout, Navbar } from '@heroui-pro/react';
 import { RiAddLine, RiGithubLine, RiLayoutLeftLine, RiLayoutRightLine } from '@remixicon/react';
@@ -12,17 +12,23 @@ import { SessionNoticeToasts } from './components/SessionNoticeToasts';
 import { AppSidebar } from './components/AppSidebar';
 import { AppIcon } from './components/AppIcon';
 import { ChatPanel } from './screens/ChatPanel';
-import { SettingsPanel } from './screens/SettingsPanel';
-import { AsidePanel } from './screens/AsidePanel';
-import { CapabilitiesPanel } from './screens/CapabilitiesPanel';
-import { WorkbenchPanel } from './screens/WorkbenchPanel';
-import { UsagePanel } from './screens/UsagePanel';
-import { AboutPanel } from './screens/AboutPanel';
-import { CliManagerPanel } from './screens/CliManagerPanel';
-import { KanbanPanel } from './screens/KanbanPanel';
 import { Field } from './components/Field';
 import { connectionStateLabel, fetchWorkspaceDirectorySnapshot } from './session/helpers';
 import { isWorkbenchTab, panelFromRoute, type DesktopPanel, type OpenPanelOptions, type WorkbenchTab } from './lib/panels';
+
+// Secondary surfaces load on demand so the main bundle stays small.
+const SettingsPanel = lazy(() => import('./screens/SettingsPanel').then((module) => ({ default: module.SettingsPanel })));
+const AsidePanel = lazy(() => import('./screens/AsidePanel').then((module) => ({ default: module.AsidePanel })));
+const CapabilitiesPanel = lazy(() => import('./screens/CapabilitiesPanel').then((module) => ({ default: module.CapabilitiesPanel })));
+const WorkbenchPanel = lazy(() => import('./screens/WorkbenchPanel').then((module) => ({ default: module.WorkbenchPanel })));
+const UsagePanel = lazy(() => import('./screens/UsagePanel').then((module) => ({ default: module.UsagePanel })));
+const AboutPanel = lazy(() => import('./screens/AboutPanel').then((module) => ({ default: module.AboutPanel })));
+const CliManagerPanel = lazy(() => import('./screens/CliManagerPanel').then((module) => ({ default: module.CliManagerPanel })));
+const KanbanPanel = lazy(() => import('./screens/KanbanPanel').then((module) => ({ default: module.KanbanPanel })));
+
+const panelFallback = (
+  <div className="text-muted flex h-full min-h-24 items-center justify-center text-sm">加载中…</div>
+);
 
 const LAYOUT_AUTO_SAVE_ID = 'todex-desktop-app-layout';
 const LAYOUT_OPEN_STORAGE_KEY = 'todex.desktop.layoutOpen.v3';
@@ -161,15 +167,19 @@ export function App() {
           asideOpen={Boolean(scopeKey) && layout.hydrated && asideOpen}
           onAsideOpenChange={persistAsideOpen}
           aside={
-            !scopeKey || !layout.hydrated ? null : overlayPanel ? (
-              <AsidePanel
-                session={session}
-                panel={overlayPanel}
-                slashCommand={slashCommand}
-                onBack={() => setPanel(workbenchTab)}
-              />
-            ) : (
-              <WorkbenchPanel key={scopeKey} scopeKey={scopeKey} session={session} tab={workbenchTab} target={panelTarget} onTabChange={changeWorkbenchTab} onTargetConsumed={consumePanelTarget} />
+            !scopeKey || !layout.hydrated ? null : (
+              <Suspense fallback={panelFallback}>
+                {overlayPanel ? (
+                  <AsidePanel
+                    session={session}
+                    panel={overlayPanel}
+                    slashCommand={slashCommand}
+                    onBack={() => setPanel(workbenchTab)}
+                  />
+                ) : (
+                  <WorkbenchPanel key={scopeKey} scopeKey={scopeKey} session={session} tab={workbenchTab} target={panelTarget} onTabChange={changeWorkbenchTab} onTargetConsumed={consumePanelTarget} />
+                )}
+              </Suspense>
             )
           }
           sidebar={
@@ -213,7 +223,9 @@ export function App() {
           }
         >
           {panel === 'kanban' ? (
-            <KanbanPanel session={session} onOpenConversation={() => setPanel(null)} />
+            <Suspense fallback={panelFallback}>
+              <KanbanPanel session={session} onOpenConversation={() => setPanel(null)} />
+            </Suspense>
           ) : <ChatPanel session={session} />}
         </AppLayout>
       ) : (
@@ -232,7 +244,7 @@ export function App() {
                 <Modal.Heading>设置</Modal.Heading>
               </Modal.Header>
               <Modal.Body className="max-h-[70vh] overflow-y-auto">
-                <SettingsPanel session={session} />
+                <Suspense fallback={panelFallback}><SettingsPanel session={session} /></Suspense>
               </Modal.Body>
             </Modal.Dialog>
           </Modal.Container>
@@ -244,7 +256,7 @@ export function App() {
             <Modal.Dialog className="max-h-[92vh] sm:max-w-5xl">
               <Modal.CloseTrigger />
               <Modal.Header><Modal.Heading>使用统计</Modal.Heading></Modal.Header>
-              <Modal.Body className="max-h-[82vh] overflow-y-auto p-0"><UsagePanel session={session} /></Modal.Body>
+              <Modal.Body className="max-h-[82vh] overflow-y-auto p-0"><Suspense fallback={panelFallback}><UsagePanel session={session} /></Suspense></Modal.Body>
             </Modal.Dialog>
           </Modal.Container>
         </Modal.Backdrop>
@@ -255,7 +267,7 @@ export function App() {
             <Modal.Dialog className="max-h-[90vh] sm:max-w-2xl">
               <Modal.CloseTrigger />
               <Modal.Header><Modal.Heading>关于</Modal.Heading></Modal.Header>
-              <Modal.Body className="max-h-[76vh] overflow-y-auto p-0"><AboutPanel session={session} /></Modal.Body>
+              <Modal.Body className="max-h-[76vh] overflow-y-auto p-0"><Suspense fallback={panelFallback}><AboutPanel session={session} /></Suspense></Modal.Body>
             </Modal.Dialog>
           </Modal.Container>
         </Modal.Backdrop>
@@ -266,13 +278,13 @@ export function App() {
             <Modal.Dialog className="max-h-[92vh] sm:max-w-3xl">
               <Modal.CloseTrigger />
               <Modal.Header><Modal.Heading>CLI 管理</Modal.Heading></Modal.Header>
-              <Modal.Body className="max-h-[80vh] overflow-y-auto p-0"><CliManagerPanel session={session} /></Modal.Body>
+              <Modal.Body className="max-h-[80vh] overflow-y-auto p-0"><Suspense fallback={panelFallback}><CliManagerPanel session={session} /></Suspense></Modal.Body>
             </Modal.Dialog>
           </Modal.Container>
         </Modal.Backdrop>
       </Modal>
       <Modal isOpen={capabilitiesOpen} onOpenChange={setCapabilitiesOpen}>
-        <Modal.Backdrop><Modal.Container><Modal.Dialog className="max-h-[90vh] sm:max-w-2xl"><Modal.CloseTrigger /><Modal.Header><Modal.Heading>MCP / Skill 管理</Modal.Heading></Modal.Header><Modal.Body className="max-h-[75vh] overflow-y-auto"><CapabilitiesPanel workspacePath={session.activeWorkspace?.path ?? session.settings.defaultWorkspacePath} providers={session.v2Providers} catalogs={session.capabilityCatalogs} onRefresh={(provider) => void session.refreshCapabilityCatalog(provider)} conversationId={session.activeConversation?.id} selectedSkills={session.activeConversation ? session.selectedSkills[session.activeConversation.id] ?? [] : []} canInvoke={Boolean(session.activeConversation?.v2ConversationId)} onToggleSkill={(skill, provider) => session.activeConversation && session.toggleCatalogSkill(session.activeConversation.id, skill, provider)} onPreviewSkill={(skill, provider) => session.previewSkillResource(provider, skill.resourceId)} onRefreshMcp={(resourceId) => session.activeConversation && session.refreshMcpServer(session.activeConversation.id, resourceId)} onCallMcp={(resourceId, toolName) => session.activeConversation && session.callMcpTool(session.activeConversation.id, resourceId, toolName)} /></Modal.Body></Modal.Dialog></Modal.Container></Modal.Backdrop>
+        <Modal.Backdrop><Modal.Container><Modal.Dialog className="max-h-[90vh] sm:max-w-2xl"><Modal.CloseTrigger /><Modal.Header><Modal.Heading>MCP / Skill 管理</Modal.Heading></Modal.Header><Modal.Body className="max-h-[75vh] overflow-y-auto"><Suspense fallback={panelFallback}><CapabilitiesPanel workspacePath={session.activeWorkspace?.path ?? session.settings.defaultWorkspacePath} providers={session.v2Providers} catalogs={session.capabilityCatalogs} onRefresh={(provider) => void session.refreshCapabilityCatalog(provider)} conversationId={session.activeConversation?.id} selectedSkills={session.activeConversation ? session.selectedSkills[session.activeConversation.id] ?? [] : []} canInvoke={Boolean(session.activeConversation?.v2ConversationId)} onToggleSkill={(skill, provider) => session.activeConversation && session.toggleCatalogSkill(session.activeConversation.id, skill, provider)} onPreviewSkill={(skill, provider) => session.previewSkillResource(provider, skill.resourceId)} onRefreshMcp={(resourceId) => session.activeConversation && session.refreshMcpServer(session.activeConversation.id, resourceId)} onCallMcp={(resourceId, toolName) => session.activeConversation && session.callMcpTool(session.activeConversation.id, resourceId, toolName)} /></Suspense></Modal.Body></Modal.Dialog></Modal.Container></Modal.Backdrop>
       </Modal>
       <GitActionsModal key={session.activeConversation?.id} session={session} isOpen={gitOpen} onOpenChange={setGitOpen} />
       {createOpen ? <CreateWorkspaceModal

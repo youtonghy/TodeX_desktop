@@ -223,7 +223,11 @@ export function AppSidebar({
     setContextMenu(null);
   };
 
-  if (session.directorySyncStatus === 'loading') return <Sidebar><Sidebar.Content><p className="text-muted px-3 py-4 text-sm">正在同步目录…</p></Sidebar.Content></Sidebar>;
+  // Cached data renders immediately; the directory sync only blocks an
+  // entirely empty sidebar (first run or cleared storage).
+  if (session.directorySyncStatus === 'loading' && session.workspaces.length === 0) {
+    return <Sidebar><Sidebar.Content><p className="text-muted px-3 py-4 text-sm">正在同步目录…</p></Sidebar.Content></Sidebar>;
+  }
 
   return (
     <Sidebar>

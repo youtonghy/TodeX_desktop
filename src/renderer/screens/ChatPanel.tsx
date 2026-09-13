@@ -483,7 +483,9 @@ export function ChatPanel({ session }: Props) {
         <div ref={messagesRef} className="mx-auto flex max-w-2xl flex-col gap-3">
           {items.length === 0 ? (
             <p className="text-muted py-16 text-center text-sm" role="status">
-              {thinking ? '正在工作' : '还没有消息。输入内容后发送。'}
+              {thinking ? '正在工作'
+                : session.recoveringConversations[conversation.id] ? '正在恢复对话记录…'
+                  : '还没有消息。输入内容后发送。'}
             </p>
           ) : null}
           {items.map((item) => {
