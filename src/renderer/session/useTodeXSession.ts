@@ -599,6 +599,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       const next = {
         ...current,
         [key]: {
+          ...previous,
           lastModel: nextModel,
           reasoningByModel: reasoningEffort
             ? { ...previous.reasoningByModel, [nextModel]: reasoningEffort }
@@ -5079,9 +5080,14 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       && item.backendConnectionId === backendConnectionId
       && isUnusedConversation(item));
     if (existing && existing.provider && !options?.provider && !options?.title) {
+      const record = { ...existing, permissionMode: runModes.permissionMode, mode: runModes.mode };
+      if (record.permissionMode !== existing.permissionMode || record.mode !== existing.mode) {
+        conversationsRef.current = conversationsRef.current.map((item) => item.id === record.id ? record : item);
+        setConversations((current) => current.map((item) => item.id === record.id ? record : item));
+      }
       setActiveWorkspaceId(workspace.id);
-      setActiveConversationId(existing.id);
-      return existing;
+      setActiveConversationId(record.id);
+      return record;
     }
     const now = Date.now();
     const placeholder = {
