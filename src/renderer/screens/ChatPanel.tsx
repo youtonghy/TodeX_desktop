@@ -12,7 +12,7 @@ import { providerDisplayName, type ProviderKind, type PermissionMode } from '@to
 import { progressGroupLabel } from '@todex/protocol/mobileParity';
 import { ConversationPermissionActions, ConversationPromptInput, ConversationRunStatus, TurnUsageSummary } from '../components/ConversationRunStatus';
 import { ReferenceComposer, type ReferenceComposerHandle } from '../components/ReferenceComposer';
-import { activeChatProcessId, buildChatRenderItems, isChatTimelineEntry, isChatToolEntry } from '../components/conversationTimeline';
+import { activeChatProcessId, buildChatRenderItems, isChatTimelineEntry, isChatToolEntry, latestIncomingEntryIds } from '../components/conversationTimeline';
 import { ModelReasoningCard } from '../components/ModelReasoningCard';
 import { ProviderIcon } from '../components/ProviderIcon';
 import type { TodeXSession } from '../session/useTodeXSession';
@@ -248,22 +248,22 @@ export function ChatPanel({ session }: Props) {
       });
     return () => { active = false; };
   }, [mention?.query, mention?.start, workspace?.path, session.fetchWorkspaceEntries]);
-  const items = useMemo(() => {
+  const chatEntries = useMemo(() => {
     if (!conversation) return [];
-    return buildChatRenderItems(
-      session.timeline
-        .filter((entry) => entry.conversationId === conversation.id)
-        .filter((entry) => isChatTimelineEntry(entry) && !isChatReminderEntry(entry))
-        .slice()
-        .sort((left, right) => {
-          if (left.sequence !== undefined && right.sequence !== undefined && left.sequence !== right.sequence) {
-            return left.sequence - right.sequence;
-          }
-          if (left.at !== right.at) return left.at - right.at;
-          return left.id.localeCompare(right.id);
-        }),
-    );
+    return session.timeline
+      .filter((entry) => entry.conversationId === conversation.id)
+      .filter((entry) => isChatTimelineEntry(entry) && !isChatReminderEntry(entry))
+      .slice()
+      .sort((left, right) => {
+        if (left.sequence !== undefined && right.sequence !== undefined && left.sequence !== right.sequence) {
+          return left.sequence - right.sequence;
+        }
+        if (left.at !== right.at) return left.at - right.at;
+        return left.id.localeCompare(right.id);
+      });
   }, [conversation?.id, session.timeline]);
+  const items = useMemo(() => buildChatRenderItems(chatEntries), [chatEntries]);
+  const actionableIncoming = useMemo(() => latestIncomingEntryIds(chatEntries), [chatEntries]);
   const messagesRef = useRef<HTMLDivElement>(null);
   const [quote, setQuote] = useState<{ text: string; left: number; top: number; messageId?: string } | null>(null);
   useEffect(() => {
@@ -582,7 +582,9 @@ export function ChatPanel({ session }: Props) {
                       </Markdown>
                     )}
                   </div>
-                  {entry.kind === 'incoming' ? <AgentMessageActions conversationId={conversation.id} entry={entry} session={session} /> : null}
+                  {entry.kind === 'incoming' && actionableIncoming.has(entry.id)
+                    ? <AgentMessageActions conversationId={conversation.id} entry={entry} session={session} />
+                    : null}
                   {request ? (
                     <ChatMessage.Actions>
                       <ConversationPermissionActions request={request} onSelect={(option, data) => { session.sendApprovalResponse(option, request, data); }} />
