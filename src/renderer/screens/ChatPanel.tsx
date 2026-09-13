@@ -7,7 +7,7 @@ import { Button, Label, ListBox, Popover, ScrollShadow, Select, Tooltip, toast }
 import { ChainOfThought, ChatAttachment, ChatAttachmentGroup, ChatAttachmentInput, ChatMessage, HoverCard, PromptInput } from '@heroui-pro/react';
 import { ChatMessageActions } from '@heroui-pro/react/chat-message-actions';
 import { ChatTool } from '@heroui-pro/react/chat-tool';
-import { Markdown } from '@heroui-pro/react/markdown';
+import { Markdown, type MarkdownProps } from '@heroui-pro/react/markdown';
 import { providerDisplayName, type ProviderKind, type PermissionMode } from '@todex/protocol/v2';
 import { progressGroupLabel } from '@todex/protocol/mobileParity';
 import { ConversationPermissionActions, ConversationPromptInput, ConversationRunStatus, TurnUsageSummary } from '../components/ConversationRunStatus';
@@ -287,6 +287,29 @@ export function ChatPanel({ session }: Props) {
       document.removeEventListener('scroll', hide, true);
     };
   }, []);
+  const workspacePath = workspace?.path;
+  const markdownComponents = useMemo<NonNullable<MarkdownProps['components']>>(() => ({
+    a: ({ href, children, node: _node, ref: _ref, ...props }) => {
+      const target = workspaceLinkTarget(href, workspacePath);
+      return (
+        <a
+          {...props}
+          href={href}
+          onClick={(event) => {
+            if (!target) return;
+            event.preventDefault();
+            if (target.kind === 'browser-url') {
+              session.openPanel('Browser', { url: target.url });
+            } else {
+              session.openPanel('Files', { filePath: target.filePath });
+            }
+          }}
+        >
+          {children}
+        </a>
+      );
+    },
+  }), [workspacePath, session.openPanel]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const atBottomRef = useRef(true);
   const [isAtBottom, setIsAtBottom] = useState(true);
@@ -580,28 +603,7 @@ export function ChatPanel({ session }: Props) {
                     </div> : (
                       <Markdown
                         id={entry.id}
-                        components={{
-                          a: ({ href, children, ...props }) => {
-                            const target = workspaceLinkTarget(href, workspace.path);
-                            return (
-                              <a
-                                {...props}
-                                href={href}
-                                onClick={(event) => {
-                                  if (!target) return;
-                                  event.preventDefault();
-                                  if (target.kind === 'browser-url') {
-                                    session.openPanel('Browser', { url: target.url });
-                                  } else {
-                                    session.openPanel('Files', { filePath: target.filePath });
-                                  }
-                                }}
-                              >
-                                {children}
-                              </a>
-                            );
-                          },
-                        }}
+                        components={markdownComponents}
                       >
                         {entry.subtitle}
                       </Markdown>
