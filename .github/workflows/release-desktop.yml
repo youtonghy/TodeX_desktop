@@ -112,7 +112,17 @@ jobs:
             mv pnpm-workspace.yaml pnpm-workspace.yaml.ci
             trap 'mv -f pnpm-workspace.yaml.ci pnpm-workspace.yaml' EXIT
           fi
-          npx -y hpsetup@latest "$HEROUI_KEY"
+          for attempt in 1 2 3; do
+            if npx -y hpsetup@latest "$HEROUI_KEY"; then
+              break
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              echo "hpsetup failed after 3 attempts." >&2
+              exit 1
+            fi
+            echo "hpsetup attempt ${attempt} failed; retrying in 10s..." >&2
+            sleep 10
+          done
           if [ "$RUNNER_OS" = "Windows" ]; then
             mv -f pnpm-workspace.yaml.ci pnpm-workspace.yaml
             trap - EXIT
@@ -185,7 +195,17 @@ jobs:
             mv pnpm-workspace.yaml pnpm-workspace.yaml.ci
             trap 'mv -f pnpm-workspace.yaml.ci pnpm-workspace.yaml' EXIT
           fi
-          npx -y hpsetup@latest "$HEROUI_KEY"
+          for attempt in 1 2 3; do
+            if npx -y hpsetup@latest "$HEROUI_KEY"; then
+              break
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              echo "hpsetup failed after 3 attempts." >&2
+              exit 1
+            fi
+            echo "hpsetup attempt ${attempt} failed; retrying in 10s..." >&2
+            sleep 10
+          done
           if [ "$RUNNER_OS" = "Windows" ]; then
             mv -f pnpm-workspace.yaml.ci pnpm-workspace.yaml
             trap - EXIT
