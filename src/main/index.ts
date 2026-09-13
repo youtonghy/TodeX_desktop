@@ -99,18 +99,53 @@ function storePath(): string {
   return join(app.getPath('userData'), 'todex-desktop-store.json');
 }
 
+let storeCache: StoreShape | null = null;
+let storeDirty = false;
+let storeWriteTimer: ReturnType<typeof setTimeout> | null = null;
+const STORE_WRITE_DEBOUNCE_MS = 300;
+
 function readStore(): StoreShape {
+  if (storeCache) {
+    return storeCache;
+  }
   try {
-    return JSON.parse(readFileSync(storePath(), 'utf8')) as StoreShape;
+    storeCache = JSON.parse(readFileSync(storePath(), 'utf8')) as StoreShape;
   } catch {
-    return {};
+    storeCache = {};
+  }
+  return storeCache;
+}
+
+function flushStore(): void {
+  if (storeWriteTimer) {
+    clearTimeout(storeWriteTimer);
+    storeWriteTimer = null;
+  }
+  if (!storeDirty || !storeCache) {
+    return;
+  }
+  storeDirty = false;
+  try {
+    const target = storePath();
+    mkdirSync(dirname(target), { recursive: true });
+    writeFileSync(target, JSON.stringify(storeCache), 'utf8');
+  } catch (error) {
+    debugLog('error', 'store.flush.error', { error });
   }
 }
 
+function scheduleStoreWrite(): void {
+  storeDirty = true;
+  if (storeWriteTimer) {
+    return;
+  }
+  storeWriteTimer = setTimeout(flushStore, STORE_WRITE_DEBOUNCE_MS);
+  storeWriteTimer.unref?.();
+}
+
 function writeStore(value: StoreShape): void {
-  const target = storePath();
-  mkdirSync(dirname(target), { recursive: true });
-  writeFileSync(target, JSON.stringify(value, null, 2), 'utf8');
+  storeCache = value;
+  scheduleStoreWrite();
 }
 
 function initializeDebugLogging(): void {
@@ -498,7 +533,10 @@ app.whenReady().then(() => {
   });
 });
 
-app.on('before-quit', () => debugLog('info', 'app.before-quit'));
+app.on('before-quit', () => {
+  debugLog('info', 'app.before-quit');
+  flushStore();
+});
 app.on('child-process-gone', (_event, details) => debugLog('error', 'app.child-process-gone', { details }));
 app.on('window-all-closed', () => {
   debugLog('info', 'app.window-all-closed', { platform: process.platform });
