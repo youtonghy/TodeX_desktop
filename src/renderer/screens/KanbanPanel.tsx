@@ -1,7 +1,7 @@
 import { useState, type Key } from 'react';
 import { Plus } from '@gravity-ui/icons';
-import { RiArrowRightLine, RiChat3Line, RiFolder3Line, RiMoreFill, RiPushpinLine } from '@remixicon/react';
-import { Button, Chip, Dropdown, Input, Label, TextField, Tooltip } from '@heroui/react';
+import { RiArrowRightLine, RiCalendarLine, RiChat3Line, RiFolder3Line, RiMoreFill, RiPushpinLine } from '@remixicon/react';
+import { Button, Chip, Dropdown, Input, Label, TextArea, TextField, Tooltip } from '@heroui/react';
 import { EmptyState, Kanban } from '@heroui-pro/react';
 import type { WorkspaceRecord } from '@todex/protocol/todex';
 import { conversationDisplayTitle, workspaceDisplayName, type ConversationRecord } from '../session/helpers';
@@ -9,6 +9,8 @@ import type { TodeXSession } from '../session/useTodeXSession';
 import {
   addKanbanTask,
   attachKanbanTask,
+  isKanbanTaskOverdue,
+  kanbanTaskDraftText,
   kanbanTaskStatusLabels,
   kanbanTaskStatuses,
   kanbanTasksForWorkspace,
@@ -94,8 +96,9 @@ function TaskCard({ task, session, conversations, onOpen }: {
     } else if (action === 'detach') {
       attachKanbanTask(task.id, undefined);
     } else if (action === 'draft' && linked) {
+      const draft = kanbanTaskDraftText(task);
       session.setConversationChatDraft(linked.id, (current) => (
-        current.trim() ? `${current}\n任务：${task.title}` : `任务：${task.title}`
+        current.trim() ? `${current}\n${draft}` : draft
       ));
       onOpen(task.workspaceId, linked.id);
     } else if (action === 'rename') {
@@ -112,6 +115,19 @@ function TaskCard({ task, session, conversations, onOpen }: {
         <span className={`mt-1 size-2.5 shrink-0 rounded-sm ${STATUS_META[task.status].dot}`} />
         <span className="text-foreground min-w-0 break-all font-semibold leading-snug">{task.title}</span>
       </div>
+
+      {task.description ? (
+        <p className="text-muted break-all text-xs leading-snug line-clamp-2">{task.description}</p>
+      ) : null}
+
+      {task.dueDate ? (
+        <div className={`flex min-w-0 items-center gap-1 text-xs ${isKanbanTaskOverdue(task) ? 'text-danger' : 'text-muted'}`}>
+          <RiCalendarLine className="size-3.5 shrink-0" />
+          <span className="truncate">
+            {task.dueDate}{isKanbanTaskOverdue(task) ? '（已逾期）' : ''}
+          </span>
+        </div>
+      ) : null}
 
       {task.conversationId ? (
         <div className="flex min-w-0 items-center gap-1">
@@ -228,16 +244,40 @@ function WorkspaceColumn({ workspace, meta, tasks, session, creating, onCreate, 
   onOpenConversation: (workspaceId: string, conversationId: string) => void;
 }) {
   const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
+  const [dueDate, setDueDate] = useState('');
   const conversations = session.conversations
     .filter((conversation) => conversation.workspaceId === workspace.id && !conversation.archived)
     .sort((a, b) => b.updatedAt - a.updatedAt);
 
+  const resetForm = () => {
+    setTitle('');
+    setDescription('');
+    setDueDate('');
+  };
+
   const submit = () => {
-    const created = addKanbanTask(workspace.id, title);
+    const created = addKanbanTask(workspace.id, title, { description, dueDate });
     if (created) {
-      setTitle('');
+      resetForm();
       onCancelCreate();
     }
+  };
+
+  const openTaskConversation = (task: KanbanTask) => {
+    const linked = task.conversationId
+      ? conversations.find((conversation) => conversation.id === task.conversationId)
+      : undefined;
+    if (linked) {
+      onOpenConversation(task.workspaceId, linked.id);
+      return;
+    }
+    if (task.conversationId) attachKanbanTask(task.id, undefined);
+    const created = session.createConversation(task.workspaceId, { title: task.title });
+    if (!created) return;
+    attachKanbanTask(task.id, created.id);
+    session.setConversationChatDraft(created.id, kanbanTaskDraftText(task));
+    onOpenConversation(task.workspaceId, created.id);
   };
 
   return (
@@ -290,10 +330,7 @@ function WorkspaceColumn({ workspace, meta, tasks, session, creating, onCreate, 
                 items={items}
                 onAction={(key) => {
                   const task = items.find((item) => item.id === String(key));
-                  const linked = task?.conversationId
-                    ? conversations.find((conversation) => conversation.id === task.conversationId)
-                    : undefined;
-                  if (task && linked) onOpenConversation(task.workspaceId, linked.id);
+                  if (task) openTaskConversation(task);
                 }}
               >
                 {(task: KanbanTask) => (
@@ -320,9 +357,15 @@ function WorkspaceColumn({ workspace, meta, tasks, session, creating, onCreate, 
               <TextField value={title} onChange={setTitle}>
                 <Input autoFocus placeholder="任务标题" maxLength={200} />
               </TextField>
+              <TextField value={description} onChange={setDescription}>
+                <TextArea placeholder="任务描述（可选）" rows={2} maxLength={2000} />
+              </TextField>
+              <TextField value={dueDate} onChange={setDueDate}>
+                <Input type="date" aria-label="截止日期（可选）" />
+              </TextField>
               <div className="flex gap-2">
                 <Button size="sm" type="submit" isDisabled={!title.trim()}>添加</Button>
-                <Button size="sm" variant="ghost" onPress={() => { setTitle(''); onCancelCreate(); }}>取消</Button>
+                <Button size="sm" variant="ghost" onPress={() => { resetForm(); onCancelCreate(); }}>取消</Button>
               </div>
             </form>
           ) : (

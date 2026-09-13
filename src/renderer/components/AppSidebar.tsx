@@ -62,10 +62,13 @@ export function AppSidebar({
   const { pins, togglePin } = useSidebarPins();
   const kanbanTasks = useKanbanTasks();
 
-  const conversationTaskCountMap = useMemo(() => {
-    const map: Record<string, number> = {};
+  const conversationTaskMetaMap = useMemo(() => {
+    const map: Record<string, { count: number; pending: number }> = {};
     for (const task of kanbanTasks) {
-      if (task.conversationId) map[task.conversationId] = (map[task.conversationId] ?? 0) + 1;
+      if (!task.conversationId) continue;
+      const meta = map[task.conversationId] ??= { count: 0, pending: 0 };
+      meta.count += 1;
+      if (task.status !== 'done') meta.pending += 1;
     }
     return map;
   }, [kanbanTasks]);
@@ -462,11 +465,13 @@ export function AppSidebar({
                   {displayedConversations.map((conversation) => {
                     const isSelected = conversation.id === session.activeConversationId;
                     const status = getConversationStatus(session, conversation, timelineInfoMap[conversation.id]?.latestEntry);
+                    const taskMeta = conversationTaskMetaMap[conversation.id];
+                    const tasksDone = Boolean(taskMeta && taskMeta.pending === 0);
                     return (
                       <ChatListView.Item
                         key={conversation.id}
                         id={conversation.id}
-                        className={`sidebar-item ${isSelected ? 'is-selected' : ''}`}
+                        className={`sidebar-item ${isSelected ? 'is-selected' : ''} ${tasksDone ? 'opacity-60' : ''}`}
                         textValue={conversationDisplayTitle(conversation, session.timeline)}
                         onContextMenu={(event) => openContextMenu(event, 'conversation', conversation.id)}
                       >
@@ -481,8 +486,8 @@ export function AppSidebar({
                             </span>
                           </ChatListView.Icon>
                           <ChatListView.Text>
-                            <ChatListView.Title className={isSelected ? 'text-accent font-semibold' : ''}>
-                              {conversationDisplayTitle(conversation, session.timeline)}{pins.conversation.includes(conversation.id) ? <RiPushpin2Fill className="ml-1 inline size-3 text-muted" aria-label="已置顶" /> : null}{conversationTaskCountMap[conversation.id] ? <RiKanbanView2 className="ml-1 inline size-3 text-accent" aria-label={`${conversationTaskCountMap[conversation.id]} 个关联任务`} /> : null}
+                            <ChatListView.Title className={isSelected ? 'text-accent font-semibold' : tasksDone ? 'text-muted' : ''}>
+                              {conversationDisplayTitle(conversation, session.timeline)}{pins.conversation.includes(conversation.id) ? <RiPushpin2Fill className="ml-1 inline size-3 text-muted" aria-label="已置顶" /> : null}{taskMeta ? <Chip className="ml-1 inline-flex h-4 align-middle px-1.5 text-[10px]" color={tasksDone ? 'default' : 'accent'} size="sm" variant="soft" aria-label={`${taskMeta.count} 个关联任务`}>{tasksDone ? '已完成' : '规划'}</Chip> : null}
                             </ChatListView.Title>
                             <ChatListView.Preview>{conversation.preview || '还没有消息'}</ChatListView.Preview>
                           </ChatListView.Text>
