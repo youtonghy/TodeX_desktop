@@ -88,7 +88,7 @@ export function ConversationControls({ runtime, reportedError, running, canSteer
         </div>
         <ol className="space-y-1.5">
           {localQueue.map((item, index) => <li key={item.id} className="flex items-start justify-between gap-2">
-            <span aria-hidden className="text-muted mt-0.5 w-4 shrink-0 select-none text-right tabular-nums">{index + 1}.</span>
+            <span aria-hidden className="text-muted mt-0.5 w-5 shrink-0 select-none text-right tabular-nums">{index + 1}.</span>
             <div className="min-w-0 flex-1 space-y-1">
               {item.text.trim() ? <p className="whitespace-pre-wrap break-words leading-snug line-clamp-2" title={item.text}>{item.text}</p>
                 : !item.attachments.length && !item.skills.length ? <p className="text-muted">（空消息）</p> : null}
