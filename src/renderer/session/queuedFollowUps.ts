@@ -1,5 +1,5 @@
-/** Serializes local follow-ups. Only a live terminal event belonging to a
- * submission made by this client can automatically advance the queue. */
+/** Serializes local follow-ups. The queue pauses only when the previous turn
+ * ends abnormally; every other trigger keeps it moving. */
 export class QueuedFollowUps {
   private readonly sending = new Set<string>();
   private readonly advance = new Set<string>();
@@ -10,10 +10,10 @@ export class QueuedFollowUps {
   pause(id: string) { this.paused.add(id); }
 
   async settle<T extends { id: string }>(id: string, turnId: string, terminal: string,
-    liveSubmission: boolean, recovering: boolean, next: () => T | undefined,
+    recovering: boolean, next: () => T | undefined,
     send: (item: T) => Promise<boolean>, remove: (itemId: string) => void): Promise<void> {
     const key = `${id}:${turnId}`;
-    if (recovering || !liveSubmission || !turnId || this.terminals.has(key)) return;
+    if (recovering || !turnId || this.terminals.has(key)) return;
     this.terminals.add(key);
     if (this.terminals.size > 2000) this.terminals.delete(this.terminals.values().next().value!);
     if (terminal !== 'turn.completed') { this.pause(id); return; }
@@ -37,8 +37,8 @@ export class QueuedFollowUps {
     this.sending.add(id);
     try {
       if (await send(item)) remove(item.id);
-      else this.pause(id); // Includes an unknown ACK: never blindly resend.
-    } catch { this.pause(id); }
+      // A failed send keeps the item queued; the next trigger retries it.
+    } catch { /* Item stays queued; the next trigger retries it. */ }
     finally {
       this.sending.delete(id);
       const advance = this.advance.delete(id);

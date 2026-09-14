@@ -692,10 +692,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     void loadJson<unknown>('todex.queued-follow-ups.v1', {}).then((value) => {
       if (disposed) return;
       const queues = restoreQueuedFollowUps<QueuedChatSubmission>(value);
-      for (const id of Object.keys(queues)) followUpsRef.current.pause(id);
       queuedChatDraftsRef.current = { ...queues, ...queuedChatDraftsRef.current };
       setQueuedChatDrafts(queuedChatDraftsRef.current);
-      setQueuePausedByConversation(Object.fromEntries(Object.keys(queues).map(id => [id, true])));
       setQueueHydrated(true);
     }).catch(() => {
       if (!disposed) setLastError('无法恢复候选消息，请检查本地存储。');
@@ -1524,20 +1522,22 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         }
         if (submission && turnId && submission.turnId === turnId) {
           if (type === 'turn.completed') removeQueuedFollowUp(localId, submission.requestId);
-          queueMicrotask(() => {
-            void followUpsRef.current.settle(localId, turnId, type, true, recovering,
-              () => queuedChatDraftsRef.current[localId]?.[0],
-              (item) => sendQueuedChatDraftRef.current(item, localId),
-              (itemId) => removeQueuedFollowUp(localId, itemId)).then(() => {
-                setQueuePausedByConversation(current => ({ ...current, [localId]: followUpsRef.current.isPaused(localId) }));
-              });
-          });
           if (type === 'turn.failed') {
             restorePendingSubmission(localId);
             setLastError(typeof data.message === 'string' ? data.message : '当前任务执行失败，请核对记录后重试。');
           }
           pendingV2SubmissionsRef.current.delete(localId);
           setSubmissionStatusByConversation((current) => ({ ...current, [localId]: undefined }));
+        }
+        if (turnId) {
+          queueMicrotask(() => {
+            void followUpsRef.current.settle(localId, turnId, type, recovering,
+              () => queuedChatDraftsRef.current[localId]?.[0],
+              (item) => sendQueuedChatDraftRef.current(item, localId),
+              (itemId) => removeQueuedFollowUp(localId, itemId)).then(() => {
+                setQueuePausedByConversation(current => ({ ...current, [localId]: followUpsRef.current.isPaused(localId) }));
+              });
+          });
         }
       }
     }
@@ -2509,11 +2509,18 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       }
       if (hasTimelineTarget && turnIsTerminal) {
         setConversationThinking(targetConversationId, false);
+        const turnIsCompleted = event.type === 'codex.turn.completed' || /^completed$/i.test(turnStatus);
+        if (!turnIsCompleted) {
+          followUpsRef.current.pause(targetConversationId);
+          setQueuePausedByConversation((current) => ({ ...current, [targetConversationId]: true }));
+        }
         const queuedDrafts = queuedChatDraftsRef.current[targetConversationId] ?? [];
         const nextQueuedDraft = queuedDrafts[0] ?? null;
         if (
+          turnIsCompleted &&
           nextQueuedDraft &&
           (nextQueuedDraft.text.trim() || nextQueuedDraft.attachments.length > 0 || nextQueuedDraft.skills.length > 0) &&
+          !followUpsRef.current.isPaused(targetConversationId) &&
           !queuedChatDispatchingRef.current.has(targetConversationId)
         ) {
           queuedChatDispatchingRef.current.add(targetConversationId);
@@ -3105,6 +3112,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
             }
           })();
           flushQueuedProtocolCommands();
+          for (const queuedConversationId of Object.keys(queuedChatDraftsRef.current)) {
+            void resumeQueuedFollowUps(queuedConversationId);
+          }
         };
 
         socket.onmessage = (event) => {
@@ -3183,7 +3193,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       setLastError(message);
       setConnectionHealth({ status: 'offline', latencyMs: null, lastCheckedAt: Date.now(), error: message, code: 'backend_unreachable' });
     });
-  }, [checkConnectionHealth, closeSocket, enqueueSocketFrame, flushQueuedProtocolCommands, getSessionCursorSnapshot, recoverConversation, refreshServerVersion, sendRawProtocolFrame, sendSessionResume, settings, syncWorkspacesFromBackend]);
+  }, [checkConnectionHealth, closeSocket, enqueueSocketFrame, flushQueuedProtocolCommands, getSessionCursorSnapshot, recoverConversation, refreshServerVersion, resumeQueuedFollowUps, sendRawProtocolFrame, sendSessionResume, settings, syncWorkspacesFromBackend]);
 
   useEffect(() => {
     if (!hydrated || !autoConnectEnabled || manualDisconnectRef.current) {
