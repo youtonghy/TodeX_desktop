@@ -385,7 +385,11 @@ export function KanbanPanel({ session, onOpenConversation }: Props) {
   const [creatingWorkspaceId, setCreatingWorkspaceId] = useState<string | null>(null);
   const columns = session.workspaces.map((workspace) => ({
     workspace,
-    tasks: kanbanTasksForWorkspace(allTasks, workspace.id),
+    tasks: kanbanTasksForWorkspace(
+      allTasks,
+      workspace.id,
+      workspace.backendConnectionId ?? session.activeBackendConnectionId,
+    ),
   }));
   const total = columns.reduce((count, column) => count + column.tasks.length, 0);
 

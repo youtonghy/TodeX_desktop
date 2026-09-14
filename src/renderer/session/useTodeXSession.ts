@@ -7,6 +7,7 @@ import {
   useCompletionNotifications,
 } from './completionNotifications';
 import { bindSentAttachmentEvents, prepareSentAttachments, projectSentAttachments, pruneSentAttachmentRecords, type SentAttachmentRecord } from './sentAttachments';
+import { configureKanbanSync, syncKanbanTasksFromBackend } from './kanbanTasks';
 import { ENCRYPTION_VERIFICATION_ERROR, TransportVerificationError, validateTransportEncryption, verifyEncryptedSocket } from './transportVerification';
 import { QueuedFollowUps, restoreQueuedFollowUps } from './queuedFollowUps';
 import { LegacyEventRecovery } from './legacyEventRecovery';
@@ -1236,10 +1237,21 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   }, [activeBackendConnectionId, settings, syncWorkspacesToBackend]);
 
   useEffect(() => {
-    if (!hydrated || connectionState !== 'open') return;
-    const timer = setInterval(() => void syncWorkspacesFromBackend(), 15000);
+    if (!hydrated || connectionState !== 'open') {
+      if (connectionState !== 'open') configureKanbanSync(null);
+      return;
+    }
+    configureKanbanSync({
+      serverUrl: settings.serverUrl,
+      authToken: settings.authToken,
+      backendConnectionId: activeBackendConnectionId,
+    });
+    const timer = setInterval(() => {
+      void syncWorkspacesFromBackend();
+      void syncKanbanTasksFromBackend();
+    }, 15000);
     return () => clearInterval(timer);
-  }, [connectionState, hydrated, syncWorkspacesFromBackend]);
+  }, [activeBackendConnectionId, connectionState, hydrated, settings.authToken, settings.serverUrl, syncWorkspacesFromBackend]);
 
   useEffect(() => {
     if (!hydrated) {

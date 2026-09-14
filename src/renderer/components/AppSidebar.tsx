@@ -65,7 +65,7 @@ export function AppSidebar({
   const conversationTaskMetaMap = useMemo(() => {
     const map: Record<string, { count: number; pending: number }> = {};
     for (const task of kanbanTasks) {
-      if (!task.conversationId) continue;
+      if (!task.conversationId || task.deletedAt) continue;
       const meta = map[task.conversationId] ??= { count: 0, pending: 0 };
       meta.count += 1;
       if (task.status !== 'done') meta.pending += 1;
