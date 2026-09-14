@@ -3076,8 +3076,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
             try {
               await verifyEncryptedSocket(socket, crypto, attempt.signal);
             } catch (error) {
-              if (!isSocketCurrent()) return;
+              // The verifier's verdict is authoritative even when the socket
+              // already closed mid-handshake; only a newer connection attempt
+              // or our own abort may supersede it.
+              if (connectionAttemptRef.current !== attempt) return;
+              if (error instanceof DOMException && error.name === 'AbortError') return;
               if (error instanceof TransportVerificationError && error.retryable) {
+                if (!isSocketCurrent()) return;
                 // Transient drop mid-handshake: supersede this socket so its
                 // onclose no-ops, then let the reconnect effect retry.
                 closeSocket(false);
@@ -3085,7 +3090,22 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
                 setConnectionState('closed');
                 return;
               }
-              failTransport(error);
+              const message = error instanceof TransportVerificationError
+                ? error.message
+                : `${ENCRYPTION_VERIFICATION_ERROR}${error instanceof Error && error.message ? `（${error.message}）` : ''}`;
+              transportFailureRef.current = true;
+              try {
+                socket.close();
+              } catch {
+                // already closed
+              }
+              closeSocket(false);
+              // Set after socket.close(): the re-entrant onclose marks the
+              // mid-handshake drop retryable; the verifier's rejection wins.
+              lastFailureRetryableRef.current = false;
+              setConnectionState('error');
+              setLastError(message);
+              setConnectionHealth({ status: 'offline', latencyMs: null, lastCheckedAt: Date.now(), error: message, code: 'protocol_mismatch' });
               return;
             }
           }
@@ -3240,7 +3260,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     reconnectAttemptRef.current += 1;
     reconnectTimerRef.current = setTimeout(() => {
       reconnectTimerRef.current = null;
-      if (!manualDisconnectRef.current) {
+      // A definitive failure may land after this timer was scheduled (the
+      // encrypted-socket verifier can reject after the socket closes).
+      if (!manualDisconnectRef.current && lastFailureRetryableRef.current) {
         connect();
       }
     }, delay);
