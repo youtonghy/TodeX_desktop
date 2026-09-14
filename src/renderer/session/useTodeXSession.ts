@@ -1134,7 +1134,16 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           body,
         });
         if (!response.ok) {
-          throw new Error(`workspace sync returned ${response.status}`);
+          const errorBody = await response.json().catch(() => null) as { message?: unknown } | null;
+          const message = typeof errorBody?.message === 'string' ? errorBody.message : '';
+          throw new Error(message ? `workspace sync failed: ${message}` : `workspace sync returned ${response.status}`);
+        }
+        const payload = await response.json().catch(() => null) as { rejected?: { path?: unknown }[] } | null;
+        const rejectedPaths = (payload?.rejected ?? [])
+          .map((item) => item?.path)
+          .filter((path): path is string => typeof path === 'string' && path.length > 0);
+        if (rejectedPaths.length > 0) {
+          setLastError(t('sess.workspaceSyncRejected', { paths: rejectedPaths.join(', ') }));
         }
         return true;
       } catch (error) {
@@ -1166,7 +1175,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         headers: authHeaders(settings, 'GET', '/v2/workspaces'),
       });
       if (!response.ok) {
-        throw new Error(`workspace sync returned ${response.status}`);
+        const errorBody = await response.json().catch(() => null) as { message?: unknown } | null;
+        const message = typeof errorBody?.message === 'string' ? errorBody.message : '';
+        throw new Error(message ? `workspace sync failed: ${message}` : `workspace sync returned ${response.status}`);
       }
       const remoteWorkspaces = parseWorkspaceSyncResponse(await response.json());
       const localWorkspaces = workspacesRef.current;

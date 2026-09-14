@@ -1075,6 +1075,7 @@ export const zhCN = {
   'sess.workspaceDeleteSyncFailed': '工作区删除同步失败',
   'sess.workspaceNotFoundRefresh': '未找到工作区，无法刷新 Codex threads。',
   'sess.workspaceSyncFailed': '工作区同步失败',
+  'sess.workspaceSyncRejected': '部分工作区因目录不可用被跳过：{paths}',
   'sess.worktreeBackendSwitched': '后端已切换，请在源对话的后端重新读取 worktree 列表。',
   'sess.worktreeInvalid': '无法打开 worktree：源对话或目录路径无效。',
 

@@ -1075,6 +1075,7 @@ export const en: Messages = {
   'sess.workspaceDeleteSyncFailed': 'Failed to sync workspace deletion',
   'sess.workspaceNotFoundRefresh': 'Workspace not found; cannot refresh Codex threads.',
   'sess.workspaceSyncFailed': 'Failed to sync workspace',
+  'sess.workspaceSyncRejected': 'Some workspaces were skipped because their directories are unavailable: {paths}',
   'sess.worktreeBackendSwitched': 'The backend has changed. Reload the worktree list on the backend of the source conversation.',
   'sess.worktreeInvalid': 'Cannot open worktree: the source conversation or directory path is invalid.',
 

@@ -1075,6 +1075,7 @@ export const ja: Messages = {
   'sess.workspaceDeleteSyncFailed': 'ワークスペース削除の同期に失敗しました',
   'sess.workspaceNotFoundRefresh': 'ワークスペースが見つからず、Codex threads を更新できません。',
   'sess.workspaceSyncFailed': 'ワークスペースの同期に失敗しました',
+  'sess.workspaceSyncRejected': '一部のワークスペースはディレクトリが利用できないためスキップされました: {paths}',
   'sess.worktreeBackendSwitched': 'Backend が切り替わりました。元の会話の Backend で worktree 一覧を読み直してください。',
   'sess.worktreeInvalid': 'worktree を開けません：元の会話またはディレクトリパスが無効です。',
 

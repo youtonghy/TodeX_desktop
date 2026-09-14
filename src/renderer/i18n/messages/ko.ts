@@ -1075,6 +1075,7 @@ export const ko: Messages = {
   'sess.workspaceDeleteSyncFailed': '워크스페이스 삭제 동기화 실패',
   'sess.workspaceNotFoundRefresh': '워크스페이스를 찾을 수 없어 Codex threads를 새로 고칠 수 없습니다.',
   'sess.workspaceSyncFailed': '워크스페이스 동기화 실패',
+  'sess.workspaceSyncRejected': '일부 워크스페이스는 디렉터리를 사용할 수 없어 건너뛰었습니다: {paths}',
   'sess.worktreeBackendSwitched': 'Backend가 전환되었습니다. 원본 대화의 Backend에서 worktree 목록을 다시 읽으세요.',
   'sess.worktreeInvalid': 'worktree를 열 수 없습니다: 원본 대화 또는 디렉터리 경로가 유효하지 않습니다.',
 
