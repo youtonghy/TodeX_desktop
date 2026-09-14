@@ -98,7 +98,7 @@ export const zhCN = {
   'settings.labelColorAria': '后端标签颜色',
   'settings.labelColorHint': '工作区旁的圆点使用此颜色，悬停可查看对应后端。颜色自动保存。',
   'settings.serverUrl': '后端地址',
-  'settings.credentialWarning': '连接凭据保存在当前浏览器配置文件中。共享设备上请在使用后清除本地数据。',
+  'settings.credentialWarning': '设备密钥保存在当前浏览器配置文件中。共享设备上请在使用后清除本地数据。',
   'settings.encryption': '传输加密',
   'settings.encryptionKey': '加密公钥',
   'settings.disconnect': '断开',
@@ -777,7 +777,7 @@ export const zhCN = {
   'pair.errTimeout': '设备验证请求超时，请检查后端连接',
   'pair.errTooLarge': '设备验证响应过大',
   'pair.errTooMany': '设备申请过于频繁或队列已满，请稍后重试',
-  'pair.errUnsupported': '当前后端不支持设备验证，请更新后端或手动填写令牌',
+  'pair.errUnsupported': '当前后端不支持设备验证，请更新后端。',
 
   // pi
   'pi.noticeInfo': '通知',

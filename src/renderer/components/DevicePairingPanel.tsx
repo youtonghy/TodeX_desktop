@@ -1,11 +1,12 @@
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Button, Spinner } from '@heroui/react';
 import { beginDevicePairing, type DevicePairingRequest } from '../session/devicePairing';
+import { deviceIdentityFromSecret, generateDeviceIdentity } from '@todex/protocol/deviceAuth';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { useT } from '../i18n';
 import { useNoticeToast } from './NoticeToast';
 
-type Props = { session: TodeXSession; deviceName: string };
+type Props = { session: TodeXSession; deviceName: string; autoStartNonce?: number };
 type Phase = 'idle' | 'requesting' | 'pending' | 'approved' | 'rejected' | 'expired' | 'cancelled' | 'error';
 type Attempt = {
   profileId: string;
@@ -19,7 +20,7 @@ type Attempt = {
 };
 
 /** Keep every asynchronous response attached to the profile that requested it. */
-export function DevicePairingPanel({ session, deviceName }: Props) {
+export function DevicePairingPanel({ session, deviceName, autoStartNonce = 0 }: Props) {
   const t = useT();
   const profile = session.backendConnections.find(item => item.id === session.activeBackendConnectionId);
   const latest = useRef(session);
@@ -46,6 +47,15 @@ export function DevicePairingPanel({ session, deviceName }: Props) {
     return () => { if (active.current) dispose(active.current, true); };
   }, [profile?.id, profile?.serverUrl, session.settings.serverUrl]);
 
+  // Pairing-link import bumps the nonce; auto-enroll when this profile has no
+  // enrolled device yet.
+  const lastAutoStart = useRef(autoStartNonce);
+  useEffect(() => {
+    if (autoStartNonce === lastAutoStart.current) return;
+    lastAutoStart.current = autoStartNonce;
+    if (!deviceIdentityFromSecret(profile?.deviceSecret)) void start();
+  }, [autoStartNonce]);
+
   const isCurrent = (attempt: Attempt) => {
     const current = latest.current;
     return active.current === attempt && !attempt.controller.signal.aborted
@@ -56,6 +66,17 @@ export function DevicePairingPanel({ session, deviceName }: Props) {
 
   const start = async () => {
     if (!profile || active.current) return;
+    // Persist a fresh device identity up front so retries enroll the same key.
+    const current = latest.current;
+    let deviceSecret = current.backendConnections.find(item => item.id === profile.id)?.deviceSecret ?? '';
+    if (!deviceIdentityFromSecret(deviceSecret)) {
+      deviceSecret = generateDeviceIdentity().secretKey;
+      current.updateBackendConnection(profile.id, { deviceSecret });
+      current.setSettings(settings => (
+        current.activeBackendConnectionId === profile.id ? { ...settings, deviceSecret } : settings
+      ));
+    }
+    const device = deviceIdentityFromSecret(deviceSecret)!;
     const attempt: Attempt = {
       profileId: profile.id, serverUrl: profile.serverUrl,
       settingsServerUrl: session.settings.serverUrl, controller: new AbortController(),
@@ -65,7 +86,7 @@ export function DevicePairingPanel({ session, deviceName }: Props) {
     setError('');
     setVerificationCode('');
     try {
-      const request = await beginDevicePairing(attempt.serverUrl, deviceName, attempt.controller.signal);
+      const request = await beginDevicePairing(attempt.serverUrl, deviceName, device, attempt.controller.signal);
       attempt.request = request;
       if (!isCurrent(attempt)) { dispose(attempt, true); return; }
       const expire = () => {
@@ -93,16 +114,15 @@ export function DevicePairingPanel({ session, deviceName }: Props) {
             return;
           }
           if (result.status === 'approved') {
-            if (!result.authToken?.trim()) throw new Error(t('pair.missingCredentials'));
-            const token = result.authToken;
+            // The device key was persisted when pairing started; approval only
+            // confirms the backend registered the matching deviceId.
             const current = latest.current;
-            current.updateBackendConnection(attempt.profileId, { authToken: token });
-            current.setSettings(settings => (
-              latest.current.activeBackendConnectionId === attempt.profileId
-              && latest.current.backendConnections.some(item => item.id === attempt.profileId && item.serverUrl === attempt.serverUrl)
-              && settings.serverUrl === attempt.serverUrl
-                ? { ...settings, authToken: token } : settings
-            ));
+            if (!(current.activeBackendConnectionId === attempt.profileId
+              && current.backendConnections.some(item => item.id === attempt.profileId && item.serverUrl === attempt.serverUrl)
+              && current.settings.serverUrl === attempt.serverUrl)) {
+              return;
+            }
+            current.onDevicePairingApproved?.();
           }
           dispose(attempt, false);
           setPhase(result.status);

@@ -66,6 +66,7 @@ import {
 } from '@todex/protocol/todex';
 import type { TransportCryptoSession } from '@todex/protocol/transportCrypto';
 import type { PairingQrChunk } from '@todex/protocol/transportCrypto';
+import { deviceAuthHeaders, deviceIdentityFromSecret } from '@todex/protocol/deviceAuth';
 import {
   cursorFromEvent as transportCursorFromEvent,
   sessionIdFromEvent as transportSessionIdFromEvent,
@@ -1338,7 +1339,7 @@ export function textFromItem(item: Record<string, unknown>): string {
   return textFromContent(item.content);
 }
 
-export type PersistedSettings = Omit<ConnectionSettings, 'authToken'>;
+export type PersistedSettings = Omit<ConnectionSettings, 'deviceSecret'>;
 
 
 export const SETTINGS_STORAGE_KEY = 'todex.desktop.settings.v1';
@@ -1353,8 +1354,8 @@ export const EXPERIMENTAL_FEATURES_STORAGE_KEY = 'todex.desktop.experimentalFeat
 export const USAGE_RECORDS_STORAGE_KEY = 'todex.desktop.usageRecords.v1';
 export const PROVIDER_MODEL_PREFERENCES_STORAGE_KEY = 'todex.desktop.providerModelPreferences.v1';
 export const KANBAN_TASKS_STORAGE_KEY = 'todex.desktop.kanbanTasks.v1';
-export const TOKEN_STORAGE_KEY = 'todex.desktop.token.v1';
-export const TOKEN_ORIGIN_STORAGE_KEY = 'todex.desktop.tokenOrigin.v1';
+export const DEVICE_SECRET_STORAGE_KEY = 'todex.desktop.deviceSecret.v1';
+export const DEVICE_ORIGIN_STORAGE_KEY = 'todex.desktop.deviceOrigin.v1';
 export const JSON_SAVE_DEBOUNCE_MS = 350;
 export const SESSION_CURSOR_SAVE_DEBOUNCE_MS = 800;
 export const WORKSPACE_SYNC_DEBOUNCE_MS = 900;
@@ -1611,7 +1612,7 @@ export const FEEDBACK_CATEGORIES: { id: string; title: string; description: stri
 
 export const defaultSettings: ConnectionSettings = {
   serverUrl: 'http://127.0.0.1:7345',
-  authToken: '',
+  deviceSecret: '',
   tenantId: 'local',
   encryptionProtocol: 'none',
   encryptionPublicKey: '',
@@ -1706,11 +1707,11 @@ export function parseModelCommandArgs(args: string[]): {
 }
 
 export function toPersistedSettings(settings: ConnectionSettings): PersistedSettings {
-  const { authToken: _authToken, ...rest } = settings;
+  const { deviceSecret: _deviceSecret, ...rest } = settings;
   return rest;
 }
 
-export function fromPersistedSettings(raw: Partial<PersistedSettings> | null | undefined, authToken: string): ConnectionSettings {
+export function fromPersistedSettings(raw: Partial<PersistedSettings> | null | undefined, deviceSecret: string): ConnectionSettings {
   const { defaultThreadId: _legacyDefaultThreadId, ...safeRaw } = (raw ?? {}) as Partial<PersistedSettings> & {
     defaultThreadId?: string;
   };
@@ -1718,17 +1719,17 @@ export function fromPersistedSettings(raw: Partial<PersistedSettings> | null | u
     ...defaultSettings,
     ...safeRaw,
     defaultReasoningEffort: normalizeReasoningEffort(safeRaw.defaultReasoningEffort) ?? defaultSettings.defaultReasoningEffort,
-    authToken,
+    deviceSecret,
   };
 }
 
 export function profileFromSettings(settings: ConnectionSettings, name = t('session.defaultBackend'), id = 'default-backend'): BackendConnectionProfile {
   const now = Date.now();
-  return { id, name, serverUrl: normalizeServerUrl(settings.serverUrl), authToken: settings.authToken, tenantId: settings.tenantId, encryptionProtocol: settings.encryptionProtocol, encryptionPublicKey: settings.encryptionPublicKey, createdAt: now, updatedAt: now };
+  return { id, name, serverUrl: normalizeServerUrl(settings.serverUrl), deviceSecret: settings.deviceSecret, tenantId: settings.tenantId, encryptionProtocol: settings.encryptionProtocol, encryptionPublicKey: settings.encryptionPublicKey, createdAt: now, updatedAt: now };
 }
 
 export function settingsFromProfile(profile: BackendConnectionProfile, current: ConnectionSettings): ConnectionSettings {
-  return { ...current, serverUrl: normalizeServerUrl(profile.serverUrl), authToken: profile.authToken, tenantId: profile.tenantId, encryptionProtocol: profile.encryptionProtocol, encryptionPublicKey: profile.encryptionPublicKey };
+  return { ...current, serverUrl: normalizeServerUrl(profile.serverUrl), deviceSecret: profile.deviceSecret, tenantId: profile.tenantId, encryptionProtocol: profile.encryptionProtocol, encryptionPublicKey: profile.encryptionPublicKey };
 }
 
 export function normalizeBackendConnectionProfile(value: unknown): BackendConnectionProfile | null {
@@ -1738,13 +1739,20 @@ export function normalizeBackendConnectionProfile(value: unknown): BackendConnec
   const serverUrl = typeof raw.serverUrl === 'string' ? raw.serverUrl.trim() : '';
   if (!id || !serverUrl) return null;
   const now = Date.now();
-  return { id, labelColor: normalizeBackendLabelColor(raw.labelColor), name: typeof raw.name === 'string' && raw.name.trim() ? raw.name.trim() : t('session.backend'), serverUrl: normalizeServerUrl(serverUrl), authToken: typeof raw.authToken === 'string' ? raw.authToken : '', tenantId: typeof raw.tenantId === 'string' && raw.tenantId.trim() ? raw.tenantId.trim() : 'local', encryptionProtocol: raw.encryptionProtocol === 'x25519' || raw.encryptionProtocol === 'ml-kem-768' ? raw.encryptionProtocol : 'none', encryptionPublicKey: typeof raw.encryptionPublicKey === 'string' ? raw.encryptionPublicKey : '', createdAt: typeof raw.createdAt === 'number' ? raw.createdAt : now, updatedAt: typeof raw.updatedAt === 'number' ? raw.updatedAt : now };
+  return { id, labelColor: normalizeBackendLabelColor(raw.labelColor), name: typeof raw.name === 'string' && raw.name.trim() ? raw.name.trim() : t('session.backend'), serverUrl: normalizeServerUrl(serverUrl), deviceSecret: typeof raw.deviceSecret === 'string' ? raw.deviceSecret : '', tenantId: typeof raw.tenantId === 'string' && raw.tenantId.trim() ? raw.tenantId.trim() : 'local', encryptionProtocol: raw.encryptionProtocol === 'x25519' || raw.encryptionProtocol === 'ml-kem-768' ? raw.encryptionProtocol : 'none', encryptionPublicKey: typeof raw.encryptionPublicKey === 'string' ? raw.encryptionPublicKey : '', createdAt: typeof raw.createdAt === 'number' ? raw.createdAt : now, updatedAt: typeof raw.updatedAt === 'number' ? raw.updatedAt : now };
 }
 
-export function authHeaders(settings: ConnectionSettings, extra: Record<string, string> = {}): Record<string, string> {
+export function authHeaders(
+  settings: ConnectionSettings,
+  method = 'GET',
+  pathAndQuery = '/',
+  body: Uint8Array = new Uint8Array(),
+  extra: Record<string, string> = {},
+): Record<string, string> {
+  const device = deviceIdentityFromSecret(settings.deviceSecret);
   return {
     ...extra,
-    ...(settings.authToken ? { Authorization: `Bearer ${settings.authToken}` } : {}),
+    ...(device ? deviceAuthHeaders(device, method, pathAndQuery, body) : {}),
   };
 }
 

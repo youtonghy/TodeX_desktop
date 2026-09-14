@@ -98,7 +98,7 @@ export const ja: Messages = {
   'settings.labelColorAria': 'Backend ラベルの色',
   'settings.labelColorHint': 'ワークスペース横のドットにこの色を使用します。ホバーで対応する Backend を確認できます。色は自動保存されます。',
   'settings.serverUrl': 'Backend アドレス',
-  'settings.credentialWarning': '接続の認証情報はこのブラウザプロファイルに保存されます。共有デバイスでは使用後にローカルデータを削除してください。',
+  'settings.credentialWarning': 'デバイスキーはこのブラウザプロファイルに保存されます。共有デバイスでは使用後にローカルデータを削除してください。',
   'settings.encryption': '転送暗号化',
   'settings.encryptionKey': '暗号化公開鍵',
   'settings.disconnect': '切断',
@@ -777,7 +777,7 @@ export const ja: Messages = {
   'pair.errTimeout': 'デバイス認証リクエストがタイムアウトしました。Backend 接続を確認してください。',
   'pair.errTooLarge': 'デバイス認証の応答が大きすぎます。',
   'pair.errTooMany': 'デバイス申請が多すぎるかキューがいっぱいです。後で再試行してください。',
-  'pair.errUnsupported': '現在の Backend はデバイス認証に対応していません。Backend を更新するかトークンを手入力してください。',
+  'pair.errUnsupported': '現在の Backend はデバイス認証に対応していません。Backend を更新してください。',
 
   // pi
   'pi.noticeInfo': '通知',

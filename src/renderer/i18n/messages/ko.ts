@@ -98,7 +98,7 @@ export const ko: Messages = {
   'settings.labelColorAria': 'Backend 라벨 색상',
   'settings.labelColorHint': '워크스페이스 옆 점에 이 색상이 사용됩니다. 마우스를 올리면 해당 Backend를 확인할 수 있습니다. 색상은 자동 저장됩니다.',
   'settings.serverUrl': 'Backend 주소',
-  'settings.credentialWarning': '연결 자격 증명은 현재 브라우저 프로필에 저장됩니다. 공용 기기에서는 사용 후 로컬 데이터를 삭제하세요.',
+  'settings.credentialWarning': '기기 키는 현재 브라우저 프로필에 저장됩니다. 공용 기기에서는 사용 후 로컬 데이터를 삭제하세요.',
   'settings.encryption': '전송 암호화',
   'settings.encryptionKey': '암호화 공개 키',
   'settings.disconnect': '연결 해제',
@@ -777,7 +777,7 @@ export const ko: Messages = {
   'pair.errTimeout': '기기 인증 요청 시간이 초과되었습니다. Backend 연결을 확인하세요.',
   'pair.errTooLarge': '기기 인증 응답이 너무 큽니다.',
   'pair.errTooMany': '기기 신청이 너무 많거나 큐가 가득 찼습니다. 잠시 후 다시 시도하세요.',
-  'pair.errUnsupported': '현재 Backend는 기기 인증을 지원하지 않습니다. Backend를 업데이트하거나 토큰을 직접 입력하세요.',
+  'pair.errUnsupported': '현재 Backend는 기기 인증을 지원하지 않습니다. Backend를 업데이트하세요.',
 
   // pi
   'pi.noticeInfo': '알림',

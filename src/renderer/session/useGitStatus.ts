@@ -11,7 +11,7 @@ export function useGitStatus({ settings, workspacePath, scopeKey, enabled, think
   thinking: boolean;
   refreshKey: boolean;
 }) {
-  const identity = JSON.stringify([scopeKey, workspacePath, settings.serverUrl, settings.authToken]);
+  const identity = JSON.stringify([scopeKey, workspacePath, settings.serverUrl, settings.deviceSecret]);
   const [result, setResult] = useState<{ identity: string; data: GitStatusSummary | null; error: string } | null>(null);
   const refreshRef = useRef<() => void>(() => {});
   const refresh = useCallback(() => refreshRef.current(), []);

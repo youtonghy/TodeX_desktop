@@ -8,6 +8,7 @@ import {
   type CliVersionStatus,
   type ManagedCliProvider,
 } from '@todex/protocol/v2';
+import { deviceIdentityFromSecret } from '@todex/protocol/deviceAuth';
 import { ProviderIcon } from '../components/ProviderIcon';
 import { NoticeToast } from '../components/NoticeToast';
 import { t, useT, type MessageKey } from '../i18n';
@@ -32,8 +33,8 @@ export function CliManagerPanel({ session }: { session: TodeXSession }) {
   const backendGeneration = useRef(0);
   const api = useCallback(() => new V2ApiClient({
     serverUrl: session.settings.serverUrl,
-    authToken: session.settings.authToken,
-  }), [session.settings.authToken, session.settings.serverUrl]);
+    device: deviceIdentityFromSecret(session.settings.deviceSecret),
+  }), [session.settings.deviceSecret, session.settings.serverUrl]);
 
   const refresh = useCallback(async (quiet = false) => {
     const generation = ++requestGeneration.current;

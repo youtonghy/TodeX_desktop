@@ -10,6 +10,7 @@ import {
   type KanbanTaskStatus,
 } from '@todex/protocol/todex';
 import { loadJson, saveJson } from '../lib/storage';
+import { deviceAuthHeaders, deviceIdentityFromSecret } from '@todex/protocol/deviceAuth';
 import { KANBAN_TASKS_STORAGE_KEY, WORKSPACE_SYNC_DEBOUNCE_MS } from './helpers';
 import { t } from '../i18n';
 
@@ -34,7 +35,7 @@ const KANBAN_TOMBSTONE_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 
 export type KanbanSyncConfig = {
   serverUrl: string;
-  authToken: string;
+  deviceSecret: string;
   backendConnectionId: string;
 };
 
@@ -101,7 +102,7 @@ export function configureKanbanSync(config: KanbanSyncConfig | null): void {
   if (!config) return;
   const changed = !previous
     || previous.serverUrl !== config.serverUrl
-    || previous.authToken !== config.authToken
+    || previous.deviceSecret !== config.deviceSecret
     || previous.backendConnectionId !== config.backendConnectionId;
   if (changed) {
     syncSupported = true;
@@ -109,12 +110,17 @@ export function configureKanbanSync(config: KanbanSyncConfig | null): void {
   }
 }
 
+function kanbanAuthHeaders(config: KanbanSyncConfig, method: string, pathAndQuery: string, body: Uint8Array = new Uint8Array()): Record<string, string> {
+  const device = deviceIdentityFromSecret(config.deviceSecret);
+  return device ? { ...deviceAuthHeaders(device, method, pathAndQuery, body) } : {};
+}
+
 export async function syncKanbanTasksFromBackend(): Promise<void> {
   const config = syncConfig;
   if (!config || !syncSupported) return;
   try {
     const response = await fetch(buildHttpUrl(config.serverUrl, '/v2/kanban/tasks'), {
-      headers: config.authToken ? { Authorization: `Bearer ${config.authToken}` } : {},
+      headers: kanbanAuthHeaders(config, 'GET', '/v2/kanban/tasks'),
     });
     if (response.status === 404) {
       syncSupported = false;
@@ -156,13 +162,14 @@ async function pushKanbanTasksToBackend(): Promise<void> {
   }
   pushInFlight = true;
   try {
+    const body = JSON.stringify({ tasks: prepareKanbanSyncPayload(tasksForConnection(config.backendConnectionId)) });
     const response = await fetch(buildHttpUrl(config.serverUrl, '/v2/kanban/tasks'), {
       method: 'PUT',
+      body,
       headers: {
         'Content-Type': 'application/json',
-        ...(config.authToken ? { Authorization: `Bearer ${config.authToken}` } : {}),
+        ...kanbanAuthHeaders(config, 'PUT', '/v2/kanban/tasks', new TextEncoder().encode(body)),
       },
-      body: JSON.stringify({ tasks: prepareKanbanSyncPayload(tasksForConnection(config.backendConnectionId)) }),
     });
     if (response.status === 404) {
       syncSupported = false;

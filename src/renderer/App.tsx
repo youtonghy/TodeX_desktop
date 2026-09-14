@@ -319,7 +319,7 @@ function CreateWorkspaceModal({
   const [backendId, setBackendId] = useState(workspace?.backendConnectionId ?? session.activeBackendConnectionId);
   const [entries, setEntries] = useState<string[]>([]);
   const selectedBackend = session.backendConnections.find((profile) => profile.id === backendId);
-  const directorySettings = selectedBackend ? { ...session.settings, serverUrl: selectedBackend.serverUrl, authToken: selectedBackend.authToken, tenantId: selectedBackend.tenantId, encryptionProtocol: selectedBackend.encryptionProtocol, encryptionPublicKey: selectedBackend.encryptionPublicKey } : session.settings;
+  const directorySettings = selectedBackend ? { ...session.settings, serverUrl: selectedBackend.serverUrl, deviceSecret: selectedBackend.deviceSecret, tenantId: selectedBackend.tenantId, encryptionProtocol: selectedBackend.encryptionProtocol, encryptionPublicKey: selectedBackend.encryptionPublicKey } : session.settings;
 
   useEffect(() => {
     if (!isOpen || workspace) return;

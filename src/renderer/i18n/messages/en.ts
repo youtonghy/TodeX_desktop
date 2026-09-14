@@ -98,7 +98,7 @@ export const en: Messages = {
   'settings.labelColorAria': 'Backend label color',
   'settings.labelColorHint': 'The dot next to workspaces uses this color; hover to see the backend. Saved automatically.',
   'settings.serverUrl': 'Backend address',
-  'settings.credentialWarning': 'Connection credentials are stored in this browser profile. On shared devices, clear local data after use.',
+  'settings.credentialWarning': 'Device keys are stored in this browser profile. On shared devices, clear local data after use.',
   'settings.encryption': 'Transport encryption',
   'settings.encryptionKey': 'Encryption public key',
   'settings.disconnect': 'Disconnect',
@@ -777,7 +777,7 @@ export const en: Messages = {
   'pair.errTimeout': 'Device verification request timed out. Check the backend connection.',
   'pair.errTooLarge': 'The device verification response is too large.',
   'pair.errTooMany': 'Too many device requests or the queue is full. Try again later.',
-  'pair.errUnsupported': 'This backend does not support device verification. Update the backend or enter the token manually.',
+  'pair.errUnsupported': 'This backend does not support device verification. Update the backend.',
 
   // pi
   'pi.noticeInfo': 'Notice',

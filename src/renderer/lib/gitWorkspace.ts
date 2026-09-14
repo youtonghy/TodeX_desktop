@@ -1,4 +1,5 @@
 import { buildHttpUrl, type ConnectionSettings } from '@todex/protocol/todex';
+import { deviceAuthHeaders, deviceIdentityFromSecret } from '@todex/protocol/deviceAuth';
 import { t } from '../i18n';
 
 export interface GitWorkspaceBranch {
@@ -70,13 +71,18 @@ async function request<T>(settings: ConnectionSettings, url: string, operation?:
   else externalSignal?.addEventListener('abort', abort, { once: true });
   const timeout = setTimeout(() => controller.abort(), operation ? 120_000 : 15_000);
   try {
+    const requestBody = operation ? JSON.stringify({ workspacePath, operation }) : '';
+    const device = deviceIdentityFromSecret(settings.deviceSecret);
+    const parsedUrl = new URL(url);
     const response = await fetch(url, {
       method: operation ? 'POST' : 'GET',
       headers: {
-        ...(settings.authToken ? { Authorization: `Bearer ${settings.authToken}` } : {}),
+        ...(device
+          ? deviceAuthHeaders(device, operation ? 'POST' : 'GET', `${parsedUrl.pathname}${parsedUrl.search}`, new TextEncoder().encode(requestBody))
+          : {}),
         ...(operation ? { 'Content-Type': 'application/json' } : {}),
       },
-      ...(operation ? { body: JSON.stringify({ workspacePath, operation }) } : {}),
+      ...(operation ? { body: requestBody } : {}),
       signal: controller.signal,
     });
     const body: unknown = await response.json().catch(() => null);
