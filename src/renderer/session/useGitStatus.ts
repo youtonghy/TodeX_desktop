@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ConnectionSettings } from '@todex/protocol/todex';
 import { readGitStatus, type GitStatusSummary } from '../lib/gitWorkspace';
+import { t } from '../i18n';
 
 export function useGitStatus({ settings, workspacePath, scopeKey, enabled, thinking, refreshKey }: {
   settings: ConnectionSettings;
@@ -34,7 +35,7 @@ export function useGitStatus({ settings, workspacePath, scopeKey, enabled, think
         const data = await readGitStatus(settings, workspacePath, controller.signal);
         if (!disposed) setResult({ identity, data, error: '' });
       } catch (cause) {
-        if (!disposed) setResult({ identity, data: null, error: cause instanceof Error ? cause.message : '读取 Git 状态失败' });
+        if (!disposed) setResult({ identity, data: null, error: cause instanceof Error ? cause.message : t('git.readFailed') });
       } finally {
         pending = false;
         if (!disposed) timer = setTimeout(() => void poll(), thinking ? 5_000 : 30_000);

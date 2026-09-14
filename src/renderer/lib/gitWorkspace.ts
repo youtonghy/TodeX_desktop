@@ -1,4 +1,5 @@
 import { buildHttpUrl, type ConnectionSettings } from '@todex/protocol/todex';
+import { t } from '../i18n';
 
 export interface GitWorkspaceBranch {
   name: string;
@@ -82,18 +83,18 @@ async function request<T>(settings: ConnectionSettings, url: string, operation?:
     if (!response.ok) {
       const data = body && typeof body === 'object' ? body as Record<string, unknown> : {};
       const code = typeof data.code === 'string' ? data.code : undefined;
-      throw new GitWorkspaceError(typeof data.message === 'string' ? data.message : `Git 请求失败 (${response.status})`, {
+      throw new GitWorkspaceError(typeof data.message === 'string' ? data.message : t('git.requestFailed', { status: response.status }), {
         status: response.status, code,
         unknownOutcome: Boolean(operation && (data.unknownOutcome === true || (code && uncertainCodes.has(code)) || response.status >= 500)),
       });
     }
     if (!body || typeof body !== 'object') {
-      throw new GitWorkspaceError('后端返回了无效的 Git 操作结果', { status: response.status, unknownOutcome: Boolean(operation) });
+      throw new GitWorkspaceError(t('git.invalidResult'), { status: response.status, unknownOutcome: Boolean(operation) });
     }
     return body as T;
   } catch (error) {
     if (error instanceof GitWorkspaceError) throw error;
-    throw new GitWorkspaceError(controller.signal.aborted ? 'Git 请求已取消或超时，请核对实际状态' : error instanceof Error ? error.message : 'Git 请求连接失败', {
+    throw new GitWorkspaceError(controller.signal.aborted ? t('git.requestAborted') : error instanceof Error ? error.message : t('git.requestConnFailed'), {
       code: controller.signal.aborted ? 'REQUEST_ABORTED' : 'NETWORK_ERROR', unknownOutcome: Boolean(operation),
     });
   } finally {

@@ -1,3 +1,5 @@
+import { t } from '../i18n';
+
 export type ProtocolCommand = { id: string; type: string; payload: Record<string, unknown> };
 
 export class ProtocolCommandError extends Error {
@@ -28,7 +30,7 @@ export class ProtocolCommands {
 
   request(message: ProtocolCommand, timeoutMs = 15_000): Promise<Record<string, unknown>> {
     if (this.pending.has(message.id) || this.pending.size >= 64) {
-      return Promise.reject(new ProtocolCommandError('待处理请求过多，请等待现有请求完成。', 'not-sent', message.id));
+      return Promise.reject(new ProtocolCommandError(t('proto.tooManyPending'), 'not-sent', message.id));
     }
     return new Promise((resolve, reject) => {
       const entry: PendingCommand = {
@@ -36,7 +38,7 @@ export class ProtocolCommands {
         timer: setTimeout(() => {
           if (!this.pending.delete(message.id)) return;
           reject(new ProtocolCommandError(
-            entry.sent ? '后端尚未确认，执行状态待确认。正在核对记录，请勿重复发送。' : '消息未发送：连接后端超时。',
+            entry.sent ? t('proto.unconfirmed') : t('proto.sendTimeout'),
             entry.sent ? 'unknown' : 'not-sent', message.id,
           ));
         }, timeoutMs),
@@ -69,14 +71,14 @@ export class ProtocolCommands {
     for (const [id, entry] of this.pending) {
       if (!entry.sent) continue;
       this.take(id);
-      entry.reject(new ProtocolCommandError('连接在确认前中断，执行状态待确认。请勿重复发送。', 'unknown', id));
+      entry.reject(new ProtocolCommandError(t('proto.disconnectedBeforeAck'), 'unknown', id));
     }
   }
 
   dispose(): void {
     for (const [id, entry] of this.pending) {
       this.take(id);
-      entry.reject(new ProtocolCommandError('连接已关闭。', entry.sent ? 'unknown' : 'not-sent', id));
+      entry.reject(new ProtocolCommandError(t('proto.connectionClosed'), entry.sent ? 'unknown' : 'not-sent', id));
     }
   }
 
@@ -94,7 +96,7 @@ export class ProtocolCommands {
       entry.sent = this.send(entry.message);
     } catch (error) {
       this.take(entry.message.id);
-      entry.reject(new ProtocolCommandError(error instanceof Error ? error.message : '消息未能发送。', 'not-sent', entry.message.id));
+      entry.reject(new ProtocolCommandError(error instanceof Error ? error.message : t('proto.sendFailed'), 'not-sent', entry.message.id));
     }
   }
 }

@@ -1,7 +1,9 @@
 import { buildHttpUrl, type ConnectionSettings } from '@todex/protocol/todex';
+import { t, subscribeLocale } from '../i18n';
 import type { TransportCryptoSession } from '@todex/protocol/transportCrypto';
 
-export const ENCRYPTION_VERIFICATION_ERROR = '尚未通过加密密钥传输验证。请通过后端二维码或复制粘贴导入正确的加密公钥后重新连接。';
+export let ENCRYPTION_VERIFICATION_ERROR = t('transport.notVerified');
+subscribeLocale(() => { ENCRYPTION_VERIFICATION_ERROR = t('transport.notVerified'); });
 const TIMEOUT_MS = 10_000;
 
 /** Verification failures split into transport problems worth retrying (network
@@ -34,15 +36,15 @@ export async function validateTransportEncryption(settings: ConnectionSettings, 
     // Older backends do not advertise a policy. Their existing handshake still
     // applies, and an explicitly encrypted client must still have a local key.
     if (response.status !== 404) {
-      if (!response.ok) throw new TransportVerificationError('无法确认后端加密要求，请检查后端状态后重试。', response.status >= 500);
+      if (!response.ok) throw new TransportVerificationError(t('transport.cannotConfirmPolicy'), response.status >= 500);
       const text = await response.text();
-      if (text.length > 2048) throw new TransportVerificationError('后端加密要求响应无效。');
+      if (text.length > 2048) throw new TransportVerificationError(t('transport.invalidPolicy'));
       let value: unknown;
-      try { value = JSON.parse(text); } catch { throw new TransportVerificationError('后端加密要求响应无效。'); }
+      try { value = JSON.parse(text); } catch { throw new TransportVerificationError(t('transport.invalidPolicy')); }
       const protocol = value && typeof value === 'object' ? (value as Record<string, unknown>).requiredProtocol : undefined;
-      if (protocol !== 'none' && protocol !== 'x25519' && protocol !== 'ml-kem-768') throw new TransportVerificationError('后端加密要求响应无效，请更新客户端或后端。');
+      if (protocol !== 'none' && protocol !== 'x25519' && protocol !== 'ml-kem-768') throw new TransportVerificationError(t('transport.invalidPolicyUpdate'));
       if (protocol !== 'none' && settings.encryptionProtocol !== protocol) {
-        throw new TransportVerificationError(`后端要求 ${protocol} 加密，当前连接尚未完成加密密钥传输验证。请通过二维码或复制粘贴导入对应公钥，并选择 ${protocol} 后重新连接。`);
+        throw new TransportVerificationError(t('transport.protocolRequired', { protocol }));
       }
     }
     if (settings.encryptionProtocol !== 'none' && !settings.encryptionPublicKey.trim()) {
@@ -51,9 +53,9 @@ export async function validateTransportEncryption(settings: ConnectionSettings, 
     if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
   } catch (error) {
     if (error instanceof TransportVerificationError) throw error;
-    if (controller.signal.aborted && !signal?.aborted) throw new TransportVerificationError('确认后端加密要求超时，请检查连接后重试。', true);
+    if (controller.signal.aborted && !signal?.aborted) throw new TransportVerificationError(t('transport.policyTimeout'), true);
     if (signal?.aborted) throw error;
-    throw new TransportVerificationError('无法连接后端以确认加密要求，将自动重试。', true);
+    throw new TransportVerificationError(t('transport.policyUnreachable'), true);
   } finally {
     clearTimeout(timer);
     signal?.removeEventListener('abort', abort);

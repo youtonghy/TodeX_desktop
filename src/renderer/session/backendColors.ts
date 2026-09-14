@@ -1,16 +1,17 @@
 import type { BackendConnectionProfile as ProtocolBackendConnectionProfile } from '@todex/protocol/todex';
+import { t } from '../i18n';
 
 export type BackendConnectionProfile = ProtocolBackendConnectionProfile & { labelColor?: string };
 
 export const BACKEND_LABEL_COLORS = [
-  { value: '#3b82f6', label: '蓝色' },
-  { value: '#8b5cf6', label: '紫色' },
-  { value: '#ec4899', label: '粉色' },
-  { value: '#ef4444', label: '红色' },
-  { value: '#f97316', label: '橙色' },
-  { value: '#eab308', label: '黄色' },
-  { value: '#22c55e', label: '绿色' },
-  { value: '#06b6d4', label: '青色' },
+  { value: '#3b82f6', get label() { return t('color.blue'); } },
+  { value: '#8b5cf6', get label() { return t('color.purple'); } },
+  { value: '#ec4899', get label() { return t('color.pink'); } },
+  { value: '#ef4444', get label() { return t('color.red'); } },
+  { value: '#f97316', get label() { return t('color.orange'); } },
+  { value: '#eab308', get label() { return t('color.yellow'); } },
+  { value: '#22c55e', get label() { return t('color.green'); } },
+  { value: '#06b6d4', get label() { return t('color.cyan'); } },
 ] as const;
 
 export function normalizeBackendLabelColor(value: unknown): string | undefined {

@@ -3,6 +3,7 @@ import { Button } from '@heroui/react';
 import { CodeBlock } from '@heroui-pro/react/code-block';
 import { Markdown } from '@heroui-pro/react/markdown';
 import { lineRangeForOffsets, selectionInside, selectionStartOffset, type TextLineRange } from '../lib/selection';
+import { useT } from '../i18n';
 
 function fileExtension(path: string): string {
   return path.split(/[\\/]/).pop()?.split('.').pop()?.toLowerCase() || '';
@@ -144,6 +145,7 @@ export function WorkspaceFilePreview({ file, onAddReference }: {
   file: PreviewFile | null;
   onAddReference?: (selection: ReferenceSelection) => void;
 }) {
+  const t = useT();
   const containerRef = useRef<HTMLDivElement>(null);
   const [quote, setQuote] = useState<QuoteTarget | null>(null);
   const quotable = Boolean(onAddReference && file && typeof file.text === 'string' && file.text);
@@ -185,18 +187,18 @@ export function WorkspaceFilePreview({ file, onAddReference }: {
 
   let content: React.ReactNode;
   if (!file) {
-    content = <p className="text-muted text-xs">选择文件预览。</p>;
+    content = <p className="text-muted text-xs">{t('filePreview.hint')}</p>;
   } else {
     // Older backends report images as application/octet-stream with text: null.
     const imageMime = file.mimeType.startsWith('image/') ? file.mimeType : imageTypes[fileExtension(file.path)];
     if (imageMime) {
       content = file.dataUrl?.startsWith(`data:${imageMime};base64,`)
-        ? <img src={file.dataUrl} alt={file.name || file.path.split('/').pop() || '图片预览'} className="block h-auto max-w-full rounded-lg object-contain" />
-        : <p className="text-muted text-xs">当前后端未返回图片预览，请更新后端后重试。</p>;
+        ? <img src={file.dataUrl} alt={file.name || file.path.split('/').pop() || t('filePreview.imageAlt')} className="block h-auto max-w-full rounded-lg object-contain" />
+        : <p className="text-muted text-xs">{t('filePreview.noImageData')}</p>;
     } else if (typeof file.text !== 'string') {
-      content = <p className="text-muted text-xs">暂不支持预览此文件格式。</p>;
+      content = <p className="text-muted text-xs">{t('filePreview.unsupported')}</p>;
     } else if (!file.text) {
-      content = <p className="text-muted text-xs">{file.sizeBytes ? '该文件没有可供预览的文本内容。' : '此文件为空。'}</p>;
+      content = <p className="text-muted text-xs">{file.sizeBytes ? t('filePreview.noText') : t('filePreview.empty')}</p>;
     } else if (isMarkdownFile(file.path)) {
       content = <Markdown>{file.text}</Markdown>;
     } else {
@@ -216,7 +218,7 @@ export function WorkspaceFilePreview({ file, onAddReference }: {
       {content}
       {quote ? (
         <div className="fixed z-50 -translate-x-1/2" style={{ left: quote.left, top: quote.top }}>
-          <Button size="sm" variant="secondary" onPress={addQuote}>添加到对话</Button>
+          <Button size="sm" variant="secondary" onPress={addQuote}>{t('filePreview.addToChat')}</Button>
         </div>
       ) : null}
     </div>

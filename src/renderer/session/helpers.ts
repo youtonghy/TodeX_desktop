@@ -38,6 +38,12 @@ export function buildConversationControlMessage(
 }
 import { providerDisplayName } from '@todex/protocol/v2';
 import type { ConnectionFailureCode } from '@todex/protocol/connectionError';
+import { matchesMessage, t } from '../i18n';
+
+// Sentinel produced while an assistant reply is streaming. The shared
+// protocol lib merges against this exact zh literal, so it stays untranslated;
+// the UI maps it to t('chat.replying') at render time.
+export const STREAMING_REPLY_PLACEHOLDER = '正在回复...';
 import {
   buildHttpUrl,
   createRequestId,
@@ -588,16 +594,16 @@ export function isThreadNotFound(text: string): boolean {
 
 export function localTurnErrorMessage(text: string): string {
   if (isThreadNotFound(text)) {
-    return '当前对话的 thread 已失效，下一次发送会为该对话自动创建新的 thread。';
+    return t('session.threadInvalid');
   }
   if (isLocalAdapterFailed(text)) {
-    return '本地会话状态已失效，请重新发送消息以启动新的会话。';
+    return t('session.localStateInvalid');
   }
   if (isLocalAdapterAlreadyRunning(text)) {
-    return '本地会话已经在运行，不要重复启动。';
+    return t('session.localAlreadyRunning');
   }
   if (/unsupported_action/i.test(text) || /not running for this session/i.test(text)) {
-    return '本地会话还没启动，先执行 start 再发送消息。';
+    return t('session.localNotStarted');
   }
   return text;
 }
@@ -807,15 +813,15 @@ export function attachmentPrompt(attachments: ComposerAttachmentDraft[]): string
   const referenceCount = attachments.filter((item) => item.kind === 'reference').length;
   const fileCount = attachments.length - imageCount - referenceCount;
   if (imageCount === 0 && fileCount === 0) {
-    return referenceCount === 1 ? '请查看这条引用。' : `请查看这 ${referenceCount} 条引用。`;
+    return referenceCount === 1 ? t('session.viewReferenceSingle') : t('session.viewReferences', { count: referenceCount });
   }
   if (imageCount > 0 && fileCount > 0) {
-    return `请查看这 ${attachments.length} 个附件。`;
+    return t('session.viewAttachments', { count: attachments.length });
   }
   if (imageCount > 0) {
-    return imageCount === 1 ? '请查看这张图片。' : `请查看这 ${imageCount} 张图片。`;
+    return imageCount === 1 ? t('session.viewImage') : t('session.viewImages', { count: imageCount });
   }
-  return fileCount === 1 ? '请查看这个文件。' : `请查看这 ${fileCount} 个文件。`;
+  return fileCount === 1 ? t('session.viewFile') : t('session.viewFiles', { count: fileCount });
 }
 
 export function attachmentTextBlock(attachment: ComposerAttachmentDraft): string {
@@ -846,7 +852,7 @@ export function codexInputFromComposer(
 ): Record<string, unknown>[] {
   const trimmed = text.trim();
   const items: Record<string, unknown>[] = [
-    { type: 'text', text: trimmed || attachmentPrompt(attachments) || (skills.length ? '请使用已选择的 Skill。' : '') },
+    { type: 'text', text: trimmed || attachmentPrompt(attachments) || (skills.length ? t('session.useSelectedSkills') : '') },
   ];
   skills.forEach((skill) => {
     items.push({
@@ -919,7 +925,7 @@ export function liveComposerAttachments(
 
 export function attachmentSummary(attachments: ComposerAttachmentDraft[]): string {
   return attachments
-    .map((item) => `${item.kind === 'image' ? '图片' : item.kind === 'reference' ? '引用' : '文件'} ${item.name} (${formatBytes(item.sizeBytes)})`)
+    .map((item) => `${item.kind === 'image' ? t('session.kindImage') : item.kind === 'reference' ? t('session.kindReference') : t('session.kindFile')} ${item.name} (${formatBytes(item.sizeBytes)})`)
     .join('\n');
 }
 
@@ -1036,6 +1042,7 @@ export type TimelineEntry = {
   workspaceId?: string;
   conversationId?: string;
   requestId?: string;
+  marker?: string;
   category?: ConversationBlockCategory;
   phase?: ConversationBlockPhase;
   turnId?: string;
@@ -1052,7 +1059,7 @@ export function parseToolCallState(raw: string, fallbackId: string): import('@to
   const normalizedStatus = (status === 'awaiting_approval' ? 'awaitingApproval' : status) as import('@todex/protocol/v2').ToolCallStatus;
   return {
     callId: String(value.callId ?? value.toolCallId ?? fallbackId),
-    name: String(value.toolName ?? value.name ?? value.tool ?? '工具调用'),
+    name: String(value.toolName ?? value.name ?? value.tool ?? t('chat.toolCall')),
     argumentsText: typeof args === 'string' ? args : args === undefined ? raw : JSON.stringify(args, null, 2),
     argumentsJson: typeof args === 'string' ? undefined : args,
     resultText: typeof result === 'string' ? result : result === undefined ? undefined : JSON.stringify(result, null, 2),
@@ -1074,6 +1081,12 @@ export function workspaceDisplayName(workspace: Pick<WorkspaceRecord, 'name' | '
   return normalizedPath.split(/[\\/]/).pop() || name || workspace.path;
 }
 
+// Default conversation titles are produced localized; match them across all
+// locales so records created under another language still read as generic.
+export function isDefaultConversationTitle(title: string): boolean {
+  return matchesMessage('chat.newConversation', title) || matchesMessage('chat.defaultConversation', title);
+}
+
 export function conversationDisplayTitle(
   conversation: Pick<ConversationRecord, 'id' | 'title' | 'preview' | 'provider'>,
   timeline: TimelineEntry[],
@@ -1081,8 +1094,6 @@ export function conversationDisplayTitle(
   const title = conversation.title.trim();
   const genericTitles = new Set([
     '',
-    '默认对话',
-    '新对话',
     'codex',
     'codex cli',
     'pi',
@@ -1092,7 +1103,7 @@ export function conversationDisplayTitle(
     'opencode',
     conversation.provider ? providerDisplayName(conversation.provider).toLowerCase() : '',
   ]);
-  if (!genericTitles.has(title.toLowerCase())) {
+  if (!genericTitles.has(title.toLowerCase()) && !isDefaultConversationTitle(title)) {
     return title;
   }
 
@@ -1107,7 +1118,7 @@ export function conversationDisplayTitle(
   const firstPrompt = [...timeline]
     .filter((entry) => entry.conversationId === conversation.id && entry.kind === 'outgoing' && entry.subtitle.trim())
     .sort((left, right) => left.at - right.at)[0];
-  return summarize(firstPrompt?.subtitle || '') || title || '未命名对话';
+  return summarize(firstPrompt?.subtitle || '') || title || t('chat.untitledConversation');
 }
 
 export type ConversationContextUsage = {
@@ -1211,7 +1222,7 @@ export function reasoningEffortLabel(value: string | null | undefined): string {
 export function modelDisplayLabel(model: string | null | undefined, catalog: CodexModelCatalogItem[]): string {
   const normalized = model?.trim() ?? '';
   if (!normalized) {
-    return '未设置';
+    return t('session.modelUnset');
   }
   return catalog.find((item) => item.model === normalized)?.displayName || normalized;
 }
@@ -1417,20 +1428,20 @@ export const EXPERIMENTAL_FEATURE_DEFAULTS: ExperimentalFeatureSettings = {
 export const EXPERIMENTAL_FEATURES: ExperimentalFeatureDefinition[] = [
   {
     id: 'gitDiffViewer',
-    title: 'Git diff 独立视图',
-    description: '允许通过 /diff 打开单独的变更查看界面。',
+    title: t('exp.gitDiffViewerTitle'),
+    description: t('exp.gitDiffViewerDesc'),
     scope: 'App UI',
   },
   {
     id: 'verboseRuntimeEvents',
-    title: '详细运行事件',
-    description: '保留更多后端事件细节，便于排查连接和线程状态。',
+    title: t('exp.verboseRuntimeEventsTitle'),
+    description: t('exp.verboseRuntimeEventsDesc'),
     scope: 'Diagnostics',
   },
   {
     id: 'composerFileMentions',
-    title: '@ 文件提及增强',
-    description: '启用输入框内的文件提及辅助和最近文件记录。',
+    title: t('exp.composerFileMentionsTitle'),
+    description: t('exp.composerFileMentionsDesc'),
     scope: 'Composer',
   },
 ];
@@ -1438,12 +1449,12 @@ export const EXPERIMENTAL_FEATURES: ExperimentalFeatureDefinition[] = [
 export const SLASH_COMMAND_CATEGORY_ORDER: SlashCommandCategory[] = ['core', 'thread', 'context', 'runtime', 'settings', 'debug'];
 
 export const SLASH_COMMAND_CATEGORY_LABELS: Record<SlashCommandCategory, string> = {
-  core: '核心',
+  get core() { return t('slashCat.core'); },
   thread: 'Thread',
-  context: '上下文',
-  runtime: '运行时',
-  settings: '设置',
-  debug: '调试',
+  get context() { return t('slashCat.context'); },
+  get runtime() { return t('slashCat.runtime'); },
+  get settings() { return t('slashCat.settings'); },
+  get debug() { return t('slashCat.debug'); },
 };
 
 export const DIRECT_SLASH_COMMANDS = new Set([
@@ -1711,7 +1722,7 @@ export function fromPersistedSettings(raw: Partial<PersistedSettings> | null | u
   };
 }
 
-export function profileFromSettings(settings: ConnectionSettings, name = '默认后端', id = 'default-backend'): BackendConnectionProfile {
+export function profileFromSettings(settings: ConnectionSettings, name = t('session.defaultBackend'), id = 'default-backend'): BackendConnectionProfile {
   const now = Date.now();
   return { id, name, serverUrl: normalizeServerUrl(settings.serverUrl), authToken: settings.authToken, tenantId: settings.tenantId, encryptionProtocol: settings.encryptionProtocol, encryptionPublicKey: settings.encryptionPublicKey, createdAt: now, updatedAt: now };
 }
@@ -1727,7 +1738,7 @@ export function normalizeBackendConnectionProfile(value: unknown): BackendConnec
   const serverUrl = typeof raw.serverUrl === 'string' ? raw.serverUrl.trim() : '';
   if (!id || !serverUrl) return null;
   const now = Date.now();
-  return { id, labelColor: normalizeBackendLabelColor(raw.labelColor), name: typeof raw.name === 'string' && raw.name.trim() ? raw.name.trim() : '后端', serverUrl: normalizeServerUrl(serverUrl), authToken: typeof raw.authToken === 'string' ? raw.authToken : '', tenantId: typeof raw.tenantId === 'string' && raw.tenantId.trim() ? raw.tenantId.trim() : 'local', encryptionProtocol: raw.encryptionProtocol === 'x25519' || raw.encryptionProtocol === 'ml-kem-768' ? raw.encryptionProtocol : 'none', encryptionPublicKey: typeof raw.encryptionPublicKey === 'string' ? raw.encryptionPublicKey : '', createdAt: typeof raw.createdAt === 'number' ? raw.createdAt : now, updatedAt: typeof raw.updatedAt === 'number' ? raw.updatedAt : now };
+  return { id, labelColor: normalizeBackendLabelColor(raw.labelColor), name: typeof raw.name === 'string' && raw.name.trim() ? raw.name.trim() : t('session.backend'), serverUrl: normalizeServerUrl(serverUrl), authToken: typeof raw.authToken === 'string' ? raw.authToken : '', tenantId: typeof raw.tenantId === 'string' && raw.tenantId.trim() ? raw.tenantId.trim() : 'local', encryptionProtocol: raw.encryptionProtocol === 'x25519' || raw.encryptionProtocol === 'ml-kem-768' ? raw.encryptionProtocol : 'none', encryptionPublicKey: typeof raw.encryptionPublicKey === 'string' ? raw.encryptionPublicKey : '', createdAt: typeof raw.createdAt === 'number' ? raw.createdAt : now, updatedAt: typeof raw.updatedAt === 'number' ? raw.updatedAt : now };
 }
 
 export function authHeaders(settings: ConnectionSettings, extra: Record<string, string> = {}): Record<string, string> {
@@ -1764,18 +1775,18 @@ export function terminalIdForConversation(conversationId: string, suffix = ''): 
 export function terminalStatusLabel(status: TerminalLifecycleState): string {
   switch (status) {
     case 'starting':
-      return '启动中';
+      return t('terminal.starting');
     case 'running':
-      return '运行中';
+      return t('terminal.running');
     case 'stopping':
-      return '停止中';
+      return t('terminal.stopping');
     case 'exited':
-      return '已退出';
+      return t('terminal.exited');
     case 'error':
-      return '异常';
+      return t('terminal.error');
     case 'idle':
     default:
-      return '未启动';
+      return t('terminal.idle');
   }
 }
 
@@ -1798,37 +1809,37 @@ export function nowLabel(timestamp: number): string {
 export function connectionStateLabel(state: ConnectionState): string {
   switch (state) {
     case 'open':
-      return '已连接';
+      return t('conn.open');
     case 'connecting':
-      return '连接中';
+      return t('conn.connecting');
     case 'closed':
-      return '已断开';
+      return t('conn.closed');
     case 'error':
-      return '连接异常';
+      return t('conn.error');
     case 'idle':
     default:
-      return '未连接';
+      return t('conn.idle');
   }
 }
 
 export function latencyLabelOf(latencyMs: number | null): string {
-  return latencyMs === null ? '未检测' : `${latencyMs} ms`;
+  return latencyMs === null ? t('conn.notMeasured') : `${latencyMs} ms`;
 }
 
 export function healthLabelOf(health: ConnectionHealth): string {
   switch (health.status) {
     case 'online':
-      return `后端在线 · ${latencyLabelOf(health.latencyMs)}`;
+      return t('conn.online', { latency: latencyLabelOf(health.latencyMs) });
     case 'checking':
-      return health.latencyMs === null ? '检测中' : `检测中 · ${latencyLabelOf(health.latencyMs)}`;
+      return health.latencyMs === null ? t('conn.checking') : t('conn.checkingWithLatency', { latency: latencyLabelOf(health.latencyMs) });
     case 'offline':
       if (health.error) {
         return health.error;
       }
-      return '后端不可达';
+      return t('conn.unreachable');
     case 'unknown':
     default:
-      return '等待检测';
+      return t('conn.waiting');
   }
 }
 
@@ -1845,7 +1856,7 @@ export function conversationImageInputSupport(
   } = {},
 ): { supported: boolean; reason?: string } {
   if (!conversation) {
-    return { supported: false, reason: '请先选择一个对话。' };
+    return { supported: false, reason: t('image.pickConversation') };
   }
   // Provider-less conversations use the legacy local Codex path.
   if (!isV2Conversation(conversation)) {
@@ -1862,25 +1873,25 @@ export function conversationImageInputSupport(
     return {
       supported: false,
       reason: model
-        ? `当前模型 ${model.displayName || model.id} 不支持图片输入，请切换模型。`
-        : '尚未确认当前模型是否支持图片输入，请等待模型列表加载完成。',
+        ? t('image.modelUnsupported', { model: model.displayName || model.id })
+        : t('image.modelUnconfirmed'),
     };
   }
   if (mode === 'profile') {
     if (options.profileCapability?.status === 'ready') {
       return options.profileCapability.imageInput
         ? { supported: true }
-        : { supported: false, reason: options.profileCapability.reason || '当前 ACP 配置不支持图片输入。' };
+        : { supported: false, reason: options.profileCapability.reason || t('image.profileUnsupported') };
     }
     return {
       supported: false,
       reason: options.profileCapability?.status === 'error'
-        ? options.profileCapability.reason || '无法确认当前 ACP 配置的图片能力。'
-        : '正在确认当前 ACP 配置的图片能力…',
+        ? options.profileCapability.reason || t('image.profileUnconfirmed')
+        : t('image.profileConfirming'),
     };
   }
   if (mode === 'none') {
-    return { supported: false, reason: '当前 Agent 不支持图片输入。' };
+    return { supported: false, reason: t('image.agentUnsupported') };
   }
   if (descriptor?.capabilities.imageInput === true) {
     return { supported: true };
@@ -1888,12 +1899,12 @@ export function conversationImageInputSupport(
   if (!descriptor || descriptor.capabilities.imageInput === undefined) {
     return {
       supported: false,
-      reason: '当前 Backend 版本未声明图片输入能力，请升级 Backend 后重试。',
+      reason: t('image.backendUndeclared'),
     };
   }
   return {
     supported: false,
-    reason: `${providerDisplayName(descriptor.id, descriptor.displayName)} 当前不支持图片输入；可继续附加文本文件或切换 Agent。`,
+    reason: t('image.providerUnsupported', { provider: providerDisplayName(descriptor.id, descriptor.displayName) }),
   };
 }
 
@@ -2227,17 +2238,17 @@ export function parseThreadMetadataArgs(args: string[]): { gitInfo: Record<strin
           ? rawKey
           : '';
     if (!key) {
-      return { gitInfo, error: `未知 metadata 字段: ${args[index]}` };
+      return { gitInfo, error: t('metadata.unknownField', { field: args[index] ?? '' }) };
     }
     const next = args[index + 1];
     if (!next) {
-      return { gitInfo, error: `${args[index]} 需要一个值，或使用 clear/null 清空。` };
+      return { gitInfo, error: t('metadata.needsValue', { field: args[index] ?? '' }) };
     }
     gitInfo[key] = /^(clear|null|none|-)$/i.test(next) ? null : next;
     index += 2;
   }
   if (Object.keys(gitInfo).length === 0) {
-    return { gitInfo, error: '请输入 branch、sha 或 origin。' };
+    return { gitInfo, error: t('metadata.missing') };
   }
   return { gitInfo };
 }
@@ -2377,7 +2388,7 @@ export function textFromLocalTurnPayload(payload: Record<string, unknown>): stri
       }
       if (record.type === 'image') {
         const name = typeof record.name === 'string' && record.name ? record.name : 'image';
-        return `[图片附件: ${name}]`;
+        return t('chat.imageAttachmentBlock', { name });
       }
       return '';
     })
@@ -2526,11 +2537,11 @@ export async function fetchWorkspaceDirectorySnapshot(
     const message = body && typeof body === 'object' && !Array.isArray(body)
       ? stringFromUnknown((body as Record<string, unknown>).message)
       : '';
-    throw new Error(message || `目录读取失败: ${response.status}`);
+    throw new Error(message || t('workspace.dirReadFailed', { status: response.status }));
   }
   const snapshot = parseWorkspaceDirectorySnapshot(body);
   if (!snapshot.current) {
-    throw new Error('后端没有返回当前目录');
+    throw new Error(t('workspace.noCurrentDir'));
   }
   return snapshot;
 }
@@ -2671,7 +2682,7 @@ export function classifyChatEvent(event: ServerEvent, workspaceId: string, conve
     id: itemIdOf(item, eventId(event)),
     kind: 'incoming',
     title: 'Codex',
-    subtitle: text || '正在回复...',
+    subtitle: text || STREAMING_REPLY_PLACEHOLDER,
     raw: shortJson(event),
     at: Date.now(),
     workspaceId,
@@ -2698,12 +2709,13 @@ export function classifyProgressEvent(event: ServerEvent, workspaceId: string, c
     return {
       id: `progress-${eventId(event)}`,
       kind: 'system',
-      title: '思考中',
+      title: t('progress.thinking'),
       subtitle: progressText,
       raw: shortJson(event),
       at: Date.now(),
       workspaceId,
       conversationId,
+      category: 'reasoning',
     };
   }
 
@@ -2719,16 +2731,17 @@ export function classifyProgressEvent(event: ServerEvent, workspaceId: string, c
       id: `progress-${eventId(event)}`,
       kind: 'system',
       title: type.endsWith('.request')
-        ? '请求权限批准'
+        ? t('progress.requestApproval')
         : type.endsWith('.completed') || /resolved|completed/i.test(type)
-          ? '步骤完成'
-          : '执行步骤',
+          ? t('progress.stepDone')
+          : t('progress.stepRunning'),
       subtitle: progressText || type,
       raw: shortJson(event),
       at: Date.now(),
       workspaceId,
       conversationId,
       requestId: pendingRequestId,
+      category: type.endsWith('.request') ? 'approval' : 'status',
     };
   }
 
@@ -2736,12 +2749,13 @@ export function classifyProgressEvent(event: ServerEvent, workspaceId: string, c
     return {
       id: `progress-${eventId(event)}`,
       kind: 'system',
-      title: /interrupted/i.test(type) ? '已停止' : '运行异常',
+      title: /interrupted/i.test(type) ? t('progress.stopped') : t('progress.error'),
       subtitle: progressText || extractProtocolError(type, data) || type,
       raw: shortJson(event),
       at: Date.now(),
       workspaceId,
       conversationId,
+      ...(/interrupted/i.test(type) ? {} : { marker: 'error' }),
     };
   }
 
@@ -2824,8 +2838,9 @@ export function isVisibleConversationEntry(entry: TimelineEntry): boolean {
 }
 
 export function conversationPreviewText(latest: TimelineEntry | undefined): string {
-  const text = (latest?.subtitle || latest?.title || '').replace(/\s+/g, ' ').trim();
-  return text || '新的对话';
+  const raw = (latest?.subtitle || latest?.title || '').replace(/\s+/g, ' ').trim();
+  const text = raw === STREAMING_REPLY_PLACEHOLDER ? t('chat.replying') : raw;
+  return text || t('chat.newChatFallback');
 }
 
 export function isStepProgressEntry(entry: TimelineEntry): boolean {
@@ -2853,7 +2868,7 @@ export function createDefaultConversation(workspace: WorkspaceRecord): Conversat
   return {
     id: createRequestId('conversation'),
     workspaceId: workspace.id,
-    title: '默认对话',
+    title: t('chat.defaultConversation'),
     preview: '',
     nativeStatus: '',
     archived: false,
@@ -2887,7 +2902,7 @@ export function forkConversationRecord(conversation: ConversationRecord, title?:
   return {
     ...conversation,
     id: createRequestId('conversation'),
-    title: title?.trim() || `${conversation.title || '新对话'} fork`,
+    title: title?.trim() || t('chat.forkTitle', { title: conversation.title || t('chat.newConversation') }),
     preview: '',
     nativeStatus: '',
     archived: false,

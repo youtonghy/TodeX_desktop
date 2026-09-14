@@ -3,6 +3,7 @@ import { x25519 } from '@noble/curves/ed25519.js';
 import { hkdf } from '@noble/hashes/hkdf.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { buildHttpUrl } from '@todex/protocol/todex';
+import { t } from '../i18n';
 
 export type DevicePairingResult =
   | { status: 'pending' | 'rejected' | 'expired' }
@@ -27,29 +28,29 @@ function encode(bytes: Uint8Array): string {
 
 function decode(value: unknown, length?: number): Uint8Array {
   if (typeof value !== 'string' || !/^[A-Za-z0-9_-]+$/.test(value) || value.length > MAX_RESPONSE_BYTES) {
-    throw new Error('设备验证响应格式无效');
+    throw new Error(t('pair.errInvalidResponse'));
   }
   let bytes: Uint8Array;
   try {
     bytes = Uint8Array.from(atob(value.replaceAll('-', '+').replaceAll('_', '/')), (char) => char.charCodeAt(0));
   } catch {
-    throw new Error('设备验证响应格式无效');
+    throw new Error(t('pair.errInvalidResponse'));
   }
   if ((length !== undefined && bytes.length !== length) || encode(bytes) !== value) {
-    throw new Error('设备验证响应格式无效');
+    throw new Error(t('pair.errInvalidResponse'));
   }
   return bytes;
 }
 
 function object(value: unknown): Record<string, unknown> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('设备验证响应格式无效');
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(t('pair.errInvalidResponse'));
   return value as Record<string, unknown>;
 }
 
 async function post(serverUrl: string, action: string, body: unknown, signal?: AbortSignal): Promise<Record<string, unknown>> {
   const url = new URL(buildHttpUrl(serverUrl, `/v2/device-pairing/${action}`));
   if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) {
-    throw new Error('请输入有效的后端 HTTP 或 HTTPS 地址');
+    throw new Error(t('pair.errInvalidUrl'));
   }
   const controller = new AbortController();
   const abort = () => controller.abort();
@@ -67,13 +68,13 @@ async function post(serverUrl: string, action: string, body: unknown, signal?: A
       redirect: 'error',
     });
     if (!response.ok) {
-      if (response.status === 404) throw new Error('当前后端不支持设备验证，请更新后端或手动填写令牌');
-      if (response.status === 429) throw new Error('设备申请过于频繁或队列已满，请稍后重试');
-      if (response.status === 401 || response.status === 403) throw new Error('设备验证请求未被接受，请重新申请');
-      throw new Error(`设备验证失败（HTTP ${response.status}），请检查后端状态`);
+      if (response.status === 404) throw new Error(t('pair.errUnsupported'));
+      if (response.status === 429) throw new Error(t('pair.errTooMany'));
+      if (response.status === 401 || response.status === 403) throw new Error(t('pair.errRejectedRequest'));
+      throw new Error(t('pair.errHttp', { status: response.status }));
     }
     const reader = response.body?.getReader();
-    if (!reader) throw new Error('后端未返回设备验证结果');
+    if (!reader) throw new Error(t('pair.errNoResult'));
     const chunks: Uint8Array[] = [];
     let size = 0;
     try {
@@ -83,7 +84,7 @@ async function post(serverUrl: string, action: string, body: unknown, signal?: A
         size += value.length;
         if (size > MAX_RESPONSE_BYTES) {
           await reader.cancel();
-          throw new Error('设备验证响应过大');
+          throw new Error(t('pair.errTooLarge'));
         }
         chunks.push(value);
       }
@@ -97,10 +98,10 @@ async function post(serverUrl: string, action: string, body: unknown, signal?: A
     try {
       return object(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)));
     } catch {
-      throw new Error('设备验证响应格式无效');
+      throw new Error(t('pair.errInvalidResponse'));
     }
   } catch (error) {
-    if (controller.signal.aborted && !signal?.aborted) throw new Error('设备验证请求超时，请检查后端连接');
+    if (controller.signal.aborted && !signal?.aborted) throw new Error(t('pair.errTimeout'));
     throw error;
   } finally {
     clearTimeout(timeout);
@@ -123,7 +124,7 @@ export async function beginDevicePairing(serverUrl: string, deviceName: string, 
     const { requestId, expiresAt } = response;
     if (typeof requestId !== 'string' || !uuidPattern.test(requestId)
       || typeof expiresAt !== 'number' || !Number.isSafeInteger(expiresAt) || expiresAt <= Date.now()) {
-      throw new Error('设备验证申请无效或已过期，请重新申请');
+      throw new Error(t('pair.errInvalidRequest'));
     }
     const serverKey = decode(response.serverPublicKey, 32);
     const prefix = encoder.encode(`${DOMAIN}transcript\0${requestId}\0`);
@@ -154,7 +155,7 @@ export async function beginDevicePairing(serverUrl: string, deviceName: string, 
       expiresAt,
       async poll(pollSignal) {
         if (finished || Date.now() >= expiresAt) { dispose(); return { status: 'expired' }; }
-        if (polling) throw new Error('设备验证正在查询，请稍候');
+        if (polling) throw new Error(t('pair.errPolling'));
         polling = true;
         try {
           const result = await post(serverUrl, 'poll', { requestId, proof: encode(pollProof!) }, pollSignal);
@@ -164,7 +165,7 @@ export async function beginDevicePairing(serverUrl: string, deviceName: string, 
             dispose();
             return { status: result.status };
           }
-          if (result.status !== 'approved') throw new Error('设备验证响应状态无效');
+          if (result.status !== 'approved') throw new Error(t('pair.errInvalidStatus'));
           try {
             const nonce = decode(result.nonce, 24);
             const ciphertext = decode(result.ciphertext);
@@ -179,7 +180,7 @@ export async function beginDevicePairing(serverUrl: string, deviceName: string, 
               plaintext.fill(0);
             }
           } catch {
-            throw new Error('设备验证结果校验失败，请重新核对验证码并申请');
+            throw new Error(t('pair.errChecksum'));
           } finally {
             dispose();
           }

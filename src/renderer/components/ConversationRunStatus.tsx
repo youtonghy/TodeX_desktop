@@ -8,6 +8,7 @@ import { permissionActions, type PendingRequest, type PermissionOption } from '@
 import type { UsageRecord } from '@todex/protocol/mobileParity';
 import { hasActiveConversationWork } from './conversationProgress';
 import { useNoticeToast } from './NoticeToast';
+import { getLocale, t, useLocale, useT } from '../i18n';
 
 type SubmissionStatus = 'sending' | 'running' | 'unknown' | undefined;
 type Props = {
@@ -20,6 +21,7 @@ type Props = {
 };
 
 export function ConversationRunStatus({ submissionStatus, runtime, compaction, onRecover, isRecovering = false, isConnected = true }: Props) {
+  const t = useT();
   const progressToastRef = useRef<string | null>(null);
   const [recovering, setRecovering] = useState(false);
   const unknown = submissionStatus === 'unknown';
@@ -35,8 +37,8 @@ export function ConversationRunStatus({ submissionStatus, runtime, compaction, o
     const timer = window.setInterval(() => {
       if (notified || Date.now() - observedAt < 120_000) return;
       notified = true;
-      progressToastRef.current = toast.info('暂未收到新的运行状态', {
-        description: '可以继续等待；如需结束本轮，可使用停止按钮。',
+      progressToastRef.current = toast.info(t('runStatus.stale'), {
+        description: t('runStatus.staleHint'),
         timeout: 6000,
       });
     }, 15_000);
@@ -48,13 +50,13 @@ export function ConversationRunStatus({ submissionStatus, runtime, compaction, o
       }
     };
   }, [observeQuiet, runtime?.conversationId, runtime?.activeTurnId, runtime?.lastProgressAt]);
-  useNoticeToast(unknown ? '执行状态待确认' : null, {
-    description: '尚未确认这次提交的执行结果。核对记录后再发送，避免重复执行。',
+  useNoticeToast(unknown ? t('runStatus.unknown') : null, {
+    description: t('runStatus.unknownHint'),
     scope: runtime?.conversationId,
   });
-  useNoticeToast(compaction?.status === 'failed' ? '上下文压缩失败'
-    : compaction?.status === 'completed' ? '上下文压缩完成'
-      : compaction?.recommended && compaction.status !== 'running' ? '建议压缩上下文' : null, {
+  useNoticeToast(compaction?.status === 'failed' ? t('runStatus.compactionFailed')
+    : compaction?.status === 'completed' ? t('runStatus.compactionDone')
+      : compaction?.recommended && compaction.status !== 'running' ? t('runStatus.compactionSuggested') : null, {
     variant: compaction?.status === 'failed' ? 'danger' : compaction?.status === 'completed' ? 'success' : 'info',
     description: compaction?.status === 'failed' ? compaction.error : undefined,
     scope: runtime?.conversationId,
@@ -63,13 +65,13 @@ export function ConversationRunStatus({ submissionStatus, runtime, compaction, o
     if (recovering) return;
     setRecovering(true);
     try { await onRecover(); }
-    catch (error) { toast.danger(error instanceof Error ? error.message : '核对失败，请重试'); }
+    catch (error) { toast.danger(error instanceof Error ? error.message : t('runStatus.recoverFailed')); }
     finally { setRecovering(false); }
   };
   return <>
     {unknown ? <Button className="mb-2" size="sm" variant="secondary" isPending={recovering}
-      onPress={() => { void recover(); }}>核对记录</Button> : null}
-    {compaction?.status === 'running' ? <div className="text-muted mb-2 text-xs" role="status">正在压缩上下文</div> : null}
+      onPress={() => { void recover(); }}>{t('runStatus.review')}</Button> : null}
+    {compaction?.status === 'running' ? <div className="text-muted mb-2 text-xs" role="status">{t('runStatus.compacting')}</div> : null}
   </>;
 }
 
@@ -83,22 +85,25 @@ export function ConversationPromptInput({ submissionStatus, onSubmit, isDisabled
 }
 
 function formatTokenCount(value: number) {
-  return new Intl.NumberFormat('zh-CN', { notation: value >= 10_000 ? 'compact' : 'standard', maximumFractionDigits: 1 }).format(value);
+  return new Intl.NumberFormat(getLocale(), { notation: value >= 10_000 ? 'compact' : 'standard', maximumFractionDigits: 1 }).format(value);
 }
 export function TurnUsageSummary({ records }: { records: readonly UsageRecord[] }) {
+  const t = useT();
+  const locale = useLocale();
+  const listSeparator = locale === 'zh-CN' || locale === 'ja' ? '、' : ', ';
   const totals = records.reduce((sum, record) => ({
     input: sum.input + record.inputTokens, output: sum.output + record.outputTokens,
     cacheRead: sum.cacheRead + record.cachedInputTokens, cacheWrite: sum.cacheWrite + record.cacheWriteTokens,
     total: sum.total + usageTotalTokens(record),
   }), { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 });
   return <div className="min-w-52 space-y-1 p-1 text-xs">
-    <p className="font-medium">本轮统计</p>
+    <p className="font-medium">{t('runStatus.turnStats')}</p>
     {records.length ? <>
-      <p className="text-muted">模型：{[...new Set(records.map(record => record.model))].join('、')}</p>
-      <p>输入 {formatTokenCount(totals.input)} · 输出 {formatTokenCount(totals.output)}</p>
-      <p>缓存读取 {formatTokenCount(totals.cacheRead)} · 写入 {formatTokenCount(totals.cacheWrite)}</p>
-      <p>总计 {formatTokenCount(totals.total)} tokens</p>
-    </> : <p className="text-muted">暂无可归属本轮的用量数据。</p>}
+      <p className="text-muted">{t('runStatus.models', { models: [...new Set(records.map(record => record.model))].join(listSeparator) })}</p>
+      <p>{t('runStatus.inOut', { input: formatTokenCount(totals.input), output: formatTokenCount(totals.output) })}</p>
+      <p>{t('runStatus.cache', { read: formatTokenCount(totals.cacheRead), write: formatTokenCount(totals.cacheWrite) })}</p>
+      <p>{t('runStatus.total', { total: formatTokenCount(totals.total) })}</p>
+    </> : <p className="text-muted">{t('runStatus.noUsage')}</p>}
   </div>;
 }
 
@@ -183,7 +188,7 @@ function permissionForm(request: PendingRequest): PermissionForm | null {
         return { label, value: label };
       }).filter(option => option.label) : [];
       return [{ id, label: permissionString(question.question) || permissionString(question.header) || id,
-        description: choices.length ? `参考选项：${choices.map(choice => choice.label).join('；')}` : undefined,
+        description: choices.length ? t('runStatus.choiceOptions', { options: choices.map(choice => choice.label).join(getLocale() === 'zh-CN' || getLocale() === 'ja' ? '；' : '; ') }) : undefined,
         type: 'string', required: true, secret: question.isSecret === true,
         choices: question.isOther === true ? undefined : choices.length ? choices : undefined }];
     });
@@ -195,7 +200,7 @@ function permissionForm(request: PendingRequest): PermissionForm | null {
     const choices = method === 'select' && Array.isArray(details.options)
       ? details.options.filter((value): value is string => typeof value === 'string').map(value => ({ label: value, value })) : undefined;
     return { mode: 'extension_ui', method, unsupported: method === 'select' && !choices?.length,
-      fields: [{ id: method === 'confirm' ? 'confirmed' : 'value', label: permissionString(details.message) || permissionString(details.title) || (method === 'confirm' ? '是否确认？' : '你的回答'),
+      fields: [{ id: method === 'confirm' ? 'confirmed' : 'value', label: permissionString(details.message) || permissionString(details.title) || (method === 'confirm' ? t('runStatus.confirmQuestion') : t('runStatus.yourAnswer')),
         type: method === 'confirm' ? 'boolean' : 'string', required: true, choices,
         multiline: method === 'editor', initial: method === 'editor' ? permissionString(details.prefill) : undefined }] };
   }
@@ -203,29 +208,29 @@ function permissionForm(request: PendingRequest): PermissionForm | null {
 }
 
 function permissionFormAnswer(form: PermissionForm, values: Record<string, string>): { data?: PermissionAnswerData; error?: string } {
-  if (form.unsupported) return { error: '这项请求包含暂不支持的输入格式，请取消或让 Agent 改用简单字段。' };
+  if (form.unsupported) return { error: t('runStatus.unsupportedForm') };
   if (form.mode === 'url') return { data: { completed: true } };
   const data: PermissionAnswerData = Object.create(null) as PermissionAnswerData;
   for (const field of form.fields) {
     const text = values[field.id] ?? field.initial ?? '';
     if (!text.trim()) {
-      if (field.required) return { error: `请填写「${field.label}」。` };
+      if (field.required) return { error: t('runStatus.fieldRequired', { label: field.label }) };
       continue;
     }
     let value: string | number | boolean = text;
     if (field.choices) {
       const index = Number(text);
-      if (!Number.isInteger(index) || !field.choices[index]) return { error: `请选择「${field.label}」。` };
+      if (!Number.isInteger(index) || !field.choices[index]) return { error: t('runStatus.fieldChoose', { label: field.label }) };
       value = field.choices[index].value;
     } else if (field.type === 'boolean') {
-      if (!['true', 'false'].includes(text)) return { error: `请选择「${field.label}」。` };
+      if (!['true', 'false'].includes(text)) return { error: t('runStatus.fieldChoose', { label: field.label }) };
       value = text === 'true';
     } else if (field.type === 'number' || field.type === 'integer') {
       value = Number(text);
-      if (!Number.isFinite(value) || (field.type === 'integer' && !Number.isInteger(value))) return { error: `「${field.label}」需要有效${field.type === 'integer' ? '整数' : '数字'}。` };
-      if ((field.minimum !== undefined && value < field.minimum) || (field.maximum !== undefined && value > field.maximum)) return { error: `「${field.label}」超出了允许范围。` };
+      if (!Number.isFinite(value) || (field.type === 'integer' && !Number.isInteger(value))) return { error: t(field.type === 'integer' ? 'runStatus.fieldInteger' : 'runStatus.fieldNumber', { label: field.label }) };
+      if ((field.minimum !== undefined && value < field.minimum) || (field.maximum !== undefined && value > field.maximum)) return { error: t('runStatus.fieldRange', { label: field.label }) };
     }
-    if (typeof value === 'string' && ((field.minLength !== undefined && value.length < field.minLength) || (field.maxLength !== undefined && value.length > field.maxLength))) return { error: `「${field.label}」的长度不符合要求。` };
+    if (typeof value === 'string' && ((field.minLength !== undefined && value.length < field.minLength) || (field.maxLength !== undefined && value.length > field.maxLength))) return { error: t('runStatus.fieldLength', { label: field.label }) };
     data[field.id] = value;
   }
   if (form.mode === 'user_input') return { data: { answers: Object.fromEntries(Object.entries(data).map(([id, value]) => [id, { answers: [String(value)] }])) } };
@@ -234,12 +239,13 @@ function permissionFormAnswer(form: PermissionForm, values: Record<string, strin
 
 function PermissionResponseForm({ request, form, onSelect }: { request: PendingRequest; form: PermissionForm;
   onSelect: (option: boolean | PermissionOption, data?: PermissionAnswerData) => void }) {
+  const t = useT();
   const [values, setValues] = useState<Record<string, string>>({});
   const inputPrefix = React.useId();
   const options = permissionActions(request);
   const submit = options.find(option => typeof option !== 'boolean' && option.kind === 'answer');
   const update = (id: string, value: string) => setValues(previous => ({ ...previous, [id]: value }));
-  useNoticeToast(form.unsupported ? '这项请求包含暂不支持的输入格式，请取消或让 Agent 改用简单字段。' : null);
+  useNoticeToast(form.unsupported ? t('runStatus.unsupportedForm') : null);
   return <Form className="flex w-full min-w-0 flex-col gap-3 py-2" onSubmit={event => {
     event.preventDefault();
     if (!submit) return;
@@ -248,8 +254,8 @@ function PermissionResponseForm({ request, form, onSelect }: { request: PendingR
     onSelect(submit, answer.data);
   }}>
     {form.mode === 'url' && form.url ? <div className="space-y-2 text-sm">
-      <Link href={form.url} target="_blank" rel="noopener noreferrer">打开验证页面<Link.Icon /></Link>
-      <p className="text-muted">在页面完成操作后，再点击“已完成，继续”。</p>
+      <Link href={form.url} target="_blank" rel="noopener noreferrer">{t('runStatus.openVerify')}<Link.Icon /></Link>
+      <p className="text-muted">{t('runStatus.verifyHint')}</p>
     </div> : null}
     {form.fields.map((field, index) => {
       const value = values[field.id] ?? field.initial ?? '';
@@ -258,9 +264,9 @@ function PermissionResponseForm({ request, form, onSelect }: { request: PendingR
         <Label htmlFor={inputId}>{field.label}{field.required ? ' *' : ''}</Label>
         <NativeSelect fullWidth>
           <NativeSelect.Trigger id={inputId} value={value} required={field.required} onChange={event => update(field.id, event.target.value)}>
-            <NativeSelect.Option value="">请选择</NativeSelect.Option>
+            <NativeSelect.Option value="">{t('runStatus.selectPlaceholder')}</NativeSelect.Option>
             {field.choices ? field.choices.map((choice, choiceIndex) => <NativeSelect.Option key={choiceIndex} value={String(choiceIndex)}>{choice.label}</NativeSelect.Option>)
-              : <><NativeSelect.Option value="true">是</NativeSelect.Option><NativeSelect.Option value="false">否</NativeSelect.Option></>}
+              : <><NativeSelect.Option value="true">{t('runStatus.yes')}</NativeSelect.Option><NativeSelect.Option value="false">{t('runStatus.no')}</NativeSelect.Option></>}
           </NativeSelect.Trigger>
         </NativeSelect>
         {field.description ? <Description>{field.description}</Description> : null}
@@ -271,16 +277,17 @@ function PermissionResponseForm({ request, form, onSelect }: { request: PendingR
       </TextField>;
     })}
     <div className="flex flex-wrap gap-2">
-      {submit ? <Button size="sm" type="submit" isDisabled={form.unsupported}>{form.mode === 'url' ? '已完成，继续' : '提交回答'}</Button> : null}
+      {submit ? <Button size="sm" type="submit" isDisabled={form.unsupported}>{form.mode === 'url' ? t('runStatus.urlDone') : t('runStatus.submitAnswer')}</Button> : null}
       {options.filter(option => typeof option === 'boolean' ? !option : option.kind.startsWith('reject') || option.kind === 'abort_turn').map(option => <Button
         key={typeof option === 'boolean' ? String(option) : option.optionId} type="button" size="sm" variant="danger-soft" onPress={() => onSelect(option)}
-      >{typeof option === 'boolean' ? '拒绝' : option.kind === 'abort_turn' ? '拒绝并停止本轮' : option.name}</Button>)}
+      >{typeof option === 'boolean' ? t('runStatus.reject') : option.kind === 'abort_turn' ? t('runStatus.rejectStop') : option.name}</Button>)}
     </div>
   </Form>;
 }
 
 export function ConversationPermissionActions({ request, onSelect }:
   { request: PendingRequest; onSelect: (option: boolean | PermissionOption, data?: PermissionAnswerData) => void }) {
+  const t = useT();
   const form = permissionForm(request);
   if (form) return <PermissionResponseForm key={request.requestId} request={request} form={form} onSelect={onSelect} />;
   return <>{permissionActions(request).map(option => <Button
@@ -289,6 +296,6 @@ export function ConversationPermissionActions({ request, onSelect }:
     variant={typeof option === 'boolean' ? (option ? 'primary' : 'danger-soft')
       : option.kind.startsWith('reject') || option.kind === 'abort_turn' ? 'danger-soft' : 'primary'}
     onPress={() => onSelect(option)}
-  >{typeof option === 'boolean' ? (option ? '同意' : '拒绝')
-    : option.kind === 'abort_turn' ? '拒绝并停止本轮' : option.name}</Button>)}</>;
+  >{typeof option === 'boolean' ? (option ? t('runStatus.approve') : t('runStatus.reject'))
+    : option.kind === 'abort_turn' ? t('runStatus.rejectStop') : option.name}</Button>)}</>;
 }

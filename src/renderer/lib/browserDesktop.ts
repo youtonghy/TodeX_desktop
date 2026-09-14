@@ -1,4 +1,5 @@
 import type { TodeXDesktopApi } from '../../preload/index';
+import { t } from '../i18n';
 
 const PREFIX = 'todex.browser.';
 
@@ -38,15 +39,18 @@ export function installBrowserDesktopBridge(): void {
     },
     fs: {
       readFile: async () => {
-        throw new Error('浏览器预览不支持读取本机文件');
+        throw new Error(t('storage.browserReadFile'));
       },
     },
     app: {
       focus: () => window.focus(),
     },
+    locale: {
+      set: () => undefined,
+    },
     git: {
       scan: async () => [],
-      run: async () => ({ output: '浏览器预览不支持 Git 操作' }),
+      run: async () => ({ output: t('storage.browserGit') }),
     },
     theme: {
       shouldUseDark: async () => window.matchMedia('(prefers-color-scheme: dark)').matches,

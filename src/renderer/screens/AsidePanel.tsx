@@ -15,6 +15,7 @@ import {
 } from '../session/helpers';
 import { XtermTerminal } from '../components/XtermTerminal';
 import { CapabilitiesPanel } from './CapabilitiesPanel';
+import { useT } from '../i18n';
 
 type Props = {
   session: TodeXSession;
@@ -24,11 +25,12 @@ type Props = {
 };
 
 export function AsidePanel({ session, panel, slashCommand, onBack }: Props) {
+  const t = useT();
   const conversation = session.activeConversation;
   const workspace = session.activeWorkspace;
   const back = onBack ? (
     <div className="px-4 pt-3">
-      <Button size="sm" variant="tertiary" onPress={onBack}>返回工作台</Button>
+      <Button size="sm" variant="tertiary" onPress={onBack}>{t('aside.back')}</Button>
     </div>
   ) : null;
 
@@ -73,7 +75,7 @@ export function AsidePanel({ session, panel, slashCommand, onBack }: Props) {
     return (
       <div className="flex flex-col gap-4 p-5">
         {back}
-        <h2 className="text-lg font-semibold">实验功能</h2>
+        <h2 className="text-lg font-semibold">{t('aside.experimental')}</h2>
         {EXPERIMENTAL_FEATURES.map((feature) => (
           <Switch
             key={feature.id}
@@ -102,14 +104,14 @@ export function AsidePanel({ session, panel, slashCommand, onBack }: Props) {
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-lg font-semibold">Git Diff</h2>
           <Button size="sm" variant="secondary" isDisabled={!conversation} onPress={() => conversation && session.requestGitDiff(conversation.id)}>
-            刷新
+            {t('aside.refresh')}
           </Button>
         </div>
         <ScrollShadow className="min-h-0 flex-1">
-          <pre className="text-xs whitespace-pre-wrap">{state?.diff || state?.error || '暂无 diff。'}</pre>
+          <pre className="text-xs whitespace-pre-wrap">{state?.diff || state?.error || t('aside.noDiff')}</pre>
         </ScrollShadow>
         {state?.diff ? (
-          <Button className="mt-3" variant="tertiary" onPress={() => void navigator.clipboard.writeText(state.diff)}>复制</Button>
+          <Button className="mt-3" variant="tertiary" onPress={() => void navigator.clipboard.writeText(state.diff)}>{t('common.copy')}</Button>
         ) : null}
       </div>
     );
@@ -126,7 +128,7 @@ export function AsidePanel({ session, panel, slashCommand, onBack }: Props) {
     return (
       <div className="flex h-full min-h-0 flex-col p-5">
         {back}
-        <h2 className="text-lg font-semibold">斜杠命令</h2>
+        <h2 className="text-lg font-semibold">{t('aside.slashCommands')}</h2>
         <ScrollShadow className="mt-3 min-h-0 flex-1">
           {SLASH_COMMAND_CATEGORY_ORDER.map((category) => {
             const commands = SLASH_COMMANDS.filter((item) => item.category === category);
@@ -176,7 +178,7 @@ export function AsidePanel({ session, panel, slashCommand, onBack }: Props) {
         {session.v2Providers.map((provider) => (
           <Card key={provider.id} className="p-3">
             <p className="font-medium">{provider.displayName}</p>
-            <p className="text-muted text-xs">{provider.available ? '可用' : provider.unavailableReason || '不可用'}</p>
+            <p className="text-muted text-xs">{provider.available ? t('aside.available') : provider.unavailableReason || t('aside.unavailable')}</p>
           </Card>
         ))}
         {session.v2Conversations.map((item) => (
@@ -193,6 +195,7 @@ export function AsidePanel({ session, panel, slashCommand, onBack }: Props) {
 }
 
 function TerminalAside({ session, terminalId }: { session: TodeXSession; terminalId: string }) {
+  const t = useT();
   const workspace = session.activeWorkspace;
   const conversation = session.activeConversation;
   const terminal = session.terminalById[terminalId];
@@ -221,15 +224,15 @@ function TerminalAside({ session, terminalId }: { session: TodeXSession; termina
   }, [session.resizeTerminalSession, session.settings.tenantId, terminalId, workspace]);
 
   if (!workspace || !conversation) {
-    return <p className="text-muted p-5 text-sm">请先选择对话。</p>;
+    return <p className="text-muted p-5 text-sm">{t('aside.selectConversation')}</p>;
   }
 
   return (
     <div className="flex h-full min-h-0 flex-col p-5">
       <div className="mb-3 flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-semibold">终端</h2>
-          <p className="text-muted text-xs">{terminal ? terminalStatusLabel(terminal.status) : '未启动'}</p>
+          <h2 className="text-lg font-semibold">{t('aside.terminal')}</h2>
+          <p className="text-muted text-xs">{terminal ? terminalStatusLabel(terminal.status) : t('aside.terminalNotStarted')}</p>
         </div>
         <div className="flex gap-2">
           <Button
@@ -245,7 +248,7 @@ function TerminalAside({ session, terminalId }: { session: TodeXSession; termina
               });
             }}
           >
-            启动
+            {t('aside.terminalStart')}
           </Button>
           <Button
             size="sm"
@@ -253,7 +256,7 @@ function TerminalAside({ session, terminalId }: { session: TodeXSession; termina
             isDisabled={!terminal || terminal.status === 'idle' || terminal.status === 'exited'}
             onPress={() => session.stopTerminalSession(terminalId, workspace.tenantId || session.settings.tenantId)}
           >
-            停止
+            {t('aside.terminalStop')}
           </Button>
         </div>
       </div>
@@ -271,12 +274,13 @@ function TerminalAside({ session, terminalId }: { session: TodeXSession; termina
 }
 
 function SlashActionAside({ session, command, conversationId }: { session: TodeXSession; command: string; conversationId: string }) {
+  const t = useT();
   const [value, setValue] = useState('');
   const subagents = command === '/subagents' ? session.subagentsByConversation[conversationId] ?? [] : [];
-  const subagentLabels = { queued: '等待执行', running: '执行中', completed: '已完成', failed: '失败', cancelled: '已取消' };
+  const subagentLabels = { queued: t('aside.subagentQueued'), running: t('aside.subagentRunning'), completed: t('aside.subagentCompleted'), failed: t('aside.subagentFailed'), cancelled: t('aside.subagentCancelled') };
   const memoryEntries = session.memoryEntriesByConversation[conversationId] ?? [];
   if (command === '/memory') {
-    return <div className="flex h-full flex-col gap-3 p-5"><h2 className="text-lg font-semibold">记忆内容</h2><p className="text-muted text-sm">这里只显示 Agent 已提供的记忆内容，配置开关不代表支持读取内容。</p><ScrollShadow className="min-h-0 flex-1 overflow-y-auto">{memoryEntries.length ? memoryEntries.map(entry => <Card key={entry.id} className="mb-2 p-3"><p className="whitespace-pre-wrap text-sm">{entry.content}</p><p className="text-muted mt-2 text-xs">{entry.scope === 'user' ? '用户记忆' : entry.scope === 'workspace' ? '工作区记忆' : '对话记忆'}</p></Card>) : <p className="text-muted text-sm">当前 Agent 尚未提供可读取的记忆记录，无法据此判断是否存在记忆。</p>}</ScrollShadow></div>;
+    return <div className="flex h-full flex-col gap-3 p-5"><h2 className="text-lg font-semibold">{t('aside.memoryTitle')}</h2><p className="text-muted text-sm">{t('aside.memoryHint')}</p><ScrollShadow className="min-h-0 flex-1 overflow-y-auto">{memoryEntries.length ? memoryEntries.map(entry => <Card key={entry.id} className="mb-2 p-3"><p className="whitespace-pre-wrap text-sm">{entry.content}</p><p className="text-muted mt-2 text-xs">{entry.scope === 'user' ? t('aside.memoryUser') : entry.scope === 'workspace' ? t('aside.memoryWorkspace') : t('aside.memoryConversation')}</p></Card>) : <p className="text-muted text-sm">{t('aside.memoryEmpty')}</p>}</ScrollShadow></div>;
   }
   if (command === '/subagents') {
     return (
@@ -290,7 +294,7 @@ function SlashActionAside({ session, command, conversationId }: { session: TodeX
               {run.result ? <p className="mt-2 text-sm whitespace-pre-wrap">{run.result}</p> : null}
               {run.error ? <p className="mt-2 text-danger text-xs">{run.error}</p> : null}
             </Card>
-          )) : <p className="text-muted text-sm">当前对话尚未收到子 Agent 运行记录。</p>}
+          )) : <p className="text-muted text-sm">{t('aside.subagentEmpty')}</p>}
         </ScrollShadow>
       </div>
     );
@@ -298,12 +302,12 @@ function SlashActionAside({ session, command, conversationId }: { session: TodeX
   return (
     <div className="flex flex-col gap-4 p-5">
       <h2 className="text-lg font-semibold">{command}</h2>
-      <p className="text-muted text-sm">确认后将作为斜杠命令发送到当前对话。</p>
+      <p className="text-muted text-sm">{t('aside.slashConfirm')}</p>
       <TextField value={value} onChange={setValue}>
-        <Label>参数</Label>
+        <Label>{t('aside.slashArgs')}</Label>
         <TextArea className="w-full" rows={4} />
       </TextField>
-      <Button onPress={() => session.sendSlashCommand(`${command} ${value}`.trim(), conversationId)}>执行</Button>
+      <Button onPress={() => session.sendSlashCommand(`${command} ${value}`.trim(), conversationId)}>{t('aside.slashRun')}</Button>
     </div>
   );
 }

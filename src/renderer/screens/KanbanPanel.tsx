@@ -6,12 +6,13 @@ import { EmptyState, Kanban } from '@heroui-pro/react';
 import type { WorkspaceRecord } from '@todex/protocol/todex';
 import { conversationDisplayTitle, workspaceDisplayName, type ConversationRecord } from '../session/helpers';
 import type { TodeXSession } from '../session/useTodeXSession';
+import { useT } from '../i18n';
 import {
   addKanbanTask,
   attachKanbanTask,
   isKanbanTaskOverdue,
   kanbanTaskDraftText,
-  kanbanTaskStatusLabels,
+  kanbanTaskStatusLabel,
   kanbanTaskStatuses,
   kanbanTasksForWorkspace,
   removeKanbanTask,
@@ -79,6 +80,7 @@ function TaskCard({ task, session, conversations, onOpen }: {
   conversations: ConversationRecord[];
   onOpen: (workspaceId: string, conversationId: string) => void;
 }) {
+  const t = useT();
   const linked = task.conversationId
     ? conversations.find((conversation) => conversation.id === task.conversationId) ?? null
     : null;
@@ -102,7 +104,7 @@ function TaskCard({ task, session, conversations, onOpen }: {
       ));
       onOpen(task.workspaceId, linked.id);
     } else if (action === 'rename') {
-      const title = window.prompt('新的任务标题', task.title);
+      const title = window.prompt(t('kanban.renamePrompt'), task.title);
       if (title) renameKanbanTask(task.id, title);
     } else if (action === 'delete') {
       removeKanbanTask(task.id);
@@ -124,7 +126,7 @@ function TaskCard({ task, session, conversations, onOpen }: {
         <div className={`flex min-w-0 items-center gap-1 text-xs ${isKanbanTaskOverdue(task) ? 'text-danger' : 'text-muted'}`}>
           <RiCalendarLine className="size-3.5 shrink-0" />
           <span className="truncate">
-            {task.dueDate}{isKanbanTaskOverdue(task) ? '（已逾期）' : ''}
+            {task.dueDate}{isKanbanTaskOverdue(task) ? t('kanban.overdue') : ''}
           </span>
         </div>
       ) : null}
@@ -141,7 +143,7 @@ function TaskCard({ task, session, conversations, onOpen }: {
               {conversationDisplayTitle(linked, session.timeline)}
             </button>
           ) : (
-            <span className="text-muted min-w-0 truncate text-xs">对话已失效</span>
+            <span className="text-muted min-w-0 truncate text-xs">{t('kanban.linkStale')}</span>
           )}
         </div>
       ) : null}
@@ -149,18 +151,18 @@ function TaskCard({ task, session, conversations, onOpen }: {
       <div className="flex items-center gap-1">
         <Dropdown>
           <Dropdown.Trigger
-            aria-label={`任务状态：${kanbanTaskStatusLabels[task.status]}`}
+            aria-label={t('kanban.taskStatus', { status: kanbanTaskStatusLabel(task.status) })}
             className="cursor-pointer rounded-full outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
           >
             <Chip color={STATUS_META[task.status].chip} size="sm" variant="soft">
-              {kanbanTaskStatusLabels[task.status]}
+              {kanbanTaskStatusLabel(task.status)}
             </Chip>
           </Dropdown.Trigger>
           <Dropdown.Popover>
-            <Dropdown.Menu aria-label="设置任务状态" onAction={runTaskAction}>
+            <Dropdown.Menu aria-label={t('kanban.setStatus')} onAction={runTaskAction}>
               {kanbanTaskStatuses.map((status) => (
-                <Dropdown.Item key={status} id={`status:${status}`} textValue={kanbanTaskStatusLabels[status]}>
-                  <Label>{kanbanTaskStatusLabels[status]}</Label>
+                <Dropdown.Item key={status} id={`status:${status}`} textValue={kanbanTaskStatusLabel(status)}>
+                  <Label>{kanbanTaskStatusLabel(status)}</Label>
                 </Dropdown.Item>
               ))}
             </Dropdown.Menu>
@@ -171,16 +173,16 @@ function TaskCard({ task, session, conversations, onOpen }: {
 
         <Dropdown>
           <Dropdown.Trigger
-            aria-label="贴到对话"
+            aria-label={t('kanban.attach')}
             className="text-muted hover:text-foreground flex size-6 cursor-pointer items-center justify-center rounded-md outline-none hover:bg-surface-secondary focus-visible:ring-2 focus-visible:ring-accent/40"
           >
             <RiPushpinLine className="size-3.5" />
           </Dropdown.Trigger>
           <Dropdown.Popover>
-            <Dropdown.Menu aria-label="贴到对话" onAction={runTaskAction}>
+            <Dropdown.Menu aria-label={t('kanban.attach')} onAction={runTaskAction}>
               {conversations.length === 0 ? (
-                <Dropdown.Item id="noop" textValue="没有可关联的对话" isDisabled>
-                  <Label>这个工作区还没有对话</Label>
+                <Dropdown.Item id="noop" textValue={t('kanban.noConversations')} isDisabled>
+                  <Label>{t('kanban.noConversations')}</Label>
                 </Dropdown.Item>
               ) : conversations.slice(0, ATTACH_LIMIT).map((conversation) => (
                 <Dropdown.Item
@@ -192,8 +194,8 @@ function TaskCard({ task, session, conversations, onOpen }: {
                 </Dropdown.Item>
               ))}
               {task.conversationId ? (
-                <Dropdown.Item id="detach" textValue="取消关联对话">
-                  <Label>取消关联</Label>
+                <Dropdown.Item id="detach" textValue={t('kanban.detachAria')}>
+                  <Label>{t('kanban.detach')}</Label>
                 </Dropdown.Item>
               ) : null}
             </Dropdown.Menu>
@@ -202,28 +204,28 @@ function TaskCard({ task, session, conversations, onOpen }: {
 
         <Dropdown>
           <Dropdown.Trigger
-            aria-label="任务操作"
+            aria-label={t('kanban.taskActions')}
             className="text-muted hover:text-foreground flex size-6 cursor-pointer items-center justify-center rounded-md outline-none hover:bg-surface-secondary focus-visible:ring-2 focus-visible:ring-accent/40"
           >
             <RiMoreFill className="size-4" />
           </Dropdown.Trigger>
           <Dropdown.Popover>
-            <Dropdown.Menu aria-label="任务操作" onAction={runTaskAction}>
+            <Dropdown.Menu aria-label={t('kanban.taskActions')} onAction={runTaskAction}>
               {linked ? (
-                <Dropdown.Item id="draft" textValue="写入对话草稿">
-                  <Label>写入对话草稿</Label>
+                <Dropdown.Item id="draft" textValue={t('kanban.draftToChat')}>
+                  <Label>{t('kanban.draftToChat')}</Label>
                 </Dropdown.Item>
               ) : null}
               {task.conversationId ? (
-                <Dropdown.Item id="detach" textValue="取消关联对话">
-                  <Label>{staleLink ? '移除失效关联' : '取消关联对话'}</Label>
+                <Dropdown.Item id="detach" textValue={t('kanban.detachAria')}>
+                  <Label>{staleLink ? t('kanban.removeStale') : t('kanban.detachAria')}</Label>
                 </Dropdown.Item>
               ) : null}
-              <Dropdown.Item id="rename" textValue="重命名任务">
-                <Label>重命名</Label>
+              <Dropdown.Item id="rename" textValue={t('kanban.renameAria')}>
+                <Label>{t('kanban.rename')}</Label>
               </Dropdown.Item>
-              <Dropdown.Item id="delete" textValue="删除任务" variant="danger">
-                <Label className="text-danger">删除任务</Label>
+              <Dropdown.Item id="delete" textValue={t('kanban.delete')} variant="danger">
+                <Label className="text-danger">{t('kanban.delete')}</Label>
               </Dropdown.Item>
             </Dropdown.Menu>
           </Dropdown.Popover>
@@ -243,6 +245,7 @@ function WorkspaceColumn({ workspace, meta, tasks, session, creating, onCreate, 
   onCancelCreate: () => void;
   onOpenConversation: (workspaceId: string, conversationId: string) => void;
 }) {
+  const t = useT();
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [dueDate, setDueDate] = useState('');
@@ -300,7 +303,7 @@ function WorkspaceColumn({ workspace, meta, tasks, session, creating, onCreate, 
             <Tooltip delay={300}>
               <Button
                 isIconOnly
-                aria-label="进入工作区"
+                aria-label={t('kanban.enterWorkspace')}
                 className={meta.countColor}
                 size="sm"
                 variant="ghost"
@@ -308,24 +311,24 @@ function WorkspaceColumn({ workspace, meta, tasks, session, creating, onCreate, 
               >
                 <RiArrowRightLine />
               </Button>
-              <Tooltip.Content>进入工作区</Tooltip.Content>
+              <Tooltip.Content>{t('kanban.enterWorkspace')}</Tooltip.Content>
             </Tooltip>
           </Kanban.ColumnActions>
         </Kanban.ColumnHeader>
       </div>
       <Kanban.ColumnBody className={`rounded-t-none ${meta.bodyBg}`}>
         {tasks.length === 0 ? (
-          <p className="text-muted px-3 py-8 text-center text-xs">暂无任务，点击下方新建</p>
+          <p className="text-muted px-3 py-8 text-center text-xs">{t('kanban.empty')}</p>
         ) : kanbanTaskStatuses.map((status) => {
           const items = tasks.filter((task) => task.status === status);
           if (!items.length) return null;
           return (
             <div key={status}>
               <p className="text-muted px-3 pt-2 text-xs">
-                {kanbanTaskStatusLabels[status]} · {items.length}
+                {kanbanTaskStatusLabel(status)} · {items.length}
               </p>
               <Kanban.CardList
-                aria-label={`${workspaceDisplayName(workspace)} ${kanbanTaskStatusLabels[status]}任务`}
+                aria-label={t('kanban.columnAria', { workspace: workspaceDisplayName(workspace), status: kanbanTaskStatusLabel(status) })}
                 className="pb-1 pt-1"
                 items={items}
                 onAction={(key) => {
@@ -355,23 +358,23 @@ function WorkspaceColumn({ workspace, meta, tasks, session, creating, onCreate, 
               }}
             >
               <TextField value={title} onChange={setTitle}>
-                <Input autoFocus placeholder="任务标题" maxLength={200} />
+                <Input autoFocus placeholder={t('kanban.titlePlaceholder')} maxLength={200} />
               </TextField>
               <TextField value={description} onChange={setDescription}>
-                <TextArea placeholder="任务描述（可选）" rows={2} maxLength={2000} />
+                <TextArea placeholder={t('kanban.descPlaceholder')} rows={2} maxLength={2000} />
               </TextField>
               <TextField value={dueDate} onChange={setDueDate}>
-                <Input type="date" aria-label="截止日期（可选）" />
+                <Input type="date" aria-label={t('kanban.dueDateAria')} />
               </TextField>
               <div className="flex gap-2">
-                <Button size="sm" type="submit" isDisabled={!title.trim()}>添加</Button>
-                <Button size="sm" variant="ghost" onPress={() => { resetForm(); onCancelCreate(); }}>取消</Button>
+                <Button size="sm" type="submit" isDisabled={!title.trim()}>{t('kanban.add')}</Button>
+                <Button size="sm" variant="ghost" onPress={() => { resetForm(); onCancelCreate(); }}>{t('common.cancel')}</Button>
               </div>
             </form>
           ) : (
             <Button fullWidth className={meta.btnStyle} variant="outline" onPress={onCreate}>
               <Plus />
-              新建任务
+              {t('kanban.newTask')}
             </Button>
           )}
         </div>
@@ -381,6 +384,7 @@ function WorkspaceColumn({ workspace, meta, tasks, session, creating, onCreate, 
 }
 
 export function KanbanPanel({ session, onOpenConversation }: Props) {
+  const t = useT();
   const allTasks = useKanbanTasks();
   const [creatingWorkspaceId, setCreatingWorkspaceId] = useState<string | null>(null);
   const columns = session.workspaces.map((workspace) => ({
@@ -405,13 +409,13 @@ export function KanbanPanel({ session, onOpenConversation }: Props) {
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <RiChat3Line className="text-accent size-5" />
-            <h1 className="truncate text-lg font-semibold">任务看板</h1>
-            <Chip color="accent" size="sm" variant="soft">{total} 个任务</Chip>
+            <h1 className="truncate text-lg font-semibold">{t('sidebar.kanban')}</h1>
+            <Chip color="accent" size="sm" variant="soft">{t('kanban.taskCount', { count: total })}</Chip>
           </div>
-          <p className="text-muted mt-1 text-sm">按工作区管理任务，可把任务贴到对应工作区的对话上</p>
+          <p className="text-muted mt-1 text-sm">{t('kanban.subtitle')}</p>
         </div>
         <Button size="sm" variant="secondary" onPress={onOpenConversation}>
-          返回对话
+          {t('kanban.backToChat')}
           <RiArrowRightLine />
         </Button>
       </div>
@@ -422,8 +426,8 @@ export function KanbanPanel({ session, onOpenConversation }: Props) {
               <EmptyState.Media variant="icon">
                 <RiFolder3Line />
               </EmptyState.Media>
-              <EmptyState.Title>还没有工作区</EmptyState.Title>
-              <EmptyState.Description>创建工作区后，可以在这里按工作区管理任务。</EmptyState.Description>
+              <EmptyState.Title>{t('kanban.noWorkspaces')}</EmptyState.Title>
+              <EmptyState.Description>{t('kanban.noWorkspacesHint')}</EmptyState.Description>
             </EmptyState.Header>
           </EmptyState>
         </div>

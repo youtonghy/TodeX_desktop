@@ -1,4 +1,5 @@
 import { applyConversationRuntimeEvents, createConversationRuntime, type ConversationRuntime } from '@todex/protocol/conversationRuntime';
+import { t } from '../i18n';
 import type { ConversationEvent, ConversationReplay } from '@todex/protocol/v2';
 
 type Replay = (conversationId: string, afterSequence: number, limit: number) => Promise<ConversationReplay>;
@@ -56,7 +57,7 @@ export class ConversationRecovery {
     try {
       this.update(state, applied, this.isRecovering(conversationId) || recovering);
     } catch (error) {
-      this.onError(error instanceof Error ? error.message : '对话状态提交失败');
+      this.onError(error instanceof Error ? error.message : t('rec.submitFailed'));
     }
   }
 
@@ -131,14 +132,14 @@ export class ConversationRecovery {
           return;
         }
         if (next <= cursor || ++pages >= 10_000) {
-          throw new Error('对话记录存在缺口，恢复未完成。请重新连接后核对记录。');
+          throw new Error(t('rec.gapError'));
         }
         cursor = next;
       }
     }).catch((error: unknown) => {
       if (epoch === this.epoch) {
         this.incomplete.add(conversationId);
-        this.onError(error instanceof Error ? error.message : '对话恢复失败');
+        this.onError(error instanceof Error ? error.message : t('rec.recoveryFailed'));
       }
     }).finally(() => {
       if (epoch !== this.epoch) return;

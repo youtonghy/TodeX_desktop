@@ -6,10 +6,12 @@ import type { TodeXSession } from '../session/useTodeXSession';
 import { isV2Conversation } from '../session/helpers';
 import { ProviderIcon } from './ProviderIcon';
 import { GitStatusDisplay, useConversationGitStatus } from './GitStatusIndicator';
+import { useT } from '../i18n';
 
 type Props = { session: TodeXSession; title: string; gitOpen: boolean; onOpenGit: () => void };
 
 export function ConversationHeaderDetails({ session, title, gitOpen, onOpenGit }: Props) {
+  const t = useT();
   const availableRef = useRef<HTMLDivElement>(null);
   const measureRef = useRef<HTMLDivElement>(null);
   const [compact, setCompact] = useState(true);
@@ -30,7 +32,7 @@ export function ConversationHeaderDetails({ session, title, gitOpen, onOpenGit }
   useLayoutEffect(() => { if (!compact) setOpen(false); }, [compact]);
   const agent = conversation ? <Chip size="sm" variant="soft" className="shrink-0 whitespace-nowrap">
     <ProviderIcon provider={isV2Conversation(conversation) ? conversation.provider : 'codex'} />
-    {isV2Conversation(conversation) ? providerDisplayName(conversation.provider || '', 'Agent') : '历史 Codex'}
+    {isV2Conversation(conversation) ? providerDisplayName(conversation.provider || '', 'Agent') : t('header.legacyCodex')}
   </Chip> : null;
   const inline = <>
     <span className="max-w-64 shrink-0 truncate text-sm font-medium">{title}</span>
@@ -41,7 +43,7 @@ export function ConversationHeaderDetails({ session, title, gitOpen, onOpenGit }
     {/* Measure presentation only; Git is fetched once above, even when collapsed. */}
     <div ref={measureRef} inert aria-hidden="true" className="pointer-events-none invisible absolute top-0 left-0 flex w-max items-center gap-3">{inline}</div>
     {compact ? <Popover isOpen={open} onOpenChange={setOpen}>
-      <Button isIconOnly size="sm" variant="ghost" aria-label="对话与 Git 信息" aria-expanded={open}><RiMoreLine className="size-4" /></Button>
+      <Button isIconOnly size="sm" variant="ghost" aria-label={t('header.details')} aria-expanded={open}><RiMoreLine className="size-4" /></Button>
       <Popover.Content placement="bottom start" className="w-[min(24rem,calc(100vw-2rem))]">
         <Popover.Dialog className="space-y-3 p-4">
           <Popover.Heading className="break-words text-sm font-semibold">{title}</Popover.Heading>

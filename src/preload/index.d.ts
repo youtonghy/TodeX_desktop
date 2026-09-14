@@ -25,6 +25,9 @@ export type TodeXDesktopApi = {
   app: {
     focus: () => void;
   };
+  locale: {
+    set: (locale: string) => void;
+  };
   theme: {
     shouldUseDark: () => Promise<boolean>;
     onUpdated: (listener: (dark: boolean) => void) => () => void;

@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, useState } from 'react';
 import { Button, Spinner } from '@heroui/react';
 import { beginDevicePairing, type DevicePairingRequest } from '../session/devicePairing';
 import type { TodeXSession } from '../session/useTodeXSession';
+import { useT } from '../i18n';
 import { useNoticeToast } from './NoticeToast';
 
 type Props = { session: TodeXSession; deviceName: string };
@@ -19,6 +20,7 @@ type Attempt = {
 
 /** Keep every asynchronous response attached to the profile that requested it. */
 export function DevicePairingPanel({ session, deviceName }: Props) {
+  const t = useT();
   const profile = session.backendConnections.find(item => item.id === session.activeBackendConnectionId);
   const latest = useRef(session);
   latest.current = session;
@@ -91,7 +93,7 @@ export function DevicePairingPanel({ session, deviceName }: Props) {
             return;
           }
           if (result.status === 'approved') {
-            if (!result.authToken?.trim()) throw new Error('后端批准结果缺少连接凭据，请重新申请。');
+            if (!result.authToken?.trim()) throw new Error(t('pair.missingCredentials'));
             const token = result.authToken;
             const current = latest.current;
             current.updateBackendConnection(attempt.profileId, { authToken: token });
@@ -107,7 +109,7 @@ export function DevicePairingPanel({ session, deviceName }: Props) {
         } catch (cause) {
           if (!isCurrent(attempt)) return;
           dispose(attempt, true);
-          setError(cause instanceof Error ? cause.message : '设备验证失败，请重新申请。');
+          setError(cause instanceof Error ? cause.message : t('pair.verifyFailed'));
           setPhase('error');
         }
       };
@@ -115,7 +117,7 @@ export function DevicePairingPanel({ session, deviceName }: Props) {
     } catch (cause) {
       if (!isCurrent(attempt)) return;
       dispose(attempt, true);
-      setError(cause instanceof Error ? cause.message : '无法申请设备验证，请检查后端地址。');
+      setError(cause instanceof Error ? cause.message : t('pair.requestFailed'));
       setPhase('error');
     }
   };
@@ -123,42 +125,42 @@ export function DevicePairingPanel({ session, deviceName }: Props) {
   const waiting = phase === 'requesting' || phase === 'pending';
   const missingPublicKey = profile?.encryptionProtocol !== 'none' && !profile?.encryptionPublicKey?.trim();
   const noticeScope = `${profile?.id}:${profile?.serverUrl}:${session.settings.serverUrl}`;
-  const phaseMessage = phase === 'approved' ? '已批准，可连接。连接凭据已保存到此后端。'
-    : phase === 'rejected' ? '后端已拒绝申请。请与后端管理员核对后重新申请。'
-    : phase === 'expired' ? '申请已过期，请重新申请设备验证。'
-    : phase === 'cancelled' ? '已取消本次设备验证。'
+  const phaseMessage = phase === 'approved' ? t('pair.approved')
+    : phase === 'rejected' ? t('pair.rejected')
+    : phase === 'expired' ? t('pair.expired')
+    : phase === 'cancelled' ? t('pair.cancelled')
     : phase === 'error' ? error : null;
   useNoticeToast(phaseMessage, {
     variant: phase === 'approved' ? 'success' : phase === 'error' ? 'danger' : phase === 'cancelled' ? 'info' : 'warning',
     scope: noticeScope,
   });
-  useNoticeToast(missingPublicKey ? '已启用传输加密，但缺少加密公钥。' : null, {
-    description: '设备验证只保存连接凭据；仍需通过下方二维码或粘贴配对内容导入公钥，再使用“连接”按钮。',
+  useNoticeToast(missingPublicKey ? t('pair.missingPublicKey') : null, {
+    description: t('pair.missingPublicKeyDesc'),
     scope: noticeScope,
   });
   return (
-    <section aria-label="设备验证" className="border-separator flex flex-col gap-3 rounded-xl border p-4">
+    <section aria-label={t('pair.sectionLabel')} className="border-separator flex flex-col gap-3 rounded-xl border p-4">
       <div>
-        <h4 className="text-sm font-semibold">设备验证</h4>
-        <p className="text-muted mt-1 text-xs">申请后，请在后端核对同一个随机核对码，并批准此设备。</p>
+        <h4 className="text-sm font-semibold">{t('pair.title')}</h4>
+        <p className="text-muted mt-1 text-xs">{t('pair.hint')}</p>
       </div>
       {phase === 'pending' ? (
         <div className="flex flex-col gap-2">
-          <p className="text-muted text-xs">随机核对码</p>
-          <output aria-label="随机核对码" className="font-mono text-2xl font-semibold tracking-widest">{verificationCode}</output>
-          <p role="status" className="text-muted flex items-center gap-2 text-sm"><Spinner size="sm" />等待后端批准</p>
-          <p className="text-muted text-xs">剩余 {remaining} 秒</p>
+          <p className="text-muted text-xs">{t('pair.code')}</p>
+          <output aria-label={t('pair.code')} className="font-mono text-2xl font-semibold tracking-widest">{verificationCode}</output>
+          <p role="status" className="text-muted flex items-center gap-2 text-sm"><Spinner size="sm" />{t('pair.waiting')}</p>
+          <p className="text-muted text-xs">{t('pair.remaining', { seconds: remaining })}</p>
         </div>
       ) : null}
       <div className="flex gap-2">
         {phase !== 'pending' ? <Button size="sm" variant="secondary" isPending={phase === 'requesting'} isDisabled={!profile?.serverUrl.trim()} onPress={() => { void start(); }}>
-          {({ isPending }) => <>{isPending ? <Spinner size="sm" color="current" /> : null}{isPending ? '正在申请' : phase === 'idle' ? '设备验证' : '重新申请'}</>}
+          {({ isPending }) => <>{isPending ? <Spinner size="sm" color="current" /> : null}{isPending ? t('pair.requesting') : phase === 'idle' ? t('pair.title') : t('pair.reapply')}</>}
         </Button> : null}
         {waiting ? <Button size="sm" variant="tertiary" onPress={() => {
           if (active.current) dispose(active.current, true);
           setVerificationCode('');
           setPhase('cancelled');
-        }}>取消验证</Button> : null}
+        }}>{t('pair.cancel')}</Button> : null}
       </div>
     </section>
   );

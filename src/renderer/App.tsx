@@ -15,6 +15,7 @@ import { ChatPanel } from './screens/ChatPanel';
 import { Field } from './components/Field';
 import { connectionStateLabel, fetchWorkspaceDirectorySnapshot } from './session/helpers';
 import { isWorkbenchTab, panelFromRoute, type DesktopPanel, type OpenPanelOptions, type WorkbenchTab } from './lib/panels';
+import { useT } from './i18n';
 
 // Secondary surfaces load on demand so the main bundle stays small.
 const SettingsPanel = lazy(() => import('./screens/SettingsPanel').then((module) => ({ default: module.SettingsPanel })));
@@ -26,9 +27,11 @@ const AboutPanel = lazy(() => import('./screens/AboutPanel').then((module) => ({
 const CliManagerPanel = lazy(() => import('./screens/CliManagerPanel').then((module) => ({ default: module.CliManagerPanel })));
 const KanbanPanel = lazy(() => import('./screens/KanbanPanel').then((module) => ({ default: module.KanbanPanel })));
 
-const panelFallback = (
-  <div className="text-muted flex h-full min-h-24 items-center justify-center text-sm">加载中…</div>
-);
+function PanelFallback() {
+  const t = useT();
+  return <div className="text-muted flex h-full min-h-24 items-center justify-center text-sm">{t('app.loading')}</div>;
+}
+const panelFallback = <PanelFallback />;
 
 const LAYOUT_AUTO_SAVE_ID = 'todex-desktop-app-layout';
 const LAYOUT_OPEN_STORAGE_KEY = 'todex.desktop.layoutOpen.v3';
@@ -62,6 +65,7 @@ function writeLayoutOpen(next: LayoutOpenState) {
 }
 
 export function App() {
+  const t = useT();
   const [panel, setPanel] = useState<DesktopPanel | null>(null);
   const panelScopeRef = useRef('');
   const [slashCommand, setSlashCommand] = useState<string>();
@@ -205,16 +209,16 @@ export function App() {
           navbar={
             <Navbar maxWidth="full">
               <Navbar.Header className="flex-nowrap gap-2 px-3 sm:px-6 [&>button]:shrink-0">
-                <AppLayout.MenuToggle className="inline-flex min-[769px]:hidden" aria-label="打开导航侧栏"><RiLayoutLeftLine className="size-4" /></AppLayout.MenuToggle>
-                <Button className="hidden min-[769px]:inline-flex" isIconOnly size="sm" variant="ghost" aria-label={sidebarOpen ? '折叠侧栏' : '展开侧栏'} onPress={() => persistSidebarOpen(!sidebarOpen)}>
+                <AppLayout.MenuToggle className="inline-flex min-[769px]:hidden" aria-label={t('app.openSidebar')}><RiLayoutLeftLine className="size-4" /></AppLayout.MenuToggle>
+                <Button className="hidden min-[769px]:inline-flex" isIconOnly size="sm" variant="ghost" aria-label={sidebarOpen ? t('app.collapseSidebar') : t('app.expandSidebar')} onPress={() => persistSidebarOpen(!sidebarOpen)}>
                   <RiLayoutLeftLine className="size-4" />
                 </Button>
-                <ConversationHeaderDetails session={session} title={panel === 'kanban' ? '今日看板' : session.activeConversation?.title ?? '对话'} gitOpen={gitOpen} onOpenGit={() => setGitOpen(true)} />
+                <ConversationHeaderDetails session={session} title={panel === 'kanban' ? t('app.kanbanTitle') : session.activeConversation?.title ?? t('app.conversation')} gitOpen={gitOpen} onOpenGit={() => setGitOpen(true)} />
                 <Navbar.Content className="shrink-0 gap-2">
-                  <Button isIconOnly size="sm" variant="ghost" aria-label="GitHub 操作" onPress={() => setGitOpen(true)}>
+                  <Button isIconOnly size="sm" variant="ghost" aria-label={t('app.githubActions')} onPress={() => setGitOpen(true)}>
                     <RiGithubLine className="size-4" />
                   </Button>
-                  <Button isIconOnly size="sm" variant="ghost" aria-label={asideOpen ? '关闭右侧面板' : '打开右侧面板'} aria-expanded={asideOpen} onPress={() => persistAsideOpen(!asideOpen)}>
+                  <Button isIconOnly size="sm" variant="ghost" aria-label={asideOpen ? t('app.closeAside') : t('app.openAside')} aria-expanded={asideOpen} onPress={() => persistAsideOpen(!asideOpen)}>
                     <RiLayoutRightLine className="size-4" />
                   </Button>
                 </Navbar.Content>
@@ -232,7 +236,7 @@ export function App() {
         <div className="flex h-full flex-col items-center justify-center gap-3">
           <AppIcon className="size-16" />
           <p className="text-lg font-semibold">TodeX</p>
-          <p className="text-muted text-sm">正在加载设置和工作区...</p>
+          <p className="text-muted text-sm">{t('app.loadingSettings')}</p>
         </div>
       )}
       <Modal isOpen={settingsOpen} onOpenChange={(open) => { if (!open) setPanel((current) => current === 'settings' ? null : current); }}>
@@ -241,7 +245,7 @@ export function App() {
             <Modal.Dialog className="max-h-[90vh] sm:max-w-xl">
               <Modal.CloseTrigger />
               <Modal.Header>
-                <Modal.Heading>设置</Modal.Heading>
+                <Modal.Heading>{t('app.settings')}</Modal.Heading>
               </Modal.Header>
               <Modal.Body className="max-h-[70vh] overflow-y-auto">
                 <Suspense fallback={panelFallback}><SettingsPanel session={session} /></Suspense>
@@ -255,7 +259,7 @@ export function App() {
           <Modal.Container>
             <Modal.Dialog className="max-h-[92vh] sm:max-w-5xl">
               <Modal.CloseTrigger />
-              <Modal.Header><Modal.Heading>使用统计</Modal.Heading></Modal.Header>
+              <Modal.Header><Modal.Heading>{t('app.usage')}</Modal.Heading></Modal.Header>
               <Modal.Body className="max-h-[82vh] overflow-y-auto p-0"><Suspense fallback={panelFallback}><UsagePanel session={session} /></Suspense></Modal.Body>
             </Modal.Dialog>
           </Modal.Container>
@@ -266,7 +270,7 @@ export function App() {
           <Modal.Container>
             <Modal.Dialog className="max-h-[90vh] sm:max-w-2xl">
               <Modal.CloseTrigger />
-              <Modal.Header><Modal.Heading>关于</Modal.Heading></Modal.Header>
+              <Modal.Header><Modal.Heading>{t('app.about')}</Modal.Heading></Modal.Header>
               <Modal.Body className="max-h-[76vh] overflow-y-auto p-0"><Suspense fallback={panelFallback}><AboutPanel session={session} /></Suspense></Modal.Body>
             </Modal.Dialog>
           </Modal.Container>
@@ -277,14 +281,14 @@ export function App() {
           <Modal.Container>
             <Modal.Dialog className="max-h-[92vh] sm:max-w-3xl">
               <Modal.CloseTrigger />
-              <Modal.Header><Modal.Heading>CLI 管理</Modal.Heading></Modal.Header>
+              <Modal.Header><Modal.Heading>{t('app.cliManager')}</Modal.Heading></Modal.Header>
               <Modal.Body className="max-h-[80vh] overflow-y-auto p-0"><Suspense fallback={panelFallback}><CliManagerPanel session={session} /></Suspense></Modal.Body>
             </Modal.Dialog>
           </Modal.Container>
         </Modal.Backdrop>
       </Modal>
       <Modal isOpen={capabilitiesOpen} onOpenChange={setCapabilitiesOpen}>
-        <Modal.Backdrop><Modal.Container><Modal.Dialog className="max-h-[90vh] sm:max-w-2xl"><Modal.CloseTrigger /><Modal.Header><Modal.Heading>MCP / Skill 管理</Modal.Heading></Modal.Header><Modal.Body className="max-h-[75vh] overflow-y-auto"><Suspense fallback={panelFallback}><CapabilitiesPanel workspacePath={session.activeWorkspace?.path ?? session.settings.defaultWorkspacePath} providers={session.v2Providers} catalogs={session.capabilityCatalogs} onRefresh={(provider) => void session.refreshCapabilityCatalog(provider)} conversationId={session.activeConversation?.id} selectedSkills={session.activeConversation ? session.selectedSkills[session.activeConversation.id] ?? [] : []} canInvoke={Boolean(session.activeConversation?.v2ConversationId)} onToggleSkill={(skill, provider) => session.activeConversation && session.toggleCatalogSkill(session.activeConversation.id, skill, provider)} onPreviewSkill={(skill, provider) => session.previewSkillResource(provider, skill.resourceId)} onRefreshMcp={(resourceId) => session.activeConversation && session.refreshMcpServer(session.activeConversation.id, resourceId)} onCallMcp={(resourceId, toolName) => session.activeConversation && session.callMcpTool(session.activeConversation.id, resourceId, toolName)} /></Suspense></Modal.Body></Modal.Dialog></Modal.Container></Modal.Backdrop>
+        <Modal.Backdrop><Modal.Container><Modal.Dialog className="max-h-[90vh] sm:max-w-2xl"><Modal.CloseTrigger /><Modal.Header><Modal.Heading>{t('app.mcpSkillManager')}</Modal.Heading></Modal.Header><Modal.Body className="max-h-[75vh] overflow-y-auto"><Suspense fallback={panelFallback}><CapabilitiesPanel workspacePath={session.activeWorkspace?.path ?? session.settings.defaultWorkspacePath} providers={session.v2Providers} catalogs={session.capabilityCatalogs} onRefresh={(provider) => void session.refreshCapabilityCatalog(provider)} conversationId={session.activeConversation?.id} selectedSkills={session.activeConversation ? session.selectedSkills[session.activeConversation.id] ?? [] : []} canInvoke={Boolean(session.activeConversation?.v2ConversationId)} onToggleSkill={(skill, provider) => session.activeConversation && session.toggleCatalogSkill(session.activeConversation.id, skill, provider)} onPreviewSkill={(skill, provider) => session.previewSkillResource(provider, skill.resourceId)} onRefreshMcp={(resourceId) => session.activeConversation && session.refreshMcpServer(session.activeConversation.id, resourceId)} onCallMcp={(resourceId, toolName) => session.activeConversation && session.callMcpTool(session.activeConversation.id, resourceId, toolName)} /></Suspense></Modal.Body></Modal.Dialog></Modal.Container></Modal.Backdrop>
       </Modal>
       <GitActionsModal key={session.activeConversation?.id} session={session} isOpen={gitOpen} onOpenChange={setGitOpen} />
       {createOpen ? <CreateWorkspaceModal
@@ -309,6 +313,7 @@ function CreateWorkspaceModal({
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  const t = useT();
   const [name, setName] = useState(workspace?.name ?? '');
   const [path, setPath] = useState(workspace?.path ?? session.settings.defaultWorkspacePath);
   const [backendId, setBackendId] = useState(workspace?.backendConnectionId ?? session.activeBackendConnectionId);
@@ -349,15 +354,15 @@ function CreateWorkspaceModal({
           <Modal.Dialog className="sm:max-w-lg">
             <Modal.CloseTrigger />
             <Modal.Header>
-              <Modal.Heading>{workspace ? '编辑工作区' : '新建工作区'}</Modal.Heading>
+              <Modal.Heading>{workspace ? t('app.workspaceEditTitle') : t('app.workspaceCreateTitle')}</Modal.Heading>
             </Modal.Header>
             <Modal.Body className="flex flex-col gap-4">
-              <Field label="名称" value={name} onChange={setName} />
+              <Field label={t('app.workspaceName')} value={name} onChange={setName} />
               <Select isDisabled={Boolean(workspace)} selectedKey={backendId} onSelectionChange={(key) => { if (typeof key === 'string') setBackendId(key); }}>
-                <Label>连接后端</Label><Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
+                <Label>{t('app.workspaceBackend')}</Label><Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
                 <Select.Popover><ListBox>{session.backendConnections.map((profile) => <ListBox.Item key={profile.id} id={profile.id} textValue={profile.name}>{profile.name} · {profile.serverUrl}</ListBox.Item>)}</ListBox></Select.Popover>
               </Select>
-              <Field label="目录" value={path} onChange={setPath} />
+              <Field label={t('app.workspaceDirectory')} value={path} onChange={setPath} />
               <div className="flex gap-2">
                 <Button
                   variant="secondary"
@@ -366,7 +371,7 @@ function CreateWorkspaceModal({
                     if (selected) setPath(selected);
                   }}
                 >
-                  本机选择
+                  {t('app.workspacePickLocal')}
                 </Button>
                 <Button
                   variant="tertiary"
@@ -376,11 +381,11 @@ function CreateWorkspaceModal({
                       setPath(snapshot.current);
                       setEntries(snapshot.entries.map((entry) => entry.path));
                     } catch (error) {
-                      toast.danger(error instanceof Error ? error.message : '无法读取目录');
+                      toast.danger(error instanceof Error ? error.message : t('app.workspaceReadFailed'));
                     }
                   }}
                 >
-                  浏览后端目录
+                  {t('app.workspaceBrowse')}
                 </Button>
               </div>
               {entries.length ? (
@@ -394,7 +399,7 @@ function CreateWorkspaceModal({
               ) : null}
             </Modal.Body>
             <Modal.Footer>
-              <Button slot="close" variant="tertiary">取消</Button>
+              <Button slot="close" variant="tertiary">{t('common.cancel')}</Button>
               <Button
                 onPress={async () => {
                   let validatedPath = path;
@@ -402,7 +407,7 @@ function CreateWorkspaceModal({
                     try {
                       validatedPath = (await fetchWorkspaceDirectorySnapshot(directorySettings, path)).current;
                     } catch (error) {
-                      toast.danger(error instanceof Error ? error.message : '无法读取目录');
+                      toast.danger(error instanceof Error ? error.message : t('app.workspaceReadFailed'));
                       return;
                     }
                   }
@@ -416,7 +421,7 @@ function CreateWorkspaceModal({
                 }}
               >
                 {workspace ? null : <RiAddLine className="size-4" />}
-                {workspace ? '保存' : '创建'}
+                {workspace ? t('common.save') : t('app.workspaceCreate')}
               </Button>
             </Modal.Footer>
           </Modal.Dialog>

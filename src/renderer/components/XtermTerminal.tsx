@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { FitAddon } from '@xterm/addon-fit';
 import { Terminal } from '@xterm/xterm';
 import type { TerminalOutputEntry } from '../session/helpers';
+import { useT } from '../i18n';
 
 type Props = {
   entries: TerminalOutputEntry[];
@@ -115,6 +116,7 @@ function getTerminalTheme(container?: HTMLElement | null) {
 }
 
 export function XtermTerminal({ entries, isActive, isDisabled = false, onData, onResize }: Props) {
+  const t = useT();
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -235,7 +237,7 @@ export function XtermTerminal({ entries, isActive, isDisabled = false, onData, o
   return (
     <div
       ref={containerRef}
-      aria-label="交互式终端"
+      aria-label={t('xterm.interactive')}
       className="h-full min-h-0 w-full overflow-hidden px-3 py-2"
       role="application"
     />

@@ -48,6 +48,11 @@ const api = {
       ipcRenderer.send('window:focus');
     },
   },
+  locale: {
+    set: (locale: string) => {
+      ipcRenderer.send('locale:set', locale);
+    },
+  },
   theme: {
     shouldUseDark: () => ipcRenderer.invoke('theme:shouldUseDark') as Promise<boolean>,
     onUpdated: (listener: (dark: boolean) => void) => {

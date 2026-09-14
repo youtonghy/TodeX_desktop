@@ -10,6 +10,7 @@ import { ProviderIcon } from './ProviderIcon';
 import { AppIcon } from './AppIcon';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { conversationDisplayTitle, isConversationHighlighted, workspaceDisplayName } from '../session/helpers';
+import { t, useT } from '../i18n';
 
 type Props = {
   session: TodeXSession;
@@ -32,16 +33,17 @@ function getConversationStatus(
   latestEntry?: TodeXSession['timeline'][number],
 ): { color: string; label: string } | null {
   if (isConversationHighlighted(conversation, session.activeConversationId, session.turnIds)) {
-    return { color: 'bg-green-500', label: '正在工作' };
+    return { color: 'bg-green-500', label: t('sidebar.statusWorking') };
   }
   if (
+    latestEntry?.marker === 'error' ||
     /error|failed|异常|失败/i.test(conversation.nativeStatus || '') ||
     /error|failed|异常|失败/i.test(latestEntry?.title || '')
   ) {
-    return { color: 'bg-amber-500', label: '遇到问题' };
+    return { color: 'bg-amber-500', label: t('sidebar.statusIssue') };
   }
   if (conversation.id !== session.activeConversationId && latestEntry?.kind === 'incoming') {
-    return { color: 'bg-blue-500', label: '有未读回复' };
+    return { color: 'bg-blue-500', label: t('sidebar.statusUnread') };
   }
   return null;
 }
@@ -58,6 +60,7 @@ export function AppSidebar({
   onOpenAbout,
   onOpenKanban,
 }: Props) {
+  const t = useT();
   const { isMobile, setMobileOpen } = useSidebar();
   const { pins, togglePin } = useSidebarPins();
   const kanbanTasks = useKanbanTasks();
@@ -209,7 +212,7 @@ export function AppSidebar({
       const workspace = session.workspaces.find((item) => item.id === contextMenu.id);
       if (!workspace) return;
       if (action === 'rename') {
-        const name = window.prompt('新的工作区名称', workspace.name);
+        const name = window.prompt(t('sidebar.renameWorkspacePrompt'), workspace.name);
         if (name) session.renameWorkspace(workspace.id, name);
       } else if (action === 'edit') onEditWorkspace(workspace.id);
       else if (action === 'delete') session.removeWorkspace(workspace.id);
@@ -217,7 +220,7 @@ export function AppSidebar({
       const conversation = session.conversations.find((item) => item.id === contextMenu.id);
       if (!conversation) return;
       if (action === 'rename') {
-        const title = window.prompt('新的对话标题', conversation.title);
+        const title = window.prompt(t('sidebar.renameConversationPrompt'), conversation.title);
         if (title) session.renameConversation(conversation.id, title);
       } else if (action === 'fork') session.forkConversation(conversation.id);
       else if (action === 'delete') session.removeConversation(conversation.id);
@@ -228,7 +231,7 @@ export function AppSidebar({
   // Cached data renders immediately; the directory sync only blocks an
   // entirely empty sidebar (first run or cleared storage).
   if (session.directorySyncStatus === 'loading' && session.workspaces.length === 0) {
-    return <Sidebar><Sidebar.Content><p className="text-muted px-3 py-4 text-sm">正在同步目录…</p></Sidebar.Content></Sidebar>;
+    return <Sidebar><Sidebar.Content><p className="text-muted px-3 py-4 text-sm">{t('sidebar.syncing')}</p></Sidebar.Content></Sidebar>;
   }
 
   return (
@@ -236,12 +239,12 @@ export function AppSidebar({
       <Sidebar.Header>
         <Dropdown>
           <Dropdown.Trigger
-            aria-label="TodeX 菜单"
+            aria-label={t('sidebar.menu')}
             className="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left hover:bg-surface-secondary active:bg-surface-secondary/70 transition-colors cursor-pointer select-none outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
           >
             <Badge.Anchor className="shrink-0">
               <AppIcon />
-              <Badge color={healthColor} placement="bottom-right" size="sm" aria-label={session.connectionState === 'open' ? '后端已连接' : '后端未连接'} />
+              <Badge color={healthColor} placement="bottom-right" size="sm" aria-label={session.connectionState === 'open' ? t('sidebar.backendConnected') : t('sidebar.backendDisconnected')} />
             </Badge.Anchor>
             <span className="flex min-w-0 flex-1 items-center gap-1.5" data-sidebar="label">
               <span className="text-foreground truncate text-sm font-semibold tracking-tight">TodeX</span>
@@ -259,11 +262,11 @@ export function AppSidebar({
               if (key === 'usage') onOpenUsage();
               if (key === 'about') onOpenAbout();
             }}>
-              <Dropdown.Item id="settings" textValue="设置"><RiSettings3Line className="text-muted size-4 shrink-0" /><Label>设置</Label></Dropdown.Item>
-              <Dropdown.Item id="capabilities" textValue="MCP / Skill 管理"><RiPuzzle2Line className="text-muted size-4 shrink-0" /><Label>MCP / Skill 管理</Label></Dropdown.Item>
-              <Dropdown.Item id="cli-manager" textValue="CLI 管理"><RiTerminalBoxLine className="text-muted size-4 shrink-0" /><Label>CLI 管理</Label></Dropdown.Item>
-              <Dropdown.Item id="usage" textValue="使用统计"><RiBarChartBoxLine className="text-muted size-4 shrink-0" /><Label>使用统计</Label></Dropdown.Item>
-              <Dropdown.Item id="about" textValue="关于"><RiInformationLine className="text-muted size-4 shrink-0" /><Label>关于</Label></Dropdown.Item>
+              <Dropdown.Item id="settings" textValue={t('app.settings')}><RiSettings3Line className="text-muted size-4 shrink-0" /><Label>{t('app.settings')}</Label></Dropdown.Item>
+              <Dropdown.Item id="capabilities" textValue={t('app.mcpSkillManager')}><RiPuzzle2Line className="text-muted size-4 shrink-0" /><Label>{t('app.mcpSkillManager')}</Label></Dropdown.Item>
+              <Dropdown.Item id="cli-manager" textValue={t('app.cliManager')}><RiTerminalBoxLine className="text-muted size-4 shrink-0" /><Label>{t('app.cliManager')}</Label></Dropdown.Item>
+              <Dropdown.Item id="usage" textValue={t('app.usage')}><RiBarChartBoxLine className="text-muted size-4 shrink-0" /><Label>{t('app.usage')}</Label></Dropdown.Item>
+              <Dropdown.Item id="about" textValue={t('app.about')}><RiInformationLine className="text-muted size-4 shrink-0" /><Label>{t('app.about')}</Label></Dropdown.Item>
             </Dropdown.Menu>
           </Dropdown.Popover>
         </Dropdown>
@@ -274,11 +277,11 @@ export function AppSidebar({
           onPress={onCreateConversation}
         >
           <RiAddLine className="size-4" />
-          <span data-sidebar="label">增加对话</span>
+          <span data-sidebar="label">{t('sidebar.newConversation')}</span>
         </Button>
         <Button className="mt-1 w-full justify-start" variant="ghost" onPress={onOpenKanban}>
           <RiKanbanView2 className="size-4" />
-          <span data-sidebar="label">任务看板</span>
+          <span data-sidebar="label">{t('sidebar.kanban')}</span>
         </Button>
       </Sidebar.Header>
 
@@ -297,7 +300,7 @@ export function AppSidebar({
             }}
             className="group flex items-center justify-between px-2 py-1.5 rounded-lg cursor-pointer hover:bg-surface-secondary transition-colors select-none"
             aria-expanded={!workspacesCollapsed}
-            aria-label={workspacesCollapsed ? '展开工作区' : '收起工作区'}
+            aria-label={workspacesCollapsed ? t('sidebar.expandWorkspaces') : t('sidebar.collapseWorkspaces')}
           >
             <div className="flex items-center gap-1.5 min-w-0">
               <RiArrowDownSLine
@@ -306,7 +309,7 @@ export function AppSidebar({
                 }`}
               />
               <Sidebar.GroupLabel className="cursor-pointer p-0 font-medium text-foreground text-xs">
-                工作区
+                {t('sidebar.workspaces')}
               </Sidebar.GroupLabel>
               <span className="text-[11px] text-muted font-normal">
                 ({session.workspaces.length})
@@ -316,7 +319,7 @@ export function AppSidebar({
               isIconOnly
               size="sm"
               variant="ghost"
-              aria-label="新建工作区"
+              aria-label={t('sidebar.newWorkspace')}
               className="size-6 text-muted hover:text-foreground"
               onPress={() => onCreateWorkspace()}
               onClick={(e) => e.stopPropagation()}
@@ -327,12 +330,12 @@ export function AppSidebar({
 
           {!workspacesCollapsed && (
             session.workspaces.length === 0 ? (
-              <p className="text-muted px-3 py-2 text-xs">还没有工作区。</p>
+              <p className="text-muted px-3 py-2 text-xs">{t('sidebar.noWorkspaces')}</p>
             ) : (
               <>
                 <ChatListView
                   key={`workspaces_${workspaceLimit}`}
-                  aria-label="工作区"
+                  aria-label={t('sidebar.workspaces')}
                   density="compact"
                   className="sidebar-chat-list"
                   onAction={(key) => session.selectWorkspace(String(key))}
@@ -340,7 +343,7 @@ export function AppSidebar({
                   {displayedWorkspaces.map((workspace) => {
                     const isSelected = workspace.id === session.activeWorkspaceId;
                     const backend = session.backendConnections.find((profile) => profile.id === (workspace.backendConnectionId || session.activeBackendConnectionId));
-                    const backendLabel = backend ? `后端：${backend.name} · ${backend.serverUrl}` : '后端配置已移除';
+                    const backendLabel = backend ? t('sidebar.backendLabel', { name: backend.name, url: backend.serverUrl }) : t('sidebar.backendRemoved');
                     return (
                       <ChatListView.Item
                         key={workspace.id}
@@ -356,7 +359,7 @@ export function AppSidebar({
                           </ChatListView.Icon>
                           <ChatListView.Text className="flex-1">
                             <ChatListView.Title className={isSelected ? 'text-accent font-semibold' : ''}>
-                              {workspaceDisplayName(workspace)}{pins.workspace.includes(workspace.id) ? <RiPushpin2Fill className="ml-1 inline size-3 text-muted" aria-label="已置顶" /> : null}
+                              {workspaceDisplayName(workspace)}{pins.workspace.includes(workspace.id) ? <RiPushpin2Fill className="ml-1 inline size-3 text-muted" aria-label={t('sidebar.pinned')} /> : null}
                             </ChatListView.Title>
                             <ChatListView.Preview>{workspace.path}</ChatListView.Preview>
                           </ChatListView.Text>
@@ -386,7 +389,7 @@ export function AppSidebar({
                         className="h-7 text-xs text-muted hover:text-foreground font-normal"
                         onPress={() => setWorkspaceLimit((prev) => prev + 5)}
                       >
-                        <span>显示更多 (+5)</span>
+                        <span>{t('sidebar.showMore')}</span>
                       </Button>
                     ) : <span />}
                     {workspaceLimit > 5 ? (
@@ -396,7 +399,7 @@ export function AppSidebar({
                         className="h-7 text-xs text-muted hover:text-foreground font-normal"
                         onPress={() => setWorkspaceLimit(5)}
                       >
-                        <span>收起</span>
+                        <span>{t('sidebar.collapse')}</span>
                       </Button>
                     ) : null}
                   </div>
@@ -420,7 +423,7 @@ export function AppSidebar({
             }}
             className="group flex items-center justify-between px-2 py-1.5 rounded-lg cursor-pointer hover:bg-surface-secondary transition-colors select-none"
             aria-expanded={!conversationsCollapsed}
-            aria-label={conversationsCollapsed ? '展开对话' : '收起对话'}
+            aria-label={conversationsCollapsed ? t('sidebar.expandConversations') : t('sidebar.collapseConversations')}
           >
             <div className="flex items-center gap-1.5 min-w-0">
               <RiArrowDownSLine
@@ -429,7 +432,7 @@ export function AppSidebar({
                 }`}
               />
               <Sidebar.GroupLabel className="cursor-pointer p-0 font-medium text-foreground text-xs">
-                对话
+                {t('sidebar.conversations')}
               </Sidebar.GroupLabel>
               <span className="text-[11px] text-muted font-normal">
                 ({workspaceConversations.length})
@@ -439,7 +442,7 @@ export function AppSidebar({
               isIconOnly
               size="sm"
               variant="ghost"
-              aria-label="新建对话"
+              aria-label={t('sidebar.newConversationAria')}
               className="size-6 text-muted hover:text-foreground"
               isDisabled={!session.activeWorkspaceId}
               onPress={() => onCreateConversation()}
@@ -452,13 +455,13 @@ export function AppSidebar({
           {!conversationsCollapsed && (
             workspaceConversations.length === 0 ? (
               <p className="text-muted px-3 py-2 text-xs">
-                {session.activeWorkspaceId ? '这个工作区还没有对话。' : '选择工作区后可创建对话。'}
+                {session.activeWorkspaceId ? t('sidebar.noConversations') : t('sidebar.selectWorkspace')}
               </p>
             ) : (
               <>
                 <ChatListView
                   key={`${session.activeWorkspaceId || 'no-workspace'}_${conversationLimit}`}
-                  aria-label="对话"
+                  aria-label={t('sidebar.conversations')}
                   density="compact"
                   className="sidebar-chat-list"
                   onAction={(key) => {
@@ -493,14 +496,14 @@ export function AppSidebar({
                           </ChatListView.Icon>
                           <ChatListView.Text>
                             <ChatListView.Title className={isSelected ? 'text-accent font-semibold' : tasksDone ? 'text-muted' : ''}>
-                              {conversationDisplayTitle(conversation, session.timeline)}{pins.conversation.includes(conversation.id) ? <RiPushpin2Fill className="ml-1 inline size-3 text-muted" aria-label="已置顶" /> : null}{taskMeta ? <Chip className="ml-1 inline-flex h-4 align-middle px-1.5 text-[10px]" color={tasksDone ? 'default' : 'accent'} size="sm" variant="soft" aria-label={`${taskMeta.count} 个关联任务`}>{tasksDone ? '已完成' : '规划'}</Chip> : null}
+                              {conversationDisplayTitle(conversation, session.timeline)}{pins.conversation.includes(conversation.id) ? <RiPushpin2Fill className="ml-1 inline size-3 text-muted" aria-label={t('sidebar.pinned')} /> : null}{taskMeta ? <Chip className="ml-1 inline-flex h-4 align-middle px-1.5 text-[10px]" color={tasksDone ? 'default' : 'accent'} size="sm" variant="soft" aria-label={t('sidebar.taskCount', { count: taskMeta.count })}>{tasksDone ? t('sidebar.tasksDone') : t('sidebar.tasksPlanning')}</Chip> : null}
                             </ChatListView.Title>
-                            <ChatListView.Preview>{conversation.preview || '还没有消息'}</ChatListView.Preview>
+                            <ChatListView.Preview>{conversation.preview || t('sidebar.noMessages')}</ChatListView.Preview>
                           </ChatListView.Text>
-                          <ChatListView.Meta>{isConversationHighlighted(conversation, session.activeConversationId, session.turnIds) ? '运行中' : ''}</ChatListView.Meta>
+                          <ChatListView.Meta>{isConversationHighlighted(conversation, session.activeConversationId, session.turnIds) ? t('sidebar.running') : ''}</ChatListView.Meta>
                         </ChatListView.ItemContent>
                         {isConversationHighlighted(conversation, session.activeConversationId, session.turnIds) ? (
-                          <span className="sr-only">运行中</span>
+                          <span className="sr-only">{t('sidebar.running')}</span>
                         ) : null}
                       </ChatListView.Item>
                     );
@@ -516,7 +519,7 @@ export function AppSidebar({
                         className="h-7 text-xs text-muted hover:text-foreground font-normal"
                         onPress={() => setConversationLimit((prev) => prev + 5)}
                       >
-                        <span>显示更多 (+5)</span>
+                        <span>{t('sidebar.showMore')}</span>
                       </Button>
                     ) : <span />}
                     {conversationLimit > 5 ? (
@@ -526,7 +529,7 @@ export function AppSidebar({
                         className="h-7 text-xs text-muted hover:text-foreground font-normal"
                         onPress={() => setConversationLimit(5)}
                       >
-                        <span>收起</span>
+                        <span>{t('sidebar.collapse')}</span>
                       </Button>
                     ) : null}
                   </div>
@@ -544,13 +547,13 @@ export function AppSidebar({
             style={{ left: Math.max(8, Math.min(contextMenu.x, window.innerWidth - 184)), top: Math.max(8, Math.min(contextMenu.y, window.innerHeight - 200)) }}
             onClick={(event) => event.stopPropagation()}
           >
-            <HeroContextMenu.Menu aria-label={contextMenu.kind === 'workspace' ? '工作区菜单' : '对话菜单'} autoFocus="first" onClose={() => setContextMenu(null)}>
+            <HeroContextMenu.Menu aria-label={contextMenu.kind === 'workspace' ? t('sidebar.workspaceMenu') : t('sidebar.conversationMenu')} autoFocus="first" onClose={() => setContextMenu(null)}>
               {contextMenu.kind === 'conversation' ? <HeroContextMenu.Item id="fork" textValue="Fork" onAction={() => runContextAction('fork')}><RiGitBranchLine className="size-4 text-muted" /><Label>Fork</Label></HeroContextMenu.Item> : null}
-              <HeroContextMenu.Item id="rename" textValue="改名" onAction={() => runContextAction('rename')}><RiPencilLine className="size-4 text-muted" /><Label>改名</Label></HeroContextMenu.Item>
-              {contextMenu.kind === 'workspace' ? <HeroContextMenu.Item id="edit" textValue="编辑" onAction={() => runContextAction('edit')}><RiEdit2Line className="size-4 text-muted" /><Label>编辑</Label></HeroContextMenu.Item> : null}
-              <HeroContextMenu.Item id="pin" textValue={pins[contextMenu.kind].includes(contextMenu.id) ? '取消置顶' : '置顶'} onAction={() => runContextAction('pin')}><RiPushpin2Fill className="size-4 text-muted" /><Label>{pins[contextMenu.kind].includes(contextMenu.id) ? '取消置顶' : '置顶'}</Label></HeroContextMenu.Item>
+              <HeroContextMenu.Item id="rename" textValue={t('sidebar.rename')} onAction={() => runContextAction('rename')}><RiPencilLine className="size-4 text-muted" /><Label>{t('sidebar.rename')}</Label></HeroContextMenu.Item>
+              {contextMenu.kind === 'workspace' ? <HeroContextMenu.Item id="edit" textValue={t('sidebar.edit')} onAction={() => runContextAction('edit')}><RiEdit2Line className="size-4 text-muted" /><Label>{t('sidebar.edit')}</Label></HeroContextMenu.Item> : null}
+              <HeroContextMenu.Item id="pin" textValue={pins[contextMenu.kind].includes(contextMenu.id) ? t('sidebar.unpin') : t('sidebar.pin')} onAction={() => runContextAction('pin')}><RiPushpin2Fill className="size-4 text-muted" /><Label>{pins[contextMenu.kind].includes(contextMenu.id) ? t('sidebar.unpin') : t('sidebar.pin')}</Label></HeroContextMenu.Item>
               <HeroContextMenu.Separator />
-              <HeroContextMenu.Item id="delete" textValue="删除" variant="danger" onAction={() => runContextAction('delete')}><RiDeleteBinLine className="size-4 text-danger" /><Label>删除</Label></HeroContextMenu.Item>
+              <HeroContextMenu.Item id="delete" textValue={t('common.delete')} variant="danger" onAction={() => runContextAction('delete')}><RiDeleteBinLine className="size-4 text-danger" /><Label>{t('common.delete')}</Label></HeroContextMenu.Item>
             </HeroContextMenu.Menu>
           </div>
         </HeroContextMenu>

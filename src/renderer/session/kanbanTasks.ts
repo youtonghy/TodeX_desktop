@@ -11,19 +11,20 @@ import {
 } from '@todex/protocol/todex';
 import { loadJson, saveJson } from '../lib/storage';
 import { KANBAN_TASKS_STORAGE_KEY, WORKSPACE_SYNC_DEBOUNCE_MS } from './helpers';
+import { t } from '../i18n';
 
 export type { KanbanTask, KanbanTaskStatus };
 
 export const kanbanTaskStatuses: readonly KanbanTaskStatus[] = KANBAN_TASK_STATUSES;
 
-export const kanbanTaskStatusLabels: Record<KanbanTaskStatus, string> = {
-  planned: '计划',
-  'in-progress': '进行中',
-  done: '已完成',
+const kanbanTaskStatusKeys: Record<KanbanTaskStatus, 'kanban.statusPlanned' | 'kanban.statusInProgress' | 'kanban.statusDone'> = {
+  planned: 'kanban.statusPlanned',
+  'in-progress': 'kanban.statusInProgress',
+  done: 'kanban.statusDone',
 };
 
 export function kanbanTaskStatusLabel(status: KanbanTaskStatus): string {
-  return kanbanTaskStatusLabels[status];
+  return t(kanbanTaskStatusKeys[status]);
 }
 
 const KANBAN_TASK_TITLE_LIMIT = 200;
@@ -272,8 +273,8 @@ export function isKanbanTaskOverdue(task: KanbanTask, now = new Date()): boolean
 }
 
 export function kanbanTaskDraftText(task: KanbanTask): string {
-  const lines = [`任务：${task.title}`];
-  if (task.description) lines.push(`描述：${task.description}`);
-  if (task.dueDate) lines.push(`截止日期：${task.dueDate}`);
+  const lines = [t('kanban.draftTask', { title: task.title })];
+  if (task.description) lines.push(t('kanban.draftDesc', { description: task.description }));
+  if (task.dueDate) lines.push(t('kanban.draftDue', { dueDate: task.dueDate }));
   return lines.join('\n');
 }

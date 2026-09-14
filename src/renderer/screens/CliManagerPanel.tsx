@@ -10,18 +10,20 @@ import {
 } from '@todex/protocol/v2';
 import { ProviderIcon } from '../components/ProviderIcon';
 import { NoticeToast } from '../components/NoticeToast';
+import { t, useT, type MessageKey } from '../i18n';
 import type { TodeXSession } from '../session/useTodeXSession';
 
-const STATUS: Record<CliVersionStatus, { label: string; color: 'success' | 'warning' | 'default' | 'danger' }> = {
-  upToDate: { label: '已是最新', color: 'success' },
-  updateAvailable: { label: '可升级', color: 'warning' },
-  ahead: { label: '领先最新版', color: 'default' },
-  unknown: { label: '最新版未知', color: 'default' },
-  notInstalled: { label: '未安装', color: 'danger' },
-  external: { label: '外部管理', color: 'default' },
+const STATUS: Record<CliVersionStatus, { labelKey: MessageKey; color: 'success' | 'warning' | 'default' | 'danger' }> = {
+  upToDate: { labelKey: 'cli.statusUpToDate', color: 'success' },
+  updateAvailable: { labelKey: 'cli.statusUpdateAvailable', color: 'warning' },
+  ahead: { labelKey: 'cli.statusAhead', color: 'default' },
+  unknown: { labelKey: 'cli.statusUnknownLatest', color: 'default' },
+  notInstalled: { labelKey: 'cli.statusNotInstalled', color: 'danger' },
+  external: { labelKey: 'cli.statusExternal', color: 'default' },
 };
 
 export function CliManagerPanel({ session }: { session: TodeXSession }) {
+  const t = useT();
   const [clis, setClis] = useState<CliVersionInfo[]>([]);
   const [operation, setOperation] = useState<CliUpgradeOperation>();
   const [loading, setLoading] = useState(true);
@@ -44,7 +46,7 @@ export function CliManagerPanel({ session }: { session: TodeXSession }) {
     } catch (error) {
       if (generation !== requestGeneration.current) return;
       setClis([]);
-      if (!quiet) toast.danger(error instanceof Error ? error.message : '无法读取 CLI 版本');
+      if (!quiet) toast.danger(error instanceof Error ? error.message : t('cli.readFailed'));
     } finally {
       if (generation === requestGeneration.current) setLoading(false);
     }
@@ -71,10 +73,10 @@ export function CliManagerPanel({ session }: { session: TodeXSession }) {
         reportedPollError = false;
         setOperation(next);
         if (next.status === 'succeeded') {
-          toast.success('CLI 已升级到最新版本');
+          toast.success(t('cli.upgraded'));
           void refresh(true);
         } else if (next.status === 'failed') {
-          toast.danger(next.error || 'CLI 升级失败');
+          toast.danger(next.error || t('cli.upgradeFailed'));
         } else {
           timer = window.setTimeout(() => void poll(), 1200);
         }
@@ -82,7 +84,7 @@ export function CliManagerPanel({ session }: { session: TodeXSession }) {
         if (cancelled) return;
         if (!reportedPollError) {
           reportedPollError = true;
-          toast.danger(error instanceof Error ? error.message : '无法读取升级进度');
+          toast.danger(error instanceof Error ? error.message : t('cli.progressReadFailed'));
         }
         timer = window.setTimeout(() => void poll(), 2500);
       }
@@ -99,7 +101,7 @@ export function CliManagerPanel({ session }: { session: TodeXSession }) {
       if (generation === backendGeneration.current) setOperation(next);
     } catch (error) {
       if (generation === backendGeneration.current) {
-        toast.danger(error instanceof Error ? error.message : '无法开始升级');
+        toast.danger(error instanceof Error ? error.message : t('cli.upgradeStartFailed'));
       }
     } finally {
       if (generation === backendGeneration.current) setSubmittingProvider(undefined);
@@ -115,20 +117,20 @@ export function CliManagerPanel({ session }: { session: TodeXSession }) {
           <RiServerLine className="size-5" />
         </div>
         <div className="min-w-0 flex-1">
-          <h2 className="truncate text-base font-semibold">{activeBackend?.name || '当前后端'}</h2>
+          <h2 className="truncate text-base font-semibold">{activeBackend?.name || t('cli.currentBackend')}</h2>
           <p className="text-muted truncate text-xs" title={session.settings.serverUrl}>{session.settings.serverUrl}</p>
         </div>
-        <Button isIconOnly size="sm" variant="ghost" aria-label="刷新 CLI 版本" isDisabled={loading} onPress={() => void refresh()}>
+        <Button isIconOnly size="sm" variant="ghost" aria-label={t('cli.refreshAria')} isDisabled={loading} onPress={() => void refresh()}>
           <RiRefreshLine className="size-4" />
         </Button>
       </div>
 
       {loading ? (
-        <div className="flex min-h-48 items-center justify-center"><Spinner aria-label="正在读取 CLI 版本" /></div>
+        <div className="flex min-h-48 items-center justify-center"><Spinner aria-label={t('cli.reading')} /></div>
       ) : (
         <div className="grid gap-3 sm:grid-cols-2">
           {clis.map((cli) => {
-            const status = STATUS[cli.status] ?? { label: '状态未知', color: 'default' as const };
+            const status = STATUS[cli.status] ?? { labelKey: 'cli.statusUnknown' as MessageKey, color: 'default' as const };
             const upgrading = operation?.provider === cli.id && operation.status === 'running';
             return (
               <Card key={cli.id} className="min-w-0 rounded-lg p-4">
@@ -139,13 +141,13 @@ export function CliManagerPanel({ session }: { session: TodeXSession }) {
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <h3 className="truncate text-sm font-semibold">{cli.name}</h3>
-                      <Chip size="sm" variant="soft" color={status.color}>{upgrading ? '升级中' : status.label}</Chip>
+                      <Chip size="sm" variant="soft" color={status.color}>{upgrading ? t('cli.upgrading') : t(status.labelKey)}</Chip>
                     </div>
                     <dl className="mt-3 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-xs">
-                      <dt className="text-muted">当前版本</dt><dd className="truncate font-medium tabular-nums">{cli.currentVersion || '不可用'}</dd>
-                      <dt className="text-muted">最新版本</dt><dd className="truncate font-medium tabular-nums">{cli.latestVersion || '未获取'}</dd>
+                      <dt className="text-muted">{t('cli.currentVersion')}</dt><dd className="truncate font-medium tabular-nums">{cli.currentVersion || t('cli.unavailable')}</dd>
+                      <dt className="text-muted">{t('cli.latestVersion')}</dt><dd className="truncate font-medium tabular-nums">{cli.latestVersion || t('cli.notFetched')}</dd>
                     </dl>
-                    <NoticeToast message={cli.error && cli.error !== operation?.error ? `${cli.name}：${cli.error}` : null}
+                    <NoticeToast message={cli.error && cli.error !== operation?.error ? t('cli.namedError', { name: cli.name, error: cli.error }) : null}
                       variant="danger" scope={session.activeBackendConnectionId} />
                   </div>
                 </div>
@@ -158,7 +160,7 @@ export function CliManagerPanel({ session }: { session: TodeXSession }) {
                     onPress={() => void upgrade(cli.id)}
                   >
                     {upgrading ? <Spinner size="sm" /> : <RiDownloadCloud2Line className="size-4" />}
-                    {upgrading ? '正在升级' : '升级到最新版'}
+                    {upgrading ? t('cli.upgradingNow') : t('cli.upgradeToLatest')}
                   </Button>
                 ) : null}
               </Card>

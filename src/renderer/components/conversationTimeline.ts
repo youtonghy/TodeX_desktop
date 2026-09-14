@@ -1,4 +1,5 @@
 import { isStepProgressEntry, latestIncomingEntryIds } from '@todex/protocol/mobileParity';
+import { matchesMessage } from '../i18n';
 import type { TimelineEntry } from '../session/helpers';
 
 export { latestIncomingEntryIds };
@@ -10,7 +11,7 @@ export function isChatTimelineEntry(entry: TimelineEntry): boolean {
 }
 
 export function isChatToolEntry(entry: TimelineEntry): boolean {
-  return entry.category ? entry.category === 'tool' : entry.kind === 'system' && entry.title === '工具调用';
+  return entry.category ? entry.category === 'tool' : entry.kind === 'system' && matchesMessage('chat.toolCall', entry.title);
 }
 
 export type ChatRenderItem =

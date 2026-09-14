@@ -2,6 +2,7 @@ import { Button, Spinner, Tooltip } from '@heroui/react';
 import { RiGitBranchLine, RiStackLine } from '@remixicon/react';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { useGitStatus } from '../session/useGitStatus';
+import { useT } from '../i18n';
 
 type Props = { session: TodeXSession; gitOpen: boolean; onOpenGit: () => void };
 
@@ -24,13 +25,14 @@ export function GitStatusIndicator({ session, gitOpen, onOpenGit }: Props) {
 }
 
 export function GitStatusDisplay({ state, onOpenGit, wrap = true }: { state: ReturnType<typeof useConversationGitStatus>; onOpenGit: () => void; wrap?: boolean }) {
+  const t = useT();
   const { workspace, connected, data, error, loading, refresh } = state;
   if (!workspace?.path) return null;
-  const branch = data?.branch || '分离 HEAD';
-  const worktree = data?.worktreeKind === 'linked' ? '关联工作树' : '主工作树';
+  const branch = data?.branch || t('git.detachedHead');
+  const worktree = data?.worktreeKind === 'linked' ? t('git.linkedWorktree') : t('git.mainWorktree');
   const summary = data?.initialized
-    ? `${branch}，${worktree}，${data.changedFiles} 个变更文件，新增 ${data.additions} 行，删除 ${data.deletions} 行${data.statsTruncated ? '，统计为部分结果' : ''}`
-    : !connected ? 'Git 未连接' : error ? 'Git 状态不可用，点击重试' : loading ? '正在读取 Git 状态' : '未初始化 Git';
+    ? t('git.statusSummary', { branch, worktree, count: data.changedFiles, additions: data.additions, deletions: data.deletions, truncated: data.statsTruncated ? t('git.partialStats') : '' })
+    : !connected ? t('git.notConnected') : error ? t('git.statusUnavailable') : loading ? t('git.reading') : t('git.notInitialized');
   return <div className="min-w-0" data-testid="git-status">
     <Tooltip delay={300}>
       <Button size="sm" variant="ghost" className="h-auto min-h-8 min-w-0 max-w-full justify-start gap-2 px-2 py-1 text-xs font-normal"
@@ -40,7 +42,7 @@ export function GitStatusDisplay({ state, onOpenGit, wrap = true }: { state: Ret
           <span className="max-w-40 truncate font-medium">{branch}</span>
           <span className="flex shrink-0 items-center gap-1 text-muted"><RiStackLine className="size-3.5" />{worktree}</span>
           <span className="flex shrink-0 items-center gap-2 tabular-nums">
-            <span className="text-muted">{data.changedFiles} 个文件</span>
+            <span className="text-muted">{t('git.changedFiles', { count: data.changedFiles })}</span>
             <span className="text-success">+{data.additions}{data.statsTruncated ? '…' : ''}</span>
             <span className="text-danger">−{data.deletions}{data.statsTruncated ? '…' : ''}</span>
           </span>
@@ -49,7 +51,7 @@ export function GitStatusDisplay({ state, onOpenGit, wrap = true }: { state: Ret
       <Tooltip.Content className="max-w-sm space-y-1 text-xs">
         <p className="break-all">{data?.repositoryPath || workspace.path}</p>
         <p>{summary}</p>
-        {error ? <p className="break-all">{error}</p> : data?.initialized ? <p className="text-muted">相对 HEAD 的已暂存与未暂存更改，包含未跟踪文件；二进制文件不计行数。点击打开 Git 操作。</p> : null}
+        {error ? <p className="break-all">{error}</p> : data?.initialized ? <p className="text-muted">{t('git.statusTooltipHint')}</p> : null}
       </Tooltip.Content>
     </Tooltip>
   </div>;

@@ -21,6 +21,7 @@ import type { OpenPanelOptions, WorkbenchTab } from '../lib/panels';
 import { normalizeWorkbenchLayout } from '../session/workbenchLayout';
 import { SETTINGS_STORAGE_KEY, attachmentId, referenceToken, uniqueReferenceName } from '../session/helpers';
 import { V2ApiClient } from '@todex/protocol/v2';
+import { t, useT, type MessageKey } from '../i18n';
 
 type Props = {
   scopeKey?: string;
@@ -40,12 +41,14 @@ type StoredWorkbenchState = {
 
 const WORKBENCH_TYPES = new Set<WorkbenchTab>(['terminal', 'browser', 'files', 'git-diff']);
 
-const WORKBENCH_LABELS: Record<WorkbenchTab, string> = {
-  terminal: '终端',
-  browser: '浏览器',
-  files: '文件',
-  'git-diff': 'Git Diff',
+const WORKBENCH_LABEL_KEYS: Record<WorkbenchTab, MessageKey> = {
+  terminal: 'workbench.tabTerminal',
+  browser: 'workbench.tabBrowser',
+  files: 'workbench.tabFiles',
+  'git-diff': 'workbench.tabGitDiff',
 };
+
+const workbenchLabel = (tab: WorkbenchTab) => t(WORKBENCH_LABEL_KEYS[tab]);
 
 const WORKBENCH_ICONS = {
   terminal: RiTerminalBoxLine,
@@ -74,25 +77,28 @@ function parseStoredWorkbenchState(value: unknown): StoredWorkbenchState {
   return { items: items.map(item => ({ ...item, target: normalizeWorkbenchLayout({ target: item.target }).target })), activeId };
 }
 
-const PLACEHOLDER_FILES: Record<string, { title: string; language: string; body: string }> = {
-  readme: {
-    title: 'README.md',
-    language: 'markdown',
-    body: '# 工作区\n\n文件预览目前是前端占位。\n接入后端目录接口后，这里会显示真实文件内容。',
-  },
-  agent: {
-    title: 'AGENTS.md',
-    language: 'markdown',
-    body: '# Agents\n\nTodeX 桌面端会在右侧面板预览工作区文件。\n当前后端文件接口尚未接入。',
-  },
-  package: {
-    title: 'package.json',
-    language: 'json',
-    body: '{\n  "name": "workspace",\n  "private": true\n}',
-  },
-};
+function placeholderFiles(): Record<string, { title: string; language: string; body: string }> {
+  return {
+    readme: {
+      title: 'README.md',
+      language: 'markdown',
+      body: t('workbench.placeholderReadme'),
+    },
+    agent: {
+      title: 'AGENTS.md',
+      language: 'markdown',
+      body: t('workbench.placeholderAgents'),
+    },
+    package: {
+      title: 'package.json',
+      language: 'json',
+      body: '{\n  "name": "workspace",\n  "private": true\n}',
+    },
+  };
+}
 
 export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = session.activeConversation?.id || '', onTargetConsumed }: Props) {
+  const t = useT();
   const storageKey = `${SETTINGS_STORAGE_KEY}.workbenchTabs.v1:${scopeKey}`;
   const [items, setItems] = useState<WorkbenchItem[]>([]);
   const [activeId, setActiveId] = useState('');
@@ -148,7 +154,7 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
       setActiveId(existing.id);
       return;
     }
-    const item = { id: `${tab}-${Date.now()}`, type: tab, title: `${WORKBENCH_LABELS[tab]} 1` };
+    const item = { id: `${tab}-${Date.now()}`, type: tab, title: `${workbenchLabel(tab)} 1` };
     setItems(current => [...current, item]);
     setActiveId(item.id);
     // Consume an explicit open request, including repeated clicks on one path.
@@ -166,7 +172,7 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
   const addTab = (type: WorkbenchTab) => {
     if (!restored) return;
     const count = items.filter((item) => item.type === type).length + 1;
-    const item = { id: `${type}-${Date.now()}`, type, title: `${WORKBENCH_LABELS[type]} ${count}` };
+    const item = { id: `${type}-${Date.now()}`, type, title: `${workbenchLabel(type)} ${count}` };
     setItems((current) => [...current, item]);
     setActiveId(item.id);
     onTabChange(type);
@@ -195,7 +201,7 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
               : item.type === 'browser'
                 ? item.target?.url || item.target?.filePath || 'http://127.0.0.1:7345'
                 : item.target?.filePath || workspacePath;
-            const title = location ? `${WORKBENCH_LABELS[item.type]} ${location}` : item.title;
+            const title = location ? `${workbenchLabel(item.type)} ${location}` : item.title;
             return (
               <div key={item.id} className={`group flex h-10 shrink-0 items-center border-r border-separator ${item.id === activeId ? 'bg-surface text-foreground' : 'text-muted'}`}>
                 <Tooltip delay={200}>
@@ -211,7 +217,7 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
                   </Tooltip.Content>
                 </Tooltip>
                 <Button
-                  isIconOnly size="sm" variant="ghost" aria-label={`关闭${title}`}
+                  isIconOnly size="sm" variant="ghost" aria-label={t('workbench.closeTab', { title })}
                   className="mr-1 size-5 min-w-5 rounded-sm text-muted opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100"
                   onPress={() => closeTab(item.id)}
                 >
@@ -223,16 +229,16 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
         </div>
         <Dropdown>
           <Dropdown.Trigger
-            isDisabled={!restored} aria-label="新建工作台标签"
+            isDisabled={!restored} aria-label={t('workbench.newTab')}
             className="inline-flex size-8 items-center justify-center rounded-lg text-muted hover:text-foreground hover:bg-surface-secondary transition-colors cursor-pointer"
           >
             <RiAddLine className="size-4" />
           </Dropdown.Trigger>
           <Dropdown.Popover>
             <Dropdown.Menu onAction={(key) => addTab(String(key) as WorkbenchTab)}>
-              <Dropdown.Item id="terminal" textValue="终端">终端</Dropdown.Item>
-              <Dropdown.Item id="browser" textValue="浏览器">浏览器</Dropdown.Item>
-              <Dropdown.Item id="files" textValue="文件">文件</Dropdown.Item>
+              <Dropdown.Item id="terminal" textValue={t('workbench.tabTerminal')}>{t('workbench.tabTerminal')}</Dropdown.Item>
+              <Dropdown.Item id="browser" textValue={t('workbench.tabBrowser')}>{t('workbench.tabBrowser')}</Dropdown.Item>
+              <Dropdown.Item id="files" textValue={t('workbench.tabFiles')}>{t('workbench.tabFiles')}</Dropdown.Item>
               <Dropdown.Item id="git-diff" textValue="Git Diff">Git Diff</Dropdown.Item>
             </Dropdown.Menu>
           </Dropdown.Popover>
@@ -240,7 +246,7 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
       </div>
       <div className="min-h-0 flex-1 overflow-hidden">
         {!active ? (
-          <div className="text-muted flex h-full items-center justify-center text-sm">暂无打开的标签</div>
+          <div className="text-muted flex h-full items-center justify-center text-sm">{t('workbench.noTabs')}</div>
         ) : null}
         {items.map((item) => (
           <div key={item.id} className={item.id === active?.id ? 'h-full' : 'hidden'}>
@@ -262,6 +268,7 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
 }
 
 function TerminalPane({ session, terminalId, isActive }: { session: TodeXSession; terminalId: string; isActive: boolean }) {
+  const t = useT();
   const workspace = session.activeWorkspace;
   const conversation = session.activeConversation;
   const backendIdentity = workspace?.backendConnectionId || session.activeBackendConnectionId || session.settings.serverUrl;
@@ -401,7 +408,7 @@ function TerminalPane({ session, terminalId, isActive }: { session: TodeXSession
           }}
           className="min-w-0 flex-1"
         >
-          <TextField aria-label="终端路径" className="w-full" value={cwdDraft} onChange={setCwdDraft}>
+          <TextField aria-label={t('workbench.terminalPath')} className="w-full" value={cwdDraft} onChange={setCwdDraft}>
             <Input
               placeholder="/path/to/directory..."
               className="text-xs"
@@ -411,8 +418,8 @@ function TerminalPane({ session, terminalId, isActive }: { session: TodeXSession
         <div className="flex shrink-0 items-center gap-2">
           <Chip size="sm" variant="soft">
             {session.connectionState === 'open'
-              ? session.connectionHealth.latencyMs === null ? '检测中' : latencyLabelOf(session.connectionHealth.latencyMs)
-              : '未连接'}
+              ? session.connectionHealth.latencyMs === null ? t('workbench.detecting') : latencyLabelOf(session.connectionHealth.latencyMs)
+              : t('workbench.disconnected')}
           </Chip>
           <Button
             size="sm"
@@ -428,13 +435,13 @@ function TerminalPane({ session, terminalId, isActive }: { session: TodeXSession
                 session.stopTerminalSession(terminalId, workspace?.tenantId || session.settings.tenantId);
               }
             }}
-            aria-label="停止终端"
+            aria-label={t('workbench.stopTerminal')}
             className="expandable-action-btn"
           >
             <span className="expandable-action-btn__icon">
               <RiStopCircleLine className="size-4" />
             </span>
-            <span className="expandable-action-btn__label">停止</span>
+            <span className="expandable-action-btn__label">{t('workbench.stop')}</span>
           </Button>
         </div>
       </div>
@@ -452,6 +459,7 @@ function TerminalPane({ session, terminalId, isActive }: { session: TodeXSession
 }
 
 function BrowserPane({ workspacePath, session, target, onTargetChange }: { workspacePath?: string; session: TodeXSession; target?: OpenPanelOptions; onTargetChange?: (target: OpenPanelOptions) => void }) {
+  const t = useT();
   const targetChangeRef = useRef(onTargetChange);
   targetChangeRef.current = onTargetChange;
   const defaultUrl = target?.url ? target.url : (target?.filePath ? '' : 'http://127.0.0.1:7345');
@@ -469,17 +477,17 @@ function BrowserPane({ workspacePath, session, target, onTargetChange }: { works
     const trimmed = input.trim();
     try {
       const parsed = new URL(trimmed);
-      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error('仅支持 HTTP 和 HTTPS 地址');
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error(t('workbench.httpOnly'));
       const host = parsed.hostname.toLowerCase();
       const loopback = host === 'localhost' || host === '::1' || /^127(?:\.\d{1,3}){3}$/.test(host);
-      if (!loopback) throw new Error('浏览器预览仅允许访问本机地址');
+      if (!loopback) throw new Error(t('workbench.loopbackOnly'));
       setUrl(parsed.toString());
       setDraft(parsed.toString());
       targetChangeRef.current?.({ url: parsed.toString() });
       setSrcDoc('');
       setError('');
     } catch (reason) {
-      toast.danger(reason instanceof Error ? reason.message : '请输入有效的网址');
+      toast.danger(reason instanceof Error ? reason.message : t('workbench.invalidUrl'));
     }
   }, []);
 
@@ -511,17 +519,17 @@ function BrowserPane({ workspacePath, session, target, onTargetChange }: { works
     const api = new V2ApiClient({ serverUrl: session.settings.serverUrl, authToken: session.settings.authToken });
     void api.readWorkspaceFile(target.filePath)
       .then((file) => {
-        if (!file.text) throw new Error('该网页文件无法作为文本加载');
+        if (!file.text) throw new Error(t('workbench.webFileNotText'));
         setSrcDoc(file.text);
       })
-      .catch((reason) => setError(reason instanceof Error ? reason.message : '网页文件读取失败'));
+      .catch((reason) => setError(reason instanceof Error ? reason.message : t('workbench.webFileReadFailed')));
   }, [session.settings.authToken, session.settings.serverUrl, target?.filePath, target?.url]);
 
   const appendReference = useCallback((element: HTMLElement) => {
     const tag = element.tagName.toLowerCase();
     const text = (element.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 160);
     const id = element.id ? `#${element.id}` : '';
-    const reference = `[网页元素 ${tag}${id}${text ? `: ${text}` : ''}]`;
+    const reference = t('workbench.webElement', { tag, id, text: text ? `: ${text}` : '' });
     const conversationId = session.activeConversation?.id;
     if (conversationId) {
       session.setConversationChatDraft(conversationId, (current) => `${current}${current ? '\n' : ''}${reference}`);
@@ -630,7 +638,7 @@ function BrowserPane({ workspacePath, session, target, onTargetChange }: { works
           hoverOverlay.remove();
           selectedOverlay.remove();
         };
-      } catch { toast.danger('该页面禁止读取元素，无法使用检查功能'); }
+      } catch { toast.danger(t('workbench.inspectBlocked')); }
       return undefined;
     };
     let cleanup = bind();
@@ -657,7 +665,7 @@ function BrowserPane({ workspacePath, session, target, onTargetChange }: { works
           }}
           className="min-w-0 flex-1"
         >
-          <TextField aria-label="地址" className="w-full" value={draft} onChange={setDraft}>
+          <TextField aria-label={t('workbench.address')} className="w-full" value={draft} onChange={setDraft}>
             <Input placeholder="http://127.0.0.1:..." className="text-xs" />
           </TextField>
         </form>
@@ -667,13 +675,13 @@ function BrowserPane({ workspacePath, session, target, onTargetChange }: { works
             variant="tertiary"
             isDisabled={!url && !srcDoc}
             onPress={handleReload}
-            aria-label="刷新网页"
+            aria-label={t('workbench.refreshPage')}
             className="expandable-action-btn"
           >
             <span className="expandable-action-btn__icon">
               <RiRefreshLine className="size-4" />
             </span>
-            <span className="expandable-action-btn__label">刷新</span>
+            <span className="expandable-action-btn__label">{t('workbench.refresh')}</span>
           </Button>
           <Button
             size="sm"
@@ -687,27 +695,27 @@ function BrowserPane({ workspacePath, session, target, onTargetChange }: { works
                 return !current;
               });
             }}
-            aria-label={inspect ? '退出检查' : '选择元素'}
+            aria-label={inspect ? t('workbench.exitInspect') : t('workbench.selectElement')}
             className="expandable-action-btn"
           >
             <span className="expandable-action-btn__icon">
               <RiFocus3Line className="size-4" />
             </span>
-            <span className="expandable-action-btn__label">{inspect ? '退出检查' : '选择元素'}</span>
+            <span className="expandable-action-btn__label">{inspect ? t('workbench.exitInspect') : t('workbench.selectElement')}</span>
           </Button>
         </div>
       </div>
       {url || srcDoc ? (
         <div className="bg-surface min-h-0 flex-1 overflow-hidden rounded-xl border border-separator">
-          <iframe ref={frameRef} title="网页预览" src={url || undefined} srcDoc={srcDoc || undefined} className="size-full border-0" sandbox="allow-forms allow-modals allow-popups allow-same-origin allow-scripts" />
+          <iframe ref={frameRef} title={t('workbench.webPreview')} src={url || undefined} srcDoc={srcDoc || undefined} className="size-full border-0" sandbox="allow-forms allow-modals allow-popups allow-same-origin allow-scripts" />
         </div>
       ) : (
         <div className="bg-surface-secondary flex min-h-0 flex-1 flex-col items-center justify-center gap-2 rounded-xl px-6 text-center">
           <RiGlobalLine className="text-muted size-6" />
-          <p className="text-sm font-medium">浏览器预览</p>
-          <p className="text-muted max-w-xs text-xs">输入地址后由 backend 所在机器请求并返回内容。工作区 {workspacePath || '尚未选择'}。</p>
+          <p className="text-sm font-medium">{t('workbench.browserPreview')}</p>
+          <p className="text-muted max-w-xs text-xs">{t('workbench.browserPreviewHint', { workspace: workspacePath || t('workbench.noWorkspace') })}</p>
           <Button size="sm" variant="secondary" onPress={() => navigateTo(draft || 'http://127.0.0.1:7345')}>
-            打开默认地址
+            {t('workbench.openDefault')}
           </Button>
         </div>
       )}
@@ -716,6 +724,7 @@ function BrowserPane({ workspacePath, session, target, onTargetChange }: { works
 }
 
 function GitDiffPane({ session }: { session: TodeXSession }) {
+  const t = useT();
   const conversation = session.activeConversation;
   const state = conversation ? session.gitDiffByConversation[conversation.id] : undefined;
   const workspacePath = session.activeWorkspace?.path || '';
@@ -742,7 +751,7 @@ function GitDiffPane({ session }: { session: TodeXSession }) {
           }}
           className="min-w-0 flex-1"
         >
-          <TextField aria-label="Git 工作区路径" className="w-full" value={pathDraft} onChange={setPathDraft}>
+          <TextField aria-label={t('workbench.gitPath')} className="w-full" value={pathDraft} onChange={setPathDraft}>
             <Input placeholder="/path/to/workspace..." className="text-xs" />
           </TextField>
         </form>
@@ -752,18 +761,18 @@ function GitDiffPane({ session }: { session: TodeXSession }) {
             variant="tertiary"
             isDisabled={!conversation || state?.status === 'loading'}
             onPress={handleRefresh}
-            aria-label="刷新 Git Diff"
+            aria-label={t('workbench.refreshGitDiff')}
             className="expandable-action-btn"
           >
             <span className="expandable-action-btn__icon">
               <RiRefreshLine className={`size-4 ${state?.status === 'loading' ? 'animate-spin' : ''}`} />
             </span>
-            <span className="expandable-action-btn__label">刷新</span>
+            <span className="expandable-action-btn__label">{t('workbench.refresh')}</span>
           </Button>
         </div>
       </div>
       <ScrollShadow className="bg-surface-secondary min-h-0 flex-1 rounded-xl p-3">
-        {state?.error ? null : <pre className="font-mono text-xs whitespace-pre-wrap">{state?.diff || '暂无 diff。'}</pre>}
+        {state?.error ? null : <pre className="font-mono text-xs whitespace-pre-wrap">{state?.diff || t('aside.noDiff')}</pre>}
       </ScrollShadow>
     </div>
   );
@@ -797,6 +806,7 @@ function replaceFileTreeChildren(entries: FileTreeEntry[], path: string, childre
 }
 
 function FilesPane({ session, target, onTargetChange }: { session: TodeXSession; target?: OpenPanelOptions; onTargetChange?: (target: OpenPanelOptions) => void }) {
+  const t = useT();
   const targetChangeRef = useRef(onTargetChange);
   targetChangeRef.current = onTargetChange;
   const [entries, setEntries] = useState<FileTreeEntry[]>([]);
@@ -838,7 +848,7 @@ function FilesPane({ session, target, onTargetChange }: { session: TodeXSession;
       const next = await api.readWorkspaceFile(path);
       if (request === fileRequestRef.current) setFile(next);
     } catch (reason) {
-      if (request === fileRequestRef.current) setError(reason instanceof Error ? reason.message : '文件读取失败');
+      if (request === fileRequestRef.current) setError(reason instanceof Error ? reason.message : t('workbench.fileReadFailed'));
     } finally {
       if (request === fileRequestRef.current) setFileLoading(false);
     }
@@ -849,13 +859,13 @@ function FilesPane({ session, target, onTargetChange }: { session: TodeXSession;
   const addReferenceToChat = useCallback((selection: ReferenceSelection) => {
     const conversationId = session.activeConversation?.id;
     if (!conversationId || !file) {
-      toast.danger('请先选择一个对话，再添加引用');
+      toast.danger(t('workbench.pickConversation'));
       return;
     }
     const baseName = file.name || file.path.split(/[\\/]/).pop() || file.path;
     const base = selection.lineStart
       ? `${baseName}:${selection.lineStart}${selection.lineEnd && selection.lineEnd !== selection.lineStart ? `-${selection.lineEnd}` : ''}`
-      : `${baseName} 摘录`;
+      : t('workbench.excerpt', { name: baseName });
     const draft = session.chatDrafts[conversationId] ?? '';
     const name = uniqueReferenceName(base, session.composerAttachments[conversationId] ?? [], draft);
     session.setConversationAttachments(conversationId, (current) => [...current, {
@@ -866,7 +876,7 @@ function FilesPane({ session, target, onTargetChange }: { session: TodeXSession;
     }]);
     const token = referenceToken(name);
     session.setConversationChatDraft(conversationId, (current) => current ? `${current}\n${token}` : token);
-    toast.success(`已添加引用 ${name}`);
+    toast.success(t('workbench.referenceAdded', { name }));
   }, [file, session]);
 
   const loadDirectory = useCallback(async (directory: string) => {
@@ -881,7 +891,7 @@ function FilesPane({ session, target, onTargetChange }: { session: TodeXSession;
       setEntries((current) => directory === currentPath ? children : replaceFileTreeChildren(current, directory, children));
       setExpandedKeys((current) => new Set([...current, directory]));
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '目录读取失败');
+      setError(reason instanceof Error ? reason.message : t('workbench.dirReadFailed'));
     } finally {
       setLoading(false);
     }
@@ -948,7 +958,7 @@ function FilesPane({ session, target, onTargetChange }: { session: TodeXSession;
           }}
           className="min-w-0 flex-1"
         >
-          <TextField aria-label="路径" className="w-full" value={pathDraft} onChange={setPathDraft}>
+          <TextField aria-label={t('workbench.pathLabel')} className="w-full" value={pathDraft} onChange={setPathDraft}>
             <Input placeholder="/path/to/directory..." className="text-xs" />
           </TextField>
         </form>
@@ -958,25 +968,25 @@ function FilesPane({ session, target, onTargetChange }: { session: TodeXSession;
             variant="tertiary"
             isDisabled={!currentPath || loading}
             onPress={() => currentPath && void loadDirectory(currentPath)}
-            aria-label="刷新目录"
+            aria-label={t('workbench.refreshDir')}
             className="expandable-action-btn"
           >
             <span className="expandable-action-btn__icon">
               <RiRefreshLine className="size-4" />
             </span>
-            <span className="expandable-action-btn__label">刷新</span>
+            <span className="expandable-action-btn__label">{t('workbench.refresh')}</span>
           </Button>
           <Button
             size="sm"
             variant="tertiary"
             onPress={toggleTree}
-            aria-label={treeCollapsed ? '显示文件树' : '收起文件树'}
+            aria-label={treeCollapsed ? t('workbench.showTree') : t('workbench.collapseTree')}
             className="expandable-action-btn"
           >
             <span className="expandable-action-btn__icon">
               {treeCollapsed ? <RiArrowRightDoubleLine className="size-4" /> : <RiArrowLeftDoubleLine className="size-4" />}
             </span>
-            <span className="expandable-action-btn__label">{treeCollapsed ? '展开文件树' : '收起文件树'}</span>
+            <span className="expandable-action-btn__label">{treeCollapsed ? t('workbench.expandTree') : t('workbench.collapseTree')}</span>
           </Button>
         </div>
       </div>
@@ -996,7 +1006,7 @@ function FilesPane({ session, target, onTargetChange }: { session: TodeXSession;
           <ScrollShadow className="bg-surface-secondary h-full min-h-0 rounded-xl py-2 pl-1 pr-1.5">
           <FileTree
             key={currentPath || 'empty'}
-            aria-label="工作区文件"
+            aria-label={t('workbench.workspaceFiles')}
             className="w-full workbench-file-tree"
             selectedKeys={selected ? new Set([selected]) : new Set()}
             expandedKeys={expandedKeys}
@@ -1014,11 +1024,11 @@ function FilesPane({ session, target, onTargetChange }: { session: TodeXSession;
           </FileTree>
           </ScrollShadow>
         </Resizable.Panel>
-        <Resizable.Handle type="pill" withIndicator aria-label="调整文件树宽度" />
+        <Resizable.Handle type="pill" withIndicator aria-label={t('workbench.resizeTree')} />
         <Resizable.Panel defaultSize="70%" minSize="50%" className="min-h-0">
           <ScrollShadow className="bg-surface-secondary h-full min-h-0 rounded-xl p-3">
-            <p className="text-muted mb-2 truncate text-xs">{selected || '选择文件预览'}</p>
-            {fileLoading ? <Spinner size="sm" aria-label="正在读取文件" /> : error ? null : <WorkspaceFilePreview file={file} onAddReference={addReferenceToChat} />}
+            <p className="text-muted mb-2 truncate text-xs">{selected || t('workbench.selectFile')}</p>
+            {fileLoading ? <Spinner size="sm" aria-label={t('workbench.readingFile')} /> : error ? null : <WorkspaceFilePreview file={file} onAddReference={addReferenceToChat} />}
           </ScrollShadow>
         </Resizable.Panel>
       </Resizable>

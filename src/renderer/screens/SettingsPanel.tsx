@@ -10,6 +10,7 @@ import { DevicePairingPanel } from '../components/DevicePairingPanel';
 import { pairingConnectionPatch } from '../session/pairingImport';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { connectionStateLabel, healthLabelOf, settingsFromProfile } from '../session/helpers';
+import { LOCALE_LABELS, SUPPORTED_LOCALES, getLocalePreference, isLocale, setLocalePreference, useT, type LocalePreference } from '../i18n';
 
 type Props = {
   session: TodeXSession;
@@ -31,6 +32,8 @@ async function decodeQrFromFile(file: File): Promise<string | null> {
 }
 
 export function SettingsPanel({ session }: Props) {
+  const t = useT();
+  const [languagePreference, setLanguagePreference] = useState<LocalePreference>(() => getLocalePreference());
   const { settings, setSettings, backendConnections, activeBackendConnectionId, setActiveBackendConnectionId, updateBackendConnection, addBackendConnection, removeBackendConnection, connectionState, connectionHealth, serverVersion, connect, closeSocket } = session;
   const [pairingText, setPairingText] = useState('');
   const [chunks, setChunks] = useState<Map<number, PairingQrChunk>>(new Map());
@@ -68,7 +71,7 @@ export function SettingsPanel({ session }: Props) {
       current.setSettings(value => value.serverUrl === sourceSettingsUrl
         && latestSession.current.activeBackendConnectionId === sourceId ? { ...value, ...patch } : value);
       setChunks(new Map());
-      toast.success('配对信息已导入');
+      toast.success(t('settings.pairingImported'));
     };
     try {
       const frame = parsePairingQrFrame(raw);
@@ -77,7 +80,7 @@ export function SettingsPanel({ session }: Props) {
         next.set(frame.chunk.index, frame.chunk);
         setChunks(next);
         if (next.size < frame.chunk.total) {
-          toast(`已收到分片 ${next.size}/${frame.chunk.total}`);
+          toast(t('settings.pairingChunk', { received: next.size, total: frame.chunk.total }));
           return;
         }
         const assembled = assemblePairingQrChunkPayload([...next.values()]);
@@ -89,14 +92,14 @@ export function SettingsPanel({ session }: Props) {
       applyResolvedPairing(pairing);
     } catch (error) {
       if (generation !== pairingGeneration.current) return;
-      toast.danger(error instanceof Error ? error.message : '配对失败');
+      toast.danger(error instanceof Error ? error.message : t('settings.pairingFailed'));
     }
   };
 
   return (
     <div className="flex flex-col gap-6 p-6">
       <div>
-        <h2 className="text-xl font-semibold">连接</h2>
+        <h2 className="text-xl font-semibold">{t('settings.connection')}</h2>
         <p className="text-muted mt-1 text-sm">{healthLabelOf(connectionHealth)} · {connectionStateLabel(connectionState)}</p>
         {serverVersion ? (
           <Chip className="mt-2" variant="soft">{serverVersion.name} {serverVersion.version}{settings.tenantId ? ` · ${settings.tenantId}` : ''}</Chip>
@@ -104,8 +107,8 @@ export function SettingsPanel({ session }: Props) {
       </div>
       <Surface className="flex flex-col gap-4 rounded-2xl p-5">
         <div className="flex items-center justify-between">
-          <h3 className="font-semibold">后端连接</h3>
-          <Button size="sm" variant="secondary" onPress={() => addBackendConnection()}>添加后端</Button>
+          <h3 className="font-semibold">{t('settings.backendConnections')}</h3>
+          <Button size="sm" variant="secondary" onPress={() => addBackendConnection()}>{t('settings.addBackend')}</Button>
         </div>
         <RadioButtonGroup
           className={backendConnections.length > 1 ? 'grid-cols-2' : 'grid-cols-1'}
@@ -115,7 +118,7 @@ export function SettingsPanel({ session }: Props) {
           variant="secondary"
           onChange={selectBackend}
         >
-          <Label className="col-span-full">当前后端</Label>
+          <Label className="col-span-full">{t('settings.currentBackend')}</Label>
           {backendConnections.map((profile) => (
             <RadioButtonGroup.Item key={profile.id} value={profile.id}>
               <RadioButtonGroup.Indicator />
@@ -128,11 +131,11 @@ export function SettingsPanel({ session }: Props) {
         </RadioButtonGroup>
         {activeProfile ? (
           <>
-            <Field label="名称" value={activeProfile.name} onChange={(name) => updateBackendConnection(activeProfile.id, { name })} />
+            <Field label={t('settings.name')} value={activeProfile.name} onChange={(name) => updateBackendConnection(activeProfile.id, { name })} />
             <div className="flex flex-col gap-2">
-              <span className="text-sm font-medium">标签颜色</span>
+              <span className="text-sm font-medium">{t('settings.labelColor')}</span>
               <ColorSwatchPicker
-                aria-label="后端标签颜色"
+                aria-label={t('settings.labelColorAria')}
                 value={backendLabelColor(activeProfile)}
                 onChange={(color) => updateBackendConnection(activeProfile.id, { labelColor: color.toString('hex') })}
               >
@@ -143,23 +146,54 @@ export function SettingsPanel({ session }: Props) {
                   </ColorSwatchPicker.Item>
                 ))}
               </ColorSwatchPicker>
-              <p className="text-muted text-xs">工作区旁的圆点使用此颜色，悬停可查看对应后端。颜色自动保存。</p>
+              <p className="text-muted text-xs">{t('settings.labelColorHint')}</p>
             </div>
-            <Field label="后端地址" value={activeProfile.serverUrl} onChange={(serverUrl) => { updateBackendConnection(activeProfile.id, { serverUrl }); setSettings((current) => ({ ...current, serverUrl })); }} />
+            <Field label={t('settings.serverUrl')} value={activeProfile.serverUrl} onChange={(serverUrl) => { updateBackendConnection(activeProfile.id, { serverUrl }); setSettings((current) => ({ ...current, serverUrl })); }} />
             <Field label="Auth token" value={activeProfile.authToken} type="password" onChange={(authToken) => { updateBackendConnection(activeProfile.id, { authToken }); setSettings((current) => ({ ...current, authToken })); }} />
             <Field label="Tenant" value={activeProfile.tenantId} onChange={(tenantId) => { updateBackendConnection(activeProfile.id, { tenantId }); setSettings((current) => ({ ...current, tenantId })); }} />
             <Select selectedKey={activeProfile.encryptionProtocol} onSelectionChange={(key) => { if (typeof key === 'string') { const encryptionProtocol = key as typeof activeProfile.encryptionProtocol; updateBackendConnection(activeProfile.id, { encryptionProtocol }); setSettings((current) => ({ ...current, encryptionProtocol })); } }}>
-              <Label>传输加密</Label><Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
+              <Label>{t('settings.encryption')}</Label><Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
               <Select.Popover><ListBox><ListBox.Item id="none" textValue="none">none</ListBox.Item><ListBox.Item id="x25519" textValue="x25519">x25519</ListBox.Item><ListBox.Item id="ml-kem-768" textValue="ml-kem-768">ml-kem-768</ListBox.Item></ListBox></Select.Popover>
             </Select>
-            {activeProfile.encryptionProtocol !== 'none' ? <Field label="加密公钥" value={activeProfile.encryptionPublicKey} onChange={(encryptionPublicKey) => { updateBackendConnection(activeProfile.id, { encryptionPublicKey }); setSettings((current) => ({ ...current, encryptionPublicKey })); }} /> : null}
+            {activeProfile.encryptionProtocol !== 'none' ? <Field label={t('settings.encryptionKey')} value={activeProfile.encryptionPublicKey} onChange={(encryptionPublicKey) => { updateBackendConnection(activeProfile.id, { encryptionPublicKey }); setSettings((current) => ({ ...current, encryptionPublicKey })); }} /> : null}
             <DevicePairingPanel session={session} deviceName="TodeX Desktop" />
-            <div className="flex gap-2"><Button onPress={() => (connected ? closeSocket(true) : connect())}>{connected ? '断开' : connectionState === 'error' ? '重试' : '连接'}</Button>{backendConnections.length > 1 ? <Button variant="danger-soft" onPress={() => removeBackendConnection(activeProfile.id)}>删除后端</Button> : null}</div>
+            <div className="flex gap-2"><Button onPress={() => (connected ? closeSocket(true) : connect())}>{connected ? t('settings.disconnect') : connectionState === 'error' ? t('settings.retry') : t('settings.connect')}</Button>{backendConnections.length > 1 ? <Button variant="danger-soft" onPress={() => removeBackendConnection(activeProfile.id)}>{t('settings.removeBackend')}</Button> : null}</div>
           </>
         ) : null}
       </Surface>
       <Surface className="flex flex-col gap-4 rounded-2xl p-5">
-        <h3 className="font-semibold">右侧面板</h3>
+        <h3 className="font-semibold">{t('settings.language')}</h3>
+        <Select
+          value={languagePreference}
+          onChange={(value) => {
+            if (value === 'auto' || isLocale(value)) {
+              const preference = value as LocalePreference;
+              setLanguagePreference(preference);
+              setLocalePreference(preference);
+            }
+          }}
+        >
+          <Label>{t('common.language')}</Label>
+          <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
+          <Select.Popover>
+            <ListBox>
+              <ListBox.Item id="auto" textValue={t('common.language.auto')}>
+                {t('common.language.auto')}
+                <ListBox.ItemIndicator />
+              </ListBox.Item>
+              {SUPPORTED_LOCALES.map((locale) => (
+                <ListBox.Item key={locale} id={locale} textValue={LOCALE_LABELS[locale]}>
+                  {LOCALE_LABELS[locale]}
+                  <ListBox.ItemIndicator />
+                </ListBox.Item>
+              ))}
+            </ListBox>
+          </Select.Popover>
+          <Description>{t('settings.languageHint')}</Description>
+        </Select>
+      </Surface>
+      <Surface className="flex flex-col gap-4 rounded-2xl p-5">
+        <h3 className="font-semibold">{t('settings.aside')}</h3>
         <Select
           value={session.workbenchSharing}
           isDisabled={!session.workbenchSharingHydrated}
@@ -167,36 +201,36 @@ export function SettingsPanel({ session }: Props) {
             if (value === 'conversation' || value === 'workspace') session.setWorkbenchSharing(value);
           }}
         >
-          <Label>面板共享方式</Label>
+          <Label>{t('settings.asideSharing')}</Label>
           <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
           <Select.Popover>
             <ListBox>
-              <ListBox.Item id="conversation" textValue="每个对话独立">
-                每个对话独立
+              <ListBox.Item id="conversation" textValue={t('settings.shareConversation')}>
+                {t('settings.shareConversation')}
                 <ListBox.ItemIndicator />
               </ListBox.Item>
-              <ListBox.Item id="workspace" textValue="同一工作区共享">
-                同一工作区共享
+              <ListBox.Item id="workspace" textValue={t('settings.shareWorkspace')}>
+                {t('settings.shareWorkspace')}
                 <ListBox.ItemIndicator />
               </ListBox.Item>
             </ListBox>
           </Select.Popover>
           <Description>
             {session.workbenchSharing === 'workspace'
-              ? '同一工作区的对话复用终端、浏览器和文件标签，以及面板展开状态。'
-              : '默认每个对话独立保存面板。新对话的面板为空，并保持收起。'}
+              ? t('settings.shareWorkspaceHint')
+              : t('settings.shareConversationHint')}
           </Description>
         </Select>
       </Surface>
       <Surface className="flex flex-col gap-4 rounded-2xl p-5">
-        <h3 className="font-semibold">通知</h3>
+        <h3 className="font-semibold">{t('settings.notifications')}</h3>
         <Switch
           isSelected={session.completionNotifications}
           isDisabled={!session.completionNotificationsHydrated}
           onChange={(selected) => {
             void session.setCompletionNotifications(selected).then((result) => {
-              if (result === 'denied') toast.danger('系统拒绝了通知权限，请在系统设置中允许后再开启。');
-              if (result === 'unsupported') toast.danger('当前环境不支持系统通知（需要 HTTPS 或本机访问）。');
+              if (result === 'denied') toast.danger(t('settings.notifyDenied'));
+              if (result === 'unsupported') toast.danger(t('settings.notifyUnsupported'));
             });
           }}
         >
@@ -205,21 +239,21 @@ export function SettingsPanel({ session }: Props) {
               <Switch.Thumb />
             </Switch.Control>
             <div>
-              <p className="text-sm font-medium">任务完成提醒</p>
+              <p className="text-sm font-medium">{t('settings.notifyTaskDone')}</p>
               <p className="text-muted text-xs">
                 {session.completionNotificationsSupported
-                  ? '对话任务完成并收到回复时发送系统通知。开启时会请求系统通知权限。'
-                  : '当前环境不支持系统通知（需要 HTTPS 或本机访问）。'}
+                  ? t('settings.notifyTaskDoneHint')
+                  : t('settings.notifyUnsupported')}
               </p>
             </div>
           </Switch.Content>
         </Switch>
       </Surface>
       <Surface className="flex flex-col gap-4 rounded-2xl p-5">
-        <h3 className="font-semibold">配对</h3>
-        <p className="text-muted text-sm">粘贴后端 TUI 配对 JSON，或把二维码图片拖到这里。</p>
+        <h3 className="font-semibold">{t('settings.pairing')}</h3>
+        <p className="text-muted text-sm">{t('settings.pairingHint')}</p>
         <TextField className="w-full" value={pairingText} onChange={setPairingText}>
-          <Label>配对内容</Label>
+          <Label>{t('settings.pairingContent')}</Label>
           <TextArea className="w-full" rows={4} />
         </TextField>
         <div className="flex gap-2">
@@ -231,7 +265,7 @@ export function SettingsPanel({ session }: Props) {
               }
             }}
           >
-            导入粘贴内容
+            {t('settings.pairingImport')}
           </Button>
           <Button
             variant="tertiary"
@@ -243,7 +277,7 @@ export function SettingsPanel({ session }: Props) {
               }
             }}
           >
-            从剪贴板导入
+            {t('settings.pairingClipboard')}
           </Button>
         </div>
         <label
@@ -255,14 +289,14 @@ export function SettingsPanel({ session }: Props) {
             if (!file) return;
             const decoded = await decodeQrFromFile(file);
             if (!decoded) {
-              toast.danger('无法从图片解码二维码');
+              toast.danger(t('settings.pairingQrFailed'));
               return;
             }
             void applyRawPairing(decoded);
           }}
         >
           <RiAttachment2 className="mb-2 size-5" />
-          拖入二维码图片
+          {t('settings.pairingDropQr')}
           <input
             className="hidden"
             type="file"
@@ -272,7 +306,7 @@ export function SettingsPanel({ session }: Props) {
               if (!file) return;
               const decoded = await decodeQrFromFile(file);
               if (!decoded) {
-                toast.danger('无法从图片解码二维码');
+                toast.danger(t('settings.pairingQrFailed'));
                 return;
               }
               void applyRawPairing(decoded);

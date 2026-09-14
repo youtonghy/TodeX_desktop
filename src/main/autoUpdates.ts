@@ -1,8 +1,32 @@
 import { app, dialog, Menu, MenuItem } from 'electron';
 import electronUpdater from 'electron-updater';
 import { canAutoUpdate, createUpdateCheck } from './updatePolicy';
+import { mainT } from './i18n';
 
 const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+
+let runCheck: ((interactive: boolean) => void) | undefined;
+let updateMenuItem: MenuItem | undefined;
+
+function buildUpdateMenuItem(): MenuItem {
+  return new MenuItem({
+    label: mainT('main.updateMenu'),
+    submenu: [{ label: mainT('main.checkUpdates'), click: () => { runCheck?.(true); } }],
+  });
+}
+
+// Rebuilds the application menu with a freshly localized update item. Used when
+// the renderer switches language via the 'locale:set' IPC channel.
+export function refreshUpdateMenu(): void {
+  if (!updateMenuItem) return;
+  const menu = new Menu();
+  for (const item of Menu.getApplicationMenu()?.items ?? []) {
+    if (item !== updateMenuItem) menu.append(item);
+  }
+  updateMenuItem = buildUpdateMenuItem();
+  menu.append(updateMenuItem);
+  Menu.setApplicationMenu(menu);
+}
 
 export function startAutoUpdates(buildVersion: string): void {
   // Both independent build identities must agree. Source runs and unversioned
@@ -25,17 +49,19 @@ export function startAutoUpdates(buildVersion: string): void {
     try {
       const message = await check();
       console.info('[updates]', message);
-      if (interactive) await dialog.showMessageBox({ type: 'info', title: 'TodeX 更新', message });
+      if (interactive) await dialog.showMessageBox({ type: 'info', title: mainT('main.updateTitle'), message });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.warn('[updates] Check or download failed; keeping current version:', message);
-      if (interactive) await dialog.showMessageBox({ type: 'error', title: '更新失败', message: '无法检查或下载更新，请稍后重试。', detail: message });
+      if (interactive) await dialog.showMessageBox({ type: 'error', title: mainT('main.updateFailed'), message: mainT('main.updateFailedDetail'), detail: message });
     }
   };
+  runCheck = (interactive) => { void run(interactive); };
 
   // Native desktop application menu; no renderer or web-client API is exposed.
   const menu = Menu.getApplicationMenu() ?? new Menu();
-  menu.append(new MenuItem({ label: '更新', submenu: [{ label: '检查更新…', click: () => { void run(true); } }] }));
+  updateMenuItem = buildUpdateMenuItem();
+  menu.append(updateMenuItem);
   Menu.setApplicationMenu(menu);
   const initialCheck = setTimeout(() => { void run(false); }, 15_000);
   const periodicCheck = setInterval(() => { void run(false); }, CHECK_INTERVAL_MS);

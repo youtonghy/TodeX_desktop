@@ -6,6 +6,7 @@ import {
   useRef,
 } from 'react';
 import type { KeyboardEvent } from 'react';
+import { useT } from '../i18n';
 
 const TOKEN_PATTERN = /\[引用:([^\]\n]+)\]/g;
 
@@ -136,6 +137,7 @@ export const ReferenceComposer = forwardRef<ReferenceComposerHandle, {
   resolveReference,
   onReferenceClick,
 }, forwardedRef) {
+  const t = useT();
   const rootRef = useRef<HTMLDivElement>(null);
   const renderedRef = useRef<string | null>(null);
   const composingRef = useRef(false);
@@ -247,7 +249,7 @@ export const ReferenceComposer = forwardRef<ReferenceComposerHandle, {
       ref={rootRef}
       role="textbox"
       aria-multiline="true"
-      aria-label="消息输入"
+      aria-label={t('composer.messageInput')}
       aria-disabled={isDisabled || undefined}
       data-slot="prompt-input-textarea"
       data-placeholder={placeholder}

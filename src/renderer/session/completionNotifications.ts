@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { loadJson, saveJson } from '../lib/storage';
 import { SETTINGS_STORAGE_KEY, type TimelineEntry } from './helpers';
+import { t } from '../i18n';
 
 const STORAGE_KEY = `${SETTINGS_STORAGE_KEY}.completionNotifications.v1`;
 const BODY_MAX_LENGTH = 160;
@@ -15,7 +16,7 @@ export function notificationsSupported(): boolean {
 export function completionNotificationBody(timeline: TimelineEntry[]): string {
   const reply = timeline.find((entry) => entry.kind === 'incoming' && entry.subtitle.trim());
   const text = (reply?.subtitle ?? '').replace(/\s+/g, ' ').trim();
-  if (!text) return '任务已完成，点击查看回复。';
+  if (!text) return t('notify.completedFallback');
   return text.length > BODY_MAX_LENGTH ? `${text.slice(0, BODY_MAX_LENGTH)}…` : text;
 }
 

@@ -5,6 +5,7 @@ import type { McpCatalog, McpServerCatalogDescriptor, ProviderDescriptor, Provid
 import { providerDisplayName } from '@todex/protocol/v2';
 import { ProviderIcon } from '../components/ProviderIcon';
 import { useNoticeToast } from '../components/NoticeToast';
+import { useT } from '../i18n';
 import type { SelectedSkillAttachment } from '../session/helpers';
 
 export type CatalogState = {
@@ -48,6 +49,7 @@ export function CapabilitiesPanel({
   onRefreshMcp,
   onCallMcp,
 }: Props) {
+  const t = useT();
   const [viewMode, setViewMode] = useState<ViewMode>('skills');
   const [providerChoice, setProviderChoice] = useState<ProviderChoice>('common');
   const [previews, setPreviews] = useState<Record<string, string>>({});
@@ -82,22 +84,22 @@ export function CapabilitiesPanel({
     <div className="flex h-full min-h-0 flex-col p-5">
       <div className="mb-3 flex items-start justify-between gap-2">
         <div>
-          <h2 className="text-lg font-semibold">Skills 和 MCPs</h2>
-          <p className="text-muted mt-1 text-xs">{provider ? `${providerDisplayName(provider.id, provider.displayName)} · ${workspacePath}` : `通用能力 · ${workspacePath}`}</p>
+          <h2 className="text-lg font-semibold">{t('cap.title')}</h2>
+          <p className="text-muted mt-1 text-xs">{provider ? `${providerDisplayName(provider.id, provider.displayName)} · ${workspacePath}` : t('cap.commonPath', { path: workspacePath })}</p>
           {conversationId && canInvoke ? (
-            <p className="text-muted mt-1 text-xs">点选 Skill 会附加到下一条消息；发送后由 Backend 读取并注入。</p>
+            <p className="text-muted mt-1 text-xs">{t('cap.attachHint')}</p>
           ) : (
-            <p className="text-muted mt-1 text-xs">请先新建 v2 对话后再附加 Skill 或调用 MCP。</p>
+            <p className="text-muted mt-1 text-xs">{t('cap.needV2')}</p>
           )}
         </div>
         {providerChoice !== 'common' ? (
-          <Button isIconOnly size="sm" variant="ghost" aria-label="刷新" onPress={() => onRefresh(providerChoice)}>
+          <Button isIconOnly size="sm" variant="ghost" aria-label={t('workbench.refresh')} onPress={() => onRefresh(providerChoice)}>
             <RiRefreshLine className="size-4" />
           </Button>
         ) : null}
       </div>
       <div className="mb-3 flex flex-wrap gap-2">
-        <Button size="sm" variant={providerChoice === 'common' ? 'primary' : 'tertiary'} onPress={() => setProviderChoice('common')}>通用</Button>
+        <Button size="sm" variant={providerChoice === 'common' ? 'primary' : 'tertiary'} onPress={() => setProviderChoice('common')}>{t('cap.common')}</Button>
         {providers.map((item) => (
           <Button key={item.id} size="sm" variant={providerChoice === item.id ? 'primary' : 'tertiary'} onPress={() => setProviderChoice(item.id)}>
             <ProviderIcon provider={item.id} />
@@ -111,7 +113,7 @@ export function CapabilitiesPanel({
         className="w-full"
       >
         <Tabs.ListContainer className="w-full">
-          <Tabs.List aria-label="能力分类" className="grid w-full grid-cols-2">
+          <Tabs.List aria-label={t('cap.tabsLabel')} className="grid w-full grid-cols-2">
             <Tabs.Tab id="skills">
               Skills
               <Tabs.Indicator />
@@ -126,7 +128,7 @@ export function CapabilitiesPanel({
       {state?.status === 'loading' ? (
         <div className="flex flex-col items-center py-10">
           <Spinner />
-          <p className="text-muted mt-2 text-xs">正在读取目录…</p>
+          <p className="text-muted mt-2 text-xs">{t('cap.loading')}</p>
         </div>
       ) : null}
       <ScrollShadow className="mt-3 min-h-0 flex-1">
@@ -145,11 +147,11 @@ export function CapabilitiesPanel({
                   const content = await onPreviewSkill(item.skill, item.provider);
                   setPreviews((current) => ({ ...current, [item.skill.resourceId]: content }));
                 } catch (error) {
-                  toast.danger(error instanceof Error ? error.message : '无法预览 Skill');
+                  toast.danger(error instanceof Error ? error.message : t('cap.previewFailed'));
                 }
               }}
             />
-          )) : <p className="text-muted py-10 text-center text-sm">没有找到 Skill。</p>
+          )) : <p className="text-muted py-10 text-center text-sm">{t('cap.noSkills')}</p>
         ) : null}
         {viewMode === 'mcp' && state?.status !== 'loading' ? (
           mcpServers.length ? mcpServers.map((item) => (
@@ -160,7 +162,7 @@ export function CapabilitiesPanel({
               onRefresh={() => onRefreshMcp?.(item.resourceId)}
               onCall={(toolName) => onCallMcp?.(item.resourceId, toolName)}
             />
-          )) : <p className="text-muted py-10 text-center text-sm">没有找到 MCP Server。</p>
+          )) : <p className="text-muted py-10 text-center text-sm">{t('cap.noMcps')}</p>
         ) : null}
       </ScrollShadow>
     </div>
@@ -182,10 +184,11 @@ function SkillRow({
   onToggle: () => void;
   onPreview: () => Promise<void>;
 }) {
+  const t = useT();
   const [expanded, setExpanded] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  const status = item.active && item.valid ? '当前启用' : item.shadowedBy ? '被覆盖' : item.valid ? '未启用' : '无效';
+  const status = item.active && item.valid ? t('cap.statusActive') : item.shadowedBy ? t('cap.statusShadowed') : item.valid ? t('cap.statusInactive') : t('cap.statusInvalid');
 
   const handleToggle = async () => {
     const next = !expanded;
@@ -225,7 +228,7 @@ function SkillRow({
             <p className="truncate font-semibold text-sm">{item.name}</p>
             <div className="flex items-center gap-2 shrink-0">
               <span className={`text-xs ${selected ? 'text-accent font-medium' : 'text-muted'}`}>
-                {selected ? '已附加' : status}
+                {selected ? t('cap.attached') : status}
               </span>
               <RiArrowDownSLine
                 className={`text-muted size-4 transition-transform duration-200 ${
@@ -246,30 +249,30 @@ function SkillRow({
               {loading ? (
                 <div className="flex items-center gap-2 py-3 text-muted text-xs">
                   <Spinner size="sm" />
-                  <span>正在加载 Skill 内容…</span>
+                  <span>{t('cap.loadingSkill')}</span>
                 </div>
               ) : preview ? (
                 <div className="rounded-lg bg-surface-secondary/60 border border-separator/50 p-2.5">
-                  <p className="text-muted mb-1 text-[11px] font-medium">指令与配置内容</p>
+                  <p className="text-muted mb-1 text-[11px] font-medium">{t('cap.previewLabel')}</p>
                   <pre className="text-foreground/80 max-h-52 overflow-auto whitespace-pre-wrap font-mono text-[11px] leading-relaxed select-text">
                     {preview.slice(0, 4000)}
                   </pre>
                 </div>
               ) : (
-                <p className="text-muted text-xs">暂无预览内容。</p>
+                <p className="text-muted text-xs">{t('cap.noPreview')}</p>
               )}
 
               {canSelect ? (
                 <div className="mt-3 flex items-center justify-between">
                   <span className="text-muted text-xs">
-                    {selected ? '已附加到当前对话' : '可附加到下一条对话中'}
+                    {selected ? t('cap.attachedToChat') : t('cap.attachable')}
                   </span>
                   <Button
                     size="sm"
                     variant={selected ? 'secondary' : 'primary'}
                     onPress={onToggle}
                   >
-                    {selected ? '取消附加' : '附加到下一条消息'}
+                    {selected ? t('cap.detach') : t('cap.attach')}
                   </Button>
                 </div>
               ) : null}
@@ -292,7 +295,8 @@ function McpRow({
   onRefresh: () => void;
   onCall: (toolName: string) => void;
 }) {
-  const status = item.enabled && item.active ? '当前启用' : item.shadowedBy ? '被覆盖' : item.enabled ? '可用' : '已禁用';
+  const t = useT();
+  const status = item.enabled && item.active ? t('cap.statusActive') : item.shadowedBy ? t('cap.statusShadowed') : item.enabled ? t('cap.statusAvailable') : t('cap.statusDisabled');
   return (
     <Card className="mb-2 p-3">
       <div className="flex gap-3">
@@ -308,7 +312,7 @@ function McpRow({
           {item.error ? <p className="text-danger mt-1 text-xs">{item.error}</p> : null}
           <div className="mt-2 flex flex-wrap gap-2">
             {canInvoke ? (
-              <Button size="sm" variant="tertiary" onPress={onRefresh}>刷新工具</Button>
+              <Button size="sm" variant="tertiary" onPress={onRefresh}>{t('cap.refreshTools')}</Button>
             ) : null}
           </div>
           {item.tools?.length ? (
@@ -317,13 +321,13 @@ function McpRow({
                 <div key={tool.name} className="flex items-center justify-between gap-2">
                   <p className="truncate text-xs">{tool.name}{tool.description ? ` · ${tool.description}` : ''}</p>
                   {canInvoke ? (
-                    <Button size="sm" variant="primary" onPress={() => onCall(tool.name)}>调用</Button>
+                    <Button size="sm" variant="primary" onPress={() => onCall(tool.name)}>{t('cap.call')}</Button>
                   ) : null}
                 </div>
               ))}
             </div>
           ) : (
-            <p className="text-muted mt-2 text-xs">尚未列出工具。刷新后由 Backend 发现。</p>
+            <p className="text-muted mt-2 text-xs">{t('cap.noTools')}</p>
           )}
         </div>
       </div>

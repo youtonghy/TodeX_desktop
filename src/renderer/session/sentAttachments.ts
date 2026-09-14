@@ -1,4 +1,5 @@
 import { canonicalConversationEventType, type ConversationEvent } from '@todex/protocol/v2';
+import { t } from '../i18n';
 
 export type SentAttachment = {
   id: string;
@@ -115,7 +116,7 @@ function attachmentsFromMessageRaw(entry: TimelineIdentity): SentAttachment[] {
         if (!match) continue;
         attachments.push({
           id: `${entry.id}:attachment:${attachments.length}`, kind: 'image',
-          name: `图片 ${attachments.filter(attachment => attachment.kind === 'image').length + 1}`,
+          name: t('sess.imageAttachmentName', { count: attachments.filter(attachment => attachment.kind === 'image').length + 1 }),
           mimeType: match[1].toLowerCase(), sizeBytes: null, previewUrl: item.url,
         });
       } else if (item.type === 'text' && typeof item.text === 'string') {

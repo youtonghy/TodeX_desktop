@@ -4,7 +4,8 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { startAutoUpdates } from './autoUpdates';
+import { startAutoUpdates, refreshUpdateMenu } from './autoUpdates';
+import { isMainLocale, mainT, setMainLocale } from './i18n';
 import {
   DEBUG_BUILD_VERSION,
   DEBUG_LOG_PATH_KEY,
@@ -385,6 +386,7 @@ async function findGitRepositories(workspacePath: string): Promise<string[]> {
 initializeDebugLogging();
 
 app.whenReady().then(() => {
+  setMainLocale(app.getLocale());
   debugLog('info', 'app.ready', { readyAt: new Date().toISOString() });
   applySystemAppIcon();
   try {
@@ -443,7 +445,7 @@ app.whenReady().then(() => {
 
   handleIpc('fs:readFile', async (_event, filePath: string) => {
     if (!existsSync(filePath)) {
-      throw new Error('文件不存在');
+      throw new Error(mainT('main.fileNotFound'));
     }
     const buffer = readFileSync(filePath);
     const name = filePath.split(/[/\\]/).pop() || 'file';
@@ -451,7 +453,7 @@ app.whenReady().then(() => {
     const isImage = mimeType.startsWith('image/');
     const limit = isImage ? MAX_IMAGE_ATTACHMENT_BYTES : MAX_FILE_ATTACHMENT_BYTES;
     if (buffer.byteLength > limit) {
-      throw new Error(`文件过大（最大 ${Math.round(limit / 1024)} KB）`);
+      throw new Error(mainT('main.fileTooLarge', { kb: Math.round(limit / 1024) }));
     }
     const text = !isImage && buffer.byteLength <= MAX_FILE_ATTACHMENT_BYTES
       ? buffer.toString('utf8')
@@ -469,13 +471,13 @@ app.whenReady().then(() => {
     const repos = await findGitRepositories(workspacePath);
     const summaries = await Promise.all(repos.map(async (repoPath) => {
       try { return await gitSummary(repoPath); }
-      catch (error) { return { path: repoPath, name: repoPath.split(/[\\/]/).pop() || repoPath, branch: '未知', files: [], additions: 0, deletions: 0, initialEligible: false, error: error instanceof Error ? error.message : 'Git 读取失败' }; }
+      catch (error) { return { path: repoPath, name: repoPath.split(/[\\/]/).pop() || repoPath, branch: mainT('main.unknown'), files: [], additions: 0, deletions: 0, initialEligible: false, error: error instanceof Error ? error.message : mainT('main.gitReadFailed') }; }
     }));
     if (!summaries.some((repo) => repo.path === workspacePath)) {
       summaries.unshift({
         path: workspacePath,
         name: workspacePath.split(/[\\/]/).pop() || workspacePath,
-        branch: '未初始化',
+        branch: mainT('main.notInitialized'),
         files: [] as { status: string; path: string }[],
         additions: 0,
         deletions: 0,
@@ -502,7 +504,13 @@ app.whenReady().then(() => {
       }
       if (action === 'push' || action === 'commit-push') outputs.push(await gitText(repo, ['push']));
     }
-    return { output: outputs.filter(Boolean).join('\n') || '操作完成' };
+    return { output: outputs.filter(Boolean).join('\n') || mainT('main.operationDone') };
+  });
+
+  ipcMain.on('locale:set', (_event, value: unknown) => {
+    if (!isMainLocale(value)) return;
+    setMainLocale(value);
+    refreshUpdateMenu();
   });
 
   ipcMain.on('window:focus', (event) => {
