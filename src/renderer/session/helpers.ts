@@ -1062,6 +1062,8 @@ export type TimelineEntry = {
   turnId?: string;
   blockId?: string;
   contentIndex?: number;
+  /** Placeholder for a `detail=summary` replay event: content loads on expand. */
+  detailStub?: boolean;
 };
 
 export function parseToolCallState(raw: string, fallbackId: string): import('@todex/protocol/v2').ToolCallState {

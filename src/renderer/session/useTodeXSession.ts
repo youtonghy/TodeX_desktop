@@ -484,7 +484,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const settledV2TurnsRef = useRef(new Map<string, string>());
   const runtimeReplayRef = useRef((id: string, after: number, limit: number) =>
     new V2ApiClient({ serverUrl: settings.serverUrl, device: deviceIdentityFromSecret(settings.deviceSecret) }).replayEvents(id, after, limit));
-  runtimeReplayRef.current = (id, after, limit) => new V2ApiClient({ serverUrl: settings.serverUrl, device: deviceIdentityFromSecret(settings.deviceSecret) }).replayEvents(id, after, limit);
+  // History replays fetch summary events only; folded process groups fetch
+  // their full sequence range back when the user expands them.
+  runtimeReplayRef.current = (id, after, limit) => new V2ApiClient({ serverUrl: settings.serverUrl, device: deviceIdentityFromSecret(settings.deviceSecret) }).replayEvents(id, after, limit, 'summary');
   const runtimeUpdateRef = useRef<(state: ConversationRuntime, applied: ConversationEvent[], recovering: boolean) => void>(() => {});
   const notifyTurnCompletedRef = useRef<(localId: string, state: ConversationRuntime, turnId: string) => void>(() => {});
   const conversationRecoveryRef = useRef<ConversationRecovery | null>(null);
@@ -7345,6 +7347,31 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     [serverVersion],
   );
 
+  /** Fetch the full events covering an expanded folded group and merge them
+   * into the projected timeline. Rejects when the backend cannot be read so
+   * the UI can offer a retry. */
+  const hydrateProcessGroup = useCallback(async (conversationId: string, fromSequence: number, toSequence: number) => {
+    const conversation = conversationsRef.current.find((item) => item.id === conversationId);
+    const v2Id = conversation?.v2ConversationId ?? conversationId;
+    const api = new V2ApiClient({ serverUrl: settings.serverUrl, device: deviceIdentityFromSecret(settings.deviceSecret) });
+    const events: ConversationEvent[] = [];
+    let cursor = fromSequence - 1;
+    while (cursor < toSequence) {
+      const page = await api.replayEvents(v2Id, cursor, Math.min(500, toSequence - cursor));
+      let reached = false;
+      for (const event of page.events) {
+        if (event.sequence > cursor && event.sequence <= toSequence) {
+          events.push(event);
+          cursor = event.sequence;
+          reached = true;
+        }
+      }
+      if (!reached || !page.hasMore) break;
+    }
+    return events.length > 0
+      && (conversationRecoveryRef.current?.hydrate(v2Id, conversation?.workspaceId ?? '', events) ?? false);
+  }, [settings.serverUrl, settings.deviceSecret]);
+
   return {
     ...workbenchSharingState,
     ...completionNotificationsState,
@@ -7373,6 +7400,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     versionMismatch,
     events,
     timeline: visibleTimeline,
+    hydrateProcessGroup,
     mentionHistory,
     experimentalFeatures,
     setExperimentalFeatures,

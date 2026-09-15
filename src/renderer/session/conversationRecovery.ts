@@ -1,4 +1,4 @@
-import { applyConversationRuntimeEvents, createConversationRuntime, type ConversationRuntime } from '@todex/protocol/conversationRuntime';
+import { applyConversationRuntimeEvents, createConversationRuntime, hydrateConversationRuntimeEvents, type ConversationRuntime } from '@todex/protocol/conversationRuntime';
 import { t } from '../i18n';
 import type { ConversationEvent, ConversationReplay } from '@todex/protocol/v2';
 
@@ -78,6 +78,17 @@ export class ConversationRecovery {
     for (const conversationId of pending) {
       this.flushConversation(conversationId);
     }
+  }
+
+  /** Merge full events fetched on demand into a summary-replayed runtime.
+   * Only folded step entries merge back; hydration never rewinds cursors. */
+  hydrate(conversationId: string, workspaceId: string, events: readonly ConversationEvent[]): boolean {
+    const state = this.states.get(conversationId) ?? createConversationRuntime(conversationId, workspaceId);
+    const next = hydrateConversationRuntimeEvents(state, events);
+    if (next === state) return false;
+    this.states.set(conversationId, next);
+    this.deliver(conversationId, [], this.isRecovering(conversationId));
+    return true;
   }
 
   receive(conversationId: string, workspaceId: string, events: readonly ConversationEvent[]): void {

@@ -12,6 +12,7 @@ import { providerDisplayName, type ProviderKind, type PermissionMode } from '@to
 import { ConversationPermissionActions, ConversationPromptInput, ConversationRunStatus, TurnUsageSummary } from '../components/ConversationRunStatus';
 import { ReferenceComposer, type ReferenceComposerHandle } from '../components/ReferenceComposer';
 import { activeChatProcessId, buildChatRenderItems, isChatTimelineEntry, isChatToolEntry, latestIncomingEntryIds } from '../components/conversationTimeline';
+import type { ChatRenderItem } from '../components/conversationTimeline';
 import { ModelReasoningCard } from '../components/ModelReasoningCard';
 import { ProviderIcon } from '../components/ProviderIcon';
 import type { TodeXSession } from '../session/useTodeXSession';
@@ -249,6 +250,7 @@ export function ChatPanel({ session }: Props) {
   const [mentionSuggestions, setMentionSuggestions] = useState<Array<{ id: string; title: string; description: string; insertText: string }>>([]);
   const [suggestionIndex, setSuggestionIndex] = useState(0);
   const [expandedProcessIds, setExpandedProcessIds] = useState<Set<string>>(() => new Set());
+  const [processGroupLoad, setProcessGroupLoad] = useState<Record<string, 'loading' | 'error'>>({});
   const [isDraggingAttachment, setIsDraggingAttachment] = useState(false);
   const isComposingRef = useRef(false);
   useEffect(() => {
@@ -282,6 +284,25 @@ export function ChatPanel({ session }: Props) {
   }, [conversation?.id, session.timeline]);
   const items = useMemo(() => buildChatRenderItems(chatEntries), [chatEntries]);
   const actionableIncoming = useMemo(() => latestIncomingEntryIds(chatEntries), [chatEntries]);
+  /** Folded groups fetched as summary stubs load their full events on expand;
+   * a failed load keeps a retryable error state per group. */
+  const requestProcessDetails = (item: Extract<ChatRenderItem, { type: 'executionGroup' }>) => {
+    if (!conversation) return;
+    const sequences = item.entries
+      .filter((entry) => entry.detailStub)
+      .map((entry) => entry.sequence ?? 0)
+      .filter((sequence) => sequence > 0);
+    if (!sequences.length || processGroupLoad[item.id] === 'loading') return;
+    setProcessGroupLoad((current) => ({ ...current, [item.id]: 'loading' }));
+    void session.hydrateProcessGroup(conversation.id, Math.min(...sequences), Math.max(...sequences))
+      .then((hydrated) => setProcessGroupLoad((current) => {
+        const next = { ...current };
+        if (hydrated) delete next[item.id];
+        else next[item.id] = 'error';
+        return next;
+      }))
+      .catch(() => setProcessGroupLoad((current) => ({ ...current, [item.id]: 'error' })));
+  };
   const messagesRef = useRef<HTMLDivElement>(null);
   const [quote, setQuote] = useState<{ text: string; left: number; top: number; messageId?: string } | null>(null);
   useEffect(() => {
@@ -555,34 +576,51 @@ export function ChatPanel({ session }: Props) {
           {items.map((item) => {
             if (item.type === 'executionGroup') {
               const expanded = expandedProcessIds.has(item.id);
+              const hasStubs = item.entries.some((entry) => entry.detailStub);
+              const loadState = processGroupLoad[item.id];
               const pendingCount = item.entries.filter((entry) => entry.requestId && session.pendingRequests.some((request) => request.requestId === entry.requestId)).length;
               return (
                 <ChainOfThought
                   key={item.id}
                   isExpanded={expanded}
-                  onExpandedChange={(nextExpanded) => setExpandedProcessIds((current) => {
-                    const next = new Set(current);
-                    if (nextExpanded) next.add(item.id);
-                    else next.delete(item.id);
-                    return next;
-                  })}
+                  onExpandedChange={(nextExpanded) => {
+                    if (nextExpanded && hasStubs) requestProcessDetails(item);
+                    setExpandedProcessIds((current) => {
+                      const next = new Set(current);
+                      if (nextExpanded) next.add(item.id);
+                      else next.delete(item.id);
+                      return next;
+                    });
+                  }}
                   isStreaming={thinking && item.id === latestProcessGroupId}
                   className="chat-process-trace min-w-0"
                 >
-                  <ChainOfThought.Trigger className="min-h-7 py-1 text-xs">
+                  <ChainOfThought.Trigger
+                    className="min-h-7 py-1 text-xs"
+                  >
                     {progressGroupLabel(item.entries, thinking && item.id === latestProcessGroupId, pendingCount)}
                   </ChainOfThought.Trigger>
                   {expanded ? <ChainOfThought.Content>
-                    <ChainOfThought.Steps>
-                      {item.entries.map((entry) => (
-                        <ChainOfThought.Step key={entry.id} label={entry.title}>
-                          {isToolCallEntry(entry) ? (() => {
-                            const { toolName, argsText } = toolPresentation(entry.subtitle);
-                            return <ChatTool defaultExpanded={false} state={entry.phase === 'completed' ? 'output-available' : 'input-streaming'} toolName={toolName} argsText={argsText} />;
-                          })() : <p className="max-w-full overflow-x-auto whitespace-pre-wrap break-words text-xs">{entry.subtitle || entry.title}</p>}
-                        </ChainOfThought.Step>
-                      ))}
-                    </ChainOfThought.Steps>
+                    {hasStubs ? (
+                      loadState === 'error' ? (
+                        <button type="button" className="text-danger cursor-pointer text-xs" onClick={() => requestProcessDetails(item)}>
+                          加载过程记录失败，点按重试
+                        </button>
+                      ) : (
+                        <p className="text-muted text-xs">正在加载过程记录…</p>
+                      )
+                    ) : (
+                      <ChainOfThought.Steps>
+                        {item.entries.map((entry) => (
+                          <ChainOfThought.Step key={entry.id} label={entry.title}>
+                            {isToolCallEntry(entry) ? (() => {
+                              const { toolName, argsText } = toolPresentation(entry.subtitle);
+                              return <ChatTool defaultExpanded={false} state={entry.phase === 'completed' ? 'output-available' : 'input-streaming'} toolName={toolName} argsText={argsText} />;
+                            })() : <p className="max-w-full overflow-x-auto whitespace-pre-wrap break-words text-xs">{entry.subtitle || entry.title}</p>}
+                          </ChainOfThought.Step>
+                        ))}
+                      </ChainOfThought.Steps>
+                    )}
                   </ChainOfThought.Content> : null}
                 </ChainOfThought>
               );
