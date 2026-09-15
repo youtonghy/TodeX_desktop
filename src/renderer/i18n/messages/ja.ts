@@ -43,6 +43,7 @@ export const ja: Messages = {
   'app.workspaceName': '名前',
   'app.workspaceBackend': '接続 Backend',
   'app.workspaceDirectory': 'ディレクトリ',
+  'app.workspaceRoot': 'ワークスペースのルート',
   'app.workspaceBrowse': 'Backend のディレクトリを参照',
   'app.workspacePickLocal': 'ローカルで選択',
   'app.workspaceReadFailed': 'ディレクトリを読み取れませんでした',

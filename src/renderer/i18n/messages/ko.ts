@@ -43,6 +43,7 @@ export const ko: Messages = {
   'app.workspaceName': '이름',
   'app.workspaceBackend': 'Backend 연결',
   'app.workspaceDirectory': '디렉터리',
+  'app.workspaceRoot': '워크스페이스 루트',
   'app.workspaceBrowse': 'Backend 디렉터리 찾아보기',
   'app.workspacePickLocal': '로컬에서 선택',
   'app.workspaceReadFailed': '디렉터리를 읽을 수 없습니다',

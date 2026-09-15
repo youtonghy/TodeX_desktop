@@ -43,6 +43,7 @@ export const zhCN = {
   'app.workspaceName': '名称',
   'app.workspaceBackend': '连接后端',
   'app.workspaceDirectory': '目录',
+  'app.workspaceRoot': '工作区根目录',
   'app.workspaceBrowse': '浏览后端目录',
   'app.workspacePickLocal': '本机选择',
   'app.workspaceReadFailed': '无法读取目录',

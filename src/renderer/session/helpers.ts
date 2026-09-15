@@ -125,6 +125,7 @@ export type WorkspaceDirectoryEntry = {
 
 export type WorkspaceDirectorySnapshot = {
   root: string;
+  roots: string[];
   current: string;
   parent: string | null;
   entries: WorkspaceDirectoryEntry[];
@@ -2538,8 +2539,12 @@ export function parseWorkspaceDirectorySnapshot(value: unknown): WorkspaceDirect
         .filter((entry): entry is WorkspaceDirectoryEntry => Boolean(entry))
     : [];
   const parent = stringFromUnknown(root.parent).trim();
+  const roots = Array.isArray(root.roots)
+    ? root.roots.map((item) => stringFromUnknown(item).trim()).filter(Boolean)
+    : [];
   return {
     root: stringFromUnknown(root.root).trim(),
+    roots,
     current: stringFromUnknown(root.current).trim(),
     parent: parent || null,
     entries,

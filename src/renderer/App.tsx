@@ -326,8 +326,17 @@ function CreateWorkspaceModal({
   const [path, setPath] = useState(workspace?.path ?? session.settings.defaultWorkspacePath);
   const [backendId, setBackendId] = useState(workspace?.backendConnectionId ?? session.activeBackendConnectionId);
   const [entries, setEntries] = useState<string[]>([]);
+  const [roots, setRoots] = useState<string[]>([]);
+  const [activeRoot, setActiveRoot] = useState('');
   const selectedBackend = session.backendConnections.find((profile) => profile.id === backendId);
   const directorySettings = selectedBackend ? { ...session.settings, serverUrl: selectedBackend.serverUrl, deviceSecret: selectedBackend.deviceSecret, tenantId: selectedBackend.tenantId, encryptionProtocol: selectedBackend.encryptionProtocol, encryptionPublicKey: selectedBackend.encryptionPublicKey } : session.settings;
+
+  const applySnapshot = (snapshot: Awaited<ReturnType<typeof fetchWorkspaceDirectorySnapshot>>) => {
+    setPath(snapshot.current);
+    setEntries(snapshot.entries.map((entry) => entry.path));
+    setRoots(snapshot.roots);
+    setActiveRoot(snapshot.root);
+  };
 
   useEffect(() => {
     if (!isOpen || workspace) return;
@@ -336,21 +345,20 @@ function CreateWorkspaceModal({
     const backendRoot = session.serverVersion?.workspace_root || '';
     setPath(defaultPath);
     void fetchWorkspaceDirectorySnapshot(directorySettings, defaultPath)
-      .then((snapshot) => {
-        setPath(snapshot.current);
-        setEntries(snapshot.entries.map((entry) => entry.path));
-      })
+      .then(applySnapshot)
       .catch(async () => {
         if (!backendRoot || backendRoot === defaultPath) {
           setEntries([]);
+          setRoots([]);
+          setActiveRoot('');
           return;
         }
         try {
-          const snapshot = await fetchWorkspaceDirectorySnapshot(directorySettings, backendRoot);
-          setPath(snapshot.current);
-          setEntries(snapshot.entries.map((entry) => entry.path));
+          applySnapshot(await fetchWorkspaceDirectorySnapshot(directorySettings, backendRoot));
         } catch {
           setEntries([]);
+          setRoots([]);
+          setActiveRoot('');
         }
       });
   }, [isOpen, workspace, session.activeBackendConnectionId, session.serverVersion?.workspace_root, session.settings]);
@@ -371,6 +379,20 @@ function CreateWorkspaceModal({
                 <Select.Popover><ListBox>{session.backendConnections.map((profile) => <ListBox.Item key={profile.id} id={profile.id} textValue={profile.name}>{profile.name} · {profile.serverUrl}</ListBox.Item>)}</ListBox></Select.Popover>
               </Select>
               <Field label={t('app.workspaceDirectory')} value={path} onChange={setPath} />
+              {roots.length > 1 ? (
+                <Select
+                  selectedKey={activeRoot}
+                  onSelectionChange={(key) => {
+                    if (typeof key !== 'string' || key === activeRoot) return;
+                    void fetchWorkspaceDirectorySnapshot(directorySettings, key)
+                      .then(applySnapshot)
+                      .catch((error) => toast.danger(error instanceof Error ? error.message : t('app.workspaceReadFailed')));
+                  }}
+                >
+                  <Label>{t('app.workspaceRoot')}</Label><Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
+                  <Select.Popover><ListBox>{roots.map((root) => <ListBox.Item key={root} id={root} textValue={root}>{root}</ListBox.Item>)}</ListBox></Select.Popover>
+                </Select>
+              ) : null}
               <div className="flex gap-2">
                 <Button
                   variant="secondary"
@@ -385,9 +407,7 @@ function CreateWorkspaceModal({
                   variant="tertiary"
                   onPress={async () => {
                     try {
-                      const snapshot = await fetchWorkspaceDirectorySnapshot(directorySettings, path);
-                      setPath(snapshot.current);
-                      setEntries(snapshot.entries.map((entry) => entry.path));
+                      applySnapshot(await fetchWorkspaceDirectorySnapshot(directorySettings, path));
                     } catch (error) {
                       toast.danger(error instanceof Error ? error.message : t('app.workspaceReadFailed'));
                     }

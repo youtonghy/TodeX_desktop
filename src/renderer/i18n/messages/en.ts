@@ -43,6 +43,7 @@ export const en: Messages = {
   'app.workspaceName': 'Name',
   'app.workspaceBackend': 'Backend connection',
   'app.workspaceDirectory': 'Directory',
+  'app.workspaceRoot': 'Workspace root',
   'app.workspaceBrowse': 'Browse backend directories',
   'app.workspacePickLocal': 'Choose locally',
   'app.workspaceReadFailed': 'Could not read the directory',
