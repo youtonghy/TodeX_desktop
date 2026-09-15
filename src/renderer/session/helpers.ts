@@ -2555,7 +2555,7 @@ export async function fetchWorkspaceDirectorySnapshot(
     url.searchParams.set('path', path);
   }
   const response = await fetch(url.toString(), {
-    headers: authHeaders(settings),
+    headers: authHeaders(settings, 'GET', `${url.pathname}${url.search}`),
   });
   const body = await response.json().catch(() => null);
   if (!response.ok) {
