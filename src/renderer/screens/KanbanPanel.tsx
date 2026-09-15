@@ -1,10 +1,10 @@
-import { useState, type Key } from 'react';
+import { useMemo, useState, type Key } from 'react';
 import { Plus } from '@gravity-ui/icons';
-import { RiArrowRightLine, RiCalendarLine, RiChat3Line, RiFolder3Line, RiMoreFill, RiPushpinLine } from '@remixicon/react';
+import { RiArrowRightLine, RiCalendarLine, RiChat3Line, RiCheckLine, RiFolder3Line, RiMoreFill, RiPushpinLine } from '@remixicon/react';
 import { Button, Chip, Dropdown, Input, Label, TextArea, TextField, Tooltip } from '@heroui/react';
 import { EmptyState, Kanban } from '@heroui-pro/react';
 import type { WorkspaceRecord } from '@todex/protocol/todex';
-import { conversationDisplayTitle, workspaceDisplayName, type ConversationRecord } from '../session/helpers';
+import { conversationDisplayTitle, getConversationStatus, workspaceDisplayName, type ConversationRecord, type TimelineEntry } from '../session/helpers';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { useT } from '../i18n';
 import {
@@ -66,18 +66,19 @@ const COLUMN_META: ColumnMeta[] = [
   },
 ];
 
-const STATUS_META: Record<KanbanTaskStatus, { chip: ChipColor; dot: string }> = {
-  planned: { chip: 'accent', dot: 'bg-accent' },
-  'in-progress': { chip: 'warning', dot: 'bg-warning' },
-  done: { chip: 'success', dot: 'bg-success' },
+const STATUS_META: Record<KanbanTaskStatus, { chip: ChipColor }> = {
+  planned: { chip: 'accent' },
+  'in-progress': { chip: 'warning' },
+  done: { chip: 'default' },
 };
 
 const ATTACH_LIMIT = 12;
 
-function TaskCard({ task, session, conversations, onOpen }: {
+function TaskCard({ task, session, conversations, latestEntries, onOpen }: {
   task: KanbanTask;
   session: TodeXSession;
   conversations: ConversationRecord[];
+  latestEntries: Record<string, TimelineEntry>;
   onOpen: (workspaceId: string, conversationId: string) => void;
 }) {
   const t = useT();
@@ -85,6 +86,10 @@ function TaskCard({ task, session, conversations, onOpen }: {
     ? conversations.find((conversation) => conversation.id === task.conversationId) ?? null
     : null;
   const staleLink = Boolean(task.conversationId && !linked);
+  const done = task.status === 'done';
+  const conversationStatus = !done && linked
+    ? getConversationStatus(session, linked, latestEntries[linked.id])
+    : null;
 
   const runTaskAction = (key: Key) => {
     const value = String(key);
@@ -114,8 +119,25 @@ function TaskCard({ task, session, conversations, onOpen }: {
   return (
     <Kanban.Card id={task.id} textValue={task.title}>
       <div className="flex items-start gap-2">
-        <span className={`mt-1 size-2.5 shrink-0 rounded-sm ${STATUS_META[task.status].dot}`} />
-        <span className="text-foreground min-w-0 break-all font-semibold leading-snug">{task.title}</span>
+        <button
+          type="button"
+          aria-label={done ? t('kanban.markUndone') : t('kanban.markDone')}
+          title={done ? t('kanban.markUndone') : t('kanban.markDone')}
+          className={`group/check mt-0.5 flex size-4 shrink-0 cursor-pointer items-center justify-center rounded-full border-2 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent/40 ${
+            done
+              ? 'border-muted bg-muted text-background'
+              : conversationStatus
+                ? conversationStatus.border
+                : 'border-separator hover:border-muted'
+          }`}
+          onClick={(event) => {
+            event.stopPropagation();
+            setKanbanTaskStatus(task.id, done ? 'planned' : 'done');
+          }}
+        >
+          <RiCheckLine className={`size-2.5 ${done ? '' : 'text-muted opacity-0 transition-opacity group-hover/check:opacity-100'}`} />
+        </button>
+        <span className={`min-w-0 break-all font-semibold leading-snug ${done ? 'text-muted' : 'text-foreground'}`}>{task.title}</span>
       </div>
 
       {task.description ? (
@@ -235,11 +257,12 @@ function TaskCard({ task, session, conversations, onOpen }: {
   );
 }
 
-function WorkspaceColumn({ workspace, meta, tasks, session, creating, onCreate, onCancelCreate, onOpenConversation }: {
+function WorkspaceColumn({ workspace, meta, tasks, session, latestEntries, creating, onCreate, onCancelCreate, onOpenConversation }: {
   workspace: WorkspaceRecord;
   meta: ColumnMeta;
   tasks: KanbanTask[];
   session: TodeXSession;
+  latestEntries: Record<string, TimelineEntry>;
   creating: boolean;
   onCreate: () => void;
   onCancelCreate: () => void;
@@ -341,6 +364,7 @@ function WorkspaceColumn({ workspace, meta, tasks, session, creating, onCreate, 
                     task={task}
                     session={session}
                     conversations={conversations}
+                    latestEntries={latestEntries}
                     onOpen={onOpenConversation}
                   />
                 )}
@@ -397,6 +421,16 @@ export function KanbanPanel({ session, onOpenConversation }: Props) {
   }));
   const total = columns.reduce((count, column) => count + column.tasks.length, 0);
 
+  const latestEntries = useMemo(() => {
+    const map: Record<string, TimelineEntry> = {};
+    for (const entry of session.timeline) {
+      if (!entry.conversationId) continue;
+      const existing = map[entry.conversationId];
+      if (!existing || entry.at > existing.at) map[entry.conversationId] = entry;
+    }
+    return map;
+  }, [session.timeline]);
+
   const openConversation = (workspaceId: string, conversationId: string) => {
     if (conversationId) session.selectConversation(workspaceId, conversationId);
     else session.selectWorkspace(workspaceId);
@@ -441,6 +475,7 @@ export function KanbanPanel({ session, onOpenConversation }: Props) {
                 meta={COLUMN_META[index % COLUMN_META.length]}
                 tasks={tasks}
                 session={session}
+                latestEntries={latestEntries}
                 creating={creatingWorkspaceId === workspace.id}
                 onCreate={() => setCreatingWorkspaceId(workspace.id)}
                 onCancelCreate={() => setCreatingWorkspaceId(null)}

@@ -659,6 +659,8 @@ export const en: Messages = {
   'kanban.statusPlanned': 'Planned',
   'kanban.statusInProgress': 'In progress',
   'kanban.statusDone': 'Done',
+  'kanban.markDone': 'Mark as done',
+  'kanban.markUndone': 'Mark as not done',
   'kanban.draftTask': 'Task: {title}',
   'kanban.draftDesc': 'Description: {description}',
   'kanban.draftDue': 'Due date: {dueDate}',

@@ -9,7 +9,7 @@ import { backendLabelColor } from '../session/backendColors';
 import { ProviderIcon } from './ProviderIcon';
 import { AppIcon } from './AppIcon';
 import type { TodeXSession } from '../session/useTodeXSession';
-import { conversationDisplayTitle, isConversationHighlighted, workspaceDisplayName } from '../session/helpers';
+import { conversationDisplayTitle, getConversationStatus, isConversationHighlighted, workspaceDisplayName } from '../session/helpers';
 import { t, useT } from '../i18n';
 
 type Props = {
@@ -26,27 +26,6 @@ type Props = {
 };
 
 type ContextMenu = { kind: 'workspace' | 'conversation'; id: string; x: number; y: number } | null;
-
-function getConversationStatus(
-  session: TodeXSession,
-  conversation: TodeXSession['conversations'][number],
-  latestEntry?: TodeXSession['timeline'][number],
-): { color: string; label: string } | null {
-  if (isConversationHighlighted(conversation, session.activeConversationId, session.turnIds)) {
-    return { color: 'bg-green-500', label: t('sidebar.statusWorking') };
-  }
-  if (
-    latestEntry?.marker === 'error' ||
-    /error|failed|异常|失败/i.test(conversation.nativeStatus || '') ||
-    /error|failed|异常|失败/i.test(latestEntry?.title || '')
-  ) {
-    return { color: 'bg-amber-500', label: t('sidebar.statusIssue') };
-  }
-  if (conversation.id !== session.activeConversationId && latestEntry?.kind === 'incoming') {
-    return { color: 'bg-blue-500', label: t('sidebar.statusUnread') };
-  }
-  return null;
-}
 
 export function AppSidebar({
   session,

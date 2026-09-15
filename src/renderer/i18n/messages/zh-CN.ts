@@ -659,6 +659,8 @@ export const zhCN = {
   'kanban.statusPlanned': '计划',
   'kanban.statusInProgress': '进行中',
   'kanban.statusDone': '已完成',
+  'kanban.markDone': '标记为已完成',
+  'kanban.markUndone': '标记为未完成',
   'kanban.draftTask': '任务：{title}',
   'kanban.draftDesc': '描述：{description}',
   'kanban.draftDue': '截止日期：{dueDate}',

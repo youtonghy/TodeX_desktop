@@ -659,6 +659,8 @@ export const ko: Messages = {
   'kanban.statusPlanned': '계획',
   'kanban.statusInProgress': '진행 중',
   'kanban.statusDone': '완료',
+  'kanban.markDone': '완료로 표시',
+  'kanban.markUndone': '미완료로 표시',
   'kanban.draftTask': '작업: {title}',
   'kanban.draftDesc': '설명: {description}',
   'kanban.draftDue': '마감일: {dueDate}',

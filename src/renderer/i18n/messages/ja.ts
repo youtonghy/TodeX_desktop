@@ -659,6 +659,8 @@ export const ja: Messages = {
   'kanban.statusPlanned': '計画',
   'kanban.statusInProgress': '進行中',
   'kanban.statusDone': '完了',
+  'kanban.markDone': '完了にする',
+  'kanban.markUndone': '未完了に戻す',
   'kanban.draftTask': 'タスク：{title}',
   'kanban.draftDesc': '説明：{description}',
   'kanban.draftDue': '期限：{dueDate}',

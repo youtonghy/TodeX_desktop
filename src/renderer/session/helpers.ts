@@ -582,6 +582,27 @@ export function isConversationHighlighted(conversation: ConversationRecord, _act
   return Boolean(activeTurns[conversation.id]);
 }
 
+export function getConversationStatus(
+  session: { activeConversationId: string; turnIds: Record<string, string> },
+  conversation: ConversationRecord,
+  latestEntry?: TimelineEntry,
+): { color: string; border: string; label: string } | null {
+  if (isConversationHighlighted(conversation, session.activeConversationId, session.turnIds)) {
+    return { color: 'bg-green-500', border: 'border-green-500', label: t('sidebar.statusWorking') };
+  }
+  if (
+    latestEntry?.marker === 'error' ||
+    /error|failed|异常|失败/i.test(conversation.nativeStatus || '') ||
+    /error|failed|异常|失败/i.test(latestEntry?.title || '')
+  ) {
+    return { color: 'bg-amber-500', border: 'border-amber-500', label: t('sidebar.statusIssue') };
+  }
+  if (conversation.id !== session.activeConversationId && latestEntry?.kind === 'incoming') {
+    return { color: 'bg-blue-500', border: 'border-blue-500', label: t('sidebar.statusUnread') };
+  }
+  return null;
+}
+
 export function sessionIdForConversation(workspace: WorkspaceRecord, conversation: ConversationRecord): string {
   return conversation.sessionId || workspace.sessionId || createSessionId(workspace.name);
 }
