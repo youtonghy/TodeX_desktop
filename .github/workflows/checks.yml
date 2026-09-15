@@ -33,9 +33,9 @@ jobs:
       - name: Checkout shared protocol
         uses: actions/checkout@v6
         with:
-          repository: youtonghy/TodeX
+          repository: youtonghy/TodeX_protocol
           ref: main
-          path: TodeX_app
+          path: TodeX_protocol
           token: ${{ secrets.PROTOCOL_REPO_TOKEN || github.token }}
 
       - name: Setup Node

@@ -82,15 +82,15 @@ jobs:
       - name: Checkout shared protocol
         uses: actions/checkout@v6
         with:
-          repository: youtonghy/TodeX
+          repository: youtonghy/TodeX_protocol
           ref: main
-          path: TodeX_app
+          path: TodeX_protocol
           token: ${{ secrets.PROTOCOL_REPO_TOKEN || github.token }}
 
       - name: Record shared protocol revision
         id: protocol
         shell: bash
-        run: echo "sha=$(git -C ../TodeX_app rev-parse HEAD)" >> "${GITHUB_OUTPUT}"
+        run: echo "sha=$(git -C ../TodeX_protocol rev-parse HEAD)" >> "${GITHUB_OUTPUT}"
 
       - name: Setup Node
         uses: actions/setup-node@v6
@@ -170,9 +170,9 @@ jobs:
       - name: Checkout shared protocol
         uses: actions/checkout@v6
         with:
-          repository: youtonghy/TodeX
+          repository: youtonghy/TodeX_protocol
           ref: ${{ needs.validate.outputs.protocol_sha }}
-          path: TodeX_app
+          path: TodeX_protocol
           token: ${{ secrets.PROTOCOL_REPO_TOKEN || github.token }}
 
       - name: Setup Node
