@@ -888,6 +888,8 @@ export const en: Messages = {
   'conn.open': 'Connected',
   'conn.unreachable': 'Backend unreachable',
   'conn.waiting': 'Waiting to check',
+  'conn.versionMismatch': 'Backend {backend} does not match this app {app}. Upgrade to avoid incompatibility.',
+  'conn.versionMismatchShort': 'version mismatch',
 
   // exp
   'exp.composerFileMentionsDesc': 'Enables file mention assistance and recent file history in the composer.',

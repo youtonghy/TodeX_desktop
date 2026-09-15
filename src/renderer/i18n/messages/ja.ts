@@ -888,6 +888,8 @@ export const ja: Messages = {
   'conn.open': '接続済み',
   'conn.unreachable': 'Backend に接続できません',
   'conn.waiting': '確認待ち',
+  'conn.versionMismatch': 'バックエンド {backend} とアプリ {app} のバージョンが一致しません。互換性のためアップグレードしてください。',
+  'conn.versionMismatchShort': 'バージョン不一致',
 
   // exp
   'exp.composerFileMentionsDesc': '入力ボックス内のファイルメンション補助と最近使ったファイル履歴を有効にします。',

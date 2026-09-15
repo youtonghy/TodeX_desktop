@@ -104,6 +104,19 @@ export type ServerVersion = {
   workspace_root: string;
 };
 
+// Dev builds report "DEV0.0.0" (backend and clients) or a bare "0.0.0"; warning
+// on those would fire on every development connection.
+export function isDevVersion(version: string | null | undefined): boolean {
+  const normalized = (version ?? '').trim().toLowerCase();
+  return normalized === '' || /^(?:dev[-.]?)?0\.0\.0$/.test(normalized);
+}
+
+export function isVersionMismatch(appVersion: string, backendVersion: string | null | undefined): boolean {
+  if (isDevVersion(appVersion) || isDevVersion(backendVersion)) return false;
+  const normalize = (value: string) => value.trim().replace(/^v/i, '');
+  return normalize(appVersion) !== normalize(backendVersion ?? '');
+}
+
 export type WorkspaceDirectoryEntry = {
   name: string;
   path: string;

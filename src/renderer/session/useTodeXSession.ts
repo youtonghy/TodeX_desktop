@@ -203,6 +203,7 @@ import {
   fetchWorkspaceDirectorySnapshot,
   progressTextFromData,
   isLifecycleProgressText,
+  isVersionMismatch,
   objectPayloadOf,
   sessionIdFromEvent,
   mergeModelCatalog,
@@ -7337,6 +7338,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     projectSentAttachments([entry], sentAttachmentRecords, entry.conversationId ?? '')[0]),
   [timeline, sentAttachmentRecords]);
 
+  // Backend/app release versions are expected to ship in lockstep; dev builds
+  // (DEV0.0.0 / 0.0.0) on either side skip the check entirely.
+  const versionMismatch = useMemo(
+    () => isVersionMismatch(__TODEX_BUILD_VERSION__, serverVersion?.version),
+    [serverVersion],
+  );
+
   return {
     ...workbenchSharingState,
     ...completionNotificationsState,
@@ -7362,6 +7370,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     modelCatalogError,
     lastError,
     serverVersion,
+    versionMismatch,
     events,
     timeline: visibleTimeline,
     mentionHistory,

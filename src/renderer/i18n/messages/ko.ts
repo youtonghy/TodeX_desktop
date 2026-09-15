@@ -888,6 +888,8 @@ export const ko: Messages = {
   'conn.open': '연결됨',
   'conn.unreachable': 'Backend에 연결할 수 없음',
   'conn.waiting': '확인 대기',
+  'conn.versionMismatch': '백엔드 {backend}와 앱 {app}의 버전이 일치하지 않습니다. 호환성을 위해 업그레이드하세요.',
+  'conn.versionMismatchShort': '버전 불일치',
 
   // exp
   'exp.composerFileMentionsDesc': '입력창의 파일 멘션 보조와 최근 파일 기록을 활성화합니다.',

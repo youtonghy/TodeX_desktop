@@ -35,7 +35,7 @@ async function decodeQrFromFile(file: File): Promise<string | null> {
 export function SettingsPanel({ session }: Props) {
   const t = useT();
   const [languagePreference, setLanguagePreference] = useState<LocalePreference>(() => getLocalePreference());
-  const { settings, setSettings, backendConnections, activeBackendConnectionId, setActiveBackendConnectionId, updateBackendConnection, addBackendConnection, removeBackendConnection, connectionState, connectionHealth, serverVersion, connect, closeSocket } = session;
+  const { settings, setSettings, backendConnections, activeBackendConnectionId, setActiveBackendConnectionId, updateBackendConnection, addBackendConnection, removeBackendConnection, connectionState, connectionHealth, serverVersion, versionMismatch, connect, closeSocket } = session;
   const [pairingText, setPairingText] = useState('');
   const [pairingAutoStart, setPairingAutoStart] = useState(0);
   const [chunks, setChunks] = useState<Map<number, PairingQrChunk>>(new Map());
@@ -112,7 +112,7 @@ export function SettingsPanel({ session }: Props) {
         <h2 className="text-xl font-semibold">{t('settings.connection')}</h2>
         <p className="text-muted mt-1 text-sm">{healthLabelOf(connectionHealth)} · {connectionStateLabel(connectionState)}</p>
         {serverVersion ? (
-          <Chip className="mt-2" variant="soft">{serverVersion.name} {serverVersion.version}{settings.tenantId ? ` · ${settings.tenantId}` : ''}</Chip>
+          <Chip className="mt-2" variant="soft" color={versionMismatch ? 'warning' : 'default'}>{serverVersion.name} {serverVersion.version}{settings.tenantId ? ` · ${settings.tenantId}` : ''}{versionMismatch ? ` · ${t('conn.versionMismatchShort')}` : ''}</Chip>
         ) : null}
       </div>
       <Surface className="flex flex-col gap-4 rounded-2xl p-5">

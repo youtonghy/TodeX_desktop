@@ -888,6 +888,8 @@ export const zhCN = {
   'conn.open': '已连接',
   'conn.unreachable': '后端不可达',
   'conn.waiting': '等待检测',
+  'conn.versionMismatch': '后端 {backend} 与本应用 {app} 版本不一致，请升级以避免不兼容。',
+  'conn.versionMismatchShort': '版本不一致',
 
   // exp
   'exp.composerFileMentionsDesc': '启用输入框内的文件提及辅助和最近文件记录。',

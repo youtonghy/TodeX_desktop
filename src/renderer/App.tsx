@@ -9,6 +9,7 @@ import { ConversationHeaderDetails } from './components/ConversationHeaderDetail
 import { GitActionsModal } from './components/GitActionsModal';
 import { DesktopAlertHost } from './components/DesktopAlertHost';
 import { SessionNoticeToasts } from './components/SessionNoticeToasts';
+import { useNoticeToast } from './components/NoticeToast';
 import { AppSidebar } from './components/AppSidebar';
 import { AppIcon } from './components/AppIcon';
 import { ChatPanel } from './screens/ChatPanel';
@@ -91,6 +92,13 @@ export function App() {
   const layout = useWorkbenchLayout(scopeKey);
   const { isOpen: asideOpen, setOpen: persistAsideOpen, tab: workbenchTab, setTab: setWorkbenchTab,
     target: panelTarget, setTarget: setPanelTarget } = layout;
+
+  useNoticeToast(
+    session.versionMismatch
+      ? t('conn.versionMismatch', { backend: session.serverVersion?.version ?? '?', app: __TODEX_BUILD_VERSION__ })
+      : null,
+    { variant: 'warning', timeout: 12000 },
+  );
 
   const openPanel = useCallback((name: string, params?: OpenPanelOptions) => {
     const next = panelFromRoute(name);
