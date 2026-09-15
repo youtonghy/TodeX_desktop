@@ -48,7 +48,7 @@ export default defineConfig({
     resolve: {
       alias: {
         '@renderer': resolve(desktopRoot, 'src/renderer'),
-        '@todex/protocol': resolve(desktopRoot, '../TodeX_app/src/lib'),
+        '@todex/protocol': resolve(desktopRoot, '../TodeX_protocol/src'),
         '@noble/ciphers': resolve(desktopRoot, 'node_modules/@noble/ciphers'),
         '@noble/curves': resolve(desktopRoot, 'node_modules/@noble/curves'),
         '@noble/hashes': resolve(desktopRoot, 'node_modules/@noble/hashes'),

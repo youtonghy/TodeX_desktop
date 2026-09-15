@@ -25,7 +25,7 @@
 
 **TodeX Desktop** 是连接 [`todex-agentd`](../TodeX_backend) 后端服务的桌面客户端，为 macOS 开发者提供沉浸式编程工作台。
 
-桌面端采用 **Electron 44**、**React 19**、**Vite 7**、**Tailwind CSS v4** 和 **HeroUI Pro** 构建，设计了专为宽屏优化的经典三栏工作台布局。它与移动端客户端（[`TodeX_app`](../TodeX_app)）共享核心通信协议库（`@todex/protocol`），同时充分利用桌面端原生能力，如系统原生目录选择器、拖拽二维码图片解码以及多标签页开发者工作台。
+桌面端采用 **Electron 44**、**React 19**、**Vite 7**、**Tailwind CSS v4** 和 **HeroUI Pro** 构建，设计了专为宽屏优化的经典三栏工作台布局。它与 Web 客户端共享核心通信协议库（`@todex/protocol`，来自 [`TodeX_protocol`](../TodeX_protocol)），同时充分利用桌面端原生能力，如系统原生目录选择器、拖拽二维码图片解码以及多标签页开发者工作台。
 
 ---
 
@@ -79,7 +79,7 @@
 |  +-----------------------------------------------------------------------------+  |
 |                                         |                                         |
 |  +-----------------------------------------------------------------------------+  |
-|  |                  @todex/protocol (与 TodeX_app 共享协议层)                  |  |
+|  |              @todex/protocol (共享协议层, 来自 TodeX_protocol)             |  |
 |  |         (v2 客户端, 传输层, 心跳探测, 加密协商, 连接健康检测)               |  |
 |  +-----------------------------------------------------------------------------+  |
 +-----------------------------------------------------------------------------------+
@@ -93,13 +93,13 @@
 
 ### 桌面端与移动端对照
 
-| 维度 | 移动端 (`TodeX_app`) | 桌面端 (`TodeX_desktop`) |
+| 维度 | 移动端 (`Todex_mobile`) | 桌面端 (`TodeX_desktop`) |
 | :--- | :--- | :--- |
-| **基础框架** | React Native (Expo SDK 57) | Electron 44 + React 19 (Vite) |
-| **UI 组件库** | `heroui-native` + Uniwind (Tailwind v4) | `@heroui/react` + `@heroui-pro/react` (Tailwind v4) |
+| **基础框架** | Swift + UIKit | Electron 44 + React 19 (Vite) |
+| **UI 组件库** | UIKit（Liquid Glass） | `@heroui/react` + `@heroui-pro/react` (Tailwind v4) |
 | **界面布局** | 移动端堆叠导航（Stack Navigation） | 三栏可调节桌面工作台布局 |
-| **协议层实现** | `src/lib` | `@todex/protocol` 路径别名映射至 `../TodeX_app/src/lib` |
-| **本地持久化** | `AsyncStorage` / `expo-secure-store` | Electron `userData` JSON 文件（`todex.desktop.*`） |
+| **协议层实现** | Swift 实现（`TodexCore`） | `@todex/protocol` 路径别名映射至 `../TodeX_protocol/src` |
+| **本地持久化** | iOS Keychain / 本地持久化 | Electron `userData` JSON 文件（`todex.desktop.*`） |
 | **配对输入** | 手机摄像头实时扫描二维码 | 文本粘贴 / 图片拖拽二维码本地解码 |
 
 ---
@@ -213,7 +213,8 @@ SmartScreen 或 Gatekeeper。由于桌面端直接共享移动端协议源码，
 ## 相关仓库
 
 - **[TodeX 后端服务](../TodeX_backend)**：基于 Rust 构建的后端守护进程 (`todex-agentd`)。
-- **[TodeX 移动端应用](../TodeX_app)**：基于 React Native 与 Expo 构建的移动客户端。
+- **[TodeX Protocol](../TodeX_protocol)**：本客户端与 Web 客户端共用的 `@todex/protocol` 协议源码。
+- **[Todex 移动端应用](../Todex_mobile)**：基于 Swift + UIKit 构建的移动客户端。
 
 ---
 

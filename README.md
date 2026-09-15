@@ -23,7 +23,7 @@
 
 **TodeX Desktop** is a desktop client for [`todex-agentd`](../TodeX_backend), delivering a coding workspace environment on macOS.
 
-Built with **Electron 44**, **React 19**, **Vite 7**, **Tailwind CSS v4**, and **HeroUI Pro**, TodeX Desktop features a 3-pane layout optimized for wide screens. It shares the transport and protocol library (`@todex/protocol`) with the mobile app ([`TodeX_app`](../TodeX_app)), while leveraging native desktop capabilities like local file pickers, Drag & Drop QR decoding, and multi-tab developer workbenches.
+Built with **Electron 44**, **React 19**, **Vite 7**, **Tailwind CSS v4**, and **HeroUI Pro**, TodeX Desktop features a 3-pane layout optimized for wide screens. It shares the transport and protocol library (`@todex/protocol`, from [`TodeX_protocol`](../TodeX_protocol)) with the web client, while leveraging native desktop capabilities like local file pickers, Drag & Drop QR decoding, and multi-tab developer workbenches.
 
 ---
 
@@ -78,7 +78,7 @@ Built with **Electron 44**, **React 19**, **Vite 7**, **Tailwind CSS v4**, and *
 |  +-----------------------------------------------------------------------------+  |
 |                                         |                                         |
 |  +-----------------------------------------------------------------------------+  |
-|  |                  @todex/protocol (Shared with TodeX_app)                    |  |
+|  |                @todex/protocol (Shared, from TodeX_protocol)               |  |
 |  |         (v2 Client, Transport, Heartbeat, Crypto Sessions, Probes)          |  |
 |  +-----------------------------------------------------------------------------+  |
 +-----------------------------------------------------------------------------------+
@@ -92,13 +92,13 @@ Built with **Electron 44**, **React 19**, **Vite 7**, **Tailwind CSS v4**, and *
 
 ### Desktop vs Mobile Comparison
 
-| Dimension | Mobile Client (`TodeX_app`) | Desktop Client (`TodeX_desktop`) |
+| Dimension | Mobile Client (`Todex_mobile`) | Desktop Client (`TodeX_desktop`) |
 | :--- | :--- | :--- |
-| **Framework** | React Native (Expo SDK 57) | Electron 44 + React 19 (Vite) |
-| **UI Components** | `heroui-native` + Uniwind (Tailwind v4) | `@heroui/react` + `@heroui-pro/react` (Tailwind v4) |
+| **Framework** | Swift + UIKit | Electron 44 + React 19 (Vite) |
+| **UI Components** | UIKit (Liquid Glass) | `@heroui/react` + `@heroui-pro/react` (Tailwind v4) |
 | **Layout** | Mobile Stack Navigation | 3-Pane Resizable Desktop Layout |
-| **Protocol Layer** | `src/lib` | `@todex/protocol` alias mapped to `../TodeX_app/src/lib` |
-| **Local Storage** | `AsyncStorage` / `expo-secure-store` | Electron `userData` JSON (`todex.desktop.*`) |
+| **Protocol Layer** | Swift port (`TodexCore`) | `@todex/protocol` alias mapped to `../TodeX_protocol/src` |
+| **Local Storage** | iOS Keychain / local persistence | Electron `userData` JSON (`todex.desktop.*`) |
 | **Pairing Input** | Live Device Camera Scanner | Text Paste / Image File Drag & Drop QR Decoding |
 
 ---
@@ -218,7 +218,8 @@ The Settings screen in TodeX Desktop provides clear diagnostic feedback:
 ## Related Repositories
 
 - **[TodeX Backend](../TodeX_backend)**: Rust backend daemon (`todex-agentd`).
-- **[TodeX App](../TodeX_app)**: React Native / Expo mobile app.
+- **[TodeX Protocol](../TodeX_protocol)**: Shared `@todex/protocol` sources consumed by this client and the web client.
+- **[Todex Mobile](../Todex_mobile)**: Swift + UIKit mobile app.
 
 ---
 
