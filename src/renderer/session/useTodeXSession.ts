@@ -40,6 +40,8 @@ import {
   PermissionOption,
   ServerEvent,
   WorkspaceRecord,
+  type WorkspaceSyncRejection,
+  type WorkspaceTombstone,
   approvalResponsePayload,
   buildHttpUrl,
   classifyPendingRequest,
@@ -54,10 +56,13 @@ import {
   normalizeReasoningEffort,
   normalizeThreadId,
   normalizeServerUrl,
+  normalizeWorkspacePath,
+  normalizeWorkspaceTombstone,
   mergeWorkspaceRecords,
   nextWorkspaceSortOrder,
   remapWorkspaceScopedRecords,
   prepareWorkspaceSyncPayload,
+  parseWorkspaceSyncRejected,
   parseCodexModelListResponse,
   parseCodexNativeThread,
   parseCodexNativeThreadListResponse,
@@ -68,6 +73,7 @@ import {
   parsePermissionProfileListResponse,
   parsePluginListResponse,
   parseWorkspaceSyncResponse,
+  workspaceMatchesTombstone,
   findCapabilityHashTrigger,
   insertCapabilityReference,
   sandboxPolicyForMode,
@@ -111,12 +117,14 @@ import {
   JSON_SAVE_DEBOUNCE_MS,
   SESSION_CURSOR_SAVE_DEBOUNCE_MS,
   WORKSPACE_SYNC_DEBOUNCE_MS,
+  WORKSPACE_TOMBSTONES_STORAGE_KEY,
   SOCKET_EVENT_BATCH_SIZE,
   SOCKET_FRAME_DECODE_BATCH_SIZE,
   SOCKET_FRAME_DECODE_BUDGET_MS,
   MAX_TRANSPORT_HELLO_SESSION_CURSORS,
   MAX_TIMELINE_ITEMS,
   MAX_USAGE_RECORDS,
+  MAX_WORKSPACE_TOMBSTONES,
   MAX_EVENTS,
   CHAT_ATTACH_REPLAY_LIMIT,
   TERMINAL_MAX_OUTPUT_ENTRIES,
@@ -405,6 +413,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const workspaceBackendReadyRef = useRef(false);
   const workspaceBackendSkipNextSaveRef = useRef(false);
   const workspaceBackendSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const workspaceTombstonesRef = useRef<WorkspaceTombstone[]>([]);
+  const workspaceMissingNotifiedRef = useRef(new Set<string>());
   const healthProbeSeqRef = useRef(0);
   const loadedNativeThreadHistoryRef = useRef(new Map<string, number>());
   const unmaterializedNativeThreadIdsRef = useRef(new Set<string>());
@@ -417,6 +427,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const activeBackendConnectionIdRef = useRef(activeBackendConnectionId);
   activeBackendConnectionIdRef.current = activeBackendConnectionId;
   const [workspaces, setWorkspaces] = useState<WorkspaceRecord[]>([]);
+  const [workspaceTombstones, setWorkspaceTombstones] = useState<WorkspaceTombstone[]>([]);
   const [conversations, setConversations] = useState<ConversationRecord[]>([]);
   const [directorySyncStatus, setDirectorySyncStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [activeWorkspaceId, setActiveWorkspaceId] = useState('');
@@ -950,6 +961,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         storedUsageRecords,
         storedBackendConnections,
         storedProviderModelPreferences,
+        storedWorkspaceTombstones,
         storedDeviceSecret,
         storedDeviceOrigin,
       ] = await Promise.all([
@@ -965,6 +977,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         loadJson<unknown>(USAGE_RECORDS_STORAGE_KEY, []),
         loadJson<BackendConnectionProfile[]>(BACKEND_CONNECTIONS_STORAGE_KEY, []),
         loadJson<unknown>(PROVIDER_MODEL_PREFERENCES_STORAGE_KEY, {}),
+        loadJson<unknown>(WORKSPACE_TOMBSTONES_STORAGE_KEY, []),
         loadSecret(DEVICE_SECRET_STORAGE_KEY),
         loadSecret(DEVICE_ORIGIN_STORAGE_KEY),
       ]);
@@ -1035,10 +1048,16 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           .filter((entry): entry is [string, number] => typeof entry[1] === 'number' && Number.isFinite(entry[1]) && entry[1] > 0),
       );
 
+      const normalizedTombstones = (Array.isArray(storedWorkspaceTombstones) ? storedWorkspaceTombstones : [])
+        .map(normalizeWorkspaceTombstone)
+        .filter((item): item is WorkspaceTombstone => Boolean(item))
+        .slice(0, MAX_WORKSPACE_TOMBSTONES);
+      workspaceTombstonesRef.current = normalizedTombstones;
       setSettings(nextSettings);
       setBackendConnections(profiles);
       setActiveBackendConnectionId(profiles[0]?.id ?? 'default-backend');
       setWorkspaces(normalizedWorkspaces);
+      setWorkspaceTombstones(normalizedTombstones);
       setConversations(normalizedConversations);
       setTimeline(storedTimeline.slice(0, MAX_TIMELINE_ITEMS));
       const attachmentRecords = pruneSentAttachmentRecords(Array.isArray(storedSentAttachments) ? storedSentAttachments : []);
@@ -1073,6 +1092,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   useEffect(() => {
     workspacesRef.current = workspaces;
   }, [workspaces]);
+
+  useEffect(() => {
+    workspaceTombstonesRef.current = workspaceTombstones;
+  }, [workspaceTombstones]);
 
   useEffect(() => {
     conversationsRef.current = conversations;
@@ -1124,6 +1147,49 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     }
   }, [hydrated, providerModelPreferences]);
 
+  useEffect(() => {
+    if (hydrated) {
+      void saveJson(WORKSPACE_TOMBSTONES_STORAGE_KEY, workspaceTombstones);
+    }
+  }, [hydrated, workspaceTombstones]);
+
+  // Rejections carry `code` per record; every rejected workspace is flagged
+  // `pathMissing` (greyed out in the sidebar) and toasted once per path until
+  // it syncs cleanly again.
+  const flagWorkspaceMissing = useCallback(
+    (workspace: WorkspaceRecord, missingKeys: Set<string>) => {
+      const inScope = !workspace.backendConnectionId || workspace.backendConnectionId === activeBackendConnectionId;
+      const pathMissing = (inScope && missingKeys.has(normalizeWorkspacePath(workspace.path))) || undefined;
+      return workspace.pathMissing === pathMissing ? workspace : { ...workspace, pathMissing };
+    },
+    [activeBackendConnectionId],
+  );
+
+  const notifyRejectedWorkspaces = useCallback((rejections: WorkspaceSyncRejection[]) => {
+    const keys = new Set(rejections.map((item) => normalizeWorkspacePath(item.path)));
+    const fresh = rejections.filter((item) => !workspaceMissingNotifiedRef.current.has(normalizeWorkspacePath(item.path)));
+    workspaceMissingNotifiedRef.current = keys;
+    if (fresh.length > 0) {
+      setLastError(t('sess.workspacePathMissing', { paths: fresh.map((item) => item.path).join(', ') }));
+    }
+  }, []);
+
+  const applyWorkspaceSyncRejections = useCallback(
+    (rejections: WorkspaceSyncRejection[]) => {
+      notifyRejectedWorkspaces(rejections);
+      const missingKeys = new Set(rejections.map((item) => normalizeWorkspacePath(item.path)));
+      setWorkspaces((current) => {
+        const flagged = current.map((workspace) => flagWorkspaceMissing(workspace, missingKeys));
+        if (flagged.every((workspace, index) => workspace === current[index])) {
+          return current;
+        }
+        workspaceBackendSkipNextSaveRef.current = true;
+        return flagged;
+      });
+    },
+    [flagWorkspaceMissing, notifyRejectedWorkspaces],
+  );
+
   const syncWorkspacesToBackend = useCallback(
     async (snapshot: WorkspaceRecord[] = workspacesRef.current) => {
       try {
@@ -1141,20 +1207,15 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           const message = typeof errorBody?.message === 'string' ? errorBody.message : '';
           throw new Error(message ? `workspace sync failed: ${message}` : `workspace sync returned ${response.status}`);
         }
-        const payload = await response.json().catch(() => null) as { rejected?: { path?: unknown }[] } | null;
-        const rejectedPaths = (payload?.rejected ?? [])
-          .map((item) => item?.path)
-          .filter((path): path is string => typeof path === 'string' && path.length > 0);
-        if (rejectedPaths.length > 0) {
-          setLastError(t('sess.workspaceSyncRejected', { paths: rejectedPaths.join(', ') }));
-        }
+        const payload = await response.json().catch(() => null);
+        applyWorkspaceSyncRejections(parseWorkspaceSyncRejected(payload));
         return true;
       } catch (error) {
         setLastError(error instanceof Error ? error.message : t('sess.workspaceSyncFailed'));
         return false;
       }
     },
-    [activeBackendConnectionId, settings],
+    [activeBackendConnectionId, applyWorkspaceSyncRejections, settings],
   );
 
   const scheduleWorkspaceBackendSave = useCallback(
@@ -1182,7 +1243,11 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         const message = typeof errorBody?.message === 'string' ? errorBody.message : '';
         throw new Error(message ? `workspace sync failed: ${message}` : `workspace sync returned ${response.status}`);
       }
-      const remoteWorkspaces = parseWorkspaceSyncResponse(await response.json());
+      const syncBody = await response.json().catch(() => null);
+      const remoteWorkspaces = parseWorkspaceSyncResponse(syncBody);
+      const remoteRejections = parseWorkspaceSyncRejected(syncBody);
+      notifyRejectedWorkspaces(remoteRejections);
+      const missingKeys = new Set(remoteRejections.map((item) => normalizeWorkspacePath(item.path)));
       const localWorkspaces = workspacesRef.current;
       const localActiveWorkspaces = localWorkspaces.filter((workspace) =>
         !workspace.backendConnectionId || workspace.backendConnectionId === activeBackendConnectionId,
@@ -1190,12 +1255,44 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       const otherWorkspaces = localWorkspaces.filter((workspace) =>
         Boolean(workspace.backendConnectionId) && workspace.backendConnectionId !== activeBackendConnectionId,
       );
+      const scopedTombstones = workspaceTombstonesRef.current.filter((item) =>
+        !item.backendConnectionId || item.backendConnectionId === activeBackendConnectionId,
+      );
       const taggedRemoteWorkspaces = remoteWorkspaces.map((workspace) => ({
         ...workspace,
         backendConnectionId: activeBackendConnectionId || null,
       }));
+      // Tombstoned deletions must not be merged back. While the backend still
+      // stores such a record, re-issue the DELETE with the remote id so it is
+      // cleaned up even if the original delete never reached the server.
+      const keptRemoteWorkspaces = taggedRemoteWorkspaces.filter((workspace) =>
+        !scopedTombstones.some((item) => workspaceMatchesTombstone(workspace, item)),
+      );
+      for (const remote of taggedRemoteWorkspaces) {
+        if (keptRemoteWorkspaces.includes(remote)) {
+          continue;
+        }
+        void fetch(buildHttpUrl(settings.serverUrl, `/v2/workspaces/${encodeURIComponent(remote.id)}`), {
+          method: 'DELETE',
+          headers: authHeaders(settings, 'DELETE', `/v2/workspaces/${encodeURIComponent(remote.id)}`),
+        }).catch(() => {});
+      }
+      // Prune tombstones once the backend no longer stores a matching record.
+      if (workspaceTombstonesRef.current.length > 0) {
+        const surviving = workspaceTombstonesRef.current.filter((item) => {
+          const inScope = !item.backendConnectionId || item.backendConnectionId === activeBackendConnectionId;
+          if (!inScope) {
+            return true;
+          }
+          return remoteWorkspaces.some((remote) => workspaceMatchesTombstone(remote, item));
+        });
+        if (surviving.length !== workspaceTombstonesRef.current.length) {
+          workspaceTombstonesRef.current = surviving;
+          setWorkspaceTombstones(surviving);
+        }
+      }
       const nextActiveWorkspaces = remoteWorkspaces.length > 0
-        ? mergeWorkspaceRecords(localActiveWorkspaces, taggedRemoteWorkspaces).map((workspace) => ({
+        ? mergeWorkspaceRecords(localActiveWorkspaces, keptRemoteWorkspaces).map((workspace) => ({
             ...workspace,
             threadId: '',
             localAdapterState:
@@ -1204,7 +1301,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
               'idle',
           }))
         : localActiveWorkspaces;
-      const nextWorkspaces = [...otherWorkspaces, ...nextActiveWorkspaces]
+      const nextWorkspaces = [...otherWorkspaces, ...nextActiveWorkspaces.map((workspace) => flagWorkspaceMissing(workspace, missingKeys))]
         .sort((left, right) => right.updatedAt - left.updatedAt);
 
       if (nextWorkspaces.length > 0) {
@@ -1244,7 +1341,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       } catch (error) {
         setLastError(error instanceof Error ? error.message : t('sess.conversationDirSyncFailed'));
       }
-      if (!workspaceSyncPayloadEquals(taggedRemoteWorkspaces, nextActiveWorkspaces)) {
+      if (!workspaceSyncPayloadEquals(keptRemoteWorkspaces, nextActiveWorkspaces)) {
         void syncWorkspacesToBackend(nextActiveWorkspaces);
       }
       return true;
@@ -1253,7 +1350,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       setLastError(error instanceof Error ? error.message : t('sess.workspaceSyncFailed'));
       return false;
     }
-  }, [activeBackendConnectionId, settings, syncWorkspacesToBackend]);
+  }, [activeBackendConnectionId, flagWorkspaceMissing, notifyRejectedWorkspaces, settings, syncWorkspacesToBackend]);
 
   useEffect(() => {
     if (!hydrated || connectionState !== 'open') {
@@ -1673,9 +1770,34 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const updateWorkspace = useCallback((id: string, patch: Partial<WorkspaceRecord>) => {
     setWorkspaces((current) =>
       current.map((workspace) =>
-        workspace.id === id ? { ...workspace, ...patch, updatedAt: Date.now() } : workspace,
+        workspace.id === id
+          ? {
+              ...workspace,
+              ...patch,
+              updatedAt: Date.now(),
+              // A changed path needs a fresh backend verdict.
+              ...(patch.path !== undefined && normalizeWorkspacePath(patch.path) !== normalizeWorkspacePath(workspace.path)
+                ? { pathMissing: undefined }
+                : null),
+            }
+          : workspace,
       ),
     );
+  }, []);
+
+  const clearWorkspaceTombstone = useCallback((path: string, backendConnectionId: string | null) => {
+    const key = normalizeWorkspacePath(path);
+    const next = workspaceTombstonesRef.current.filter((item) => {
+      if (normalizeWorkspacePath(item.path) !== key) {
+        return true;
+      }
+      const scope = item.backendConnectionId ?? null;
+      return scope !== null && scope !== backendConnectionId;
+    });
+    if (next.length !== workspaceTombstonesRef.current.length) {
+      workspaceTombstonesRef.current = next;
+      setWorkspaceTombstones(next);
+    }
   }, []);
 
   const updateConversation = useCallback((id: string, patch: Partial<ConversationRecord>) => {
@@ -3622,6 +3744,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       };
       const nextConversation = createDefaultConversation(nextWorkspace);
 
+      clearWorkspaceTombstone(nextWorkspace.path, nextWorkspace.backendConnectionId ?? null);
       setWorkspaces((current) => [nextWorkspace, ...current]);
       setConversations((current) => [nextConversation, ...current]);
       setActiveWorkspaceId(id);
@@ -3630,6 +3753,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       return { workspace: nextWorkspace, conversation: nextConversation };
     },
     [
+      clearWorkspaceTombstone,
       pushSystem,
       settings.approvalPolicy,
       settings.defaultModel,
@@ -3665,7 +3789,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
 
   const selectWorkspace = useCallback((workspaceId: string) => {
     const workspace = workspaces.find((item) => item.id === workspaceId);
-    if (!workspace) {
+    if (!workspace || workspace.pathMissing) {
       return;
     }
     setActiveWorkspaceId(workspaceId);
@@ -3721,6 +3845,23 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const removeWorkspace = useCallback(
     (workspaceId: string) => {
       const removedWorkspace = workspaces.find((workspace) => workspace.id === workspaceId);
+      if (removedWorkspace) {
+        // A tombstone keeps the merge-based sync from resurrecting the
+        // workspace while the backend record is still around or unreachable.
+        const tombstone: WorkspaceTombstone = {
+          id: removedWorkspace.id,
+          path: removedWorkspace.path,
+          backendConnectionId: removedWorkspace.backendConnectionId ?? activeBackendConnectionId ?? null,
+          deletedAt: Date.now(),
+        };
+        const nextTombstones = [
+          tombstone,
+          ...workspaceTombstonesRef.current.filter((item) =>
+            item.id !== tombstone.id && normalizeWorkspacePath(item.path) !== normalizeWorkspacePath(tombstone.path)),
+        ].slice(0, MAX_WORKSPACE_TOMBSTONES);
+        workspaceTombstonesRef.current = nextTombstones;
+        setWorkspaceTombstones(nextTombstones);
+      }
       if (
         connectionState === 'open' &&
         removedWorkspace &&
@@ -3730,7 +3871,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           method: 'DELETE',
           headers: authHeaders(settings, 'DELETE', `/v2/workspaces/${encodeURIComponent(workspaceId)}`),
         }).then((response) => {
-          if (!response.ok) throw new Error(`workspace delete returned ${response.status}`);
+          // 404 means the backend holds no matching record — the desired state.
+          if (!response.ok && response.status !== 404) throw new Error(`workspace delete returned ${response.status}`);
         }).catch((error) => setLastError(error instanceof Error ? error.message : t('sess.workspaceDeleteSyncFailed')));
       }
       const removedConversationIds = conversations
@@ -3807,12 +3949,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         }))
       : [createDefaultConversation(nextWorkspace)];
 
+    clearWorkspaceTombstone(nextWorkspace.path, nextWorkspace.backendConnectionId ?? null);
     setWorkspaces((current) => [nextWorkspace, ...current]);
     setConversations((current) => [...nextConversations, ...current]);
     setActiveWorkspaceId(nextWorkspace.id);
     setActiveConversationId(nextConversations[0]?.id ?? '');
     return { workspace: nextWorkspace, conversation: nextConversations[0] ?? null };
-  }, [conversations, workspaces]);
+  }, [clearWorkspaceTombstone, conversations, workspaces]);
 
   const sendWorkspaceCommand = useCallback(
     (workspace: WorkspaceRecord, type: string, extra: Record<string, unknown> = {}, conversation?: ConversationRecord | null) => {

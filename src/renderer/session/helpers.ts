@@ -1371,6 +1371,7 @@ export const PROVIDER_MODEL_PREFERENCES_STORAGE_KEY = 'todex.desktop.providerMod
 export const KANBAN_TASKS_STORAGE_KEY = 'todex.desktop.kanbanTasks.v1';
 export const DEVICE_SECRET_STORAGE_KEY = 'todex.desktop.deviceSecret.v1';
 export const DEVICE_ORIGIN_STORAGE_KEY = 'todex.desktop.deviceOrigin.v1';
+export const WORKSPACE_TOMBSTONES_STORAGE_KEY = 'todex.desktop.workspaceTombstones.v1';
 export const JSON_SAVE_DEBOUNCE_MS = 350;
 export const SESSION_CURSOR_SAVE_DEBOUNCE_MS = 800;
 export const WORKSPACE_SYNC_DEBOUNCE_MS = 900;
@@ -1384,6 +1385,7 @@ export const MAX_TRANSPORT_HELLO_SESSION_CURSORS = 12;
 // context users are currently reviewing.
 export const MAX_TIMELINE_ITEMS = 1000;
 export const MAX_USAGE_RECORDS = 2_000;
+export const MAX_WORKSPACE_TOMBSTONES = 100;
 export const MAX_EVENTS = 220;
 export const RECONNECT_DELAY_MS = 2000;
 export const RECONNECT_MAX_DELAY_MS = 30_000;

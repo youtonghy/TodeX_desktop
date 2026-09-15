@@ -1,4 +1,4 @@
-import { RiPushpin2Fill, RiAddLine, RiPencilLine, RiEdit2Line, RiGitBranchLine, RiDeleteBinLine, RiArrowDownSLine, RiBarChartBoxLine, RiFolder3Line, RiInformationLine, RiKanbanView2, RiPuzzle2Line, RiSettings3Line, RiTerminalBoxLine } from '@remixicon/react';
+import { RiPushpin2Fill, RiAddLine, RiPencilLine, RiEdit2Line, RiErrorWarningLine, RiGitBranchLine, RiDeleteBinLine, RiArrowDownSLine, RiBarChartBoxLine, RiFolder3Line, RiInformationLine, RiKanbanView2, RiPuzzle2Line, RiSettings3Line, RiTerminalBoxLine } from '@remixicon/react';
 import { Badge, Button, Chip, Dropdown, Label, Tooltip } from '@heroui/react';
 import { useEffect, useMemo, useState } from 'react';
 import type { DragEvent, MouseEvent } from 'react';
@@ -338,18 +338,26 @@ export function AppSidebar({
                   aria-label={t('sidebar.workspaces')}
                   density="compact"
                   className="sidebar-chat-list"
-                  onAction={(key) => session.selectWorkspace(String(key))}
+                  onAction={(key) => {
+                    const target = session.workspaces.find((item) => item.id === String(key));
+                    if (target?.pathMissing) {
+                      return;
+                    }
+                    session.selectWorkspace(String(key));
+                  }}
                 >
                   {displayedWorkspaces.map((workspace) => {
                     const isSelected = workspace.id === session.activeWorkspaceId;
+                    const isMissing = Boolean(workspace.pathMissing);
                     const backend = session.backendConnections.find((profile) => profile.id === (workspace.backendConnectionId || session.activeBackendConnectionId));
                     const backendLabel = backend ? t('sidebar.backendLabel', { name: backend.name, url: backend.serverUrl }) : t('sidebar.backendRemoved');
                     return (
                       <ChatListView.Item
                         key={workspace.id}
                         id={workspace.id}
-                        className={`sidebar-item ${isSelected ? 'is-selected' : ''} ${dragIndicator?.id === workspace.id ? `drop-${dragIndicator.position}` : ''}`}
+                        className={`sidebar-item ${isSelected ? 'is-selected' : ''} ${isMissing ? 'opacity-50 cursor-not-allowed' : ''} ${dragIndicator?.id === workspace.id ? `drop-${dragIndicator.position}` : ''}`}
                         textValue={workspaceDisplayName(workspace)}
+                        title={isMissing ? t('sidebar.workspaceMissingPath') : undefined}
                         data-workspace-id={workspace.id}
                         {...({ draggable: true, onDragStart: (event: globalThis.DragEvent) => { event.dataTransfer?.setData('text/plain', workspace.id); if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'; setDraggedWorkspaceId(workspace.id); }, onDragOver: (event: globalThis.DragEvent) => { event.preventDefault(); if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'; }, onDrop: (event: globalThis.DragEvent) => { event.preventDefault(); const sourceId = draggedWorkspaceId || event.dataTransfer?.getData('text/plain'); if (!sourceId || sourceId === workspace.id) { setDraggedWorkspaceId(null); return; } const from = orderedWorkspaces.findIndex((item) => item.id === sourceId); const to = orderedWorkspaces.findIndex((item) => item.id === workspace.id); if (from < 0 || to < 0) { setDraggedWorkspaceId(null); return; } const next = [...orderedWorkspaces]; const [moved] = next.splice(from, 1); next.splice(to, 0, moved); next.forEach((item, index) => session.updateWorkspace(item.id, { sortOrder: index })); setDraggedWorkspaceId(null); setDragIndicator(null); }, onDragEnd: () => { setDraggedWorkspaceId(null); setDragIndicator(null); } } as any)} onContextMenu={(event) => openContextMenu(event, 'workspace', workspace.id)}
                       >
@@ -358,8 +366,8 @@ export function AppSidebar({
                             <RiFolder3Line className={`size-4 ${isSelected ? 'text-accent' : ''}`} />
                           </ChatListView.Icon>
                           <ChatListView.Text className="flex-1">
-                            <ChatListView.Title className={isSelected ? 'text-accent font-semibold' : ''}>
-                              {workspaceDisplayName(workspace)}{pins.workspace.includes(workspace.id) ? <RiPushpin2Fill className="ml-1 inline size-3 text-muted" aria-label={t('sidebar.pinned')} /> : null}
+                            <ChatListView.Title className={isSelected ? 'text-accent font-semibold' : isMissing ? 'text-muted' : ''}>
+                              {workspaceDisplayName(workspace)}{pins.workspace.includes(workspace.id) ? <RiPushpin2Fill className="ml-1 inline size-3 text-muted" aria-label={t('sidebar.pinned')} /> : null}{isMissing ? <RiErrorWarningLine className="ml-1 inline size-3 text-warning" aria-label={t('sidebar.workspaceMissingPath')} /> : null}
                             </ChatListView.Title>
                             <ChatListView.Preview>{workspace.path}</ChatListView.Preview>
                           </ChatListView.Text>
