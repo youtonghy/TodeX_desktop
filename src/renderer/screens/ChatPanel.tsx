@@ -45,7 +45,8 @@ import {
   type ComposerAttachmentDraft,
 } from '../session/helpers';
 import { selectionInside } from '../lib/selection';
-import { findCapabilityHashTrigger } from '@todex/protocol/todex';
+import { findCapabilityHashTrigger, insertCapabilityReference } from '@todex/protocol/todex';
+import { buildCapabilitySuggestions, capabilityCatalogsPending, type CapabilitySuggestion } from '@todex/protocol/capabilityCatalog';
 import { getLocale, t, useT } from '../i18n';
 
 type Props = {
@@ -261,6 +262,11 @@ export function ChatPanel({ session }: Props) {
   const composerSelectionRef = useRef(session.composerSelections[conversation?.id ?? '']);
   composerSelectionRef.current = session.composerSelections[conversation?.id ?? ''];
   const mention = findMentionTrigger(draft, conversation ? (session.composerSelections[conversation.id]?.end ?? draft.length) : 0);
+  const capability = conversation ? findCapabilityHashTrigger(draft, session.composerSelections[conversation.id]?.end ?? draft.length) : null;
+  // `@` and `#` can both parse when one wraps the other (`@file#x`); the
+  // trigger closest to the caret wins.
+  const mentionActive = Boolean(mention && (!capability || mention.start > capability.start));
+  const capabilityActive = Boolean(capability && !mentionActive);
   const [mentionSuggestions, setMentionSuggestions] = useState<Array<{ id: string; title: string; description: string; insertText: string }>>([]);
   const [suggestionIndex, setSuggestionIndex] = useState(0);
   const [expandedProcessIds, setExpandedProcessIds] = useState<Set<string>>(() => new Set());
@@ -424,11 +430,47 @@ export function ChatPanel({ session }: Props) {
   const slashSuggestions = slashTrigger
     ? slashCatalog.filter((item) => canonicalSlashCommand(item.command).startsWith(canonicalSlashCommand(slashTrigger.split(/\s+/)[0] || slashTrigger)))
     : [];
-  const suggestionCount = slashSuggestions.length > 0 ? Math.min(12, slashSuggestions.length) : mentionSuggestions.length;
+  // The conversation's own provider catalog leads the `#` list; the rest follow.
+  const capabilityProviderOrder: ProviderKind[] = currentProvider
+    ? [currentProvider as ProviderKind, ...session.v2Providers.map(item => item.id).filter(id => id !== currentProvider)]
+    : session.v2Providers.map(item => item.id);
+  const selectedSkillAttachments = session.selectedSkills[conversation.id] ?? [];
+  const capabilitySuggestions = capabilityActive && capability
+    ? buildCapabilitySuggestions(session.capabilityCatalogs, capabilityProviderOrder, capability.query, {
+      isSkillAttached: (skill) => selectedSkillAttachments.some(item =>
+        item.resourceId === skill.resourceId || (item.name === skill.name && item.path === skill.source)),
+    })
+    : [];
+  const capabilityLoading = capabilityActive && capabilityCatalogsPending(session.capabilityCatalogs, capabilityProviderOrder);
+  const applyCapabilitySuggestion = (item: CapabilitySuggestion) => {
+    if (!capability) return;
+    if (item.kind === 'skill') {
+      // Attaching produces the same chip the capability manager creates, so
+      // the `#name` trigger text is dropped instead of sent as literal text.
+      session.toggleCatalogSkill(conversation.id, item.skill, item.provider);
+      session.setConversationChatDraft(conversation.id, insertCapabilityReference(draft, capability, ''));
+      session.setConversationComposerSelection(conversation.id, { start: capability.start, end: capability.start });
+      composerRef.current?.focus(capability.start);
+      return;
+    }
+    const insertText = `#${item.name} `;
+    session.setConversationChatDraft(conversation.id, insertCapabilityReference(draft, capability, insertText));
+    const cursor = capability.start + insertText.length;
+    session.setConversationComposerSelection(conversation.id, { start: cursor, end: cursor });
+    composerRef.current?.focus(cursor);
+  };
+  const suggestionCount = slashSuggestions.length > 0
+    ? Math.min(12, slashSuggestions.length)
+    : capabilityActive ? capabilitySuggestions.length : mentionSuggestions.length;
   const applySuggestion = (index: number) => {
     if (slashSuggestions.length > 0) {
       const item = slashSuggestions[index];
       if (item) chooseSlashCommand(item.command);
+      return;
+    }
+    if (capabilityActive) {
+      const item = capabilitySuggestions[index];
+      if (item) applyCapabilitySuggestion(item);
       return;
     }
     const item = mentionSuggestions[index];
@@ -452,7 +494,6 @@ export function ChatPanel({ session }: Props) {
       setSuggestionIndex(0);
     }
   };
-  const capability = findCapabilityHashTrigger(draft, session.composerSelections[conversation.id]?.end ?? draft.length);
   const thinking = session.thinkingConversations[conversation.id] === true;
   const submissionStatus = session.submissionStatusByConversation[conversation.id];
   const executionUnknown = submissionStatus === 'unknown';
@@ -788,7 +829,7 @@ export function ChatPanel({ session }: Props) {
             <p className="mb-2 text-xs font-medium">{sessionPermissionIds.has(request.requestId) ? t('chat.piPluginRequest') : request.title || t('chat.permissionApproval')}</p>
             <ConversationPermissionActions request={request} onSelect={(option, data) => { session.sendApprovalResponse(option, request, data); }} />
           </div>)}
-          {(slashSuggestions.length > 0 || mentionSuggestions.length > 0 || (mention && mentionSuggestions.length === 0)) ? (
+          {(slashSuggestions.length > 0 || mentionSuggestions.length > 0 || (mentionActive && mentionSuggestions.length === 0) || capabilityActive) ? (
             <div className="composer-suggestions-popover">
               {slashSuggestions.length > 0 ? (
                 <ListBox
@@ -805,6 +846,29 @@ export function ChatPanel({ session }: Props) {
                     </ListBox.Item>
                   ))}
                 </ListBox>
+              ) : capabilityActive ? (
+                capabilitySuggestions.length > 0 ? (
+                  <ListBox
+                    aria-label={t('chat.capabilitySuggestions')}
+                    onAction={(key) => {
+                      const item = capabilitySuggestions.find((candidate) => candidate.id === String(key));
+                      if (item) applyCapabilitySuggestion(item);
+                    }}
+                  >
+                    {capabilitySuggestions.map((item, index) => (
+                      <ListBox.Item key={item.id} id={item.id} textValue={`#${item.name} ${item.description}`} className={`composer-suggestion-item ${index === suggestionIndex ? 'composer-suggestion-item--active' : ''}`}>
+                        <span className="composer-suggestion-command">#{item.name}</span>
+                        <span className="composer-suggestion-description">
+                          {item.kind === 'skill'
+                            ? `Skill${item.attached ? ` · ${t('chat.capabilityAttached')}` : ''}${item.description ? ` · ${item.description}` : ''}`
+                            : `MCP${item.description ? ` · ${item.description}` : ''}`}
+                        </span>
+                      </ListBox.Item>
+                    ))}
+                  </ListBox>
+                ) : (
+                  <p className="text-muted px-2 py-1 text-xs">{capabilityLoading ? t('chat.loadingCapabilities') : t('chat.noCapabilities')}</p>
+                )
               ) : mentionSuggestions.length > 0 ? (
                 <ListBox
                   aria-label={t('chat.fileSuggestions')}
@@ -827,7 +891,6 @@ export function ChatPanel({ session }: Props) {
               ) : mention ? <p className="text-muted px-2 py-1 text-xs">{t('chat.searchingFiles')}</p> : null}
             </div>
           ) : null}
-          {capability ? <p className="text-muted mb-2 text-xs">{t('chat.capabilityHint')}</p> : null}
           {(session.selectedSkills[conversation.id] ?? []).length > 0 ? (
             <div className="mb-2 flex flex-wrap gap-2">
               {(session.selectedSkills[conversation.id] ?? []).map((skill) => (
