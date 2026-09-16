@@ -188,6 +188,7 @@ export const zhCN = {
   'storage.insecureBackend': '公开 HTTPS 页面只能连接使用 HTTPS/WSS 的远程 Backend',
   'storage.browserReadFile': '浏览器预览不支持读取本机文件',
   'storage.browserGit': '浏览器预览不支持 Git 操作',
+  'storage.browserShell': '浏览器预览不支持打开本机文件',
 
   // chat
   'chat.readImageFailed': '无法读取图片',
@@ -405,6 +406,13 @@ export const zhCN = {
   'workbench.resizeTree': '调整文件树宽度',
   'workbench.selectFile': '选择文件预览',
   'workbench.readingFile': '正在读取文件',
+  'workbench.fileMenu': '文件菜单',
+  'workbench.open': '打开',
+  'workbench.openWith': '打开方式…',
+  'workbench.revealInFinder': '在访达中显示',
+  'workbench.revealInExplorer': '在文件资源管理器中显示',
+  'workbench.revealInFileManager': '在文件管理器中显示',
+  'workbench.openFailed': '无法打开该文件',
 
   // filePreview
   'filePreview.hint': '选择文件预览。',

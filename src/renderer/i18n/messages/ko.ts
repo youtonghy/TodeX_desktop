@@ -188,6 +188,7 @@ export const ko: Messages = {
   'storage.insecureBackend': '공개 HTTPS 페이지는 HTTPS/WSS를 사용하는 원격 Backend에만 연결할 수 있습니다',
   'storage.browserReadFile': '브라우저 미리보기에서는 로컬 파일을 읽을 수 없습니다',
   'storage.browserGit': '브라우저 미리보기에서는 Git 작업을 지원하지 않습니다',
+  'storage.browserShell': '브라우저 미리보기에서는 로컬 파일을 열 수 없습니다',
 
   // chat
   'chat.readImageFailed': '이미지를 읽을 수 없습니다',
@@ -405,6 +406,13 @@ export const ko: Messages = {
   'workbench.resizeTree': '파일 트리 너비 조정',
   'workbench.selectFile': '파일을 선택하여 미리보기',
   'workbench.readingFile': '파일 읽는 중',
+  'workbench.fileMenu': '파일 메뉴',
+  'workbench.open': '열기',
+  'workbench.openWith': '다음으로 열기…',
+  'workbench.revealInFinder': 'Finder에서 보기',
+  'workbench.revealInExplorer': '파일 탐색기에서 보기',
+  'workbench.revealInFileManager': '파일 관리자에서 보기',
+  'workbench.openFailed': '파일을 열 수 없습니다',
 
   // filePreview
   'filePreview.hint': '파일을 선택하여 미리보기.',

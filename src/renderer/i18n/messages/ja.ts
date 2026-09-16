@@ -188,6 +188,7 @@ export const ja: Messages = {
   'storage.insecureBackend': '公開 HTTPS ページは HTTPS/WSS のリモート Backend にのみ接続できます',
   'storage.browserReadFile': 'ブラウザプレビューではローカルファイルを読み取れません',
   'storage.browserGit': 'ブラウザプレビューでは Git 操作をサポートしていません',
+  'storage.browserShell': 'ブラウザプレビューではローカルファイルを開けません',
 
   // chat
   'chat.readImageFailed': '画像を読み取れませんでした',
@@ -405,6 +406,13 @@ export const ja: Messages = {
   'workbench.resizeTree': 'ファイルツリーの幅を調整',
   'workbench.selectFile': 'ファイルを選択してプレビュー',
   'workbench.readingFile': 'ファイルを読み込み中',
+  'workbench.fileMenu': 'ファイルメニュー',
+  'workbench.open': '開く',
+  'workbench.openWith': 'このアプリケーションで開く…',
+  'workbench.revealInFinder': 'Finder に表示',
+  'workbench.revealInExplorer': 'エクスプローラーに表示',
+  'workbench.revealInFileManager': 'ファイルマネージャーに表示',
+  'workbench.openFailed': 'ファイルを開けませんでした',
 
   // filePreview
   'filePreview.hint': 'ファイルを選択してプレビュー。',

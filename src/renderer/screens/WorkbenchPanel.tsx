@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { ReactNode } from 'react';
-import { RiCloseLine, RiTerminalBoxLine, RiGitBranchLine, RiAddLine, RiArrowLeftDoubleLine, RiArrowRightDoubleLine, RiFileTextLine, RiFolder3Line, RiGlobalLine, RiFocus3Line, RiRefreshLine, RiStopCircleLine } from '@remixicon/react';
-import { Button, Chip, Dropdown, Input, Popover, ScrollShadow, Spinner, TextField, Tooltip, toast } from '@heroui/react';
+import type { MouseEvent as ReactMouseEvent, ReactNode } from 'react';
+import { RiAppsLine, RiCloseLine, RiTerminalBoxLine, RiGitBranchLine, RiAddLine, RiArrowLeftDoubleLine, RiArrowRightDoubleLine, RiExternalLinkLine, RiFileTextLine, RiFolder3Line, RiFolderOpenLine, RiGlobalLine, RiFocus3Line, RiRefreshLine, RiStopCircleLine } from '@remixicon/react';
+import { Button, Chip, Dropdown, Input, Label, Popover, ScrollShadow, Spinner, TextField, Tooltip, toast } from '@heroui/react';
 import type { Selection } from '@heroui/react';
-import { FileTree } from '@heroui-pro/react';
+import { ContextMenu as HeroContextMenu, FileTree } from '@heroui-pro/react';
 import { Resizable } from '@heroui-pro/react/resizable';
 import type { PanelImperativeHandle } from '@heroui-pro/react/resizable';
 import { WorkspaceFilePreview, type PreviewFile, type ReferenceSelection } from '../components/WorkspaceFilePreview';
@@ -22,6 +22,7 @@ import { normalizeWorkbenchLayout } from '../session/workbenchLayout';
 import { SETTINGS_STORAGE_KEY, attachmentId, referenceToken, uniqueReferenceName } from '../session/helpers';
 import { V2ApiClient } from '@todex/protocol/v2';
 import { deviceIdentityFromSecret } from '@todex/protocol/deviceAuth';
+import { isLoopbackUrl } from '@todex/protocol/mobileParity';
 import { t, useT, type MessageKey } from '../i18n';
 
 type Props = {
@@ -915,6 +916,26 @@ function FilesPane({ session, target, onTargetChange }: { session: TodeXSession;
     setCurrentPath(trimmed);
   };
 
+  const [contextMenu, setContextMenu] = useState<{ path: string; x: number; y: number } | null>(null);
+  // shell.openPath/showItemInFolder act on the desktop's own filesystem, so
+  // the menu only makes sense when the backend runs on this machine.
+  const canUseSystemShell = isLoopbackUrl(session.settings.serverUrl);
+  const revealInManagerLabel = window.todexDesktop.shell.platform === 'darwin'
+    ? t('workbench.revealInFinder')
+    : window.todexDesktop.shell.platform === 'win32'
+      ? t('workbench.revealInExplorer')
+      : t('workbench.revealInFileManager');
+
+  useEffect(() => {
+    const close = () => setContextMenu(null);
+    window.addEventListener('click', close);
+    window.addEventListener('blur', close);
+    return () => {
+      window.removeEventListener('click', close);
+      window.removeEventListener('blur', close);
+    };
+  }, []);
+
   useEffect(() => {
     if (!target?.filePath || target === appliedTargetRef.current) return;
     appliedTargetRef.current = target;
@@ -932,6 +953,30 @@ function FilesPane({ session, target, onTargetChange }: { session: TodeXSession;
     }
   };
 
+  const openEntryContextMenu = (event: ReactMouseEvent, path: string) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (findFileTreeEntry(entries, path)) void handleAction(path);
+    else setSelected(path);
+    setContextMenu({ path, x: event.clientX, y: event.clientY });
+  };
+
+  const runFileContextAction = async (action: 'open' | 'open-with' | 'reveal') => {
+    const path = contextMenu?.path;
+    setContextMenu(null);
+    if (!path) return;
+    try {
+      if (action === 'open') await window.todexDesktop.shell.openPath(path);
+      else if (action === 'open-with') await window.todexDesktop.shell.openWith(path);
+      else await window.todexDesktop.shell.showItemInFolder(path);
+    } catch (reason) {
+      const message = reason instanceof Error
+        ? reason.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
+        : '';
+      toast.danger(message || t('workbench.openFailed'));
+    }
+  };
+
   const renderEntry = (entry: FileTreeEntry): ReactNode => (
     <FileTree.Item
       key={entry.path}
@@ -939,6 +984,7 @@ function FilesPane({ session, target, onTargetChange }: { session: TodeXSession;
       id={entry.path}
       textValue={entry.name}
       title={entry.name}
+      onContextMenu={canUseSystemShell ? (event) => openEntryContextMenu(event, entry.path) : undefined}
     >
       {entry.children?.map(renderEntry)}
     </FileTree.Item>
@@ -1019,7 +1065,7 @@ function FilesPane({ session, target, onTargetChange }: { session: TodeXSession;
             }}
             onExpandedChange={setExpandedKeys}
           >
-            <FileTree.Item key={currentPath || 'root'} icon={<RiFolder3Line />} id={currentPath || 'root'} textValue={rootName} title={rootName}>
+            <FileTree.Item key={currentPath || 'root'} icon={<RiFolder3Line />} id={currentPath || 'root'} textValue={rootName} title={rootName} onContextMenu={canUseSystemShell && currentPath ? (event) => openEntryContextMenu(event, currentPath) : undefined}>
               {entries.map(renderEntry)}
             </FileTree.Item>
           </FileTree>
@@ -1033,6 +1079,22 @@ function FilesPane({ session, target, onTargetChange }: { session: TodeXSession;
           </ScrollShadow>
         </Resizable.Panel>
       </Resizable>
+      {contextMenu ? (
+        <HeroContextMenu open onOpenChange={(open) => { if (!open) setContextMenu(null); }}>
+          <div
+            className="fixed z-50 w-44 rounded-xl border border-separator bg-overlay p-1 shadow-overlay"
+            style={{ left: Math.max(8, Math.min(contextMenu.x, window.innerWidth - 184)), top: Math.max(8, Math.min(contextMenu.y, window.innerHeight - 140)) }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <HeroContextMenu.Menu aria-label={t('workbench.fileMenu')} autoFocus="first" onClose={() => setContextMenu(null)}>
+              <HeroContextMenu.Item id="open" textValue={t('workbench.open')} onAction={() => void runFileContextAction('open')}><RiExternalLinkLine className="size-4 text-muted" /><Label>{t('workbench.open')}</Label></HeroContextMenu.Item>
+              <HeroContextMenu.Item id="open-with" textValue={t('workbench.openWith')} onAction={() => void runFileContextAction('open-with')}><RiAppsLine className="size-4 text-muted" /><Label>{t('workbench.openWith')}</Label></HeroContextMenu.Item>
+              <HeroContextMenu.Separator />
+              <HeroContextMenu.Item id="reveal" textValue={revealInManagerLabel} onAction={() => void runFileContextAction('reveal')}><RiFolderOpenLine className="size-4 text-muted" /><Label>{revealInManagerLabel}</Label></HeroContextMenu.Item>
+            </HeroContextMenu.Menu>
+          </div>
+        </HeroContextMenu>
+      ) : null}
     </div>
   );
 }

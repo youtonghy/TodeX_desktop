@@ -188,6 +188,7 @@ export const en: Messages = {
   'storage.insecureBackend': 'A public HTTPS page can only connect to remote Backends over HTTPS/WSS',
   'storage.browserReadFile': 'The browser preview cannot read local files',
   'storage.browserGit': 'The browser preview does not support Git operations',
+  'storage.browserShell': 'The browser preview cannot open local files',
 
   // chat
   'chat.readImageFailed': 'Could not read the image',
@@ -405,6 +406,13 @@ export const en: Messages = {
   'workbench.resizeTree': 'Resize file tree',
   'workbench.selectFile': 'Select a file to preview',
   'workbench.readingFile': 'Reading file',
+  'workbench.fileMenu': 'File menu',
+  'workbench.open': 'Open',
+  'workbench.openWith': 'Open With…',
+  'workbench.revealInFinder': 'Reveal in Finder',
+  'workbench.revealInExplorer': 'Show in File Explorer',
+  'workbench.revealInFileManager': 'Show in File Manager',
+  'workbench.openFailed': 'Failed to open the file',
 
   // filePreview
   'filePreview.hint': 'Select a file to preview.',

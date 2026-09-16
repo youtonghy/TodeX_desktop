@@ -2,7 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, nativeTheme, shell } from 'electro
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { startAutoUpdates, refreshUpdateMenu } from './autoUpdates';
 import { isMainLocale, mainT, setMainLocale } from './i18n';
@@ -465,6 +465,55 @@ app.whenReady().then(() => {
       base64: buffer.toString('base64'),
       text,
     };
+  });
+
+  const spawnDetached = (command: string, args: string[]) => new Promise<void>((resolve, reject) => {
+    const child = spawn(command, args, { detached: true, stdio: 'ignore' });
+    child.once('error', reject);
+    child.once('spawn', () => {
+      child.unref();
+      resolve();
+    });
+  });
+
+  handleIpc('shell:openPath', async (_event, targetPath: string) => {
+    if (!existsSync(targetPath)) {
+      throw new Error(mainT('main.fileNotFound'));
+    }
+    const failure = await shell.openPath(targetPath);
+    if (failure) {
+      throw new Error(failure);
+    }
+  });
+
+  handleIpc('shell:showItemInFolder', (_event, targetPath: string) => {
+    if (!existsSync(targetPath)) {
+      throw new Error(mainT('main.fileNotFound'));
+    }
+    shell.showItemInFolder(targetPath);
+  });
+
+  handleIpc('shell:openWith', async (_event, targetPath: string) => {
+    if (!existsSync(targetPath)) {
+      throw new Error(mainT('main.fileNotFound'));
+    }
+    if (process.platform === 'win32') {
+      await spawnDetached('rundll32.exe', ['shell32.dll,OpenAs_RunDLL', targetPath]);
+      return;
+    }
+    const picked = await dialog.showOpenDialog({
+      title: mainT('main.chooseApplication'),
+      defaultPath: process.platform === 'darwin' ? '/Applications' : '/usr/bin',
+      properties: ['openFile'],
+      ...(process.platform === 'darwin' ? { filters: [{ name: 'Applications', extensions: ['app'] }] } : {}),
+    });
+    const appPath = picked.canceled ? '' : picked.filePaths[0] ?? '';
+    if (!appPath) return;
+    if (process.platform === 'darwin') {
+      await execFileAsync('open', ['-a', appPath, targetPath]);
+    } else {
+      await spawnDetached(appPath, [targetPath]);
+    }
   });
 
   handleIpc('git:scan', async (_event, workspacePath: string) => {

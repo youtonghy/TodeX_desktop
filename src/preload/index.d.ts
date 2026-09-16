@@ -18,6 +18,12 @@ export type TodeXDesktopApi = {
   fs: {
     readFile: (filePath: string) => Promise<DesktopFilePayload>;
   };
+  shell: {
+    platform: string;
+    openPath: (path: string) => Promise<void>;
+    showItemInFolder: (path: string) => Promise<void>;
+    openWith: (path: string) => Promise<void>;
+  };
   git: {
     scan: (workspacePath: string) => Promise<GitRepositorySummary[]>;
     run: (workspacePath: string, action: 'commit' | 'commit-push' | 'push' | 'initial', message?: string, includeUnstaged?: boolean) => Promise<{ output: string }>;

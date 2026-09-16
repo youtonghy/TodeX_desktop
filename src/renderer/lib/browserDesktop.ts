@@ -42,6 +42,18 @@ export function installBrowserDesktopBridge(): void {
         throw new Error(t('storage.browserReadFile'));
       },
     },
+    shell: {
+      platform: navigator.userAgent.includes('Mac') ? 'darwin' : navigator.userAgent.includes('Win') ? 'win32' : 'linux',
+      openPath: async () => {
+        throw new Error(t('storage.browserShell'));
+      },
+      showItemInFolder: async () => {
+        throw new Error(t('storage.browserShell'));
+      },
+      openWith: async () => {
+        throw new Error(t('storage.browserShell'));
+      },
+    },
     app: {
       focus: () => window.focus(),
     },

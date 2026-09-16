@@ -39,6 +39,12 @@ const api = {
   fs: {
     readFile: (filePath: string) => ipcRenderer.invoke('fs:readFile', filePath) as Promise<DesktopFilePayload>,
   },
+  shell: {
+    platform: process.platform,
+    openPath: (path: string) => ipcRenderer.invoke('shell:openPath', path) as Promise<void>,
+    showItemInFolder: (path: string) => ipcRenderer.invoke('shell:showItemInFolder', path) as Promise<void>,
+    openWith: (path: string) => ipcRenderer.invoke('shell:openWith', path) as Promise<void>,
+  },
   git: {
     scan: (workspacePath: string) => ipcRenderer.invoke('git:scan', workspacePath),
     run: (workspacePath: string, action: 'commit' | 'commit-push' | 'push' | 'initial', message?: string, includeUnstaged = true) => ipcRenderer.invoke('git:run', workspacePath, action, message, includeUnstaged),
