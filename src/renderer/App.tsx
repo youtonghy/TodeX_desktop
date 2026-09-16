@@ -26,6 +26,7 @@ const WorkbenchPanel = lazy(() => import('./screens/WorkbenchPanel').then((modul
 const UsagePanel = lazy(() => import('./screens/UsagePanel').then((module) => ({ default: module.UsagePanel })));
 const AboutPanel = lazy(() => import('./screens/AboutPanel').then((module) => ({ default: module.AboutPanel })));
 const CliManagerPanel = lazy(() => import('./screens/CliManagerPanel').then((module) => ({ default: module.CliManagerPanel })));
+const AgentProvidersPanel = lazy(() => import('./screens/AgentProvidersPanel').then((module) => ({ default: module.AgentProvidersPanel })));
 const KanbanPanel = lazy(() => import('./screens/KanbanPanel').then((module) => ({ default: module.KanbanPanel })));
 
 function PanelFallback() {
@@ -112,14 +113,14 @@ export function App() {
     if (isWorkbenchTab(next)) {
       setWorkbenchTab(next);
     }
-    if (next !== 'settings' && next !== 'usage' && next !== 'about' && next !== 'cli-manager') {
+    if (next !== 'settings' && next !== 'usage' && next !== 'about' && next !== 'cli-manager' && next !== 'agent-providers') {
       persistAsideOpen(true);
     }
   }, [persistAsideOpen, scopeKey, setPanelTarget, setWorkbenchTab]);
   openPanelHandlerRef.current = openPanel;
 
   useEffect(() => {
-    setPanel(current => current && ['settings', 'usage', 'about', 'cli-manager', 'kanban'].includes(current) ? current : null);
+    setPanel(current => current && ['settings', 'usage', 'about', 'cli-manager', 'agent-providers', 'kanban'].includes(current) ? current : null);
     setSlashCommand(undefined);
   }, [scopeKey]);
 
@@ -148,7 +149,8 @@ export function App() {
   const usageOpen = panel === 'usage';
   const aboutOpen = panel === 'about';
   const cliManagerOpen = panel === 'cli-manager';
-  const modalPanel = settingsOpen || usageOpen || aboutOpen || cliManagerOpen;
+  const agentProvidersOpen = panel === 'agent-providers';
+  const modalPanel = settingsOpen || usageOpen || aboutOpen || cliManagerOpen || agentProvidersOpen;
   const overlayPanel = panelScopeRef.current === scopeKey && panel && panel !== 'kanban' && !modalPanel && !isWorkbenchTab(panel) ? panel : null;
 
   return (
@@ -214,6 +216,7 @@ export function App() {
               onOpenSettings={() => setPanel('settings')}
               onOpenCapabilities={() => setCapabilitiesOpen(true)}
               onOpenCliManager={() => { persistAsideOpen(false); setPanel('cli-manager'); }}
+              onOpenAgentProviders={() => { persistAsideOpen(false); setPanel('agent-providers'); }}
               onOpenUsage={() => setPanel('usage')}
               onOpenAbout={() => setPanel('about')}
               onOpenKanban={() => { setPanel('kanban'); persistAsideOpen(false); }}
@@ -293,6 +296,17 @@ export function App() {
               <Modal.CloseTrigger />
               <Modal.Header><Modal.Heading>{t('app.cliManager')}</Modal.Heading></Modal.Header>
               <Modal.Body className="max-h-[80vh] overflow-y-auto p-0"><Suspense fallback={panelFallback}><CliManagerPanel session={session} /></Suspense></Modal.Body>
+            </Modal.Dialog>
+          </Modal.Container>
+        </Modal.Backdrop>
+      </Modal>
+      <Modal isOpen={agentProvidersOpen} onOpenChange={(open) => { if (!open) setPanel((current) => current === 'agent-providers' ? null : current); }}>
+        <Modal.Backdrop>
+          <Modal.Container>
+            <Modal.Dialog className="max-h-[92vh] sm:max-w-3xl">
+              <Modal.CloseTrigger />
+              <Modal.Header><Modal.Heading>{t('app.agentProviders')}</Modal.Heading></Modal.Header>
+              <Modal.Body className="max-h-[80vh] overflow-y-auto p-0"><Suspense fallback={panelFallback}><AgentProvidersPanel session={session} /></Suspense></Modal.Body>
             </Modal.Dialog>
           </Modal.Container>
         </Modal.Backdrop>

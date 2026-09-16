@@ -1,4 +1,4 @@
-import { RiPushpin2Fill, RiAddLine, RiPencilLine, RiEdit2Line, RiErrorWarningLine, RiGitBranchLine, RiDeleteBinLine, RiArrowDownSLine, RiBarChartBoxLine, RiFolder3Line, RiInformationLine, RiKanbanView2, RiPuzzle2Line, RiSettings3Line, RiTerminalBoxLine } from '@remixicon/react';
+import { RiPushpin2Fill, RiAddLine, RiPencilLine, RiEdit2Line, RiErrorWarningLine, RiGitBranchLine, RiDeleteBinLine, RiArrowDownSLine, RiBarChartBoxLine, RiFolder3Line, RiInformationLine, RiKanbanView2, RiPuzzle2Line, RiSettings3Line, RiTerminalBoxLine, RiUserSettingsLine } from '@remixicon/react';
 import { Badge, Button, Chip, Dropdown, Label, Tooltip } from '@heroui/react';
 import { useEffect, useMemo, useState } from 'react';
 import type { DragEvent, MouseEvent } from 'react';
@@ -20,6 +20,7 @@ type Props = {
   onOpenSettings: () => void;
   onOpenCapabilities: () => void;
   onOpenCliManager: () => void;
+  onOpenAgentProviders: () => void;
   onOpenUsage: () => void;
   onOpenAbout: () => void;
   onOpenKanban: () => void;
@@ -35,6 +36,7 @@ export function AppSidebar({
   onOpenSettings,
   onOpenCapabilities,
   onOpenCliManager,
+  onOpenAgentProviders,
   onOpenUsage,
   onOpenAbout,
   onOpenKanban,
@@ -238,12 +240,17 @@ export function AppSidebar({
                 if (isMobile) setMobileOpen(false);
                 onOpenCliManager();
               }
+              if (key === 'agent-providers') {
+                if (isMobile) setMobileOpen(false);
+                onOpenAgentProviders();
+              }
               if (key === 'usage') onOpenUsage();
               if (key === 'about') onOpenAbout();
             }}>
               <Dropdown.Item id="settings" textValue={t('app.settings')}><RiSettings3Line className="text-muted size-4 shrink-0" /><Label>{t('app.settings')}</Label></Dropdown.Item>
               <Dropdown.Item id="capabilities" textValue={t('app.mcpSkillManager')}><RiPuzzle2Line className="text-muted size-4 shrink-0" /><Label>{t('app.mcpSkillManager')}</Label></Dropdown.Item>
               <Dropdown.Item id="cli-manager" textValue={t('app.cliManager')}><RiTerminalBoxLine className="text-muted size-4 shrink-0" /><Label>{t('app.cliManager')}</Label></Dropdown.Item>
+              <Dropdown.Item id="agent-providers" textValue={t('app.agentProviders')}><RiUserSettingsLine className="text-muted size-4 shrink-0" /><Label>{t('app.agentProviders')}</Label></Dropdown.Item>
               <Dropdown.Item id="usage" textValue={t('app.usage')}><RiBarChartBoxLine className="text-muted size-4 shrink-0" /><Label>{t('app.usage')}</Label></Dropdown.Item>
               <Dropdown.Item id="about" textValue={t('app.about')}><RiInformationLine className="text-muted size-4 shrink-0" /><Label>{t('app.about')}</Label></Dropdown.Item>
             </Dropdown.Menu>
