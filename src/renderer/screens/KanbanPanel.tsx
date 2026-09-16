@@ -1,6 +1,6 @@
 import { useMemo, useState, type DragEvent, type Key } from 'react';
 import { Plus } from '@gravity-ui/icons';
-import { RiArrowRightLine, RiCalendarLine, RiChat3Line, RiCheckLine, RiDraggable, RiFolder3Line, RiMoreFill, RiPushpinLine } from '@remixicon/react';
+import { RiArrowDownSLine, RiArrowRightLine, RiCalendarLine, RiChat3Line, RiCheckLine, RiDraggable, RiFolder3Line, RiMoreFill, RiPushpinLine } from '@remixicon/react';
 import { Button, Chip, Dropdown, Input, Label, TextArea, TextField, Tooltip } from '@heroui/react';
 import { EmptyState, Kanban } from '@heroui-pro/react';
 import type { WorkspaceRecord } from '@todex/protocol/todex';
@@ -280,6 +280,7 @@ function WorkspaceColumn({ workspace, meta, tasks, session, latestEntries, creat
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [dueDate, setDueDate] = useState('');
+  const [collapsedStatuses, setCollapsedStatuses] = useState<Partial<Record<KanbanTaskStatus, boolean>>>({});
   const conversations = session.conversations
     .filter((conversation) => conversation.workspaceId === workspace.id && !conversation.archived)
     .sort((a, b) => b.updatedAt - a.updatedAt);
@@ -404,30 +405,39 @@ function WorkspaceColumn({ workspace, meta, tasks, session, latestEntries, creat
         ) : kanbanTaskStatuses.map((status) => {
           const items = tasks.filter((task) => task.status === status);
           if (!items.length) return null;
+          const collapsed = collapsedStatuses[status] ?? status === 'done';
           return (
             <div key={status}>
-              <p className="text-muted px-3 pt-2 text-xs">
-                {kanbanTaskStatusLabel(status)} · {items.length}
-              </p>
-              <Kanban.CardList
-                aria-label={t('kanban.columnAria', { workspace: workspaceDisplayName(workspace), status: kanbanTaskStatusLabel(status) })}
-                className="pb-1 pt-1"
-                items={items}
-                onAction={(key) => {
-                  const task = items.find((item) => item.id === String(key));
-                  if (task) openTaskConversation(task);
-                }}
+              <button
+                type="button"
+                aria-expanded={!collapsed}
+                className="text-muted hover:text-foreground flex w-full items-center gap-1 px-3 pt-2 text-left text-xs outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+                onClick={() => setCollapsedStatuses((current) => ({ ...current, [status]: !collapsed }))}
               >
-                {(task: KanbanTask) => (
-                  <TaskCard
-                    task={task}
-                    session={session}
-                    conversations={conversations}
-                    latestEntries={latestEntries}
-                    onOpen={onOpenConversation}
-                  />
-                )}
-              </Kanban.CardList>
+                <RiArrowDownSLine className={`size-3.5 shrink-0 transition-transform ${collapsed ? '-rotate-90' : ''}`} />
+                {kanbanTaskStatusLabel(status)} · {items.length}
+              </button>
+              {collapsed ? null : (
+                <Kanban.CardList
+                  aria-label={t('kanban.columnAria', { workspace: workspaceDisplayName(workspace), status: kanbanTaskStatusLabel(status) })}
+                  className="pb-1 pt-1"
+                  items={items}
+                  onAction={(key) => {
+                    const task = items.find((item) => item.id === String(key));
+                    if (task) openTaskConversation(task);
+                  }}
+                >
+                  {(task: KanbanTask) => (
+                    <TaskCard
+                      task={task}
+                      session={session}
+                      conversations={conversations}
+                      latestEntries={latestEntries}
+                      onOpen={onOpenConversation}
+                    />
+                  )}
+                </Kanban.CardList>
+              )}
             </div>
           );
         })}
