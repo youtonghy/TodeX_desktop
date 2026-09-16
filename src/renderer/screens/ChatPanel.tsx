@@ -26,8 +26,10 @@ import {
   isImageMimeType,
   isStepProgressEntry,
   isV2Conversation,
+  liveComposerAttachments,
   MAX_COMPOSER_ATTACHMENTS,
   SLASH_COMMANDS,
+  attachmentToken,
   findMentionTrigger,
   buildMentionSuggestions,
   insertMention,
@@ -36,7 +38,7 @@ import {
   reasoningEffortLabel,
   referencePreview,
   referenceToken,
-  uniqueReferenceName,
+  uniqueAttachmentName,
   workspaceLinkTarget,
   STREAMING_REPLY_PLACEHOLDER,
 } from '../session/helpers';
@@ -246,6 +248,12 @@ export function ChatPanel({ session }: Props) {
   const workspace = session.activeWorkspace;
   const draft = conversation ? (session.chatDrafts[conversation.id] ?? '') : '';
   const composerRef = useRef<ReferenceComposerHandle>(null);
+  // Attachment reads are async; insert against the live draft, not the render
+  // that started the read.
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  const composerSelectionRef = useRef(session.composerSelections[conversation?.id ?? '']);
+  composerSelectionRef.current = session.composerSelections[conversation?.id ?? ''];
   const mention = findMentionTrigger(draft, conversation ? (session.composerSelections[conversation.id]?.end ?? draft.length) : 0);
   const [mentionSuggestions, setMentionSuggestions] = useState<Array<{ id: string; title: string; description: string; insertText: string }>>([]);
   const [suggestionIndex, setSuggestionIndex] = useState(0);
@@ -381,7 +389,6 @@ export function ChatPanel({ session }: Props) {
   }
 
   const attachments = session.composerAttachments[conversation.id] ?? [];
-  const fileAttachments = attachments.filter((attachment) => attachment.kind !== 'reference');
   const currentProvider = isV2Conversation(conversation) ? conversation.provider || '' : '';
   const agentProvider = conversation.provider || (isV2Conversation(conversation) ? '' : 'codex');
   const slashTrigger = draft.trim().startsWith('/') ? draft.trim() : '';
@@ -496,6 +503,23 @@ export function ChatPanel({ session }: Props) {
 
   const isToolCallEntry = isChatToolEntry;
 
+  const insertAttachmentTokens = (tokens: string[]) => {
+    if (!tokens.length) return;
+    const text = draftRef.current;
+    const recorded = composerSelectionRef.current ?? { start: text.length, end: text.length };
+    const start = Math.min(recorded.start, text.length);
+    const end = Math.min(Math.max(recorded.end, start), text.length);
+    const before = text.slice(0, start);
+    const after = text.slice(end);
+    const insertion = tokens.join(' ');
+    const lead = before && !/\s$/.test(before) ? ' ' : '';
+    const tail = after && !/^\s/.test(after) ? ' ' : '';
+    const cursor = start + lead.length + insertion.length + tail.length;
+    session.setConversationChatDraft(conversation.id, `${before}${lead}${insertion}${tail}${after}`);
+    session.setConversationComposerSelection(conversation.id, { start: cursor, end: cursor });
+    composerRef.current?.focus(cursor);
+  };
+
   const addBrowserFiles = async (files: File[], source: 'clipboard' | 'file' = 'file') => {
     const remaining = MAX_COMPOSER_ATTACHMENTS - attachments.length;
     if (remaining <= 0) {
@@ -522,10 +546,15 @@ export function ChatPanel({ session }: Props) {
         if (!image && (!isTextFile(file) || file.size > MAX_COMPOSER_TEXT_BYTES)) {
           throw new Error(t('chat.textAttachmentLimit'));
         }
+        const name = uniqueAttachmentName(
+          attachmentName(file, index, mimeType, source),
+          [...attachments, ...nextAttachments],
+          draft,
+        );
         nextAttachments.push({
           id: attachmentId(),
           kind: image ? 'image' : 'file',
-          name: attachmentName(file, index, mimeType, source),
+          name,
           mimeType,
           sizeBytes: file.size,
           dataUrl: image ? await readFileAsDataUrl(file) : '',
@@ -541,6 +570,8 @@ export function ChatPanel({ session }: Props) {
         ...current,
         ...nextAttachments,
       ].slice(0, MAX_COMPOSER_ATTACHMENTS));
+      // Every attachment lives in the draft as a capsule token, exactly like a quote.
+      insertAttachmentTokens(nextAttachments.map(attachmentToken));
     }
     if (reachedLimit) {
       toast.danger(t('chat.maxAttachments', { max: MAX_COMPOSER_ATTACHMENTS }));
@@ -696,7 +727,7 @@ export function ChatPanel({ session }: Props) {
         <div className="fixed z-50 -translate-x-1/2" style={{ left: quote.left, top: quote.top }}>
           <Button size="sm" variant="secondary" onPress={() => {
             const existing = session.composerAttachments[conversation.id] ?? [];
-            const name = uniqueReferenceName(t('chat.quoteName'), existing, draft);
+            const name = uniqueAttachmentName(t('chat.quoteName'), existing, draft);
             session.setConversationAttachments(conversation.id, (current) => [...current, {
               id: attachmentId(), kind: 'reference', name, mimeType: 'text/plain',
               sizeBytes: new TextEncoder().encode(quote.text).length, dataUrl: '',
@@ -704,11 +735,7 @@ export function ChatPanel({ session }: Props) {
               ...(quote.messageId ? { messageId: quote.messageId } : {}),
             }]);
             const token = referenceToken(name);
-            const selection = session.composerSelections[conversation.id] ?? { start: draft.length, end: draft.length };
-            session.setConversationChatDraft(conversation.id, draft.slice(0, selection.start) + token + draft.slice(selection.end));
-            const cursor = selection.start + token.length;
-            session.setConversationComposerSelection(conversation.id, { start: cursor, end: cursor });
-            composerRef.current?.focus(cursor);
+            insertAttachmentTokens([token]);
             window.getSelection()?.removeAllRanges();
             setQuote(null);
             toast.success(t('chat.quoteAdded'));
@@ -868,30 +895,6 @@ export function ChatPanel({ session }: Props) {
                     }
                   }}
                 >
-                  {fileAttachments.length > 0 ? (
-                    <PromptInput.Attachments>
-                      <ChatAttachmentGroup aria-label={t('chat.pendingAttachments')} role="list">
-                        {fileAttachments.map((attachment) => (
-                          <ChatAttachment
-                            key={attachment.id}
-                            mimeType={attachment.mimeType}
-                            name={attachment.name}
-                            role="listitem"
-                            size={attachment.sizeBytes ?? undefined}
-                            src={attachment.kind === 'image' ? attachment.dataUrl : undefined}
-                          >
-                            <ChatAttachment.Preview />
-                            <ChatAttachment.Info />
-                            <ChatAttachment.Remove
-                              aria-label={t('chat.removeAttachment', { name: attachment.name })}
-                              onPress={() => session.setConversationAttachments(conversation.id, (current) =>
-                                current.filter((item) => item.id !== attachment.id))}
-                            />
-                          </ChatAttachment>
-                        ))}
-                      </ChatAttachmentGroup>
-                    </PromptInput.Attachments>
-                  ) : null}
                   <ReferenceComposer
                     ref={composerRef}
                     value={draft}
@@ -899,17 +902,26 @@ export function ChatPanel({ session }: Props) {
                     placeholder={imageInputSupport.supported
                       ? t('chat.placeholderFull')
                       : t('chat.placeholderText')}
-                    onChange={(value) => { setSuggestionIndex(0); session.setConversationChatDraft(conversation.id, value); }}
+                    onChange={(value) => {
+                      setSuggestionIndex(0);
+                      session.setConversationChatDraft(conversation.id, value);
+                      // A capsule token owns its attachment's lifetime.
+                      session.setConversationAttachments(conversation.id, (current) =>
+                        current.every((item) => value.includes(attachmentToken(item)))
+                          ? current
+                          : liveComposerAttachments(value, current));
+                    }}
                     onSubmit={submitComposer}
                     onKeyDown={handleSuggestionKeyDown}
                     onSelectionChange={(selection) => session.setConversationComposerSelection(conversation.id, selection)}
                     onCompositionStart={() => { isComposingRef.current = true; }}
                     onCompositionEnd={() => { isComposingRef.current = false; }}
-                    resolveReference={(name) => {
-                      const item = attachments.find((entry) => entry.kind === 'reference' && entry.name === name);
-                      return item ? referencePreview(item.textContent) || item.name : undefined;
+                    resolveTokenLabel={(kind, name) => {
+                      const item = attachments.find((entry) => entry.kind === kind && entry.name === name);
+                      if (!item) return undefined;
+                      return item.kind === 'reference' ? referencePreview(item.textContent) || item.name : item.name;
                     }}
-                    onReferenceClick={(name) => {
+                    onTokenClick={(_kind, name) => {
                       const item = attachments.find((entry) => entry.kind === 'reference' && entry.name === name);
                       if (!item) return;
                       if (item.path) {

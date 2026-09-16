@@ -119,22 +119,36 @@ body {
 .composer-ref {
   display: inline-flex;
   align-items: baseline;
-  gap: 0.25rem;
+  gap: 0.3rem;
   max-width: 20rem;
   margin-inline: 0.0625rem;
+  padding-block: 0.0625rem;
   padding-inline: 0.5rem;
-  border-radius: var(--radius-lg, 0.5rem);
-  background: var(--accent-soft, color-mix(in oklab, var(--accent) 14%, transparent));
-  color: var(--accent);
+  border-radius: 999px;
+  background: var(--surface-tertiary);
+  color: var(--surface-tertiary-foreground, var(--foreground));
   font-weight: 500;
   vertical-align: baseline;
   user-select: none;
 }
 
-.composer-ref::before {
-  content: '❝';
-  font-size: 0.85em;
-  opacity: 0.75;
+.composer-ref__icon {
+  align-self: center;
+  width: 0.9em;
+  height: 0.9em;
+  flex: none;
+  color: var(--accent);
+}
+
+/* A quote is an excerpt of the conversation, so it keeps the accent fill. */
+.composer-ref--reference {
+  background: var(--accent-soft, color-mix(in oklab, var(--accent) 14%, transparent));
+  color: var(--accent);
+}
+
+.composer-ref--reference .composer-ref__icon {
+  color: currentColor;
+  opacity: 0.8;
 }
 
 .composer-ref__label {

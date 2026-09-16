@@ -913,8 +913,70 @@ export function codexInputFromComposer(
   return items;
 }
 
+/**
+ * Inline composer capsules. Every attachment that the user picked or quoted
+ * lives in the draft as one of these tokens, which the editor renders as an
+ * atomic pill and the payload builder resolves back to the attachment.
+ */
+export const COMPOSER_TOKEN_SOURCE = '\\[(引用|文件|图片):([^\\]\n]+)\\]';
+
+const TOKEN_LABEL_BY_KIND: Record<ComposerAttachmentDraft['kind'], string> = {
+  reference: '引用',
+  file: '文件',
+  image: '图片',
+};
+
+const TOKEN_KIND_BY_LABEL: Record<string, ComposerAttachmentDraft['kind']> = {
+  引用: 'reference',
+  文件: 'file',
+  图片: 'image',
+};
+
+export function composerTokenPattern(flags = 'g'): RegExp {
+  return new RegExp(COMPOSER_TOKEN_SOURCE, flags);
+}
+
+export function composerTokenKindFromLabel(label: string): ComposerAttachmentDraft['kind'] | undefined {
+  return TOKEN_KIND_BY_LABEL[label];
+}
+
+/** A `]` or newline inside a name would terminate the token early. */
+export function tokenSafeName(name: string): string {
+  return name.replace(/[\][\r\n]/g, '');
+}
+
+export function composerToken(kind: ComposerAttachmentDraft['kind'], name: string): string {
+  return `[${TOKEN_LABEL_BY_KIND[kind]}:${tokenSafeName(name)}]`;
+}
+
+export function attachmentToken(attachment: Pick<ComposerAttachmentDraft, 'kind' | 'name'>): string {
+  return composerToken(attachment.kind, attachment.name);
+}
+
 export function referenceToken(name: string): string {
-  return `[引用:${name}]`;
+  return composerToken('reference', name);
+}
+
+export type ComposerTokenRef = {
+  kind: ComposerAttachmentDraft['kind'];
+  name: string;
+  token: string;
+  start: number;
+};
+
+export function composerTokensInText(text: string): ComposerTokenRef[] {
+  const refs: ComposerTokenRef[] = [];
+  for (const match of text.matchAll(composerTokenPattern())) {
+    const kind = TOKEN_KIND_BY_LABEL[match[1]];
+    if (!kind) continue;
+    refs.push({ kind, name: match[2], token: match[0], start: match.index });
+  }
+  return refs;
+}
+
+/** Names used by any capsule token in the draft, regardless of kind. */
+export function composerTokenNamesInText(text: string): string[] {
+  return composerTokensInText(text).map((item) => item.name);
 }
 
 /** Short excerpt preview used as the capsule label (first line, ≤ max chars). */
@@ -926,21 +988,18 @@ export function referencePreview(excerpt: string | undefined, max = 10): string 
 }
 
 export function referenceNamesInText(text: string): string[] {
-  const names: string[] = [];
-  for (const match of text.matchAll(/\[引用:([^\]\n]+)\]/g)) {
-    names.push(match[1]);
-  }
-  return names;
+  return composerTokensInText(text).filter((item) => item.kind === 'reference').map((item) => item.name);
 }
 
-export function uniqueReferenceName(
+/** Keep every capsule name distinct so its token maps to exactly one attachment. */
+export function uniqueAttachmentName(
   base: string,
   attachments: readonly ComposerAttachmentDraft[],
   draftText: string,
 ): string {
   const taken = new Set([
-    ...attachments.filter((item) => item.kind === 'reference').map((item) => item.name),
-    ...referenceNamesInText(draftText),
+    ...attachments.map((item) => item.name),
+    ...composerTokenNamesInText(draftText),
   ]);
   let name = base;
   let index = 2;
@@ -951,12 +1010,21 @@ export function uniqueReferenceName(
   return name;
 }
 
-/** Reference attachments only count while their token still lives in the draft text. */
+export function uniqueReferenceName(
+  base: string,
+  attachments: readonly ComposerAttachmentDraft[],
+  draftText: string,
+): string {
+  return uniqueAttachmentName(base, attachments, draftText);
+}
+
+/** Attachments only count while their capsule token still lives in the draft text. */
 export function liveComposerAttachments(
   text: string,
   attachments: readonly ComposerAttachmentDraft[],
 ): ComposerAttachmentDraft[] {
-  return attachments.filter((item) => item.kind !== 'reference' || text.includes(referenceToken(item.name)));
+  const live = new Set(composerTokensInText(text).map((item) => item.token));
+  return attachments.filter((item) => live.has(attachmentToken(item)));
 }
 
 export function attachmentSummary(attachments: ComposerAttachmentDraft[]): string {

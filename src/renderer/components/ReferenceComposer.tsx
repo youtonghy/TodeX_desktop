@@ -7,8 +7,36 @@ import {
 } from 'react';
 import type { KeyboardEvent } from 'react';
 import { useT } from '../i18n';
+import {
+  composerToken,
+  composerTokenKindFromLabel,
+  composerTokenPattern,
+  type ComposerTokenRef,
+} from '../session/helpers';
 
-const TOKEN_PATTERN = /\[引用:([^\]\n]+)\]/g;
+type TokenKind = ComposerTokenRef['kind'];
+
+/** Icon paths from Remixicon, the icon set used across the app (MIT). */
+const TOKEN_ICON_PATHS: Record<TokenKind, string> = {
+  reference: 'M4.58341 17.3211C3.55316 16.2274 3 15 3 13.0103C3 9.51086 5.45651 6.37366 9.03059 4.82318L9.92328 6.20079C6.58804 8.00539 5.93618 10.346 5.67564 11.822C6.21263 11.5443 6.91558 11.4466 7.60471 11.5105C9.40908 11.6778 10.8312 13.159 10.8312 15C10.8312 16.933 9.26416 18.5 7.33116 18.5C6.2581 18.5 5.23196 18.0095 4.58341 17.3211ZM14.5834 17.3211C13.5532 16.2274 13 15 13 13.0103C13 9.51086 15.4565 6.37366 19.0306 4.82318L19.9233 6.20079C16.588 8.00539 15.9362 10.346 15.6756 11.822C16.2126 11.5443 16.9156 11.4466 17.6047 11.5105C19.4091 11.6778 20.8312 13.159 20.8312 15C20.8312 16.933 19.2642 18.5 17.3312 18.5C16.2581 18.5 15.232 18.0095 14.5834 17.3211Z',
+  file: 'M21 8V20.9932C21 21.5501 20.5552 22 20.0066 22H3.9934C3.44495 22 3 21.556 3 21.0082V2.9918C3 2.45531 3.4487 2 4.00221 2H14.9968L21 8ZM19 9H14V4H5V20H19V9ZM8 7H11V9H8V7ZM8 11H16V13H8V11ZM8 15H16V17H8V15Z',
+  image: 'M2.9918 21C2.44405 21 2 20.5551 2 20.0066V3.9934C2 3.44476 2.45531 3 2.9918 3H21.0082C21.556 3 22 3.44495 22 3.9934V20.0066C22 20.5552 21.5447 21 21.0082 21H2.9918ZM20 15V5H4V19L14 9L20 15ZM20 17.8284L14 11.8284L6.82843 19H20V17.8284ZM8 11C6.89543 11 6 10.1046 6 9C6 7.89543 6.89543 7 8 7C9.10457 7 10 7.89543 10 9C10 10.1046 9.10457 11 8 11Z',
+};
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+function makeIcon(kind: TokenKind): SVGElement {
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('focusable', 'false');
+  svg.setAttribute('class', 'composer-ref__icon');
+  const path = document.createElementNS(SVG_NS, 'path');
+  path.setAttribute('d', TOKEN_ICON_PATHS[kind]);
+  path.setAttribute('fill', 'currentColor');
+  svg.append(path);
+  return svg;
+}
 
 function isBlock(node: Node): boolean {
   return node instanceof HTMLElement && (node.tagName === 'DIV' || node.tagName === 'P');
@@ -17,7 +45,7 @@ function isBlock(node: Node): boolean {
 function serializeInline(node: Node): string {
   if (node.nodeType === Node.TEXT_NODE) return node.nodeValue ?? '';
   if (node instanceof HTMLElement) {
-    if (node.dataset.ref !== undefined) return `[引用:${node.dataset.ref}]`;
+    if (node.dataset.token !== undefined) return node.dataset.token;
     if (node.tagName === 'BR') {
       return node.parentElement && node.parentElement.childNodes.length === 1 ? '' : '\n';
     }
@@ -36,11 +64,13 @@ function serialize(root: HTMLElement): string {
   return serializeInline(root);
 }
 
-function makeCapsule(name: string, label: string): HTMLElement {
+function makeCapsule(kind: TokenKind, name: string, label: string): HTMLElement {
   const el = document.createElement('span');
-  el.className = 'composer-ref';
+  el.className = `composer-ref composer-ref--${kind}`;
   el.contentEditable = 'false';
   el.dataset.ref = name;
+  el.dataset.kind = kind;
+  el.dataset.token = composerToken(kind, name);
   el.title = name;
   const text = document.createElement('span');
   text.className = 'composer-ref__label';
@@ -49,15 +79,21 @@ function makeCapsule(name: string, label: string): HTMLElement {
   close.className = 'composer-ref__remove';
   close.setAttribute('aria-hidden', 'true');
   close.textContent = '×';
-  el.append(text, close);
+  el.append(makeIcon(kind), text, close);
   return el;
 }
 
-function appendInline(parent: ParentNode, line: string, resolve: (name: string) => string | undefined): void {
+function appendInline(
+  parent: ParentNode,
+  line: string,
+  resolve: (kind: TokenKind, name: string) => string | undefined,
+): void {
   let last = 0;
-  for (const match of line.matchAll(TOKEN_PATTERN)) {
+  for (const match of line.matchAll(composerTokenPattern())) {
+    const kind = composerTokenKindFromLabel(match[1]);
+    if (!kind) continue;
     if (match.index > last) parent.append(document.createTextNode(line.slice(last, match.index)));
-    parent.append(makeCapsule(match[1], resolve(match[1]) ?? match[1]));
+    parent.append(makeCapsule(kind, match[2], resolve(kind, match[2]) ?? match[2]));
     last = match.index + match[0].length;
   }
   if (last < line.length) parent.append(document.createTextNode(line.slice(last)));
@@ -66,7 +102,11 @@ function appendInline(parent: ParentNode, line: string, resolve: (name: string) 
   }
 }
 
-function buildChildren(root: HTMLElement, text: string, resolve: (name: string) => string | undefined): void {
+function buildChildren(
+  root: HTMLElement,
+  text: string,
+  resolve: (kind: TokenKind, name: string) => string | undefined,
+): void {
   const fragment = document.createDocumentFragment();
   for (const line of text.split('\n')) {
     const div = document.createElement('div');
@@ -99,7 +139,7 @@ function locate(node: Node, remaining: number): TextPos {
     const length = serializeInline(child).length;
     if (remaining <= length) {
       if (child.nodeType === Node.TEXT_NODE) return { node: child, offset: remaining };
-      if (child instanceof HTMLElement && child.dataset.ref !== undefined) {
+      if (child instanceof HTMLElement && child.dataset.token !== undefined) {
         return { node, offset: remaining === 0 ? i : i + 1 };
       }
       return locate(child, remaining);
@@ -122,8 +162,9 @@ export const ReferenceComposer = forwardRef<ReferenceComposerHandle, {
   onCompositionEnd?: () => void;
   placeholder?: string;
   isDisabled?: boolean;
-  resolveReference?: (name: string) => string | undefined;
-  onReferenceClick?: (name: string) => void;
+  /** Capsule label override, e.g. the first line of a quoted excerpt. */
+  resolveTokenLabel?: (kind: TokenKind, name: string) => string | undefined;
+  onTokenClick?: (kind: TokenKind, name: string) => void;
 }>(function ReferenceComposer({
   value,
   onChange,
@@ -134,8 +175,8 @@ export const ReferenceComposer = forwardRef<ReferenceComposerHandle, {
   onCompositionEnd,
   placeholder,
   isDisabled,
-  resolveReference,
-  onReferenceClick,
+  resolveTokenLabel,
+  onTokenClick,
 }, forwardedRef) {
   const t = useT();
   const rootRef = useRef<HTMLDivElement>(null);
@@ -145,10 +186,10 @@ export const ReferenceComposer = forwardRef<ReferenceComposerHandle, {
   const pendingCaretRef = useRef<number | null>(null);
   const valueRef = useRef(value);
   valueRef.current = value;
-  const resolveRef = useRef(resolveReference);
-  resolveRef.current = resolveReference;
-  const clickRef = useRef(onReferenceClick);
-  clickRef.current = onReferenceClick;
+  const resolveRef = useRef(resolveTokenLabel);
+  resolveRef.current = resolveTokenLabel;
+  const clickRef = useRef(onTokenClick);
+  clickRef.current = onTokenClick;
 
   const readSelection = useCallback((): ReferenceComposerSelection | null => {
     const root = rootRef.current;
@@ -204,7 +245,7 @@ export const ReferenceComposer = forwardRef<ReferenceComposerHandle, {
       return;
     }
     const previous = document.activeElement === root ? readSelection() : null;
-    buildChildren(root, value, (name) => resolveRef.current?.(name));
+    buildChildren(root, value, (kind, name) => resolveRef.current?.(kind, name));
     renderedRef.current = value;
     updateEmpty();
     if (pendingCaretRef.current != null) {
@@ -259,15 +300,17 @@ export const ReferenceComposer = forwardRef<ReferenceComposerHandle, {
       onInput={emitChange}
       onMouseDown={(event) => {
         const target = event.target as HTMLElement;
-        const capsule = target.closest('.composer-ref');
-        if (target.closest('.composer-ref__remove') && capsule instanceof HTMLElement) {
+        const capsule = target.closest<HTMLElement>('.composer-ref');
+        if (target.closest('.composer-ref__remove') && capsule) {
           event.preventDefault();
           capsule.remove();
           emitChange();
           return;
         }
-        if (capsule instanceof HTMLElement && capsule.dataset.ref != null) {
-          clickRef.current?.(capsule.dataset.ref);
+        const kind = capsule?.dataset.kind;
+        if (capsule && capsule.dataset.ref != null
+          && (kind === 'reference' || kind === 'file' || kind === 'image')) {
+          clickRef.current?.(kind, capsule.dataset.ref);
           return;
         }
         if (target === rootRef.current) {
@@ -309,8 +352,8 @@ export const ReferenceComposer = forwardRef<ReferenceComposerHandle, {
         const text = event.clipboardData?.getData('text/plain');
         if (!text) return;
         event.preventDefault();
-        // A pasted [引用:name] token should render as a capsule again.
-        forceRebuildRef.current = /\[引用:[^\]\n]+\]/.test(text);
+        // A pasted capsule token should render as a capsule again.
+        forceRebuildRef.current = composerTokenPattern().test(text);
         if (typeof document.execCommand === 'function' && document.execCommand('insertText', false, text)) {
           return;
         }
@@ -336,7 +379,7 @@ export const ReferenceComposer = forwardRef<ReferenceComposerHandle, {
         emitChange();
         const root = rootRef.current;
         if (root && renderedRef.current !== valueRef.current) {
-          buildChildren(root, valueRef.current, (name) => resolveRef.current?.(name));
+          buildChildren(root, valueRef.current, (kind, name) => resolveRef.current?.(kind, name));
           renderedRef.current = valueRef.current;
           updateEmpty();
         }
