@@ -462,6 +462,21 @@ export function ChatPanel({ session }: Props) {
   const permissionRequests = session.pendingRequests.filter(item => item.requestId && pendingPermissionIds.has(item.requestId));
   const compaction = session.compactionByConversation[conversation.id];
   const latestProcessGroupId = activeChatProcessId(items, runtime?.activeTurnId || session.turnIds[conversation.id]);
+  // A trailing reply whose turn is still running is unfinished: hide its
+  // copy/fork/usage actions until the turn settles. A newer outgoing entry
+  // means the last reply already belongs to a completed turn.
+  const runActive = thinking || executionUnknown || submissionStatus === 'sending' || compaction?.status === 'running';
+  let pendingReplyId: string | undefined;
+  if (runActive) {
+    for (let index = chatEntries.length - 1; index >= 0; index -= 1) {
+      const candidate = chatEntries[index];
+      if (candidate.kind === 'incoming') {
+        pendingReplyId = candidate.id;
+        break;
+      }
+      if (candidate.kind === 'outgoing') break;
+    }
+  }
   const conversationTimeline = session.timeline.filter((entry) => entry.conversationId === conversation.id);
   const canSwitchAgent = canSwitchConversationAgent(conversation, {
     timeline: conversationTimeline,
@@ -716,7 +731,7 @@ export function ChatPanel({ session }: Props) {
                       </Markdown>
                     )}
                   </div>
-                  {entry.kind === 'incoming' && actionableIncoming.has(entry.id)
+                  {entry.kind === 'incoming' && actionableIncoming.has(entry.id) && entry.id !== pendingReplyId
                     ? <AgentMessageActions conversationId={conversation.id} entry={entry} session={session} />
                     : null}
                   {request ? (
