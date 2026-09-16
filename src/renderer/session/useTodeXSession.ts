@@ -5037,7 +5037,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     return true;
   }, [appendTimeline, getConversationContext, sendLocalMethodRequest, setLastError]);
 
-  const requestGitDiff = useCallback(async (conversationId = activeConversationRef.current) => {
+  const requestGitDiff = useCallback(async (conversationId = activeConversationRef.current, cwd = '') => {
     const context = getConversationContext(conversationId);
     if (!context) {
       desktopAlert(t('alert.noConversation'), t('alert.pickCodexConversation'));
@@ -5093,7 +5093,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       requestId,
       timeoutId,
     });
-    const sent = sendLocalMethodRequest(workspace, conversation, 'gitDiffToRemote', { cwd: workspace.path }, requestId);
+    const sent = sendLocalMethodRequest(workspace, conversation, 'gitDiffToRemote', { cwd: cwd.trim() || workspace.path }, requestId);
     if (!sent) {
       const pending = pendingGitDiffsRef.current.get(requestId);
       if (pending) {

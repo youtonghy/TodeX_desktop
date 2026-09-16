@@ -739,7 +739,7 @@ function GitDiffPane({ session }: { session: TodeXSession }) {
 
   const handleRefresh = () => {
     if (conversation) {
-      void session.requestGitDiff(conversation.id);
+      void session.requestGitDiff(conversation.id, pathDraft);
     }
   };
 
@@ -774,7 +774,9 @@ function GitDiffPane({ session }: { session: TodeXSession }) {
         </div>
       </div>
       <ScrollShadow className="bg-surface-secondary min-h-0 flex-1 rounded-xl p-3">
-        {state?.error ? null : <pre className="font-mono text-xs whitespace-pre-wrap">{state?.diff || t('aside.noDiff')}</pre>}
+        <pre className={`font-mono text-xs whitespace-pre-wrap ${state?.error && !state?.diff ? 'text-danger' : ''}`}>
+          {state?.diff || state?.error || t('aside.noDiff')}
+        </pre>
       </ScrollShadow>
     </div>
   );
