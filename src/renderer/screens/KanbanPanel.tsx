@@ -367,7 +367,7 @@ function WorkspaceColumn({ workspace, meta, tasks, session, latestEntries, creat
             </Tooltip>
           </Kanban.ColumnActions>
         </Kanban.ColumnHeader>
-        <div className="p-2 pb-0">
+        <div className={`p-2 ${meta.bodyBg}`}>
           {creating ? (
             <form
               className="space-y-2"

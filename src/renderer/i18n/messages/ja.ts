@@ -656,7 +656,7 @@ export const ja: Messages = {
   'kanban.delete': 'タスクを削除',
   'kanban.enterWorkspace': 'ワークスペースに移動',
   'kanban.reorderColumn': 'ドラッグしてワークスペースの順序を変更',
-  'kanban.empty': 'タスクがありません。下のボタンで新規作成',
+  'kanban.empty': 'タスクがありません。上のボタンで新規作成',
   'kanban.columnAria': '{workspace} の{status}タスク',
   'kanban.titlePlaceholder': 'タスクタイトル',
   'kanban.descPlaceholder': 'タスク説明（任意）',

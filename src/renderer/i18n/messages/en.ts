@@ -656,7 +656,7 @@ export const en: Messages = {
   'kanban.delete': 'Delete task',
   'kanban.enterWorkspace': 'Open workspace',
   'kanban.reorderColumn': 'Drag to reorder workspaces',
-  'kanban.empty': 'No tasks yet; create one below',
+  'kanban.empty': 'No tasks yet; create one above',
   'kanban.columnAria': '{workspace} {status} tasks',
   'kanban.titlePlaceholder': 'Task title',
   'kanban.descPlaceholder': 'Task description (optional)',

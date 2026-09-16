@@ -656,7 +656,7 @@ export const ko: Messages = {
   'kanban.delete': '작업 삭제',
   'kanban.enterWorkspace': '워크스페이스로 이동',
   'kanban.reorderColumn': '드래그하여 워크스페이스 순서 변경',
-  'kanban.empty': '작업이 없습니다. 아래에서 새로 만드세요',
+  'kanban.empty': '작업이 없습니다. 위에서 새로 만드세요',
   'kanban.columnAria': '{workspace} {status} 작업',
   'kanban.titlePlaceholder': '작업 제목',
   'kanban.descPlaceholder': '작업 설명(선택)',
