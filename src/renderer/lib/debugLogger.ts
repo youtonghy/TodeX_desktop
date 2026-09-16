@@ -43,6 +43,12 @@ function installFetchTracing(): void {
   };
 }
 
+function frameBytes(data: string | ArrayBufferLike | Blob | ArrayBufferView): number {
+  if (typeof data === 'string') return data.length;
+  if (data instanceof Blob) return data.size;
+  return data.byteLength;
+}
+
 function installWebSocketTracing(): void {
   const NativeWebSocket = window.WebSocket;
   if (!NativeWebSocket) return;
@@ -52,11 +58,14 @@ function installWebSocketTracing(): void {
     debugLog('websocket.create', { socketId, url: String(url), protocols: protocols ? '[provided]' : undefined });
     const nativeSend = socket.send.bind(socket);
     socket.send = (data: string | ArrayBufferLike | Blob | ArrayBufferView) => {
-      debugLog('websocket.send', { socketId, readyState: socket.readyState, data: summary(data) });
+      // Frames arrive many times per second during a live session; logging the
+      // (encrypted) payload once per frame dominated the debug log. The byte
+      // count still shows frame rate and direction.
+      debugLog('websocket.send', { socketId, readyState: socket.readyState, bytes: frameBytes(data) });
       return nativeSend(data);
     };
     socket.addEventListener('open', () => debugLog('websocket.open', { socketId }));
-    socket.addEventListener('message', (event) => debugLog('websocket.message', { socketId, data: summary(event.data) }));
+    socket.addEventListener('message', (event) => debugLog('websocket.message', { socketId, bytes: frameBytes(event.data) }));
     socket.addEventListener('error', () => debugLog('websocket.error', { socketId }, 'error'));
     socket.addEventListener('close', (event) => debugLog('websocket.close', { socketId, code: event.code, reason: event.reason, wasClean: event.wasClean }));
     return socket;

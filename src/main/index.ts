@@ -37,13 +37,29 @@ function debugLog(level: DebugLogLevel, event: string, data?: unknown): void {
   debugLogger?.write(level, event, data);
 }
 
+const IPC_VALUE_PREVIEW_CHARS = 512;
+
+// IPC payloads can be arbitrarily large (store:set mirrors whole collections);
+// trace logs keep the shape and size without mirroring the payload.
+function summarizeIpcValue(value: unknown): unknown {
+  if (typeof value === 'string') {
+    return value.length > IPC_VALUE_PREVIEW_CHARS
+      ? `${value.slice(0, IPC_VALUE_PREVIEW_CHARS)}… [${value.length} chars]`
+      : value;
+  }
+  if (value === null || value === undefined || typeof value !== 'object') return value;
+  if (Array.isArray(value)) return `[array ${value.length} items]`;
+  const keys = Object.keys(value);
+  return `[object ${keys.slice(0, 16).join(',')}${keys.length > 16 ? ',…' : ''}]`;
+}
+
 function handleIpc(channel: string, handler: (event: Electron.IpcMainInvokeEvent, ...args: any[]) => unknown): void {
   ipcMain.handle(channel, async (event, ...args: any[]) => {
     const started = Date.now();
-    debugLog('trace', 'ipc.request', { channel, senderId: event.sender.id, args });
+    debugLog('trace', 'ipc.request', { channel, senderId: event.sender.id, args: args.map(summarizeIpcValue) });
     try {
       const result = await handler(event, ...args);
-      debugLog('trace', 'ipc.response', { channel, senderId: event.sender.id, durationMs: Date.now() - started, result });
+      debugLog('trace', 'ipc.response', { channel, senderId: event.sender.id, durationMs: Date.now() - started, result: summarizeIpcValue(result) });
       return result;
     } catch (error) {
       debugLog('error', 'ipc.error', { channel, senderId: event.sender.id, durationMs: Date.now() - started, error });

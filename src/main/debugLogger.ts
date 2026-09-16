@@ -6,6 +6,8 @@ export const DEBUG_LOG_PATH_KEY = 'todex.desktop.debug.logPath';
 export const DEBUG_LOG_FILE_NAME = 'todex-desktop-debug.log';
 export const CHROMIUM_LOG_FILE_NAME = 'todex-desktop-chromium.log';
 const MAX_LOG_FILE_BYTES = 20 * 1024 * 1024;
+const MAX_RECORD_BYTES = 8 * 1024;
+const TRUNCATED_PREVIEW_BYTES = 1024;
 const MAX_STRING_LENGTH = 16 * 1024;
 const MAX_OBJECT_KEYS = 100;
 const SENSITIVE_KEY = /(authorization|access[_-]?token|refresh[_-]?token|api[_-]?key|password|passwd|secret|private[_-]?key|cookie|set-cookie)/i;
@@ -80,6 +82,7 @@ function serialize(value: unknown): string {
 export class DebugLogger {
   readonly info: DebugLogInfo;
   private sequence = 0;
+  private bytesWritten = 0;
 
   constructor(info: DebugLogInfo) {
     this.info = info;
@@ -92,6 +95,7 @@ export class DebugLogger {
       if (existsSync(this.info.logPath) && statSync(this.info.logPath).size > MAX_LOG_FILE_BYTES) {
         renameSync(this.info.logPath, `${this.info.logPath}.previous`);
       }
+      this.bytesWritten = existsSync(this.info.logPath) ? statSync(this.info.logPath).size : 0;
       this.write('info', 'debug.logger.started', { configPath: this.info.configPath, logPath: this.info.logPath, chromiumLogPath: this.info.chromiumLogPath });
     } catch {
       // Diagnostics must never prevent the application from starting.
@@ -110,10 +114,36 @@ export class DebugLogger {
     };
     try {
       mkdirSync(dirname(this.info.logPath), { recursive: true });
-      appendFileSync(this.info.logPath, `${serialize(record)}\n`, 'utf8');
+      let line = serialize(record);
+      if (line.length > MAX_RECORD_BYTES) {
+        // Large payloads (IPC arguments, websocket frames) must not be
+        // mirrored verbatim: a busy session writes them faster than the disk
+        // budget allows. Keep a short preview instead.
+        line = serialize({
+          ...record,
+          data: `[truncated ${line.length} chars] ${line.slice(0, TRUNCATED_PREVIEW_BYTES)}…`,
+        });
+      }
+      appendFileSync(this.info.logPath, `${line}\n`, 'utf8');
+      this.bytesWritten += Buffer.byteLength(line) + 1;
+      if (this.bytesWritten > MAX_LOG_FILE_BYTES) {
+        this.rotate();
+      }
     } catch {
       // Do not recurse through console logging when the log file is unavailable.
     }
+  }
+
+  private rotate(): void {
+    // Rotation previously only ran at start(), so a single long session could
+    // grow the file without bound. Rotate as soon as the cap is crossed.
+    try {
+      renameSync(this.info.logPath, `${this.info.logPath}.previous`);
+    } catch {
+      // If the file vanished between writes the next append recreates it.
+    }
+    this.bytesWritten = 0;
+    this.write('info', 'debug.logger.rotated', { maxBytes: MAX_LOG_FILE_BYTES });
   }
 }
 
