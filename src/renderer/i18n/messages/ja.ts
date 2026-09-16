@@ -644,6 +644,7 @@ export const ja: Messages = {
   'kanban.rename': '名前を変更',
   'kanban.delete': 'タスクを削除',
   'kanban.enterWorkspace': 'ワークスペースに移動',
+  'kanban.reorderColumn': 'ドラッグしてワークスペースの順序を変更',
   'kanban.empty': 'タスクがありません。下のボタンで新規作成',
   'kanban.columnAria': '{workspace} の{status}タスク',
   'kanban.titlePlaceholder': 'タスクタイトル',

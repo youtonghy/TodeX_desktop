@@ -158,6 +158,11 @@ export function App() {
         scope={`${session.activeBackendConnectionId}:${session.settings.serverUrl}`} />
       <DesktopAlertHost />
       {session.hydrated ? (
+        panel === 'kanban' ? (
+          <Suspense fallback={panelFallback}>
+            <KanbanPanel session={session} onOpenConversation={() => setPanel(null)} />
+          </Suspense>
+        ) : (
         <AppLayout
           className="h-full min-h-0"
           scrollMode="content"
@@ -221,7 +226,7 @@ export function App() {
                 <Button className="hidden min-[769px]:inline-flex" isIconOnly size="sm" variant="ghost" aria-label={sidebarOpen ? t('app.collapseSidebar') : t('app.expandSidebar')} onPress={() => persistSidebarOpen(!sidebarOpen)}>
                   <RiLayoutLeftLine className="size-4" />
                 </Button>
-                <ConversationHeaderDetails session={session} title={panel === 'kanban' ? t('app.kanbanTitle') : session.activeConversation?.title ?? t('app.conversation')} gitOpen={gitOpen} onOpenGit={() => setGitOpen(true)} />
+                <ConversationHeaderDetails session={session} title={session.activeConversation?.title ?? t('app.conversation')} gitOpen={gitOpen} onOpenGit={() => setGitOpen(true)} />
                 <Navbar.Content className="shrink-0 gap-2">
                   <Button isIconOnly size="sm" variant="ghost" aria-label={t('app.githubActions')} onPress={() => setGitOpen(true)}>
                     <RiGithubLine className="size-4" />
@@ -234,12 +239,9 @@ export function App() {
             </Navbar>
           }
         >
-          {panel === 'kanban' ? (
-            <Suspense fallback={panelFallback}>
-              <KanbanPanel session={session} onOpenConversation={() => setPanel(null)} />
-            </Suspense>
-          ) : <ChatPanel session={session} />}
+          <ChatPanel session={session} />
         </AppLayout>
+        )
       ) : (
         <div className="flex h-full flex-col items-center justify-center gap-3">
           <AppIcon className="size-16" />

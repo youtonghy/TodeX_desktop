@@ -644,6 +644,7 @@ export const zhCN = {
   'kanban.rename': '重命名',
   'kanban.delete': '删除任务',
   'kanban.enterWorkspace': '进入工作区',
+  'kanban.reorderColumn': '拖拽调整工作区顺序',
   'kanban.empty': '暂无任务，点击下方新建',
   'kanban.columnAria': '{workspace} {status}任务',
   'kanban.titlePlaceholder': '任务标题',

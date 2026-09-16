@@ -1,6 +1,6 @@
-import { useMemo, useState, type Key } from 'react';
+import { useMemo, useState, type DragEvent, type Key } from 'react';
 import { Plus } from '@gravity-ui/icons';
-import { RiArrowRightLine, RiCalendarLine, RiChat3Line, RiCheckLine, RiFolder3Line, RiMoreFill, RiPushpinLine } from '@remixicon/react';
+import { RiArrowRightLine, RiCalendarLine, RiChat3Line, RiCheckLine, RiDraggable, RiFolder3Line, RiMoreFill, RiPushpinLine } from '@remixicon/react';
 import { Button, Chip, Dropdown, Input, Label, TextArea, TextField, Tooltip } from '@heroui/react';
 import { EmptyState, Kanban } from '@heroui-pro/react';
 import type { WorkspaceRecord } from '@todex/protocol/todex';
@@ -257,7 +257,9 @@ function TaskCard({ task, session, conversations, latestEntries, onOpen }: {
   );
 }
 
-function WorkspaceColumn({ workspace, meta, tasks, session, latestEntries, creating, onCreate, onCancelCreate, onOpenConversation }: {
+type ColumnDropPosition = 'before' | 'after';
+
+function WorkspaceColumn({ workspace, meta, tasks, session, latestEntries, creating, onCreate, onCancelCreate, onOpenConversation, dragging, dropPosition, onHandleDragStart, onColumnDragOver, onColumnDrop, onColumnDragEnd }: {
   workspace: WorkspaceRecord;
   meta: ColumnMeta;
   tasks: KanbanTask[];
@@ -267,6 +269,12 @@ function WorkspaceColumn({ workspace, meta, tasks, session, latestEntries, creat
   onCreate: () => void;
   onCancelCreate: () => void;
   onOpenConversation: (workspaceId: string, conversationId: string) => void;
+  dragging: boolean;
+  dropPosition: ColumnDropPosition | null;
+  onHandleDragStart: (event: DragEvent<HTMLElement>) => void;
+  onColumnDragOver: (event: DragEvent<HTMLElement>) => void;
+  onColumnDrop: (event: DragEvent<HTMLElement>) => void;
+  onColumnDragEnd: () => void;
 }) {
   const t = useT();
   const [title, setTitle] = useState('');
@@ -307,7 +315,17 @@ function WorkspaceColumn({ workspace, meta, tasks, session, latestEntries, creat
   };
 
   return (
-    <Kanban.Column className="gap-0">
+    <Kanban.Column
+      className={`relative gap-0 transition-opacity ${dragging ? 'opacity-50' : ''}`}
+      onDragOver={onColumnDragOver}
+      onDrop={onColumnDrop}
+    >
+      {dropPosition ? (
+        <span
+          aria-hidden
+          className={`bg-accent pointer-events-none absolute inset-y-1 z-20 w-1 rounded-full ${dropPosition === 'before' ? '-left-2.5' : '-right-2.5'}`}
+        />
+      ) : null}
       <div className="bg-background sticky top-0 z-10 pt-2">
         <Kanban.ColumnHeader
           className={`rounded-t-[calc(var(--radius-2xl)_+_var(--radius-sm))] px-3 py-2.5 ${meta.bodyBg}`}
@@ -323,6 +341,17 @@ function WorkspaceColumn({ workspace, meta, tasks, session, latestEntries, creat
           </span>
           <Kanban.ColumnCount className={meta.countColor}>{tasks.length}</Kanban.ColumnCount>
           <Kanban.ColumnActions>
+            <Tooltip delay={300}>
+              <Tooltip.Trigger
+                aria-label={t('kanban.reorderColumn')}
+                className="text-muted hover:text-foreground flex size-6 cursor-grab items-center justify-center rounded-md outline-none hover:bg-surface-secondary focus-visible:ring-2 focus-visible:ring-accent/40 active:cursor-grabbing"
+              >
+                <span draggable onDragStart={onHandleDragStart} onDragEnd={onColumnDragEnd} className="flex">
+                  <RiDraggable className="size-4" />
+                </span>
+              </Tooltip.Trigger>
+              <Tooltip.Content>{t('kanban.reorderColumn')}</Tooltip.Content>
+            </Tooltip>
             <Tooltip delay={300}>
               <Button
                 isIconOnly
@@ -411,7 +440,13 @@ export function KanbanPanel({ session, onOpenConversation }: Props) {
   const t = useT();
   const allTasks = useKanbanTasks();
   const [creatingWorkspaceId, setCreatingWorkspaceId] = useState<string | null>(null);
-  const columns = session.workspaces.map((workspace) => ({
+  const [draggedColumnId, setDraggedColumnId] = useState<string | null>(null);
+  const [columnDrop, setColumnDrop] = useState<{ id: string; position: ColumnDropPosition } | null>(null);
+  // Columns follow the same manual order as the sidebar workspace list.
+  const orderedWorkspaces = useMemo(() => [...session.workspaces].sort(
+    (a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || (a.createdAt - b.createdAt) || a.id.localeCompare(b.id),
+  ), [session.workspaces]);
+  const columns = orderedWorkspaces.map((workspace) => ({
     workspace,
     tasks: kanbanTasksForWorkspace(
       allTasks,
@@ -420,6 +455,23 @@ export function KanbanPanel({ session, onOpenConversation }: Props) {
     ),
   }));
   const total = columns.reduce((count, column) => count + column.tasks.length, 0);
+
+  const clearColumnDrag = () => {
+    setDraggedColumnId(null);
+    setColumnDrop(null);
+  };
+
+  const moveColumn = (sourceId: string, targetId: string, position: ColumnDropPosition) => {
+    if (sourceId === targetId) return;
+    const moved = orderedWorkspaces.find((workspace) => workspace.id === sourceId);
+    if (!moved) return;
+    const next = orderedWorkspaces.filter((workspace) => workspace.id !== sourceId);
+    let index = next.findIndex((workspace) => workspace.id === targetId);
+    if (index < 0) return;
+    if (position === 'after') index += 1;
+    next.splice(index, 0, moved);
+    next.forEach((workspace, order) => session.updateWorkspace(workspace.id, { sortOrder: order }));
+  };
 
   const latestEntries = useMemo(() => {
     const map: Record<string, TimelineEntry> = {};
@@ -466,7 +518,14 @@ export function KanbanPanel({ session, onOpenConversation }: Props) {
           </EmptyState>
         </div>
       ) : (
-        <div className="min-h-0 flex-1 overflow-auto pr-3">
+        <div
+          className="min-h-0 flex-1 overflow-auto pr-3"
+          onDragLeave={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+              setColumnDrop(null);
+            }
+          }}
+        >
           <Kanban hideScrollBar className="items-start overflow-visible px-5 pb-5" isEnabled={false}>
             {columns.map(({ workspace, tasks }, index) => (
               <WorkspaceColumn
@@ -480,6 +539,39 @@ export function KanbanPanel({ session, onOpenConversation }: Props) {
                 onCreate={() => setCreatingWorkspaceId(workspace.id)}
                 onCancelCreate={() => setCreatingWorkspaceId(null)}
                 onOpenConversation={openConversation}
+                dragging={draggedColumnId === workspace.id}
+                dropPosition={columnDrop?.id === workspace.id ? columnDrop.position : null}
+                onHandleDragStart={(event) => {
+                  event.dataTransfer.setData('text/plain', workspace.id);
+                  event.dataTransfer.effectAllowed = 'move';
+                  const column = event.currentTarget.closest('section');
+                  if (column) event.dataTransfer.setDragImage(column, 24, 24);
+                  setDraggedColumnId(workspace.id);
+                }}
+                onColumnDragOver={(event) => {
+                  if (!draggedColumnId) return;
+                  event.preventDefault();
+                  event.dataTransfer.dropEffect = 'move';
+                  if (draggedColumnId === workspace.id) {
+                    if (columnDrop) setColumnDrop(null);
+                    return;
+                  }
+                  const rect = event.currentTarget.getBoundingClientRect();
+                  const position: ColumnDropPosition = event.clientX < rect.left + rect.width / 2 ? 'before' : 'after';
+                  if (columnDrop?.id !== workspace.id || columnDrop.position !== position) {
+                    setColumnDrop({ id: workspace.id, position });
+                  }
+                }}
+                onColumnDrop={(event) => {
+                  if (!draggedColumnId) return;
+                  event.preventDefault();
+                  const sourceId = draggedColumnId;
+                  const rect = event.currentTarget.getBoundingClientRect();
+                  const position: ColumnDropPosition = event.clientX < rect.left + rect.width / 2 ? 'before' : 'after';
+                  clearColumnDrag();
+                  moveColumn(sourceId, workspace.id, position);
+                }}
+                onColumnDragEnd={clearColumnDrag}
               />
             ))}
           </Kanban>
