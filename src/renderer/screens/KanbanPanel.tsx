@@ -367,6 +367,36 @@ function WorkspaceColumn({ workspace, meta, tasks, session, latestEntries, creat
             </Tooltip>
           </Kanban.ColumnActions>
         </Kanban.ColumnHeader>
+        <div className="p-2 pb-0">
+          {creating ? (
+            <form
+              className="space-y-2"
+              onSubmit={(event) => {
+                event.preventDefault();
+                submit();
+              }}
+            >
+              <TextField value={title} onChange={setTitle}>
+                <Input autoFocus placeholder={t('kanban.titlePlaceholder')} maxLength={200} />
+              </TextField>
+              <TextField value={description} onChange={setDescription}>
+                <TextArea placeholder={t('kanban.descPlaceholder')} rows={2} maxLength={2000} />
+              </TextField>
+              <TextField value={dueDate} onChange={setDueDate}>
+                <Input type="date" aria-label={t('kanban.dueDateAria')} />
+              </TextField>
+              <div className="flex gap-2">
+                <Button size="sm" type="submit" isDisabled={!title.trim()}>{t('kanban.add')}</Button>
+                <Button size="sm" variant="ghost" onPress={() => { resetForm(); onCancelCreate(); }}>{t('common.cancel')}</Button>
+              </div>
+            </form>
+          ) : (
+            <Button fullWidth className={meta.btnStyle} variant="outline" onPress={onCreate}>
+              <Plus />
+              {t('kanban.newTask')}
+            </Button>
+          )}
+        </div>
       </div>
       <Kanban.ColumnBody className={`rounded-t-none ${meta.bodyBg}`}>
         {tasks.length === 0 ? (
@@ -401,36 +431,6 @@ function WorkspaceColumn({ workspace, meta, tasks, session, latestEntries, creat
             </div>
           );
         })}
-        <div className="p-2 pt-0">
-          {creating ? (
-            <form
-              className="space-y-2"
-              onSubmit={(event) => {
-                event.preventDefault();
-                submit();
-              }}
-            >
-              <TextField value={title} onChange={setTitle}>
-                <Input autoFocus placeholder={t('kanban.titlePlaceholder')} maxLength={200} />
-              </TextField>
-              <TextField value={description} onChange={setDescription}>
-                <TextArea placeholder={t('kanban.descPlaceholder')} rows={2} maxLength={2000} />
-              </TextField>
-              <TextField value={dueDate} onChange={setDueDate}>
-                <Input type="date" aria-label={t('kanban.dueDateAria')} />
-              </TextField>
-              <div className="flex gap-2">
-                <Button size="sm" type="submit" isDisabled={!title.trim()}>{t('kanban.add')}</Button>
-                <Button size="sm" variant="ghost" onPress={() => { resetForm(); onCancelCreate(); }}>{t('common.cancel')}</Button>
-              </div>
-            </form>
-          ) : (
-            <Button fullWidth className={meta.btnStyle} variant="outline" onPress={onCreate}>
-              <Plus />
-              {t('kanban.newTask')}
-            </Button>
-          )}
-        </div>
       </Kanban.ColumnBody>
     </Kanban.Column>
   );
