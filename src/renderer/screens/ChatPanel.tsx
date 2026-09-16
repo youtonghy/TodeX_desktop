@@ -99,8 +99,12 @@ function toolPresentation(raw: string) {
     const toolName = typeof value.toolName === 'string' ? value.toolName
       : typeof value.tool === 'string' ? value.tool
         : typeof value.command === 'string' ? t('chat.toolCommand') : t('chat.toolCall');
-    const args = value.arguments ?? value.input ?? (typeof value.command === 'string' ? { command: value.command } : {});
-    return { toolName, argsText: typeof args === 'string' ? args : JSON.stringify(args, null, 2) };
+    const args = value.arguments ?? value.input ?? (typeof value.command === 'string' ? { command: value.command } : undefined);
+    const emptyObject = typeof args === 'object' && args !== null && !Array.isArray(args) && Object.keys(args).length === 0;
+    const argsText = typeof args === 'string' ? args
+      : args === undefined || args === null || emptyObject ? ''
+        : JSON.stringify(args, null, 2);
+    return { toolName, argsText };
   } catch {
     return { toolName: t('chat.toolCall'), argsText: raw };
   }
