@@ -285,6 +285,12 @@ body {
   background-color: var(--surface-secondary);
 }
 
+/* Agent output can contain long unbroken tokens (URLs, request ids); they
+   must wrap inside the chat column instead of overflowing it. */
+.markdown {
+  overflow-wrap: break-word;
+}
+
 .composer-toolbar {
   container-type: inline-size;
   gap: 0.5rem;
