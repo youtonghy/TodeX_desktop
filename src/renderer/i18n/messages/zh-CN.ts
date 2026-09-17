@@ -89,6 +89,8 @@ export const zhCN = {
   'sidebar.unpin': '取消置顶',
   'sidebar.renameWorkspacePrompt': '新的工作区名称',
   'sidebar.renameConversationPrompt': '新的对话标题',
+  'sidebar.labelColor': '标签颜色',
+  'sidebar.labelClear': '移除标签',
   'sidebar.syncing': '正在同步目录…',
 
   // settings

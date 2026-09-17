@@ -89,6 +89,8 @@ export const en: Messages = {
   'sidebar.unpin': 'Unpin',
   'sidebar.renameWorkspacePrompt': 'New workspace name',
   'sidebar.renameConversationPrompt': 'New conversation title',
+  'sidebar.labelColor': 'Label color',
+  'sidebar.labelClear': 'Clear label',
   'sidebar.syncing': 'Syncing directory…',
 
   // settings

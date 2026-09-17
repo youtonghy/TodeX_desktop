@@ -89,6 +89,8 @@ export const ko: Messages = {
   'sidebar.unpin': '고정 해제',
   'sidebar.renameWorkspacePrompt': '새 워크스페이스 이름',
   'sidebar.renameConversationPrompt': '새 대화 제목',
+  'sidebar.labelColor': '라벨 색상',
+  'sidebar.labelClear': '라벨 지우기',
   'sidebar.syncing': '디렉터리 동기화 중…',
 
   // settings

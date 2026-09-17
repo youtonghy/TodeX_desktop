@@ -78,7 +78,7 @@ function TaskCard({ task, session, conversations, latestEntries, onOpen }: {
   task: KanbanTask;
   session: TodeXSession;
   conversations: ConversationRecord[];
-  latestEntries: Record<string, TimelineEntry>;
+  latestEntries: Record<string, { latest: TimelineEntry | undefined; latestIncomingAt: number }>;
   onOpen: (workspaceId: string, conversationId: string) => void;
 }) {
   const t = useT();
@@ -88,7 +88,7 @@ function TaskCard({ task, session, conversations, latestEntries, onOpen }: {
   const staleLink = Boolean(task.conversationId && !linked);
   const done = task.status === 'done';
   const conversationStatus = !done && linked
-    ? getConversationStatus(session, linked, latestEntries[linked.id])
+    ? getConversationStatus(session, linked, latestEntries[linked.id]?.latest, latestEntries[linked.id]?.latestIncomingAt)
     : null;
 
   const runTaskAction = (key: Key) => {
@@ -264,7 +264,7 @@ function WorkspaceColumn({ workspace, meta, tasks, session, latestEntries, creat
   meta: ColumnMeta;
   tasks: KanbanTask[];
   session: TodeXSession;
-  latestEntries: Record<string, TimelineEntry>;
+  latestEntries: Record<string, { latest: TimelineEntry | undefined; latestIncomingAt: number }>;
   creating: boolean;
   onCreate: () => void;
   onCancelCreate: () => void;
@@ -484,11 +484,12 @@ export function KanbanPanel({ session, onOpenConversation }: Props) {
   };
 
   const latestEntries = useMemo(() => {
-    const map: Record<string, TimelineEntry> = {};
+    const map: Record<string, { latest: TimelineEntry | undefined; latestIncomingAt: number }> = {};
     for (const entry of session.timeline) {
       if (!entry.conversationId) continue;
-      const existing = map[entry.conversationId];
-      if (!existing || entry.at > existing.at) map[entry.conversationId] = entry;
+      const existing = map[entry.conversationId] ??= { latest: undefined, latestIncomingAt: 0 };
+      if (!existing.latest || entry.at > existing.latest.at) existing.latest = entry;
+      if (entry.kind === 'incoming' && entry.at > existing.latestIncomingAt) existing.latestIncomingAt = entry.at;
     }
     return map;
   }, [session.timeline]);

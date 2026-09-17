@@ -89,6 +89,8 @@ export const ja: Messages = {
   'sidebar.unpin': 'ピン留めを解除',
   'sidebar.renameWorkspacePrompt': '新しいワークスペース名',
   'sidebar.renameConversationPrompt': '新しい会話タイトル',
+  'sidebar.labelColor': 'ラベルカラー',
+  'sidebar.labelClear': 'ラベルを削除',
   'sidebar.syncing': 'ディレクトリを同期中…',
 
   // settings

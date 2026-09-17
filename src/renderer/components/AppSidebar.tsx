@@ -1,11 +1,11 @@
-import { RiPushpin2Fill, RiAddLine, RiPencilLine, RiEdit2Line, RiErrorWarningLine, RiGitBranchLine, RiDeleteBinLine, RiArrowDownSLine, RiBarChartBoxLine, RiFolder3Line, RiInformationLine, RiKanbanView2, RiPuzzle2Line, RiSettings3Line, RiTerminalBoxLine, RiUserSettingsLine } from '@remixicon/react';
-import { Badge, Button, Chip, Dropdown, Label, Tooltip } from '@heroui/react';
+import { RiPushpin2Fill, RiAddLine, RiPencilLine, RiEdit2Line, RiErrorWarningLine, RiGitBranchLine, RiDeleteBinLine, RiArrowDownSLine, RiBarChartBoxLine, RiFolder3Line, RiInformationLine, RiKanbanView2, RiPriceTag3Line, RiPuzzle2Line, RiSettings3Line, RiTerminalBoxLine, RiUserSettingsLine } from '@remixicon/react';
+import { Badge, Button, Chip, ColorSwatchPicker, Dropdown, Label, Tooltip } from '@heroui/react';
 import { useEffect, useMemo, useState } from 'react';
 import type { DragEvent, MouseEvent } from 'react';
 import { ContextMenu as HeroContextMenu, ChatListView, Sidebar, useSidebar } from '@heroui-pro/react';
 import { useSidebarPins } from '../session/useSidebarPins';
 import { useKanbanTasks } from '../session/kanbanTasks';
-import { backendLabelColor } from '../session/backendColors';
+import { BACKEND_LABEL_COLORS, backendLabelColor } from '../session/backendColors';
 import { ProviderIcon } from './ProviderIcon';
 import { AppIcon } from './AppIcon';
 import type { TodeXSession } from '../session/useTodeXSession';
@@ -89,15 +89,18 @@ export function AppSidebar({
 
   // High-performance timeline lookup map: precomputed once in O(M) time instead of O(N*M) during sorting
   const timelineInfoMap = useMemo(() => {
-    const map: Record<string, { latestAt: number; latestEntry?: TodeXSession['timeline'][number] }> = {};
+    const map: Record<string, { latestAt: number; latestEntry?: TodeXSession['timeline'][number]; latestIncomingAt: number }> = {};
     const timeline = session.timeline;
     for (let i = 0; i < timeline.length; i++) {
       const entry = timeline[i];
-      if (entry?.conversationId && entry?.at) {
-        const existing = map[entry.conversationId];
-        if (!existing || entry.at > existing.latestAt) {
-          map[entry.conversationId] = { latestAt: entry.at, latestEntry: entry };
-        }
+      if (!entry?.conversationId || !entry?.at) continue;
+      const existing = map[entry.conversationId] ??= { latestAt: 0, latestIncomingAt: 0 };
+      if (entry.at > existing.latestAt) {
+        existing.latestAt = entry.at;
+        existing.latestEntry = entry;
+      }
+      if (entry.kind === 'incoming' && entry.at > existing.latestIncomingAt) {
+        existing.latestIncomingAt = entry.at;
       }
     }
     return map;
@@ -467,7 +470,7 @@ export function AppSidebar({
                 >
                   {displayedConversations.map((conversation) => {
                     const isSelected = conversation.id === session.activeConversationId;
-                    const status = getConversationStatus(session, conversation, timelineInfoMap[conversation.id]?.latestEntry);
+                    const status = getConversationStatus(session, conversation, timelineInfoMap[conversation.id]?.latestEntry, timelineInfoMap[conversation.id]?.latestIncomingAt);
                     const taskMeta = conversationTaskMetaMap[conversation.id];
                     const tasksDone = Boolean(taskMeta && taskMeta.pending === 0);
                     return (
@@ -494,7 +497,16 @@ export function AppSidebar({
                             </ChatListView.Title>
                             <ChatListView.Preview>{conversation.preview || t('sidebar.noMessages')}</ChatListView.Preview>
                           </ChatListView.Text>
-                          <ChatListView.Meta>{isConversationHighlighted(conversation, session.activeConversationId, session.turnIds) ? t('sidebar.running') : ''}</ChatListView.Meta>
+                          <ChatListView.Meta>
+                            {conversation.labelColor ? (
+                              <span
+                                aria-label={t('sidebar.labelColor')}
+                                className="mr-1 inline-block size-2 rounded-full align-middle"
+                                style={{ backgroundColor: conversation.labelColor }}
+                              />
+                            ) : null}
+                            {isConversationHighlighted(conversation, session.activeConversationId, session.turnIds) ? t('sidebar.running') : ''}
+                          </ChatListView.Meta>
                         </ChatListView.ItemContent>
                         {isConversationHighlighted(conversation, session.activeConversationId, session.turnIds) ? (
                           <span className="sr-only">{t('sidebar.running')}</span>
@@ -546,6 +558,45 @@ export function AppSidebar({
               <HeroContextMenu.Item id="rename" textValue={t('sidebar.rename')} onAction={() => runContextAction('rename')}><RiPencilLine className="size-4 text-muted" /><Label>{t('sidebar.rename')}</Label></HeroContextMenu.Item>
               {contextMenu.kind === 'workspace' ? <HeroContextMenu.Item id="edit" textValue={t('sidebar.edit')} onAction={() => runContextAction('edit')}><RiEdit2Line className="size-4 text-muted" /><Label>{t('sidebar.edit')}</Label></HeroContextMenu.Item> : null}
               <HeroContextMenu.Item id="pin" textValue={pins[contextMenu.kind].includes(contextMenu.id) ? t('sidebar.unpin') : t('sidebar.pin')} onAction={() => runContextAction('pin')}><RiPushpin2Fill className="size-4 text-muted" /><Label>{pins[contextMenu.kind].includes(contextMenu.id) ? t('sidebar.unpin') : t('sidebar.pin')}</Label></HeroContextMenu.Item>
+              {contextMenu.kind === 'conversation' ? (
+                <HeroContextMenu.SubmenuTrigger>
+                  <HeroContextMenu.Item id="label-color" textValue={t('sidebar.labelColor')}>
+                    <RiPriceTag3Line className="size-4 text-muted" />
+                    <Label>{t('sidebar.labelColor')}</Label>
+                    <HeroContextMenu.SubmenuIndicator />
+                  </HeroContextMenu.Item>
+                  <HeroContextMenu.Popover>
+                    <div className="flex flex-col gap-1 p-2">
+                      <ColorSwatchPicker
+                        aria-label={t('sidebar.labelColor')}
+                        value={session.conversations.find((item) => item.id === contextMenu.id)?.labelColor ?? undefined}
+                        onChange={(color) => {
+                          session.setConversationLabelColor(contextMenu.id, color.toString('hex'));
+                          setContextMenu(null);
+                        }}
+                      >
+                        {BACKEND_LABEL_COLORS.map(({ value, label }) => (
+                          <ColorSwatchPicker.Item key={value} color={value} aria-label={label}>
+                            <ColorSwatchPicker.Swatch />
+                            <ColorSwatchPicker.Indicator />
+                          </ColorSwatchPicker.Item>
+                        ))}
+                      </ColorSwatchPicker>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="justify-start"
+                        onPress={() => {
+                          session.setConversationLabelColor(contextMenu.id, undefined);
+                          setContextMenu(null);
+                        }}
+                      >
+                        {t('sidebar.labelClear')}
+                      </Button>
+                    </div>
+                  </HeroContextMenu.Popover>
+                </HeroContextMenu.SubmenuTrigger>
+              ) : null}
               <HeroContextMenu.Separator />
               <HeroContextMenu.Item id="delete" textValue={t('common.delete')} variant="danger" onAction={() => runContextAction('delete')}><RiDeleteBinLine className="size-4 text-danger" /><Label>{t('common.delete')}</Label></HeroContextMenu.Item>
             </HeroContextMenu.Menu>

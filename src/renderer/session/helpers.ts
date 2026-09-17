@@ -153,6 +153,10 @@ export type ConversationRecord = {
   v2ConversationId?: string;
   lastSequence?: number;
   lastCompletedAt?: number;
+  /** Last time the conversation was visible in a focused window. */
+  lastReadAt?: number;
+  /** User-picked tag color (hex); persists independently of read state. */
+  labelColor?: string;
   createdAt: number;
   updatedAt: number;
 };
@@ -586,18 +590,24 @@ export function getConversationStatus(
   session: { activeConversationId: string; turnIds: Record<string, string> },
   conversation: ConversationRecord,
   latestEntry?: TimelineEntry,
+  latestIncomingAt?: number,
 ): { color: string; border: string; label: string } | null {
   if (isConversationHighlighted(conversation, session.activeConversationId, session.turnIds)) {
     return { color: 'bg-green-500', border: 'border-green-500', label: t('sidebar.statusWorking') };
   }
+  // The dot is an attention marker: it clears once the conversation has been
+  // seen (lastReadAt), regardless of which state produced it.
+  const lastReadAt = conversation.lastReadAt ?? 0;
+  const latestEntryUnread = Boolean(latestEntry && latestEntry.at > lastReadAt);
   if (
-    latestEntry?.marker === 'error' ||
-    /error|failed|异常|失败/i.test(conversation.nativeStatus || '') ||
-    /error|failed|异常|失败/i.test(latestEntry?.title || '')
+    (latestEntry?.marker === 'error' && latestEntryUnread) ||
+    (/error|failed|异常|失败/i.test(conversation.nativeStatus || '') && conversation.updatedAt > lastReadAt) ||
+    (/error|failed|异常|失败/i.test(latestEntry?.title || '') && latestEntryUnread)
   ) {
     return { color: 'bg-amber-500', border: 'border-amber-500', label: t('sidebar.statusIssue') };
   }
-  if (conversation.id !== session.activeConversationId && latestEntry?.kind === 'incoming') {
+  const incomingAt = latestIncomingAt ?? (latestEntry?.kind === 'incoming' ? latestEntry.at : 0);
+  if (incomingAt > lastReadAt) {
     return { color: 'bg-blue-500', border: 'border-blue-500', label: t('sidebar.statusUnread') };
   }
   return null;
