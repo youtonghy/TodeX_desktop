@@ -260,7 +260,7 @@ function TerminalAside({ session, terminalId }: { session: TodeXSession; termina
           </Button>
         </div>
       </div>
-      <div className="min-h-0 flex-1 overflow-hidden rounded-lg bg-[#111418]">
+      <div className="min-h-0 flex-1 overflow-hidden rounded-lg bg-eclipse">
         <XtermTerminal
           entries={terminal?.output ?? []}
           isActive

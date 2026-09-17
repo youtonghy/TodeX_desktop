@@ -4,6 +4,7 @@ import { App } from './App';
 import { installBrowserDesktopBridge } from './lib/browserDesktop';
 import { installRendererDebugLogging } from './lib/debugLogger';
 import { getLocale, subscribeLocale } from './i18n';
+import '@fontsource-variable/inter';
 import './styles/global.css';
 
 installBrowserDesktopBridge();

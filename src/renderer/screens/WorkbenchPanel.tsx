@@ -565,8 +565,10 @@ function BrowserPane({ workspacePath, session, target, onTargetChange }: { works
           doc.body.appendChild(overlay);
           return overlay;
         };
-        const hoverOverlay = createOverlay('#0ea5e9');
-        const selectedOverlay = createOverlay('#2563eb');
+        const rootStyle = getComputedStyle(document.documentElement);
+        const tokenColor = (name: string) => rootStyle.getPropertyValue(name).trim() || '#128DDB';
+        const hoverOverlay = createOverlay(tokenColor('--chart-4'));
+        const selectedOverlay = createOverlay(tokenColor('--accent'));
         const positionOverlay = (overlay: HTMLDivElement, element: HTMLElement | null) => {
           if (!element || !element.isConnected) {
             overlay.style.display = 'none';
