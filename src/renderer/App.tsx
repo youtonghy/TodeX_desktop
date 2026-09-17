@@ -77,10 +77,25 @@ export function App() {
   const [capabilitiesOpen, setCapabilitiesOpen] = useState(false);
   const [gitOpen, setGitOpen] = useState(false);
 
+  const [panelMotion, setPanelMotion] = useState(false);
+  const panelMotionTimerRef = useRef<number | null>(null);
+  // Panel sizes are driven by inline flex-grow; the CSS transition is gated on
+  // [data-panel-motion] so handle drags and window resizes stay instant.
+  const animatePanelMotion = useCallback(() => {
+    if (document.querySelector('.resizable [data-separator="drag"], .resizable [data-separator="active"]')) return;
+    setPanelMotion(true);
+    if (panelMotionTimerRef.current !== null) window.clearTimeout(panelMotionTimerRef.current);
+    panelMotionTimerRef.current = window.setTimeout(() => {
+      panelMotionTimerRef.current = null;
+      setPanelMotion(false);
+    }, 400);
+  }, []);
+
   const persistSidebarOpen = useCallback((open: boolean) => {
+    if (open !== sidebarOpen) animatePanelMotion();
     setSidebarOpen(open);
     writeLayoutOpen({ ...readLayoutOpen(), sidebarOpen: open });
-  }, []);
+  }, [animatePanelMotion, sidebarOpen]);
 
   const openPanelHandlerRef = useRef<(name: string, params?: OpenPanelOptions) => void>(() => {});
   const forwardOpenPanel = useCallback((name: string, params?: OpenPanelOptions) => openPanelHandlerRef.current(name, params), []);
@@ -91,8 +106,12 @@ export function App() {
     session.activeWorkspace?.id || '', session.activeConversation?.id || '',
   ) : '';
   const layout = useWorkbenchLayout(scopeKey);
-  const { isOpen: asideOpen, setOpen: persistAsideOpen, tab: workbenchTab, setTab: setWorkbenchTab,
+  const { isOpen: asideOpen, setOpen: setAsideOpenRaw, tab: workbenchTab, setTab: setWorkbenchTab,
     target: panelTarget, setTarget: setPanelTarget } = layout;
+  const persistAsideOpen = useCallback((open: boolean) => {
+    if (open !== asideOpen) animatePanelMotion();
+    setAsideOpenRaw(open);
+  }, [animatePanelMotion, asideOpen, setAsideOpenRaw]);
 
   useNoticeToast(
     session.versionMismatch
@@ -166,7 +185,7 @@ export function App() {
   const overlayPanel = panelScopeRef.current === scopeKey && panel && panel !== 'kanban' && !modalPanel && !isWorkbenchTab(panel) ? panel : null;
 
   return (
-    <div className="bg-background text-foreground h-full">
+    <div className="bg-background text-foreground h-full" data-panel-motion={panelMotion || undefined}>
       <Toast.Provider placement="top" />
       <SessionNoticeToasts lastError={session.lastError} health={session.connectionHealth}
         scope={`${session.activeBackendConnectionId}:${session.settings.serverUrl}`} />
