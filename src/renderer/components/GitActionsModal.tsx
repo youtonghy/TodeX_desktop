@@ -31,7 +31,6 @@ export function GitActionsModal({ session, isOpen, onOpenChange }: Props) {
   const [snapshot, setSnapshot] = useState<GitWorkspaceSnapshot | null>(null);
   const [branchName, setBranchName] = useState('');
   const [startPoint, setStartPoint] = useState('');
-  const [path, setPath] = useState('');
   const [removePath, setRemovePath] = useState('');
   const [output, setOutput] = useState('');
   const [prTitle, setPrTitle] = useState('');
@@ -94,6 +93,12 @@ export function GitActionsModal({ session, isOpen, onOpenChange }: Props) {
       if (operation) {
         const result = await runGitWorkspaceOperation(session.settings, workspace.path, operation);
         if (revision !== generation.current) return;
+        if (operation.action === 'create-worktree'
+          && session.openGitWorktree(operation.path, conversation.id)) {
+          onOpenChange(false);
+          toast.success(t('git.worktreeOpened'));
+          return;
+        }
         setOutput(result.output || t('git.operationDone'));
         setRemovePath('');
       }
@@ -138,7 +143,7 @@ export function GitActionsModal({ session, isOpen, onOpenChange }: Props) {
   const choose = (id: GitAgentActionId) => {
     if (allActions.find(action => action.id === id)?.mode === 'agent') { void send(id); return; }
     setView(id); setSnapshot(null); setPr(null); setError(''); setFailure(null); setOutput(''); setRemovePath('');
-    setBranchName(''); setStartPoint(''); setPath('');
+    setBranchName(''); setStartPoint('');
     setPrTitle(''); setPrBody(''); setPrRepository(''); setPrBase(''); setPrDraft(false);
     if (prViewActions.has(id)) {
       setConfirming(prMutationActions.has(id) ? id : null);
@@ -164,6 +169,11 @@ export function GitActionsModal({ session, isOpen, onOpenChange }: Props) {
   useNoticeToast(isOpen && !view && unknown ? t('git.checkSendStatus') : null, { scope: noticeScope });
   const title = allActions.find(action => action.id === view)?.title || t('git.operations');
   const isBranchForm = view === 'create-branch' || view === 'create-worktree';
+  const worktreeName = branchName.trim().replace(/^\/+|\/+$/g, '').replace(/^todex\//, '');
+  const worktreeAnchor = snapshot?.worktrees.find(tree => tree.main)?.path || snapshot?.repositoryPath || workspace?.path || '';
+  const worktreeBase = worktreeAnchor.replace(/[\\/]+$/, '').replace(/[\\/][^\\/]+$/, '');
+  const worktreeBranch = worktreeName ? `todex/${worktreeName}` : '';
+  const worktreePath = worktreeName && worktreeBase ? `${worktreeBase}/todex/${worktreeName}` : '';
   const prConfirm = (id: GitAgentActionId, label: string, operation: GitWorkspaceOperation,
     options?: { danger?: boolean; hint?: string; methodPicker?: boolean }) => confirming === id
     ? <div className="space-y-2 rounded-xl border border-default p-3">
@@ -237,15 +247,15 @@ export function GitActionsModal({ session, isOpen, onOpenChange }: Props) {
           </form> : null}
           {isBranchForm ? <form className="space-y-3" onSubmit={event => {
             event.preventDefault();
-            if (!branchName.trim() || (view === 'create-worktree' && !path.trim())) return;
+            if (!branchName.trim() || (view === 'create-worktree' && !worktreePath)) return;
             void direct(view, view === 'create-worktree'
-              ? { action: 'create-worktree', path: path.trim(), branchName: branchName.trim(), ...(startPoint.trim() ? { startPoint: startPoint.trim() } : {}) }
+              ? { action: 'create-worktree', path: worktreePath, branchName: worktreeBranch, ...(startPoint.trim() ? { startPoint: startPoint.trim() } : {}) }
               : { action: 'create-branch', branchName: branchName.trim(), ...(startPoint.trim() ? { startPoint: startPoint.trim() } : {}) });
           }}>
-            <TextField isRequired value={branchName} onChange={setBranchName}><Label>{t('git.newBranchName')}</Label><Input placeholder="codex/my-task" /></TextField>
+            <TextField isRequired value={branchName} onChange={setBranchName}><Label>{view === 'create-worktree' ? t('git.worktreeName') : t('git.newBranchName')}</Label><Input placeholder={view === 'create-worktree' ? t('git.worktreeNamePlaceholder') : 'codex/my-task'} /></TextField>
             <TextField value={startPoint} onChange={setStartPoint}><Label>{t('git.startPoint')}</Label><Input placeholder={t('git.startPointPlaceholder')} /></TextField>
-            {view === 'create-worktree' ? <TextField isRequired value={path} onChange={setPath}><Label>{t('git.newWorktreePath')}</Label><Input placeholder={t('git.worktreePathPlaceholder')} /></TextField> : <p className="text-muted text-xs">{t('git.branchStays')}</p>}
-            <Button type="submit" isDisabled={writingBlocked || Boolean(sending) || Boolean(failure?.unknown) || !snapshot?.initialized}>{title}</Button>
+            {view === 'create-worktree' ? <p className="text-muted break-all text-xs">{t('git.worktreeDerived', { branch: worktreeBranch || 'todex/…', path: worktreePath || `${worktreeBase}/todex/…` })}</p> : <p className="text-muted text-xs">{t('git.branchStays')}</p>}
+            <Button type="submit" isDisabled={writingBlocked || Boolean(sending) || Boolean(failure?.unknown) || !snapshot?.initialized || (view === 'create-worktree' && !worktreePath)}>{title}</Button>
           </form> : null}
           {(view === 'list-branches' || view === 'switch-branch') && snapshot ? <div className="space-y-2">
             {snapshot.branches.length === 0 ? <p>{t('git.noBranches')}</p> : snapshot.branches.map(branch => <div key={branch.name} className="flex items-center justify-between gap-3 rounded-xl border border-default p-3">
