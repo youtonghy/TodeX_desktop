@@ -1175,6 +1175,7 @@ export const ko: Messages = {
   'ap.save': '저장',
   'ap.unmanaged': '관리 안 함',
   'ap.adopt': '가져오기',
+  'ap.adoptParsed': '현재 설정에서 파싱했습니다. 저장 전에 확인·수정할 수 있습니다.',
   'ap.noProviders': '프로바이더가 없습니다',
   'ap.add': '프로바이더 추가',
   'ap.fetchModels': '모델 목록 가져오기',

@@ -1175,6 +1175,7 @@ export const ja: Messages = {
   'ap.save': '保存',
   'ap.unmanaged': '未管理',
   'ap.adopt': '取り込む',
+  'ap.adoptParsed': '現在の設定から解析しました。保存前に確認・編集できます。',
   'ap.noProviders': 'プロバイダーがありません',
   'ap.add': 'プロバイダーを追加',
   'ap.fetchModels': 'モデル一覧を取得',

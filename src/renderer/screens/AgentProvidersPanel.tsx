@@ -11,13 +11,16 @@ import {
   type ManagedProviderAgent,
 } from '@todex/protocol/v2';
 import { deviceIdentityFromSecret } from '@todex/protocol/deviceAuth';
+import { ConnectionError } from '@todex/protocol/connectionError';
 import { ProviderIcon } from '../components/ProviderIcon';
 import { Field } from '../components/Field';
 import {
+  asRecord,
   buildSettingsConfig,
   extractFormValues,
   providerBaseUrl,
   providerModelIds,
+  type ProviderConfigSource,
   type ProviderFormValues,
 } from '../lib/agentProviders';
 import { useT } from '../i18n';
@@ -209,21 +212,38 @@ export function AgentProvidersPanel({ session }: { session: TodeXSession }) {
               );
             })}
 
-            {unmanaged.map((nodeId) => (
-              <Card key={nodeId} className="min-w-0 rounded-lg border-dashed p-4">
-                <div className="flex items-center gap-3">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <h3 className="truncate text-sm font-semibold">{nodeId}</h3>
-                      <Chip size="sm" variant="soft">{t('ap.unmanaged')}</Chip>
+            {unmanaged.map((nodeId) => {
+              const nodeSettings = asRecord(unmanagedNodes[nodeId]);
+              const nodeBaseUrl = providerBaseUrl(agent, nodeSettings);
+              const nodeModels = providerModelIds(agent, nodeSettings);
+              const isLiveSelection = live?.kind === 'additive' && live.selection?.providerId === nodeId;
+              return (
+                <Card key={nodeId} className="min-w-0 rounded-lg border-dashed p-4">
+                  <div className="flex items-start gap-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h3 className="truncate text-sm font-semibold">{nodeId}</h3>
+                        <Chip size="sm" variant="soft">{t('ap.unmanaged')}</Chip>
+                        {isLiveSelection ? <Chip size="sm" variant="soft" color="success">{t('ap.active')}</Chip> : null}
+                      </div>
+                      {nodeBaseUrl ? (
+                        <p className="text-muted mt-1 truncate text-xs">{nodeBaseUrl}</p>
+                      ) : null}
+                      {nodeModels.length ? (
+                        <div className="mt-2 flex flex-wrap gap-1">
+                          {nodeModels.map((modelId) => (
+                            <Chip key={modelId} size="sm" variant="soft">{modelId}</Chip>
+                          ))}
+                        </div>
+                      ) : null}
                     </div>
+                    <Button size="sm" variant="secondary" isDisabled={Boolean(busy)} onPress={() => setEditor({ kind: 'adopt', nodeId })}>
+                      {t('ap.adopt')}
+                    </Button>
                   </div>
-                  <Button size="sm" variant="secondary" isDisabled={Boolean(busy)} onPress={() => setEditor({ kind: 'adopt', nodeId })}>
-                    {t('ap.adopt')}
-                  </Button>
-                </div>
-              </Card>
-            ))}
+                </Card>
+              );
+            })}
 
             {bucket.providers.length === 0 && unmanaged.length === 0 ? (
               <p className="text-muted py-8 text-center text-sm">{t('ap.noProviders')}</p>
@@ -238,6 +258,14 @@ export function AgentProvidersPanel({ session }: { session: TodeXSession }) {
               busy={Boolean(busy)}
               onCancel={() => setEditor(null)}
               onSave={(id, input) => void run('save', async () => {
+                if (editor.kind === 'adopt') {
+                  try {
+                    await api().importLiveAgentProvider(agent, id, input.name);
+                  } catch (error) {
+                    const details = error instanceof ConnectionError ? error.technicalDetails : '';
+                    if (!details.includes('CONFLICT') && !details.includes('HTTP 409')) throw error;
+                  }
+                }
                 const next = await api().upsertAgentProvider(agent, id, input);
                 setEditor(null);
                 return next;
@@ -307,14 +335,21 @@ function ProviderEditor({
 }) {
   const t = useT();
   const profile = editor.kind === 'edit' ? editor.profile : undefined;
-  const initialSettings = editor.kind === 'adopt' ? unmanagedNodes[editor.nodeId] : undefined;
-  const [form, setForm] = useState<ProviderFormValues>(() => ({
-    ...extractFormValues(agent, profile),
-    name: editor.kind === 'adopt' ? editor.nodeId : (profile?.name ?? ''),
-  }));
+  const adoptNode = editor.kind === 'adopt' ? asRecord(unmanagedNodes[editor.nodeId]) : undefined;
+  const adoptName = editor.kind === 'adopt' && typeof adoptNode?.name === 'string' && adoptNode.name.trim()
+    ? adoptNode.name.trim()
+    : editor.kind === 'adopt' ? editor.nodeId : '';
+  const baseSource: ProviderConfigSource | undefined = profile
+    ?? (adoptNode ? { name: adoptName, settingsConfig: adoptNode } : undefined);
+  const [form, setForm] = useState<ProviderFormValues>(() => extractFormValues(agent, baseSource));
+  const [formDirty, setFormDirty] = useState(false);
+  const updateForm = (patch: Partial<ProviderFormValues>) => {
+    setForm((current) => ({ ...current, ...patch }));
+    setFormDirty(true);
+  };
   const [jsonMode, setJsonMode] = useState(false);
   const [jsonText, setJsonText] = useState(() => JSON.stringify(
-    profile?.settingsConfig ?? initialSettings ?? {},
+    profile?.settingsConfig ?? adoptNode ?? {},
     null,
     2,
   ));
@@ -343,7 +378,7 @@ function ProviderEditor({
       }
       return;
     }
-    onSave(providerId, { name, settingsConfig: buildSettingsConfig(agent, form, profile) });
+    onSave(providerId, { name, settingsConfig: buildSettingsConfig(agent, form, baseSource) });
   };
 
   return (
@@ -356,16 +391,21 @@ function ProviderEditor({
           <div className="flex gap-1">
             <Button size="sm" variant={jsonMode ? 'ghost' : 'secondary'} onPress={() => setJsonMode(false)}>{t('ap.formMode')}</Button>
             <Button size="sm" variant={jsonMode ? 'secondary' : 'ghost'} onPress={() => {
-              if (!jsonMode && !profile && editor.kind !== 'adopt') {
-                setJsonText(JSON.stringify(buildSettingsConfig(agent, form, profile), null, 2));
+              if (!jsonMode && (editor.kind === 'new' || formDirty)) {
+                setJsonText(JSON.stringify(buildSettingsConfig(agent, form, baseSource), null, 2));
+                setFormDirty(false);
               }
               setJsonMode(true);
             }}>{t('ap.jsonMode')}</Button>
           </div>
         </div>
 
+        {editor.kind === 'adopt' ? (
+          <p className="text-muted text-xs">{t('ap.adoptParsed')}</p>
+        ) : null}
+
         <div className="grid gap-3 sm:grid-cols-2">
-          <Field label={t('ap.name')} value={form.name} onChange={(name) => setForm((f) => ({ ...f, name }))} />
+          <Field label={t('ap.name')} value={form.name} onChange={(name) => updateForm({ name })} />
           <TextField className="w-full" value={id} onChange={setId} isDisabled={idLocked}>
             <Label>{t('ap.providerId')}</Label>
             <Input className="w-full" placeholder="my-provider" />
@@ -379,19 +419,19 @@ function ProviderEditor({
           </TextField>
         ) : (
           <div className="grid gap-3 sm:grid-cols-2">
-            <Field label={t('ap.baseUrl')} value={form.baseUrl} onChange={(baseUrl) => setForm((f) => ({ ...f, baseUrl }))} />
-            <Field label={t('ap.apiKey')} value={form.apiKey} onChange={(apiKey) => setForm((f) => ({ ...f, apiKey }))} description={t('ap.secretKept')} />
+            <Field label={t('ap.baseUrl')} value={form.baseUrl} onChange={(baseUrl) => updateForm({ baseUrl })} />
+            <Field label={t('ap.apiKey')} value={form.apiKey} onChange={(apiKey) => updateForm({ apiKey })} description={t('ap.secretKept')} />
             {isClaude || isCodex ? (
-              <Field label={t('ap.model')} value={form.model} onChange={(model) => setForm((f) => ({ ...f, model }))} />
+              <Field label={t('ap.model')} value={form.model} onChange={(model) => updateForm({ model })} />
             ) : null}
             {isCodex ? (
-              <Field label={t('ap.reasoningEffort')} value={form.reasoningEffort} onChange={(reasoningEffort) => setForm((f) => ({ ...f, reasoningEffort }))} />
+              <Field label={t('ap.reasoningEffort')} value={form.reasoningEffort} onChange={(reasoningEffort) => updateForm({ reasoningEffort })} />
             ) : null}
             {agent === 'pi' ? (
-              <Field label={t('ap.apiKind')} value={form.apiKind} onChange={(apiKind) => setForm((f) => ({ ...f, apiKind }))} description="openai-completions / anthropic-messages / …" />
+              <Field label={t('ap.apiKind')} value={form.apiKind} onChange={(apiKind) => updateForm({ apiKind })} description="openai-completions / anthropic-messages / …" />
             ) : null}
             {isAdditive ? (
-              <Field label={t('ap.models')} value={form.modelsText} onChange={(modelsText) => setForm((f) => ({ ...f, modelsText }))} description={t('ap.modelsHint')} />
+              <Field label={t('ap.models')} value={form.modelsText} onChange={(modelsText) => updateForm({ modelsText })} description={t('ap.modelsHint')} />
             ) : null}
           </div>
         )}

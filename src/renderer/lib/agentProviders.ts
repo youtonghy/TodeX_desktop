@@ -1,4 +1,4 @@
-import type { AgentProviderProfile, ManagedProviderAgent } from '@todex/protocol/v2';
+import type { ManagedProviderAgent } from '@todex/protocol/v2';
 
 export const MASKED_SECRET = '__TODEX_MASKED__';
 
@@ -21,12 +21,6 @@ export const emptyFormValues: ProviderFormValues = {
   apiKind: '',
   modelsText: '',
 };
-
-function asRecord(value: unknown): Record<string, unknown> {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
-}
 
 function asString(value: unknown): string {
   return typeof value === 'string' ? value : '';
@@ -97,12 +91,25 @@ wire_api = "responses"
 requires_openai_auth = true
 `;
 
+/** Anything carrying a stored/live provider config — a profile, or an
+ * unmanaged live node wrapped as `{ name, settingsConfig }`. */
+export type ProviderConfigSource = {
+  name?: string;
+  settingsConfig?: unknown;
+};
+
+export function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
 export function extractFormValues(
   agent: ManagedProviderAgent,
-  profile?: AgentProviderProfile,
+  source?: ProviderConfigSource,
 ): ProviderFormValues {
-  const settings = asRecord(profile?.settingsConfig);
-  const base = { ...emptyFormValues, name: profile?.name ?? '' };
+  const settings = asRecord(source?.settingsConfig);
+  const base = { ...emptyFormValues, name: source?.name ?? '' };
   switch (agent) {
     case 'claude-code': {
       const env = asRecord(settings.env);
@@ -181,7 +188,7 @@ function codexConfigFromForm(
 export function buildSettingsConfig(
   agent: ManagedProviderAgent,
   form: ProviderFormValues,
-  existing?: AgentProviderProfile,
+  existing?: ProviderConfigSource,
 ): Record<string, unknown> {
   const previous = asRecord(existing?.settingsConfig);
   switch (agent) {

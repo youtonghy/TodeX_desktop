@@ -1175,6 +1175,7 @@ export const zhCN = {
   'ap.save': '保存',
   'ap.unmanaged': '未托管',
   'ap.adopt': '收编',
+  'ap.adoptParsed': '已从当前配置解析供应商与模型信息，可修改后保存。',
   'ap.noProviders': '暂无供应商',
   'ap.add': '添加供应商',
   'ap.fetchModels': '获取模型列表',
