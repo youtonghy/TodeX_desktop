@@ -56,6 +56,19 @@ export function installBrowserDesktopBridge(): void {
     },
     app: {
       focus: () => window.focus(),
+      closeWindow: () => window.close(),
+      // Browsers reserve Cmd+W, so the DOM fallback only fires where the host
+      // delivers the key (e.g. embedded webviews).
+      onCloseRequest: (listener) => {
+        const onKeyDown = (event: KeyboardEvent) => {
+          if (!event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+          if (event.key.toLowerCase() !== 'w') return;
+          event.preventDefault();
+          listener();
+        };
+        window.addEventListener('keydown', onKeyDown);
+        return () => window.removeEventListener('keydown', onKeyDown);
+      },
       windowChrome: 'native' as const,
     },
     locale: {

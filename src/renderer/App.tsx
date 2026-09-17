@@ -130,6 +130,17 @@ export function App() {
     setPanelTarget({});
   }, [setWorkbenchTab, setPanelTarget]);
 
+  // The main process forwards Cmd+W as 'app:close-request'; close the active
+  // workbench tab when the aside is showing, otherwise fall back to closing
+  // the window so the platform shortcut keeps working.
+  const workbenchCloseRef = useRef<() => boolean>(() => false);
+  const asideOpenRef = useRef(asideOpen);
+  asideOpenRef.current = asideOpen;
+  useEffect(() => window.todexDesktop.app.onCloseRequest(() => {
+    if (asideOpenRef.current && workbenchCloseRef.current()) return;
+    window.todexDesktop.app.closeWindow();
+  }), []);
+
   useEffect(() => {
     let unsubscribe: (() => void) | undefined;
     void window.todexDesktop.theme.shouldUseDark().then((dark) => {
@@ -197,7 +208,7 @@ export function App() {
                     onBack={() => setPanel(workbenchTab)}
                   />
                 ) : (
-                  <WorkbenchPanel key={scopeKey} scopeKey={scopeKey} session={session} tab={workbenchTab} target={panelTarget} onTabChange={changeWorkbenchTab} onTargetConsumed={consumePanelTarget} />
+                  <WorkbenchPanel key={scopeKey} scopeKey={scopeKey} session={session} tab={workbenchTab} target={panelTarget} onTabChange={changeWorkbenchTab} onTargetConsumed={consumePanelTarget} closeRequestRef={workbenchCloseRef} />
                 )}
               </Suspense>
             )

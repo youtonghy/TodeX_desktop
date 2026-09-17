@@ -30,6 +30,8 @@ export type TodeXDesktopApi = {
   };
   app: {
     focus: () => void;
+    closeWindow: () => void;
+    onCloseRequest: (listener: () => void) => () => void;
     windowChrome: 'hidden-inset' | 'native';
   };
   locale: {

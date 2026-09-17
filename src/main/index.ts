@@ -260,6 +260,18 @@ function createWindow(): BrowserWindow {
     },
   });
 
+  // The default macOS menu binds Cmd+W to closing the window. Intercept it so
+  // the renderer can close the active workbench tab first; it falls back to
+  // 'window:close' when no workbench tab is available.
+  if (process.platform === 'darwin') {
+    window.webContents.on('before-input-event', (event, input) => {
+      if (input.type !== 'keyDown' || !input.meta || input.control || input.shift || input.alt) return;
+      if (input.key.toLowerCase() !== 'w') return;
+      event.preventDefault();
+      window.webContents.send('app:close-request');
+    });
+  }
+
   window.webContents.setWindowOpenHandler(({ url }) => {
     debugLog('debug', 'window.open.request', { url });
     void shell.openExternal(url);
@@ -587,6 +599,10 @@ app.whenReady().then(() => {
     if (window.isMinimized()) window.restore();
     window.show();
     window.focus();
+  });
+
+  ipcMain.on('window:close', (event) => {
+    BrowserWindow.fromWebContents(event.sender)?.close();
   });
 
   handleIpc('theme:shouldUseDark', () => nativeTheme.shouldUseDarkColors);

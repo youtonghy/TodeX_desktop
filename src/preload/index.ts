@@ -53,6 +53,16 @@ const api = {
     focus: () => {
       ipcRenderer.send('window:focus');
     },
+    closeWindow: () => {
+      ipcRenderer.send('window:close');
+    },
+    onCloseRequest: (listener: () => void) => {
+      const handler = () => listener();
+      ipcRenderer.on('app:close-request', handler);
+      return () => {
+        ipcRenderer.removeListener('app:close-request', handler);
+      };
+    },
     windowChrome: (process.platform === 'darwin' ? 'hidden-inset' : 'native') as 'hidden-inset' | 'native',
   },
   locale: {
