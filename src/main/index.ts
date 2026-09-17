@@ -21,6 +21,7 @@ const execFileAsync = promisify(execFile);
 
 const MAX_IMAGE_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 const MAX_FILE_ATTACHMENT_BYTES = 512 * 1024;
+const MAX_RENDERER_CRASH_RELOADS = 5;
 const APP_IDENTITY = 'todex-desktop';
 const PROTOCOL_VERSION = 'v2';
 const DEFAULT_BACKEND_URL = process.env.TODEX_BACKEND_URL?.trim() || 'http://127.0.0.1:7345';
@@ -290,7 +291,34 @@ function createWindow(): BrowserWindow {
   window.webContents.on('did-start-loading', () => debugLog('debug', 'renderer.did-start-loading', { id: window.webContents.id }));
   window.webContents.on('dom-ready', () => debugLog('debug', 'renderer.dom-ready', { id: window.webContents.id }));
   window.webContents.on('did-stop-loading', () => debugLog('debug', 'renderer.did-stop-loading', { id: window.webContents.id }));
-  window.webContents.on('render-process-gone', (_event, details) => debugLog('fatal', 'renderer.process-gone', { id: window.webContents.id, details }));
+  // The renderer can die from upstream V8 bugs (e.g. JIT bookkeeping SIGTRAPs
+  // observed as exit code 5). Reload it instead of leaving a dead window, with
+  // exponential backoff so a persistent crash does not spin a reload loop.
+  let rendererCrashCount = 0;
+  let rendererReloadTimer: ReturnType<typeof setTimeout> | null = null;
+  window.on('closed', () => {
+    if (rendererReloadTimer) {
+      clearTimeout(rendererReloadTimer);
+      rendererReloadTimer = null;
+    }
+  });
+  window.webContents.on('render-process-gone', (_event, details) => {
+    debugLog('fatal', 'renderer.process-gone', { id: window.webContents.id, details });
+    if (!['crashed', 'oom', 'integrity-failure'].includes(details.reason)) return;
+    rendererCrashCount += 1;
+    if (rendererCrashCount > MAX_RENDERER_CRASH_RELOADS) {
+      console.error('TodeX renderer crashed repeatedly; not reloading');
+      return;
+    }
+    const delay = Math.min(500 * 2 ** (rendererCrashCount - 1), 8000);
+    rendererReloadTimer = setTimeout(() => {
+      rendererReloadTimer = null;
+      if (window.isDestroyed() || window.webContents.isDestroyed()) return;
+      console.log('TodeX renderer reloading after crash');
+      window.webContents.reload();
+    }, delay);
+    rendererReloadTimer.unref?.();
+  });
   window.webContents.on('unresponsive', () => debugLog('error', 'renderer.unresponsive', { id: window.webContents.id }));
   window.webContents.on('responsive', () => debugLog('info', 'renderer.responsive', { id: window.webContents.id }));
 
@@ -310,6 +338,7 @@ function createWindow(): BrowserWindow {
     console.error('TodeX preload error', path, error);
   });
   window.webContents.on('did-finish-load', () => {
+    rendererCrashCount = 0;
     debugLog('info', 'renderer.did-finish-load', { id: window.webContents.id, url: window.webContents.getURL() });
     console.log('TodeX renderer loaded');
   });
@@ -412,6 +441,13 @@ async function findGitRepositories(workspacePath: string): Promise<string[]> {
     try { roots.add((await gitText(candidate, ['rev-parse', '--show-toplevel']))); } catch { /* not a repository */ }
   }
   return [...roots];
+}
+
+// Escape hatch for renderer V8 issues (e.g. upstream JIT crashes):
+// TODEX_JS_FLAGS="--jitless" pnpm dev
+const jsFlags = process.env.TODEX_JS_FLAGS?.trim();
+if (jsFlags) {
+  app.commandLine.appendSwitch('js-flags', jsFlags);
 }
 
 initializeDebugLogging();
