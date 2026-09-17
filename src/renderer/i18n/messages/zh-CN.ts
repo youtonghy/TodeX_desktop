@@ -238,6 +238,7 @@ export const zhCN = {
   'chat.sentAttachments': '已发送的附件',
   'chat.scrollToLatest': '前往最新',
   'chat.quoteName': '对话摘录',
+  'chat.pastedTextName': '粘贴的文本',
   'chat.quoteAdded': '已添加引用',
   'chat.quoteAdd': '添加到对话',
   'chat.piPluginRequest': 'Pi 插件请求',
@@ -311,6 +312,7 @@ export const zhCN = {
   'controls.candidateNumber': '候选消息 {order}',
   'controls.openInFiles': '在文件中打开',
   'controls.close': '关闭',
+  'controls.save': '保存',
 
   // runStatus
   'runStatus.stale': '暂未收到新的运行状态',

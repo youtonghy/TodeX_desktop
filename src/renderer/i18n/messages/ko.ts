@@ -238,6 +238,7 @@ export const ko: Messages = {
   'chat.sentAttachments': '보낸 첨부 파일',
   'chat.scrollToLatest': '최신으로 이동',
   'chat.quoteName': '대화 발췌',
+  'chat.pastedTextName': '붙여넣은 텍스트',
   'chat.quoteAdded': '참조를 추가했습니다',
   'chat.quoteAdd': '대화에 추가',
   'chat.piPluginRequest': 'Pi 플러그인 요청',
@@ -311,6 +312,7 @@ export const ko: Messages = {
   'controls.candidateNumber': '후보 메시지 {order}',
   'controls.openInFiles': '파일에서 열기',
   'controls.close': '닫기',
+  'controls.save': '저장',
 
   // runStatus
   'runStatus.stale': '새 실행 상태가 아직 없습니다',

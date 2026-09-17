@@ -238,6 +238,7 @@ export const ja: Messages = {
   'chat.sentAttachments': '送信済みの添付ファイル',
   'chat.scrollToLatest': '最新へ移動',
   'chat.quoteName': '会話の抜粋',
+  'chat.pastedTextName': '貼り付けたテキスト',
   'chat.quoteAdded': '参照を追加しました',
   'chat.quoteAdd': '会話に追加',
   'chat.piPluginRequest': 'Pi プラグイン要求',
@@ -311,6 +312,7 @@ export const ja: Messages = {
   'controls.candidateNumber': '候補メッセージ {order}',
   'controls.openInFiles': 'ファイルで開く',
   'controls.close': '閉じる',
+  'controls.save': '保存',
 
   // runStatus
   'runStatus.stale': '新しい実行状態をまだ受け取っていません',

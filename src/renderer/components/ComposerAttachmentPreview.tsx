@@ -1,12 +1,15 @@
-import { Button, Modal } from '@heroui/react';
+import { Button, Label, Modal, TextArea, TextField } from '@heroui/react';
+import { useEffect, useState } from 'react';
 import { useT } from '../i18n';
 import { formatBytes, type ComposerAttachmentDraft } from '../session/helpers';
 
-export function ComposerAttachmentPreview({ attachment, onOpenChange, onOpenSource }: {
+export function ComposerAttachmentPreview({ attachment, onOpenChange, onOpenSource, onSaveText }: {
   attachment: ComposerAttachmentDraft | null;
   onOpenChange: (open: boolean) => void;
   /** References keep a jump-to-source action inside the preview. */
   onOpenSource?: (attachment: ComposerAttachmentDraft) => void;
+  /** When provided, text attachments become editable inside the preview. */
+  onSaveText?: (attachment: ComposerAttachmentDraft, text: string) => void;
 }) {
   const t = useT();
   const kindLabel = !attachment ? ''
@@ -20,6 +23,11 @@ export function ComposerAttachmentPreview({ attachment, onOpenChange, onOpenSour
     ? attachment.path ? t('controls.openInFiles')
       : attachment.messageId ? t('chat.jumpToMessage') : null
     : null;
+  const editable = Boolean(onSaveText && attachment && attachment.kind !== 'image' && attachment.textContent !== undefined);
+  const [draftText, setDraftText] = useState('');
+  useEffect(() => {
+    setDraftText(attachment?.textContent ?? '');
+  }, [attachment]);
   return (
     <Modal>
       <Modal.Backdrop isOpen={attachment != null} onOpenChange={onOpenChange}>
@@ -40,6 +48,11 @@ export function ComposerAttachmentPreview({ attachment, onOpenChange, onOpenSour
                 attachment.dataUrl
                   ? <img src={attachment.dataUrl} alt={attachment.name} className="mx-auto max-h-[60dvh] rounded-lg object-contain" />
                   : <p className="text-muted text-sm">{t('chat.noPreviewContent')}</p>
+              ) : editable ? (
+                <TextField className="w-full" value={draftText} onChange={setDraftText}>
+                  <Label className="sr-only">{attachment?.name}</Label>
+                  <TextArea className="w-full font-mono text-xs" rows={14} />
+                </TextField>
               ) : attachment?.textContent ? (
                 <pre className="whitespace-pre-wrap break-all text-sm leading-6">{attachment.textContent}</pre>
               ) : (
@@ -50,7 +63,12 @@ export function ComposerAttachmentPreview({ attachment, onOpenChange, onOpenSour
               {attachment && sourceAction ? (
                 <Button variant="secondary" onPress={() => onOpenSource?.(attachment)}>{sourceAction}</Button>
               ) : null}
-              <Button onPress={() => onOpenChange(false)}>{t('controls.close')}</Button>
+              <Button variant={editable ? 'secondary' : undefined} onPress={() => onOpenChange(false)}>{t('controls.close')}</Button>
+              {editable ? (
+                <Button onPress={() => { if (attachment) onSaveText?.(attachment, draftText); }}>
+                  {t('controls.save')}
+                </Button>
+              ) : null}
             </Modal.Footer>
           </Modal.Dialog>
         </Modal.Container>
