@@ -278,9 +278,11 @@ body {
   min-height: 0;
 }
 
-/* Dialogs sit on a recessed background so surface cards inside read as elevated. */
-.modal__dialog {
-  background-color: var(--background-secondary);
+/* Inside dialogs, default surfaces step down one level so grouped
+   sections stay distinct from the overlay background. */
+.modal__dialog .surface--default,
+.modal__dialog .card--default {
+  background-color: var(--surface-secondary);
 }
 
 .composer-toolbar {
