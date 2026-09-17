@@ -1080,6 +1080,8 @@ export const ko: Messages = {
   'sess.resumeNeedsMessage': '명확한 후속 메시지를 보내 대화를 계속하세요. 현재 Agent는 독립 재개 작업을 지원하지 않습니다.',
   'sess.sendFailed': '메시지 전송에 실패했습니다. 잠시 후 다시 시도하세요.',
   'sess.sendFailedShort': '메시지 전송 실패',
+  'sess.sendRestoredDraft': '메시지가 전달되지 않아 초안으로 복원되었습니다.',
+  'sess.sendRestoredQueue': '메시지가 전달되지 않아 전송 대기열이 일시 중지되었습니다.',
   'sess.sentGoalSet': 'thread/goal/set status={status}를 보냈습니다.',
   'sess.sentMethod': '{method}를 보냈습니다.',
   'sess.serializeFailed': '메시지 직렬화 실패.',

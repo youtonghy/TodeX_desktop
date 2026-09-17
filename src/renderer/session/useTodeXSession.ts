@@ -1695,6 +1695,43 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     if (conversation?.v2ConversationId) await conversationRecoveryRef.current!.recover(conversation.v2ConversationId, conversation.workspaceId);
   }, []);
 
+  /** A lost prompt ACK leaves the submission 'unknown'. Replaying the journal
+   * settles it: a recorded turn binds its clientRequestId and flips the phase
+   * to 'running'; a complete replay without a match means the prompt never
+   * reached the backend, so the draft returns to the composer. */
+  const reconcilePendingSubmission = useCallback(async (conversationId: string) => {
+    const submission = pendingV2SubmissionsRef.current.get(conversationId);
+    if (submission?.phase !== 'unknown') return;
+    const settled = () => pendingV2SubmissionsRef.current.get(conversationId) !== submission
+      || submission.phase !== 'unknown' || Boolean(submission.turnId);
+    const unfinished = () => {
+      const v2Id = conversationsRef.current.find((item) => item.id === conversationId)?.v2ConversationId;
+      return !v2Id || (conversationRecoveryRef.current?.isRecovering(v2Id) ?? true);
+    };
+    await recoverConversation(conversationId);
+    if (settled() || unfinished()) return;
+    // The ACK can be lost while the backend is still journaling the prompt;
+    // allow one settle window before concluding it never arrived.
+    await new Promise((resolve) => setTimeout(resolve, 4000));
+    if (settled()) return;
+    await recoverConversation(conversationId);
+    if (settled() || unfinished()) return;
+    // A queued dispatch keeps its queue entry; only composer submissions are
+    // handed back as drafts.
+    const stillQueued = (queuedChatDraftsRef.current[conversationId] ?? []).some((item) => item.id === submission.requestId);
+    if (!stillQueued) restorePendingSubmission(conversationId);
+    pendingV2SubmissionsRef.current.delete(conversationId);
+    updateSentAttachmentRecords(sentAttachmentRecordsRef.current.filter((record) =>
+      record.conversationId !== conversationId || record.requestId !== submission.requestId || Boolean(record.eventId)));
+    setSubmissionStatusByConversation((current) => ({ ...current, [conversationId]: undefined }));
+    setConversationThinking(conversationId, false);
+    if ((queuedChatDraftsRef.current[conversationId] ?? []).length > 0) {
+      followUpsRef.current.pause(conversationId);
+      setQueuePausedByConversation((current) => ({ ...current, [conversationId]: true }));
+    }
+    setLastError(t(stillQueued ? 'sess.sendRestoredQueue' : 'sess.sendRestoredDraft'));
+  }, [recoverConversation, restorePendingSubmission, setConversationThinking, updateSentAttachmentRecords, setLastError]);
+
   useEffect(() => {
     conversationRecoveryRef.current?.reset();
     legacyRecoveryRef.current = new LegacyEventRecovery<ServerEvent>();
@@ -3295,6 +3332,11 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           if (foregroundConversation?.v2ConversationId) {
             void recoverConversation(foregroundConversation.id);
           }
+          // Prompt submissions whose ACK was lost are reconciled against the
+          // journal: delivered ones resume tracking, the rest return to drafts.
+          for (const [pendingId, pending] of pendingV2SubmissionsRef.current) {
+            if (pending.phase === 'unknown') void reconcilePendingSubmission(pendingId);
+          }
           void (async () => {
             await syncWorkspacesFromBackend();
             if (!isSocketCurrent()) return;
@@ -3408,7 +3450,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       setLastError(message);
       setConnectionHealth({ status: 'offline', latencyMs: null, lastCheckedAt: Date.now(), error: message, code: 'backend_unreachable' });
     });
-  }, [checkConnectionHealth, closeSocket, enqueueSocketFrame, flushQueuedProtocolCommands, getSessionCursorSnapshot, recoverConversation, refreshServerVersion, resumeQueuedFollowUps, sendRawProtocolFrame, sendSessionResume, settings, syncWorkspacesFromBackend]);
+  }, [checkConnectionHealth, closeSocket, enqueueSocketFrame, flushQueuedProtocolCommands, getSessionCursorSnapshot, recoverConversation, reconcilePendingSubmission, refreshServerVersion, resumeQueuedFollowUps, sendRawProtocolFrame, sendSessionResume, settings, syncWorkspacesFromBackend]);
 
   useEffect(() => {
     if (!hydrated || !autoConnectEnabled || manualDisconnectRef.current) {
@@ -4075,6 +4117,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           settleResolve = innerResolve;
           settleReject = innerReject;
         });
+        // The shared entry rejects even when no concurrent waiter attached;
+        // mark it handled so a timeout can't surface as an unhandled rejection.
+        void promise.catch(() => {});
         const timeoutId = setTimeout(() => {
           pendingLocalStartsRef.current.delete(conversation.id);
           updateConversation(conversation.id, { localAdapterState: 'error' });
@@ -5904,7 +5949,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           setSubmissionStatusByConversation((current) => ({ ...current, [conversation.id]: 'unknown' }));
           setLastError(error.message);
           setConversationThinking(conversation.id, false);
-          await recoverConversation(conversation.id);
+          await reconcilePendingSubmission(conversation.id);
           const latest = pendingV2SubmissionsRef.current.get(conversation.id);
           const v2Id = conversationsRef.current.find((item) => item.id === conversation.id)?.v2ConversationId;
           const terminal = v2Id && submission.turnId ? settledV2TurnsRef.current.get(`${v2Id}:${submission.turnId}`) : undefined;
@@ -5928,7 +5973,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         }
       }
     },
-    [updateSentAttachmentRecords, getConversationContext, materializeV2Conversation, recoverConversation, promptContentFromAttachments, promptSkillsFromAttachments, sendProtocolCommand, setConversationAttachments, setConversationChatDraft, setConversationSelectedSkills, setConversationThinking, settings.defaultModel, updateConversation, autoConnectEnabled, connect],
+    [updateSentAttachmentRecords, getConversationContext, materializeV2Conversation, reconcilePendingSubmission, promptContentFromAttachments, promptSkillsFromAttachments, sendProtocolCommand, setConversationAttachments, setConversationChatDraft, setConversationSelectedSkills, setConversationThinking, settings.defaultModel, updateConversation, autoConnectEnabled, connect],
   );
 
   const sendLocalTurn = useCallback(
@@ -7638,6 +7683,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     recoveringConversations,
     submissionStatusByConversation,
     recoverConversation,
+    reconcilePendingSubmission,
     memoryEntriesByConversation,
     usageRecords,
     pendingRequests,

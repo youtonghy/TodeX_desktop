@@ -1080,6 +1080,8 @@ export const ja: Messages = {
   'sess.resumeNeedsMessage': '明示的な後続メッセージを送信して会話を続けてください。現在の Agent は独立した再開操作に対応していません。',
   'sess.sendFailed': 'メッセージの送信に失敗しました。後で再試行してください。',
   'sess.sendFailedShort': 'メッセージの送信に失敗しました',
+  'sess.sendRestoredDraft': 'メッセージは配信されず、下書きに復元されました。',
+  'sess.sendRestoredQueue': 'メッセージは配信されず、送信キューが一時停止されました。',
   'sess.sentGoalSet': 'thread/goal/set status={status} を送信しました。',
   'sess.sentMethod': '{method} を送信しました。',
   'sess.serializeFailed': 'メッセージのシリアライズに失敗しました。',

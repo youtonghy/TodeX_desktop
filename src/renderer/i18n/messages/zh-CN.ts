@@ -1080,6 +1080,8 @@ export const zhCN = {
   'sess.resumeNeedsMessage': '请发送明确的后续消息继续对话；当前 Agent 不支持独立恢复操作。',
   'sess.sendFailed': '消息发送失败，请稍后重试。',
   'sess.sendFailedShort': '消息发送失败',
+  'sess.sendRestoredDraft': '消息未送达，已恢复为草稿。',
+  'sess.sendRestoredQueue': '消息未送达，待发送队列已暂停。',
   'sess.sentGoalSet': '已发送 thread/goal/set status={status}。',
   'sess.sentMethod': '已发送 {method}。',
   'sess.serializeFailed': '消息序列化失败。',

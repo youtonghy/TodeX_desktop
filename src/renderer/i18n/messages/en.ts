@@ -1080,6 +1080,8 @@ export const en: Messages = {
   'sess.resumeNeedsMessage': 'Send an explicit follow-up message to continue; the current Agent does not support a standalone resume.',
   'sess.sendFailed': 'Failed to send the message. Please try again later.',
   'sess.sendFailedShort': 'Failed to send the message',
+  'sess.sendRestoredDraft': 'The message was not delivered and has been restored to the draft.',
+  'sess.sendRestoredQueue': 'The message was not delivered; the send queue has been paused.',
   'sess.sentGoalSet': 'Sent thread/goal/set status={status}.',
   'sess.sentMethod': 'Sent {method}.',
   'sess.serializeFailed': 'Failed to serialize the message.',
