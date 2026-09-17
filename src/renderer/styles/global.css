@@ -1129,17 +1129,19 @@ body {
   padding-left: 84px;
 }
 
-/* AppLayout side panels size through inline flex-grow (react-resizable-panels).
-   The transition is gated on [data-panel-motion], which App sets only around
-   programmatic open/close, so separator drags and window resizes stay instant. */
-[data-panel-motion='true'] .app-layout__sidebar-panel,
-[data-panel-motion='true'] .app-layout__aside-panel {
+/* AppLayout side panels size through the outer [data-panel] element's inline
+   flex-grow (react-resizable-panels puts the panel class on an inner content
+   div). The transition is gated on [data-panel-motion], which App sets only
+   around programmatic open/close, so separator drags and window resizes stay
+   instant. */
+[data-panel-motion='true'] [data-panel]#app-layout-sidebar,
+[data-panel-motion='true'] [data-panel]#app-layout-aside {
   transition: flex-grow 0.24s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  [data-panel-motion='true'] .app-layout__sidebar-panel,
-  [data-panel-motion='true'] .app-layout__aside-panel {
+  [data-panel-motion='true'] [data-panel]#app-layout-sidebar,
+  [data-panel-motion='true'] [data-panel]#app-layout-aside {
     transition: none;
   }
 }
