@@ -364,6 +364,8 @@ export const zhCN = {
   'workbench.tabGitDiff': 'Git Diff',
   'workbench.newTab': '新建工作台标签',
   'workbench.closeTab': '关闭{title}',
+  'workbench.tabsHorizontal': '切换为横向标签栏',
+  'workbench.tabsVertical': '切换为竖排标签栏',
   'workbench.noTabs': '暂无打开的标签',
   'workbench.placeholderReadme': '# 工作区\n\n文件预览目前是前端占位。\n接入后端目录接口后，这里会显示真实文件内容。',
   'workbench.placeholderAgents': '# Agents\n\nTodeX 桌面端会在右侧面板预览工作区文件。\n当前后端文件接口尚未接入。',

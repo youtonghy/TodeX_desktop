@@ -364,6 +364,8 @@ export const ja: Messages = {
   'workbench.tabGitDiff': 'Git Diff',
   'workbench.newTab': '新しいワークベンチタブ',
   'workbench.closeTab': '{title} を閉じる',
+  'workbench.tabsHorizontal': 'タブを横並びにする',
+  'workbench.tabsVertical': 'タブを縦並びにする',
   'workbench.noTabs': '開いているタブはありません',
   'workbench.placeholderReadme': '# ワークスペース\n\nファイルプレビューは現在フロントエンドのプレースホルダーです。\nバックエンドのディレクトリ API に接続すると、ここに実際のファイル内容が表示されます。',
   'workbench.placeholderAgents': '# Agents\n\nTodeX デスクトップ版は右側パネルでワークスペースファイルをプレビューします。\n現在、バックエンドのファイル API は未接続です。',

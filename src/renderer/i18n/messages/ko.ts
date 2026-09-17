@@ -364,6 +364,8 @@ export const ko: Messages = {
   'workbench.tabGitDiff': 'Git Diff',
   'workbench.newTab': '새 워크벤치 탭',
   'workbench.closeTab': '{title} 닫기',
+  'workbench.tabsHorizontal': '가로 탭으로 전환',
+  'workbench.tabsVertical': '세로 탭으로 전환',
   'workbench.noTabs': '열린 탭이 없습니다',
   'workbench.placeholderReadme': '# 워크스페이스\n\n파일 미리보기는 현재 프론트엔드 플레이스홀더입니다.\n백엔드 디렉터리 API가 연결되면 여기에 실제 파일 내용이 표시됩니다.',
   'workbench.placeholderAgents': '# Agents\n\nTodeX 데스크톱 앱은 오른쪽 패널에서 워크스페이스 파일을 미리 봅니다.\n현재 백엔드 파일 API는 연결되지 않았습니다.',

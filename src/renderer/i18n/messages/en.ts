@@ -364,6 +364,8 @@ export const en: Messages = {
   'workbench.tabGitDiff': 'Git Diff',
   'workbench.newTab': 'New workbench tab',
   'workbench.closeTab': 'Close {title}',
+  'workbench.tabsHorizontal': 'Switch to horizontal tabs',
+  'workbench.tabsVertical': 'Switch to vertical tabs',
   'workbench.noTabs': 'No open tabs',
   'workbench.placeholderReadme': '# Workspace\n\nFile preview is currently a frontend placeholder.\nReal file contents will appear here once the backend directory API is connected.',
   'workbench.placeholderAgents': '# Agents\n\nThe TodeX desktop app previews workspace files in the side panel.\nThe backend file API is not connected yet.',

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { MouseEvent as ReactMouseEvent, ReactNode, RefObject } from 'react';
-import { RiAppsLine, RiCloseLine, RiTerminalBoxLine, RiGitBranchLine, RiAddLine, RiArrowLeftDoubleLine, RiArrowRightDoubleLine, RiExternalLinkLine, RiFileTextLine, RiFolder3Line, RiFolderOpenLine, RiGlobalLine, RiFocus3Line, RiRefreshLine, RiStopCircleLine } from '@remixicon/react';
+import { RiAppsLine, RiCloseLine, RiTerminalBoxLine, RiGitBranchLine, RiAddLine, RiArrowLeftDoubleLine, RiArrowRightDoubleLine, RiExternalLinkLine, RiFileTextLine, RiFolder3Line, RiFolderOpenLine, RiGlobalLine, RiFocus3Line, RiLayoutColumnLine, RiLayoutRowLine, RiRefreshLine, RiStopCircleLine } from '@remixicon/react';
 import { Button, Chip, Dropdown, Input, Label, Popover, ScrollShadow, Spinner, TextField, Tooltip, toast } from '@heroui/react';
 import type { Selection } from '@heroui/react';
 import { ContextMenu as HeroContextMenu, FileTree } from '@heroui-pro/react';
@@ -60,6 +60,10 @@ const WORKBENCH_ICONS = {
   'git-diff': RiGitBranchLine,
 };
 
+type WorkbenchTabAxis = 'horizontal' | 'vertical';
+
+const WORKBENCH_TAB_AXIS_KEY = `${SETTINGS_STORAGE_KEY}.workbenchTabAxis.v1`;
+
 function parseStoredWorkbenchState(value: unknown): StoredWorkbenchState {
   if (!value || typeof value !== 'object') return { items: [], activeId: '' };
   const candidate = value as Partial<StoredWorkbenchState>;
@@ -106,6 +110,7 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
   const [items, setItems] = useState<WorkbenchItem[]>([]);
   const [activeId, setActiveId] = useState('');
   const [restored, setRestored] = useState(false);
+  const [axis, setAxis] = useState<WorkbenchTabAxis>('vertical');
   const requestedTargetRef = useRef(target);
   const openedTargetRef = useRef<{ target: OpenPanelOptions; tab: WorkbenchTab } | null>(null);
   requestedTargetRef.current = target;
@@ -204,61 +209,128 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
     return () => { closeRequestRef.current = () => false; };
   }, [closeRequestRef, closeActiveTab]);
 
-  return (
-    <div className="flex h-full min-h-0">
-      <div className="flex w-11 shrink-0 flex-col items-center gap-0.5 overflow-y-auto border-r border-separator py-1">
-        {items.map((item) => {
-          const Icon = WORKBENCH_ICONS[item.type];
-          const workspacePath = session.activeWorkspace?.path;
-          const location = item.type === 'terminal'
-            ? session.terminalById[terminalIdForConversation(scopeKey, item.id)]?.cwd || workspacePath
-            : item.type === 'browser'
-              ? item.target?.url || item.target?.filePath || 'http://127.0.0.1:7345'
-              : item.target?.filePath || workspacePath;
-          const title = location ? `${workbenchLabel(item.type)} ${location}` : item.title;
-          const isActive = item.id === activeId;
-          return (
-            <div key={item.id} className="group relative flex size-10 shrink-0 items-center justify-center">
-              <Tooltip delay={200}>
-                <Button
-                  isIconOnly variant="ghost" aria-label={title} aria-pressed={isActive}
-                  className={`size-9 min-w-9 rounded-lg ${isActive ? 'bg-surface-secondary text-foreground' : 'text-muted'}`}
-                  onPress={() => { setActiveId(item.id); onTabChange(item.type); }}
-                >
-                  <Icon aria-hidden="true" className={`size-4 transition-opacity group-hover:opacity-0 group-focus-within:opacity-0${isActive ? ' [@media(hover:none)]:opacity-0' : ''}`} />
-                </Button>
-                <Tooltip.Content placement="right" className="max-w-sm break-all text-xs">
-                  {title}
-                </Tooltip.Content>
-              </Tooltip>
-              <Button
-                isIconOnly size="sm" variant="ghost" aria-label={t('workbench.closeTab', { title })}
-                className={`pointer-events-none absolute inset-0 m-auto size-6 min-w-6 rounded-md text-muted opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100${isActive ? ' [@media(hover:none)]:pointer-events-auto [@media(hover:none)]:opacity-100' : ''}`}
-                onPress={() => closeTab(item.id)}
-              >
-                <RiCloseLine aria-hidden="true" className="size-4" />
-              </Button>
-            </div>
-          );
-        })}
-        <Dropdown>
-          <Dropdown.Trigger
-            isDisabled={!restored} aria-label={t('workbench.newTab')}
-            className="inline-flex size-8 items-center justify-center rounded-lg text-muted hover:text-foreground hover:bg-surface-secondary transition-colors cursor-pointer"
+  useEffect(() => {
+    let cancelled = false;
+    void window.todexDesktop.store.get(WORKBENCH_TAB_AXIS_KEY)
+      .then((value) => {
+        if (!cancelled && (value === 'horizontal' || value === 'vertical')) setAxis(value);
+      })
+      .catch((reason) => {
+        console.error('Failed to restore workbench tab axis', reason);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  const vertical = axis === 'vertical';
+  const axisLabel = vertical ? t('workbench.tabsHorizontal') : t('workbench.tabsVertical');
+  const toggleAxis = () => {
+    const next: WorkbenchTabAxis = vertical ? 'horizontal' : 'vertical';
+    setAxis(next);
+    void window.todexDesktop.store.set(WORKBENCH_TAB_AXIS_KEY, next)
+      .catch((reason) => {
+        console.error('Failed to persist workbench tab axis', reason);
+      });
+  };
+
+  const tabStrip = items.map((item) => {
+    const Icon = WORKBENCH_ICONS[item.type];
+    const workspacePath = session.activeWorkspace?.path;
+    const location = item.type === 'terminal'
+      ? session.terminalById[terminalIdForConversation(scopeKey, item.id)]?.cwd || workspacePath
+      : item.type === 'browser'
+        ? item.target?.url || item.target?.filePath || 'http://127.0.0.1:7345'
+        : item.target?.filePath || workspacePath;
+    const title = location ? `${workbenchLabel(item.type)} ${location}` : item.title;
+    const isActive = item.id === activeId;
+    return (
+      <div
+        key={item.id}
+        className={vertical
+          ? 'group relative flex size-10 shrink-0 items-center justify-center'
+          : `group relative flex h-10 shrink-0 items-center border-r border-separator ${isActive ? 'bg-surface text-foreground' : 'text-muted'}`}
+      >
+        <Tooltip delay={200}>
+          <Button
+            isIconOnly variant="ghost" aria-label={title} aria-pressed={isActive}
+            className={vertical
+              ? `size-9 min-w-9 rounded-lg ${isActive ? 'bg-surface-secondary text-foreground' : 'text-muted'}`
+              : 'size-10 min-w-10 rounded-none text-inherit'}
+            onPress={() => { setActiveId(item.id); onTabChange(item.type); }}
           >
-            <RiAddLine className="size-4" />
-          </Dropdown.Trigger>
-          <Dropdown.Popover>
-            <Dropdown.Menu onAction={(key) => addTab(String(key) as WorkbenchTab)}>
-              <Dropdown.Item id="terminal" textValue={t('workbench.tabTerminal')}>{t('workbench.tabTerminal')}</Dropdown.Item>
-              <Dropdown.Item id="browser" textValue={t('workbench.tabBrowser')}>{t('workbench.tabBrowser')}</Dropdown.Item>
-              <Dropdown.Item id="files" textValue={t('workbench.tabFiles')}>{t('workbench.tabFiles')}</Dropdown.Item>
-              <Dropdown.Item id="git-diff" textValue="Git Diff">Git Diff</Dropdown.Item>
-            </Dropdown.Menu>
-          </Dropdown.Popover>
-        </Dropdown>
+            <Icon aria-hidden="true" className={`size-4 transition-opacity group-hover:opacity-0 group-focus-within:opacity-0${isActive ? ' [@media(hover:none)]:opacity-0' : ''}`} />
+          </Button>
+          <Tooltip.Content placement={vertical ? 'right' : 'bottom'} className="max-w-sm break-all text-xs">
+            {title}
+          </Tooltip.Content>
+        </Tooltip>
+        <Button
+          isIconOnly size="sm" variant="ghost" aria-label={t('workbench.closeTab', { title })}
+          className={`pointer-events-none absolute inset-0 m-auto size-6 min-w-6 rounded-md text-muted opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100${isActive ? ' [@media(hover:none)]:pointer-events-auto [@media(hover:none)]:opacity-100' : ''}`}
+          onPress={() => closeTab(item.id)}
+        >
+          <RiCloseLine aria-hidden="true" className="size-4" />
+        </Button>
       </div>
-      <div className="min-w-0 flex-1 overflow-hidden">
+    );
+  });
+
+  const newTabDropdown = (
+    <Dropdown>
+      <Dropdown.Trigger
+        isDisabled={!restored} aria-label={t('workbench.newTab')}
+        className="inline-flex size-8 items-center justify-center rounded-lg text-muted hover:text-foreground hover:bg-surface-secondary transition-colors cursor-pointer"
+      >
+        <RiAddLine className="size-4" />
+      </Dropdown.Trigger>
+      <Dropdown.Popover>
+        <Dropdown.Menu onAction={(key) => addTab(String(key) as WorkbenchTab)}>
+          <Dropdown.Item id="terminal" textValue={t('workbench.tabTerminal')}>{t('workbench.tabTerminal')}</Dropdown.Item>
+          <Dropdown.Item id="browser" textValue={t('workbench.tabBrowser')}>{t('workbench.tabBrowser')}</Dropdown.Item>
+          <Dropdown.Item id="files" textValue={t('workbench.tabFiles')}>{t('workbench.tabFiles')}</Dropdown.Item>
+          <Dropdown.Item id="git-diff" textValue="Git Diff">Git Diff</Dropdown.Item>
+        </Dropdown.Menu>
+      </Dropdown.Popover>
+    </Dropdown>
+  );
+
+  const axisToggle = (
+    <Tooltip delay={200}>
+      <Button
+        isIconOnly variant="ghost" aria-label={axisLabel}
+        className="inline-flex size-8 items-center justify-center rounded-lg text-muted hover:text-foreground hover:bg-surface-secondary transition-colors cursor-pointer"
+        onPress={toggleAxis}
+      >
+        {vertical ? <RiLayoutRowLine className="size-4" /> : <RiLayoutColumnLine className="size-4" />}
+      </Button>
+      <Tooltip.Content placement={vertical ? 'right' : 'bottom'} className="text-xs">
+        {axisLabel}
+      </Tooltip.Content>
+    </Tooltip>
+  );
+
+  return (
+    <div className={`flex h-full min-h-0${vertical ? '' : ' flex-col'}`}>
+      <div className={vertical
+        ? 'flex w-11 shrink-0 flex-col border-r border-separator'
+        : 'flex min-h-10 items-center border-b border-separator px-2'}
+      >
+        <div className={vertical
+          ? 'flex min-h-0 flex-1 flex-col items-center gap-0.5 overflow-y-auto py-1'
+          : 'flex min-w-0 flex-1 overflow-x-auto'}
+        >
+          {tabStrip}
+          {vertical ? newTabDropdown : null}
+        </div>
+        {vertical ? (
+          <div className="flex items-center justify-center py-1.5">{axisToggle}</div>
+        ) : (
+          <>
+            {newTabDropdown}
+            {axisToggle}
+          </>
+        )}
+      </div>
+      <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
         {!active ? (
           <div className="text-muted flex h-full items-center justify-center text-sm">{t('workbench.noTabs')}</div>
         ) : null}
