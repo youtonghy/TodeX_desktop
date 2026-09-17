@@ -248,6 +248,9 @@ function createWindow(): BrowserWindow {
     minHeight: 640,
     title: 'TodeX',
     icon: themedAppIconPath(),
+    // macOS keeps its traffic-light buttons overlaid on the page instead of a
+    // separate title bar, so the window reads as one unified surface.
+    ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset' as const } : {}),
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#12151c' : '#f4f7f8',
     webPreferences: {
       preload: join(__dirname, '../preload/index.cjs'),

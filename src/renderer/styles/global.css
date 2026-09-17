@@ -913,3 +913,26 @@ body {
 }
 .sidebar-chat-list .list-view__item.drop-before::after { top: -3px; }
 .sidebar-chat-list .list-view__item.drop-after::after { bottom: -3px; }
+
+/* Hidden title bar (macOS): window controls are overlaid on the page, so the
+   top strips double as drag regions and the traffic lights need clear space
+   at the top of the sidebar. */
+:root[data-window-chrome='hidden-inset'] [data-slot='sidebar-header'] {
+  padding-top: calc(var(--spacing, 0.25rem) * 8);
+}
+
+:root[data-window-chrome='hidden-inset'] [data-slot='navbar-header'],
+:root[data-window-chrome='hidden-inset'] [data-slot='sidebar-header'],
+:root[data-window-chrome='hidden-inset'] .window-drag {
+  -webkit-app-region: drag;
+}
+
+:root[data-window-chrome='hidden-inset'] :is([data-slot='navbar-header'], [data-slot='sidebar-header'], .window-drag) :is(button, a, input, select, textarea, [role='button'], [role='combobox'], [role='listbox'], [role='menu'], [role='tab'], [data-slot='navbar-content']),
+:root[data-window-chrome='hidden-inset'] .window-no-drag {
+  -webkit-app-region: no-drag;
+}
+
+/* With the sidebar collapsed the traffic lights sit over the navbar instead. */
+:root[data-window-chrome='hidden-inset'] [data-slot='navbar-header'].navbar--clear-lights {
+  padding-left: 84px;
+}

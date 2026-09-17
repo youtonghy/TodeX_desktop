@@ -145,6 +145,7 @@ export function App() {
     document.title = conversation ? `TodeX · ${conversation.title} · ${status}` : `TodeX · ${status}`;
   }, [session.activeConversation, session.connectionState]);
 
+  const insetChrome = window.todexDesktop.app.windowChrome === 'hidden-inset';
   const settingsOpen = panel === 'settings';
   const usageOpen = panel === 'usage';
   const aboutOpen = panel === 'about';
@@ -224,7 +225,7 @@ export function App() {
           }
           navbar={
             <Navbar maxWidth="full">
-              <Navbar.Header className="flex-nowrap gap-2 px-3 sm:px-6 [&>button]:shrink-0">
+              <Navbar.Header className={`flex-nowrap gap-2 px-3 sm:px-6 [&>button]:shrink-0${insetChrome && !sidebarOpen ? ' navbar--clear-lights' : ''}`}>
                 <AppLayout.MenuToggle className="inline-flex min-[769px]:hidden" aria-label={t('app.openSidebar')}><RiLayoutLeftLine className="size-4" /></AppLayout.MenuToggle>
                 <Button className="hidden min-[769px]:inline-flex" isIconOnly size="sm" variant="ghost" aria-label={sidebarOpen ? t('app.collapseSidebar') : t('app.expandSidebar')} onPress={() => persistSidebarOpen(!sidebarOpen)}>
                   <RiLayoutLeftLine className="size-4" />
@@ -246,7 +247,7 @@ export function App() {
         </AppLayout>
         )
       ) : (
-        <div className="flex h-full flex-col items-center justify-center gap-3">
+        <div className="window-drag flex h-full flex-col items-center justify-center gap-3">
           <AppIcon className="size-16" />
           <p className="text-lg font-semibold">TodeX</p>
           <p className="text-muted text-sm">{t('app.loadingSettings')}</p>

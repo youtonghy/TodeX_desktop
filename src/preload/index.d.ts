@@ -30,6 +30,7 @@ export type TodeXDesktopApi = {
   };
   app: {
     focus: () => void;
+    windowChrome: 'hidden-inset' | 'native';
   };
   locale: {
     set: (locale: string) => void;

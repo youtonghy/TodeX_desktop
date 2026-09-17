@@ -56,6 +56,7 @@ export function installBrowserDesktopBridge(): void {
     },
     app: {
       focus: () => window.focus(),
+      windowChrome: 'native' as const,
     },
     locale: {
       set: () => undefined,

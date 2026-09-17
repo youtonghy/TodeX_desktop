@@ -9,6 +9,10 @@ import './styles/global.css';
 installBrowserDesktopBridge();
 installRendererDebugLogging();
 
+// Expose the window chrome so CSS can reserve space for overlaid window
+// controls (macOS traffic lights) and mark drag regions.
+document.documentElement.dataset.windowChrome = window.todexDesktop.app.windowChrome;
+
 // Push the renderer locale to the main process so dialogs and the update
 // menu follow the in-app language choice.
 window.todexDesktop.locale.set(getLocale());

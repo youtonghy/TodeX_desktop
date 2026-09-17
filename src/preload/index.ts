@@ -53,6 +53,7 @@ const api = {
     focus: () => {
       ipcRenderer.send('window:focus');
     },
+    windowChrome: (process.platform === 'darwin' ? 'hidden-inset' : 'native') as 'hidden-inset' | 'native',
   },
   locale: {
     set: (locale: string) => {
