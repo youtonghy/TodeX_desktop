@@ -205,44 +205,42 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
   }, [closeRequestRef, closeActiveTab]);
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <div className="flex min-h-10 items-center border-b border-separator px-2">
-        <div className="flex min-w-0 flex-1 overflow-x-auto">
-          {items.map((item) => {
-            const Icon = WORKBENCH_ICONS[item.type];
-            const workspacePath = session.activeWorkspace?.path;
-            const location = item.type === 'terminal'
-              ? session.terminalById[terminalIdForConversation(scopeKey, item.id)]?.cwd || workspacePath
-              : item.type === 'browser'
-                ? item.target?.url || item.target?.filePath || 'http://127.0.0.1:7345'
-                : item.target?.filePath || workspacePath;
-            const title = location ? `${workbenchLabel(item.type)} ${location}` : item.title;
-            const isActive = item.id === activeId;
-            return (
-              <div key={item.id} className={`group relative flex h-10 shrink-0 items-center border-r border-separator ${isActive ? 'bg-surface text-foreground' : 'text-muted'}`}>
-                <Tooltip delay={200}>
-                  <Button
-                    isIconOnly variant="ghost" aria-label={title} aria-pressed={isActive}
-                    className="size-10 min-w-10 rounded-none text-inherit"
-                    onPress={() => { setActiveId(item.id); onTabChange(item.type); }}
-                  >
-                    <Icon aria-hidden="true" className={`size-4 transition-opacity group-hover:opacity-0 group-focus-within:opacity-0${isActive ? ' [@media(hover:none)]:opacity-0' : ''}`} />
-                  </Button>
-                  <Tooltip.Content placement="bottom" className="max-w-sm break-all text-xs">
-                    {title}
-                  </Tooltip.Content>
-                </Tooltip>
+    <div className="flex h-full min-h-0">
+      <div className="flex w-11 shrink-0 flex-col items-center gap-0.5 overflow-y-auto border-r border-separator py-1">
+        {items.map((item) => {
+          const Icon = WORKBENCH_ICONS[item.type];
+          const workspacePath = session.activeWorkspace?.path;
+          const location = item.type === 'terminal'
+            ? session.terminalById[terminalIdForConversation(scopeKey, item.id)]?.cwd || workspacePath
+            : item.type === 'browser'
+              ? item.target?.url || item.target?.filePath || 'http://127.0.0.1:7345'
+              : item.target?.filePath || workspacePath;
+          const title = location ? `${workbenchLabel(item.type)} ${location}` : item.title;
+          const isActive = item.id === activeId;
+          return (
+            <div key={item.id} className="group relative flex size-10 shrink-0 items-center justify-center">
+              <Tooltip delay={200}>
                 <Button
-                  isIconOnly size="sm" variant="ghost" aria-label={t('workbench.closeTab', { title })}
-                  className={`pointer-events-none absolute inset-0 m-auto size-6 min-w-6 rounded-md text-muted opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100${isActive ? ' [@media(hover:none)]:pointer-events-auto [@media(hover:none)]:opacity-100' : ''}`}
-                  onPress={() => closeTab(item.id)}
+                  isIconOnly variant="ghost" aria-label={title} aria-pressed={isActive}
+                  className={`size-9 min-w-9 rounded-lg ${isActive ? 'bg-surface-secondary text-foreground' : 'text-muted'}`}
+                  onPress={() => { setActiveId(item.id); onTabChange(item.type); }}
                 >
-                  <RiCloseLine aria-hidden="true" className="size-4" />
+                  <Icon aria-hidden="true" className={`size-4 transition-opacity group-hover:opacity-0 group-focus-within:opacity-0${isActive ? ' [@media(hover:none)]:opacity-0' : ''}`} />
                 </Button>
-              </div>
-            );
-          })}
-        </div>
+                <Tooltip.Content placement="right" className="max-w-sm break-all text-xs">
+                  {title}
+                </Tooltip.Content>
+              </Tooltip>
+              <Button
+                isIconOnly size="sm" variant="ghost" aria-label={t('workbench.closeTab', { title })}
+                className={`pointer-events-none absolute inset-0 m-auto size-6 min-w-6 rounded-md text-muted opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100${isActive ? ' [@media(hover:none)]:pointer-events-auto [@media(hover:none)]:opacity-100' : ''}`}
+                onPress={() => closeTab(item.id)}
+              >
+                <RiCloseLine aria-hidden="true" className="size-4" />
+              </Button>
+            </div>
+          );
+        })}
         <Dropdown>
           <Dropdown.Trigger
             isDisabled={!restored} aria-label={t('workbench.newTab')}
@@ -260,7 +258,7 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
           </Dropdown.Popover>
         </Dropdown>
       </div>
-      <div className="min-h-0 flex-1 overflow-hidden">
+      <div className="min-w-0 flex-1 overflow-hidden">
         {!active ? (
           <div className="text-muted flex h-full items-center justify-center text-sm">{t('workbench.noTabs')}</div>
         ) : null}
