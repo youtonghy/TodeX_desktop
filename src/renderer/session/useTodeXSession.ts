@@ -7577,27 +7577,43 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     [serverVersion],
   );
 
-  /** Fetch the full events covering an expanded folded group and merge them
-   * into the projected timeline. Rejects when the backend cannot be read so
-   * the UI can offer a retry. */
-  const hydrateProcessGroup = useCallback(async (conversationId: string, fromSequence: number, toSequence: number) => {
+  /** Fetch the full events covering an expanded folded group's stub sequences
+   * and merge them into the projected timeline. Stubs are batched into
+   * contiguous ranges so sparse groups skip unrelated payloads. Rejects when
+   * the backend cannot be read so the UI can offer a retry. */
+  const hydrateProcessGroup = useCallback(async (conversationId: string, sequences: readonly number[]) => {
     const conversation = conversationsRef.current.find((item) => item.id === conversationId);
     const v2Id = conversation?.v2ConversationId ?? conversationId;
     const api = new V2ApiClient({ serverUrl: settings.serverUrl, device: deviceIdentityFromSecret(settings.deviceSecret) });
+    const ordered = [...new Set(sequences.filter((sequence) => Number.isFinite(sequence) && sequence > 0))]
+      .sort((left, right) => left - right);
+    if (!ordered.length) return false;
     const events: ConversationEvent[] = [];
-    let cursor = fromSequence - 1;
-    while (cursor < toSequence) {
-      const page = await api.replayEvents(v2Id, cursor, Math.min(500, toSequence - cursor));
-      let reached = false;
-      for (const event of page.events) {
-        if (event.sequence > cursor && event.sequence <= toSequence) {
-          events.push(event);
-          cursor = event.sequence;
-          reached = true;
+    const fetchRange = async (fromSequence: number, toSequence: number) => {
+      let cursor = fromSequence - 1;
+      while (cursor < toSequence) {
+        const page = await api.replayEvents(v2Id, cursor, Math.min(500, toSequence - cursor));
+        let reached = false;
+        for (const event of page.events) {
+          if (event.sequence > cursor && event.sequence <= toSequence) {
+            events.push(event);
+            cursor = event.sequence;
+            reached = true;
+          }
         }
+        if (!reached || !page.hasMore) break;
       }
-      if (!reached || !page.hasMore) break;
+    };
+    let start = ordered[0];
+    let previous = ordered[0];
+    for (const sequence of ordered.slice(1)) {
+      if (sequence > previous + 1) {
+        await fetchRange(start, previous);
+        start = sequence;
+      }
+      previous = sequence;
     }
+    await fetchRange(start, previous);
     return events.length > 0
       && (conversationRecoveryRef.current?.hydrate(v2Id, conversation?.workspaceId ?? '', events) ?? false);
   }, [settings.serverUrl, settings.deviceSecret]);

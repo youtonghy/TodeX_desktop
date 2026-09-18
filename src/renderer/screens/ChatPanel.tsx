@@ -55,6 +55,7 @@ type Props = {
 
 const MAX_COMPOSER_IMAGE_BYTES = 2_500_000;
 const MAX_COMPOSER_TEXT_BYTES = 512 * 1024;
+const HYDRATE_DEBOUNCE_MS = 200;
 // Clipboard text longer than this becomes a capsule attachment instead of
 // flooding the composer.
 const PASTED_TEXT_MAX_LINES = 5;
@@ -309,25 +310,45 @@ const ChatTimelineItem = memo(function ChatTimelineItem({
   session,
 }: ChatTimelineItemProps) {
   const t = useT();
+  // Folded-group detail fetches are debounced and single-flight per group:
+  // rapid toggles coalesce into one request, and a started request keeps
+  // running after the group folds again so the content is already merged
+  // back when the user expands it next.
+  const detailFetchRef = useRef<{ timer?: ReturnType<typeof setTimeout>; inflight?: boolean }>({});
+  const itemRef = useRef(item);
+  itemRef.current = item;
+  useEffect(() => () => {
+    const control = detailFetchRef.current;
+    if (control.timer) clearTimeout(control.timer);
+  }, []);
   if (item.type === 'executionGroup') {
     const hasStubs = item.entries.some((entry) => entry.detailStub);
     /** Folded groups fetched as summary stubs load their full events on expand;
      * a failed load keeps a retryable error state per group. */
     const requestDetails = () => {
-      const sequences = item.entries
-        .filter((entry) => entry.detailStub)
-        .map((entry) => entry.sequence ?? 0)
-        .filter((sequence) => sequence > 0);
-      if (!sequences.length || groupLoadState === 'loading') return;
-      setProcessGroupLoad((current) => ({ ...current, [item.id]: 'loading' }));
-      void onHydrateGroup(conversationId, Math.min(...sequences), Math.max(...sequences))
-        .then((hydrated) => setProcessGroupLoad((current) => {
-          const next = { ...current };
-          if (hydrated) delete next[item.id];
-          else next[item.id] = 'error';
-          return next;
-        }))
-        .catch(() => setProcessGroupLoad((current) => ({ ...current, [item.id]: 'error' })));
+      const control = detailFetchRef.current;
+      if (control.inflight || control.timer) return;
+      control.timer = setTimeout(() => {
+        control.timer = undefined;
+        const latest = itemRef.current;
+        if (latest.type !== 'executionGroup') return;
+        const sequences = latest.entries
+          .filter((entry) => entry.detailStub)
+          .map((entry) => entry.sequence ?? 0)
+          .filter((sequence) => sequence > 0);
+        if (!sequences.length) return;
+        control.inflight = true;
+        setProcessGroupLoad((current) => ({ ...current, [item.id]: 'loading' }));
+        void onHydrateGroup(conversationId, sequences)
+          .then((hydrated) => setProcessGroupLoad((current) => {
+            const next = { ...current };
+            if (hydrated) delete next[item.id];
+            else next[item.id] = 'error';
+            return next;
+          }))
+          .catch(() => setProcessGroupLoad((current) => ({ ...current, [item.id]: 'error' })))
+          .finally(() => { control.inflight = false; });
+      }, HYDRATE_DEBOUNCE_MS);
     };
     return (
       <ChainOfThought

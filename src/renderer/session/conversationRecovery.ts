@@ -82,8 +82,11 @@ export class ConversationRecovery {
 
   /** Merge full events fetched on demand into a summary-replayed runtime.
    * Only folded step entries merge back; hydration never rewinds cursors. */
-  hydrate(conversationId: string, workspaceId: string, events: readonly ConversationEvent[]): boolean {
-    const state = this.states.get(conversationId) ?? createConversationRuntime(conversationId, workspaceId);
+  hydrate(conversationId: string, _workspaceId: string, events: readonly ConversationEvent[]): boolean {
+    // Hydration merges into the committed runtime only; fabricating one from a
+    // partial range would replace the rendered timeline with group contents.
+    const state = this.states.get(conversationId);
+    if (!state) return false;
     const next = hydrateConversationRuntimeEvents(state, events);
     if (next === state) return false;
     this.states.set(conversationId, next);
