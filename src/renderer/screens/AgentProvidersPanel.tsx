@@ -55,7 +55,6 @@ export function AgentProvidersPanel({ session }: { session: TodeXSession }) {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string>();
   const [editor, setEditor] = useState<EditorState>(null);
-  const [modelChoice, setModelChoice] = useState<Record<string, string>>({});
   const requestGeneration = useRef(0);
   const api = useCallback(() => new V2ApiClient({
     serverUrl: session.settings.serverUrl,
@@ -102,10 +101,8 @@ export function AgentProvidersPanel({ session }: { session: TodeXSession }) {
   };
 
   const activate = (profile: AgentProviderProfile) => {
-    const settings = profile.settingsConfig as Record<string, unknown>;
-    const modelId = modelChoice[profile.id] ?? providerModelIds(agent, settings)[0];
     void run(`activate:${profile.id}`,
-      () => api().activateAgentProvider(agent, profile.id, modelId), 'ap.activated');
+      () => api().activateAgentProvider(agent, profile.id), 'ap.activated');
   };
 
   const remove = (profile: AgentProviderProfile) => {
@@ -116,8 +113,10 @@ export function AgentProvidersPanel({ session }: { session: TodeXSession }) {
   };
 
   const activeBackend = session.backendConnections.find((item) => item.id === session.activeBackendConnectionId);
+  const additiveAgent = agent === 'pi' || agent === 'opencode';
   const additive = bucket?.mode === 'additive';
   const live = bucket?.live;
+  const liveSelection = live?.kind === 'additive' ? live.selection : null;
   const unmanaged = live?.kind === 'additive' ? live.unmanagedProviders : [];
   const unmanagedNodes = live?.kind === 'additive' ? live.providers : {};
   const liveMismatch = live?.kind === 'exclusive' && live.configured && !live.matchesCurrent;
@@ -137,7 +136,7 @@ export function AgentProvidersPanel({ session }: { session: TodeXSession }) {
         </Button>
       </div>
 
-      <p className="text-muted -mt-2 text-xs">{t('ap.globalNote')}</p>
+      <p className="text-muted -mt-2 text-xs">{t(additiveAgent ? 'ap.globalNoteAdditive' : 'ap.globalNote')}</p>
 
       <div className="flex flex-wrap gap-2">
         {MANAGED_PROVIDER_AGENTS.map((id) => (
@@ -169,7 +168,9 @@ export function AgentProvidersPanel({ session }: { session: TodeXSession }) {
           <div className="grid gap-3">
             {bucket.providers.map((profile) => {
               const settings = profile.settingsConfig as Record<string, unknown>;
-              const isCurrent = bucket.currentProviderId === profile.id;
+              const isCurrent = !additive && bucket.currentProviderId === profile.id;
+              const isDefault = liveSelection?.providerId === profile.id;
+              const defaultModelId = isDefault ? liveSelection?.modelId : null;
               const modelIds = providerModelIds(agent, settings);
               return (
                 <Card key={profile.id} className="min-w-0 rounded-lg p-4">
@@ -181,8 +182,19 @@ export function AgentProvidersPanel({ session }: { session: TodeXSession }) {
                       <div className="flex flex-wrap items-center gap-2">
                         <h3 className="truncate text-sm font-semibold">{profile.name}</h3>
                         {isCurrent ? <Chip size="sm" variant="soft" color="success">{t('ap.active')}</Chip> : null}
+                        {isDefault ? <Chip size="sm" variant="soft" color="success">{t('ap.default')}</Chip> : null}
                       </div>
                       <p className="text-muted mt-1 truncate text-xs">{providerBaseUrl(agent, settings) || profile.id}</p>
+                      {additive && modelIds.length ? (
+                        <div className="mt-2 flex flex-wrap gap-1">
+                          {modelIds.map((modelId) => (
+                            <Chip key={modelId} size="sm" variant="soft"
+                              color={modelId === defaultModelId ? 'success' : undefined}>
+                              {modelId}
+                            </Chip>
+                          ))}
+                        </div>
+                      ) : null}
                     </div>
                     <div className="flex shrink-0 items-center gap-1">
                       <Button isIconOnly size="sm" variant="ghost" aria-label={t('ap.edit')}
@@ -196,26 +208,7 @@ export function AgentProvidersPanel({ session }: { session: TodeXSession }) {
                     </div>
                   </div>
                   <div className="mt-3 flex flex-wrap items-center gap-2">
-                    {additive && modelIds.length > 1 ? (
-                      <Select
-                        className="w-44"
-                        selectedKey={modelChoice[profile.id] ?? modelIds[0]}
-                        onSelectionChange={(key) => {
-                          if (typeof key === 'string') setModelChoice((current) => ({ ...current, [profile.id]: key }));
-                        }}
-                      >
-                        <Label className="sr-only">{t('ap.model')}</Label>
-                        <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
-                        <Select.Popover>
-                          <ListBox>
-                            {modelIds.map((id) => (
-                              <ListBox.Item key={id} id={id} textValue={id}>{id}</ListBox.Item>
-                            ))}
-                          </ListBox>
-                        </Select.Popover>
-                      </Select>
-                    ) : null}
-                    {!isCurrent ? (
+                    {!additive && !isCurrent ? (
                       <Button size="sm" variant="primary" isDisabled={Boolean(busy)}
                         onPress={() => activate(profile)}>
                         {busy === `activate:${profile.id}` ? <Spinner size="sm" /> : <RiCheckLine className="size-4" />}
@@ -232,7 +225,7 @@ export function AgentProvidersPanel({ session }: { session: TodeXSession }) {
               const nodeSettings = asRecord(unmanagedNodes[nodeId]);
               const nodeBaseUrl = providerBaseUrl(agent, nodeSettings);
               const nodeModels = providerModelIds(agent, nodeSettings);
-              const isLiveSelection = live?.kind === 'additive' && live.selection?.providerId === nodeId;
+              const isLiveSelection = liveSelection?.providerId === nodeId;
               return (
                 <Card key={nodeId} className="min-w-0 rounded-lg border-dashed p-4">
                   <div className="flex items-start gap-3">
@@ -240,7 +233,7 @@ export function AgentProvidersPanel({ session }: { session: TodeXSession }) {
                       <div className="flex flex-wrap items-center gap-2">
                         <h3 className="truncate text-sm font-semibold">{nodeId}</h3>
                         <Chip size="sm" variant="soft">{t('ap.unmanaged')}</Chip>
-                        {isLiveSelection ? <Chip size="sm" variant="soft" color="success">{t('ap.active')}</Chip> : null}
+                        {isLiveSelection ? <Chip size="sm" variant="soft" color="success">{t('ap.default')}</Chip> : null}
                       </div>
                       {nodeBaseUrl ? (
                         <p className="text-muted mt-1 truncate text-xs">{nodeBaseUrl}</p>
@@ -248,7 +241,10 @@ export function AgentProvidersPanel({ session }: { session: TodeXSession }) {
                       {nodeModels.length ? (
                         <div className="mt-2 flex flex-wrap gap-1">
                           {nodeModels.map((modelId) => (
-                            <Chip key={modelId} size="sm" variant="soft">{modelId}</Chip>
+                            <Chip key={modelId} size="sm" variant="soft"
+                              color={isLiveSelection && liveSelection?.modelId === modelId ? 'success' : undefined}>
+                              {modelId}
+                            </Chip>
                           ))}
                         </div>
                       ) : null}
