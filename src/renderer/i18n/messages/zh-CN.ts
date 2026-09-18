@@ -1201,6 +1201,8 @@ export const zhCN = {
   'ap.apiKind': 'API 类型',
   'ap.models': '模型',
   'ap.modelsHint': '逗号分隔的模型 ID',
+  'ap.addModel': '添加模型',
+  'ap.addModelPlaceholder': '输入模型 ID，回车添加',
   'ap.nameIdRequired': '名称与供应商 ID 必填',
   'ap.jsonInvalid': '配置必须是 JSON 对象',
 

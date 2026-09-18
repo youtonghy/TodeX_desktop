@@ -1201,6 +1201,8 @@ export const en: Messages = {
   'ap.apiKind': 'API type',
   'ap.models': 'Models',
   'ap.modelsHint': 'Comma-separated model IDs',
+  'ap.addModel': 'Add model',
+  'ap.addModelPlaceholder': 'Type model IDs and press Enter',
   'ap.nameIdRequired': 'Name and provider ID are required',
   'ap.jsonInvalid': 'Settings config must be a JSON object',
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Card, Chip, Input, Label, ListBox, Select, Spinner, TextArea, TextField, toast } from '@heroui/react';
 import { RiAddLine, RiCheckLine, RiDeleteBinLine, RiEdit2Line, RiListCheck2, RiRefreshLine, RiUserSettingsLine } from '@remixicon/react';
 import {
@@ -18,6 +18,7 @@ import {
   asRecord,
   buildSettingsConfig,
   extractFormValues,
+  modelIdsFromText,
   providerBaseUrl,
   providerModelIds,
   type ProviderConfigSource,
@@ -31,6 +32,21 @@ type EditorState =
   | { kind: 'edit'; profile: AgentProviderProfile }
   | { kind: 'adopt'; nodeId: string }
   | null;
+
+/// `api` values pi supports in models.json (built-in APIs plus gateway
+/// protocols); extension-registered customs stay possible via JSON mode.
+const PI_API_KINDS = [
+  'openai-completions',
+  'openai-responses',
+  'azure-openai-responses',
+  'openai-codex-responses',
+  'anthropic-messages',
+  'google-generative-ai',
+  'google-vertex',
+  'mistral-conversations',
+  'bedrock-converse-stream',
+  'pi-messages',
+];
 
 export function AgentProvidersPanel({ session }: { session: TodeXSession }) {
   const t = useT();
@@ -252,6 +268,7 @@ export function AgentProvidersPanel({ session }: { session: TodeXSession }) {
 
           {editor ? (
             <ProviderEditor
+              session={session}
               agent={agent}
               editor={editor}
               unmanagedNodes={unmanagedNodes}
@@ -319,6 +336,7 @@ function FetchModelsButton({ session, agent, id }: { session: TodeXSession; agen
 }
 
 function ProviderEditor({
+  session,
   agent,
   editor,
   unmanagedNodes,
@@ -326,6 +344,7 @@ function ProviderEditor({
   onCancel,
   onSave,
 }: {
+  session: TodeXSession;
   agent: ManagedProviderAgent;
   editor: Exclude<EditorState, null>;
   unmanagedNodes: Record<string, unknown>;
@@ -360,6 +379,26 @@ function ProviderEditor({
   const isClaude = agent === 'claude-code';
   const isCodex = agent === 'codex';
   const isAdditive = agent === 'pi' || agent === 'opencode';
+
+  const apiKindOptions =
+    form.apiKind && !PI_API_KINDS.includes(form.apiKind)
+      ? [...PI_API_KINDS, form.apiKind]
+      : PI_API_KINDS;
+
+  // The backend resolves masked secrets against the stored profile or the
+  // live additive node of the same id, so this works pre-save in all modes.
+  const fetchEditorModels = async () => {
+    const client = new V2ApiClient({
+      serverUrl: session.settings.serverUrl,
+      device: deviceIdentityFromSecret(session.settings.deviceSecret),
+    });
+    const response = await client.previewAgentProviderModels(
+      agent,
+      id.trim() || 'preview',
+      buildSettingsConfig(agent, form, baseSource),
+    );
+    return response.models;
+  };
 
   const save = () => {
     const name = form.name.trim();
@@ -428,10 +467,34 @@ function ProviderEditor({
               <Field label={t('ap.reasoningEffort')} value={form.reasoningEffort} onChange={(reasoningEffort) => updateForm({ reasoningEffort })} />
             ) : null}
             {agent === 'pi' ? (
-              <Field label={t('ap.apiKind')} value={form.apiKind} onChange={(apiKind) => updateForm({ apiKind })} description="openai-completions / anthropic-messages / …" />
+              <Select
+                className="w-full"
+                selectedKey={form.apiKind || null}
+                onSelectionChange={(key) => {
+                  if (typeof key === 'string') updateForm({ apiKind: key });
+                }}
+              >
+                <Label>{t('ap.apiKind')}</Label>
+                <Select.Trigger className="w-full"><Select.Value /><Select.Indicator /></Select.Trigger>
+                <Select.Popover>
+                  <ListBox>
+                    {apiKindOptions.map((kind) => (
+                      <ListBox.Item key={kind} id={kind} textValue={kind}>
+                        {kind}
+                        <ListBox.ItemIndicator />
+                      </ListBox.Item>
+                    ))}
+                  </ListBox>
+                </Select.Popover>
+              </Select>
             ) : null}
             {isAdditive ? (
-              <Field label={t('ap.models')} value={form.modelsText} onChange={(modelsText) => updateForm({ modelsText })} description={t('ap.modelsHint')} />
+              <ModelsField
+                ids={modelIdsFromText(form.modelsText)}
+                onChange={(ids) => updateForm({ modelsText: ids.join(', ') })}
+                fetchModels={fetchEditorModels}
+                autoFetch={editor.kind !== 'new' || Boolean(form.baseUrl.trim())}
+              />
             ) : null}
           </div>
         )}
@@ -443,5 +506,135 @@ function ProviderEditor({
         </div>
       </div>
     </Card>
+  );
+}
+
+/// Multi-select model list: fetched catalogs populate the options, while the
+/// in-popover input appends ids the endpoint did not return.
+function ModelsField({
+  ids,
+  onChange,
+  fetchModels,
+  autoFetch,
+}: {
+  ids: string[];
+  onChange: (ids: string[]) => void;
+  fetchModels: () => Promise<Array<{ id: string; name: string }>>;
+  autoFetch: boolean;
+}) {
+  const t = useT();
+  const [fetched, setFetched] = useState<Array<{ id: string; name: string }>>();
+  const [fetching, setFetching] = useState(false);
+  const [fetchFailed, setFetchFailed] = useState(false);
+  const [draft, setDraft] = useState('');
+
+  const options = useMemo(() => {
+    const seen = new Set<string>();
+    const out: Array<{ id: string; label: string }> = [];
+    for (const model of fetched ?? []) {
+      if (model.id && !seen.has(model.id)) {
+        seen.add(model.id);
+        out.push({ id: model.id, label: model.name || model.id });
+      }
+    }
+    for (const id of ids) {
+      if (!seen.has(id)) {
+        seen.add(id);
+        out.push({ id, label: id });
+      }
+    }
+    return out;
+  }, [fetched, ids]);
+
+  const runFetch = async () => {
+    setFetching(true);
+    try {
+      setFetched(await fetchModels());
+      setFetchFailed(false);
+    } catch (error) {
+      setFetchFailed(true);
+      toast.danger(error instanceof Error ? error.message : t('ap.failed'));
+    } finally {
+      setFetching(false);
+    }
+  };
+
+  const commitDraft = () => {
+    const additions = modelIdsFromText(draft).filter((value) => !ids.includes(value));
+    if (additions.length) onChange([...ids, ...additions]);
+    setDraft('');
+  };
+
+  return (
+    <div>
+      <Select
+        className="w-full"
+        selectionMode="multiple"
+        value={ids}
+        onChange={(keys) => onChange([...keys].map(String))}
+        placeholder={t('ap.modelsHint')}
+        onOpenChange={(open) => {
+          if (open && autoFetch && fetched === undefined && !fetchFailed) void runFetch();
+        }}
+      >
+        <Label>{t('ap.models')}</Label>
+        <Select.Trigger className="w-full"><Select.Value /><Select.Indicator /></Select.Trigger>
+        <Select.Popover>
+          <div className="border-separator flex items-center gap-1 border-b p-1">
+            <Input
+              className="h-8 min-w-0 flex-1 text-xs"
+              placeholder={t('ap.addModelPlaceholder')}
+              aria-label={t('ap.addModelPlaceholder')}
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  commitDraft();
+                }
+              }}
+            />
+            <Button
+              isIconOnly
+              size="sm"
+              variant="ghost"
+              aria-label={t('ap.addModel')}
+              isDisabled={!draft.trim()}
+              onPress={commitDraft}
+            >
+              <RiAddLine className="size-4" />
+            </Button>
+            <Button
+              isIconOnly
+              size="sm"
+              variant="ghost"
+              aria-label={t('ap.fetchModels')}
+              isDisabled={fetching}
+              onPress={() => void runFetch()}
+            >
+              {fetching ? <Spinner size="sm" /> : <RiRefreshLine className="size-4" />}
+            </Button>
+          </div>
+          <ListBox
+            renderEmptyState={() => (
+              <span className="text-muted block px-3 py-2 text-xs">{t('ap.noModels')}</span>
+            )}
+          >
+            {options.map((option) => (
+              <ListBox.Item key={option.id} id={option.id} textValue={option.id}>
+                <div className="flex min-w-0 flex-col">
+                  <span className="truncate">{option.label}</span>
+                  {option.label !== option.id ? (
+                    <span className="text-muted truncate text-xs">{option.id}</span>
+                  ) : null}
+                </div>
+                <ListBox.ItemIndicator />
+              </ListBox.Item>
+            ))}
+          </ListBox>
+        </Select.Popover>
+      </Select>
+      <p className="text-muted mt-1 text-xs">{t('ap.modelsHint')}</p>
+    </div>
   );
 }

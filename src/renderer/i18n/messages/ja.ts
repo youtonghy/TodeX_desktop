@@ -1201,6 +1201,8 @@ export const ja: Messages = {
   'ap.apiKind': 'API タイプ',
   'ap.models': 'モデル',
   'ap.modelsHint': 'カンマ区切りのモデル ID',
+  'ap.addModel': 'モデルを追加',
+  'ap.addModelPlaceholder': 'モデル ID を入力して Enter で追加',
   'ap.nameIdRequired': '名前とプロバイダー ID は必須です',
   'ap.jsonInvalid': '設定は JSON オブジェクトである必要があります',
 

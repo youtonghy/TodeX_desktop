@@ -1201,6 +1201,8 @@ export const ko: Messages = {
   'ap.apiKind': 'API 유형',
   'ap.models': '모델',
   'ap.modelsHint': '쉼표로 구분된 모델 ID',
+  'ap.addModel': '모델 추가',
+  'ap.addModelPlaceholder': '모델 ID 입력 후 Enter로 추가',
   'ap.nameIdRequired': '이름과 프로바이더 ID는 필수입니다',
   'ap.jsonInvalid': '설정은 JSON 객체여야 합니다',
 

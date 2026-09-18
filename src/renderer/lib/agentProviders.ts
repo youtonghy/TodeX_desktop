@@ -156,7 +156,7 @@ export function extractFormValues(
   }
 }
 
-function modelIds(modelsText: string): string[] {
+export function modelIdsFromText(modelsText: string): string[] {
   return modelsText
     .split(/[\s,]+/)
     .map((id) => id.trim())
@@ -211,7 +211,7 @@ export function buildSettingsConfig(
       if (form.apiKey.trim()) options.apiKey = form.apiKey.trim();
       const existingModels = asRecord(previous.models);
       const models = Object.fromEntries(
-        modelIds(form.modelsText).map((id) => [id, existingModels[id] ?? {}]),
+        modelIdsFromText(form.modelsText).map((id) => [id, existingModels[id] ?? {}]),
       );
       return { ...previous, options, models };
     }
@@ -224,7 +224,7 @@ export function buildSettingsConfig(
           if (id) existingById.set(id, record);
         }
       }
-      const models = modelIds(form.modelsText).map((id) => existingById.get(id) ?? { id });
+      const models = modelIdsFromText(form.modelsText).map((id) => existingById.get(id) ?? { id });
       const next: Record<string, unknown> = { ...previous, models };
       if (form.baseUrl.trim()) next.baseUrl = form.baseUrl.trim();
       if (form.apiKey.trim()) next.apiKey = form.apiKey.trim();
