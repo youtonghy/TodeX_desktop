@@ -342,6 +342,12 @@ import {
 
 const SENT_ATTACHMENTS_STORAGE_KEY = `${TIMELINE_STORAGE_KEY}.attachments`;
 
+// The backend allows 128 conversation subscriptions per v2 socket. Keep a
+// smaller client-side budget so explicit subscribes (activate/attach/create)
+// still have headroom; least-recently-subscribed entries are unsubscribed
+// to make room.
+const V2_WS_SUBSCRIPTION_BUDGET = 120;
+
 export type OpenPanelFn = (name: string, params?: OpenPanelOptions) => void;
 
 type LiveConversationControl =
@@ -393,6 +399,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     turnId?: string;
     phase: 'sending' | 'running' | 'unknown';
   }>());
+  // v2 ids we have asked the current socket to subscribe to, in request order;
+  // the tail is the eviction candidate when the budget is reached.
+  const v2SubscriptionsRef = useRef(new Set<string>());
+  // subscribe requestId -> v2 id, so a rejected subscribe frees its slot again.
+  const pendingV2SubscribeRef = useRef(new Map<string, string>());
+  // Set during render (like rawProtocolSenderRef) so earlier effects can reach it.
+  const subscribeV2ConversationRef = useRef<(v2ConversationId: string, options?: { afterSequence?: number; limit?: number }) => boolean>(() => false);
   const pendingGitDiffsRef = useRef(new Map<string, PendingGitDiff>());
   const pendingSkillListsRef = useRef(new Map<string, PendingSkillList>());
   const pendingModelListRef = useRef<PendingModelList | null>(null);
@@ -1744,6 +1757,18 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   useEffect(() => {
     if (!hydrated || !activeConversation?.v2ConversationId || !settings.serverUrl.trim()) return;
     void recoverConversation(activeConversation.id);
+    // An opened conversation must hold a live subscription even when it was
+    // past the auto-subscribe budget at connect time; the helper evicts the
+    // oldest background subscription if needed.
+    if (activeConversation.archived !== true) {
+      subscribeV2ConversationRef.current(activeConversation.v2ConversationId, {
+        afterSequence: Math.max(
+          conversationRecoveryRef.current?.get(activeConversation.v2ConversationId)?.appliedSequence ?? 0,
+          activeConversation.lastSequence ?? 0,
+        ),
+        limit: 200,
+      });
+    }
   }, [activeConversation?.id, activeConversation?.v2ConversationId, hydrated, recoverConversation, settings.serverUrl, settings.deviceSecret]);
 
   const runtimeStatus = useMemo<RuntimeStatusState>(() => ({
@@ -2923,15 +2948,26 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         const id = typeof parsed.id === 'string' ? parsed.id : '';
         const payload = parsed.payload && typeof parsed.payload === 'object' && !Array.isArray(parsed.payload)
           ? parsed.payload as Record<string, unknown> : {};
+        pendingV2SubscribeRef.current.delete(id);
         protocolCommandsRef.current?.resolve(id, payload);
         return;
       }
       if (messageType === 'server.error' && parsed.id !== undefined) {
-        const payload = parsed.payload as { code?: unknown; message?: unknown } | undefined;
+        const payload = parsed.payload as { code?: unknown; message?: unknown; conversationId?: unknown } | undefined;
         const code = typeof payload?.code === 'string' ? payload.code : '';
         const detail = typeof payload?.message === 'string' ? payload.message : t('sess.v2CommandFailed');
         const message = code ? `[${code}] ${detail}` : detail;
-        protocolCommandsRef.current?.reject(typeof parsed.id === 'string' ? parsed.id : '', message, code);
+        const requestId = typeof parsed.id === 'string' ? parsed.id : '';
+        const failedSubscribe = pendingV2SubscribeRef.current.get(requestId);
+        if (failedSubscribe) {
+          pendingV2SubscribeRef.current.delete(requestId);
+          v2SubscriptionsRef.current.delete(failedSubscribe);
+        }
+        // A subscription task that died server-side already released its slot;
+        // drop the local marker so a later subscribe is not deduped away.
+        const endedConversationId = typeof payload?.conversationId === 'string' ? payload.conversationId : '';
+        if (endedConversationId) v2SubscriptionsRef.current.delete(endedConversationId);
+        protocolCommandsRef.current?.reject(requestId, message, code);
         setLastError(message);
         return;
       }
@@ -3007,6 +3043,55 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     socket.send(frame);
     return message;
   }, []);
+
+  const unsubscribeV2Conversation = useCallback((v2ConversationId: string) => {
+    if (!v2SubscriptionsRef.current.delete(v2ConversationId)) return;
+    sendRawProtocolFrame({
+      id: createRequestId('unsub'),
+      type: 'conversation.unsubscribe',
+      payload: { conversationId: v2ConversationId },
+    });
+  }, [sendRawProtocolFrame]);
+
+  /** Send `conversation.subscribe` within the per-socket budget. When the
+   * budget is full, the oldest background subscription is unsubscribed first;
+   * the active conversation is never evicted. Returns false when the frame
+   * could not be sent or no slot could be freed. */
+  const subscribeV2Conversation = useCallback((
+    v2ConversationId: string,
+    options?: { afterSequence?: number; limit?: number },
+  ): boolean => {
+    const subscribed = v2SubscriptionsRef.current;
+    if (subscribed.has(v2ConversationId)) {
+      // Refresh recency so active conversations are not evicted first.
+      subscribed.delete(v2ConversationId);
+      subscribed.add(v2ConversationId);
+      return true;
+    }
+    const activeV2Id = conversationsRef.current.find(
+      (item) => item.id === activeConversationRef.current,
+    )?.v2ConversationId;
+    while (subscribed.size >= V2_WS_SUBSCRIPTION_BUDGET) {
+      const evict = [...subscribed].find((id) => id !== activeV2Id);
+      if (!evict) return false;
+      unsubscribeV2Conversation(evict);
+    }
+    const requestId = createRequestId('sub');
+    const sent = sendRawProtocolFrame({
+      id: requestId,
+      type: 'conversation.subscribe',
+      payload: {
+        conversationId: v2ConversationId,
+        afterSequence: options?.afterSequence ?? 0,
+        limit: options?.limit ?? 200,
+      },
+    });
+    if (!sent) return false;
+    subscribed.add(v2ConversationId);
+    pendingV2SubscribeRef.current.set(requestId, v2ConversationId);
+    return true;
+  }, [sendRawProtocolFrame, unsubscribeV2Conversation]);
+  subscribeV2ConversationRef.current = subscribeV2Conversation;
 
   rawProtocolSenderRef.current = (message) => Boolean(sendRawProtocolFrame(message));
 
@@ -3316,6 +3401,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           if (!isSocketCurrent() || socket.readyState !== WebSocket.OPEN) return;
           verified = true;
           socketVerifiedRef.current = true;
+          // Server-side subscriptions are per-socket; this socket starts empty.
+          v2SubscriptionsRef.current.clear();
+          pendingV2SubscribeRef.current.clear();
           reconnectAttemptRef.current = 0;
           lastFailureRetryableRef.current = true;
           setConnectionState('open');
@@ -3340,31 +3428,35 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           void (async () => {
             await syncWorkspacesFromBackend();
             if (!isSocketCurrent()) return;
-            for (const conversation of conversationsRef.current) {
-              if (conversation.v2ConversationId) {
-                try {
-                  // Conversations whose last recovery was cut short resume here.
-                  if (conversationRecoveryRef.current?.isRecovering(conversation.v2ConversationId)) {
-                    void recoverConversation(conversation.id);
-                  }
-                  sendRawProtocolFrame({
-                    id: createRequestId('sub'),
-                    type: 'conversation.subscribe',
-                    payload: {
-                      conversationId: conversation.v2ConversationId,
-                      // Subscribe at the known high-water mark instead of
-                      // replaying the backfill; a stale cursor still surfaces
-                      // missed events, and gaps trigger an on-demand recover.
-                      afterSequence: Math.max(
-                        conversationRecoveryRef.current?.get(conversation.v2ConversationId)?.appliedSequence ?? 0,
-                        conversation.lastSequence ?? 0,
-                      ),
-                      limit: 200,
-                    },
-                  });
-                } catch {
-                  // subscribe is best-effort after resume
+            const backendId = activeBackendConnectionIdRef.current;
+            const candidates = conversationsRef.current.filter((conversation) =>
+              Boolean(conversation.v2ConversationId)
+              && conversation.archived !== true
+              && (!conversation.backendConnectionId || conversation.backendConnectionId === backendId));
+            // The foreground conversation must keep its live subscription even
+            // when the list exceeds the server's per-socket subscription cap.
+            candidates.sort((left, right) =>
+              Number(right.id === foregroundConversation?.id) - Number(left.id === foregroundConversation?.id));
+            for (const conversation of candidates) {
+              if (v2SubscriptionsRef.current.size >= V2_WS_SUBSCRIPTION_BUDGET) break;
+              const v2ConversationId = conversation.v2ConversationId as string;
+              try {
+                // Conversations whose last recovery was cut short resume here.
+                if (conversationRecoveryRef.current?.isRecovering(v2ConversationId)) {
+                  void recoverConversation(conversation.id);
                 }
+                subscribeV2Conversation(v2ConversationId, {
+                  // Subscribe at the known high-water mark instead of
+                  // replaying the backfill; a stale cursor still surfaces
+                  // missed events, and gaps trigger an on-demand recover.
+                  afterSequence: Math.max(
+                    conversationRecoveryRef.current?.get(v2ConversationId)?.appliedSequence ?? 0,
+                    conversation.lastSequence ?? 0,
+                  ),
+                  limit: 200,
+                });
+              } catch {
+                // subscribe is best-effort after resume
               }
             }
           })();
@@ -3450,7 +3542,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       setLastError(message);
       setConnectionHealth({ status: 'offline', latencyMs: null, lastCheckedAt: Date.now(), error: message, code: 'backend_unreachable' });
     });
-  }, [checkConnectionHealth, closeSocket, enqueueSocketFrame, flushQueuedProtocolCommands, getSessionCursorSnapshot, recoverConversation, reconcilePendingSubmission, refreshServerVersion, resumeQueuedFollowUps, sendRawProtocolFrame, sendSessionResume, settings, syncWorkspacesFromBackend]);
+  }, [checkConnectionHealth, closeSocket, enqueueSocketFrame, flushQueuedProtocolCommands, getSessionCursorSnapshot, recoverConversation, reconcilePendingSubmission, refreshServerVersion, resumeQueuedFollowUps, sendSessionResume, settings, subscribeV2Conversation, syncWorkspacesFromBackend]);
 
   useEffect(() => {
     if (!hydrated || !autoConnectEnabled || manualDisconnectRef.current) {
@@ -3962,6 +4054,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       const removedConversationIds = conversations
         .filter((conversation) => conversation.workspaceId === workspaceId)
         .map((conversation) => conversation.id);
+      // Release the websocket subscription slots held by this workspace's
+      // conversations; they no longer exist locally.
+      for (const conversation of conversations) {
+        if (conversation.workspaceId === workspaceId && conversation.v2ConversationId) {
+          unsubscribeV2Conversation(conversation.v2ConversationId);
+        }
+      }
       setWorkspaces((current) => current.filter((workspace) => workspace.id !== workspaceId));
       setConversations((current) => current.filter((conversation) => conversation.workspaceId !== workspaceId));
       setTimeline((current) => current.filter((entry) => entry.workspaceId !== workspaceId && !removedConversationIds.includes(entry.conversationId ?? '')));
@@ -3994,7 +4093,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         setActiveConversationId(conversations.find((conversation) => conversation.workspaceId === next?.id)?.id ?? '');
       }
     },
-    [activeBackendConnectionId, activeWorkspaceId, connectionState, conversations, settings, workspaces],
+    [activeBackendConnectionId, activeWorkspaceId, connectionState, conversations, settings, unsubscribeV2Conversation, workspaces],
   );
 
   const renameWorkspace = useCallback((workspaceId: string, name: string) => {
@@ -4059,15 +4158,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       if (!conversation.v2ConversationId) {
         return true;
       }
-      return Boolean(sendRawProtocolFrame({
-        id: createRequestId('sub'),
-        type: 'conversation.subscribe',
-        payload: {
-          conversationId: conversation.v2ConversationId,
-          afterSequence: 0,
-          limit: CHAT_ATTACH_REPLAY_LIMIT,
-        },
-      }));
+      return subscribeV2Conversation(conversation.v2ConversationId, {
+        afterSequence: 0,
+        limit: CHAT_ATTACH_REPLAY_LIMIT,
+      });
     }
     const sessionId = sessionIdForConversation(workspace, conversation);
     const afterCursor = sessionCursorsRef.current.get(sessionId) ?? null;
@@ -4075,7 +4169,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       afterCursor,
       replayLimit: CHAT_ATTACH_REPLAY_LIMIT,
     }, conversation);
-  }, [sendRawProtocolFrame, sendWorkspaceCommand]);
+  }, [sendWorkspaceCommand, subscribeV2Conversation]);
 
   const sendLocalMethodRequest = useCallback((
     workspace: WorkspaceRecord,
@@ -5577,9 +5671,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           setActiveWorkspaceId(workspace.id);
           setActiveConversationId(record.id);
           await recoverConversation(record.id);
-          await sendProtocolCommand({ id: createRequestId('sub'), type: 'conversation.subscribe', payload: {
-            conversationId: created.id, afterSequence: conversationRecoveryRef.current?.get(created.id)?.appliedSequence ?? 0, limit: 500,
-          } });
+          subscribeV2Conversation(created.id, {
+            afterSequence: conversationRecoveryRef.current?.get(created.id)?.appliedSequence ?? 0,
+            limit: 500,
+          });
         } catch (error) { setLastError(error instanceof Error ? error.message : t('sess.forkFailed')); }
       })();
       return null;
@@ -5614,7 +5709,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       { selectResult: true, resultConversationId: nextConversation.id },
     );
     return nextConversation;
-  }, [getConversationContext, recoverConversation, sendProtocolCommand, settings.serverUrl, settings.deviceSecret, sendNativeThreadAction, settings.approvalPolicy, settings.approvalsReviewer, settings.defaultModel, settings.sandboxMode]);
+  }, [getConversationContext, recoverConversation, sendProtocolCommand, settings.serverUrl, settings.deviceSecret, sendNativeThreadAction, settings.approvalPolicy, settings.approvalsReviewer, settings.defaultModel, settings.sandboxMode, subscribeV2Conversation]);
 
   const removeConversation = useCallback((conversationId: string) => {
     const context = getConversationContext(conversationId);
@@ -5662,10 +5757,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     if (activeConversationRef.current === conversationId) {
       setActiveConversationId(nextActive?.id ?? '');
     }
+    if (conversation.v2ConversationId) {
+      unsubscribeV2Conversation(conversation.v2ConversationId);
+    }
     if (normalizeThreadId(conversation.threadId)) {
       void sendNativeThreadAction(conversationId, 'archive', 'thread/archive', (threadId) => ({ threadId }));
     }
-  }, [getConversationContext, sendNativeThreadAction, updateConversation]);
+  }, [getConversationContext, sendNativeThreadAction, unsubscribeV2Conversation, updateConversation]);
 
   const promptSkillsFromAttachments = useCallback((skills: SelectedSkillAttachment[]): PromptSkillRef[] => {
     return skills
@@ -5770,11 +5868,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           ...current.filter((item) => item.id !== created.id),
         ]);
         void recoverConversation(record.id);
-        sendRawProtocolFrame({
-          id: createRequestId('sub'),
-          type: 'conversation.subscribe',
-          payload: { conversationId: created.id, afterSequence: 0, limit: 200 },
-        });
+        subscribeV2Conversation(created.id, { afterSequence: 0, limit: 200 });
         return record;
       } catch (error) {
         const message = error instanceof ConnectionError
@@ -5794,7 +5888,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         pendingV2ConversationCreatesRef.current.delete(conversationId);
       }
     }
-  }, [backendConnections, getConversationContext, recoverConversation, sendRawProtocolFrame, settings.deviceSecret, settings.serverUrl]);
+  }, [backendConnections, getConversationContext, recoverConversation, settings.deviceSecret, settings.serverUrl, subscribeV2Conversation]);
 
   const sendV2Prompt = useCallback(
     async (
