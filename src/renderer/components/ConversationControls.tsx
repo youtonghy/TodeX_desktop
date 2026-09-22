@@ -4,7 +4,7 @@ import { ChatAttachment, ChatAttachmentGroup } from '@heroui-pro/react';
 import { useNoticeToast } from './NoticeToast';
 import { WorkspaceFilePreview, type PreviewFile } from './WorkspaceFilePreview';
 import type { ConversationRuntime } from '@todex/protocol/conversationRuntime';
-import type { ComposerAttachmentDraft, QueuedChatSubmission } from '../session/helpers';
+import { attachmentPrompt, type ComposerAttachmentDraft, type QueuedChatSubmission } from '../session/helpers';
 import { useT } from '../i18n';
 
 type Props = {
@@ -76,12 +76,23 @@ export function ConversationControls({ runtime, reportedError, running, canUseNa
           {!running ? <Button size="sm" variant="secondary" isDisabled={disabled} onPress={onResumeLocal}>{t('controls.resumeSend')}</Button> : null}
         </div>
         <ol className="space-y-1.5">
-          {localQueue.map((item, index) => <li key={item.id} className="flex items-start justify-between gap-2">
+          {localQueue.map((item, index) => {
+            // Multiple candidates collapse to one line; hover or keyboard focus
+            // expands the full text, attachments, and skills.
+            const collapsible = localQueue.length > 1;
+            const reveal = 'group-hover:block group-focus-within:block';
+            return <li key={item.id} className="group flex items-start justify-between gap-2">
             <span aria-hidden className="text-muted mt-0.5 w-5 shrink-0 select-none text-right tabular-nums">{index + 1}.</span>
             <div className="min-w-0 flex-1 space-y-1">
-              {item.text.trim() ? <p className="whitespace-pre-wrap break-words leading-snug line-clamp-2" title={item.text}>{item.text}</p>
-                : !item.attachments.length && !item.skills.length ? <p className="text-muted">{t('controls.emptyMessage')}</p> : null}
+              {item.text.trim() ? <p className={`whitespace-pre-wrap break-words leading-snug ${collapsible ? 'line-clamp-1 group-hover:line-clamp-none group-focus-within:line-clamp-none' : 'line-clamp-2'}`} title={item.text}>{item.text}</p>
+                : !item.attachments.length && !item.skills.length ? <p className="text-muted">{t('controls.emptyMessage')}</p>
+                : collapsible ? <p className="text-muted truncate">
+                  {[attachmentPrompt([...item.attachments]),
+                    item.skills.length ? `Skill · ${item.skills.map(s => s.displayName || s.name).join(', ')}` : '']
+                    .filter(Boolean).join(' · ')}
+                </p> : null}
               {item.attachments.length > 0 ? (
+                <div className={collapsible ? `hidden ${reveal}` : undefined}>
                 <ChatAttachmentGroup aria-label={t('controls.queueAttachments', { order: index + 1 })} role="list">
                   {item.attachments.map((attachment) => (
                     <span key={attachment.id} role="listitem">
@@ -108,9 +119,10 @@ export function ConversationControls({ runtime, reportedError, running, canUseNa
                     </span>
                   ))}
                 </ChatAttachmentGroup>
+                </div>
               ) : null}
               {item.skills.length > 0 ? (
-                <div className="flex flex-wrap gap-1">
+                <div className={`flex flex-wrap gap-1 ${collapsible ? `hidden group-hover:flex group-focus-within:flex` : ''}`}>
                   {item.skills.map((skill) => (
                     <span key={skill.resourceId || `${skill.name}:${skill.path}`}
                       className="border-border text-muted rounded-md border px-1.5 py-0.5">
@@ -121,7 +133,7 @@ export function ConversationControls({ runtime, reportedError, running, canUseNa
               ) : null}
             </div>
             <Button size="sm" variant="ghost" aria-label={t('controls.removeCandidate', { text: item.text || index + 1 })} onPress={() => onRemoveLocal(item.id)}>{t('controls.remove')}</Button>
-          </li>)}
+          </li>;})}
         </ol>
       </div> : null}
     </div> : null}
