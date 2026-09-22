@@ -769,23 +769,25 @@ function ModelConfigList({
                   value={model.maxTokens}
                   onChange={(maxTokens) => update(model.id, { maxTokens })}
                 />
-                <Switch
-                  isSelected={model.reasoning}
-                  onChange={(reasoning) =>
-                    update(model.id, {
-                      reasoning,
-                      efforts:
-                        reasoning && !model.efforts.length ? defaultEfforts(agent) : model.efforts,
-                    })
-                  }
-                >
-                  <Switch.Content>
-                    <Switch.Control>
-                      <Switch.Thumb />
-                    </Switch.Control>
-                    <p className="text-sm">{t('ap.reasoning')}</p>
-                  </Switch.Content>
-                </Switch>
+                <div className="sm:col-span-2">
+                  <Switch
+                    isSelected={model.reasoning}
+                    onChange={(reasoning) =>
+                      update(model.id, {
+                        reasoning,
+                        efforts:
+                          reasoning && !model.efforts.length ? defaultEfforts(agent) : model.efforts,
+                      })
+                    }
+                  >
+                    <Switch.Content>
+                      <Switch.Control>
+                        <Switch.Thumb />
+                      </Switch.Control>
+                      <p className="text-sm">{t('ap.reasoning')}</p>
+                    </Switch.Content>
+                  </Switch>
+                </div>
                 {model.reasoning ? (
                   <div className="sm:col-span-2">
                     <p className="text-muted mb-1.5 text-xs">{t('ap.efforts')}</p>
