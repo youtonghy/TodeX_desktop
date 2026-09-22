@@ -1216,6 +1216,13 @@ export const zhCN = {
   'ap.removeModel': '移除模型',
   'ap.invalidNumber': '数值字段必须是正整数',
   'ap.outputRequired': '填写上下文窗口时必须同时给出最大输出',
+  'ap.modelRequired': '使用 API 密钥时必须填写模型',
+  'ap.authMode': '认证方式',
+  'ap.authSubscription': '官方订阅（grok login）',
+  'ap.authApi': 'API 密钥',
+  'ap.grokSubscriptionHint': '订阅账户使用 grok login 写入的 auth.json 会话。先在后端主机运行 grok login，再点「导入当前配置」保存为供应商；切换时会先备份当前会话再替换。新建的空订阅供应商激活后需重新运行 grok login。',
+  'ap.grokBaseUrlHint': '留空使用 xAI 官方 API（https://api.x.ai/v1）',
+  'ap.grokModelHint': '可选，写入 [models].default，如 grok-build',
 
   // xterm
   'xterm.interactive': '交互式终端',

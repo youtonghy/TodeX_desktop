@@ -37,13 +37,24 @@ export const emptyModelEntry = (id: string): ModelFormEntry => ({
   efforts: [],
 });
 
+/// Grok Build credential source: the `grok login` session kept in auth.json
+/// (official subscription) or a per-model API key in config.toml.
+export type GrokAuthMode = 'subscription' | 'api';
+
+export const GROK_API_BACKENDS = ['chat_completions', 'responses', 'messages'] as const;
+
+/// Public xAI API endpoint Grok Build uses when a model sets no base_url.
+export const GROK_XAI_BASE_URL = 'https://api.x.ai/v1';
+
 export type ProviderFormValues = {
   name: string;
   baseUrl: string;
   apiKey: string;
   model: string;
   reasoningEffort: string;
+  /** Pi `api`; Grok Build `api_backend`. */
   apiKind: string;
+  authMode: GrokAuthMode;
   /** Codex `model_context_window` (top-level TOML number). */
   contextWindow: string;
   models: ModelFormEntry[];
@@ -56,6 +67,7 @@ export const emptyFormValues: ProviderFormValues = {
   model: '',
   reasoningEffort: '',
   apiKind: '',
+  authMode: 'api',
   contextWindow: '',
   models: [],
 };
@@ -83,18 +95,34 @@ function codexConfigText(settings: Record<string, unknown> | undefined): string 
   return asString(settings?.config);
 }
 
+/** Selects TOML tables by header: a string matches as a name prefix, a
+ * function decides exactly. */
+type TableMatcher = string | ((name: string) => boolean);
+
+function tableMatches(matcher: TableMatcher | undefined, name: string): boolean {
+  if (matcher === undefined) return true;
+  return typeof matcher === 'string' ? name.startsWith(matcher) : matcher(name);
+}
+
+function tableHeader(line: string): string | undefined {
+  return line.match(/^\s*\[([^\]]+)\]/)?.[1].trim();
+}
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 /** Pull the scalar named `key` out of a TOML document's top level or a table. */
-function tomlScalar(text: string, key: string, withinTablePrefix?: string): string {
-  let inTargetTable = withinTablePrefix === undefined;
+function tomlScalar(text: string, key: string, withinTable?: TableMatcher): string {
+  let inTargetTable = withinTable === undefined;
   for (const line of text.split('\n')) {
-    const tableMatch = line.match(/^\s*\[([^\]]+)\]/);
-    if (tableMatch) {
-      inTargetTable =
-        withinTablePrefix === undefined || tableMatch[1].trim().startsWith(withinTablePrefix);
+    const header = tableHeader(line);
+    if (header !== undefined) {
+      inTargetTable = withinTable !== undefined && tableMatches(withinTable, header);
       continue;
     }
     if (!inTargetTable) continue;
-    const match = line.match(new RegExp(`^\\s*${key}\\s*=\\s*"([^"]*)"`));
+    const match = line.match(new RegExp(`^\\s*${escapeRegExp(key)}\\s*=\\s*"([^"]*)"`));
     if (match) return match[1];
   }
   return '';
@@ -115,38 +143,66 @@ function tomlNumber(text: string, key: string): string {
   return '';
 }
 
-/** Replaces `key = "…"` lines in the TOML top level or a `prefix`-named table.
- * Inserts the key when absent instead of dropping user config. */
+/** Replaces `key = "…"` lines in the TOML top level or a matching table.
+ * Inserts the key when absent instead of dropping user config: into the
+ * first matching table, or a new `[newTable]` (defaults to a string matcher). */
 function patchTomlScalar(
   text: string,
   key: string,
   value: string,
-  withinTablePrefix?: string,
+  withinTable?: TableMatcher,
+  newTable: string | undefined = typeof withinTable === 'string' ? withinTable : undefined,
 ): string {
   const escaped = value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  const assignment = `${key} = "${escaped}"`;
+  const keyPattern = new RegExp(`^\\s*${escapeRegExp(key)}\\s*=`);
   const lines = text.split('\n');
-  let inTargetTable = withinTablePrefix === undefined;
+  let inTargetTable = withinTable === undefined;
   let replaced = false;
-  const out = lines.map((line) => {
-    const tableMatch = line.match(/^\s*\[([^\]]+)\]/);
-    if (tableMatch) {
-      inTargetTable =
-        withinTablePrefix === undefined || tableMatch[1].trim().startsWith(withinTablePrefix);
+  let firstTableLine = -1;
+  const out = lines.map((line, index) => {
+    const header = tableHeader(line);
+    if (header !== undefined) {
+      inTargetTable = withinTable !== undefined && tableMatches(withinTable, header);
+      if (inTargetTable && firstTableLine < 0) firstTableLine = index;
       return line;
     }
     if (!inTargetTable || replaced) return line;
-    if (new RegExp(`^\\s*${key}\\s*=`).test(line)) {
+    if (keyPattern.test(line)) {
       replaced = true;
-      return `${key} = "${escaped}"`;
+      return assignment;
     }
     return line;
   });
   if (replaced) return out.join('\n');
-  if (withinTablePrefix === undefined) {
-    return `${key} = "${escaped}"\n${text.startsWith('\n') ? '' : '\n'}${text}`;
+  if (withinTable === undefined) {
+    return `${assignment}\n${text.startsWith('\n') ? '' : '\n'}${text}`;
   }
-  // Table missing entirely: append one.
-  return `${text.trimEnd()}\n\n[${withinTablePrefix}]\n${key} = "${escaped}"\n`;
+  if (firstTableLine >= 0) {
+    // Table exists without the key: a second header would be invalid TOML.
+    out.splice(firstTableLine + 1, 0, assignment);
+    return out.join('\n');
+  }
+  if (newTable === undefined) return text;
+  const head = text.trimEnd();
+  return `${head}${head ? '\n\n' : ''}[${newTable}]\n${assignment}\n`;
+}
+
+/** Drops `key = …` lines inside the matching tables. */
+function removeTomlKey(text: string, key: string, withinTable: TableMatcher): string {
+  const keyPattern = new RegExp(`^\\s*${escapeRegExp(key)}\\s*=`);
+  let inTargetTable = false;
+  return text
+    .split('\n')
+    .filter((line) => {
+      const header = tableHeader(line);
+      if (header !== undefined) {
+        inTargetTable = tableMatches(withinTable, header);
+        return true;
+      }
+      return !(inTargetTable && keyPattern.test(line));
+    })
+    .join('\n');
 }
 
 /** Like patchTomlScalar but writes a bare integer on the TOML top level. */
@@ -179,6 +235,102 @@ base_url = "https://example.com/v1"
 wire_api = "responses"
 requires_openai_auth = true
 `;
+
+const isModelsTable = (name: string) => name === 'models';
+
+/** `[model.<id>]` header for a Grok Build model entry (quoted unless bare). */
+function grokModelHeader(id: string): string {
+  return /^[A-Za-z0-9_-]+$/.test(id) ? `model.${id}` : `model."${id.replace(/"/g, '\\"')}"`;
+}
+
+function grokModelTable(id: string): (name: string) => boolean {
+  const accepted = new Set([`model.${id}`, `model."${id}"`, `model.'${id}'`, grokModelHeader(id)]);
+  return (name) => accepted.has(name);
+}
+
+type GrokAuthScope = { scope: string; entry: Record<string, unknown> };
+
+function grokAuthScopes(settings: Record<string, unknown>): GrokAuthScope[] {
+  return Object.entries(asRecord(settings.auth)).map(([scope, entry]) => ({ scope, entry: asRecord(entry) }));
+}
+
+/** Key from a `grok login --api-key` scope, which lives in auth.json. */
+function grokAuthApiKey(settings: Record<string, unknown>): string {
+  return asString(grokAuthScopes(settings).find(({ entry }) => entry.auth_mode === 'api_key')?.entry.key);
+}
+
+function grokHasSession(settings: Record<string, unknown>): boolean {
+  return grokAuthScopes(settings).some(({ entry }) => entry.auth_mode !== 'api_key');
+}
+
+/** The `[models].default` entry: its catalog key, whether a `[model.<key>]`
+ * table exists, and the model id sent to the API (`model`, else the key). */
+function grokModelFields(config: string) {
+  const key = tomlScalar(config, 'default', isModelsTable);
+  const table = key ? grokModelTable(key) : () => false;
+  return {
+    key,
+    hasTable: Boolean(key) && config.split('\n').some((line) => {
+      const header = tableHeader(line);
+      return header !== undefined && table(header);
+    }),
+    model: tomlScalar(config, 'model', table) || key,
+    apiKey: tomlScalar(config, 'api_key', table),
+    baseUrl: tomlScalar(config, 'base_url', table),
+    apiBackend: tomlScalar(config, 'api_backend', table),
+  };
+}
+
+function grokExtract(settings: Record<string, unknown>, isNew: boolean) {
+  const fields = grokModelFields(codexConfigText(settings));
+  const authApiKey = grokAuthApiKey(settings);
+  const authMode: GrokAuthMode = grokHasSession(settings)
+    ? 'subscription'
+    : fields.apiKey || fields.baseUrl || authApiKey || isNew
+      ? 'api'
+      : 'subscription';
+  return { ...fields, apiKey: fields.apiKey || authApiKey, authMode };
+}
+
+/// Subscription: keep the stored `grok login` session and let it
+/// authenticate the default model (a per-model api_key would win over it).
+/// API: `[models].default` points at a `[model.<key>]` entry carrying the
+/// key. An existing entry keeps its catalog key when the model id changes so
+/// a masked api_key still restores against the stored profile. auth.json is
+/// dropped on activation unless it only holds an unchanged
+/// `grok login --api-key` scope.
+function grokSettingsFromForm(
+  form: ProviderFormValues,
+  previous: Record<string, unknown>,
+): Record<string, unknown> {
+  let config = codexConfigText(previous);
+  const before = grokModelFields(config);
+  const model = form.model.trim() || before.model;
+  const previousAuth = previous.auth && typeof previous.auth === 'object' ? previous.auth : null;
+  if (form.authMode === 'subscription') {
+    if (model) {
+      const key = before.hasTable && before.model === model ? before.key : model;
+      config = patchTomlScalar(config, 'default', key, isModelsTable, 'models');
+      config = removeTomlKey(config, 'api_key', grokModelTable(key));
+    }
+    return { auth: previousAuth, config };
+  }
+  const authApiKey = grokAuthApiKey(previous);
+  const keepAuthKey = !before.apiKey && Boolean(authApiKey) && form.apiKey.trim() === authApiKey
+    && !grokHasSession(previous);
+  if (!model) return { auth: keepAuthKey ? previousAuth : null, config };
+  const key = before.hasTable ? before.key : model;
+  const table = grokModelTable(key);
+  const header = grokModelHeader(key);
+  config = patchTomlScalar(config, 'default', key, isModelsTable, 'models');
+  config = patchTomlScalar(config, 'model', model, table, header);
+  const baseUrl = form.baseUrl.trim() || tomlScalar(config, 'base_url', table) || GROK_XAI_BASE_URL;
+  config = patchTomlScalar(config, 'base_url', baseUrl, table, header);
+  if (form.apiKey.trim() && !keepAuthKey) config = patchTomlScalar(config, 'api_key', form.apiKey.trim(), table, header);
+  if (form.apiKind.trim()) config = patchTomlScalar(config, 'api_backend', form.apiKind.trim(), table, header);
+  if (form.name.trim()) config = patchTomlScalar(config, 'name', form.name.trim(), table, header);
+  return { auth: keepAuthKey ? previousAuth : null, config };
+}
 
 /** Anything carrying a stored/live provider config — a profile, or an
  * unmanaged live node wrapped as `{ name, settingsConfig }`. */
@@ -255,6 +407,17 @@ export function extractFormValues(
         model: tomlScalar(config, 'model'),
         reasoningEffort: tomlScalar(config, 'model_reasoning_effort'),
         contextWindow: tomlNumber(config, 'model_context_window'),
+      };
+    }
+    case 'grok-build': {
+      const grok = grokExtract(settings, source === undefined);
+      return {
+        ...base,
+        authMode: grok.authMode,
+        baseUrl: grok.baseUrl,
+        apiKey: grok.apiKey,
+        model: grok.model,
+        apiKind: grok.apiBackend,
       };
     }
     case 'opencode': {
@@ -399,9 +562,10 @@ export function validateModelForm(
   agent: ManagedProviderAgent,
   form: ProviderFormValues,
   existing?: ProviderConfigSource,
-): 'ap.invalidNumber' | 'ap.outputRequired' | null {
+): 'ap.invalidNumber' | 'ap.outputRequired' | 'ap.modelRequired' | null {
   const invalid = (text: string) => text.trim() !== '' && parsePositiveInt(text) === undefined;
   if (agent === 'codex') return invalid(form.contextWindow) ? 'ap.invalidNumber' : null;
+  if (agent === 'grok-build') return form.authMode === 'api' && !form.model.trim() ? 'ap.modelRequired' : null;
   if (agent !== 'pi' && agent !== 'opencode') return null;
   const settings = asRecord(existing?.settingsConfig);
   const existingModels =
@@ -449,6 +613,8 @@ export function buildSettingsConfig(
         : asRecord(previous.auth);
       return { auth, config: codexConfigFromForm(form, previous) };
     }
+    case 'grok-build':
+      return grokSettingsFromForm(form, previous);
     case 'opencode': {
       const options = { ...asRecord(previous.options) };
       if (form.baseUrl.trim()) options.baseURL = form.baseUrl.trim();
@@ -496,16 +662,23 @@ export function providerModelIds(agent: ManagedProviderAgent, settings: Record<s
       return [asString(asRecord(settings.env).ANTHROPIC_MODEL)].filter(Boolean);
     case 'codex':
       return [tomlScalar(codexConfigText(settings), 'model')].filter(Boolean);
+    case 'grok-build':
+      return [grokModelFields(codexConfigText(settings)).model].filter(Boolean);
   }
 }
 
-/** Human-readable base URL for the provider card. */
+/** Human-readable endpoint for the provider card; Grok Build subscription
+ * profiles show the signed-in account instead. */
 export function providerBaseUrl(agent: ManagedProviderAgent, settings: Record<string, unknown>): string {
   switch (agent) {
     case 'claude-code':
       return asString(asRecord(settings.env).ANTHROPIC_BASE_URL);
     case 'codex':
       return tomlScalar(codexConfigText(settings), 'base_url', 'model_providers.');
+    case 'grok-build': {
+      const session = grokAuthScopes(settings).find(({ entry }) => entry.auth_mode !== 'api_key');
+      return asString(session?.entry.email) || grokModelFields(codexConfigText(settings)).baseUrl;
+    }
     case 'opencode': {
       const options = asRecord(settings.options);
       return asString(options.baseURL ?? options.baseUrl);

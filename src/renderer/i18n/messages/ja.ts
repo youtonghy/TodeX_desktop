@@ -1216,6 +1216,13 @@ export const ja: Messages = {
   'ap.removeModel': 'モデルを削除',
   'ap.invalidNumber': '数値フィールドは正の整数で入力してください',
   'ap.outputRequired': 'コンテキストウィンドウを設定する場合は最大出力も入力してください',
+  'ap.modelRequired': 'API キーを使う場合はモデルが必須です',
+  'ap.authMode': '認証方式',
+  'ap.authSubscription': '公式サブスクリプション（grok login）',
+  'ap.authApi': 'API キー',
+  'ap.grokSubscriptionHint': 'サブスクリプションアカウントは grok login が書き込む auth.json のセッションを使います。バックエンドホストで grok login を実行してから「現在の設定をインポート」で保存してください。切り替え時は現在のセッションをバックアップしてから置き換えます。空のサブスクリプションプロバイダーは有効化後に grok login を再実行する必要があります。',
+  'ap.grokBaseUrlHint': '空欄の場合は xAI 公式 API（https://api.x.ai/v1）を使用します',
+  'ap.grokModelHint': '任意。[models].default に書き込まれます（例: grok-build）',
 
   // xterm
   'xterm.interactive': 'インタラクティブターミナル',

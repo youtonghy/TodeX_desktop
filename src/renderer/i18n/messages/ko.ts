@@ -1216,6 +1216,13 @@ export const ko: Messages = {
   'ap.removeModel': '모델 삭제',
   'ap.invalidNumber': '숫자 필드는 양의 정수여야 합니다',
   'ap.outputRequired': '컨텍스트 윈도우를 설정할 때 최대 출력도 입력하세요',
+  'ap.modelRequired': 'API 키를 사용할 때는 모델이 필요합니다',
+  'ap.authMode': '인증 방식',
+  'ap.authSubscription': '공식 구독 (grok login)',
+  'ap.authApi': 'API 키',
+  'ap.grokSubscriptionHint': '구독 계정은 grok login이 기록한 auth.json 세션을 사용합니다. 백엔드 호스트에서 grok login을 실행한 뒤 "현재 설정 가져오기"로 프로바이더로 저장하세요. 전환 시 현재 세션을 백업한 후 교체합니다. 빈 구독 프로바이더는 활성화 후 grok login을 다시 실행해야 합니다.',
+  'ap.grokBaseUrlHint': '비워 두면 xAI 공식 API(https://api.x.ai/v1)를 사용합니다',
+  'ap.grokModelHint': '선택 사항이며 [models].default에 기록됩니다 (예: grok-build)',
 
   // xterm
   'xterm.interactive': '대화형 터미널',

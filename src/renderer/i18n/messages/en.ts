@@ -1216,6 +1216,13 @@ export const en: Messages = {
   'ap.removeModel': 'Remove model',
   'ap.invalidNumber': 'Numeric fields must be positive integers',
   'ap.outputRequired': 'Max output is required together with context window',
+  'ap.modelRequired': 'A model is required when using an API key',
+  'ap.authMode': 'Authentication',
+  'ap.authSubscription': 'Official subscription (grok login)',
+  'ap.authApi': 'API key',
+  'ap.grokSubscriptionHint': 'Subscription accounts use the auth.json session written by grok login. Run grok login on the backend host, then use “Import current config” to save it as a provider; switching backs up the current session before replacing it. An empty subscription provider requires running grok login again after activation.',
+  'ap.grokBaseUrlHint': 'Leave empty to use the official xAI API (https://api.x.ai/v1)',
+  'ap.grokModelHint': 'Optional; written to [models].default, e.g. grok-build',
 
   // xterm
   'xterm.interactive': 'Interactive terminal',

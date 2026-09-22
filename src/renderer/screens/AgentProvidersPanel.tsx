@@ -20,6 +20,7 @@ import {
   defaultEfforts,
   emptyModelEntry,
   extractFormValues,
+  GROK_API_BACKENDS,
   modelIdsFromText,
   providerBaseUrl,
   providerModelIds,
@@ -356,6 +357,8 @@ function ProviderEditor({
   const idLocked = editor.kind !== 'new';
   const isClaude = agent === 'claude-code';
   const isCodex = agent === 'codex';
+  const isGrok = agent === 'grok-build';
+  const grokSubscription = isGrok && form.authMode === 'subscription';
   const isAdditive = agent === 'pi' || agent === 'opencode';
 
   const apiKindOptions =
@@ -441,10 +444,66 @@ function ProviderEditor({
           </TextField>
         ) : (
           <div className="grid gap-3 sm:grid-cols-2">
-            <Field label={t('ap.baseUrl')} value={form.baseUrl} onChange={(baseUrl) => updateForm({ baseUrl })} />
-            <Field label={t('ap.apiKey')} value={form.apiKey} onChange={(apiKey) => updateForm({ apiKey })} description={t('ap.secretKept')} />
-            {isClaude || isCodex ? (
-              <Field label={t('ap.model')} value={form.model} onChange={(model) => updateForm({ model })} />
+            {isGrok ? (
+              <Select
+                className="w-full sm:col-span-2"
+                selectedKey={form.authMode}
+                onSelectionChange={(key) => {
+                  if (key === 'subscription' || key === 'api') updateForm({ authMode: key });
+                }}
+              >
+                <Label>{t('ap.authMode')}</Label>
+                <Select.Trigger className="w-full"><Select.Value /><Select.Indicator /></Select.Trigger>
+                <Select.Popover>
+                  <ListBox>
+                    <ListBox.Item id="subscription" textValue={t('ap.authSubscription')}>
+                      {t('ap.authSubscription')}
+                      <ListBox.ItemIndicator />
+                    </ListBox.Item>
+                    <ListBox.Item id="api" textValue={t('ap.authApi')}>
+                      {t('ap.authApi')}
+                      <ListBox.ItemIndicator />
+                    </ListBox.Item>
+                  </ListBox>
+                </Select.Popover>
+              </Select>
+            ) : null}
+            {grokSubscription ? null : (
+              <>
+                <Field label={t('ap.baseUrl')} value={form.baseUrl} onChange={(baseUrl) => updateForm({ baseUrl })}
+                  description={isGrok ? t('ap.grokBaseUrlHint') : undefined} />
+                <Field label={t('ap.apiKey')} value={form.apiKey} onChange={(apiKey) => updateForm({ apiKey })} description={t('ap.secretKept')} />
+              </>
+            )}
+            {isClaude || isCodex || isGrok ? (
+              <Field label={t('ap.model')} value={form.model} onChange={(model) => updateForm({ model })}
+                description={grokSubscription ? t('ap.grokModelHint') : undefined} />
+            ) : null}
+            {isGrok && !grokSubscription ? (
+              <Select
+                className="w-full"
+                placeholder={GROK_API_BACKENDS[0]}
+                selectedKey={form.apiKind || null}
+                onSelectionChange={(key) => {
+                  if (typeof key === 'string') updateForm({ apiKind: key });
+                }}
+              >
+                <Label>{t('ap.apiKind')}</Label>
+                <Select.Trigger className="w-full"><Select.Value /><Select.Indicator /></Select.Trigger>
+                <Select.Popover>
+                  <ListBox>
+                    {GROK_API_BACKENDS.map((backend) => (
+                      <ListBox.Item key={backend} id={backend} textValue={backend}>
+                        {backend}
+                        <ListBox.ItemIndicator />
+                      </ListBox.Item>
+                    ))}
+                  </ListBox>
+                </Select.Popover>
+              </Select>
+            ) : null}
+            {grokSubscription ? (
+              <p className="text-muted text-xs sm:col-span-2">{t('ap.grokSubscriptionHint')}</p>
             ) : null}
             {isCodex ? (
               <>
