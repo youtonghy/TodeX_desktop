@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Card, Chip, Input, Label, ListBox, Select, Spinner, Switch, TextArea, TextField, toast } from '@heroui/react';
-import { RiAddLine, RiArrowDownSLine, RiCheckLine, RiCloseLine, RiDeleteBinLine, RiEdit2Line, RiListCheck2, RiRefreshLine, RiUserSettingsLine } from '@remixicon/react';
+import { RiAddLine, RiArrowDownSLine, RiCheckLine, RiCloseLine, RiDeleteBinLine, RiEdit2Line, RiRefreshLine, RiUserSettingsLine } from '@remixicon/react';
 import {
   MANAGED_PROVIDER_AGENTS,
   PROVIDER_DISPLAY_NAMES,
@@ -126,6 +126,33 @@ export function AgentProvidersPanel({ session }: { session: TodeXSession }) {
   const unmanagedNodes = live?.kind === 'additive' ? live.providers : {};
   const liveMismatch = live?.kind === 'exclusive' && live.configured && !live.matchesCurrent;
 
+  /// The editor mounts inline under the card it edits (or at the bottom for
+  /// 'new'); the key remounts it when the target changes so form state resets.
+  const renderEditor = () => editor ? (
+    <ProviderEditor
+      key={editor.kind === 'edit' ? editor.profile.id : editor.kind === 'adopt' ? `adopt:${editor.nodeId}` : 'new'}
+      session={session}
+      agent={agent}
+      editor={editor}
+      unmanagedNodes={unmanagedNodes}
+      busy={Boolean(busy)}
+      onCancel={() => setEditor(null)}
+      onSave={(id, input) => void run('save', async () => {
+        if (editor.kind === 'adopt') {
+          try {
+            await api().importLiveAgentProvider(agent, id, input.name);
+          } catch (error) {
+            const details = error instanceof ConnectionError ? error.technicalDetails : '';
+            if (!details.includes('CONFLICT') && !details.includes('HTTP 409')) throw error;
+          }
+        }
+        const next = await api().upsertAgentProvider(agent, id, input);
+        setEditor(null);
+        return next;
+      }, 'ap.saved')}
+    />
+  ) : null;
+
   return (
     <div className="flex flex-col gap-4 p-6">
       <div className="flex min-w-0 items-center gap-3">
@@ -172,13 +199,15 @@ export function AgentProvidersPanel({ session }: { session: TodeXSession }) {
 
           <div className="grid gap-3">
             {bucket.providers.map((profile) => {
+              const editingThis = editor?.kind === 'edit' && editor.profile.id === profile.id;
               const settings = profile.settingsConfig as Record<string, unknown>;
               const isCurrent = !additive && bucket.currentProviderId === profile.id;
               const isDefault = liveSelection?.providerId === profile.id;
               const defaultModelId = isDefault ? liveSelection?.modelId : null;
               const modelIds = providerModelIds(agent, settings);
               return (
-                <Card key={profile.id} className="min-w-0 rounded-lg p-4">
+                <Fragment key={profile.id}>
+                <Card className="min-w-0 rounded-lg p-4">
                   <div className="flex items-start gap-3">
                     <div className="bg-surface-secondary flex size-9 shrink-0 items-center justify-center rounded-lg">
                       <ProviderIcon className="size-5" provider={agent} />
@@ -212,17 +241,18 @@ export function AgentProvidersPanel({ session }: { session: TodeXSession }) {
                       </Button>
                     </div>
                   </div>
-                  <div className="mt-3 flex flex-wrap items-center gap-2">
-                    {!additive && !isCurrent ? (
+                  {!additive && !isCurrent ? (
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
                       <Button size="sm" variant="primary" isDisabled={Boolean(busy)}
                         onPress={() => activate(profile)}>
                         {busy === `activate:${profile.id}` ? <Spinner size="sm" /> : <RiCheckLine className="size-4" />}
                         {t('ap.activate')}
                       </Button>
-                    ) : null}
-                    <FetchModelsButton session={session} agent={agent} id={profile.id} />
-                  </div>
+                    </div>
+                  ) : null}
                 </Card>
+                {editingThis ? renderEditor() : null}
+                </Fragment>
               );
             })}
 
@@ -231,8 +261,10 @@ export function AgentProvidersPanel({ session }: { session: TodeXSession }) {
               const nodeBaseUrl = providerBaseUrl(agent, nodeSettings);
               const nodeModels = providerModelIds(agent, nodeSettings);
               const isLiveSelection = liveSelection?.providerId === nodeId;
+              const adoptingThis = editor?.kind === 'adopt' && editor.nodeId === nodeId;
               return (
-                <Card key={nodeId} className="min-w-0 rounded-lg border-dashed p-4">
+                <Fragment key={nodeId}>
+                <Card className="min-w-0 rounded-lg border-dashed p-4">
                   <div className="flex items-start gap-3">
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
@@ -259,6 +291,8 @@ export function AgentProvidersPanel({ session }: { session: TodeXSession }) {
                     </Button>
                   </div>
                 </Card>
+                {adoptingThis ? renderEditor() : null}
+                </Fragment>
               );
             })}
 
@@ -267,29 +301,7 @@ export function AgentProvidersPanel({ session }: { session: TodeXSession }) {
             ) : null}
           </div>
 
-          {editor ? (
-            <ProviderEditor
-              session={session}
-              agent={agent}
-              editor={editor}
-              unmanagedNodes={unmanagedNodes}
-              busy={Boolean(busy)}
-              onCancel={() => setEditor(null)}
-              onSave={(id, input) => void run('save', async () => {
-                if (editor.kind === 'adopt') {
-                  try {
-                    await api().importLiveAgentProvider(agent, id, input.name);
-                  } catch (error) {
-                    const details = error instanceof ConnectionError ? error.technicalDetails : '';
-                    if (!details.includes('CONFLICT') && !details.includes('HTTP 409')) throw error;
-                  }
-                }
-                const next = await api().upsertAgentProvider(agent, id, input);
-                setEditor(null);
-                return next;
-              }, 'ap.saved')}
-            />
-          ) : (
+          {editor?.kind === 'new' ? renderEditor() : (
             <Button variant="secondary" onPress={() => setEditor({ kind: 'new' })}>
               <RiAddLine className="size-4" />
               {t('ap.add')}
@@ -298,41 +310,6 @@ export function AgentProvidersPanel({ session }: { session: TodeXSession }) {
         </>
       )}
     </div>
-  );
-}
-
-function FetchModelsButton({ session, agent, id }: { session: TodeXSession; agent: ManagedProviderAgent; id: string }) {
-  const t = useT();
-  const [models, setModels] = useState<Array<{ id: string; name: string }>>();
-  const [loading, setLoading] = useState(false);
-  const fetch = async () => {
-    setLoading(true);
-    try {
-      const api = new V2ApiClient({
-        serverUrl: session.settings.serverUrl,
-        device: deviceIdentityFromSecret(session.settings.deviceSecret),
-      });
-      setModels((await api.listAgentProviderModels(agent, id)).models);
-    } catch (error) {
-      toast.danger(error instanceof Error ? error.message : t('ap.failed'));
-    } finally {
-      setLoading(false);
-    }
-  };
-  return (
-    <>
-      <Button size="sm" variant="tertiary" isDisabled={loading} onPress={() => void fetch()}>
-        {loading ? <Spinner size="sm" /> : <RiListCheck2 className="size-4" />}
-        {t('ap.fetchModels')}
-      </Button>
-      {models ? (
-        <div className="mt-1 flex w-full flex-wrap gap-1">
-          {models.length ? models.map((model) => (
-            <Chip key={model.id} size="sm" variant="soft">{model.name}</Chip>
-          )) : <span className="text-muted text-xs">{t('ap.noModels')}</span>}
-        </div>
-      ) : null}
-    </>
   );
 }
 
