@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Button, Card, Chip, Input, Label, ListBox, Select, Spinner, Switch, TextArea, TextField, toast } from '@heroui/react';
+import { Button, Card, Chip, ComboBox, Input, Label, ListBox, Select, Spinner, Switch, TextArea, TextField, toast } from '@heroui/react';
 import { RiAddLine, RiArrowDownSLine, RiCheckLine, RiCloseLine, RiDeleteBinLine, RiEdit2Line, RiRefreshLine, RiUserSettingsLine } from '@remixicon/react';
 import {
   MANAGED_PROVIDER_AGENTS,
@@ -663,12 +663,12 @@ function ModelsField({
   );
 }
 
-/// Common context-window sizes offered as one-tap presets; the field still
-/// accepts any number.
+/// Common context-window sizes listed in the combo box; the input still
+/// accepts any number (allowsCustomValue).
 const CONTEXT_PRESETS = [
-  { label: '128K', value: '128000' },
-  { label: '272K', value: '272000' },
-  { label: '1M', value: '1000000' },
+  { id: '128000', label: '128K' },
+  { id: '272000', label: '272K' },
+  { id: '1000000', label: '1M' },
 ] as const;
 
 /// Per-model settings below the membership picker: context/output limits and
@@ -734,25 +734,36 @@ function ModelConfigList({
                   value={model.name}
                   onChange={(name) => update(model.id, { name })}
                 />
-                <div>
-                  <Field
-                    label={t('ap.contextWindow')}
-                    value={model.contextWindow}
-                    onChange={(contextWindow) => update(model.id, { contextWindow })}
-                  />
-                  <div className="mt-1.5 flex flex-wrap gap-1">
-                    {CONTEXT_PRESETS.map((preset) => (
-                      <Button
-                        key={preset.value}
-                        size="sm"
-                        variant={model.contextWindow.trim() === preset.value ? 'secondary' : 'tertiary'}
-                        onPress={() => update(model.id, { contextWindow: preset.value })}
-                      >
-                        {preset.label}
-                      </Button>
-                    ))}
-                  </div>
-                </div>
+                <ComboBox
+                  className="w-full"
+                  allowsCustomValue
+                  inputValue={model.contextWindow}
+                  items={CONTEXT_PRESETS}
+                  defaultFilter={() => true}
+                  onInputChange={(contextWindow) => update(model.id, { contextWindow })}
+                  onSelectionChange={(key) => {
+                    if (key != null) update(model.id, { contextWindow: String(key) });
+                  }}
+                >
+                  <Label>{t('ap.contextWindow')}</Label>
+                  <ComboBox.InputGroup className="w-full">
+                    <Input className="w-full" />
+                    <ComboBox.Trigger />
+                  </ComboBox.InputGroup>
+                  <ComboBox.Popover>
+                    <ListBox items={CONTEXT_PRESETS}>
+                      {(preset) => (
+                        <ListBox.Item id={preset.id} textValue={preset.id}>
+                          <div className="flex min-w-0 items-baseline gap-2">
+                            <span>{preset.label}</span>
+                            <span className="text-muted text-xs">{preset.id}</span>
+                          </div>
+                          <ListBox.ItemIndicator />
+                        </ListBox.Item>
+                      )}
+                    </ListBox>
+                  </ComboBox.Popover>
+                </ComboBox>
                 <Field
                   label={t('ap.maxTokens')}
                   value={model.maxTokens}
