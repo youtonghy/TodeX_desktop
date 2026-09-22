@@ -438,13 +438,8 @@ const ChatTimelineItem = memo(function ChatTimelineItem({
     const { toolName, argsText } = toolPresentation(entry.subtitle);
     return <ChatTool defaultExpanded={false} state={entry.phase === 'completed' ? 'output-available' : 'input-streaming'} toolName={toolName} argsText={argsText} triggerPrefix={thinking ? t('chat.toolCalling') : t('chat.toolCalled')} />;
   }
-  if (entry.category === 'assistant_progress') {
-    return entry.subtitle.trim() ? (
-      <div data-message-id={entry.id} className="flex py-1">
-        <p className="text-muted border-separator whitespace-pre-wrap break-words border-l-2 pl-3 text-sm leading-6">{entry.subtitle}</p>
-      </div>
-    ) : null;
-  }
+  // Progress narration renders like a normal message; empty detail stubs hide.
+  if (entry.category === 'assistant_progress' && !entry.subtitle.trim()) return null;
   const isUser = entry.kind === 'outgoing';
   return (
     <div data-message-id={entry.id} className={`flex gap-3 py-1 ${isUser ? 'justify-end' : 'justify-start'}`}>
