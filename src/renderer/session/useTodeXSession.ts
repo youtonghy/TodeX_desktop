@@ -123,6 +123,7 @@ import {
   SOCKET_FRAME_DECODE_BUDGET_MS,
   MAX_TRANSPORT_HELLO_SESSION_CURSORS,
   MAX_TIMELINE_ITEMS,
+  MAX_TIMELINE_ITEMS_LIVE,
   MAX_USAGE_RECORDS,
   MAX_WORKSPACE_TOMBSTONES,
   MAX_EVENTS,
@@ -504,6 +505,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const [usageRecords, setUsageRecords] = useState<UsageRecord[]>([]);
   const [conversationRuntimeById, setConversationRuntimeById] = useState<Record<string, ConversationRuntime>>({});
   const [recoveringConversations, setRecoveringConversations] = useState<Record<string, boolean>>({});
+  // Per-conversation lazy-history flags for the chat scroll sentinel.
+  const [earlierHistory, setEarlierHistory] = useState<Record<string, { hasMore: boolean; loading: boolean }>>({});
   const [submissionStatusByConversation, setSubmissionStatusByConversation] = useState<Record<string, 'sending' | 'running' | 'unknown' | undefined>>({});
   const settledV2TurnsRef = useRef(new Map<string, string>());
   const runtimeReplayRef = useRef((id: string, after: number, limit: number) =>
@@ -511,12 +514,16 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   // History replays fetch summary events only; folded process groups fetch
   // their full sequence range back when the user expands them.
   runtimeReplayRef.current = (id, after, limit) => new V2ApiClient({ serverUrl: settings.serverUrl, device: deviceIdentityFromSecret(settings.deviceSecret) }).replayEvents(id, after, limit, 'summary');
+  const runtimeReplayBeforeRef = useRef((id: string, before: number, limit: number) =>
+    new V2ApiClient({ serverUrl: settings.serverUrl, device: deviceIdentityFromSecret(settings.deviceSecret) }).replayEventsBefore(id, before, limit));
+  runtimeReplayBeforeRef.current = (id, before, limit) => new V2ApiClient({ serverUrl: settings.serverUrl, device: deviceIdentityFromSecret(settings.deviceSecret) }).replayEventsBefore(id, before, limit, 'summary');
   const runtimeUpdateRef = useRef<(state: ConversationRuntime, applied: ConversationEvent[], recovering: boolean) => void>(() => {});
   const notifyTurnCompletedRef = useRef<(localId: string, state: ConversationRuntime, turnId: string) => void>(() => {});
   const conversationRecoveryRef = useRef<ConversationRecovery | null>(null);
   if (!conversationRecoveryRef.current) conversationRecoveryRef.current = new ConversationRecovery(
     (id, after, limit) => runtimeReplayRef.current(id, after, limit),
     (state, applied, recovering) => runtimeUpdateRef.current(state, applied, recovering), setLastError,
+    (id, before, limit) => runtimeReplayBeforeRef.current(id, before, limit),
   );
 
 
@@ -1614,7 +1621,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     setTimeline((current) => [
       ...state.timeline.map((entry) => ({ ...entry, conversationId: localId })),
       ...current.filter((entry) => entry.conversationId !== localId),
-    ].slice(0, MAX_TIMELINE_ITEMS));
+    ].slice(0, MAX_TIMELINE_ITEMS_LIVE));
+    const hasEarlier = conversationRecoveryRef.current?.hasEarlierHistory(state.conversationId) ?? false;
+    setEarlierHistory((current) => {
+      const existing = current[localId];
+      if (existing?.hasMore === hasEarlier) return current;
+      return { ...current, [localId]: { hasMore: hasEarlier, loading: existing?.loading ?? false } };
+    });
     if (state.contextUsage) setContextUsageByConversation((current) => current[localId] === state.contextUsage ? current : { ...current, [localId]: state.contextUsage! });
     setCompactionByConversation((current) => current[localId] === state.compaction ? current : { ...current, [localId]: state.compaction });
     setSubagentsByConversation((current) => ({ ...current, [localId]: state.subagents.map((run) => ({ ...run, conversationId: localId })) }));
@@ -1708,6 +1721,40 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     if (conversation?.v2ConversationId) await conversationRecoveryRef.current!.recover(conversation.v2ConversationId, conversation.workspaceId);
   }, []);
 
+  /** Open a conversation lazily: only the newest history window is fetched
+   * from the journal tail; earlier events page in on scroll. Falls back to a
+   * full forward replay when the runtime is already initialized. */
+  const openConversation = useCallback(async (conversationId: string) => {
+    const conversation = conversationsRef.current.find((item) => item.id === conversationId || item.v2ConversationId === conversationId);
+    const v2Id = conversation?.v2ConversationId;
+    if (!v2Id || !conversation) return;
+    const status = conversation.nativeStatus ?? '';
+    await conversationRecoveryRef.current!.open(v2Id, conversation.workspaceId, {
+      highWater: conversation.lastSequence ?? 0,
+      turnActive: status === 'running' || status === 'waiting_permission',
+    });
+  }, []);
+
+  /** Fetch and prepend the next older history page for the scroll sentinel.
+   * Resolves false when no earlier events remain or a page is in flight. */
+  const loadEarlierHistory = useCallback(async (conversationId: string) => {
+    const conversation = conversationsRef.current.find((item) => item.id === conversationId);
+    const v2Id = conversation?.v2ConversationId;
+    const recovery = conversationRecoveryRef.current;
+    if (!conversation || !v2Id || !recovery || recovery.isLoadingEarlier(v2Id) || !recovery.hasEarlierHistory(v2Id)) {
+      return false;
+    }
+    setEarlierHistory((current) => ({ ...current, [conversation.id]: { hasMore: true, loading: true } }));
+    try {
+      return await recovery.loadEarlier(v2Id, conversation.workspaceId);
+    } finally {
+      setEarlierHistory((current) => ({
+        ...current,
+        [conversation.id]: { hasMore: recovery.hasEarlierHistory(v2Id), loading: false },
+      }));
+    }
+  }, []);
+
   /** A lost prompt ACK leaves the submission 'unknown'. Replaying the journal
    * settles it: a recorded turn binds its clientRequestId and flips the phase
    * to 'running'; a complete replay without a match means the prompt never
@@ -1751,12 +1798,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     protocolCommandsRef.current?.dispose();
     setConversationRuntimeById({});
     setRecoveringConversations({});
+    setEarlierHistory({});
     settledV2TurnsRef.current.clear();
   }, [settings.serverUrl, settings.deviceSecret]);
 
   useEffect(() => {
     if (!hydrated || !activeConversation?.v2ConversationId || !settings.serverUrl.trim()) return;
-    void recoverConversation(activeConversation.id);
+    void openConversation(activeConversation.id);
     // An opened conversation must hold a live subscription even when it was
     // past the auto-subscribe budget at connect time; the helper evicts the
     // oldest background subscription if needed.
@@ -1769,7 +1817,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         limit: 200,
       });
     }
-  }, [activeConversation?.id, activeConversation?.v2ConversationId, hydrated, recoverConversation, settings.serverUrl, settings.deviceSecret]);
+  }, [activeConversation?.id, activeConversation?.v2ConversationId, hydrated, openConversation, settings.serverUrl, settings.deviceSecret]);
 
   const runtimeStatus = useMemo<RuntimeStatusState>(() => ({
     socket: connectionState,
@@ -1976,7 +2024,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   );
 
   const appendTimeline = useCallback((entry: TimelineEntry) => {
-    setTimeline((current) => [entry, ...current].slice(0, MAX_TIMELINE_ITEMS));
+    setTimeline((current) => [entry, ...current].slice(0, MAX_TIMELINE_ITEMS_LIVE));
   }, []);
 
   const rememberMentionReferences = useCallback((workspaceId: string, references: MentionReference[]) => {
@@ -2041,7 +2089,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       );
 
       if (index === -1) {
-        return [entry, ...current].slice(0, MAX_TIMELINE_ITEMS);
+        return [entry, ...current].slice(0, MAX_TIMELINE_ITEMS_LIVE);
       }
 
       const next = current.slice();
@@ -2708,7 +2756,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
               .reverse();
             setTimeline((current) => {
               const remaining = current.filter((entry) => entry.conversationId !== pendingThreadAction.conversationId);
-              return [...restored, ...remaining].slice(0, MAX_TIMELINE_ITEMS);
+              return [...restored, ...remaining].slice(0, MAX_TIMELINE_ITEMS_LIVE);
             });
             loadedNativeThreadHistoryRef.current.set(
               nativeThreadRead.thread.id,
@@ -7791,8 +7839,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     subagentsByConversation,
     conversationRuntimeById,
     recoveringConversations,
+    earlierHistory,
     submissionStatusByConversation,
     recoverConversation,
+    loadEarlierHistory,
     reconcilePendingSubmission,
     memoryEntriesByConversation,
     usageRecords,

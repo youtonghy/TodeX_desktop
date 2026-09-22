@@ -237,6 +237,8 @@ export const ja: Messages = {
   'chat.piExtensionEntry': 'Pi プラグイン · {title}',
   'chat.sentAttachments': '送信済みの添付ファイル',
   'chat.scrollToLatest': '最新へ移動',
+  'chat.loadEarlier': '以前のメッセージを読み込む',
+  'chat.loadingEarlier': '以前のメッセージを読み込み中…',
   'chat.quoteName': '会話の抜粋',
   'chat.pastedTextName': '貼り付けたテキスト',
   'chat.quoteAdded': '参照を追加しました',
@@ -987,6 +989,7 @@ export const ja: Messages = {
   'rec.gapError': '会話記録に欠落があり、復元が完了していません。再接続して記録を確認してください。',
   'rec.recoveryFailed': '会話の復元に失敗しました',
   'rec.submitFailed': '会話状態の送信に失敗しました',
+  'rec.loadEarlierFailed': '以前のメッセージの読み込みに失敗しました',
 
   // sess
   'sess.actionFailed': '{title} に失敗しました',

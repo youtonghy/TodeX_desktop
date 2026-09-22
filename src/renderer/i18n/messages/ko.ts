@@ -237,6 +237,8 @@ export const ko: Messages = {
   'chat.piExtensionEntry': 'Pi 플러그인 · {title}',
   'chat.sentAttachments': '보낸 첨부 파일',
   'chat.scrollToLatest': '최신으로 이동',
+  'chat.loadEarlier': '이전 메시지 불러오기',
+  'chat.loadingEarlier': '이전 메시지를 불러오는 중…',
   'chat.quoteName': '대화 발췌',
   'chat.pastedTextName': '붙여넣은 텍스트',
   'chat.quoteAdded': '참조를 추가했습니다',
@@ -987,6 +989,7 @@ export const ko: Messages = {
   'rec.gapError': '대화 기록에 누락이 있어 복구가 완료되지 않았습니다. 다시 연결한 후 기록을 확인하세요.',
   'rec.recoveryFailed': '대화 복구 실패',
   'rec.submitFailed': '대화 상태 제출 실패',
+  'rec.loadEarlierFailed': '이전 메시지 불러오기 실패',
 
   // sess
   'sess.actionFailed': '{title} 실패',

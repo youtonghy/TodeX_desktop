@@ -1484,6 +1484,9 @@ export const MAX_TRANSPORT_HELLO_SESSION_CURSORS = 12;
 // of truth for replay, while the desktop cache avoids silently evicting the
 // context users are currently reviewing.
 export const MAX_TIMELINE_ITEMS = 1000;
+/** In-memory ceiling for the rendered timeline. Lazy history loading keeps
+ * older pages mounted, so this is far above the persisted slice. */
+export const MAX_TIMELINE_ITEMS_LIVE = 5_000;
 export const MAX_USAGE_RECORDS = 2_000;
 export const MAX_WORKSPACE_TOMBSTONES = 100;
 export const MAX_EVENTS = 220;

@@ -1,9 +1,9 @@
 import { ConversationControls } from '../components/ConversationControls';
 import { NoticeToast } from '../components/NoticeToast';
 import { RiArrowDownDoubleLine, RiAttachment2, RiBarChartBoxLine, RiClipboardLine, RiCpuLine, RiGitBranchLine, RiListCheck2, RiShieldLine, RiStopCircleLine } from '@remixicon/react';
-import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { Dispatch, KeyboardEvent, SetStateAction } from 'react';
-import { Button, Label, ListBox, Popover, ScrollShadow, Select, Tooltip, toast } from '@heroui/react';
+import { Button, Label, ListBox, Popover, ScrollShadow, Select, Spinner, Tooltip, toast } from '@heroui/react';
 import { ChainOfThought, ChatAttachment, ChatAttachmentGroup, ChatAttachmentInput, ChatMessage, HoverCard, PromptInput } from '@heroui-pro/react';
 import { ChatMessageActions } from '@heroui-pro/react/chat-message-actions';
 import { ChatTool } from '@heroui-pro/react/chat-tool';
@@ -596,13 +596,51 @@ export function ChatPanel({ session }: Props) {
     const element = scrollRef.current;
     if (element) element.scrollTo({ top: element.scrollHeight, behavior });
   };
+  const earlierHistoryStatus = conversation?.id ? session.earlierHistory?.[conversation.id] : undefined;
+  /** Records where the viewport sat before an earlier-history prepend so the
+   * rendered rows can be shifted back onto the same content. */
+  const historyAnchorRef = useRef<{ conversationId: string; scrollHeight: number; scrollTop: number; oldestEntryId: string } | null>(null);
+  const oldestChatEntryId = chatEntries[0]?.id ?? '';
+  const requestEarlierHistory = () => {
+    const element = scrollRef.current;
+    if (!element || !conversation || !earlierHistoryStatus?.hasMore || earlierHistoryStatus.loading) return;
+    historyAnchorRef.current = {
+      conversationId: conversation.id,
+      scrollHeight: element.scrollHeight,
+      scrollTop: element.scrollTop,
+      oldestEntryId: oldestChatEntryId,
+    };
+    void session.loadEarlierHistory(conversation.id);
+  };
   const updateScrollPosition = () => {
     const element = scrollRef.current;
     if (!element) return;
     const atBottom = element.scrollHeight - element.scrollTop - element.clientHeight < 120;
     atBottomRef.current = atBottom;
     setIsAtBottom(atBottom);
+    if (element.scrollTop < 240) requestEarlierHistory();
   };
+  useLayoutEffect(() => {
+    const anchor = historyAnchorRef.current;
+    const element = scrollRef.current;
+    if (!element) return;
+    if (anchor && anchor.conversationId === conversation?.id) {
+      if (oldestChatEntryId !== anchor.oldestEntryId) {
+        // Older rows mounted above the viewport: compensate by the height they
+        // added so the visible content does not move.
+        historyAnchorRef.current = null;
+        element.scrollTop = anchor.scrollTop + (element.scrollHeight - anchor.scrollHeight);
+      } else if (!earlierHistoryStatus?.loading) {
+        // The page resolved without new rows (empty or fully deduplicated).
+        historyAnchorRef.current = null;
+      }
+    }
+    // Content shorter than the viewport never scrolls, so pull the next page
+    // here instead of waiting for an onScroll that cannot fire.
+    if (earlierHistoryStatus?.hasMore && !earlierHistoryStatus.loading && element.scrollHeight <= element.clientHeight) {
+      requestEarlierHistory();
+    }
+  }, [session.timeline, oldestChatEntryId, earlierHistoryStatus?.loading, conversation?.id]);
   useEffect(() => {
     atBottomRef.current = true;
     setIsAtBottom(true);
@@ -917,6 +955,18 @@ export function ChatPanel({ session }: Props) {
       <div className="relative min-h-0 flex-1">
         <ScrollShadow ref={scrollRef} onScroll={updateScrollPosition} className="h-full px-5 py-5">
         <div ref={messagesRef} className="mx-auto flex max-w-2xl flex-col gap-3">
+          {earlierHistoryStatus?.loading ? (
+            <p className="text-muted flex items-center justify-center gap-2 py-2 text-xs" role="status">
+              <Spinner size="sm" />
+              {t('chat.loadingEarlier')}
+            </p>
+          ) : earlierHistoryStatus?.hasMore ? (
+            <div className="flex justify-center py-1">
+              <Button size="sm" variant="ghost" onPress={requestEarlierHistory}>
+                {t('chat.loadEarlier')}
+              </Button>
+            </div>
+          ) : null}
           {items.length === 0 ? (
             <p className="text-muted py-16 text-center text-sm" role="status">
               {thinking ? t('chat.working')

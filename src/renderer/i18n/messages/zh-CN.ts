@@ -237,6 +237,8 @@ export const zhCN = {
   'chat.piExtensionEntry': 'Pi 插件 · {title}',
   'chat.sentAttachments': '已发送的附件',
   'chat.scrollToLatest': '前往最新',
+  'chat.loadEarlier': '加载更早的消息',
+  'chat.loadingEarlier': '正在加载更早的消息…',
   'chat.quoteName': '对话摘录',
   'chat.pastedTextName': '粘贴的文本',
   'chat.quoteAdded': '已添加引用',
@@ -987,6 +989,7 @@ export const zhCN = {
   'rec.gapError': '对话记录存在缺口，恢复未完成。请重新连接后核对记录。',
   'rec.recoveryFailed': '对话恢复失败',
   'rec.submitFailed': '对话状态提交失败',
+  'rec.loadEarlierFailed': '加载更早的消息失败',
 
   // sess
   'sess.actionFailed': '{title} 失败',

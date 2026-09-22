@@ -237,6 +237,8 @@ export const en: Messages = {
   'chat.piExtensionEntry': 'Pi extension · {title}',
   'chat.sentAttachments': 'Sent attachments',
   'chat.scrollToLatest': 'Jump to latest',
+  'chat.loadEarlier': 'Load earlier messages',
+  'chat.loadingEarlier': 'Loading earlier messages…',
   'chat.quoteName': 'Conversation excerpt',
   'chat.pastedTextName': 'Pasted text',
   'chat.quoteAdded': 'Reference added',
@@ -987,6 +989,7 @@ export const en: Messages = {
   'rec.gapError': 'The conversation history has gaps and recovery is incomplete. Reconnect and check the records.',
   'rec.recoveryFailed': 'Conversation recovery failed',
   'rec.submitFailed': 'Failed to submit conversation state',
+  'rec.loadEarlierFailed': 'Failed to load earlier messages',
 
   // sess
   'sess.actionFailed': '{title} failed',
