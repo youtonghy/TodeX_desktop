@@ -8,6 +8,8 @@ export type SentAttachment = {
   mimeType: string;
   sizeBytes: number | null;
   previewUrl?: string;
+  /** Text payloads stay with the receipt so sent files can be re-previewed. */
+  textContent?: string;
 };
 
 export type SentAttachmentRecord = {
@@ -21,6 +23,11 @@ export type SentAttachmentRecord = {
 
 type AttachmentDraft = Omit<SentAttachment, 'previewUrl' | 'kind'> & { kind: 'image' | 'file' | 'reference'; dataUrl: string };
 const MAX_PREVIEW_LENGTH = 100 * 1024;
+
+/** Oversized text still previews, truncated to the shared preview budget. */
+function capText(text: string): string {
+  return text.length > MAX_PREVIEW_LENGTH ? text.slice(0, MAX_PREVIEW_LENGTH) : text;
+}
 
 async function imagePreview(dataUrl: string): Promise<string | undefined> {
   if (!/^data:image\//i.test(dataUrl) || typeof Image === 'undefined' || typeof document === 'undefined') return undefined;
@@ -55,11 +62,15 @@ async function imagePreview(dataUrl: string): Promise<string | undefined> {
 }
 
 export async function prepareSentAttachments(drafts: readonly AttachmentDraft[]): Promise<SentAttachment[]> {
-  return Promise.all(drafts.map(async ({ id, kind, name, mimeType, sizeBytes, dataUrl }) => {
+  return Promise.all(drafts.map(async ({ id, kind, name, mimeType, sizeBytes, dataUrl, textContent }) => {
     const previewUrl = kind === 'image' ? await imagePreview(dataUrl) : undefined;
     // References surface as plain file receipts; their text stays in the message.
     const sentKind = kind === 'reference' ? 'file' : kind;
-    return { id, kind: sentKind, name, mimeType, sizeBytes, ...(previewUrl ? { previewUrl } : {}) };
+    return {
+      id, kind: sentKind, name, mimeType, sizeBytes,
+      ...(previewUrl ? { previewUrl } : {}),
+      ...(sentKind === 'file' && textContent ? { textContent: capText(textContent) } : {}),
+    };
   }));
 }
 
@@ -122,8 +133,11 @@ function attachmentsFromMessageRaw(entry: TimelineIdentity): SentAttachment[] {
       } else if (item.type === 'text' && typeof item.text === 'string') {
         const match = /^\[附件: ([^\r\n\]]+)\]\n/.exec(item.text);
         if (!match) continue;
+        // attachmentTextBlock() appends "Content:\n<text>" when the draft had text.
+        const content = /\nContent:\n([\s\S]*)$/.exec(item.text)?.[1];
         attachments.push({ id: `${entry.id}:attachment:${attachments.length}`, kind: 'file',
-          name: match[1], mimeType: 'text/plain', sizeBytes: null });
+          name: match[1], mimeType: 'text/plain', sizeBytes: null,
+          ...(content ? { textContent: capText(content) } : {}) });
       }
     }
     return attachments;
@@ -168,14 +182,19 @@ export function pruneSentAttachmentRecords(records: readonly SentAttachmentRecor
       .map(attachment => {
       const { id, kind, name, mimeType, sizeBytes } = attachment;
       const metadata: SentAttachment = { id, kind, name, mimeType, sizeBytes };
+      const textContent = attachment.textContent;
+      const kept = typeof textContent === 'string' && textContent
+        && textContent.length <= MAX_PREVIEW_LENGTH && textContent.length <= remaining
+        ? (remaining -= textContent.length, { ...metadata, textContent })
+        : metadata;
       const previewUrl = attachment.previewUrl;
       if (kind === 'image' && typeof previewUrl === 'string'
         && /^data:image\/(webp|png);base64,[A-Za-z0-9+/]*={0,2}$/.test(previewUrl)
         && previewUrl.length <= MAX_PREVIEW_LENGTH && previewUrl.length <= remaining) {
         remaining -= previewUrl.length;
-        return { ...metadata, previewUrl };
+        return { ...kept, previewUrl };
       }
-      return metadata;
+      return kept;
     }),
   })).reverse();
 }

@@ -12,6 +12,7 @@ import { providerDisplayName, type ProviderKind, type PermissionMode } from '@to
 import { ConversationPermissionActions, ConversationPromptInput, ConversationRunStatus, TurnUsageSummary } from '../components/ConversationRunStatus';
 import { ReferenceComposer, type ReferenceComposerHandle } from '../components/ReferenceComposer';
 import { ComposerAttachmentPreview } from '../components/ComposerAttachmentPreview';
+import { SentAttachmentPreview } from '../components/SentAttachmentPreview';
 import { activeChatProcessId, buildChatRenderItems, isChatTimelineEntry, isChatToolEntry, latestIncomingEntryIds } from '../components/conversationTimeline';
 import type { ChatRenderItem } from '../components/conversationTimeline';
 import { ModelReasoningCard } from '../components/ModelReasoningCard';
@@ -45,6 +46,7 @@ import {
   type ComposerAttachmentDraft,
 } from '../session/helpers';
 import { selectionInside } from '../lib/selection';
+import type { SentAttachment } from '../session/sentAttachments';
 import { findCapabilityHashTrigger, insertCapabilityReference } from '@todex/protocol/todex';
 import { buildCapabilitySuggestions, capabilityCatalogsPending, type CapabilitySuggestion } from '@todex/protocol/capabilityCatalog';
 import { getLocale, t, useT } from '../i18n';
@@ -115,6 +117,42 @@ function toolPresentation(raw: string) {
   } catch {
     return { toolName: t('chat.toolCall'), argsText: raw };
   }
+}
+
+/// Sent attachments open a read-only preview on click/Enter; content comes
+/// from the receipt (previewUrl / textContent captured at send time).
+function SentAttachmentList({ attachments }: { attachments: SentAttachment[] }) {
+  const t = useT();
+  const [preview, setPreview] = useState<SentAttachment | null>(null);
+  return (
+    <>
+      <ChatAttachmentGroup aria-label={t('chat.sentAttachments')} className="justify-end text-left" role="list">
+        {attachments.map((attachment) => (
+          <ChatAttachment
+            key={attachment.id}
+            mimeType={attachment.mimeType}
+            name={attachment.name}
+            role="listitem"
+            size={attachment.sizeBytes ?? undefined}
+            src={attachment.previewUrl}
+            className="cursor-pointer"
+            tabIndex={0}
+            onClick={() => setPreview(attachment)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                setPreview(attachment);
+              }
+            }}
+          >
+            <ChatAttachment.Preview />
+            <ChatAttachment.Info />
+          </ChatAttachment>
+        ))}
+      </ChatAttachmentGroup>
+      <SentAttachmentPreview attachment={preview} onOpenChange={(open) => { if (!open) setPreview(null); }} />
+    </>
+  );
 }
 
 const PERMISSION_MODES: readonly PermissionMode[] = ['ask', 'auto', 'full-access'];
@@ -408,21 +446,7 @@ const ChatTimelineItem = memo(function ChatTimelineItem({
         <div className={`${isUser ? 'mt-1' : ''} text-sm leading-6`}>
           {isUser ? <div className="flex flex-col items-end gap-2">
             {entry.sentAttachments?.length ? (
-              <ChatAttachmentGroup aria-label={t('chat.sentAttachments')} className="justify-end text-left" role="list">
-                {entry.sentAttachments.map((attachment) => (
-                  <ChatAttachment
-                    key={attachment.id}
-                    mimeType={attachment.mimeType}
-                    name={attachment.name}
-                    role="listitem"
-                    size={attachment.sizeBytes ?? undefined}
-                    src={attachment.previewUrl}
-                  >
-                    <ChatAttachment.Preview />
-                    <ChatAttachment.Info />
-                  </ChatAttachment>
-                ))}
-              </ChatAttachmentGroup>
+              <SentAttachmentList attachments={entry.sentAttachments} />
             ) : null}
             {entry.subtitle ? <p className="whitespace-pre-wrap wrap-anywhere">{entry.subtitle === STREAMING_REPLY_PLACEHOLDER ? t('chat.replying') : entry.subtitle}</p> : null}
           </div> : (
