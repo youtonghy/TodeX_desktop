@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Card, Chip, Input, Label, ListBox, Select, Spinner, Switch, TextArea, TextField, toast } from '@heroui/react';
-import { RiAddLine, RiArrowDownSLine, RiCheckLine, RiDeleteBinLine, RiEdit2Line, RiListCheck2, RiRefreshLine, RiUserSettingsLine } from '@remixicon/react';
+import { RiAddLine, RiArrowDownSLine, RiCheckLine, RiCloseLine, RiDeleteBinLine, RiEdit2Line, RiListCheck2, RiRefreshLine, RiUserSettingsLine } from '@remixicon/react';
 import {
   MANAGED_PROVIDER_AGENTS,
   PROVIDER_DISPLAY_NAMES,
@@ -600,7 +600,15 @@ function ModelsField({
         }}
       >
         <Label>{t('ap.models')}</Label>
-        <Select.Trigger className="w-full"><Select.Value /><Select.Indicator /></Select.Trigger>
+        <Select.Trigger className="w-full">
+          <Select.Value>
+            {({ isPlaceholder, selectedItems }) =>
+              isPlaceholder
+                ? t('ap.modelsHint')
+                : t('ap.modelsSelected', { count: selectedItems.length })}
+          </Select.Value>
+          <Select.Indicator />
+        </Select.Trigger>
         <Select.Popover>
           <div className="border-separator flex items-center gap-1 border-b p-1">
             <Input
@@ -656,10 +664,35 @@ function ModelsField({
           </ListBox>
         </Select.Popover>
       </Select>
+      {ids.length ? (
+        <div className="mt-2 flex flex-wrap gap-1">
+          {ids.map((id) => (
+            <Chip key={id} size="sm" variant="soft" className="gap-0.5 pr-1">
+              {id}
+              <button
+                type="button"
+                aria-label={t('ap.removeModel')}
+                className="text-muted hover:text-foreground inline-flex items-center"
+                onClick={() => onChange(ids.filter((item) => item !== id))}
+              >
+                <RiCloseLine className="size-3.5" />
+              </button>
+            </Chip>
+          ))}
+        </div>
+      ) : null}
       <p className="text-muted mt-1 text-xs">{t('ap.modelsHint')}</p>
     </div>
   );
 }
+
+/// Common context-window sizes offered as one-tap presets; the field still
+/// accepts any number.
+const CONTEXT_PRESETS = [
+  { label: '128K', value: '128000' },
+  { label: '272K', value: '272000' },
+  { label: '1M', value: '1000000' },
+] as const;
 
 /// Per-model settings below the membership picker: context/output limits and
 /// the enabled thinking levels. Rows stay collapsed to a one-line summary.
@@ -724,11 +757,25 @@ function ModelConfigList({
                   value={model.name}
                   onChange={(name) => update(model.id, { name })}
                 />
-                <Field
-                  label={t('ap.contextWindow')}
-                  value={model.contextWindow}
-                  onChange={(contextWindow) => update(model.id, { contextWindow })}
-                />
+                <div>
+                  <Field
+                    label={t('ap.contextWindow')}
+                    value={model.contextWindow}
+                    onChange={(contextWindow) => update(model.id, { contextWindow })}
+                  />
+                  <div className="mt-1.5 flex flex-wrap gap-1">
+                    {CONTEXT_PRESETS.map((preset) => (
+                      <Button
+                        key={preset.value}
+                        size="sm"
+                        variant={model.contextWindow.trim() === preset.value ? 'secondary' : 'tertiary'}
+                        onPress={() => update(model.id, { contextWindow: preset.value })}
+                      >
+                        {preset.label}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
                 <Field
                   label={t('ap.maxTokens')}
                   value={model.maxTokens}

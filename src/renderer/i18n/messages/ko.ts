@@ -1203,6 +1203,7 @@ export const ko: Messages = {
   'ap.apiKind': 'API 유형',
   'ap.models': '모델',
   'ap.modelsHint': '모델 ID를 선택하거나 입력하고, 행을 펼쳐 개별 설정',
+  'ap.modelsSelected': '{count}개 선택됨',
   'ap.addModel': '모델 추가',
   'ap.addModelPlaceholder': '모델 ID 입력 후 Enter로 추가',
   'ap.nameIdRequired': '이름과 프로바이더 ID는 필수입니다',

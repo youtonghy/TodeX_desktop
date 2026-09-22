@@ -1203,6 +1203,7 @@ export const en: Messages = {
   'ap.apiKind': 'API type',
   'ap.models': 'Models',
   'ap.modelsHint': 'Select or type model IDs; expand a row to configure it',
+  'ap.modelsSelected': '{count} selected',
   'ap.addModel': 'Add model',
   'ap.addModelPlaceholder': 'Type model IDs and press Enter',
   'ap.nameIdRequired': 'Name and provider ID are required',

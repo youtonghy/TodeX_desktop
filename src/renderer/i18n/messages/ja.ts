@@ -1203,6 +1203,7 @@ export const ja: Messages = {
   'ap.apiKind': 'API タイプ',
   'ap.models': 'モデル',
   'ap.modelsHint': 'モデル ID を選択または入力し、行を展開して個別に設定',
+  'ap.modelsSelected': '{count} 個選択中',
   'ap.addModel': 'モデルを追加',
   'ap.addModelPlaceholder': 'モデル ID を入力して Enter で追加',
   'ap.nameIdRequired': '名前とプロバイダー ID は必須です',

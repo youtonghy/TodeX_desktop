@@ -1203,6 +1203,7 @@ export const zhCN = {
   'ap.apiKind': 'API 类型',
   'ap.models': '模型',
   'ap.modelsHint': '选择或输入模型 ID，逐项展开可配置上下文与思考强度',
+  'ap.modelsSelected': '已选 {count} 个',
   'ap.addModel': '添加模型',
   'ap.addModelPlaceholder': '输入模型 ID，回车添加',
   'ap.nameIdRequired': '名称与供应商 ID 必填',
