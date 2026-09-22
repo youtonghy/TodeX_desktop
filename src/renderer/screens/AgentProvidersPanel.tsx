@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Button, Card, Chip, Input, Label, ListBox, Select, Spinner, TextArea, TextField, toast } from '@heroui/react';
-import { RiAddLine, RiCheckLine, RiDeleteBinLine, RiEdit2Line, RiListCheck2, RiRefreshLine, RiUserSettingsLine } from '@remixicon/react';
+import { Button, Card, Chip, Input, Label, ListBox, Select, Spinner, Switch, TextArea, TextField, toast } from '@heroui/react';
+import { RiAddLine, RiArrowDownSLine, RiCheckLine, RiDeleteBinLine, RiEdit2Line, RiListCheck2, RiRefreshLine, RiUserSettingsLine } from '@remixicon/react';
 import {
   MANAGED_PROVIDER_AGENTS,
   PROVIDER_DISPLAY_NAMES,
@@ -17,10 +17,15 @@ import { Field } from '../components/Field';
 import {
   asRecord,
   buildSettingsConfig,
+  defaultEfforts,
+  emptyModelEntry,
   extractFormValues,
   modelIdsFromText,
   providerBaseUrl,
   providerModelIds,
+  thinkingLevelsFor,
+  validateModelForm,
+  type ModelFormEntry,
   type ProviderConfigSource,
   type ProviderFormValues,
 } from '../lib/agentProviders';
@@ -413,6 +418,11 @@ function ProviderEditor({
       }
       return;
     }
+    const invalid = validateModelForm(agent, form, baseSource);
+    if (invalid) {
+      setError(t(invalid));
+      return;
+    }
     onSave(providerId, { name, settingsConfig: buildSettingsConfig(agent, form, baseSource) });
   };
 
@@ -460,7 +470,10 @@ function ProviderEditor({
               <Field label={t('ap.model')} value={form.model} onChange={(model) => updateForm({ model })} />
             ) : null}
             {isCodex ? (
-              <Field label={t('ap.reasoningEffort')} value={form.reasoningEffort} onChange={(reasoningEffort) => updateForm({ reasoningEffort })} />
+              <>
+                <Field label={t('ap.reasoningEffort')} value={form.reasoningEffort} onChange={(reasoningEffort) => updateForm({ reasoningEffort })} />
+                <Field label={t('ap.contextWindow')} value={form.contextWindow} onChange={(contextWindow) => updateForm({ contextWindow })} />
+              </>
             ) : null}
             {agent === 'pi' ? (
               <Select
@@ -485,12 +498,25 @@ function ProviderEditor({
               </Select>
             ) : null}
             {isAdditive ? (
-              <ModelsField
-                ids={modelIdsFromText(form.modelsText)}
-                onChange={(ids) => updateForm({ modelsText: ids.join(', ') })}
-                fetchModels={fetchEditorModels}
-                autoFetch={editor.kind !== 'new' || Boolean(form.baseUrl.trim())}
-              />
+              <div className="flex flex-col gap-2 sm:col-span-2">
+                <ModelsField
+                  ids={form.models.map((model) => model.id)}
+                  onChange={(ids) =>
+                    updateForm({
+                      models: ids.map(
+                        (id) => form.models.find((model) => model.id === id) ?? emptyModelEntry(id),
+                      ),
+                    })
+                  }
+                  fetchModels={fetchEditorModels}
+                  autoFetch={editor.kind !== 'new' || Boolean(form.baseUrl.trim())}
+                />
+                <ModelConfigList
+                  agent={agent}
+                  models={form.models}
+                  onChange={(models) => updateForm({ models })}
+                />
+              </div>
             ) : null}
           </div>
         )}
@@ -631,6 +657,131 @@ function ModelsField({
         </Select.Popover>
       </Select>
       <p className="text-muted mt-1 text-xs">{t('ap.modelsHint')}</p>
+    </div>
+  );
+}
+
+/// Per-model settings below the membership picker: context/output limits and
+/// the enabled thinking levels. Rows stay collapsed to a one-line summary.
+function ModelConfigList({
+  agent,
+  models,
+  onChange,
+}: {
+  agent: ManagedProviderAgent;
+  models: ModelFormEntry[];
+  onChange: (models: ModelFormEntry[]) => void;
+}) {
+  const t = useT();
+  const [expanded, setExpanded] = useState<string | null>(null);
+  if (!models.length) return null;
+  const levels = thinkingLevelsFor(agent);
+  const update = (id: string, patch: Partial<ModelFormEntry>) =>
+    onChange(models.map((model) => (model.id === id ? { ...model, ...patch } : model)));
+  return (
+    <div className="flex flex-col gap-2">
+      {models.map((model) => {
+        const open = expanded === model.id;
+        const summary = [
+          model.contextWindow.trim() ? `${model.contextWindow.trim()} ctx` : '',
+          model.reasoning ? model.efforts.join('/') : '',
+        ]
+          .filter(Boolean)
+          .join(' · ');
+        return (
+          <div key={model.id} className="border-separator rounded-lg border">
+            <div className="flex items-center gap-1 px-2">
+              <button
+                type="button"
+                className="flex min-w-0 flex-1 items-center gap-1.5 py-2 text-left"
+                onClick={() => setExpanded(open ? null : model.id)}
+              >
+                <RiArrowDownSLine
+                  className={`text-muted size-4 shrink-0 transition-transform ${open ? '' : '-rotate-90'}`}
+                />
+                <span className="truncate text-sm">{model.name || model.id}</span>
+                {model.name ? (
+                  <span className="text-muted truncate text-xs">{model.id}</span>
+                ) : null}
+                {summary ? (
+                  <span className="text-muted ml-auto shrink-0 pl-2 text-xs">{summary}</span>
+                ) : null}
+              </button>
+              <Button
+                isIconOnly
+                size="sm"
+                variant="ghost"
+                aria-label={t('ap.removeModel')}
+                onPress={() => onChange(models.filter((item) => item.id !== model.id))}
+              >
+                <RiDeleteBinLine className="size-4" />
+              </Button>
+            </div>
+            {open ? (
+              <div className="border-separator grid gap-3 border-t px-3 py-3 sm:grid-cols-2">
+                <Field
+                  label={t('ap.displayName')}
+                  value={model.name}
+                  onChange={(name) => update(model.id, { name })}
+                />
+                <Field
+                  label={t('ap.contextWindow')}
+                  value={model.contextWindow}
+                  onChange={(contextWindow) => update(model.id, { contextWindow })}
+                />
+                <Field
+                  label={t('ap.maxTokens')}
+                  value={model.maxTokens}
+                  onChange={(maxTokens) => update(model.id, { maxTokens })}
+                />
+                <Switch
+                  isSelected={model.reasoning}
+                  onChange={(reasoning) =>
+                    update(model.id, {
+                      reasoning,
+                      efforts:
+                        reasoning && !model.efforts.length ? defaultEfforts(agent) : model.efforts,
+                    })
+                  }
+                >
+                  <Switch.Content>
+                    <Switch.Control>
+                      <Switch.Thumb />
+                    </Switch.Control>
+                    <p className="text-sm">{t('ap.reasoning')}</p>
+                  </Switch.Content>
+                </Switch>
+                {model.reasoning ? (
+                  <div className="sm:col-span-2">
+                    <p className="text-muted mb-1.5 text-xs">{t('ap.efforts')}</p>
+                    <div className="flex flex-wrap gap-1">
+                      {levels.map((level) => {
+                        const enabled = model.efforts.includes(level);
+                        return (
+                          <Button
+                            key={level}
+                            size="sm"
+                            variant={enabled ? 'primary' : 'tertiary'}
+                            onPress={() =>
+                              update(model.id, {
+                                efforts: enabled
+                                  ? model.efforts.filter((item) => item !== level)
+                                  : [...model.efforts, level],
+                              })
+                            }
+                          >
+                            {level}
+                          </Button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+        );
+      })}
     </div>
   );
 }
