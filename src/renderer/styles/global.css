@@ -291,6 +291,18 @@ body {
   overflow-wrap: break-word;
 }
 
+/* Toasts carry raw provider errors with long unbroken tokens (request ids);
+   the flex column must be allowed to shrink and wrap, and the shrink-to-fit
+   region must stay inside the viewport. */
+.toast-region {
+  max-width: calc(100vw - 2rem);
+}
+
+.toast__content {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .composer-toolbar {
   container-type: inline-size;
   gap: 0.5rem;
