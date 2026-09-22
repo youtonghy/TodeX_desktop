@@ -18,6 +18,13 @@ export type ChatRenderItem =
   | { type: 'entry'; entry: TimelineEntry }
   | { type: 'executionGroup'; id: string; entries: TimelineEntry[]; turnId?: string; userMessageId?: string };
 
+/** Steps that fold into the collapsed trace. `assistant_progress` narration is
+ * deliberately excluded: progress text reads like a message and stays visible
+ * as a standalone line, while still splitting adjacent tool runs. */
+function isFoldedStepEntry(entry: TimelineEntry): boolean {
+  return isStepProgressEntry(entry) && entry.category !== 'assistant_progress';
+}
+
 /** Consecutive steps fold into one trace; text between two runs starts a new
  * trace so the working notes stay interleaved with the narration they belong
  * to. Unattributed startup statuses are not conversation content. */
@@ -38,7 +45,7 @@ export function buildChatRenderItems(entries: readonly TimelineEntry[]): ChatRen
   let openGroupId = '';
   for (const entry of entries) {
     if (entry.kind === 'outgoing') { currentUser = entry; orphanKey = ''; openKey = ''; }
-    if (!isStepProgressEntry(entry)) { openKey = ''; continue; }
+    if (!isFoldedStepEntry(entry)) { openKey = ''; continue; }
     if (!entry.turnId && !currentUser && entry.category === 'status') continue;
     const key = entry.turnId ? turnKey(entry) : currentUser ? userKey(currentUser)
       : (orphanKey ||= JSON.stringify([entry.conversationId ?? '', 'orphan', entry.id]));
@@ -93,7 +100,7 @@ export function buildChatRenderItems(entries: readonly TimelineEntry[]): ChatRen
       }
       continue;
     }
-    if (isStepProgressEntry(entry)) continue;
+    if (isFoldedStepEntry(entry)) continue;
     items.push({ type: 'entry', entry });
     lastGroupAnchor = '';
     if (entry.kind === 'outgoing') {
