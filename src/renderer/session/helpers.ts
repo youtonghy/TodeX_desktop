@@ -74,8 +74,6 @@ import {
 import {
   buildConversationRenderItems as sharedBuildConversationRenderItems,
   executionGroupId as sharedExecutionGroupId,
-  classifyV2ConversationEvent as sharedClassifyV2ConversationEvent,
-  contextUsageFromV2Event as sharedContextUsageFromV2Event,
   isCollapsibleProgressEntry as sharedIsCollapsibleProgressEntry,
   isStepProgressEntry as sharedIsStepProgressEntry,
   isThinkingProgressEntry as sharedIsThinkingProgressEntry,
@@ -1166,28 +1164,6 @@ export type TimelineEntry = {
   detailStub?: boolean;
 };
 
-export function parseToolCallState(raw: string, fallbackId: string): import('@todex/protocol/v2').ToolCallState {
-  let value: Record<string, unknown> = {};
-  try { value = JSON.parse(raw) as Record<string, unknown>; } catch { /* legacy text event */ }
-  const args = value.arguments ?? value.args ?? value.input;
-  const result = value.result ?? value.output;
-  const status = String(value.status ?? value.phase ?? 'running');
-  const normalizedStatus = (status === 'awaiting_approval' ? 'awaitingApproval' : status) as import('@todex/protocol/v2').ToolCallStatus;
-  return {
-    callId: String(value.callId ?? value.toolCallId ?? fallbackId),
-    name: String(value.toolName ?? value.name ?? value.tool ?? t('chat.toolCall')),
-    argumentsText: typeof args === 'string' ? args : args === undefined ? raw : JSON.stringify(args, null, 2),
-    argumentsJson: typeof args === 'string' ? undefined : args,
-    resultText: typeof result === 'string' ? result : result === undefined ? undefined : JSON.stringify(result, null, 2),
-    resultJson: typeof result === 'string' ? undefined : result,
-    stdout: typeof value.stdout === 'string' ? value.stdout : undefined,
-    stderr: typeof value.stderr === 'string' ? value.stderr : undefined,
-    status: normalizedStatus,
-    error: typeof value.error === 'string' ? value.error : undefined,
-    completionReason: typeof value.completionReason === 'string' ? value.completionReason as import('@todex/protocol/v2').AgentCompletionReason : undefined,
-  };
-}
-
 export function workspaceDisplayName(workspace: Pick<WorkspaceRecord, 'name' | 'path'>): string {
   const name = workspace.name.trim();
   if (name && !/[\\/]/.test(name)) {
@@ -1252,14 +1228,6 @@ export type UsageRecord = import('@todex/protocol/mobileParity').UsageRecord;
 
 export function normalizeUsageRecords(value: unknown): UsageRecord[] {
   return normalizeSharedUsageRecords(value, { limit: MAX_USAGE_RECORDS });
-}
-
-function usageNumber(value: unknown): number {
-  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : 0;
-}
-
-export function contextUsageFromV2Event(event: ConversationEvent): ConversationContextUsage | null {
-  return sharedContextUsageFromV2Event(event) as ConversationContextUsage | null;
 }
 
 export type ConversationRenderItem =
@@ -2207,15 +2175,6 @@ export function mergeManifestConversations(
     return current;
   }
   return next.sort((left, right) => (right.updatedAt - left.updatedAt) || (left.id < right.id ? -1 : 1));
-}
-
-export function classifyV2ConversationEvent(
-  event: ConversationEvent,
-  workspaceId: string,
-  activeTurnId = '',
-): TimelineEntry | null {
-  const entry = sharedClassifyV2ConversationEvent(event, workspaceId, activeTurnId);
-  return entry ? { ...entry, raw: entry.category ? '' : shortJson(event), sequence: event.sequence } : null;
 }
 
 export function shouldAppendV2ConversationEvent(event: ConversationEvent): boolean {
