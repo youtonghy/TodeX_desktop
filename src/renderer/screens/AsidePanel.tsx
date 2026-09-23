@@ -15,6 +15,7 @@ import {
 } from '../session/helpers';
 import { XtermTerminal } from '../components/XtermTerminal';
 import { CapabilitiesPanel } from './CapabilitiesPanel';
+import { SubagentsPanel } from './SubagentsPanel';
 import { useT } from '../i18n';
 
 type Props = {
@@ -67,6 +68,15 @@ export function AsidePanel({ session, panel, slashCommand, onBack }: Props) {
           }
         }}
       />
+      </div>
+    );
+  }
+
+  if (panel === 'subagents') {
+    return (
+      <div className="flex h-full min-h-0 flex-col">
+        {back}
+        <SubagentsPanel session={session} conversationId={conversation?.id} />
       </div>
     );
   }
@@ -276,28 +286,12 @@ function TerminalAside({ session, terminalId }: { session: TodeXSession; termina
 function SlashActionAside({ session, command, conversationId }: { session: TodeXSession; command: string; conversationId: string }) {
   const t = useT();
   const [value, setValue] = useState('');
-  const subagents = command === '/subagents' ? session.subagentsByConversation[conversationId] ?? [] : [];
-  const subagentLabels = { queued: t('aside.subagentQueued'), running: t('aside.subagentRunning'), completed: t('aside.subagentCompleted'), failed: t('aside.subagentFailed'), cancelled: t('aside.subagentCancelled') };
   const memoryEntries = session.memoryEntriesByConversation[conversationId] ?? [];
   if (command === '/memory') {
     return <div className="flex h-full flex-col gap-3 p-5"><h2 className="text-lg font-semibold">{t('aside.memoryTitle')}</h2><p className="text-muted text-sm">{t('aside.memoryHint')}</p><ScrollShadow className="min-h-0 flex-1 overflow-y-auto">{memoryEntries.length ? memoryEntries.map(entry => <Card key={entry.id} className="mb-2 p-3"><p className="whitespace-pre-wrap text-sm">{entry.content}</p><p className="text-muted mt-2 text-xs">{entry.scope === 'user' ? t('aside.memoryUser') : entry.scope === 'workspace' ? t('aside.memoryWorkspace') : t('aside.memoryConversation')}</p></Card>) : <p className="text-muted text-sm">{t('aside.memoryEmpty')}</p>}</ScrollShadow></div>;
   }
   if (command === '/subagents') {
-    return (
-      <div className="flex h-full min-h-0 flex-col gap-4 p-5">
-        <h2 className="text-lg font-semibold">Subagents</h2>
-        <ScrollShadow className="min-h-0 flex-1">
-          {subagents.length ? subagents.map((run) => (
-            <Card key={run.id} className="mb-2 p-3">
-              <div className="flex items-center justify-between gap-2"><span className="font-medium">{run.title}</span><span className="text-muted text-xs">{subagentLabels[run.status]}</span></div>
-              {run.task ? <p className="text-muted mt-1 text-xs whitespace-pre-wrap">{run.task}</p> : null}
-              {run.result ? <p className="mt-2 text-sm whitespace-pre-wrap">{run.result}</p> : null}
-              {run.error ? <p className="mt-2 text-danger text-xs">{run.error}</p> : null}
-            </Card>
-          )) : <p className="text-muted text-sm">{t('aside.subagentEmpty')}</p>}
-        </ScrollShadow>
-      </div>
-    );
+    return <SubagentsPanel session={session} conversationId={conversationId} />;
   }
   return (
     <div className="flex flex-col gap-4 p-5">

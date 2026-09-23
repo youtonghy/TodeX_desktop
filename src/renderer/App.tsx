@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { Button, Label, ListBox, Modal, Select, Toast, toast } from '@heroui/react';
 import { AppLayout, Navbar } from '@heroui-pro/react';
-import { RiAddLine, RiGithubLine, RiLayoutLeftLine, RiLayoutRightLine } from '@remixicon/react';
+import { RiAddLine, RiGithubLine, RiLayoutLeftLine, RiLayoutRightLine, RiRobot2Line } from '@remixicon/react';
 import { useWorkbenchLayout } from './session/useWorkbenchLayout';
 import { workbenchScopeKey } from './session/workbenchLayout';
 import { useTodeXSession, type TodeXSession } from './session/useTodeXSession';
@@ -182,6 +182,11 @@ export function App() {
   const cliManagerOpen = panel === 'cli-manager';
   const agentProvidersOpen = panel === 'agent-providers';
   const modalPanel = settingsOpen || usageOpen || aboutOpen || cliManagerOpen || agentProvidersOpen;
+  const activeSubagents = session.activeConversation
+    ? (session.subagentsByConversation[session.activeConversation.id] ?? []).filter(
+        (run) => run.status === 'running' || run.status === 'queued',
+      ).length
+    : 0;
   const overlayPanel = panelScopeRef.current === scopeKey && panel && panel !== 'kanban' && !modalPanel && !isWorkbenchTab(panel) ? panel : null;
 
   return (
@@ -265,6 +270,14 @@ export function App() {
                   <Button isIconOnly size="sm" variant="ghost" aria-label={t('app.githubActions')} onPress={() => setGitOpen(true)}>
                     <RiGithubLine className="size-4" />
                   </Button>
+                  <span className="relative">
+                    <Button isIconOnly size="sm" variant={panel === 'subagents' && asideOpen ? 'secondary' : 'ghost'} aria-label={t('app.subagents')} aria-expanded={asideOpen && panel === 'subagents'} onPress={() => openPanel('Subagents')}>
+                      <RiRobot2Line className="size-4" />
+                    </Button>
+                    {activeSubagents > 0 ? (
+                      <span className="bg-accent text-accent-foreground pointer-events-none absolute -right-1 -top-1 flex min-w-4 items-center justify-center rounded-full px-0.5 text-[10px] leading-4">{activeSubagents}</span>
+                    ) : null}
+                  </span>
                   <Button isIconOnly size="sm" variant="ghost" aria-label={asideOpen ? t('app.closeAside') : t('app.openAside')} aria-expanded={asideOpen} onPress={() => persistAsideOpen(!asideOpen)}>
                     <RiLayoutRightLine className="size-4" />
                   </Button>
