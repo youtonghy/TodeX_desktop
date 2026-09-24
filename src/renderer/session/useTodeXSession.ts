@@ -454,6 +454,22 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   // Backend the single `/v2/ws` socket was last opened against; a switch to a
   // workspace on another backend must move the socket along with it.
   const connectedBackendIdRef = useRef<string | null>(null);
+  const connectionRoutingRef = useRef({ settings, backendConnections });
+  connectionRoutingRef.current = { settings, backendConnections };
+  // History reads follow the backend that owns the conversation, so a load
+  // still in flight when the user switches away keeps reading the right
+  // journal, and the next visit continues from where it stopped.
+  const v2ApiForConversation = useCallback((conversationId: string) => {
+    const { settings: activeSettings, backendConnections: profiles } = connectionRoutingRef.current;
+    const conversation = conversationsRef.current.find((item) => item.v2ConversationId === conversationId || item.id === conversationId);
+    const backendId = conversation?.backendConnectionId
+      ?? workspacesRef.current.find((item) => item.id === conversation?.workspaceId)?.backendConnectionId;
+    const profile = backendId && backendId !== activeBackendConnectionIdRef.current
+      ? profiles.find((item) => item.id === backendId)
+      : undefined;
+    const target = profile ?? activeSettings;
+    return new V2ApiClient({ serverUrl: target.serverUrl, device: deviceIdentityFromSecret(target.deviceSecret) });
+  }, []);
   const [workspaces, setWorkspaces] = useState<WorkspaceRecord[]>([]);
   const [workspaceTombstones, setWorkspaceTombstones] = useState<WorkspaceTombstone[]>([]);
   const [conversations, setConversations] = useState<ConversationRecord[]>([]);
@@ -531,21 +547,15 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const [earlierHistory, setEarlierHistory] = useState<Record<string, { hasMore: boolean; loading: boolean }>>({});
   const [submissionStatusByConversation, setSubmissionStatusByConversation] = useState<Record<string, 'sending' | 'running' | 'unknown' | undefined>>({});
   const settledV2TurnsRef = useRef(new Map<string, string>());
-  const runtimeReplayRef = useRef((id: string, after: number, limit: number) =>
-    new V2ApiClient({ serverUrl: settings.serverUrl, device: deviceIdentityFromSecret(settings.deviceSecret) }).replayEvents(id, after, limit));
-  // History replays fetch summary events only; folded process groups fetch
-  // their full sequence range back when the user expands them.
-  runtimeReplayRef.current = (id, after, limit) => new V2ApiClient({ serverUrl: settings.serverUrl, device: deviceIdentityFromSecret(settings.deviceSecret) }).replayEvents(id, after, limit, 'summary');
-  const runtimeReplayBeforeRef = useRef((id: string, before: number, limit: number) =>
-    new V2ApiClient({ serverUrl: settings.serverUrl, device: deviceIdentityFromSecret(settings.deviceSecret) }).replayEventsBefore(id, before, limit));
-  runtimeReplayBeforeRef.current = (id, before, limit) => new V2ApiClient({ serverUrl: settings.serverUrl, device: deviceIdentityFromSecret(settings.deviceSecret) }).replayEventsBefore(id, before, limit, 'summary');
   const runtimeUpdateRef = useRef<(state: ConversationRuntime, applied: ConversationEvent[], recovering: boolean) => void>(() => {});
   const notifyTurnCompletedRef = useRef<(localId: string, state: ConversationRuntime, turnId: string) => void>(() => {});
   const conversationRecoveryRef = useRef<ConversationRecovery | null>(null);
+  // History replays fetch summary events only; folded process groups fetch
+  // their full sequence range back when the user expands them.
   if (!conversationRecoveryRef.current) conversationRecoveryRef.current = new ConversationRecovery(
-    (id, after, limit) => runtimeReplayRef.current(id, after, limit),
+    (id, after, limit) => v2ApiForConversation(id).replayEvents(id, after, limit, 'summary'),
     (state, applied, recovering) => runtimeUpdateRef.current(state, applied, recovering), setLastError,
-    (id, before, limit) => runtimeReplayBeforeRef.current(id, before, limit),
+    (id, before, limit) => v2ApiForConversation(id).replayEventsBefore(id, before, limit, 'summary'),
   );
 
 
@@ -3523,8 +3533,11 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           const foregroundConversation = conversationsRef.current.find(
             (item) => item.id === activeConversationRef.current,
           );
+          // Returning to a backend continues its history where it stopped:
+          // a loaded conversation catches up from its cursor, an unloaded one
+          // opens lazily from the journal tail.
           if (foregroundConversation?.v2ConversationId) {
-            void recoverConversation(foregroundConversation.id);
+            void openConversation(foregroundConversation.id);
           }
           // Prompt submissions whose ACK was lost are reconciled against the
           // journal: delivered ones resume tracking, the rest return to drafts.
@@ -3535,10 +3548,14 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
             await syncWorkspacesFromBackend();
             if (!isSocketCurrent()) return;
             const backendId = activeBackendConnectionIdRef.current;
-            const candidates = conversationsRef.current.filter((conversation) =>
-              Boolean(conversation.v2ConversationId)
-              && conversation.archived !== true
-              && (!conversation.backendConnectionId || conversation.backendConnectionId === backendId));
+            const candidates = conversationsRef.current.filter((conversation) => {
+              if (!conversation.v2ConversationId || conversation.archived === true) return false;
+              // Manifest-imported conversations are untagged; their workspace
+              // names the backend that owns them.
+              const ownerId = conversation.backendConnectionId
+                ?? workspacesRef.current.find((item) => item.id === conversation.workspaceId)?.backendConnectionId;
+              return !ownerId || ownerId === backendId;
+            });
             // The foreground conversation must keep its live subscription even
             // when the list exceeds the server's per-socket subscription cap.
             candidates.sort((left, right) =>
@@ -3549,7 +3566,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
               try {
                 // Conversations whose last recovery was cut short resume here.
                 if (conversationRecoveryRef.current?.isRecovering(v2ConversationId)) {
-                  void recoverConversation(conversation.id);
+                  void openConversation(conversation.id);
                 }
                 subscribeV2Conversation(v2ConversationId, {
                   // Subscribe at the known high-water mark instead of
@@ -3648,7 +3665,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       setLastError(message);
       setConnectionHealth({ status: 'offline', latencyMs: null, lastCheckedAt: Date.now(), error: message, code: 'backend_unreachable' });
     });
-  }, [checkConnectionHealth, closeSocket, enqueueSocketFrame, flushQueuedProtocolCommands, getSessionCursorSnapshot, recoverConversation, reconcilePendingSubmission, refreshServerVersion, resumeQueuedFollowUps, sendSessionResume, setBackendProviders, settings, subscribeV2Conversation, syncWorkspacesFromBackend]);
+  }, [checkConnectionHealth, closeSocket, enqueueSocketFrame, flushQueuedProtocolCommands, getSessionCursorSnapshot, openConversation, reconcilePendingSubmission, refreshServerVersion, resumeQueuedFollowUps, sendSessionResume, setBackendProviders, settings, subscribeV2Conversation, syncWorkspacesFromBackend]);
 
   useEffect(() => {
     if (!hydrated || !autoConnectEnabled || manualDisconnectRef.current) {
@@ -7794,7 +7811,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const hydrateProcessGroup = useCallback(async (conversationId: string, sequences: readonly number[]) => {
     const conversation = conversationsRef.current.find((item) => item.id === conversationId);
     const v2Id = conversation?.v2ConversationId ?? conversationId;
-    const api = new V2ApiClient({ serverUrl: settings.serverUrl, device: deviceIdentityFromSecret(settings.deviceSecret) });
+    const api = v2ApiForConversation(v2Id);
     const ordered = [...new Set(sequences.filter((sequence) => Number.isFinite(sequence) && sequence > 0))]
       .sort((left, right) => left - right);
     if (!ordered.length) return false;
@@ -7826,7 +7843,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     await fetchRange(start, previous);
     return events.length > 0
       && (conversationRecoveryRef.current?.hydrate(v2Id, conversation?.workspaceId ?? '', events) ?? false);
-  }, [settings.serverUrl, settings.deviceSecret]);
+  }, [v2ApiForConversation]);
 
   return {
     ...workbenchSharingState,
