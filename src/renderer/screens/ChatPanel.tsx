@@ -653,8 +653,9 @@ export function ChatPanel({ session }: Props) {
       if (chatWindowStart !== null && !historyAnchorRef.current) setChatWindowStart(null);
     } else if (chatWindowStart === null && hiddenItemCount > 0) {
       // Reading away from the bottom: pin the window so streamed rows do not
-      // slide the content under the reader.
-      setChatWindowStart(firstMountedKey);
+      // slide the content under the reader. Functional, so a second scroll
+      // event before the re-render cannot undo a reveal already queued.
+      setChatWindowStart((current) => current ?? firstMountedKey);
     }
     if (element.scrollTop < 240) requestEarlierHistory();
   };
@@ -673,10 +674,10 @@ export function ChatPanel({ session }: Props) {
         historyAnchorRef.current = null;
       }
     }
-    // Content shorter than the viewport never scrolls, so pull the next page
-    // here instead of waiting for an onScroll that cannot fire.
+    // Content shorter than the viewport, or a reader already parked at the
+    // top, cannot produce another scroll event: reveal or fetch from here.
     if ((hiddenItemCount > 0 || (earlierHistoryStatus?.hasMore && !earlierHistoryStatus.loading))
-      && element.scrollHeight <= element.clientHeight) {
+      && (element.scrollHeight <= element.clientHeight || (!atBottomRef.current && element.scrollTop < 240))) {
       requestEarlierHistory();
     }
     const jumpTarget = pendingMessageJumpRef.current;
@@ -1013,7 +1014,7 @@ export function ChatPanel({ session }: Props) {
               <Spinner size="sm" />
               {t('chat.loadingEarlier')}
             </p>
-          ) : earlierHistoryStatus?.hasMore ? (
+          ) : earlierHistoryStatus?.hasMore || hiddenItemCount > 0 ? (
             <div className="flex justify-center py-1">
               <Button size="sm" variant="ghost" onPress={requestEarlierHistory}>
                 {t('chat.loadEarlier')}
