@@ -353,6 +353,10 @@ const MODEL_DISCOVERY_RETRY_DELAYS_MS = [2_000, 5_000];
 // to make room.
 const V2_WS_SUBSCRIPTION_BUDGET = 120;
 
+// Conversations whose projected history stays in memory after the user moves
+// on; older ones are released and reopen lazily from the journal tail.
+const RETAINED_CONVERSATION_RUNTIMES = 8;
+
 type ProviderModelCatalog = Partial<Record<ProviderKind, ProviderModelDescriptor[]>>;
 // Stable fallbacks for a backend whose catalogs have not loaded yet, so the
 // derived views keep their identity across renders.
@@ -547,6 +551,16 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const [earlierHistory, setEarlierHistory] = useState<Record<string, { hasMore: boolean; loading: boolean }>>({});
   const [submissionStatusByConversation, setSubmissionStatusByConversation] = useState<Record<string, 'sending' | 'running' | 'unknown' | undefined>>({});
   const settledV2TurnsRef = useRef(new Map<string, string>());
+  // Runtime entries keep their identity until an event changes them; reuse
+  // the stamped copy so chat rows stay memoized while other rows stream.
+  const stampedTimelineEntriesRef = useRef(new WeakMap<TimelineEntry, TimelineEntry>());
+  const stampTimelineEntry = (entry: TimelineEntry, conversationId: string) => {
+    const cached = stampedTimelineEntriesRef.current.get(entry);
+    if (cached?.conversationId === conversationId) return cached;
+    const stamped = { ...entry, conversationId };
+    stampedTimelineEntriesRef.current.set(entry, stamped);
+    return stamped;
+  };
   const runtimeUpdateRef = useRef<(state: ConversationRuntime, applied: ConversationEvent[], recovering: boolean) => void>(() => {});
   const notifyTurnCompletedRef = useRef<(localId: string, state: ConversationRuntime, turnId: string) => void>(() => {});
   const conversationRecoveryRef = useRef<ConversationRecovery | null>(null);
@@ -1461,11 +1475,21 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     scheduleJsonSave(CONVERSATIONS_STORAGE_KEY, conversations);
   }, [conversations, hydrated, scheduleJsonSave]);
 
+  // v2 history lives in the backend journal and pages in lazily, so only
+  // local-only entries are persisted; unchanged snapshots skip the write.
+  const persistedTimelineRef = useRef<TimelineEntry[]>([]);
   useEffect(() => {
     if (!hydrated) {
       return;
     }
-    scheduleJsonSave(TIMELINE_STORAGE_KEY, timeline.slice(0, MAX_TIMELINE_ITEMS));
+    const v2ConversationIds = new Set(conversationsRef.current.filter(isV2Conversation).map((item) => item.id));
+    const local = timeline
+      .filter((entry) => !entry.conversationId || !v2ConversationIds.has(entry.conversationId))
+      .slice(0, MAX_TIMELINE_ITEMS);
+    const previous = persistedTimelineRef.current;
+    if (local.length === previous.length && local.every((entry, index) => entry === previous[index])) return;
+    persistedTimelineRef.current = local;
+    scheduleJsonSave(TIMELINE_STORAGE_KEY, local);
   }, [hydrated, scheduleJsonSave, timeline]);
 
   useEffect(() => {
@@ -1673,7 +1697,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     const boundAttachments = bindSentAttachmentEvents(sentAttachmentRecordsRef.current, localId, appliedEvents);
     if (boundAttachments !== sentAttachmentRecordsRef.current) updateSentAttachmentRecords(boundAttachments);
     setTimeline((current) => [
-      ...state.timeline.map((entry) => ({ ...entry, conversationId: localId })),
+      ...state.timeline.map((entry) => stampTimelineEntry(entry, localId)),
       ...current.filter((entry) => entry.conversationId !== localId),
     ].slice(0, MAX_TIMELINE_ITEMS_LIVE));
     const hasEarlier = conversationRecoveryRef.current?.hasEarlierHistory(state.conversationId) ?? false;
@@ -1770,11 +1794,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     });
   };
 
-  const recoverConversation = useCallback(async (conversationId: string) => {
-    const conversation = conversationsRef.current.find((item) => item.id === conversationId || item.v2ConversationId === conversationId);
-    if (conversation?.v2ConversationId) await conversationRecoveryRef.current!.recover(conversation.v2ConversationId, conversation.workspaceId);
-  }, []);
-
   /** Open a conversation lazily: only the newest history window is fetched
    * from the journal tail; earlier events page in on scroll. Falls back to a
    * full forward replay when the runtime is already initialized. */
@@ -1788,6 +1807,19 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       turnActive: status === 'running' || status === 'waiting_permission',
     });
   }, []);
+
+  const recoverConversation = useCallback(async (conversationId: string) => {
+    const conversation = conversationsRef.current.find((item) => item.id === conversationId || item.v2ConversationId === conversationId);
+    const v2Id = conversation?.v2ConversationId;
+    if (!v2Id || !conversation) return;
+    // Without a loaded runtime a forward replay would read the whole journal;
+    // open lazily from the tail instead.
+    if (!conversationRecoveryRef.current!.get(v2Id)) {
+      await openConversation(conversation.id);
+      return;
+    }
+    await conversationRecoveryRef.current!.recover(v2Id, conversation.workspaceId);
+  }, [openConversation]);
 
   /** Fetch and prepend the next older history page for the scroll sentinel.
    * Resolves false when no earlier events remain or a page is in flight. */
@@ -1881,6 +1913,44 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       });
     }
   }, [activeConversation?.id, activeConversation?.v2ConversationId, hydrated, openConversation, settings.serverUrl, settings.deviceSecret]);
+
+  // Only recently viewed conversations keep their projected history in
+  // memory. Older ones are released and reopen lazily from the journal tail;
+  // busy conversations (running, awaiting approval, queued or unconfirmed
+  // prompts, loading) are always kept.
+  const recentConversationIdsRef = useRef<string[]>([]);
+  useEffect(() => {
+    if (!activeConversationId) return;
+    const recent = [activeConversationId, ...recentConversationIdsRef.current.filter((id) => id !== activeConversationId)];
+    const recovery = conversationRecoveryRef.current;
+    const kept: string[] = [];
+    const released: string[] = [];
+    for (const [index, localId] of recent.entries()) {
+      const v2Id = conversationsRef.current.find((item) => item.id === localId)?.v2ConversationId;
+      const state = v2Id ? recovery?.get(v2Id) : undefined;
+      const busy = Boolean(state && (state.activeTurnId || state.status === 'running' || state.status === 'waitingPermission'
+        || state.pendingPermissions.length || state.queueItems.length))
+        || thinkingConversationsRef.current[localId] === true
+        || pendingV2SubmissionsRef.current.has(localId)
+        || (queuedChatDraftsRef.current[localId]?.length ?? 0) > 0;
+      if (index < RETAINED_CONVERSATION_RUNTIMES || busy) kept.push(localId);
+      else if (!v2Id || !state) continue; // nothing loaded to release
+      else if (recovery?.release(v2Id)) released.push(localId);
+      else kept.push(localId); // a page is in flight; retry on the next switch
+    }
+    recentConversationIdsRef.current = kept;
+    if (!released.length) return;
+    const releasedIds = new Set(released);
+    const withoutReleased = <T,>(current: Record<string, T>) => {
+      const next = { ...current };
+      for (const id of released) delete next[id];
+      return next;
+    };
+    setConversationRuntimeById(withoutReleased);
+    setRecoveringConversations(withoutReleased);
+    setEarlierHistory(withoutReleased);
+    setTimeline((current) => current.filter((entry) => !entry.conversationId || !releasedIds.has(entry.conversationId)));
+  }, [activeConversationId]);
 
   const runtimeStatus = useMemo<RuntimeStatusState>(() => ({
     socket: connectionState,

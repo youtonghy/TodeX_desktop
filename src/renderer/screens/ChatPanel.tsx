@@ -315,6 +315,14 @@ type ChatTimelineItemProps = {
 
 // Timeline entries keep object identity while unchanged, so an element-wise
 // comparison of a group's entries is enough to detect real updates.
+/** Rows mounted at the bottom of the chat, and revealed per upward scroll. */
+const CHAT_ROW_WINDOW = 60;
+const SHOW_ALL_CHAT_ROWS = '\u0000all';
+
+function chatRenderItemKey(item: ChatRenderItem): string {
+  return item.type === 'executionGroup' ? item.id : item.entry.id;
+}
+
 function chatRowItemEqual(prev: ChatRenderItem, next: ChatRenderItem): boolean {
   if (prev.type !== next.type) return false;
   if (prev.type === 'executionGroup' && next.type === 'executionGroup') {
@@ -543,6 +551,17 @@ export function ChatPanel({ session }: Props) {
   }, [conversation?.id, session.timeline]);
   const items = useMemo(() => buildChatRenderItems(chatEntries), [chatEntries]);
   const actionableIncoming = useMemo(() => latestIncomingEntryIds(chatEntries), [chatEntries]);
+  // Only the newest rows are mounted. Scrolling up reveals loaded rows a
+  // window at a time before any older history is fetched; returning to the
+  // bottom unmounts them again. `null` slides with the newest rows, a row key
+  // pins the window start, and SHOW_ALL_CHAT_ROWS mounts everything.
+  const [chatWindowStart, setChatWindowStart] = useState<string | null>(null);
+  const chatWindowStartIndex = chatWindowStart === SHOW_ALL_CHAT_ROWS ? 0
+    : chatWindowStart ? items.findIndex((item) => chatRenderItemKey(item) === chatWindowStart) : -1;
+  const hiddenItemCount = chatWindowStartIndex >= 0 ? chatWindowStartIndex : Math.max(0, items.length - CHAT_ROW_WINDOW);
+  const mountedItems = hiddenItemCount > 0 ? items.slice(hiddenItemCount) : items;
+  const firstMountedKey = mountedItems[0] ? chatRenderItemKey(mountedItems[0]) : '';
+  const pendingMessageJumpRef = useRef('');
   const messagesRef = useRef<HTMLDivElement>(null);
   const [quote, setQuote] = useState<{ text: string; left: number; top: number; messageId?: string } | null>(null);
   useEffect(() => {
@@ -600,16 +619,26 @@ export function ChatPanel({ session }: Props) {
   /** Records where the viewport sat before an earlier-history prepend so the
    * rendered rows can be shifted back onto the same content. */
   const historyAnchorRef = useRef<{ conversationId: string; scrollHeight: number; scrollTop: number; oldestEntryId: string } | null>(null);
-  const oldestChatEntryId = chatEntries[0]?.id ?? '';
   const requestEarlierHistory = () => {
     const element = scrollRef.current;
-    if (!element || !conversation || !earlierHistoryStatus?.hasMore || earlierHistoryStatus.loading) return;
-    historyAnchorRef.current = {
+    if (!element || !conversation || historyAnchorRef.current) return;
+    const anchor = {
       conversationId: conversation.id,
       scrollHeight: element.scrollHeight,
       scrollTop: element.scrollTop,
-      oldestEntryId: oldestChatEntryId,
+      oldestEntryId: firstMountedKey,
     };
+    if (hiddenItemCount > 0) {
+      // Loaded rows are still unmounted: reveal the next window first.
+      historyAnchorRef.current = anchor;
+      const start = items[Math.max(0, hiddenItemCount - CHAT_ROW_WINDOW)];
+      setChatWindowStart(start ? chatRenderItemKey(start) : SHOW_ALL_CHAT_ROWS);
+      return;
+    }
+    if (!earlierHistoryStatus?.hasMore || earlierHistoryStatus.loading) return;
+    historyAnchorRef.current = anchor;
+    // Fetched rows land above the window start; keep them all mounted.
+    setChatWindowStart(SHOW_ALL_CHAT_ROWS);
     void session.loadEarlierHistory(conversation.id);
   };
   const updateScrollPosition = () => {
@@ -618,6 +647,15 @@ export function ChatPanel({ session }: Props) {
     const atBottom = element.scrollHeight - element.scrollTop - element.clientHeight < 120;
     atBottomRef.current = atBottom;
     setIsAtBottom(atBottom);
+    if (atBottom) {
+      // Back at the newest rows: let the window slide again, unmounting the
+      // rows revealed while reading older history.
+      if (chatWindowStart !== null && !historyAnchorRef.current) setChatWindowStart(null);
+    } else if (chatWindowStart === null && hiddenItemCount > 0) {
+      // Reading away from the bottom: pin the window so streamed rows do not
+      // slide the content under the reader.
+      setChatWindowStart(firstMountedKey);
+    }
     if (element.scrollTop < 240) requestEarlierHistory();
   };
   useLayoutEffect(() => {
@@ -625,7 +663,7 @@ export function ChatPanel({ session }: Props) {
     const element = scrollRef.current;
     if (!element) return;
     if (anchor && anchor.conversationId === conversation?.id) {
-      if (oldestChatEntryId !== anchor.oldestEntryId) {
+      if (firstMountedKey !== anchor.oldestEntryId) {
         // Older rows mounted above the viewport: compensate by the height they
         // added so the visible content does not move.
         historyAnchorRef.current = null;
@@ -637,13 +675,23 @@ export function ChatPanel({ session }: Props) {
     }
     // Content shorter than the viewport never scrolls, so pull the next page
     // here instead of waiting for an onScroll that cannot fire.
-    if (earlierHistoryStatus?.hasMore && !earlierHistoryStatus.loading && element.scrollHeight <= element.clientHeight) {
+    if ((hiddenItemCount > 0 || (earlierHistoryStatus?.hasMore && !earlierHistoryStatus.loading))
+      && element.scrollHeight <= element.clientHeight) {
       requestEarlierHistory();
     }
-  }, [session.timeline, oldestChatEntryId, earlierHistoryStatus?.loading, conversation?.id]);
+    const jumpTarget = pendingMessageJumpRef.current;
+    if (jumpTarget) {
+      pendingMessageJumpRef.current = '';
+      messagesRef.current
+        ?.querySelector(`[data-message-id="${CSS.escape(jumpTarget)}"]`)
+        ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [session.timeline, firstMountedKey, earlierHistoryStatus?.loading, conversation?.id]);
   useEffect(() => {
     atBottomRef.current = true;
     setIsAtBottom(true);
+    setChatWindowStart(null);
+    historyAnchorRef.current = null;
     scrollToLatest();
   }, [conversation?.id]);
   useEffect(() => {
@@ -828,9 +876,14 @@ export function ChatPanel({ session }: Props) {
       return;
     }
     if (item.messageId) {
-      messagesRef.current
-        ?.querySelector(`[data-message-id="${CSS.escape(item.messageId)}"]`)
-        ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      const target = messagesRef.current?.querySelector(`[data-message-id="${CSS.escape(item.messageId)}"]`);
+      if (target || hiddenItemCount === 0) {
+        target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        return;
+      }
+      // The quoted message is in the unmounted part of the history.
+      pendingMessageJumpRef.current = item.messageId;
+      setChatWindowStart(SHOW_ALL_CHAT_ROWS);
     }
   };
 
@@ -974,9 +1027,9 @@ export function ChatPanel({ session }: Props) {
                   : t('chat.emptyHint')}
             </p>
           ) : null}
-          {items.map((item) => (
+          {mountedItems.map((item) => (
             <ChatTimelineItem
-              key={item.type === 'executionGroup' ? item.id : item.entry.id}
+              key={chatRenderItemKey(item)}
               item={item}
               conversationId={conversation.id}
               thinking={thinking}

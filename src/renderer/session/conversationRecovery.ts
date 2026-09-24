@@ -67,6 +67,17 @@ export class ConversationRecovery {
     }
   }
 
+  /** Drop a loaded conversation so its next open pages in lazily from the
+   * journal tail again. Refused while a replay or history page is in flight. */
+  release(conversationId: string): boolean {
+    if (this.recovering.has(conversationId) || this.historyLoading.has(conversationId)) return false;
+    this.states.delete(conversationId);
+    this.historyFloors.delete(conversationId);
+    this.incomplete.delete(conversationId);
+    this.pendingNotify.delete(conversationId);
+    return true;
+  }
+
   private queueUpdate(conversationId: string, applied: ConversationEvent[], recovering: boolean): void {
     const pending = this.pendingNotify.get(conversationId);
     if (pending) {
@@ -147,6 +158,14 @@ export class ConversationRecovery {
   }
 
   receive(conversationId: string, workspaceId: string, events: readonly ConversationEvent[]): void {
+    if (!this.states.has(conversationId) && !this.recovering.has(conversationId)) {
+      // A live event for a conversation that was never opened: everything
+      // below it is unloaded history, not a gap. Seeding a lazy floor keeps
+      // background activity from replaying the whole journal; the history
+      // pages in when the conversation is actually opened and scrolled.
+      const first = Math.min(...events.map((event) => event.sequence).filter((sequence) => Number.isFinite(sequence) && sequence > 0));
+      if (Number.isFinite(first) && first > 1) this.seed(conversationId, workspaceId, first - 1);
+    }
     const committed = this.states.get(conversationId);
     const previous = committed ?? createConversationRuntime(conversationId, workspaceId);
     const result = applyConversationRuntimeEvents(previous, events);
