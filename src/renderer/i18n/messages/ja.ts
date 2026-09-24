@@ -179,6 +179,8 @@ export const ja: Messages = {
   'aside.subagentCancelled': 'キャンセル済み',
   'aside.subagentsTitle': 'サブエージェント',
   'aside.subagentDetails': '詳細',
+  'aside.subagentTask': 'タスク',
+  'aside.subagentError': 'エラー',
   'aside.subagentResult': '結果',
   'aside.subagentKind': '種類',
   'aside.subagentStarted': '開始',

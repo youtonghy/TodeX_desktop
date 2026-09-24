@@ -1,6 +1,6 @@
-import { useState } from 'react';
-import { Button, Card, Chip, ScrollShadow } from '@heroui/react';
-import { RiArrowDownSLine, RiRobot2Line } from '@remixicon/react';
+import { Chip, ScrollShadow } from '@heroui/react';
+import { ChatTool, type ToolPartState } from '@heroui-pro/react/chat-tool';
+import { RiRobot2Line } from '@remixicon/react';
 import type { SubagentRun, SubagentStatus } from '@todex/protocol/v2';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { useT, type MessageKey } from '../i18n';
@@ -24,6 +24,16 @@ const STATUS_COLORS: Record<SubagentStatus, 'default' | 'accent' | 'success' | '
   completed: 'success',
   failed: 'danger',
   cancelled: 'warning',
+};
+
+/** Runs render like the chat's tool cards: collapsed by default, status icon
+ * plus summary in the trigger, task/result/error folded into the body. */
+const STATUS_TOOL_STATE: Record<SubagentStatus, ToolPartState> = {
+  queued: 'input-available',
+  running: 'input-available',
+  completed: 'output-available',
+  failed: 'output-error',
+  cancelled: 'output-available',
 };
 
 function timeLabel(iso?: string): string {
@@ -54,9 +64,12 @@ function DetailRow({ label, value }: { label: string; value?: string }) {
   );
 }
 
+function SectionLabel({ children }: { children: string }) {
+  return <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted">{children}</div>;
+}
+
 function SubagentCard({ run }: { run: SubagentRun }) {
   const t = useT();
-  const [expanded, setExpanded] = useState(false);
   const duration = durationLabel(run);
   const usageTokens = run.usage
     ? Object.entries(run.usage)
@@ -64,58 +77,70 @@ function SubagentCard({ run }: { run: SubagentRun }) {
         .map(([key, value]) => `${key} ${value}`)
         .join(' · ')
     : '';
-  const hasDetails = Boolean(
-    run.result || run.error || run.agentKind || run.agentId || run.providerItemId
-      || run.parentId || run.outputFile || usageTokens || run.metadata,
+  // ChatTool hides the result section in the error state, so a failed run's
+  // result is surfaced as its error text — same convention as chat tool cards.
+  const errorText = run.error || (run.status === 'failed' ? run.result ?? '' : '');
+  const resultText = run.status === 'failed' ? '' : run.result ?? '';
+  const details: Array<[string, string | undefined]> = [
+    [t('aside.subagentKind'), run.agentKind],
+    ['Agent', run.agentId],
+    ['Parent', run.parentId],
+    [t('aside.subagentStarted'), timeLabel(run.startedAt)],
+    [t('aside.subagentFinished'), timeLabel(run.finishedAt)],
+    [t('aside.subagentOutput'), run.outputFile],
+    [t('aside.subagentUsage'), usageTokens],
+  ];
+  const hasContent = Boolean(
+    run.task || resultText || errorText || run.metadata || run.providerItemId
+      || details.some(([, value]) => value),
   );
 
   return (
-    <Card className="mb-2 p-3">
-      <div className="flex items-center justify-between gap-2">
+    <ChatTool
+      defaultExpanded={false}
+      state={STATUS_TOOL_STATE[run.status]}
+      active={run.status === 'running'}
+      isExpandable={hasContent}
+      className="mb-2"
+    >
+      <ChatTool.Trigger>
+        <ChatTool.StatusIcon />
         <span className="min-w-0 truncate font-medium">{run.title}</span>
-        <div className="flex shrink-0 items-center gap-2">
-          {duration ? <span className="text-muted text-xs">{duration}</span> : null}
-          <Chip size="sm" variant="soft" color={STATUS_COLORS[run.status]}>{t(STATUS_LABELS[run.status])}</Chip>
-          {hasDetails ? (
-            <Button
-              isIconOnly
-              size="sm"
-              variant="ghost"
-              aria-label={t('aside.subagentDetails')}
-              aria-expanded={expanded}
-              onPress={() => setExpanded((open) => !open)}
-            >
-              <RiArrowDownSLine className={`size-4 transition-transform${expanded ? ' rotate-180' : ''}`} />
-            </Button>
-          ) : null}
-        </div>
-      </div>
-      {run.task ? <p className="text-muted mt-1 text-xs whitespace-pre-wrap">{run.task}</p> : null}
-      {expanded ? (
-        <div className="border-separator mt-2 flex flex-col gap-2 border-t pt-2 text-xs">
-          {run.result ? (
-            <div>
-              <p className="text-muted mb-1">{t('aside.subagentResult')}</p>
-              <p className="whitespace-pre-wrap">{run.result}</p>
+        {duration ? <span className="text-muted shrink-0">{duration}</span> : null}
+        <Chip size="sm" variant="soft" color={STATUS_COLORS[run.status]}>{t(STATUS_LABELS[run.status])}</Chip>
+      </ChatTool.Trigger>
+      <ChatTool.Content>
+        {run.task ? (
+          <ChatTool.Args label={t('aside.subagentTask')}>
+            <p className="max-h-52 overflow-y-auto whitespace-pre-wrap wrap-anywhere px-1">{run.task}</p>
+          </ChatTool.Args>
+        ) : null}
+        {resultText ? (
+          <ChatTool.Result label={t('aside.subagentResult')}>
+            <p className="max-h-52 overflow-y-auto whitespace-pre-wrap wrap-anywhere px-1">{resultText}</p>
+          </ChatTool.Result>
+        ) : null}
+        {errorText ? (
+          <ChatTool.Error label={t('aside.subagentError')}>
+            <p className="whitespace-pre-wrap wrap-anywhere px-1">{errorText}</p>
+          </ChatTool.Error>
+        ) : null}
+        {details.some(([, value]) => value) ? (
+          <div className="px-1 py-1">
+            <SectionLabel>{t('aside.subagentDetails')}</SectionLabel>
+            <div className="flex flex-col gap-1.5">
+              {details.map(([label, value]) => <DetailRow key={label} label={label} value={value} />)}
             </div>
-          ) : null}
-          {run.error ? <p className="text-danger whitespace-pre-wrap">{run.error}</p> : null}
-          <DetailRow label={t('aside.subagentKind')} value={run.agentKind} />
-          <DetailRow label="Agent" value={run.agentId} />
-          <DetailRow label="Item" value={run.providerItemId} />
-          <DetailRow label="Parent" value={run.parentId} />
-          <DetailRow label={t('aside.subagentStarted')} value={timeLabel(run.startedAt)} />
-          <DetailRow label={t('aside.subagentFinished')} value={timeLabel(run.finishedAt)} />
-          <DetailRow label={t('aside.subagentOutput')} value={run.outputFile} />
-          {usageTokens ? <DetailRow label={t('aside.subagentUsage')} value={usageTokens} /> : null}
-          {run.metadata ? (
-            <pre className="text-muted max-h-40 overflow-auto whitespace-pre-wrap rounded-md bg-surface-secondary p-2 font-mono">
-              {JSON.stringify(run.metadata, null, 2)}
-            </pre>
-          ) : null}
-        </div>
-      ) : null}
-    </Card>
+          </div>
+        ) : null}
+        {run.metadata ? (
+          <pre className="text-muted max-h-40 overflow-auto whitespace-pre-wrap rounded-md bg-surface-secondary p-2 font-mono">
+            {JSON.stringify(run.metadata, null, 2)}
+          </pre>
+        ) : null}
+        {run.providerItemId ? <ChatTool.Meta toolCallId={run.providerItemId} /> : null}
+      </ChatTool.Content>
+    </ChatTool>
   );
 }
 

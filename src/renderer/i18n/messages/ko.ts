@@ -179,6 +179,8 @@ export const ko: Messages = {
   'aside.subagentCancelled': '취소됨',
   'aside.subagentsTitle': '서브 에이전트',
   'aside.subagentDetails': '세부 정보',
+  'aside.subagentTask': '작업',
+  'aside.subagentError': '오류',
   'aside.subagentResult': '결과',
   'aside.subagentKind': '유형',
   'aside.subagentStarted': '시작',

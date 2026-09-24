@@ -179,6 +179,8 @@ export const en: Messages = {
   'aside.subagentCancelled': 'Cancelled',
   'aside.subagentsTitle': 'Subagents',
   'aside.subagentDetails': 'Details',
+  'aside.subagentTask': 'Task',
+  'aside.subagentError': 'Error',
   'aside.subagentResult': 'Result',
   'aside.subagentKind': 'Kind',
   'aside.subagentStarted': 'Started',

@@ -179,6 +179,8 @@ export const zhCN = {
   'aside.subagentCancelled': '已取消',
   'aside.subagentsTitle': '子代理',
   'aside.subagentDetails': '详情',
+  'aside.subagentTask': '任务',
+  'aside.subagentError': '错误',
   'aside.subagentResult': '结果',
   'aside.subagentKind': '类型',
   'aside.subagentStarted': '开始',
