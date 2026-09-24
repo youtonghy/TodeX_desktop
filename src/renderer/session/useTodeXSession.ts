@@ -341,6 +341,11 @@ import {
 
 const SENT_ATTACHMENTS_STORAGE_KEY = `${TIMELINE_STORAGE_KEY}.attachments`;
 
+// Live model discovery can outlast a request when a provider CLI is slow to
+// start (Devin sweeps every model for its thinking levels); retry before
+// falling back to descriptor models so the model picker is not left disabled.
+const MODEL_DISCOVERY_RETRY_DELAYS_MS = [2_000, 5_000];
+
 // The backend allows 128 conversation subscriptions per v2 socket. Keep a
 // smaller client-side budget so explicit subscribes (activate/attach/create)
 // still have headroom; least-recently-subscribed entries are unsubscribed
@@ -1492,43 +1497,55 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     if (!hydrated || !activeWorkspace?.path || v2Providers.length === 0) return;
     let cancelled = false;
     const api = new V2ApiClient({ serverUrl: settings.serverUrl, device: deviceIdentityFromSecret(settings.deviceSecret) });
-    void Promise.all(v2Providers.filter((item) => item.available).map(async (provider) => {
-      try {
-        const result = await api.listProviderModels(provider.id, activeWorkspace.path);
-        if (!cancelled) {
-          setProviderModels((current) => {
-            const next = { ...current, [provider.id]: result.models };
-            providerModelsRef.current = next;
-            return next;
-          });
-          const conversation = conversationsRef.current.find((item) => item.id === activeConversationRef.current);
-          if (conversation?.provider === provider.id) {
-            const selection = resolveRememberedProviderSelection(
-              conversation.backendConnectionId ?? activeBackendConnectionId,
-              provider.id,
-              conversation.model,
-              conversation.reasoningEffort,
-              result.models,
-            );
-            if (selection.model && (selection.model !== conversation.model || selection.reasoningEffort !== conversation.reasoningEffort)) {
-              setConversations((current) => current.map((item) => item.id === conversation.id ? {
-                ...item,
-                model: selection.model,
-                reasoningEffort: selection.reasoningEffort,
-              } : item));
-            }
-            if (selection.model) {
-              rememberProviderModelSelection(
-                conversation.backendConnectionId ?? activeBackendConnectionId,
-                provider.id,
-                selection.model,
-                selection.reasoningEffort,
-              );
-            }
+    const listModels = async (provider: ProviderKind) => {
+      for (let attempt = 0; ; attempt += 1) {
+        try {
+          return await api.listProviderModels(provider, activeWorkspace.path);
+        } catch (error) {
+          const delay = MODEL_DISCOVERY_RETRY_DELAYS_MS[attempt];
+          if (cancelled) return null;
+          if (delay === undefined) {
+            console.warn(`${provider} model discovery failed`, error);
+            return null;
           }
+          await new Promise((resolve) => setTimeout(resolve, delay));
+          if (cancelled) return null;
         }
-      } catch {
-        // Keep the descriptor models when live discovery is unavailable.
+      }
+    };
+    void Promise.all(v2Providers.filter((item) => item.available).map(async (provider) => {
+      const result = await listModels(provider.id);
+      // Keep the descriptor models while live discovery is unavailable.
+      if (!result || cancelled) return;
+      setProviderModels((current) => {
+        const next = { ...current, [provider.id]: result.models };
+        providerModelsRef.current = next;
+        return next;
+      });
+      const conversation = conversationsRef.current.find((item) => item.id === activeConversationRef.current);
+      if (conversation?.provider === provider.id) {
+        const selection = resolveRememberedProviderSelection(
+          conversation.backendConnectionId ?? activeBackendConnectionId,
+          provider.id,
+          conversation.model,
+          conversation.reasoningEffort,
+          result.models,
+        );
+        if (selection.model && (selection.model !== conversation.model || selection.reasoningEffort !== conversation.reasoningEffort)) {
+          setConversations((current) => current.map((item) => item.id === conversation.id ? {
+            ...item,
+            model: selection.model,
+            reasoningEffort: selection.reasoningEffort,
+          } : item));
+        }
+        if (selection.model) {
+          rememberProviderModelSelection(
+            conversation.backendConnectionId ?? activeBackendConnectionId,
+            provider.id,
+            selection.model,
+            selection.reasoningEffort,
+          );
+        }
       }
     }));
     return () => { cancelled = true; };
