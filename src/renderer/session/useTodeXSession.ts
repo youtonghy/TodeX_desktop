@@ -352,6 +352,8 @@ const MODEL_DISCOVERY_RETRY_DELAYS_MS = [2_000, 5_000];
 // still have headroom; least-recently-subscribed entries are unsubscribed
 // to make room.
 const V2_WS_SUBSCRIPTION_BUDGET = 120;
+// Events a subscription backfills over the socket; the rest pages over HTTP.
+const V2_SUBSCRIBE_BACKFILL_LIMIT = 500;
 
 // Conversations whose projected history stays in memory after the user moves
 // on; older ones are released and reopen lazily from the journal tail.
@@ -3129,7 +3131,17 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         const id = typeof parsed.id === 'string' ? parsed.id : '';
         const payload = parsed.payload && typeof parsed.payload === 'object' && !Array.isArray(parsed.payload)
           ? parsed.payload as Record<string, unknown> : {};
+        const subscribedConversationId = pendingV2SubscribeRef.current.get(id);
         pendingV2SubscribeRef.current.delete(id);
+        if (subscribedConversationId && payload.hasMore === true) {
+          // The capped backfill stopped short of the high-water mark. A loaded
+          // conversation pages the rest over HTTP; an unopened one loads its
+          // history lazily when it is opened.
+          const conversation = conversationsRef.current.find((item) => item.v2ConversationId === subscribedConversationId);
+          if (conversation && conversationRecoveryRef.current?.get(subscribedConversationId)) {
+            void conversationRecoveryRef.current.recover(subscribedConversationId, conversation.workspaceId);
+          }
+        }
         protocolCommandsRef.current?.resolve(id, payload);
         return;
       }
@@ -3268,6 +3280,11 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         conversationId: v2ConversationId,
         afterSequence: options?.afterSequence ?? 0,
         limit: options?.limit ?? 200,
+        // Backfill like HTTP history pages: folded process events, and capped
+        // so a stale cursor cannot stream a whole journal over the socket
+        // (servers without these fields ignore them).
+        detail: 'summary',
+        backfillLimit: V2_SUBSCRIBE_BACKFILL_LIMIT,
       },
     });
     if (!sent) return false;
