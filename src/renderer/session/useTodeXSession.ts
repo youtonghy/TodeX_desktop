@@ -27,6 +27,7 @@ import {
 import type { ProviderDescriptor, ProviderKind, ConversationManifest, PromptContentRef, PromptSkillRef, SkillCatalogDescriptor, ProviderModelDescriptor, ProviderCommandDescriptor, ContextCompactionState, SubagentRun, MemoryEntry } from '@todex/protocol/v2';
 import { contextCompactionStatus } from '@todex/protocol/v2';
 import { V2ApiClient, buildV2WebSocketUrlWithOptions, normalizeConversationEvent } from '@todex/protocol/v2';
+import { retryWithDelays } from '@todex/protocol/retry';
 import { probeBackendConnection, nextReconnectDelayMs, inspectServerUrl, credentialMatchesOrigin } from '@todex/protocol/connectionProbe';
 import { deviceIdentityFromSecret } from '@todex/protocol/deviceAuth';
 import {
@@ -1497,24 +1498,12 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     if (!hydrated || !activeWorkspace?.path || v2Providers.length === 0) return;
     let cancelled = false;
     const api = new V2ApiClient({ serverUrl: settings.serverUrl, device: deviceIdentityFromSecret(settings.deviceSecret) });
-    const listModels = async (provider: ProviderKind) => {
-      for (let attempt = 0; ; attempt += 1) {
-        try {
-          return await api.listProviderModels(provider, activeWorkspace.path);
-        } catch (error) {
-          const delay = MODEL_DISCOVERY_RETRY_DELAYS_MS[attempt];
-          if (cancelled) return null;
-          if (delay === undefined) {
-            console.warn(`${provider} model discovery failed`, error);
-            return null;
-          }
-          await new Promise((resolve) => setTimeout(resolve, delay));
-          if (cancelled) return null;
-        }
-      }
-    };
     void Promise.all(v2Providers.filter((item) => item.available).map(async (provider) => {
-      const result = await listModels(provider.id);
+      const result = await retryWithDelays(() => api.listProviderModels(provider.id, activeWorkspace.path), {
+        delaysMs: MODEL_DISCOVERY_RETRY_DELAYS_MS,
+        isCancelled: () => cancelled,
+        onGiveUp: (error) => console.warn(`${provider.id} model discovery failed`, error),
+      });
       // Keep the descriptor models while live discovery is unavailable.
       if (!result || cancelled) return;
       setProviderModels((current) => {
