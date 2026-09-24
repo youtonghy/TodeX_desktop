@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Button, Checkbox, Input, Label, Modal, Spinner, TextArea, TextField, toast } from '@heroui/react';
+import { Button, Checkbox, Input, Label, ListBox, Modal, Select, Spinner, TextArea, TextField, toast } from '@heroui/react';
 import { Command } from '@heroui-pro/react/command';
 import { RiArrowRightLine, RiCloseLine, RiGitBranchLine, RiGitCommitLine, RiGitMergeLine,
   RiGitPullRequestLine, RiGithubLine, RiSearchLine, RiStackLine, RiUploadCloud2Line } from '@remixicon/react';
@@ -7,6 +7,7 @@ import { providerDisplayName } from '@todex/protocol/v2';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { buildGitAgentPrompt, buildGitFailurePrompt, gitAgentActionGroups, type GitAgentActionId } from '../session/gitAgentActions';
 import { GitWorkspaceError, readGitPullRequest, readGitWorkspace, runGitWorkspaceOperation, type GitPullRequestMethod, type GitPullRequestSnapshot, type GitWorkspaceOperation, type GitWorkspaceSnapshot } from '../lib/gitWorkspace';
+import { useConversationGitStatus } from './GitStatusIndicator';
 import { ProviderIcon } from './ProviderIcon';
 import { useNoticeToast } from './NoticeToast';
 import { useT, type MessageKey } from '../i18n';
@@ -53,6 +54,16 @@ export function GitActionsModal({ session, isOpen, onOpenChange }: Props) {
   const sendingRef = useRef(false);
   const conversation = session.activeConversation;
   const workspace = session.workspaces.find(item => item.id === conversation?.workspaceId);
+  const git = useConversationGitStatus(session, isOpen, isOpen);
+  const repoPath = git.selectedPath || workspace?.path || '';
+  const chooseRepo = (key: React.Key | null) => {
+    const path = typeof key === 'string' ? key : '';
+    if (!workspace || !path || path === repoPath) return;
+    git.selectRepo(path);
+    generation.current++;
+    setView(null); setSnapshot(null); setPr(null); setConfirming(null);
+    setError(''); setFailure(null); setOutput(''); setRemovePath('');
+  };
   const provider = conversation?.provider || 'codex';
   const unknown = conversation && session.submissionStatusByConversation[conversation.id] === 'unknown';
   const unavailable = !conversation || !workspace?.path || Boolean(unknown) || Boolean(workspace?.backendConnectionId && workspace.backendConnectionId !== session.activeBackendConnectionId);
@@ -65,8 +76,8 @@ export function GitActionsModal({ session, isOpen, onOpenChange }: Props) {
     setSending(id);
     setError('');
     try {
-      const outcome = await session.sendAgentMessage(failed && failure ? buildGitFailurePrompt(id, { workspacePath: workspace.path, workspaceName: workspace.name }, failure) : buildGitAgentPrompt(id, {
-        workspacePath: workspace.path, workspaceName: workspace.name,
+      const outcome = await session.sendAgentMessage(failed && failure ? buildGitFailurePrompt(id, { workspacePath: repoPath, workspaceName: workspace.name }, failure) : buildGitAgentPrompt(id, {
+        workspacePath: repoPath, workspaceName: workspace.name,
       }), conversation.id);
       if (!outcome) {
         setError(t('git.sendUnconfirmed'));
@@ -91,7 +102,7 @@ export function GitActionsModal({ session, isOpen, onOpenChange }: Props) {
     if (id !== 'create-pr' || operation) setOutput('');
     try {
       if (operation) {
-        const result = await runGitWorkspaceOperation(session.settings, workspace.path, operation);
+        const result = await runGitWorkspaceOperation(session.settings, repoPath, operation);
         if (revision !== generation.current) return;
         if (operation.action === 'create-worktree'
           && session.openGitWorktree(operation.path, conversation.id)) {
@@ -102,7 +113,7 @@ export function GitActionsModal({ session, isOpen, onOpenChange }: Props) {
         setOutput(result.output || t('git.operationDone'));
         setRemovePath('');
       }
-      const result = await readGitWorkspace(session.settings, workspace.path);
+      const result = await readGitWorkspace(session.settings, repoPath);
       if (revision === generation.current) { setSnapshot(result); if (id !== 'create-pr' || operation) outcomeUnknown.current = false; }
     } catch (cause) {
       if (revision !== generation.current) return;
@@ -122,12 +133,12 @@ export function GitActionsModal({ session, isOpen, onOpenChange }: Props) {
     setSending(id); setError('');
     try {
       if (operation) {
-        const result = await runGitWorkspaceOperation(session.settings, workspace.path, operation);
+        const result = await runGitWorkspaceOperation(session.settings, repoPath, operation);
         if (revision !== generation.current) return;
         setOutput(result.output || t('git.operationDone'));
         setConfirming(null);
       }
-      const result = await readGitPullRequest(session.settings, workspace.path);
+      const result = await readGitPullRequest(session.settings, repoPath);
       if (revision === generation.current) { setPr(result); outcomeUnknown.current = false; }
     } catch (cause) {
       if (revision !== generation.current) return;
@@ -170,7 +181,7 @@ export function GitActionsModal({ session, isOpen, onOpenChange }: Props) {
   const title = allActions.find(action => action.id === view)?.title || t('git.operations');
   const isBranchForm = view === 'create-branch' || view === 'create-worktree';
   const worktreeName = branchName.trim().replace(/^\/+|\/+$/g, '').replace(/^todex\//, '');
-  const worktreeAnchor = snapshot?.worktrees.find(tree => tree.main)?.path || snapshot?.repositoryPath || workspace?.path || '';
+  const worktreeAnchor = snapshot?.worktrees.find(tree => tree.main)?.path || snapshot?.repositoryPath || repoPath;
   const worktreeBase = worktreeAnchor.replace(/[\\/]+$/, '').replace(/[\\/][^\\/]+$/, '');
   const worktreeBranch = worktreeName ? `todex/${worktreeName}` : '';
   const worktreePath = worktreeName && worktreeBase ? `${worktreeBase}/todex/${worktreeName}` : '';
@@ -191,7 +202,7 @@ export function GitActionsModal({ session, isOpen, onOpenChange }: Props) {
   if (view) return <Modal>
     <Modal.Backdrop isOpen={isOpen} onOpenChange={onOpenChange}>
       <Modal.Container><Modal.Dialog className="w-[calc(100vw-2rem)] max-w-xl max-h-[88dvh]">
-        <Modal.Header><Modal.Heading>{title}</Modal.Heading><p className="text-muted break-all text-xs">{workspace?.path}</p></Modal.Header>
+        <Modal.Header><Modal.Heading>{title}</Modal.Heading><p className="text-muted break-all text-xs">{repoPath}</p></Modal.Header>
         <Modal.Body className="space-y-4 overflow-y-auto">
           <p className="text-muted text-xs">{isPrView
             ? t('git.execViaGithubApi', { detail: pr ? ` · ${pr.branch || t('git.noCommitDetached')}` : '' })
@@ -285,10 +296,31 @@ export function GitActionsModal({ session, isOpen, onOpenChange }: Props) {
       <Command.Container className="w-[calc(100vw-2rem)] max-w-xl">
         <Command.Dialog aria-label={t('git.operations')} className="max-h-[88dvh] overflow-hidden">
           <Command.Header className="flex items-start justify-between gap-4 px-5 pt-5 pb-3">
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
               <h2 className="flex items-center gap-2 text-lg font-semibold"><RiGithubLine className="size-5" />{t('git.operations')}</h2>
               <p className="mt-1 truncate text-sm" title={workspace?.path}>{workspace?.name || t('git.noWorkspace')}</p>
               {workspace?.path ? <p className="text-muted mt-0.5 truncate text-xs" title={workspace.path}>{workspace.path}</p> : null}
+              {workspace && git.repoOptions.length > 1 ? <Select
+                aria-label={t('git.selectRepository')}
+                className="mt-2 w-full"
+                selectedKey={repoPath}
+                onSelectionChange={chooseRepo}
+              >
+                <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
+                <Select.Popover>
+                  <ListBox>
+                    {git.repoOptions.map(repo => <ListBox.Item key={repo.path} id={repo.path} textValue={`${repo.name} ${repo.branch} ${repo.path}`}>
+                      <div className="flex min-w-0 flex-col">
+                        <span className="truncate">{repo.name}{repo.uninitialized ? ` · ${t('git.repoUninitialized')}` : repo.containing ? ` · ${t('git.containingRepo')}` : ''}</span>
+                        <span className="text-muted truncate text-xs">{repo.uninitialized || repo.error
+                          ? repo.error || repo.path
+                          : `${repo.branch || t('git.noCommitDetached')} · ${t('git.changedFiles', { count: repo.changedFiles })} +${repo.additions} −${repo.deletions}`}</span>
+                      </div>
+                      <ListBox.ItemIndicator />
+                    </ListBox.Item>)}
+                  </ListBox>
+                </Select.Popover>
+              </Select> : null}
             </div>
             <Button isIconOnly variant="ghost" size="sm" aria-label={t('git.closeOperations')} onPress={() => onOpenChange(false)}><RiCloseLine className="size-5" /></Button>
           </Command.Header>

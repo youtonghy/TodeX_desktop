@@ -521,6 +521,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const [threadListStatusByWorkspace, setThreadListStatusByWorkspace] = useState<Record<string, 'idle' | 'loading' | 'ready' | 'error'>>({});
   const [threadListErrorByWorkspace, setThreadListErrorByWorkspace] = useState<Record<string, string>>({});
   const [gitDiffByConversation, setGitDiffByConversation] = useState<Record<string, GitDiffState>>({});
+  const [selectedGitRepoByWorkspace, setSelectedGitRepoByWorkspace] = useState<Record<string, string>>({});
   const [mcpInventoryByConversation, setMcpInventoryByConversation] = useState<Record<string, McpInventoryState>>({});
   const [permissionProfilesByConversation, setPermissionProfilesByConversation] = useState<Record<string, PermissionProfilesState>>({});
   const [hooksCatalogByConversation, setHooksCatalogByConversation] = useState<Record<string, HooksCatalogState>>({});
@@ -5505,6 +5506,12 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     return true;
   }, [finishPendingGitDiff, getConversationContext, sendLocalMethodRequest, startLocalAdapter]);
 
+  const selectGitRepo = useCallback((workspaceId: string, path: string) => {
+    setSelectedGitRepoByWorkspace((current) => (current[workspaceId] === path
+      ? current
+      : { ...current, [workspaceId]: path }));
+  }, []);
+
   const openGitDiff = useCallback((conversationId = activeConversationRef.current) => {
     const context = getConversationContext(conversationId);
     if (!context) {
@@ -5515,8 +5522,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       workspaceId: context.workspace.id,
       conversationId: context.conversation.id,
     });
-    void requestGitDiff(context.conversation.id);
-  }, [getConversationContext, requestGitDiff]);
+    void requestGitDiff(context.conversation.id, selectedGitRepoByWorkspace[context.workspace.id] || '');
+  }, [getConversationContext, requestGitDiff, selectedGitRepoByWorkspace]);
 
   const openTerminal = useCallback((conversationId = activeConversationRef.current) => {
     const context = getConversationContext(conversationId);
@@ -7995,6 +8002,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     threadListStatusByWorkspace,
     threadListErrorByWorkspace,
     gitDiffByConversation,
+    selectedGitRepoByWorkspace,
+    selectGitRepo,
     mcpInventoryByConversation,
     permissionProfilesByConversation,
     hooksCatalogByConversation,

@@ -113,7 +113,7 @@ export function AsidePanel({ session, panel, slashCommand, onBack }: Props) {
       <div className="flex h-full min-h-0 flex-col p-5">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-lg font-semibold">Git Diff</h2>
-          <Button size="sm" variant="secondary" isDisabled={!conversation} onPress={() => conversation && session.requestGitDiff(conversation.id)}>
+          <Button size="sm" variant="secondary" isDisabled={!conversation} onPress={() => conversation && session.requestGitDiff(conversation.id, session.selectedGitRepoByWorkspace[conversation.workspaceId] || '')}>
             {t('aside.refresh')}
           </Button>
         </div>

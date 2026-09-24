@@ -828,12 +828,13 @@ function GitDiffPane({ session }: { session: TodeXSession }) {
   const conversation = session.activeConversation;
   const state = conversation ? session.gitDiffByConversation[conversation.id] : undefined;
   const workspacePath = session.activeWorkspace?.path || '';
-  const [pathDraft, setPathDraft] = useState(workspacePath);
+  const selectedRepoPath = (session.activeWorkspace && session.selectedGitRepoByWorkspace[session.activeWorkspace.id]) || workspacePath;
+  const [pathDraft, setPathDraft] = useState(selectedRepoPath);
   useNoticeToast(state?.error !== session.lastError ? state?.error : null, { variant: 'danger', scope: conversation?.id });
 
   useEffect(() => {
-    setPathDraft(workspacePath);
-  }, [workspacePath]);
+    setPathDraft(selectedRepoPath);
+  }, [selectedRepoPath]);
 
   const handleRefresh = () => {
     if (conversation) {

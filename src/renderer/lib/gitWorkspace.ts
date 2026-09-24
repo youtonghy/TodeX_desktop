@@ -160,6 +160,36 @@ export interface GitStatusSummary {
   statsTruncated: boolean;
 }
 
+export interface GitRepositoryFile {
+  path: string;
+  status: string;
+  additions?: number;
+  deletions?: number;
+}
+
+export interface GitRepositoryItem {
+  path: string;
+  name: string;
+  branch: string;
+  files: GitRepositoryFile[];
+  additions: number;
+  deletions: number;
+  ahead?: number;
+  initialEligible: boolean;
+  error?: string;
+  filesTruncated?: boolean;
+}
+
+export interface GitScanResult {
+  repositories: GitRepositoryItem[];
+}
+
+export function readGitScan(settings: ConnectionSettings, workspacePath: string, signal?: AbortSignal): Promise<GitScanResult> {
+  const url = new URL(buildHttpUrl(settings.serverUrl, '/v2/git/scan'));
+  url.searchParams.set('workspacePath', workspacePath);
+  return request(settings, url.toString(), undefined, undefined, signal);
+}
+
 export function readGitStatus(settings: ConnectionSettings, workspacePath: string, signal?: AbortSignal): Promise<GitStatusSummary> {
   const url = new URL(buildHttpUrl(settings.serverUrl, '/v2/git/status'));
   url.searchParams.set('workspacePath', workspacePath);
