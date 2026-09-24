@@ -2108,27 +2108,37 @@ export function mergeManifestConversations(
   current: ConversationRecord[],
   manifests: ConversationManifest[],
   workspaces: WorkspaceRecord[],
+  backendConnectionId: string,
 ): ConversationRecord[] {
   // The backend is authoritative after materialization. Provider-backed local
   // drafts have no v2ConversationId yet and must survive manifest refreshes.
   // Merge field-by-field and keep the previous array/object identity when
   // nothing actually changed so the sidebar does not re-render or re-sort on
   // every poll.
+  // Manifests only describe the backend they were listed from: conversations
+  // and workspaces owned by another backend are out of scope. Untagged
+  // records predate backend profiles and belong to the active backend.
+  const inScope = (id: string | null | undefined) => !id || id === backendConnectionId;
+  const scopedWorkspaces = workspaces.filter((workspace) => inScope(workspace.backendConnectionId));
+  const conversationInScope = (item: ConversationRecord) => inScope(
+    item.backendConnectionId ?? workspaces.find((workspace) => workspace.id === item.workspaceId)?.backendConnectionId,
+  );
   const manifestIds = new Set(manifests.map((manifest) => manifest.id));
   let changed = false;
   const next = current.filter((item) => (
     !isV2Conversation(item)
     || !item.v2ConversationId
     || manifestIds.has(item.v2ConversationId)
+    || !conversationInScope(item)
   ));
   if (next.length !== current.length) {
     changed = true;
   }
   for (const manifest of manifests) {
     const workspace = (manifest.workspaceId
-      ? workspaces.find((item) => item.id === manifest.workspaceId)
+      ? scopedWorkspaces.find((item) => item.id === manifest.workspaceId)
       : undefined)
-      ?? workspaces.find((item) => item.path === manifest.workspace);
+      ?? scopedWorkspaces.find((item) => item.path === manifest.workspace);
     if (!workspace) {
       continue;
     }

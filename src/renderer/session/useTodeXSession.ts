@@ -353,6 +353,13 @@ const MODEL_DISCOVERY_RETRY_DELAYS_MS = [2_000, 5_000];
 // to make room.
 const V2_WS_SUBSCRIPTION_BUDGET = 120;
 
+type ProviderModelCatalog = Partial<Record<ProviderKind, ProviderModelDescriptor[]>>;
+// Stable fallbacks for a backend whose catalogs have not loaded yet, so the
+// derived views keep their identity across renders.
+const EMPTY_PROVIDERS: ProviderDescriptor[] = [];
+const EMPTY_PROVIDER_MODELS: ProviderModelCatalog = {};
+const EMPTY_PROVIDER_COMMANDS: Partial<Record<ProviderKind, ProviderCommandDescriptor[]>> = {};
+
 export type OpenPanelFn = (name: string, params?: OpenPanelOptions) => void;
 
 type LiveConversationControl =
@@ -388,7 +395,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const thinkingConversationsRef = useRef<Record<string, boolean>>({});
   const terminalByIdRef = useRef<Record<string, TerminalClientState>>({});
   const providerModelPreferencesRef = useRef<ProviderModelPreferences>({});
-  const providerModelsRef = useRef<Partial<Record<ProviderKind, ProviderModelDescriptor[]>>>({});
+  const providerModelsByBackendRef = useRef<Record<string, ProviderModelCatalog>>({});
   const providerImageInputRef = useRef<Record<string, { status: 'loading' | 'ready' | 'error'; imageInput?: boolean; reason?: string }>>({});
   const pendingLocalStartsRef = useRef(new Map<string, PendingLocalStart>());
   const pendingThreadStartsRef = useRef(new Map<string, PendingThreadStart>());
@@ -444,6 +451,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const [activeBackendConnectionId, setActiveBackendConnectionId] = useState('default-backend');
   const activeBackendConnectionIdRef = useRef(activeBackendConnectionId);
   activeBackendConnectionIdRef.current = activeBackendConnectionId;
+  // Backend the single `/v2/ws` socket was last opened against; a switch to a
+  // workspace on another backend must move the socket along with it.
+  const connectedBackendIdRef = useRef<string | null>(null);
   const [workspaces, setWorkspaces] = useState<WorkspaceRecord[]>([]);
   const [workspaceTombstones, setWorkspaceTombstones] = useState<WorkspaceTombstone[]>([]);
   const [conversations, setConversations] = useState<ConversationRecord[]>([]);
@@ -495,13 +505,21 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const [pluginsCatalogByConversation, setPluginsCatalogByConversation] = useState<Record<string, PluginsCatalogState>>({});
   const [memorySettingsByConversation, setMemorySettingsByConversation] = useState<Record<string, MemorySettingsState>>({});
   const [terminalById, setTerminalById] = useState<Record<string, TerminalClientState>>({});
-  const [v2Providers, setV2Providers] = useState<ProviderDescriptor[]>([]);
+  // Agent, model and command catalogs are per backend: every workspace reads
+  // the catalog of its own backend, and switching back does not refetch blind.
+  const [v2ProvidersByBackend, setV2ProvidersByBackend] = useState<Record<string, ProviderDescriptor[]>>({});
   const [v2Conversations, setV2Conversations] = useState<ConversationManifest[]>([]);
   const [capabilityCatalogs, setCapabilityCatalogs] = useState<Partial<Record<ProviderKind, CatalogState>>>({});
-  const [providerModels, setProviderModels] = useState<Partial<Record<ProviderKind, ProviderModelDescriptor[]>>>({});
+  const [providerModelsByBackend, setProviderModelsByBackend] = useState<Record<string, ProviderModelCatalog>>({});
   const [providerImageInput, setProviderImageInput] = useState<Record<string, { status: 'loading' | 'ready' | 'error'; imageInput?: boolean; reason?: string }>>({});
   const [providerModelPreferences, setProviderModelPreferences] = useState<ProviderModelPreferences>({});
-  const [providerCommands, setProviderCommands] = useState<Partial<Record<ProviderKind, ProviderCommandDescriptor[]>>>({});
+  const [providerCommandsByBackend, setProviderCommandsByBackend] = useState<Record<string, Partial<Record<ProviderKind, ProviderCommandDescriptor[]>>>>({});
+  const v2Providers = v2ProvidersByBackend[activeBackendConnectionId] ?? EMPTY_PROVIDERS;
+  const providerModels = providerModelsByBackend[activeBackendConnectionId] ?? EMPTY_PROVIDER_MODELS;
+  const providerCommands = providerCommandsByBackend[activeBackendConnectionId] ?? EMPTY_PROVIDER_COMMANDS;
+  const setBackendProviders = useCallback((backendId: string, providers: ProviderDescriptor[]) => {
+    setV2ProvidersByBackend((current) => current[backendId] === providers ? current : { ...current, [backendId]: providers });
+  }, []);
   const [contextUsageByConversation, setContextUsageByConversation] = useState<Record<string, ConversationContextUsage>>({});
   const [compactionByConversation, setCompactionByConversation] = useState<Record<string, ContextCompactionState & { recommended?: boolean }>>({});
   const [subagentsByConversation, setSubagentsByConversation] = useState<Record<string, SubagentRun[]>>({});
@@ -555,27 +573,28 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       return;
     }
     const api = new V2ApiClient({ serverUrl: settings.serverUrl, device: deviceIdentityFromSecret(settings.deviceSecret) });
+    const backendId = activeBackendConnectionId;
     let active = true;
     setDirectorySyncStatus('loading');
     void Promise.all([api.listProviders(), api.listConversations()])
       .then(([providers, conversations]) => {
         if (!active) return;
-        setV2Providers(providers.providers);
+        setBackendProviders(backendId, providers.providers);
         setV2Conversations(conversations.conversations);
-        setConversations((current) => mergeManifestConversations(current, conversations.conversations, workspacesRef.current));
+        setConversations((current) => mergeManifestConversations(current, conversations.conversations, workspacesRef.current, backendId));
         setDirectorySyncStatus('ready');
       })
       .catch(() => {
         if (!active) return;
+        // Keep this backend's last known agent catalog; the status flags the failure.
         setDirectorySyncStatus('error');
-        setV2Providers([]);
         setV2Conversations([]);
       });
     const refreshTimer = setInterval(() => {
       void api.listConversations().then((response) => {
         if (!active) return;
         setV2Conversations(response.conversations);
-        setConversations((current) => mergeManifestConversations(current, response.conversations, workspacesRef.current));
+        setConversations((current) => mergeManifestConversations(current, response.conversations, workspacesRef.current, backendId));
       }).catch(() => undefined);
     }, 15000);
     // The main connection below is the single `/v2/ws` socket; providers and
@@ -584,7 +603,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       active = false;
       clearInterval(refreshTimer);
     };
-  }, [hydrated, settings.deviceSecret, settings.serverUrl]);
+  }, [activeBackendConnectionId, hydrated, setBackendProviders, settings.deviceSecret, settings.serverUrl]);
 
   useEffect(() => {
     timelineRef.current = timeline;
@@ -605,6 +624,11 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     [remoteModelCatalog, settings.defaultModel, workspaces],
   );
 
+  // Records without a backend tag belong to whichever backend is active.
+  const providerModelsFor = useCallback((backendConnectionId: string | null | undefined, provider: ProviderKind | string) => (
+    providerModelsByBackendRef.current[backendConnectionId || activeBackendConnectionIdRef.current]?.[provider as ProviderKind]
+  ), []);
+
   const resolveRememberedProviderSelection = useCallback((
     backendConnectionId: string | null | undefined,
     provider: ProviderKind,
@@ -615,7 +639,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     const preference = providerModelPreferencesRef.current[
       providerModelPreferenceKey(backendConnectionId, provider)
     ];
-    const models = modelsOverride ?? providerModelsRef.current[provider] ?? [];
+    const models = modelsOverride ?? providerModelsFor(backendConnectionId, provider) ?? [];
     const modelDescriptor = resolveProviderModel(models, requestedModel, preference?.lastModel);
     const model = modelDescriptor?.id ?? requestedModel?.trim() ?? preference?.lastModel ?? '';
     const reasoningEffort = modelDescriptor
@@ -626,7 +650,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         ])
       : requestedEffort ?? (model ? preference?.reasoningByModel[model] : undefined) ?? null;
     return { model, reasoningEffort, modelDescriptor };
-  }, []);
+  }, [providerModelsFor]);
 
   const rememberProviderModelSelection = useCallback((
     backendConnectionId: string | null | undefined,
@@ -1083,9 +1107,16 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         .filter((item): item is WorkspaceTombstone => Boolean(item))
         .slice(0, MAX_WORKSPACE_TOMBSTONES);
       workspaceTombstonesRef.current = normalizedTombstones;
-      setSettings(nextSettings);
+      // Restore the backend that owns the restored workspace; otherwise the
+      // profile the persisted settings point at, so the two cannot disagree.
+      const restoredWorkspace = normalizedWorkspaces.find((workspace) => workspace.id === firstWorkspaceId);
+      const workspaceProfile = profiles.find((profile) => profile.id === restoredWorkspace?.backendConnectionId);
+      const activeProfile = workspaceProfile
+        ?? profiles.find((profile) => profile.serverUrl === nextSettings.serverUrl)
+        ?? profiles[0];
+      setSettings(workspaceProfile ? settingsFromProfile(workspaceProfile, nextSettings) : nextSettings);
       setBackendConnections(profiles);
-      setActiveBackendConnectionId(profiles[0]?.id ?? 'default-backend');
+      setActiveBackendConnectionId(activeProfile?.id ?? 'default-backend');
       setWorkspaces(normalizedWorkspaces);
       setWorkspaceTombstones(normalizedTombstones);
       setConversations(normalizedConversations);
@@ -1367,7 +1398,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       try {
         const conversationResponse = await new V2ApiClient({ serverUrl: settings.serverUrl, device: deviceIdentityFromSecret(settings.deviceSecret) }).listConversations();
         setV2Conversations(conversationResponse.conversations);
-        setConversations((current) => mergeManifestConversations(current, conversationResponse.conversations, nextWorkspaces));
+        setConversations((current) => mergeManifestConversations(current, conversationResponse.conversations, nextWorkspaces, activeBackendConnectionId));
       } catch (error) {
         setLastError(error instanceof Error ? error.message : t('sess.conversationDirSyncFailed'));
       }
@@ -1484,19 +1515,22 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
 
   useEffect(() => {
     if (!hydrated || !activeWorkspace?.path || v2Providers.length === 0) return;
-    if (capabilityWorkspaceRef.current !== activeWorkspace.path) {
-      capabilityWorkspaceRef.current = activeWorkspace.path;
+    // The same path on two backends is two different workspaces.
+    const capabilityScope = `${activeBackendConnectionId}\n${activeWorkspace.path}`;
+    if (capabilityWorkspaceRef.current !== capabilityScope) {
+      capabilityWorkspaceRef.current = capabilityScope;
       setCapabilityCatalogs({});
       return;
     }
     for (const provider of v2Providers) {
       if (!capabilityCatalogs[provider.id]) void refreshCapabilityCatalog(provider.id);
     }
-  }, [activeWorkspace?.path, capabilityCatalogs, hydrated, refreshCapabilityCatalog, v2Providers]);
+  }, [activeBackendConnectionId, activeWorkspace?.path, capabilityCatalogs, hydrated, refreshCapabilityCatalog, v2Providers]);
 
   useEffect(() => {
     if (!hydrated || !activeWorkspace?.path || v2Providers.length === 0) return;
     let cancelled = false;
+    const backendId = activeBackendConnectionId;
     const api = new V2ApiClient({ serverUrl: settings.serverUrl, device: deviceIdentityFromSecret(settings.deviceSecret) });
     void Promise.all(v2Providers.filter((item) => item.available).map(async (provider) => {
       const result = await retryWithDelays(() => api.listProviderModels(provider.id, activeWorkspace.path), {
@@ -1506,15 +1540,15 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       });
       // Keep the descriptor models while live discovery is unavailable.
       if (!result || cancelled) return;
-      setProviderModels((current) => {
-        const next = { ...current, [provider.id]: result.models };
-        providerModelsRef.current = next;
+      setProviderModelsByBackend((current) => {
+        const next = { ...current, [backendId]: { ...current[backendId], [provider.id]: result.models } };
+        providerModelsByBackendRef.current = next;
         return next;
       });
       const conversation = conversationsRef.current.find((item) => item.id === activeConversationRef.current);
       if (conversation?.provider === provider.id) {
         const selection = resolveRememberedProviderSelection(
-          conversation.backendConnectionId ?? activeBackendConnectionId,
+          conversation.backendConnectionId ?? backendId,
           provider.id,
           conversation.model,
           conversation.reasoningEffort,
@@ -1529,7 +1563,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         }
         if (selection.model) {
           rememberProviderModelSelection(
-            conversation.backendConnectionId ?? activeBackendConnectionId,
+            conversation.backendConnectionId ?? backendId,
             provider.id,
             selection.model,
             selection.reasoningEffort,
@@ -1543,17 +1577,23 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   useEffect(() => {
     if (!hydrated || !activeWorkspace?.path || v2Providers.length === 0) return;
     let cancelled = false;
+    const backendId = activeBackendConnectionId;
     const api = new V2ApiClient({ serverUrl: settings.serverUrl, device: deviceIdentityFromSecret(settings.deviceSecret) });
     void Promise.all(v2Providers.filter((item) => item.available).map(async (provider) => {
       try {
         const result = await api.listProviderCommands(provider.id, activeWorkspace.path);
-        if (!cancelled) setProviderCommands((current) => ({ ...current, [provider.id]: result.commands }));
+        if (!cancelled) {
+          setProviderCommandsByBackend((current) => ({
+            ...current,
+            [backendId]: { ...current[backendId], [provider.id]: result.commands },
+          }));
+        }
       } catch {
         // Keep the last successful command catalog while the backend recovers.
       }
     }));
     return () => { cancelled = true; };
-  }, [activeWorkspace?.path, hydrated, settings.deviceSecret, settings.serverUrl, v2Providers]);
+  }, [activeBackendConnectionId, activeWorkspace?.path, hydrated, settings.deviceSecret, settings.serverUrl, v2Providers]);
 
   const activeConversation = useMemo(
     () => conversations.find((item) => item.id === activeConversationId) ?? null,
@@ -1796,15 +1836,24 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     setLastError(t(stillQueued ? 'sess.sendRestoredQueue' : 'sess.sendRestoredDraft'));
   }, [recoverConversation, restorePendingSubmission, setConversationThinking, updateSentAttachmentRecords, setLastError]);
 
+  // Runtime caches are only invalid when the active profile itself is
+  // re-pointed or re-paired. Switching to another profile keeps every
+  // backend's conversation state, so the other workspaces do not reload.
+  const runtimeEndpointRef = useRef<{ backendId: string; serverUrl: string; deviceSecret: string } | null>(null);
   useEffect(() => {
+    const previous = runtimeEndpointRef.current;
+    runtimeEndpointRef.current = { backendId: activeBackendConnectionId, serverUrl: settings.serverUrl, deviceSecret: settings.deviceSecret };
+    // Queued commands were addressed to the previous endpoint and must not
+    // flush onto the next socket.
+    protocolCommandsRef.current?.dispose();
+    if (previous && previous.backendId !== activeBackendConnectionId) return;
     conversationRecoveryRef.current?.reset();
     legacyRecoveryRef.current = new LegacyEventRecovery<ServerEvent>();
-    protocolCommandsRef.current?.dispose();
     setConversationRuntimeById({});
     setRecoveringConversations({});
     setEarlierHistory({});
     settledV2TurnsRef.current.clear();
-  }, [settings.serverUrl, settings.deviceSecret]);
+  }, [activeBackendConnectionId, settings.serverUrl, settings.deviceSecret]);
 
   useEffect(() => {
     if (!hydrated || !activeConversation?.v2ConversationId || !settings.serverUrl.trim()) return;
@@ -3113,6 +3162,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     v2ConversationId: string,
     options?: { afterSequence?: number; limit?: number },
   ): boolean => {
+    // Mid-switch the socket still belongs to the previous backend; the
+    // reconnect subscribes the new backend's conversations once it opens.
+    if (connectedBackendIdRef.current !== activeBackendConnectionIdRef.current) return false;
     const subscribed = v2SubscriptionsRef.current;
     if (subscribed.has(v2ConversationId)) {
       // Refresh recency so active conversations are not evicted first.
@@ -3294,6 +3346,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     setAutoConnectEnabled(true);
     closeSocket(false);
     const generation = socketGenerationRef.current;
+    const backendId = activeBackendConnectionIdRef.current;
+    connectedBackendIdRef.current = backendId;
     const attempt = new AbortController();
     connectionAttemptRef.current = attempt;
     transportFailureRef.current = false;
@@ -3369,12 +3423,12 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           });
         }
         if (probe.providers.length) {
-          setV2Providers(probe.providers);
+          setBackendProviders(backendId, probe.providers);
         }
         return;
       }
 
-      setV2Providers(probe.providers);
+      setBackendProviders(backendId, probe.providers);
       if (probe.version) {
         setServerVersion({
           name: probe.version.name,
@@ -3594,7 +3648,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       setLastError(message);
       setConnectionHealth({ status: 'offline', latencyMs: null, lastCheckedAt: Date.now(), error: message, code: 'backend_unreachable' });
     });
-  }, [checkConnectionHealth, closeSocket, enqueueSocketFrame, flushQueuedProtocolCommands, getSessionCursorSnapshot, recoverConversation, reconcilePendingSubmission, refreshServerVersion, resumeQueuedFollowUps, sendSessionResume, settings, subscribeV2Conversation, syncWorkspacesFromBackend]);
+  }, [checkConnectionHealth, closeSocket, enqueueSocketFrame, flushQueuedProtocolCommands, getSessionCursorSnapshot, recoverConversation, reconcilePendingSubmission, refreshServerVersion, resumeQueuedFollowUps, sendSessionResume, setBackendProviders, settings, subscribeV2Conversation, syncWorkspacesFromBackend]);
 
   useEffect(() => {
     if (!hydrated || !autoConnectEnabled || manualDisconnectRef.current) {
@@ -3672,6 +3726,16 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     autoConnectAttemptedRef.current = true;
     connect();
   }, [autoConnectEnabled, connect, hydrated]);
+
+  // Selecting a workspace or conversation on another backend switches the
+  // active profile; move the socket there. Editing the active profile's URL
+  // does not reconnect by itself — that still goes through Settings.
+  useEffect(() => {
+    if (!hydrated || !autoConnectEnabled || manualDisconnectRef.current) return;
+    const connectedBackendId = connectedBackendIdRef.current;
+    if (!connectedBackendId || connectedBackendId === activeBackendConnectionId) return;
+    connect();
+  }, [activeBackendConnectionId, autoConnectEnabled, connect, hydrated]);
 
   const sendProtocolMessage = useCallback(
     (
@@ -6005,7 +6069,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       if (attachments.some((attachment) => attachment.kind === 'image')) {
         const imageSupport = conversationImageInputSupport(conversation, v2ProvidersRef.current, {
           models: conversation.provider
-            ? providerModelsRef.current[conversation.provider as ProviderKind]
+            ? providerModelsFor(conversation.backendConnectionId ?? workspace.backendConnectionId, conversation.provider)
             : undefined,
           profileCapability: providerImageInputRef.current[conversation.id],
         });
@@ -7406,7 +7470,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     if (attachments.some((attachment) => attachment.kind === 'image')) {
       const imageSupport = conversationImageInputSupport(conversation, v2ProvidersRef.current, {
         models: conversation.provider
-          ? providerModelsRef.current[conversation.provider as ProviderKind]
+          ? providerModelsFor(conversation.backendConnectionId ?? workspace.backendConnectionId, conversation.provider)
           : undefined,
         profileCapability: providerImageInputRef.current[conversation.id],
       });
