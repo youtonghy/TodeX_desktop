@@ -554,7 +554,9 @@ function BrowserPane({ workspacePath, session, target, onTargetChange }: { works
   const [srcDoc, setSrcDoc] = useState('');
   const [error, setError] = useState('');
   const [inspect, setInspect] = useState(false);
-  const frameRef = useRef<HTMLIFrameElement>(null);
+  // State rather than a ref: the iframe is recreated whenever the page is
+  // (re)loaded, and the element picker has to re-attach to the new one.
+  const [frame, setFrame] = useState<HTMLIFrameElement | null>(null);
   const selectedRef = useRef<HTMLElement | null>(null);
   const selectionAnchorRef = useRef<HTMLElement | null>(null);
   useNoticeToast(error, { variant: 'danger', scope: workspacePath });
@@ -578,11 +580,11 @@ function BrowserPane({ workspacePath, session, target, onTargetChange }: { works
   }, []);
 
   const handleReload = () => {
-    if (frameRef.current) {
+    if (frame) {
       if (url) {
-        frameRef.current.src = url;
+        frame.src = url;
       } else if (srcDoc) {
-        frameRef.current.srcdoc = srcDoc;
+        frame.srcdoc = srcDoc;
       }
     }
   };
@@ -623,7 +625,6 @@ function BrowserPane({ workspacePath, session, target, onTargetChange }: { works
   }, [session.activeConversation?.id, session.setConversationChatDraft]);
 
   useEffect(() => {
-    const frame = frameRef.current;
     if (!frame || !inspect) return;
     const bind = () => {
       try {
@@ -729,19 +730,30 @@ function BrowserPane({ workspacePath, session, target, onTargetChange }: { works
       } catch { toast.danger(t('workbench.inspectBlocked')); }
       return undefined;
     };
-    let cleanup = bind();
+    // A cross-origin page leaves contentDocument null; say so instead of
+    // leaving a picker that silently selects nothing. A detached frame (one
+    // being replaced by a reload) is also null and is not a blocked page.
+    const bindOrReportBlocked = () => {
+      const unbind = bind();
+      if (frame.isConnected && frame.contentDocument === null) {
+        toast.danger(t('workbench.inspectBlocked'));
+        setInspect(false);
+      }
+      return unbind;
+    };
+    let cleanup = bindOrReportBlocked();
     const handleLoad = () => {
       cleanup?.();
       selectedRef.current = null;
       selectionAnchorRef.current = null;
-      cleanup = bind();
+      cleanup = bindOrReportBlocked();
     };
     frame.addEventListener('load', handleLoad);
     return () => {
       frame.removeEventListener('load', handleLoad);
       cleanup?.();
     };
-  }, [appendReference, inspect]);
+  }, [appendReference, frame, inspect]);
 
   return (
     <div className="flex h-full min-h-0 flex-col px-4 pb-4 pt-3">
@@ -795,7 +807,7 @@ function BrowserPane({ workspacePath, session, target, onTargetChange }: { works
       </div>
       {url || srcDoc ? (
         <div className="bg-surface min-h-0 flex-1 overflow-hidden rounded-xl border border-separator">
-          <iframe ref={frameRef} title={t('workbench.webPreview')} src={url || undefined} srcDoc={srcDoc || undefined} className="size-full border-0" sandbox="allow-forms allow-modals allow-popups allow-same-origin allow-scripts" />
+          <iframe ref={setFrame} title={t('workbench.webPreview')} src={url || undefined} srcDoc={srcDoc || undefined} className="size-full border-0" sandbox="allow-forms allow-modals allow-popups allow-same-origin allow-scripts" />
         </div>
       ) : (
         <div className="bg-surface-secondary flex min-h-0 flex-1 flex-col items-center justify-center gap-2 rounded-xl px-6 text-center">
