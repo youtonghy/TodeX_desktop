@@ -564,14 +564,14 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     stampedTimelineEntriesRef.current.set(entry, stamped);
     return stamped;
   };
-  const runtimeUpdateRef = useRef<(state: ConversationRuntime, applied: ConversationEvent[], recovering: boolean) => void>(() => {});
+  const runtimeUpdateRef = useRef<(state: ConversationRuntime, applied: ConversationEvent[], recovering: boolean, live: ReadonlySet<number>) => void>(() => {});
   const notifyTurnCompletedRef = useRef<(localId: string, state: ConversationRuntime, turnId: string) => void>(() => {});
   const conversationRecoveryRef = useRef<ConversationRecovery | null>(null);
   // History replays fetch summary events only; folded process groups fetch
   // their full sequence range back when the user expands them.
   if (!conversationRecoveryRef.current) conversationRecoveryRef.current = new ConversationRecovery(
     (id, after, limit) => v2ApiForConversation(id).replayEvents(id, after, limit, 'summary'),
-    (state, applied, recovering) => runtimeUpdateRef.current(state, applied, recovering), setLastError,
+    (state, applied, recovering, live) => runtimeUpdateRef.current(state, applied, recovering, live), setLastError,
     (id, before, limit) => v2ApiForConversation(id).replayEventsBefore(id, before, limit, 'summary'),
   );
 
@@ -631,6 +631,19 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       clearInterval(refreshTimer);
     };
   }, [activeBackendConnectionId, hydrated, setBackendProviders, settings.deviceSecret, settings.serverUrl]);
+
+  // Each manifest refresh re-checks running conversations: a lazily loaded
+  // runtime whose turn started below its window (or whose earlier search
+  // failed) would otherwise stay idle with no stop control.
+  useEffect(() => {
+    const recovery = conversationRecoveryRef.current;
+    if (!recovery) return;
+    for (const manifest of v2Conversations) {
+      if (manifest.status !== 'running' && manifest.status !== 'waiting_permission') continue;
+      const state = recovery.get(manifest.id);
+      if (state && !state.activeTurnId) void recovery.resolveTurn(manifest.id);
+    }
+  }, [v2Conversations]);
 
   useEffect(() => {
     timelineRef.current = timeline;
@@ -1684,7 +1697,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     setConversationSelectedSkills(conversationId, (current) => current.length ? current : submission.skills);
   }, [setConversationChatDraft, setConversationAttachments, setConversationSelectedSkills]);
 
-  runtimeUpdateRef.current = (state, appliedEvents, recovering) => {
+  runtimeUpdateRef.current = (state, appliedEvents, recovering, live) => {
     const conversation = conversationsRef.current.find((item) => item.v2ConversationId === state.conversationId || item.id === state.conversationId);
     if (!conversation) return;
     const localId = conversation.id;
@@ -1751,6 +1764,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         if (type === 'control.rejected') setLastError(typeof data.message === 'string' ? data.message : t('sess.agentControlRejected'));
       }
       if (['turn.completed', 'turn.cancelled', 'turn.failed', 'turn.interrupted'].includes(type)) {
+        // A realtime frame is news even when it lands inside a history replay.
+        const replayed = recovering && !live.has(event.sequence);
         completedAt = Math.max(completedAt, Date.parse(event.time) || Date.now());
         const settledKey = turnId ? `${state.conversationId}:${turnId}` : '';
         const firstSettle = Boolean(settledKey) && !settledV2TurnsRef.current.has(settledKey);
@@ -1758,7 +1773,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           settledV2TurnsRef.current.set(settledKey, type);
           if (settledV2TurnsRef.current.size > 2000) settledV2TurnsRef.current.delete(settledV2TurnsRef.current.keys().next().value!);
         }
-        if (type === 'turn.completed' && firstSettle && !recovering) {
+        if (type === 'turn.completed' && firstSettle && !replayed) {
           notifyTurnCompletedRef.current(localId, state, turnId);
         }
         if (submission && turnId && submission.turnId === turnId) {
@@ -1772,7 +1787,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         }
         if (turnId) {
           queueMicrotask(() => {
-            void followUpsRef.current.settle(localId, turnId, type, recovering,
+            void followUpsRef.current.settle(localId, turnId, type, replayed,
               () => queuedChatDraftsRef.current[localId]?.[0],
               (item) => sendQueuedChatDraftRef.current(item, localId),
               (itemId) => removeQueuedFollowUp(localId, itemId)).then(() => {
