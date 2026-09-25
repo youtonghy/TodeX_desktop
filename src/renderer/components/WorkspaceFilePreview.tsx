@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Button } from '@heroui/react';
 import { CodeBlock } from '@heroui-pro/react/code-block';
 import { Markdown } from '@heroui-pro/react/markdown';
+import { baseMarkdownComponents } from './markdownComponents';
 import { lineRangeForOffsets, selectionInside, selectionStartOffset, type TextLineRange } from '../lib/selection';
 import { useT } from '../i18n';
 
@@ -200,7 +201,7 @@ export function WorkspaceFilePreview({ file, onAddReference }: {
     } else if (!file.text) {
       content = <p className="text-muted text-xs">{file.sizeBytes ? t('filePreview.noText') : t('filePreview.empty')}</p>;
     } else if (isMarkdownFile(file.path)) {
-      content = <Markdown>{file.text}</Markdown>;
+      content = <Markdown components={baseMarkdownComponents}>{file.text}</Markdown>;
     } else {
       content = (
         <CodeBlock className="min-w-0">
