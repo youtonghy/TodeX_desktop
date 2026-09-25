@@ -92,9 +92,15 @@ export const zhCN = {
   'sidebar.renameConversationPrompt': '新的对话标题',
   'sidebar.labelColor': '标签颜色',
   'sidebar.labelClear': '移除标签',
-  'sidebar.workspaceIcon': '图标与颜色',
+  'sidebar.workspaceIcon': '图标与样式',
   'sidebar.iconColor': '图标颜色',
-  'sidebar.iconReset': '重置图标',
+  'sidebar.iconReset': '重置样式',
+  'sidebar.ringStyle': '状态样式',
+  'sidebar.ringOrbit': '轨道',
+  'sidebar.ringPulse': '呼吸',
+  'sidebar.ringEllipsis': '圆点',
+  'sidebar.ringBeads': '珠环',
+  'sidebar.ringArc': '弧线',
   'sidebar.syncing': '正在同步目录…',
 
   // settings

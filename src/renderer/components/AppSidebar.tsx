@@ -1,4 +1,4 @@
-import { RiPushpin2Fill, RiAddLine, RiPencilLine, RiEdit2Line, RiErrorWarningLine, RiGitBranchLine, RiDeleteBinLine, RiArrowDownSLine, RiBarChartBoxLine, RiInformationLine, RiKanbanView2, RiPaletteLine, RiPriceTag3Line, RiPuzzle2Line, RiSettings3Line, RiTerminalBoxLine, RiUserSettingsLine } from '@remixicon/react';
+import { RiPushpin2Fill, RiAddLine, RiPencilLine, RiEdit2Line, RiErrorWarningLine, RiFolder3Line, RiGitBranchLine, RiDeleteBinLine, RiArrowDownSLine, RiBarChartBoxLine, RiInformationLine, RiKanbanView2, RiPaletteLine, RiPriceTag3Line, RiPuzzle2Line, RiSettings3Line, RiTerminalBoxLine, RiUserSettingsLine } from '@remixicon/react';
 import { Badge, Button, Chip, ColorSwatchPicker, Dropdown, Label, Tooltip } from '@heroui/react';
 import { useEffect, useMemo, useState } from 'react';
 import type { DragEvent, MouseEvent } from 'react';
@@ -8,7 +8,7 @@ import { useKanbanTasks } from '../session/kanbanTasks';
 import { BACKEND_LABEL_COLORS, backendLabelColor } from '../session/backendColors';
 import { ProviderIcon } from './ProviderIcon';
 import { AppIcon } from './AppIcon';
-import { WORKSPACE_ICON_CHOICES, workspaceIconComponent } from './WorkspaceIcon';
+import { WORKSPACE_ICON_CHOICES, WORKSPACE_RING_STYLES, WorkspaceStatusRing, ringStyleKey, workspaceIconComponent } from './WorkspaceIcon';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { conversationDisplayTitle, getConversationStatus, isConversationHighlighted, workspaceDisplayName } from '../session/helpers';
 import { ShortcutHint } from '../lib/shortcuts';
@@ -386,16 +386,7 @@ export function AppSidebar({
                           <ChatListView.Icon>
                             <span className="relative flex size-5 items-center justify-center">
                               {workspaceStatus ? (
-                                <span
-                                  aria-label={workspaceStatusLabel}
-                                  className={`pointer-events-none absolute inset-0 rounded-full border-[1.5px] ${
-                                    workspaceStatus === 'working'
-                                      ? 'border-green-500/25 border-t-green-500 motion-safe:animate-spin'
-                                      : workspaceStatus === 'issue'
-                                        ? 'border-amber-500/80'
-                                        : 'border-blue-500/80'
-                                  }`}
-                                />
+                                <WorkspaceStatusRing kind={workspaceStatus} style={workspace.ringStyle} label={workspaceStatusLabel} />
                               ) : null}
                               <WorkspaceGlyph
                                 className={`size-4 ${!workspace.iconColor && isSelected ? 'text-accent' : ''}`}
@@ -617,7 +608,7 @@ export function AppSidebar({
                     <Label>{t('sidebar.workspaceIcon')}</Label>
                     <HeroContextMenu.SubmenuIndicator />
                   </HeroContextMenu.Item>
-                  <HeroContextMenu.Popover>
+                  <HeroContextMenu.Popover className="rounded-xl">
                     {(() => {
                       const menuWorkspace = session.workspaces.find((item) => item.id === contextMenu.id);
                       if (!menuWorkspace) return null;
@@ -631,6 +622,7 @@ export function AppSidebar({
                                 size="sm"
                                 variant={(menuWorkspace.icon ?? 'folder') === key ? 'secondary' : 'ghost'}
                                 aria-label={key}
+                                className="rounded-lg"
                                 onPress={() => {
                                   session.updateWorkspace(contextMenu.id, { icon: key === 'folder' ? undefined : key });
                                   setContextMenu(null);
@@ -655,12 +647,37 @@ export function AppSidebar({
                               </ColorSwatchPicker.Item>
                             ))}
                           </ColorSwatchPicker>
+                          <div className="flex items-center gap-2 px-1">
+                            <span className="text-[10px] font-medium uppercase tracking-wide text-muted">{t('sidebar.ringStyle')}</span>
+                            <span className="h-px flex-1 bg-separator" />
+                          </div>
+                          <div className="grid grid-cols-5 gap-1">
+                            {WORKSPACE_RING_STYLES.map(({ key, labelKey }) => (
+                              <Button
+                                key={key}
+                                isIconOnly
+                                size="sm"
+                                variant={ringStyleKey(menuWorkspace.ringStyle) === key ? 'secondary' : 'ghost'}
+                                aria-label={t(labelKey)}
+                                className="rounded-lg"
+                                onPress={() => {
+                                  session.updateWorkspace(contextMenu.id, { ringStyle: key === 'orbit' ? undefined : key });
+                                  setContextMenu(null);
+                                }}
+                              >
+                                <span className="relative flex size-5 items-center justify-center">
+                                  <WorkspaceStatusRing kind="working" style={key} label={t(labelKey)} />
+                                  <RiFolder3Line className="size-3.5 text-muted" />
+                                </span>
+                              </Button>
+                            ))}
+                          </div>
                           <Button
                             size="sm"
                             variant="ghost"
-                            className="justify-start"
+                            className="justify-start rounded-lg"
                             onPress={() => {
-                              session.updateWorkspace(contextMenu.id, { icon: undefined, iconColor: undefined });
+                              session.updateWorkspace(contextMenu.id, { icon: undefined, iconColor: undefined, ringStyle: undefined });
                               setContextMenu(null);
                             }}
                           >

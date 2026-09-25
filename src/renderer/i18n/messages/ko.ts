@@ -92,9 +92,15 @@ export const ko: Messages = {
   'sidebar.renameConversationPrompt': '새 대화 제목',
   'sidebar.labelColor': '라벨 색상',
   'sidebar.labelClear': '라벨 지우기',
-  'sidebar.workspaceIcon': '아이콘과 색상',
+  'sidebar.workspaceIcon': '아이콘과 스타일',
   'sidebar.iconColor': '아이콘 색상',
-  'sidebar.iconReset': '아이콘 재설정',
+  'sidebar.iconReset': '스타일 재설정',
+  'sidebar.ringStyle': '링 스타일',
+  'sidebar.ringOrbit': '오빗',
+  'sidebar.ringPulse': '펄스',
+  'sidebar.ringEllipsis': '도트',
+  'sidebar.ringBeads': '비즈',
+  'sidebar.ringArc': '아크',
   'sidebar.syncing': '디렉터리 동기화 중…',
 
   // settings

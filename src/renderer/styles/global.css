@@ -1201,3 +1201,32 @@ body {
     transition: none;
   }
 }
+
+/* Workspace status rings: the 'pulse' ring breathes and the 'ellipsis' dots
+   wave while a turn runs. SVG spinner rings rotate via the Tailwind
+   motion-safe:animate-spin utility, so they already honor reduced motion. */
+@keyframes ws-ring-breathe {
+  0%, 100% { opacity: 0.35; transform: scale(0.92); }
+  50% { opacity: 1; transform: scale(1); }
+}
+
+@keyframes ws-dot-wave {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.55; }
+  30% { transform: translateY(-2.5px); opacity: 1; }
+}
+
+.ws-breathe {
+  animation: ws-ring-breathe 2s ease-in-out infinite;
+  transform-origin: center;
+}
+
+.ws-dot {
+  animation: ws-dot-wave 1.2s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ws-breathe,
+  .ws-dot {
+    animation: none;
+  }
+}
