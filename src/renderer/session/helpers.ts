@@ -584,14 +584,21 @@ export function isConversationHighlighted(conversation: ConversationRecord, _act
   return Boolean(activeTurns[conversation.id]);
 }
 
+export type ConversationStatus = {
+  kind: 'working' | 'issue' | 'unread';
+  color: string;
+  border: string;
+  label: string;
+};
+
 export function getConversationStatus(
   session: { activeConversationId: string; turnIds: Record<string, string> },
   conversation: ConversationRecord,
   latestEntry?: TimelineEntry,
   latestIncomingAt?: number,
-): { color: string; border: string; label: string } | null {
+): ConversationStatus | null {
   if (isConversationHighlighted(conversation, session.activeConversationId, session.turnIds)) {
-    return { color: 'bg-green-500', border: 'border-green-500', label: t('sidebar.statusWorking') };
+    return { kind: 'working', color: 'bg-green-500', border: 'border-green-500', label: t('sidebar.statusWorking') };
   }
   // The dot is an attention marker: it clears once the conversation has been
   // seen (lastReadAt), regardless of which state produced it.
@@ -602,11 +609,11 @@ export function getConversationStatus(
     (/error|failed|异常|失败/i.test(conversation.nativeStatus || '') && conversation.updatedAt > lastReadAt) ||
     (/error|failed|异常|失败/i.test(latestEntry?.title || '') && latestEntryUnread)
   ) {
-    return { color: 'bg-amber-500', border: 'border-amber-500', label: t('sidebar.statusIssue') };
+    return { kind: 'issue', color: 'bg-amber-500', border: 'border-amber-500', label: t('sidebar.statusIssue') };
   }
   const incomingAt = latestIncomingAt ?? (latestEntry?.kind === 'incoming' ? latestEntry.at : 0);
   if (incomingAt > lastReadAt) {
-    return { color: 'bg-blue-500', border: 'border-blue-500', label: t('sidebar.statusUnread') };
+    return { kind: 'unread', color: 'bg-blue-500', border: 'border-blue-500', label: t('sidebar.statusUnread') };
   }
   return null;
 }

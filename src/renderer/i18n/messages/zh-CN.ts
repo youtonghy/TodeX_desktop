@@ -92,6 +92,9 @@ export const zhCN = {
   'sidebar.renameConversationPrompt': '新的对话标题',
   'sidebar.labelColor': '标签颜色',
   'sidebar.labelClear': '移除标签',
+  'sidebar.workspaceIcon': '图标与颜色',
+  'sidebar.iconColor': '图标颜色',
+  'sidebar.iconReset': '重置图标',
   'sidebar.syncing': '正在同步目录…',
 
   // settings

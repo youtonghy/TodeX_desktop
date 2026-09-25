@@ -92,6 +92,9 @@ export const en: Messages = {
   'sidebar.renameConversationPrompt': 'New conversation title',
   'sidebar.labelColor': 'Label color',
   'sidebar.labelClear': 'Clear label',
+  'sidebar.workspaceIcon': 'Icon & color',
+  'sidebar.iconColor': 'Icon color',
+  'sidebar.iconReset': 'Reset icon',
   'sidebar.syncing': 'Syncing directory…',
 
   // settings

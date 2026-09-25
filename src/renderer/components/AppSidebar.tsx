@@ -1,4 +1,4 @@
-import { RiPushpin2Fill, RiAddLine, RiPencilLine, RiEdit2Line, RiErrorWarningLine, RiGitBranchLine, RiDeleteBinLine, RiArrowDownSLine, RiBarChartBoxLine, RiFolder3Line, RiInformationLine, RiKanbanView2, RiPriceTag3Line, RiPuzzle2Line, RiSettings3Line, RiTerminalBoxLine, RiUserSettingsLine } from '@remixicon/react';
+import { RiPushpin2Fill, RiAddLine, RiPencilLine, RiEdit2Line, RiErrorWarningLine, RiGitBranchLine, RiDeleteBinLine, RiArrowDownSLine, RiBarChartBoxLine, RiInformationLine, RiKanbanView2, RiPaletteLine, RiPriceTag3Line, RiPuzzle2Line, RiSettings3Line, RiTerminalBoxLine, RiUserSettingsLine } from '@remixicon/react';
 import { Badge, Button, Chip, ColorSwatchPicker, Dropdown, Label, Tooltip } from '@heroui/react';
 import { useEffect, useMemo, useState } from 'react';
 import type { DragEvent, MouseEvent } from 'react';
@@ -8,6 +8,7 @@ import { useKanbanTasks } from '../session/kanbanTasks';
 import { BACKEND_LABEL_COLORS, backendLabelColor } from '../session/backendColors';
 import { ProviderIcon } from './ProviderIcon';
 import { AppIcon } from './AppIcon';
+import { WORKSPACE_ICON_CHOICES, workspaceIconComponent } from './WorkspaceIcon';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { conversationDisplayTitle, getConversationStatus, isConversationHighlighted, workspaceDisplayName } from '../session/helpers';
 import { ShortcutHint } from '../lib/shortcuts';
@@ -120,6 +121,24 @@ export function AppSidebar({
     }
     return map;
   }, [session.conversations, timelineInfoMap]);
+
+  // A workspace surfaces its most urgent conversation status: a running turn
+  // beats an unread error, which beats a plain unread marker — the same
+  // precedence getConversationStatus uses per row.
+  const workspaceStatusMap = useMemo(() => {
+    const rank = { working: 3, issue: 2, unread: 1 } as const;
+    const map: Record<string, keyof typeof rank> = {};
+    for (const conversation of session.conversations) {
+      if (!conversation.workspaceId || conversation.archived) continue;
+      const status = getConversationStatus(session, conversation, timelineInfoMap[conversation.id]?.latestEntry, timelineInfoMap[conversation.id]?.latestIncomingAt);
+      if (!status) continue;
+      const current = map[conversation.workspaceId];
+      if (!current || rank[status.kind] > rank[current]) {
+        map[conversation.workspaceId] = status.kind;
+      }
+    }
+    return map;
+  }, [session, timelineInfoMap]);
 
   // Workspaces use an explicit manual order and never move when a conversation updates.
   const sortedWorkspaces = useMemo(() => [...session.workspaces].sort((a, b) => Number(pins.workspace.includes(b.id)) - Number(pins.workspace.includes(a.id)) || (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || (a.createdAt - b.createdAt) || a.id.localeCompare(b.id)), [session.workspaces, pins.workspace]);
@@ -346,6 +365,13 @@ export function AppSidebar({
                     const isMissing = Boolean(workspace.pathMissing);
                     const backend = session.backendConnections.find((profile) => profile.id === (workspace.backendConnectionId || session.activeBackendConnectionId));
                     const backendLabel = backend ? t('sidebar.backendLabel', { name: backend.name, url: backend.serverUrl }) : t('sidebar.backendRemoved');
+                    const workspaceStatus = workspaceStatusMap[workspace.id];
+                    const workspaceStatusLabel = workspaceStatus === 'working'
+                      ? t('sidebar.statusWorking')
+                      : workspaceStatus === 'issue'
+                        ? t('sidebar.statusIssue')
+                        : t('sidebar.statusUnread');
+                    const WorkspaceGlyph = workspaceIconComponent(workspace.icon);
                     return (
                       <ChatListView.Item
                         key={workspace.id}
@@ -358,7 +384,24 @@ export function AppSidebar({
                       >
                         <ChatListView.ItemContent>
                           <ChatListView.Icon>
-                            <RiFolder3Line className={`size-4 ${isSelected ? 'text-accent' : ''}`} />
+                            <span className="relative flex size-5 items-center justify-center">
+                              {workspaceStatus ? (
+                                <span
+                                  aria-label={workspaceStatusLabel}
+                                  className={`pointer-events-none absolute inset-0 rounded-full border-[1.5px] ${
+                                    workspaceStatus === 'working'
+                                      ? 'border-green-500/25 border-t-green-500 motion-safe:animate-spin'
+                                      : workspaceStatus === 'issue'
+                                        ? 'border-amber-500/80'
+                                        : 'border-blue-500/80'
+                                  }`}
+                                />
+                              ) : null}
+                              <WorkspaceGlyph
+                                className={`size-4 ${!workspace.iconColor && isSelected ? 'text-accent' : ''}`}
+                                color={workspace.iconColor}
+                              />
+                            </span>
                           </ChatListView.Icon>
                           <ChatListView.Text className="flex-1">
                             <ChatListView.Title className={isSelected ? 'text-accent font-semibold' : isMissing ? 'text-muted' : ''}>
@@ -567,6 +610,68 @@ export function AppSidebar({
               <HeroContextMenu.Item id="rename" textValue={t('sidebar.rename')} onAction={() => runContextAction('rename')}><RiPencilLine className="size-4 text-muted" /><Label>{t('sidebar.rename')}</Label></HeroContextMenu.Item>
               {contextMenu.kind === 'workspace' ? <HeroContextMenu.Item id="edit" textValue={t('sidebar.edit')} onAction={() => runContextAction('edit')}><RiEdit2Line className="size-4 text-muted" /><Label>{t('sidebar.edit')}</Label></HeroContextMenu.Item> : null}
               <HeroContextMenu.Item id="pin" textValue={pins[contextMenu.kind].includes(contextMenu.id) ? t('sidebar.unpin') : t('sidebar.pin')} onAction={() => runContextAction('pin')}><RiPushpin2Fill className="size-4 text-muted" /><Label>{pins[contextMenu.kind].includes(contextMenu.id) ? t('sidebar.unpin') : t('sidebar.pin')}</Label></HeroContextMenu.Item>
+              {contextMenu.kind === 'workspace' ? (
+                <HeroContextMenu.SubmenuTrigger>
+                  <HeroContextMenu.Item id="workspace-icon" textValue={t('sidebar.workspaceIcon')}>
+                    <RiPaletteLine className="size-4 text-muted" />
+                    <Label>{t('sidebar.workspaceIcon')}</Label>
+                    <HeroContextMenu.SubmenuIndicator />
+                  </HeroContextMenu.Item>
+                  <HeroContextMenu.Popover>
+                    {(() => {
+                      const menuWorkspace = session.workspaces.find((item) => item.id === contextMenu.id);
+                      if (!menuWorkspace) return null;
+                      return (
+                        <div className="flex w-48 flex-col gap-2 p-2">
+                          <div className="grid grid-cols-5 gap-1">
+                            {WORKSPACE_ICON_CHOICES.map(({ key, Icon }) => (
+                              <Button
+                                key={key}
+                                isIconOnly
+                                size="sm"
+                                variant={(menuWorkspace.icon ?? 'folder') === key ? 'secondary' : 'ghost'}
+                                aria-label={key}
+                                onPress={() => {
+                                  session.updateWorkspace(contextMenu.id, { icon: key === 'folder' ? undefined : key });
+                                  setContextMenu(null);
+                                }}
+                              >
+                                <Icon className="size-4" />
+                              </Button>
+                            ))}
+                          </div>
+                          <ColorSwatchPicker
+                            aria-label={t('sidebar.iconColor')}
+                            value={menuWorkspace.iconColor ?? undefined}
+                            onChange={(color) => {
+                              session.updateWorkspace(contextMenu.id, { iconColor: color.toString('hex') });
+                              setContextMenu(null);
+                            }}
+                          >
+                            {BACKEND_LABEL_COLORS.map(({ value, label }) => (
+                              <ColorSwatchPicker.Item key={value} color={value} aria-label={label}>
+                                <ColorSwatchPicker.Swatch />
+                                <ColorSwatchPicker.Indicator />
+                              </ColorSwatchPicker.Item>
+                            ))}
+                          </ColorSwatchPicker>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="justify-start"
+                            onPress={() => {
+                              session.updateWorkspace(contextMenu.id, { icon: undefined, iconColor: undefined });
+                              setContextMenu(null);
+                            }}
+                          >
+                            {t('sidebar.iconReset')}
+                          </Button>
+                        </div>
+                      );
+                    })()}
+                  </HeroContextMenu.Popover>
+                </HeroContextMenu.SubmenuTrigger>
+              ) : null}
               {contextMenu.kind === 'conversation' ? (
                 <HeroContextMenu.SubmenuTrigger>
                   <HeroContextMenu.Item id="label-color" textValue={t('sidebar.labelColor')}>

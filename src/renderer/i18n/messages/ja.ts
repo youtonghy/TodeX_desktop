@@ -92,6 +92,9 @@ export const ja: Messages = {
   'sidebar.renameConversationPrompt': '新しい会話タイトル',
   'sidebar.labelColor': 'ラベルカラー',
   'sidebar.labelClear': 'ラベルを削除',
+  'sidebar.workspaceIcon': 'アイコンとカラー',
+  'sidebar.iconColor': 'アイコンの色',
+  'sidebar.iconReset': 'アイコンをリセット',
   'sidebar.syncing': 'ディレクトリを同期中…',
 
   // settings
