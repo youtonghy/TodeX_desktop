@@ -7940,6 +7940,14 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       && (conversationRecoveryRef.current?.hydrate(v2Id, conversation?.workspaceId ?? '', events) ?? false);
   }, [v2ApiForConversation]);
 
+  // Kept referentially stable: the composer @-mention effect depends on this
+  // callback, and a new identity per render would re-fire (and discard) the
+  // lookup on every unrelated session update.
+  const fetchWorkspaceEntries = useCallback(async (cwd: string, query: string) => {
+    const api = new V2ApiClient({ serverUrl: settings.serverUrl, device: deviceIdentityFromSecret(settings.deviceSecret) });
+    return api.listWorkspaceEntries(cwd, query);
+  }, [settings.serverUrl, settings.deviceSecret]);
+
   return {
     ...workbenchSharingState,
     ...completionNotificationsState,
@@ -8071,10 +8079,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     refreshMcpServer,
     callMcpTool,
     fetchWorkspaceDirectorySnapshot: (path?: string) => fetchWorkspaceDirectorySnapshot(settings, path),
-    fetchWorkspaceEntries: async (cwd: string, query: string) => {
-      const api = new V2ApiClient({ serverUrl: settings.serverUrl, device: deviceIdentityFromSecret(settings.deviceSecret) });
-      return api.listWorkspaceEntries(cwd, query);
-    },
+    fetchWorkspaceEntries,
     openModelPicker,
     applyModelCommand,
     applyWorkspaceModelSelection,

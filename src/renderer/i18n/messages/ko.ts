@@ -266,6 +266,7 @@ export const ko: Messages = {
   'chat.commandSuggestions': '명령 제안',
   'chat.fileSuggestions': '파일 제안',
   'chat.searchingFiles': '워크스페이스 파일 검색 중…',
+  'chat.noFileSuggestions': '일치하는 파일이 없습니다',
   'chat.capabilityHint': '#을 입력해 Skill 또는 MCP를 참조하세요.',
   'chat.capabilitySuggestions': 'Skill 및 MCP 제안',
   'chat.capabilityAttached': '첨부됨',

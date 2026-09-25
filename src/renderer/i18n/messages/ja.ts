@@ -266,6 +266,7 @@ export const ja: Messages = {
   'chat.commandSuggestions': 'コマンド候補',
   'chat.fileSuggestions': 'ファイル候補',
   'chat.searchingFiles': 'ワークスペースのファイルを検索中…',
+  'chat.noFileSuggestions': '一致するファイルがありません',
   'chat.capabilityHint': '# を入力すると Skill や MCP を参照できます。',
   'chat.capabilitySuggestions': 'Skill と MCP の候補',
   'chat.capabilityAttached': '添付済み',

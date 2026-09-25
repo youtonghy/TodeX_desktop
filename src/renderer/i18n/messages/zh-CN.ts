@@ -266,6 +266,7 @@ export const zhCN = {
   'chat.commandSuggestions': '命令建议',
   'chat.fileSuggestions': '文件建议',
   'chat.searchingFiles': '正在搜索工作区文件…',
+  'chat.noFileSuggestions': '没有匹配的文件',
   'chat.capabilityHint': '输入 # 可引用 Skill 或 MCP。',
   'chat.capabilitySuggestions': 'Skill 与 MCP 建议',
   'chat.capabilityAttached': '已附加',

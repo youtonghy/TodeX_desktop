@@ -266,6 +266,7 @@ export const en: Messages = {
   'chat.commandSuggestions': 'Command suggestions',
   'chat.fileSuggestions': 'File suggestions',
   'chat.searchingFiles': 'Searching workspace files…',
+  'chat.noFileSuggestions': 'No matching files',
   'chat.capabilityHint': 'Type # to reference a Skill or MCP.',
   'chat.capabilitySuggestions': 'Skill and MCP suggestions',
   'chat.capabilityAttached': 'attached',
