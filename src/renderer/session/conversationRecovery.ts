@@ -16,6 +16,8 @@ const HISTORY_PAGE_LIMIT = 300;
 /** A still-running turn's start can sit far below the tail; bound the scan so
  * opening stays fast instead of blocking on the whole journal. */
 const TURN_START_SCAN_MAX_PAGES = 10;
+/** Events that settle the turn state on their own, without earlier history. */
+const TURN_LIFECYCLE_TYPES = new Set(['turn.started', 'turn.completed', 'turn.cancelled', 'turn.interrupted', 'turn.failed']);
 
 export type ConversationOpenOptions = {
   /** Journal high-water mark from the conversation manifest. */
@@ -164,7 +166,19 @@ export class ConversationRecovery {
       // background activity from replaying the whole journal; the history
       // pages in when the conversation is actually opened and scrolled.
       const first = Math.min(...events.map((event) => event.sequence).filter((sequence) => Number.isFinite(sequence) && sequence > 0));
-      if (Number.isFinite(first) && first > 1) this.seed(conversationId, workspaceId, first - 1);
+      if (Number.isFinite(first) && first > 1) {
+        // A mid-turn frame (e.g. a delta after a reconnect) says nothing about
+        // whether its turn is still running: that lives in the turn.started
+        // below the floor. Page back to it (bounded) so the runtime projects
+        // the running turn instead of an idle one with no stop control. The
+        // frames buffer above the gap until the window lands.
+        const carriesTurnLifecycle = events.some((event) => TURN_LIFECYCLE_TYPES.has(canonicalConversationEventType(event)));
+        if (this.replayBefore && !carriesTurnLifecycle) {
+          void this.open(conversationId, workspaceId, { highWater: first - 1, turnActive: true });
+        } else {
+          this.seed(conversationId, workspaceId, first - 1);
+        }
+      }
     }
     const committed = this.states.get(conversationId);
     const previous = committed ?? createConversationRuntime(conversationId, workspaceId);
