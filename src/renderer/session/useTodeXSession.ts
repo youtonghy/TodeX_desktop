@@ -6881,8 +6881,19 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         }
         if (lower === 'compact' || lower === 'retry' || lower === 'resume') {
           const provider = v2ProvidersRef.current.find((item) => item.id === conversation.provider);
-          if (!conversation.v2ConversationId || !provider?.capabilities.controlActions?.includes(lower)) {
+          const nativeAction = provider?.capabilities.controlActions?.includes(lower) === true;
+          // Some providers expose these as catalog commands instead of control
+          // actions (e.g. Claude /compact runs as a literal prompt).
+          const promptCommand = conversation.provider
+            ? providerCommands[conversation.provider as ProviderKind]?.find(
+                (item) => item.name.toLowerCase() === lower && item.invocation === 'prompt')
+            : undefined;
+          if (!conversation.v2ConversationId || (!nativeAction && !promptCommand)) {
             setLastError(lower === 'resume' ? t('sess.resumeNeedsMessage') : t('sess.operationUnsupported'));
+            return;
+          }
+          if (!nativeAction) {
+            void sendV2Prompt(trimmed, conversation.id);
             return;
           }
           void sendProtocolCommand({ id: createRequestId(lower), type: `conversation.${lower}`, payload: {

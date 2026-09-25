@@ -733,7 +733,9 @@ export function ChatPanel({ session }: Props) {
     || session.v2Providers.find(item => item.id === currentProvider)?.capabilities.controlActions?.includes('compact') === true;
   const slashCatalog = [
     ...(canCompact ? [{ command: '/compact', title: t('chat.compactTitle'), description: t('chat.compactDescription'), category: 'thread' as const }] : []),
-    ...providerSlashCatalog.filter(item => canonicalSlashCommand(item.command) !== '/compact'),
+    // The synthetic /compact item already covers the catalog entry when the
+    // provider offers a native control action; otherwise keep the catalog's.
+    ...providerSlashCatalog.filter(item => !canCompact || canonicalSlashCommand(item.command) !== '/compact'),
   ];
   const chooseSlashCommand = (command: string) => {
     if (command === '/compact') {
