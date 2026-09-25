@@ -16,6 +16,7 @@ import { ChatPanel } from './screens/ChatPanel';
 import { Field } from './components/Field';
 import { connectionStateLabel, fetchWorkspaceDirectorySnapshot } from './session/helpers';
 import { isWorkbenchTab, panelFromRoute, type DesktopPanel, type OpenPanelOptions, type WorkbenchTab } from './lib/panels';
+import { ShortcutHint, useAppShortcuts, useShortcutHintTracking } from './lib/shortcuts';
 import { useT } from './i18n';
 
 // Secondary surfaces load on demand so the main bundle stays small.
@@ -160,6 +161,33 @@ export function App() {
     window.todexDesktop.app.closeWindow();
   }), []);
 
+  useShortcutHintTracking();
+  useAppShortcuts({
+    toggleSidebar: () => persistSidebarOpen(!sidebarOpen),
+    toggleAside: () => {
+      if (!scopeKey) return;
+      persistAsideOpen(!asideOpen);
+    },
+    gitActions: () => setGitOpen((open) => !open),
+    kanban: () => {
+      if (panel === 'kanban') {
+        setPanel(null);
+        return;
+      }
+      setPanel('kanban');
+      persistAsideOpen(false);
+    },
+    newConversation: () => {
+      if (!session.activeWorkspaceId) return;
+      session.createConversation(session.activeWorkspaceId);
+      setPanel(null);
+    },
+    newWorkspace: () => {
+      setEditingWorkspaceId(null);
+      setCreateOpen(true);
+    },
+  });
+
   useEffect(() => {
     let unsubscribe: (() => void) | undefined;
     void window.todexDesktop.theme.shouldUseDark().then((dark) => {
@@ -263,14 +291,20 @@ export function App() {
             <Navbar maxWidth="full">
               <Navbar.Header className={`flex-nowrap gap-2 px-3 sm:px-6 [&>button]:shrink-0${insetChrome && !sidebarOpen ? ' navbar--clear-lights' : ''}`}>
                 <AppLayout.MenuToggle className="inline-flex min-[769px]:hidden" aria-label={t('app.openSidebar')}><RiLayoutLeftLine className="size-4" /></AppLayout.MenuToggle>
-                <Button className="hidden min-[769px]:inline-flex" isIconOnly size="sm" variant="ghost" aria-label={sidebarOpen ? t('app.collapseSidebar') : t('app.expandSidebar')} onPress={() => persistSidebarOpen(!sidebarOpen)}>
-                  <RiLayoutLeftLine className="size-4" />
-                </Button>
+                <span className="relative hidden min-[769px]:inline-flex shrink-0">
+                  <Button isIconOnly size="sm" variant="ghost" aria-label={sidebarOpen ? t('app.collapseSidebar') : t('app.expandSidebar')} onPress={() => persistSidebarOpen(!sidebarOpen)}>
+                    <RiLayoutLeftLine className="size-4" />
+                  </Button>
+                  <ShortcutHint id="toggleSidebar" className="absolute -top-1.5 -right-1.5 z-10" />
+                </span>
                 <ConversationHeaderDetails session={session} title={session.activeConversation?.title ?? t('app.conversation')} gitOpen={gitOpen} onOpenGit={() => setGitOpen(true)} />
                 <Navbar.Content className="shrink-0 gap-2">
-                  <Button isIconOnly size="sm" variant="ghost" aria-label={t('app.githubActions')} onPress={() => setGitOpen(true)}>
-                    <RiGithubLine className="size-4" />
-                  </Button>
+                  <span className="relative inline-flex shrink-0">
+                    <Button isIconOnly size="sm" variant="ghost" aria-label={t('app.githubActions')} onPress={() => setGitOpen(true)}>
+                      <RiGithubLine className="size-4" />
+                    </Button>
+                    <ShortcutHint id="gitActions" className="absolute -top-1.5 -right-1.5 z-10" />
+                  </span>
                   {subagentRuns.length > 0 ? (
                     <span className="relative">
                       <Button isIconOnly size="sm" variant={panel === 'subagents' && asideOpen ? 'secondary' : 'ghost'} aria-label={t('app.subagents')} aria-expanded={asideOpen && panel === 'subagents'} onPress={() => openPanel('Subagents')}>
@@ -281,9 +315,12 @@ export function App() {
                       ) : null}
                     </span>
                   ) : null}
-                  <Button isIconOnly size="sm" variant="ghost" aria-label={asideOpen ? t('app.closeAside') : t('app.openAside')} aria-expanded={asideOpen} onPress={() => persistAsideOpen(!asideOpen)}>
-                    <RiLayoutRightLine className="size-4" />
-                  </Button>
+                  <span className="relative inline-flex shrink-0">
+                    <Button isIconOnly size="sm" variant="ghost" aria-label={asideOpen ? t('app.closeAside') : t('app.openAside')} aria-expanded={asideOpen} onPress={() => persistAsideOpen(!asideOpen)}>
+                      <RiLayoutRightLine className="size-4" />
+                    </Button>
+                    <ShortcutHint id="toggleAside" className="absolute -top-1.5 -right-1.5 z-10" />
+                  </span>
                 </Navbar.Content>
               </Navbar.Header>
             </Navbar>

@@ -10,6 +10,7 @@ import { ProviderIcon } from './ProviderIcon';
 import { AppIcon } from './AppIcon';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { conversationDisplayTitle, getConversationStatus, isConversationHighlighted, workspaceDisplayName } from '../session/helpers';
+import { ShortcutHint } from '../lib/shortcuts';
 import { t, useT } from '../i18n';
 
 type Props = {
@@ -267,10 +268,12 @@ export function AppSidebar({
         >
           <RiAddLine className="size-4" />
           <span data-sidebar="label">{t('sidebar.newConversation')}</span>
+          <ShortcutHint id="newConversation" className="ml-auto" />
         </Button>
         <Button className="mt-1 w-full justify-start" variant="ghost" onPress={onOpenKanban}>
           <RiKanbanView2 className="size-4" />
           <span data-sidebar="label">{t('sidebar.kanban')}</span>
+          <ShortcutHint id="kanban" className="ml-auto" />
         </Button>
       </Sidebar.Header>
 
@@ -304,17 +307,20 @@ export function AppSidebar({
                 ({session.workspaces.length})
               </span>
             </div>
-            <Button
-              isIconOnly
-              size="sm"
-              variant="ghost"
-              aria-label={t('sidebar.newWorkspace')}
-              className="size-6 text-muted hover:text-foreground"
-              onPress={() => onCreateWorkspace()}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <RiAddLine className="size-4" />
-            </Button>
+            <span className="relative inline-flex shrink-0">
+              <Button
+                isIconOnly
+                size="sm"
+                variant="ghost"
+                aria-label={t('sidebar.newWorkspace')}
+                className="size-6 text-muted hover:text-foreground"
+                onPress={() => onCreateWorkspace()}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <RiAddLine className="size-4" />
+              </Button>
+              <ShortcutHint id="newWorkspace" className="absolute -top-1.5 -right-1.5 z-10" />
+            </span>
           </div>
 
           {!workspacesCollapsed && (
@@ -435,18 +441,21 @@ export function AppSidebar({
                 ({workspaceConversations.length})
               </span>
             </div>
-            <Button
-              isIconOnly
-              size="sm"
-              variant="ghost"
-              aria-label={t('sidebar.newConversationAria')}
-              className="size-6 text-muted hover:text-foreground"
-              isDisabled={!session.activeWorkspaceId}
-              onPress={() => onCreateConversation()}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <RiAddLine className="size-4" />
-            </Button>
+            <span className="relative inline-flex shrink-0">
+              <Button
+                isIconOnly
+                size="sm"
+                variant="ghost"
+                aria-label={t('sidebar.newConversationAria')}
+                className="size-6 text-muted hover:text-foreground"
+                isDisabled={!session.activeWorkspaceId}
+                onPress={() => onCreateConversation()}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <RiAddLine className="size-4" />
+              </Button>
+              <ShortcutHint id="newConversation" className="absolute -top-1.5 -right-1.5 z-10" />
+            </span>
           </div>
 
           {!conversationsCollapsed && (

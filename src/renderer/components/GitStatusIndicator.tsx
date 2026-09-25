@@ -1,5 +1,6 @@
 import { Button, Spinner, Tooltip } from '@heroui/react';
 import { RiGitBranchLine, RiStackLine } from '@remixicon/react';
+import { ShortcutHint } from '../lib/shortcuts';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { useGitStatus } from '../session/useGitStatus';
 import { useGitRepositories } from '../session/useGitRepositories';
@@ -150,7 +151,8 @@ export function GitStatusDisplay({ state, onOpenGit, wrap = true }: { state: Ret
       ? t('git.statusSummary', { branch, worktree, count: data.changedFiles, additions: data.additions, deletions: data.deletions, truncated })
       : t('git.statusSummaryRepo', { branch, count: data.changedFiles, additions: data.additions, deletions: data.deletions, truncated })
     : !connected ? t('git.notConnected') : error ? t('git.statusUnavailable') : loading ? t('git.reading') : t('git.notInitialized');
-  return <div className="min-w-0" data-testid="git-status">
+  return <div className="relative min-w-0" data-testid="git-status">
+    <ShortcutHint id="gitActions" className="absolute -top-1.5 -right-1.5 z-10" />
     <Tooltip delay={300}>
       <Button size="sm" variant="ghost" className="h-auto min-h-8 min-w-0 max-w-full justify-start gap-2 px-2 py-1 text-xs font-normal"
         aria-label={summary} onPress={error ? refresh : onOpenGit}>

@@ -1157,3 +1157,47 @@ body {
     transition: none;
   }
 }
+
+/* Shortcut hint badges: revealed while the modifier key (⌘ / Ctrl) is held.
+   useShortcutHintTracking flips [data-shortcut-hints] on <html>; badges stay in
+   the DOM at opacity 0 so layout never shifts when they fade in. */
+.shortcut-hint {
+  display: inline-flex;
+  align-items: center;
+  pointer-events: none;
+  opacity: 0;
+  transform: scale(0.85);
+  transition: opacity 0.12s ease-out, transform 0.12s ease-out;
+}
+
+:root[data-shortcut-hints='on'] .shortcut-hint {
+  opacity: 1;
+  transform: scale(1);
+}
+
+/* Hints hide with their control whether they sit inside the disabled element
+   (wide buttons) or share a positioning wrapper with it (icon buttons). */
+:is([disabled], [data-disabled], [aria-disabled='true']) .shortcut-hint,
+:is([disabled], [data-disabled], [aria-disabled='true']) ~ .shortcut-hint,
+:has(> :is([disabled], [data-disabled], [aria-disabled='true'])) > .shortcut-hint {
+  display: none;
+}
+
+/* Compact keycap that still reads on top of buttons and list rows. */
+.shortcut-hint__kbd {
+  height: 1rem;
+  padding-inline: 0.3rem;
+  border: 1px solid var(--separator);
+  border-radius: 0.375rem;
+  background: var(--overlay);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+  color: var(--foreground);
+  font-size: 10px;
+  line-height: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shortcut-hint {
+    transition: none;
+  }
+}
