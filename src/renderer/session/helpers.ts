@@ -1157,7 +1157,11 @@ export type TimelineEntry = {
   subtitle: string;
   raw: string;
   at: number;
+  /** Sequence of the newest journal event merged into this row. */
   sequence?: number;
+  /** Sequence of the event that created this row; with `sequence` it bounds
+   * the journal range a folded row was built from. */
+  firstSequence?: number;
   workspaceId?: string;
   conversationId?: string;
   requestId?: string;
@@ -2878,6 +2882,22 @@ export function isTurnTerminalEvent(event: ServerEvent): boolean {
     event.type === 'codex.error' ||
     event.type === 'codex.control.error'
   );
+}
+
+/** Sort inclusive journal sequence ranges and merge the overlapping or
+ * adjacent ones, so each event is fetched once. Invalid ranges are dropped. */
+export function mergeSequenceRanges(ranges: ReadonlyArray<readonly [number, number]>): Array<[number, number]> {
+  const valid = ranges
+    .filter(([from, to]) => Number.isFinite(from) && Number.isFinite(to) && from > 0 && to >= from)
+    .map(([from, to]): [number, number] => [from, to])
+    .sort((left, right) => left[0] - right[0]);
+  const merged: Array<[number, number]> = [];
+  for (const range of valid) {
+    const last = merged[merged.length - 1];
+    if (last && range[0] <= last[1] + 1) last[1] = Math.max(last[1], range[1]);
+    else merged.push(range);
+  }
+  return merged;
 }
 
 export function makeSystemEntry(title: string, subtitle = '', workspaceId = '', conversationId = ''): TimelineEntry {

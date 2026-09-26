@@ -379,14 +379,14 @@ const ChatTimelineItem = memo(function ChatTimelineItem({
         control.timer = undefined;
         const latest = itemRef.current;
         if (latest.type !== 'executionGroup') return;
-        const sequences = latest.entries
-          .filter((entry) => entry.detailStub)
-          .map((entry) => entry.sequence ?? 0)
-          .filter((sequence) => sequence > 0);
-        if (!sequences.length) return;
+        // A folded row merges several stubs; fetch everything it was built from.
+        const ranges = latest.entries
+          .filter((entry) => entry.detailStub && (entry.sequence ?? 0) > 0)
+          .map((entry): [number, number] => [entry.firstSequence ?? entry.sequence!, entry.sequence!]);
+        if (!ranges.length) return;
         control.inflight = true;
         setProcessGroupLoad((current) => ({ ...current, [item.id]: 'loading' }));
-        void onHydrateGroup(conversationId, sequences)
+        void onHydrateGroup(conversationId, ranges)
           .then((hydrated) => setProcessGroupLoad((current) => {
             const next = { ...current };
             if (hydrated) delete next[item.id];

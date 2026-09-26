@@ -125,6 +125,7 @@ import {
   MAX_TRANSPORT_HELLO_SESSION_CURSORS,
   MAX_TIMELINE_ITEMS,
   MAX_TIMELINE_ITEMS_LIVE,
+  mergeSequenceRanges,
   MAX_USAGE_RECORDS,
   MAX_WORKSPACE_TOMBSTONES,
   MAX_EVENTS,
@@ -7929,15 +7930,17 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
    * and merge them into the projected timeline. Stubs are batched into
    * contiguous ranges so sparse groups skip unrelated payloads. Rejects when
    * the backend cannot be read so the UI can offer a retry. */
-  const hydrateProcessGroup = useCallback(async (conversationId: string, sequences: readonly number[]) => {
+  /** Fetch the full events of folded rows, each given as the inclusive
+   * journal range [firstSequence, sequence] it was built from, and merge them
+   * into the projection. */
+  const hydrateProcessGroup = useCallback(async (conversationId: string, ranges: ReadonlyArray<readonly [number, number]>) => {
     const conversation = conversationsRef.current.find((item) => item.id === conversationId);
     const v2Id = conversation?.v2ConversationId ?? conversationId;
     const api = v2ApiForConversation(v2Id);
-    const ordered = [...new Set(sequences.filter((sequence) => Number.isFinite(sequence) && sequence > 0))]
-      .sort((left, right) => left - right);
-    if (!ordered.length) return false;
+    const merged = mergeSequenceRanges(ranges);
+    if (!merged.length) return false;
     const events: ConversationEvent[] = [];
-    const fetchRange = async (fromSequence: number, toSequence: number) => {
+    for (const [fromSequence, toSequence] of merged) {
       let cursor = fromSequence - 1;
       while (cursor < toSequence) {
         const page = await api.replayEvents(v2Id, cursor, Math.min(500, toSequence - cursor));
@@ -7951,17 +7954,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         }
         if (!reached || !page.hasMore) break;
       }
-    };
-    let start = ordered[0];
-    let previous = ordered[0];
-    for (const sequence of ordered.slice(1)) {
-      if (sequence > previous + 1) {
-        await fetchRange(start, previous);
-        start = sequence;
-      }
-      previous = sequence;
     }
-    await fetchRange(start, previous);
     return events.length > 0
       && (conversationRecoveryRef.current?.hydrate(v2Id, conversation?.workspaceId ?? '', events) ?? false);
   }, [v2ApiForConversation]);
