@@ -264,6 +264,8 @@ export const ko: Messages = {
   'chat.loadEarlierFailed': '이전 메시지를 불러오지 못했습니다',
   'chat.retry': '다시 시도',
   'chat.earlierHistoryCapped': '이전 기록을 불러오지 않았습니다 (대화당 표시 한도에 도달함)',
+  'chat.openingHistory': '기록을 불러오는 중…',
+  'chat.openHistoryFailed': '기록을 불러오지 못했습니다',
   'chat.quoteName': '대화 발췌',
   'chat.pastedTextName': '붙여넣은 텍스트',
   'chat.quoteAdded': '참조를 추가했습니다',

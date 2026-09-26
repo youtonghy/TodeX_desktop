@@ -16,10 +16,6 @@ const NOTIFY_INTERVAL_MS = 60;
 /** Events fetched per history window when lazily opening a conversation or
  * paging backwards on scroll. */
 const HISTORY_PAGE_LIMIT = 300;
-/** A still-running turn's start can sit far below the tail; bound the pages
- * that project so opening stays fast. Further back the start is only
- * searched for, not projected. */
-const TURN_START_SCAN_MAX_PAGES = 10;
 /** Events per fetch-only page while searching for a turn boundary (the
  * backend caps pages at 1000). */
 const TURN_BOUNDARY_PAGE_LIMIT = 1000;
@@ -45,10 +41,16 @@ function newestTurnBoundary(events: readonly ConversationEvent[]): ConversationE
  * hold as many rows as the session keeps, so nothing was fetched. */
 export type EarlierHistoryResult = { hasMore: boolean; failed?: boolean; capped?: boolean };
 
+/** A conversation whose history window is being fetched, or whose last
+ * open failed. Known before any runtime state exists. */
+export type ConversationOpenStatus = 'opening' | 'failed';
+type OpenStatusListener = (conversationId: string, status: ConversationOpenStatus | undefined) => void;
+
 export type ConversationOpenOptions = {
   /** Journal high-water mark from the conversation manifest. */
   highWater: number;
-  /** The manifest still reports an active turn: page back to its start. */
+  /** The manifest still reports an active turn: search for its start once
+   * the window rendered. */
   turnActive?: boolean;
   /** Events per backward page; defaults to HISTORY_PAGE_LIMIT. */
   pageLimit?: number;
@@ -73,6 +75,7 @@ export class ConversationRecovery {
    * search settled it. */
   private readonly turnResolved = new Set<string>();
   private readonly turnScans = new Map<string, Promise<void>>();
+  private readonly openStatuses = new Map<string, ConversationOpenStatus>();
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
   private epoch = 0;
 
@@ -81,6 +84,7 @@ export class ConversationRecovery {
     private readonly update: Update,
     private readonly onError: (message: string) => void,
     private readonly replayBefore?: ReplayBefore,
+    private readonly onOpenStatus?: OpenStatusListener,
   ) {}
 
   get(conversationId: string): ConversationRuntime | undefined { return this.states.get(conversationId); }
@@ -88,6 +92,14 @@ export class ConversationRecovery {
   /** Older journal pages remain unfetched. */
   hasEarlierHistory(conversationId: string): boolean { return (this.historyFloors.get(conversationId) ?? 0) > 0; }
   isLoadingEarlier(conversationId: string): boolean { return this.historyLoading.has(conversationId); }
+  openStatus(conversationId: string): ConversationOpenStatus | undefined { return this.openStatuses.get(conversationId); }
+
+  private setOpenStatus(conversationId: string, status: ConversationOpenStatus | undefined): void {
+    if (this.openStatuses.get(conversationId) === status) return;
+    if (status) this.openStatuses.set(conversationId, status);
+    else this.openStatuses.delete(conversationId);
+    this.onOpenStatus?.(conversationId, status);
+  }
 
   reset(): void {
     this.epoch++;
@@ -100,6 +112,7 @@ export class ConversationRecovery {
     this.liveSequences.clear();
     this.turnResolved.clear();
     this.turnScans.clear();
+    this.openStatuses.clear();
     if (this.flushTimer) {
       clearTimeout(this.flushTimer);
       this.flushTimer = null;
@@ -116,6 +129,7 @@ export class ConversationRecovery {
     this.pendingNotify.delete(conversationId);
     this.liveSequences.delete(conversationId);
     this.turnResolved.delete(conversationId);
+    this.openStatuses.delete(conversationId);
     return true;
   }
 
@@ -278,15 +292,17 @@ export class ConversationRecovery {
 
   /** Lazy history open: seeds a floor near the journal tail so only the
    * newest window projects, then applies it through the normal receive path.
-   * An active turn's start is paged in (bounded) so live status still
-   * projects; beyond that bound it is searched for by `resolveTurn` once the
-   * window rendered. Falls back to the full forward replay when the backend
-   * lacks reverse paging or the runtime is already initialized. */
+   * One page renders first; an active turn whose start lies below it is
+   * searched for by `resolveTurn` afterwards. Falls back to the full forward
+   * replay when the backend lacks reverse paging or the runtime is already
+   * initialized. The open status is `opening` until the window landed and
+   * `failed` when it could not be fetched. */
   open(conversationId: string, workspaceId: string, options: ConversationOpenOptions): Promise<void> {
     const existing = this.recovering.get(conversationId);
     if (existing) return existing;
     const epoch = this.epoch;
     let bufferedFramesSeeded = false;
+    let failed = false;
     const work = Promise.resolve().then(async () => {
       const committed = this.states.get(conversationId);
       const initialized = this.historyFloors.has(conversationId) || Boolean(committed && committed.appliedSequence > 0);
@@ -294,34 +310,20 @@ export class ConversationRecovery {
         await this.replayForward(conversationId, workspaceId, epoch);
         return;
       }
-      // Collect backward pages first so the floor is seeded exactly once and
-      // every event applies exactly once through receive.
-      const pages: ConversationEvent[][] = [];
-      let cursor = options.highWater;
-      let hasMore = true;
-      const pageLimit = options.pageLimit ?? HISTORY_PAGE_LIMIT;
-      const maxPages = options.turnActive ? TURN_START_SCAN_MAX_PAGES : 1;
-      for (let count = 0; count < maxPages && cursor > 0; count++) {
-        const page = await this.replayBefore(conversationId, cursor, pageLimit);
-        if (epoch !== this.epoch) return;
-        const last = page.events[page.events.length - 1];
-        if (last && last.sequence !== cursor) {
-          // A backend without reverse paging answers a forward page instead;
-          // abort the lazy path and replay the whole journal.
-          await this.replayForward(conversationId, workspaceId, epoch);
-          return;
-        }
-        if (!page.events.length) { hasMore = false; cursor = 0; break; }
-        pages.unshift(page.events);
-        hasMore = page.hasMore;
-        cursor = page.events[0].sequence - 1;
-        if (!hasMore) break;
-        if (!options.turnActive || pages.some((events) => events.some(isTurnLifecycle))) break;
+      const page = await this.replayBefore(conversationId, options.highWater, options.pageLimit ?? HISTORY_PAGE_LIMIT);
+      if (epoch !== this.epoch) return;
+      const last = page.events[page.events.length - 1];
+      if (last && last.sequence !== options.highWater) {
+        // A backend without reverse paging answers a forward page instead;
+        // abort the lazy path and replay the whole journal.
+        await this.replayForward(conversationId, workspaceId, epoch);
+        return;
       }
-      this.seed(conversationId, workspaceId, hasMore ? cursor : 0);
-      for (const events of pages) this.ingest(conversationId, workspaceId, events, false);
+      const first = page.events[0]?.sequence ?? 1;
+      this.seed(conversationId, workspaceId, page.hasMore ? first - 1 : 0);
+      this.ingest(conversationId, workspaceId, page.events, false);
       // Live events that landed while the window was fetched leave a gap
-      // above the collected pages; close it with the forward cursor.
+      // above the window; close it with the forward cursor.
       const state = this.states.get(conversationId);
       if (state && state.appliedSequence < state.highWaterSequence) {
         await this.replayForward(conversationId, workspaceId, epoch);
@@ -329,6 +331,7 @@ export class ConversationRecovery {
       this.incomplete.delete(conversationId);
     }).catch((error: unknown) => {
       if (epoch !== this.epoch) return;
+      failed = true;
       // Realtime frames buffered for a window that never landed still project
       // from their own floor; replaying the whole journal to place them would
       // cost far more than the history this open was meant to skip.
@@ -338,6 +341,7 @@ export class ConversationRecovery {
     }).finally(() => {
       if (epoch !== this.epoch) return;
       this.recovering.delete(conversationId);
+      this.setOpenStatus(conversationId, failed ? 'failed' : undefined);
       this.flushConversation(conversationId);
       const state = this.states.get(conversationId);
       if (state) this.update(state, [], this.isRecovering(conversationId), NO_LIVE);
@@ -353,6 +357,7 @@ export class ConversationRecovery {
       }
     });
     this.recovering.set(conversationId, work);
+    this.setOpenStatus(conversationId, 'opening');
     const state = this.states.get(conversationId);
     if (state) this.update(state, [], true, NO_LIVE);
     return work;

@@ -12,7 +12,7 @@ import { ENCRYPTION_VERIFICATION_ERROR, TransportVerificationError, validateTran
 import { t } from '../i18n';
 import { QueuedFollowUps, restoreQueuedFollowUps } from './queuedFollowUps';
 import { LegacyEventRecovery } from './legacyEventRecovery';
-import { ConversationRecovery, type EarlierHistoryResult } from './conversationRecovery';
+import { ConversationRecovery, type ConversationOpenStatus, type EarlierHistoryResult } from './conversationRecovery';
 import { type ConversationRuntime } from '@todex/protocol/conversationRuntime';
 import { canonicalConversationEventType, type ConversationEvent } from '@todex/protocol/v2';
 import { ProtocolCommands, ProtocolCommandError, type ProtocolCommand } from './protocolCommands';
@@ -552,6 +552,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const [usageRecords, setUsageRecords] = useState<UsageRecord[]>([]);
   const [conversationRuntimeById, setConversationRuntimeById] = useState<Record<string, ConversationRuntime>>({});
   const [recoveringConversations, setRecoveringConversations] = useState<Record<string, boolean>>({});
+  /** Lazy history opens in flight or failed, by local conversation id; set
+   * before any runtime state exists, unlike recoveringConversations. */
+  const [openStatusByConversation, setOpenStatusByConversation] = useState<Record<string, ConversationOpenStatus>>({});
   // Per-conversation lazy-history flags for the chat scroll sentinel.
   const [earlierHistory, setEarlierHistory] = useState<Record<string, EarlierHistoryStatus>>({});
   const [submissionStatusByConversation, setSubmissionStatusByConversation] = useState<Record<string, 'sending' | 'running' | 'unknown' | undefined>>({});
@@ -575,6 +578,17 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     (id, after, limit) => v2ApiForConversation(id).replayEvents(id, after, limit, 'summary'),
     (state, applied, recovering, live) => runtimeUpdateRef.current(state, applied, recovering, live), setLastError,
     (id, before, limit) => v2ApiForConversation(id).replayEventsBefore(id, before, limit, 'summary'),
+    (id, status) => {
+      const localId = conversationsRef.current.find((item) => item.v2ConversationId === id || item.id === id)?.id;
+      if (!localId) return;
+      setOpenStatusByConversation((current) => {
+        if (current[localId] === status) return current;
+        const next = { ...current };
+        if (status) next[localId] = status;
+        else delete next[localId];
+        return next;
+      });
+    },
   );
 
 
@@ -1833,8 +1847,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     const v2Id = conversation?.v2ConversationId;
     if (!v2Id || !conversation) return;
     // Without a loaded runtime a forward replay would read the whole journal;
-    // open lazily from the tail instead.
-    if (!conversationRecoveryRef.current!.get(v2Id)) {
+    // open lazily from the tail instead. A failed open retries as an open so
+    // its status settles.
+    if (!conversationRecoveryRef.current!.get(v2Id) || conversationRecoveryRef.current!.openStatus(v2Id) === 'failed') {
       await openConversation(conversation.id);
       return;
     }
@@ -1930,6 +1945,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     legacyRecoveryRef.current = new LegacyEventRecovery<ServerEvent>();
     setConversationRuntimeById({});
     setRecoveringConversations({});
+    setOpenStatusByConversation({});
     setEarlierHistory({});
     settledV2TurnsRef.current.clear();
   }, [activeBackendConnectionId, settings.serverUrl, settings.deviceSecret]);
@@ -1985,6 +2001,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     };
     setConversationRuntimeById(withoutReleased);
     setRecoveringConversations(withoutReleased);
+    setOpenStatusByConversation(withoutReleased);
     setEarlierHistory(withoutReleased);
     setTimeline((current) => current.filter((entry) => !entry.conversationId || !releasedIds.has(entry.conversationId)));
   }, [activeConversationId]);
@@ -8066,6 +8083,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     subagentsByConversation,
     conversationRuntimeById,
     recoveringConversations,
+    openStatusByConversation,
     earlierHistory,
     submissionStatusByConversation,
     recoverConversation,

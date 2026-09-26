@@ -1044,11 +1044,19 @@ export function ChatPanel({ session }: Props) {
               </Button>
             </div>
           ) : null}
-          {items.length === 0 ? (
+          {items.length === 0 && !thinking && session.openStatusByConversation[conversation.id] === 'failed' ? (
+            <div className="flex flex-col items-center gap-2 py-16" role="alert">
+              <p className="text-danger text-sm">{t('chat.openHistoryFailed')}</p>
+              <Button size="sm" variant="ghost" onPress={() => { void session.recoverConversation(conversation.id); }}>
+                {t('chat.retry')}
+              </Button>
+            </div>
+          ) : items.length === 0 ? (
             <p className="text-muted py-16 text-center text-sm" role="status">
               {thinking ? t('chat.working')
-                : session.recoveringConversations[conversation.id] ? t('chat.recovering')
-                  : t('chat.emptyHint')}
+                : session.openStatusByConversation[conversation.id] === 'opening' ? t('chat.openingHistory')
+                  : session.recoveringConversations[conversation.id] ? t('chat.recovering')
+                    : t('chat.emptyHint')}
             </p>
           ) : null}
           {mountedItems.map((item) => (
