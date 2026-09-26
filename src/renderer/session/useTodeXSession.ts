@@ -12,7 +12,7 @@ import { ENCRYPTION_VERIFICATION_ERROR, TransportVerificationError, validateTran
 import { t } from '../i18n';
 import { QueuedFollowUps, restoreQueuedFollowUps } from './queuedFollowUps';
 import { LegacyEventRecovery } from './legacyEventRecovery';
-import { ConversationRecovery, type ConversationOpenStatus, type EarlierHistoryResult } from './conversationRecovery';
+import { ConversationRecovery, isConversationRuntimeBusy, type ConversationOpenStatus, type EarlierHistoryResult } from './conversationRecovery';
 import { type ConversationRuntime } from '@todex/protocol/conversationRuntime';
 import { canonicalConversationEventType, type ConversationEvent } from '@todex/protocol/v2';
 import { ProtocolCommands, ProtocolCommandError, type ProtocolCommand } from './protocolCommands';
@@ -419,6 +419,12 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     turnId?: string;
     phase: 'sending' | 'running' | 'unknown';
   }>());
+  const queuedChatDraftsRef = useRef<Record<string, QueuedChatSubmission[]>>({});
+  /** Work the session still owes a conversation: a turn shown as running, a
+   * prompt awaiting its turn, or queued follow-ups. */
+  const conversationHasPendingWork = (localId: string) => thinkingConversationsRef.current[localId] === true
+    || pendingV2SubmissionsRef.current.has(localId)
+    || (queuedChatDraftsRef.current[localId]?.length ?? 0) > 0;
   // v2 ids we have asked the current socket to subscribe to, in request order;
   // the tail is the eviction candidate when the budget is reached.
   const v2SubscriptionsRef = useRef(new Set<string>());
@@ -589,7 +595,14 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         return next;
       });
     },
+    (id) => {
+      const localId = conversationsRef.current.find((item) => item.v2ConversationId === id || item.id === id)?.id;
+      return Boolean(localId && conversationHasPendingWork(localId));
+    },
   );
+  // Runtime subagent and usage arrays keep their identity until an event
+  // changes them; the copies stamped with local ids are only rebuilt then.
+  const projectedRuntimeListsRef = useRef(new Map<string, Pick<ConversationRuntime, 'subagents' | 'usageRecords'>>());
 
 
   useEffect(() => {
@@ -664,7 +677,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   useEffect(() => {
     timelineRef.current = timeline;
   }, [timeline]);
-  const queuedChatDraftsRef = useRef<Record<string, QueuedChatSubmission[]>>({});
   const queuedChatDispatchingRef = useRef(new Set<string>());
   const sendQueuedChatDraftRef = useRef<(submission: QueuedChatSubmission, conversationId: string) => Promise<boolean>>(async () => false);
 
@@ -1740,15 +1752,21 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     });
     if (state.contextUsage) setContextUsageByConversation((current) => current[localId] === state.contextUsage ? current : { ...current, [localId]: state.contextUsage! });
     setCompactionByConversation((current) => current[localId] === state.compaction ? current : { ...current, [localId]: state.compaction });
-    setSubagentsByConversation((current) => ({ ...current, [localId]: state.subagents.map((run) => ({ ...run, conversationId: localId })) }));
+    const projected = projectedRuntimeListsRef.current.get(localId);
+    projectedRuntimeListsRef.current.set(localId, { subagents: state.subagents, usageRecords: state.usageRecords });
+    if (projected?.subagents !== state.subagents) {
+      setSubagentsByConversation((current) => ({ ...current, [localId]: state.subagents.map((run) => ({ ...run, conversationId: localId })) }));
+    }
     setMemoryEntriesByConversation((current) => current[localId] === state.memoryEntries ? current : { ...current, [localId]: state.memoryEntries });
-    setUsageRecords((current) => [
-      ...state.usageRecords.map((record) => ({ ...record, conversationId: localId,
-        provider: record.provider === 'unknown' ? conversation.provider || 'unknown' : record.provider,
-        model: record.model === 'unknown' ? conversation.model || 'unknown' : record.model,
-      })),
-      ...current.filter((record) => record.conversationId !== localId),
-    ].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, MAX_USAGE_RECORDS));
+    if (projected?.usageRecords !== state.usageRecords) {
+      setUsageRecords((current) => [
+        ...state.usageRecords.map((record) => ({ ...record, conversationId: localId,
+          provider: record.provider === 'unknown' ? conversation.provider || 'unknown' : record.provider,
+          model: record.model === 'unknown' ? conversation.model || 'unknown' : record.model,
+        })),
+        ...current.filter((record) => record.conversationId !== localId),
+      ].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, MAX_USAGE_RECORDS));
+    }
     let completedAt = 0;
     for (const event of appliedEvents) {
       const data = event.payload && typeof event.payload === 'object' && !Array.isArray(event.payload)
@@ -1853,7 +1871,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       await openConversation(conversation.id);
       return;
     }
-    await conversationRecoveryRef.current!.recover(v2Id, conversation.workspaceId);
+    await conversationRecoveryRef.current!.recover(v2Id, conversation.workspaceId, conversation.lastSequence ?? 0);
   }, [openConversation]);
 
   /** Fetch and prepend the next older history page. Resolves false when no
@@ -1947,6 +1965,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     setRecoveringConversations({});
     setOpenStatusByConversation({});
     setEarlierHistory({});
+    projectedRuntimeListsRef.current.clear();
     settledV2TurnsRef.current.clear();
   }, [activeBackendConnectionId, settings.serverUrl, settings.deviceSecret]);
 
@@ -1968,43 +1987,63 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   }, [activeConversation?.id, activeConversation?.v2ConversationId, hydrated, openConversation, settings.serverUrl, settings.deviceSecret]);
 
   // Only recently viewed conversations keep their projected history in
-  // memory. Older ones are released and reopen lazily from the journal tail;
+  // memory. Older ones, and runtimes live frames created for conversations
+  // never opened here, are released and reopen lazily from the journal tail;
   // busy conversations (running, awaiting approval, queued or unconfirmed
   // prompts, loading) are always kept.
   const recentConversationIdsRef = useRef<string[]>([]);
-  useEffect(() => {
-    if (!activeConversationId) return;
-    const recent = [activeConversationId, ...recentConversationIdsRef.current.filter((id) => id !== activeConversationId)];
+  const releaseIdleConversationRuntimes = useCallback(() => {
     const recovery = conversationRecoveryRef.current;
+    if (!recovery) return;
+    const localIdFor = (v2Id: string) => conversationsRef.current.find((item) => item.v2ConversationId === v2Id || item.id === v2Id)?.id;
+    const busy = (localId: string, state: ConversationRuntime | undefined) =>
+      Boolean(state && isConversationRuntimeBusy(state)) || conversationHasPendingWork(localId);
+    const recent = recentConversationIdsRef.current;
     const kept: string[] = [];
     const released: string[] = [];
     for (const [index, localId] of recent.entries()) {
       const v2Id = conversationsRef.current.find((item) => item.id === localId)?.v2ConversationId;
-      const state = v2Id ? recovery?.get(v2Id) : undefined;
-      const busy = Boolean(state && (state.activeTurnId || state.status === 'running' || state.status === 'waitingPermission'
-        || state.pendingPermissions.length || state.queueItems.length))
-        || thinkingConversationsRef.current[localId] === true
-        || pendingV2SubmissionsRef.current.has(localId)
-        || (queuedChatDraftsRef.current[localId]?.length ?? 0) > 0;
-      if (index < RETAINED_CONVERSATION_RUNTIMES || busy) kept.push(localId);
+      const state = v2Id ? recovery.get(v2Id) : undefined;
+      if (index < RETAINED_CONVERSATION_RUNTIMES || busy(localId, state)) kept.push(localId);
       else if (!v2Id || !state) continue; // nothing loaded to release
-      else if (recovery?.release(v2Id)) released.push(localId);
-      else kept.push(localId); // a page is in flight; retry on the next switch
+      else if (recovery.release(v2Id)) released.push(localId);
+      else kept.push(localId); // a page is in flight; retry on the next sweep
+    }
+    const recentIds = new Set(recent);
+    for (const v2Id of recovery.loadedConversationIds()) {
+      const localId = localIdFor(v2Id);
+      if (localId && recentIds.has(localId)) continue;
+      if (localId && busy(localId, recovery.get(v2Id))) continue;
+      if (!localId && isConversationRuntimeBusy(recovery.get(v2Id)!)) continue;
+      if (recovery.release(v2Id) && localId) released.push(localId);
     }
     recentConversationIdsRef.current = kept;
     if (!released.length) return;
     const releasedIds = new Set(released);
     const withoutReleased = <T,>(current: Record<string, T>) => {
+      if (!released.some((id) => id in current)) return current;
       const next = { ...current };
       for (const id of released) delete next[id];
       return next;
     };
+    for (const id of released) projectedRuntimeListsRef.current.delete(id);
     setConversationRuntimeById(withoutReleased);
     setRecoveringConversations(withoutReleased);
     setOpenStatusByConversation(withoutReleased);
     setEarlierHistory(withoutReleased);
-    setTimeline((current) => current.filter((entry) => !entry.conversationId || !releasedIds.has(entry.conversationId)));
-  }, [activeConversationId]);
+    setTimeline((current) => current.some((entry) => entry.conversationId && releasedIds.has(entry.conversationId))
+      ? current.filter((entry) => !entry.conversationId || !releasedIds.has(entry.conversationId)) : current);
+  }, []);
+  useEffect(() => {
+    if (!activeConversationId) return;
+    recentConversationIdsRef.current = [activeConversationId, ...recentConversationIdsRef.current.filter((id) => id !== activeConversationId)];
+    releaseIdleConversationRuntimes();
+  }, [activeConversationId, releaseIdleConversationRuntimes]);
+  // Background conversations settle without a switch; each manifest refresh
+  // releases the ones that went idle.
+  useEffect(() => {
+    releaseIdleConversationRuntimes();
+  }, [releaseIdleConversationRuntimes, v2Conversations]);
 
   const runtimeStatus = useMemo<RuntimeStatusState>(() => ({
     socket: connectionState,
@@ -3191,7 +3230,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           // history lazily when it is opened.
           const conversation = conversationsRef.current.find((item) => item.v2ConversationId === subscribedConversationId);
           if (conversation && conversationRecoveryRef.current?.get(subscribedConversationId)) {
-            void conversationRecoveryRef.current.recover(subscribedConversationId, conversation.workspaceId);
+            void conversationRecoveryRef.current.recover(subscribedConversationId, conversation.workspaceId, conversation.lastSequence ?? 0);
           }
         }
         protocolCommandsRef.current?.resolve(id, payload);

@@ -23,6 +23,13 @@ optional and canonical aliases are recomputed when old journals are replayed.
   compaction updates its own state without ending the parent turn.
 - Memory configuration is separate from memory content; the panel explicitly
   reports when the provider has no readable content source.
+- Only the eight most recently viewed conversations keep their projection in
+  memory. Any other loaded runtime, including one live frames created for a
+  conversation never opened, is released once idle (checked on every switch
+  and manifest refresh) and reopens lazily from the journal tail. An idle,
+  lazily opened conversation more than 2000 events behind the journal also
+  reopens from the tail instead of replaying the gap; running turns, approvals
+  and unconfirmed or queued prompts always replay forward.
 
 Backend control/write/cancel/compact defaults are 30/10/10/300 seconds, configured
 with `TODEX_AGENTD_PROVIDER_{CONTROL,WRITE,CANCEL,COMPACT}_TIMEOUT_SECONDS`.

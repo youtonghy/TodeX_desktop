@@ -22,6 +22,9 @@ const TURN_BOUNDARY_PAGE_LIMIT = 1000;
 /** Events that settle the turn state on their own, without earlier history. */
 const TURN_LIFECYCLE_TYPES = new Set(['turn.started', 'turn.completed', 'turn.cancelled', 'turn.interrupted', 'turn.failed']);
 const NO_LIVE: ReadonlySet<number> = new Set();
+/** Journal events past the cursor beyond which an idle, lazily opened
+ * conversation reopens from the journal tail instead of replaying the gap. */
+export const REOPEN_GAP_EVENTS = 2000;
 
 const isTurnLifecycle = (event: ConversationEvent) => TURN_LIFECYCLE_TYPES.has(canonicalConversationEventType(event));
 
@@ -39,6 +42,13 @@ function newestTurnBoundary(events: readonly ConversationEvent[]): ConversationE
 /** Outcome of one earlier-history request. `failed` pages stay unloaded and
  * are only retried on an explicit request; `capped` conversations already
  * hold as many rows as the session keeps, so nothing was fetched. */
+/** The runtime is inside a turn or holds state that only the events after
+ * its cursor settle (approvals, queued prompts). */
+export function isConversationRuntimeBusy(state: ConversationRuntime): boolean {
+  return Boolean(state.activeTurnId || state.status === 'running' || state.status === 'waitingPermission'
+    || state.pendingPermissions.length || state.queueItems.length);
+}
+
 export type EarlierHistoryResult = { hasMore: boolean; failed?: boolean; capped?: boolean };
 
 /** A conversation whose history window is being fetched, or whose last
@@ -85,6 +95,9 @@ export class ConversationRecovery {
     private readonly onError: (message: string) => void,
     private readonly replayBefore?: ReplayBefore,
     private readonly onOpenStatus?: OpenStatusListener,
+    /** The consumer still owes the conversation work that needs every event
+     * after the cursor (a prompt awaiting its turn, queued follow-ups). */
+    private readonly hasPendingWork?: (conversationId: string) => boolean,
   ) {}
 
   get(conversationId: string): ConversationRuntime | undefined { return this.states.get(conversationId); }
@@ -93,6 +106,9 @@ export class ConversationRecovery {
   hasEarlierHistory(conversationId: string): boolean { return (this.historyFloors.get(conversationId) ?? 0) > 0; }
   isLoadingEarlier(conversationId: string): boolean { return this.historyLoading.has(conversationId); }
   openStatus(conversationId: string): ConversationOpenStatus | undefined { return this.openStatuses.get(conversationId); }
+  /** Conversations with a projected runtime, including ones only live frames
+   * created. */
+  loadedConversationIds(): string[] { return [...this.states.keys()]; }
 
   private setOpenStatus(conversationId: string, status: ConversationOpenStatus | undefined): void {
     if (this.openStatuses.get(conversationId) === status) return;
@@ -131,6 +147,19 @@ export class ConversationRecovery {
     this.turnResolved.delete(conversationId);
     this.openStatuses.delete(conversationId);
     return true;
+  }
+
+  /** Release an idle, lazily opened runtime whose cursor lags the journal by
+   * more than REOPEN_GAP_EVENTS, so it reopens from the tail instead of
+   * replaying the whole gap. Returns the high-water mark to reopen from, or 0
+   * when the runtime stays and catches up forward. */
+  private releaseLaggingRuntime(conversationId: string, highWater: number): number {
+    const state = this.states.get(conversationId);
+    if (!state || !this.replayBefore || !this.historyFloors.has(conversationId)) return 0;
+    const tail = Math.max(highWater, state.highWaterSequence);
+    if (tail - state.appliedSequence <= REOPEN_GAP_EVENTS) return 0;
+    if (isConversationRuntimeBusy(state) || this.hasPendingWork?.(conversationId)) return 0;
+    return this.release(conversationId) ? tail : 0;
   }
 
   private queueUpdate(conversationId: string, applied: ConversationEvent[], recovering: boolean, live: ReadonlySet<number>): void {
@@ -295,11 +324,15 @@ export class ConversationRecovery {
    * One page renders first; an active turn whose start lies below it is
    * searched for by `resolveTurn` afterwards. Falls back to the full forward
    * replay when the backend lacks reverse paging or the runtime is already
-   * initialized. The open status is `opening` until the window landed and
+   * initialized, unless that runtime is idle and lags the journal by more
+   * than REOPEN_GAP_EVENTS: it is released and reopens here. The open status is `opening` until the window landed and
    * `failed` when it could not be fetched. */
   open(conversationId: string, workspaceId: string, options: ConversationOpenOptions): Promise<void> {
     const existing = this.recovering.get(conversationId);
     if (existing) return existing;
+    // A turn may have started inside the skipped gap: search for its start
+    // unless the new window settles it.
+    if (this.releaseLaggingRuntime(conversationId, options.highWater)) options = { ...options, turnActive: true };
     const epoch = this.epoch;
     let bufferedFramesSeeded = false;
     let failed = false;
@@ -496,9 +529,13 @@ export class ConversationRecovery {
     return work;
   }
 
-  recover(conversationId: string, workspaceId: string): Promise<void> {
+  /** Catch a runtime up with the journal. `highWater` is the journal's
+   * newest sequence when known (e.g. from the manifest). */
+  recover(conversationId: string, workspaceId: string, highWater = 0): Promise<void> {
     const existing = this.recovering.get(conversationId);
     if (existing) return existing;
+    const tail = this.releaseLaggingRuntime(conversationId, highWater);
+    if (tail) return this.open(conversationId, workspaceId, { highWater: tail, turnActive: true });
     const epoch = this.epoch;
     // Defer work until the single-flight entry exists, including synchronous
     // replay mocks. This also suppresses stale approval prompts during replay.
