@@ -261,6 +261,8 @@ export const ko: Messages = {
   'chat.scrollToLatest': '최신으로 이동',
   'chat.loadEarlier': '이전 메시지 불러오기',
   'chat.loadingEarlier': '이전 메시지를 불러오는 중…',
+  'chat.loadEarlierFailed': '이전 메시지를 불러오지 못했습니다',
+  'chat.retry': '다시 시도',
   'chat.quoteName': '대화 발췌',
   'chat.pastedTextName': '붙여넣은 텍스트',
   'chat.quoteAdded': '참조를 추가했습니다',

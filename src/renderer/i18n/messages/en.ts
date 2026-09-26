@@ -261,6 +261,8 @@ export const en: Messages = {
   'chat.scrollToLatest': 'Jump to latest',
   'chat.loadEarlier': 'Load earlier messages',
   'chat.loadingEarlier': 'Loading earlier messages…',
+  'chat.loadEarlierFailed': 'Failed to load earlier messages',
+  'chat.retry': 'Retry',
   'chat.quoteName': 'Conversation excerpt',
   'chat.pastedTextName': 'Pasted text',
   'chat.quoteAdded': 'Reference added',

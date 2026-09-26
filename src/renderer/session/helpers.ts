@@ -2884,6 +2884,21 @@ export function isTurnTerminalEvent(event: ServerEvent): boolean {
   );
 }
 
+/** Per-conversation state of paging older history into the chat. */
+export type EarlierHistoryStatus = {
+  hasMore: boolean;
+  loading: boolean;
+  /** The last page failed; only an explicit retry fetches again. */
+  failed?: boolean;
+};
+
+/** Scrolling may fetch older history on its own only while more exists, no
+ * page is in flight and the last one did not fail — a failing backend would
+ * otherwise be asked again on every layout pass. */
+export function canAutoLoadEarlierHistory(status: EarlierHistoryStatus | undefined): boolean {
+  return Boolean(status?.hasMore && !status.loading && !status.failed);
+}
+
 /** Sort inclusive journal sequence ranges and merge the overlapping or
  * adjacent ones, so each event is fetched once. Invalid ranges are dropped. */
 export function mergeSequenceRanges(ranges: ReadonlyArray<readonly [number, number]>): Array<[number, number]> {

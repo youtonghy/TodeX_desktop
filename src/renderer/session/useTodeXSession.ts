@@ -12,7 +12,7 @@ import { ENCRYPTION_VERIFICATION_ERROR, TransportVerificationError, validateTran
 import { t } from '../i18n';
 import { QueuedFollowUps, restoreQueuedFollowUps } from './queuedFollowUps';
 import { LegacyEventRecovery } from './legacyEventRecovery';
-import { ConversationRecovery } from './conversationRecovery';
+import { ConversationRecovery, type EarlierHistoryResult } from './conversationRecovery';
 import { type ConversationRuntime } from '@todex/protocol/conversationRuntime';
 import { canonicalConversationEventType, type ConversationEvent } from '@todex/protocol/v2';
 import { ProtocolCommands, ProtocolCommandError, type ProtocolCommand } from './protocolCommands';
@@ -125,6 +125,7 @@ import {
   MAX_TRANSPORT_HELLO_SESSION_CURSORS,
   MAX_TIMELINE_ITEMS,
   MAX_TIMELINE_ITEMS_LIVE,
+  type EarlierHistoryStatus,
   mergeSequenceRanges,
   MAX_USAGE_RECORDS,
   MAX_WORKSPACE_TOMBSTONES,
@@ -552,7 +553,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const [conversationRuntimeById, setConversationRuntimeById] = useState<Record<string, ConversationRuntime>>({});
   const [recoveringConversations, setRecoveringConversations] = useState<Record<string, boolean>>({});
   // Per-conversation lazy-history flags for the chat scroll sentinel.
-  const [earlierHistory, setEarlierHistory] = useState<Record<string, { hasMore: boolean; loading: boolean }>>({});
+  const [earlierHistory, setEarlierHistory] = useState<Record<string, EarlierHistoryStatus>>({});
   const [submissionStatusByConversation, setSubmissionStatusByConversation] = useState<Record<string, 'sending' | 'running' | 'unknown' | undefined>>({});
   const settledV2TurnsRef = useRef(new Map<string, string>());
   // Runtime entries keep their identity until an event changes them; reuse
@@ -1721,7 +1722,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     setEarlierHistory((current) => {
       const existing = current[localId];
       if (existing?.hasMore === hasEarlier) return current;
-      return { ...current, [localId]: { hasMore: hasEarlier, loading: existing?.loading ?? false } };
+      return { ...current, [localId]: { ...existing, hasMore: hasEarlier, loading: existing?.loading ?? false } };
     });
     if (state.contextUsage) setContextUsageByConversation((current) => current[localId] === state.contextUsage ? current : { ...current, [localId]: state.contextUsage! });
     setCompactionByConversation((current) => current[localId] === state.compaction ? current : { ...current, [localId]: state.compaction });
@@ -1840,8 +1841,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     await conversationRecoveryRef.current!.recover(v2Id, conversation.workspaceId);
   }, [openConversation]);
 
-  /** Fetch and prepend the next older history page for the scroll sentinel.
-   * Resolves false when no earlier events remain or a page is in flight. */
+  /** Fetch and prepend the next older history page. Resolves false when no
+   * earlier events remain or a page is in flight. Every call fetches, so an
+   * explicit retry after a failure goes through here; automatic triggers
+   * check `canAutoLoadEarlierHistory` first. */
   const loadEarlierHistory = useCallback(async (conversationId: string) => {
     const conversation = conversationsRef.current.find((item) => item.id === conversationId);
     const v2Id = conversation?.v2ConversationId;
@@ -1850,15 +1853,29 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       return false;
     }
     setEarlierHistory((current) => ({ ...current, [conversation.id]: { hasMore: true, loading: true } }));
+    let result: EarlierHistoryResult | undefined;
     try {
-      return await recovery.loadEarlier(v2Id, conversation.workspaceId);
+      result = await recovery.loadEarlier(v2Id, conversation.workspaceId);
+      return result.hasMore;
     } finally {
+      const failed = !result || result.failed === true;
       setEarlierHistory((current) => ({
         ...current,
-        [conversation.id]: { hasMore: recovery.hasEarlierHistory(v2Id), loading: false },
+        [conversation.id]: { hasMore: recovery.hasEarlierHistory(v2Id), loading: false, ...(failed ? { failed } : {}) },
       }));
     }
   }, []);
+
+  // Returning to a conversation lets it page history in on its own again.
+  useEffect(() => {
+    if (!activeConversationId) return;
+    setEarlierHistory((current) => {
+      const status = current[activeConversationId];
+      if (!status?.failed) return current;
+      const { failed: _failed, ...rest } = status;
+      return { ...current, [activeConversationId]: rest };
+    });
+  }, [activeConversationId]);
 
   /** A lost prompt ACK leaves the submission 'unknown'. Replaying the journal
    * settles it: a recorded turn binds its clientRequestId and flips the phase

@@ -39,6 +39,10 @@ function newestTurnBoundary(events: readonly ConversationEvent[]): ConversationE
   return undefined;
 }
 
+/** Outcome of one earlier-history request. `failed` pages stay unloaded and
+ * are only retried on an explicit request. */
+export type EarlierHistoryResult = { hasMore: boolean; failed?: boolean };
+
 export type ConversationOpenOptions = {
   /** Journal high-water mark from the conversation manifest. */
   highWater: number;
@@ -57,7 +61,7 @@ export class ConversationRecovery {
   /** Lazy-loading cursor: events at or below the floor stay unfetched. A
    * conversation without an entry was fully replayed. */
   private readonly historyFloors = new Map<string, number>();
-  private readonly historyLoading = new Map<string, Promise<boolean>>();
+  private readonly historyLoading = new Map<string, Promise<EarlierHistoryResult>>();
   private readonly pendingNotify = new Map<string, { applied: ConversationEvent[]; recovering: boolean; live: Set<number> }>();
   /** Realtime frames not projected yet (buffered above a gap); they stay
    * marked live until they apply, even when a history page drains them. */
@@ -428,31 +432,36 @@ export class ConversationRecovery {
   }
 
   /** Prepend the next older history page into the projected timeline.
-   * Returns whether even earlier events remain. Single-flight per
-   * conversation; resolves false until `open` seeded a floor above zero. */
-  loadEarlier(conversationId: string, _workspaceId: string, limit = HISTORY_PAGE_LIMIT): Promise<boolean> {
+   * Resolves whether even earlier events remain and whether this page
+   * failed; a failure is also reported through onError. Single-flight per
+   * conversation; resolves no more history until `open` seeded a floor
+   * above zero. */
+  loadEarlier(conversationId: string, _workspaceId: string, limit = HISTORY_PAGE_LIMIT): Promise<EarlierHistoryResult> {
     const inflight = this.historyLoading.get(conversationId);
     if (inflight) return inflight;
     const replayBefore = this.replayBefore;
     const floor = this.historyFloors.get(conversationId) ?? 0;
     if (!replayBefore || floor <= 0 || !this.states.has(conversationId)) {
-      return Promise.resolve(false);
+      return Promise.resolve({ hasMore: false });
     }
     const epoch = this.epoch;
-    const work = (async () => {
+    const work = (async (): Promise<EarlierHistoryResult> => {
       const page = await replayBefore(conversationId, floor, limit);
-      if (epoch !== this.epoch) return this.hasEarlierHistory(conversationId);
-      if (!page.events.length) {
+      if (epoch !== this.epoch) return { hasMore: this.hasEarlierHistory(conversationId) };
+      // Only events below the floor are history; the window above it is
+      // already projected and would otherwise merge twice.
+      const events = page.events.filter((event) => event.sequence <= floor);
+      if (!events.length) {
         this.historyFloors.set(conversationId, 0);
-        return false;
+        return { hasMore: false };
       }
       const state = this.states.get(conversationId);
       if (state) {
-        let next = prependConversationRuntimeEvents(state, page.events);
+        let next = prependConversationRuntimeEvents(state, events);
         // Prepended rows never project turn state, so an unresolved window
         // takes it from the page's newest lifecycle event here; a later
         // boundary search then starts below this page.
-        const boundary = this.turnResolved.has(conversationId) ? undefined : newestTurnBoundary(page.events);
+        const boundary = this.turnResolved.has(conversationId) ? undefined : newestTurnBoundary(events);
         if (boundary !== undefined) {
           this.turnResolved.add(conversationId);
           if (boundary) next = adoptConversationRuntimeTurn(next, boundary);
@@ -462,14 +471,13 @@ export class ConversationRecovery {
           this.deliver(conversationId, [], this.isRecovering(conversationId));
         }
       }
-      const first = page.events[0].sequence;
+      const first = events[0].sequence;
       this.historyFloors.set(conversationId, first - 1);
-      return page.hasMore && first > 1;
-    })().catch((error: unknown) => {
-      if (epoch === this.epoch) {
-        this.onError(error instanceof Error ? error.message : t('rec.loadEarlierFailed'));
-      }
-      return this.hasEarlierHistory(conversationId);
+      return { hasMore: page.hasMore && first > 1 };
+    })().catch((error: unknown): EarlierHistoryResult => {
+      if (epoch !== this.epoch) return { hasMore: this.hasEarlierHistory(conversationId) };
+      this.onError(error instanceof Error ? error.message : t('rec.loadEarlierFailed'));
+      return { hasMore: this.hasEarlierHistory(conversationId), failed: true };
     }).finally(() => {
       if (epoch === this.epoch) this.historyLoading.delete(conversationId);
     });

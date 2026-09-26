@@ -44,6 +44,7 @@ import {
   uniqueAttachmentName,
   workspaceLinkTarget,
   STREAMING_REPLY_PLACEHOLDER,
+  canAutoLoadEarlierHistory,
   type ComposerAttachmentDraft,
 } from '../session/helpers';
 import { selectionInside } from '../lib/selection';
@@ -628,7 +629,9 @@ export function ChatPanel({ session }: Props) {
   /** Records where the viewport sat before an earlier-history prepend so the
    * rendered rows can be shifted back onto the same content. */
   const historyAnchorRef = useRef<{ conversationId: string; scrollHeight: number; scrollTop: number; oldestEntryId: string } | null>(null);
-  const requestEarlierHistory = () => {
+  /** Automatic triggers skip a conversation whose last page failed; `retry`
+   * is the explicit request that fetches it again. */
+  const requestEarlierHistory = (retry = false) => {
     const element = scrollRef.current;
     if (!element || !conversation || historyAnchorRef.current) return;
     const anchor = {
@@ -644,7 +647,7 @@ export function ChatPanel({ session }: Props) {
       setChatWindowStart(start ? chatRenderItemKey(start) : SHOW_ALL_CHAT_ROWS);
       return;
     }
-    if (!earlierHistoryStatus?.hasMore || earlierHistoryStatus.loading) return;
+    if (retry ? !earlierHistoryStatus?.failed || earlierHistoryStatus.loading : !canAutoLoadEarlierHistory(earlierHistoryStatus)) return;
     historyAnchorRef.current = anchor;
     // Fetched rows land above the window start; keep them all mounted.
     setChatWindowStart(SHOW_ALL_CHAT_ROWS);
@@ -685,7 +688,7 @@ export function ChatPanel({ session }: Props) {
     }
     // Content shorter than the viewport, or a reader already parked at the
     // top, cannot produce another scroll event: reveal or fetch from here.
-    if ((hiddenItemCount > 0 || (earlierHistoryStatus?.hasMore && !earlierHistoryStatus.loading))
+    if ((hiddenItemCount > 0 || canAutoLoadEarlierHistory(earlierHistoryStatus))
       && (element.scrollHeight <= element.clientHeight || (!atBottomRef.current && element.scrollTop < 240))) {
       requestEarlierHistory();
     }
@@ -1025,9 +1028,16 @@ export function ChatPanel({ session }: Props) {
               <Spinner size="sm" />
               {t('chat.loadingEarlier')}
             </p>
+          ) : earlierHistoryStatus?.failed && hiddenItemCount === 0 ? (
+            <div className="flex items-center justify-center gap-2 py-1" role="alert">
+              <p className="text-danger text-xs">{t('chat.loadEarlierFailed')}</p>
+              <Button size="sm" variant="ghost" onPress={() => requestEarlierHistory(true)}>
+                {t('chat.retry')}
+              </Button>
+            </div>
           ) : earlierHistoryStatus?.hasMore || hiddenItemCount > 0 ? (
             <div className="flex justify-center py-1">
-              <Button size="sm" variant="ghost" onPress={requestEarlierHistory}>
+              <Button size="sm" variant="ghost" onPress={() => requestEarlierHistory()}>
                 {t('chat.loadEarlier')}
               </Button>
             </div>

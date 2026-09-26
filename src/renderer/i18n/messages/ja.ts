@@ -261,6 +261,8 @@ export const ja: Messages = {
   'chat.scrollToLatest': '最新へ移動',
   'chat.loadEarlier': '以前のメッセージを読み込む',
   'chat.loadingEarlier': '以前のメッセージを読み込み中…',
+  'chat.loadEarlierFailed': '以前のメッセージを読み込めませんでした',
+  'chat.retry': '再試行',
   'chat.quoteName': '会話の抜粋',
   'chat.pastedTextName': '貼り付けたテキスト',
   'chat.quoteAdded': '参照を追加しました',
