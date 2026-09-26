@@ -1,7 +1,7 @@
 import { RiPushpin2Fill, RiAddLine, RiPencilLine, RiEdit2Line, RiErrorWarningLine, RiFolder3Line, RiGitBranchLine, RiDeleteBinLine, RiArrowDownSLine, RiBarChartBoxLine, RiInformationLine, RiKanbanView2, RiPaletteLine, RiPriceTag3Line, RiPuzzle2Line, RiSettings3Line, RiTerminalBoxLine, RiUserSettingsLine } from '@remixicon/react';
 import { Badge, Button, Chip, ColorSwatchPicker, Dropdown, Label, Tooltip } from '@heroui/react';
-import { useEffect, useMemo, useState } from 'react';
-import type { DragEvent, MouseEvent } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { DragEvent, FocusEvent, MouseEvent } from 'react';
 import { ContextMenu as HeroContextMenu, ChatListView, Sidebar, useSidebar } from '@heroui-pro/react';
 import { useSidebarPins } from '../session/useSidebarPins';
 import { useKanbanTasks } from '../session/kanbanTasks';
@@ -44,7 +44,7 @@ export function AppSidebar({
   onOpenKanban,
 }: Props) {
   const t = useT();
-  const { isMobile, setMobileOpen } = useSidebar();
+  const { isMobile, isOpen, setMobileOpen } = useSidebar();
   const { pins, togglePin } = useSidebarPins();
   const kanbanTasks = useKanbanTasks();
 
@@ -75,6 +75,7 @@ export function AppSidebar({
       : 'warning';
 
   const [contextMenu, setContextMenu] = useState<ContextMenu>(null);
+  const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
 
   // Section collapse states
   const [workspacesCollapsed, setWorkspacesCollapsed] = useState(false);
@@ -88,6 +89,76 @@ export function AppSidebar({
   useEffect(() => {
     setConversationLimit(5);
   }, [session.activeWorkspaceId]);
+
+  // Icon-rail peek: the collapsed sidebar renders as a 48px icon rail. Hover,
+  // keyboard focus, or an open overlay flips data-state back to expanded while
+  // the [data-peek] CSS keeps a 48px layout footprint via a negative margin, so
+  // the expanded sidebar floats over the main content instead of pushing it.
+  const railCollapsed = !isOpen;
+  const [hoverPeek, setHoverPeek] = useState(false);
+  const [focusPeek, setFocusPeek] = useState(false);
+  const insideRef = useRef({ pointer: false, focus: false });
+  const suppressPeekRef = useRef(false);
+  const peekTimerRef = useRef<number | null>(null);
+  const peeking = railCollapsed
+    && !suppressPeekRef.current
+    && (hoverPeek || focusPeek || contextMenu !== null || headerMenuOpen);
+
+  const scheduleHoverPeek = (open: boolean) => {
+    if (peekTimerRef.current !== null) window.clearTimeout(peekTimerRef.current);
+    peekTimerRef.current = window.setTimeout(() => {
+      peekTimerRef.current = null;
+      setHoverPeek(open);
+    }, open ? 70 : 140);
+  };
+
+  const updatePeekSuppression = () => {
+    if (!insideRef.current.pointer && !insideRef.current.focus) {
+      suppressPeekRef.current = false;
+    }
+  };
+
+  // Collapsing while the pointer or focus is already inside must not pop the
+  // sidebar back open — require one clean exit before hover peeking re-arms.
+  const wasOpenRef = useRef(isOpen);
+  useEffect(() => {
+    if (wasOpenRef.current && !isOpen) {
+      suppressPeekRef.current = insideRef.current.pointer || insideRef.current.focus;
+      if (peekTimerRef.current !== null) window.clearTimeout(peekTimerRef.current);
+      peekTimerRef.current = null;
+      setHoverPeek(false);
+      setFocusPeek(false);
+    }
+    wasOpenRef.current = isOpen;
+  }, [isOpen]);
+
+  useEffect(() => () => {
+    if (peekTimerRef.current !== null) window.clearTimeout(peekTimerRef.current);
+  }, []);
+
+  const railProps = {
+    'data-peek': railCollapsed ? 'true' : undefined,
+    ...(peeking ? { 'data-state': 'expanded' as const } : {}),
+    onMouseEnter: () => {
+      insideRef.current.pointer = true;
+      if (!suppressPeekRef.current) scheduleHoverPeek(true);
+    },
+    onMouseLeave: () => {
+      insideRef.current.pointer = false;
+      scheduleHoverPeek(false);
+      updatePeekSuppression();
+    },
+    onFocus: () => {
+      insideRef.current.focus = true;
+      if (!suppressPeekRef.current) setFocusPeek(true);
+    },
+    onBlur: (event: FocusEvent<HTMLElement>) => {
+      if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+      insideRef.current.focus = false;
+      setFocusPeek(false);
+      updatePeekSuppression();
+    },
+  };
 
   // High-performance timeline lookup map: precomputed once in O(M) time instead of O(N*M) during sorting
   const timelineInfoMap = useMemo(() => {
@@ -235,13 +306,13 @@ export function AppSidebar({
   // Cached data renders immediately; the directory sync only blocks an
   // entirely empty sidebar (first run or cleared storage).
   if (session.directorySyncStatus === 'loading' && session.workspaces.length === 0) {
-    return <Sidebar><Sidebar.Content><p className="text-muted px-3 py-4 text-sm">{t('sidebar.syncing')}</p></Sidebar.Content></Sidebar>;
+    return <Sidebar {...railProps}><Sidebar.Content><p className="sidebar-empty-hint text-muted px-3 py-4 text-sm">{t('sidebar.syncing')}</p></Sidebar.Content></Sidebar>;
   }
 
   return (
-    <Sidebar>
+    <Sidebar {...railProps}>
       <Sidebar.Header>
-        <Dropdown>
+        <Dropdown onOpenChange={setHeaderMenuOpen}>
           <Dropdown.Trigger
             aria-label={t('sidebar.menu')}
             className="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left hover:bg-surface-secondary active:bg-surface-secondary/70 transition-colors cursor-pointer select-none outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
@@ -309,7 +380,7 @@ export function AppSidebar({
                 setWorkspacesCollapsed((prev) => !prev);
               }
             }}
-            className="group flex items-center justify-between px-2 py-1.5 rounded-lg cursor-pointer hover:bg-surface-secondary transition-colors select-none"
+            className="sidebar-section-head group flex items-center justify-between px-2 py-1.5 rounded-lg cursor-pointer hover:bg-surface-secondary transition-colors select-none"
             aria-expanded={!workspacesCollapsed}
             aria-label={workspacesCollapsed ? t('sidebar.expandWorkspaces') : t('sidebar.collapseWorkspaces')}
           >
@@ -344,7 +415,7 @@ export function AppSidebar({
 
           {!workspacesCollapsed && (
             session.workspaces.length === 0 ? (
-              <p className="text-muted px-3 py-2 text-xs">{t('sidebar.noWorkspaces')}</p>
+              <p className="sidebar-empty-hint text-muted px-3 py-2 text-xs">{t('sidebar.noWorkspaces')}</p>
             ) : (
               <>
                 <ChatListView
@@ -418,7 +489,7 @@ export function AppSidebar({
                 </ChatListView>
 
                 {sortedWorkspaces.length > 5 && (
-                  <div className="flex items-center justify-between px-2 pt-1">
+                  <div className="sidebar-list-more flex items-center justify-between px-2 pt-1">
                     {sortedWorkspaces.length > workspaceLimit ? (
                       <Button
                         size="sm"
@@ -458,7 +529,7 @@ export function AppSidebar({
                 setConversationsCollapsed((prev) => !prev);
               }
             }}
-            className="group flex items-center justify-between px-2 py-1.5 rounded-lg cursor-pointer hover:bg-surface-secondary transition-colors select-none"
+            className="sidebar-section-head group flex items-center justify-between px-2 py-1.5 rounded-lg cursor-pointer hover:bg-surface-secondary transition-colors select-none"
             aria-expanded={!conversationsCollapsed}
             aria-label={conversationsCollapsed ? t('sidebar.expandConversations') : t('sidebar.collapseConversations')}
           >
@@ -494,7 +565,7 @@ export function AppSidebar({
 
           {!conversationsCollapsed && (
             workspaceConversations.length === 0 ? (
-              <p className="text-muted px-3 py-2 text-xs">
+              <p className="sidebar-empty-hint text-muted px-3 py-2 text-xs">
                 {session.activeWorkspaceId ? t('sidebar.noConversations') : t('sidebar.selectWorkspace')}
               </p>
             ) : (
@@ -560,7 +631,7 @@ export function AppSidebar({
                 </ChatListView>
 
                 {sortedConversations.length > 5 && (
-                  <div className="flex items-center justify-between px-2 pt-1">
+                  <div className="sidebar-list-more flex items-center justify-between px-2 pt-1">
                     {sortedConversations.length > conversationLimit ? (
                       <Button
                         size="sm"

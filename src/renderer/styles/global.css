@@ -1118,6 +1118,81 @@ body {
 .sidebar-chat-list .list-view__item.drop-before::after { top: -3px; }
 .sidebar-chat-list .list-view__item.drop-after::after { bottom: -3px; }
 
+/* Collapsed icon rail + hover peek: AppSidebar sets data-peek while the
+   sidebar is logically collapsed, and flips data-state back to expanded while
+   the pointer/focus is inside. The negative margin keeps the rail's 48px
+   layout footprint during the peek, so the expanded sidebar floats over the
+   main content instead of pushing it. */
+.sidebar[data-collapsible='icon'] {
+  --sidebar-width: 248px;
+  transition: width var(--sidebar-duration) var(--sidebar-ease),
+    margin-inline-end var(--sidebar-duration) var(--sidebar-ease),
+    box-shadow 0.15s var(--ease-out);
+}
+
+/* AppLayout sets [data-resizable] whenever any panel resizes, and its blanket
+   `width:100%; transition:none` still matches the icon-mode sidebar even though
+   it lives outside the resizable group — restore the sidebar's own width (the
+   collapsed rail width below still wins on [data-state=collapsed]) and the
+   collapse/expand animation. */
+[data-app-layout][data-resizable] [data-slot='sidebar'].sidebar[data-collapsible='icon'] {
+  transition: width var(--sidebar-duration) var(--sidebar-ease),
+    margin-inline-end var(--sidebar-duration) var(--sidebar-ease),
+    box-shadow 0.15s var(--ease-out);
+}
+
+[data-app-layout][data-resizable] [data-slot='sidebar'].sidebar[data-collapsible='icon'][data-state='expanded'] {
+  width: var(--sidebar-width);
+}
+
+.sidebar[data-peek='true'] {
+  z-index: 30;
+}
+
+.sidebar[data-peek='true'][data-state='expanded'] {
+  margin-inline-end: calc(var(--sidebar-width-collapsed) - var(--sidebar-width));
+  box-shadow: 12px 0 32px -16px rgb(0 0 0 / 0.45), inset -1px 0 0 var(--sidebar-edge-outline);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar[data-collapsible='icon'],
+  [data-app-layout][data-resizable] [data-slot='sidebar'].sidebar[data-collapsible='icon'] {
+    transition: none;
+  }
+}
+
+/* Inside the rail, rows reduce to their leading icon; section headers, "show
+   more" affordances, empty hints, and shortcut badges have no icon form. */
+.sidebar[data-peek='true'][data-state='collapsed'] .sidebar-section-head,
+.sidebar[data-peek='true'][data-state='collapsed'] .sidebar-list-more,
+.sidebar[data-peek='true'][data-state='collapsed'] .sidebar-empty-hint,
+.sidebar[data-peek='true'][data-state='collapsed'] .shortcut-hint {
+  display: none;
+}
+
+.sidebar[data-peek='true'][data-state='collapsed'] .sidebar-chat-list .list-view__item {
+  padding-inline: 0;
+  gap: 0;
+}
+
+.sidebar[data-peek='true'][data-state='collapsed'] .sidebar-chat-list .list-view__item-content {
+  justify-content: center;
+  gap: 0;
+}
+
+.sidebar[data-peek='true'][data-state='collapsed'] .sidebar-chat-list .list-view__item-content > :not([data-slot='chat-list-view-icon']) {
+  display: none;
+}
+
+.sidebar[data-peek='true'][data-state='collapsed'] [data-slot='sidebar-header'] > * {
+  width: 2.5rem;
+  min-height: 2.5rem;
+}
+
+.sidebar[data-peek='true'][data-state='collapsed'] [data-slot='sidebar-group'] + [data-slot='sidebar-group'] {
+  margin-top: calc(var(--spacing, 0.25rem) * 3);
+}
+
 /* Hidden title bar (macOS): window controls are overlaid on the page, so the
    top strips double as drag regions and the traffic lights need clear space
    at the top of the sidebar. */
@@ -1141,18 +1216,17 @@ body {
   padding-left: 84px;
 }
 
-/* AppLayout side panels size through the outer [data-panel] element's inline
-   flex-grow (react-resizable-panels puts the panel class on an inner content
-   div). The transition is gated on [data-panel-motion], which App sets only
-   around programmatic open/close, so separator drags and window resizes stay
-   instant. */
-[data-panel-motion='true'] [data-panel]#app-layout-sidebar,
+/* The AppLayout aside panel sizes through the outer [data-panel] element's
+   inline flex-grow (react-resizable-panels puts the panel class on an inner
+   content div). The transition is gated on [data-panel-motion], which App sets
+   only around programmatic open/close, so separator drags and window resizes
+   stay instant. The icon-collapsible sidebar is not a resizable panel — its
+   own width transition lives on .sidebar. */
 [data-panel-motion='true'] [data-panel]#app-layout-aside {
   transition: flex-grow 0.24s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  [data-panel-motion='true'] [data-panel]#app-layout-sidebar,
   [data-panel-motion='true'] [data-panel]#app-layout-aside {
     transition: none;
   }
