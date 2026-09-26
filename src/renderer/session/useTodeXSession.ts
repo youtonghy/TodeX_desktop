@@ -1361,7 +1361,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     [syncWorkspacesToBackend],
   );
 
-  const syncWorkspacesFromBackend = useCallback(async () => {
+  /** Pull the backend's workspaces into the local list. The conversation list
+   * is fetched too unless `listConversations` is false: the periodic sync
+   * leaves it to the manifest refresh, which polls it on its own timer. */
+  const syncWorkspacesFromBackend = useCallback(async ({ listConversations = true }: { listConversations?: boolean } = {}) => {
     workspaceBackendReadyRef.current = false;
     try {
       const response = await fetch(buildHttpUrl(settings.serverUrl, '/v2/workspaces'), {
@@ -1463,12 +1466,14 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       }
 
       workspaceBackendReadyRef.current = true;
-      try {
-        const conversationResponse = await new V2ApiClient({ serverUrl: settings.serverUrl, device: deviceIdentityFromSecret(settings.deviceSecret) }).listConversations();
-        setV2Conversations(conversationResponse.conversations);
-        setConversations((current) => mergeManifestConversations(current, conversationResponse.conversations, nextWorkspaces, activeBackendConnectionId));
-      } catch (error) {
-        setLastError(error instanceof Error ? error.message : t('sess.conversationDirSyncFailed'));
+      if (listConversations) {
+        try {
+          const conversationResponse = await new V2ApiClient({ serverUrl: settings.serverUrl, device: deviceIdentityFromSecret(settings.deviceSecret) }).listConversations();
+          setV2Conversations(conversationResponse.conversations);
+          setConversations((current) => mergeManifestConversations(current, conversationResponse.conversations, nextWorkspaces, activeBackendConnectionId));
+        } catch (error) {
+          setLastError(error instanceof Error ? error.message : t('sess.conversationDirSyncFailed'));
+        }
       }
       if (!workspaceSyncPayloadEquals(keptRemoteWorkspaces, nextActiveWorkspaces)) {
         void syncWorkspacesToBackend(nextActiveWorkspaces);
@@ -1492,7 +1497,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       backendConnectionId: activeBackendConnectionId,
     });
     const timer = setInterval(() => {
-      void syncWorkspacesFromBackend();
+      void syncWorkspacesFromBackend({ listConversations: false });
       void syncKanbanTasksFromBackend();
     }, 15000);
     return () => clearInterval(timer);

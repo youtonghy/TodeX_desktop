@@ -30,6 +30,9 @@ optional and canonical aliases are recomputed when old journals are replayed.
   lazily opened conversation more than 2000 events behind the journal also
   reopens from the tail instead of replaying the gap; running turns, approvals
   and unconfirmed or queued prompts always replay forward.
+- The conversation list is fetched once per 15-second manifest refresh. The
+  periodic workspace sync leaves it to that refresh; only the sync that runs
+  when a connection opens lists conversations itself.
 
 Backend control/write/cancel/compact defaults are 30/10/10/300 seconds, configured
 with `TODEX_AGENTD_PROVIDER_{CONTROL,WRITE,CANCEL,COMPACT}_TIMEOUT_SECONDS`.
