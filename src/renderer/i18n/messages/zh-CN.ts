@@ -263,6 +263,7 @@ export const zhCN = {
   'chat.loadingEarlier': '正在加载更早的消息…',
   'chat.loadEarlierFailed': '加载更早记录失败',
   'chat.retry': '重试',
+  'chat.earlierHistoryCapped': '更早的历史未加载（已达单会话显示上限）',
   'chat.quoteName': '对话摘录',
   'chat.pastedTextName': '粘贴的文本',
   'chat.quoteAdded': '已添加引用',

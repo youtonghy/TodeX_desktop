@@ -263,6 +263,7 @@ export const en: Messages = {
   'chat.loadingEarlier': 'Loading earlier messages…',
   'chat.loadEarlierFailed': 'Failed to load earlier messages',
   'chat.retry': 'Retry',
+  'chat.earlierHistoryCapped': 'Earlier history is not loaded (this conversation reached its display limit)',
   'chat.quoteName': 'Conversation excerpt',
   'chat.pastedTextName': 'Pasted text',
   'chat.quoteAdded': 'Reference added',

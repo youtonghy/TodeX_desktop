@@ -1463,9 +1463,14 @@ export const MAX_TRANSPORT_HELLO_SESSION_CURSORS = 12;
 // of truth for replay, while the desktop cache avoids silently evicting the
 // context users are currently reviewing.
 export const MAX_TIMELINE_ITEMS = 1000;
-/** In-memory ceiling for the rendered timeline. Lazy history loading keeps
- * older pages mounted, so this is far above the persisted slice. */
+/** In-memory ceiling for timeline rows outside any conversation. Lazy
+ * history loading keeps older pages mounted, so this is far above the
+ * persisted slice. */
 export const MAX_TIMELINE_ITEMS_LIVE = 5_000;
+/** In-memory ceiling per conversation, so a busy background conversation
+ * cannot evict the rows of another one. Earlier history stops paging in once
+ * a conversation reaches it. */
+export const MAX_CONVERSATION_TIMELINE_ITEMS = 5_000;
 export const MAX_USAGE_RECORDS = 2_000;
 export const MAX_WORKSPACE_TOMBSTONES = 100;
 export const MAX_EVENTS = 220;
@@ -2890,13 +2895,35 @@ export type EarlierHistoryStatus = {
   loading: boolean;
   /** The last page failed; only an explicit retry fetches again. */
   failed?: boolean;
+  /** The conversation holds MAX_CONVERSATION_TIMELINE_ITEMS rows; older
+   * history is not paged in. */
+  capped?: boolean;
 };
 
 /** Scrolling may fetch older history on its own only while more exists, no
- * page is in flight and the last one did not fail — a failing backend would
- * otherwise be asked again on every layout pass. */
+ * page is in flight, the conversation is under its row cap and the last page
+ * did not fail — a failing backend would otherwise be asked again on every
+ * layout pass. */
 export function canAutoLoadEarlierHistory(status: EarlierHistoryStatus | undefined): boolean {
-  return Boolean(status?.hasMore && !status.loading && !status.failed);
+  return Boolean(status?.hasMore && !status.loading && !status.failed && !status.capped);
+}
+
+/** Keep the newest `limit` rows of each conversation (timelines are
+ * newest-first); rows outside any conversation share MAX_TIMELINE_ITEMS_LIVE.
+ * Order is preserved and the input is returned when nothing is dropped. */
+export function capTimelinePerConversation<T extends { conversationId?: string }>(
+  entries: T[],
+  limit = MAX_CONVERSATION_TIMELINE_ITEMS,
+): T[] {
+  if (entries.length <= Math.min(limit, MAX_TIMELINE_ITEMS_LIVE)) return entries;
+  const counts = new Map<string | undefined, number>();
+  const kept = entries.filter((entry) => {
+    const key = entry.conversationId || undefined;
+    const count = (counts.get(key) ?? 0) + 1;
+    counts.set(key, count);
+    return count <= (key === undefined ? MAX_TIMELINE_ITEMS_LIVE : limit);
+  });
+  return kept.length === entries.length ? entries : kept;
 }
 
 /** Sort inclusive journal sequence ranges and merge the overlapping or

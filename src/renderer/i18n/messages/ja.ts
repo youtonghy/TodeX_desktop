@@ -263,6 +263,7 @@ export const ja: Messages = {
   'chat.loadingEarlier': '以前のメッセージを読み込み中…',
   'chat.loadEarlierFailed': '以前のメッセージを読み込めませんでした',
   'chat.retry': '再試行',
+  'chat.earlierHistoryCapped': '以前の履歴は読み込まれていません（この会話の表示上限に達しました）',
   'chat.quoteName': '会話の抜粋',
   'chat.pastedTextName': '貼り付けたテキスト',
   'chat.quoteAdded': '参照を追加しました',

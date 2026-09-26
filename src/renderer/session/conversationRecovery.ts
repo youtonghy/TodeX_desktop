@@ -1,5 +1,6 @@
 import { adoptConversationRuntimeTurn, applyConversationRuntimeEvents, createConversationRuntime, hydrateConversationRuntimeEvents, prependConversationRuntimeEvents, type ConversationRuntime } from '@todex/protocol/conversationRuntime';
 import { t } from '../i18n';
+import { MAX_CONVERSATION_TIMELINE_ITEMS } from './helpers';
 import { canonicalConversationEventType } from '@todex/protocol/v2';
 import type { ConversationEvent, ConversationReplay } from '@todex/protocol/v2';
 
@@ -40,8 +41,9 @@ function newestTurnBoundary(events: readonly ConversationEvent[]): ConversationE
 }
 
 /** Outcome of one earlier-history request. `failed` pages stay unloaded and
- * are only retried on an explicit request. */
-export type EarlierHistoryResult = { hasMore: boolean; failed?: boolean };
+ * are only retried on an explicit request; `capped` conversations already
+ * hold as many rows as the session keeps, so nothing was fetched. */
+export type EarlierHistoryResult = { hasMore: boolean; failed?: boolean; capped?: boolean };
 
 export type ConversationOpenOptions = {
   /** Journal high-water mark from the conversation manifest. */
@@ -441,9 +443,13 @@ export class ConversationRecovery {
     if (inflight) return inflight;
     const replayBefore = this.replayBefore;
     const floor = this.historyFloors.get(conversationId) ?? 0;
-    if (!replayBefore || floor <= 0 || !this.states.has(conversationId)) {
+    const current = this.states.get(conversationId);
+    if (!replayBefore || floor <= 0 || !current) {
       return Promise.resolve({ hasMore: false });
     }
+    // Rows past the per-conversation cap would be dropped as soon as they
+    // render, so paging stops here instead of fetching them.
+    if (current.timeline.length >= MAX_CONVERSATION_TIMELINE_ITEMS) return Promise.resolve({ hasMore: true, capped: true });
     const epoch = this.epoch;
     const work = (async (): Promise<EarlierHistoryResult> => {
       const page = await replayBefore(conversationId, floor, limit);

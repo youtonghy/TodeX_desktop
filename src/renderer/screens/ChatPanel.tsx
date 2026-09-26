@@ -1035,6 +1035,8 @@ export function ChatPanel({ session }: Props) {
                 {t('chat.retry')}
               </Button>
             </div>
+          ) : earlierHistoryStatus?.capped && hiddenItemCount === 0 ? (
+            <p className="text-muted py-2 text-center text-xs" role="status">{t('chat.earlierHistoryCapped')}</p>
           ) : earlierHistoryStatus?.hasMore || hiddenItemCount > 0 ? (
             <div className="flex justify-center py-1">
               <Button size="sm" variant="ghost" onPress={() => requestEarlierHistory()}>
