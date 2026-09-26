@@ -1141,7 +1141,7 @@ body {
     box-shadow 0.15s var(--ease-out);
 }
 
-[data-app-layout][data-resizable] [data-slot='sidebar'].sidebar[data-collapsible='icon'][data-state='expanded'] {
+[data-app-layout][data-resizable] [data-slot='sidebar'].sidebar[data-collapsible='icon']:not([data-state='collapsed']) {
   width: var(--sidebar-width);
 }
 
@@ -1182,6 +1182,28 @@ body {
 
 .sidebar[data-peek='true'][data-state='collapsed'] .sidebar-chat-list .list-view__item-content > :not([data-slot='chat-list-view-icon']) {
   display: none;
+}
+
+/* Secondary list items carry a bottom separator hairline that renders as stray
+   dashes between rail icons — drop it. And pin the selection bar flush to the
+   rail's left edge instead of floating inside the inset row. */
+.sidebar[data-peek='true'][data-state='collapsed'] .sidebar-chat-list .list-view__item {
+  border-bottom-width: 0;
+}
+
+.sidebar[data-peek='true'][data-state='collapsed'] .sidebar-chat-list .list-view__item:is([data-selected='true'], .is-selected)::before {
+  left: -6px;
+  top: 8px;
+  bottom: 8px;
+}
+
+/* Give the rail glyphs a bit more presence (16px icon -> ~19px visual). */
+.sidebar[data-peek='true'][data-state='collapsed'] .chat-list-view__icon {
+  transform: scale(1.2);
+}
+
+.sidebar[data-peek='true'][data-state='collapsed'] [data-slot='sidebar-header'] > .button svg {
+  transform: scale(1.15);
 }
 
 .sidebar[data-peek='true'][data-state='collapsed'] [data-slot='sidebar-header'] > * {
