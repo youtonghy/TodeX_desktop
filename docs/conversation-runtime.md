@@ -7,6 +7,9 @@ optional and canonical aliases are recomputed when old journals are replayed.
 - REST pages and live frames enter one contiguous projection. A high sequence
   waits for its gap; duplicate sequences cannot append text or usage twice.
   A partial/failed replay cannot expose historical approval actions.
+- Journal records the backend could not read back arrive as
+  `journal.recordLost` placeholders that keep the sequence contiguous. Each
+  run of them (shared `runStart`) shows one notice, "N 条记录损坏，已跳过".
 - Prompt commands await a correlated acknowledgement. Rejection restores text,
   skills and attachments. A sent command that loses its acknowledgement is
   unknown: recover the record before sending again; never resend automatically.
