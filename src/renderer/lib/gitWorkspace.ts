@@ -184,6 +184,18 @@ export interface GitScanResult {
   repositories: GitRepositoryItem[];
 }
 
+const GIT_POLL_MAX_BACKOFF_MS = 5 * 60_000;
+
+/**
+ * Delay before the next background git read. Failures back off exponentially
+ * (up to five minutes) so a deterministic error such as an oversized workspace
+ * is not re-requested every few seconds; one success restores the base rate.
+ */
+export function gitPollDelayMs(thinking: boolean, consecutiveFailures: number): number {
+  const base = thinking ? 5_000 : 30_000;
+  return Math.min(base * 2 ** consecutiveFailures, GIT_POLL_MAX_BACKOFF_MS);
+}
+
 export function readGitScan(settings: ConnectionSettings, workspacePath: string, signal?: AbortSignal): Promise<GitScanResult> {
   const url = new URL(buildHttpUrl(settings.serverUrl, '/v2/git/scan'));
   url.searchParams.set('workspacePath', workspacePath);

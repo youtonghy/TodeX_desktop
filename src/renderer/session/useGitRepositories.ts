@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ConnectionSettings } from '@todex/protocol/todex';
-import { readGitScan, type GitRepositoryItem } from '../lib/gitWorkspace';
+import { gitPollDelayMs, readGitScan, type GitRepositoryItem } from '../lib/gitWorkspace';
 import { t } from '../i18n';
 
 export function useGitRepositories({ settings, workspacePath, scopeKey, enabled, thinking, refreshKey }: {
@@ -23,6 +23,7 @@ export function useGitRepositories({ settings, workspacePath, scopeKey, enabled,
     }
     let disposed = false;
     let pending = false;
+    let failures = 0;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let controller: AbortController | undefined;
     const poll = async () => {
@@ -33,12 +34,14 @@ export function useGitRepositories({ settings, workspacePath, scopeKey, enabled,
       controller = new AbortController();
       try {
         const data = await readGitScan(settings, workspacePath, controller.signal);
+        failures = 0;
         if (!disposed) setResult({ identity, repositories: data.repositories, error: '' });
       } catch (cause) {
+        failures += 1;
         if (!disposed) setResult({ identity, repositories: [], error: cause instanceof Error ? cause.message : t('git.readFailed') });
       } finally {
         pending = false;
-        if (!disposed) timer = setTimeout(() => void poll(), thinking ? 5_000 : 30_000);
+        if (!disposed) timer = setTimeout(() => void poll(), gitPollDelayMs(thinking, failures));
       }
     };
     const onVisible = () => {

@@ -97,6 +97,7 @@ import {
 } from '@todex/protocol/transport';
 import { ConnectionError } from '@todex/protocol/connectionError';
 import { desktopAlert } from '../lib/desktopAlert';
+import { createConcurrencyLimit } from '../lib/concurrencyLimit';
 import { panelFromRoute, type DesktopPanel, type OpenPanelOptions } from '../lib/panels';
 import type { CatalogState } from '../screens/CapabilitiesPanel';
 import {
@@ -349,6 +350,13 @@ const SENT_ATTACHMENTS_STORAGE_KEY = `${TIMELINE_STORAGE_KEY}.attachments`;
 // falling back to descriptor models so the model picker is not left disabled.
 const MODEL_DISCOVERY_RETRY_DELAYS_MS = [2_000, 5_000];
 
+// A workspace switch or reconnect asks every provider for models, commands,
+// skills and MCP at once (~28 requests). Chromium allows six connections per
+// host, so an unbounded burst queued `/health`, git status and conversation
+// polls behind multi-second provider probes until they timed out. Discovery
+// shares a few slots; each request's own timeout starts once it holds one.
+const discoveryLimit = createConcurrencyLimit(3);
+
 // The backend allows 128 conversation subscriptions per v2 socket. Keep a
 // smaller client-side budget so explicit subscribes (activate/attach/create)
 // still have headroom; least-recently-subscribed entries are unsubscribed
@@ -549,7 +557,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const providerModels = providerModelsByBackend[activeBackendConnectionId] ?? EMPTY_PROVIDER_MODELS;
   const providerCommands = providerCommandsByBackend[activeBackendConnectionId] ?? EMPTY_PROVIDER_COMMANDS;
   const setBackendProviders = useCallback((backendId: string, providers: ProviderDescriptor[]) => {
-    setV2ProvidersByBackend((current) => current[backendId] === providers ? current : { ...current, [backendId]: providers });
+    setV2ProvidersByBackend((current) => {
+      const previous = current[backendId];
+      // Every connection probe returns a fresh array; keeping the old one when
+      // nothing changed stops a reconnect from re-running all discovery.
+      if (previous === providers || (previous && JSON.stringify(previous) === JSON.stringify(providers))) return current;
+      return { ...current, [backendId]: providers };
+    });
   }, []);
   const [contextUsageByConversation, setContextUsageByConversation] = useState<Record<string, ConversationContextUsage>>({});
   const [compactionByConversation, setCompactionByConversation] = useState<Record<string, ContextCompactionState & { recommended?: boolean }>>({});
@@ -1584,8 +1598,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     const api = new V2ApiClient({ serverUrl: settings.serverUrl, device: deviceIdentityFromSecret(settings.deviceSecret) });
     try {
       const [skills, mcp] = await Promise.all([
-        api.listSkillCatalog(provider, workspacePath),
-        api.listMcpCatalog(provider, workspacePath),
+        discoveryLimit(() => api.listSkillCatalog(provider, workspacePath)),
+        discoveryLimit(() => api.listMcpCatalog(provider, workspacePath)),
       ]);
       setCapabilityCatalogs((current) => ({ ...current, [provider]: { status: 'ready', skills, mcp } }));
     } catch (error) {
@@ -1616,7 +1630,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     const backendId = activeBackendConnectionId;
     const api = new V2ApiClient({ serverUrl: settings.serverUrl, device: deviceIdentityFromSecret(settings.deviceSecret) });
     void Promise.all(v2Providers.filter((item) => item.available).map(async (provider) => {
-      const result = await retryWithDelays(() => api.listProviderModels(provider.id, activeWorkspace.path), {
+      const result = await retryWithDelays(() => discoveryLimit(() => (
+        cancelled ? Promise.reject(new Error('model discovery cancelled')) : api.listProviderModels(provider.id, activeWorkspace.path)
+      )), {
         delaysMs: MODEL_DISCOVERY_RETRY_DELAYS_MS,
         isCancelled: () => cancelled,
         onGiveUp: (error) => console.warn(`${provider.id} model discovery failed`, error),
@@ -1664,8 +1680,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     const api = new V2ApiClient({ serverUrl: settings.serverUrl, device: deviceIdentityFromSecret(settings.deviceSecret) });
     void Promise.all(v2Providers.filter((item) => item.available).map(async (provider) => {
       try {
-        const result = await api.listProviderCommands(provider.id, activeWorkspace.path);
-        if (!cancelled) {
+        const result = await discoveryLimit(async () => (cancelled ? null : api.listProviderCommands(provider.id, activeWorkspace.path)));
+        if (result && !cancelled) {
           setProviderCommandsByBackend((current) => ({
             ...current,
             [backendId]: { ...current[backendId], [provider.id]: result.commands },

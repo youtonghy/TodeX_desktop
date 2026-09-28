@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ConnectionSettings } from '@todex/protocol/todex';
-import { readGitStatus, type GitStatusSummary } from '../lib/gitWorkspace';
+import { gitPollDelayMs, readGitStatus, type GitStatusSummary } from '../lib/gitWorkspace';
 import { t } from '../i18n';
 
 export function useGitStatus({ settings, workspacePath, scopeKey, enabled, thinking, refreshKey }: {
@@ -23,6 +23,7 @@ export function useGitStatus({ settings, workspacePath, scopeKey, enabled, think
     }
     let disposed = false;
     let pending = false;
+    let failures = 0;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let controller: AbortController | undefined;
     const poll = async () => {
@@ -33,12 +34,14 @@ export function useGitStatus({ settings, workspacePath, scopeKey, enabled, think
       controller = new AbortController();
       try {
         const data = await readGitStatus(settings, workspacePath, controller.signal);
+        failures = 0;
         if (!disposed) setResult({ identity, data, error: '' });
       } catch (cause) {
+        failures += 1;
         if (!disposed) setResult({ identity, data: null, error: cause instanceof Error ? cause.message : t('git.readFailed') });
       } finally {
         pending = false;
-        if (!disposed) timer = setTimeout(() => void poll(), thinking ? 5_000 : 30_000);
+        if (!disposed) timer = setTimeout(() => void poll(), gitPollDelayMs(thinking, failures));
       }
     };
     const onVisible = () => {
