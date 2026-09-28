@@ -357,6 +357,16 @@ const MODEL_DISCOVERY_RETRY_DELAYS_MS = [2_000, 5_000];
 // shares a few slots; each request's own timeout starts once it holds one.
 const discoveryLimit = createConcurrencyLimit(3);
 
+interface DiscoveryProgress {
+  scope: string;
+  loaded: Set<ProviderKind>;
+  pending: Set<ProviderKind>;
+}
+
+function emptyDiscoveryProgress(scope: string): DiscoveryProgress {
+  return { scope, loaded: new Set(), pending: new Set() };
+}
+
 // The backend allows 128 conversation subscriptions per v2 socket. Keep a
 // smaller client-side budget so explicit subscribes (activate/attach/create)
 // still have headroom; least-recently-subscribed entries are unsubscribed
@@ -449,6 +459,14 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const pendingSocketFramesRef = useRef<PendingSocketFrame[]>([]);
   const pendingSocketFrameDrainRef = useRef<number | null>(null);
   const capabilityWorkspaceRef = useRef('');
+  // Discovery progress for the current backend + workspace. Effects re-run
+  // on reconnect and only query providers that neither succeeded nor are
+  // still in flight, so one failed probe (for example during a daemon
+  // restart) recovers without re-querying every provider. Results are dropped
+  // only when the scope object is replaced, not when an effect re-runs.
+  const modelDiscoveryRef = useRef<DiscoveryProgress>(emptyDiscoveryProgress(''));
+  const commandDiscoveryRef = useRef<DiscoveryProgress>(emptyDiscoveryProgress(''));
+  const capabilityRetryEpochRef = useRef(0);
   const socketGenerationRef = useRef(0);
   const autoConnectAttemptedRef = useRef(false);
   const legacyRecoveryRef = useRef(new LegacyEventRecovery<ServerEvent>());
@@ -499,6 +517,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const [activeWorkspaceId, setActiveWorkspaceId] = useState('');
   const [activeConversationId, setActiveConversationId] = useState('');
   const [connectionState, setConnectionState] = useState<ConnectionState>('idle');
+  // Bumped each time the socket opens; discovery effects use it to retry
+  // providers that failed while the backend was unreachable.
+  const [connectionEpoch, setConnectionEpoch] = useState(0);
   const [connectionHealth, setConnectionHealth] = useState<ConnectionHealth>(defaultConnectionHealth);
   const [remoteModelCatalog, setRemoteModelCatalog] = useState<CodexModelCatalogItem[]>([]);
   const [modelCatalogStatus, setModelCatalogStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
@@ -1619,26 +1640,37 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       setCapabilityCatalogs({});
       return;
     }
+    // Failed catalogs are retried once per reconnect, not on every render.
+    const retryFailed = capabilityRetryEpochRef.current !== connectionEpoch;
+    capabilityRetryEpochRef.current = connectionEpoch;
     for (const provider of v2Providers) {
-      if (!capabilityCatalogs[provider.id]) void refreshCapabilityCatalog(provider.id);
+      const entry = capabilityCatalogs[provider.id];
+      if (!entry || (retryFailed && entry.status === 'error')) void refreshCapabilityCatalog(provider.id);
     }
-  }, [activeBackendConnectionId, activeWorkspace?.path, capabilityCatalogs, hydrated, refreshCapabilityCatalog, v2Providers]);
+  }, [activeBackendConnectionId, activeWorkspace?.path, capabilityCatalogs, connectionEpoch, hydrated, refreshCapabilityCatalog, v2Providers]);
 
   useEffect(() => {
     if (!hydrated || !activeWorkspace?.path || v2Providers.length === 0) return;
-    let cancelled = false;
     const backendId = activeBackendConnectionId;
     const api = new V2ApiClient({ serverUrl: settings.serverUrl, device: deviceIdentityFromSecret(settings.deviceSecret) });
-    void Promise.all(v2Providers.filter((item) => item.available).map(async (provider) => {
+    const scope = JSON.stringify([backendId, activeWorkspace.path, settings.serverUrl, settings.deviceSecret]);
+    if (modelDiscoveryRef.current.scope !== scope) modelDiscoveryRef.current = emptyDiscoveryProgress(scope);
+    const progress = modelDiscoveryRef.current;
+    const stale = () => modelDiscoveryRef.current !== progress;
+    void Promise.all(v2Providers.filter((item) => (
+      item.available && !progress.loaded.has(item.id) && !progress.pending.has(item.id)
+    )).map(async (provider) => {
+      progress.pending.add(provider.id);
       const result = await retryWithDelays(() => discoveryLimit(() => (
-        cancelled ? Promise.reject(new Error('model discovery cancelled')) : api.listProviderModels(provider.id, activeWorkspace.path)
+        stale() ? Promise.reject(new Error('model discovery scope changed')) : api.listProviderModels(provider.id, activeWorkspace.path)
       )), {
         delaysMs: MODEL_DISCOVERY_RETRY_DELAYS_MS,
-        isCancelled: () => cancelled,
+        isCancelled: stale,
         onGiveUp: (error) => console.warn(`${provider.id} model discovery failed`, error),
-      });
+      }).finally(() => progress.pending.delete(provider.id));
       // Keep the descriptor models while live discovery is unavailable.
-      if (!result || cancelled) return;
+      if (!result || stale()) return;
+      progress.loaded.add(provider.id);
       setProviderModelsByBackend((current) => {
         const next = { ...current, [backendId]: { ...current[backendId], [provider.id]: result.models } };
         providerModelsByBackendRef.current = next;
@@ -1670,18 +1702,24 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         }
       }
     }));
-    return () => { cancelled = true; };
-  }, [activeBackendConnectionId, activeWorkspace?.path, hydrated, rememberProviderModelSelection, resolveRememberedProviderSelection, settings.deviceSecret, settings.serverUrl, v2Providers]);
+  }, [activeBackendConnectionId, activeWorkspace?.path, connectionEpoch, hydrated, rememberProviderModelSelection, resolveRememberedProviderSelection, settings.deviceSecret, settings.serverUrl, v2Providers]);
 
   useEffect(() => {
     if (!hydrated || !activeWorkspace?.path || v2Providers.length === 0) return;
-    let cancelled = false;
     const backendId = activeBackendConnectionId;
     const api = new V2ApiClient({ serverUrl: settings.serverUrl, device: deviceIdentityFromSecret(settings.deviceSecret) });
-    void Promise.all(v2Providers.filter((item) => item.available).map(async (provider) => {
+    const scope = JSON.stringify([backendId, activeWorkspace.path, settings.serverUrl, settings.deviceSecret]);
+    if (commandDiscoveryRef.current.scope !== scope) commandDiscoveryRef.current = emptyDiscoveryProgress(scope);
+    const progress = commandDiscoveryRef.current;
+    const stale = () => commandDiscoveryRef.current !== progress;
+    void Promise.all(v2Providers.filter((item) => (
+      item.available && !progress.loaded.has(item.id) && !progress.pending.has(item.id)
+    )).map(async (provider) => {
+      progress.pending.add(provider.id);
       try {
-        const result = await discoveryLimit(async () => (cancelled ? null : api.listProviderCommands(provider.id, activeWorkspace.path)));
-        if (result && !cancelled) {
+        const result = await discoveryLimit(async () => (stale() ? null : api.listProviderCommands(provider.id, activeWorkspace.path)));
+        if (result && !stale()) {
+          progress.loaded.add(provider.id);
           setProviderCommandsByBackend((current) => ({
             ...current,
             [backendId]: { ...current[backendId], [provider.id]: result.commands },
@@ -1689,10 +1727,11 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         }
       } catch {
         // Keep the last successful command catalog while the backend recovers.
+      } finally {
+        progress.pending.delete(provider.id);
       }
     }));
-    return () => { cancelled = true; };
-  }, [activeBackendConnectionId, activeWorkspace?.path, hydrated, settings.deviceSecret, settings.serverUrl, v2Providers]);
+  }, [activeBackendConnectionId, activeWorkspace?.path, connectionEpoch, hydrated, settings.deviceSecret, settings.serverUrl, v2Providers]);
 
   const activeConversation = useMemo(
     () => conversations.find((item) => item.id === activeConversationId) ?? null,
@@ -3722,6 +3761,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           reconnectAttemptRef.current = 0;
           lastFailureRetryableRef.current = true;
           setConnectionState('open');
+          setConnectionEpoch((current) => current + 1);
           sendSessionResume(getSessionCursorSnapshot());
           void checkConnectionHealth();
           void refreshServerVersion();
