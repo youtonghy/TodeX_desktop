@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button, Card, Chip, Spinner, toast } from '@heroui/react';
-import { RiDownloadCloud2Line, RiRefreshLine, RiServerLine } from '@remixicon/react';
+import { RiDownload2Line, RiDownloadCloud2Line, RiRefreshLine, RiServerLine } from '@remixicon/react';
 import {
   V2ApiClient,
+  type CliOperationAction,
   type CliUpgradeOperation,
   type CliVersionInfo,
   type CliVersionStatus,
@@ -19,7 +20,8 @@ const STATUS: Record<CliVersionStatus, { labelKey: MessageKey; color: 'success' 
   updateAvailable: { labelKey: 'cli.statusUpdateAvailable', color: 'warning' },
   ahead: { labelKey: 'cli.statusAhead', color: 'default' },
   unknown: { labelKey: 'cli.statusUnknownLatest', color: 'default' },
-  notInstalled: { labelKey: 'cli.statusNotInstalled', color: 'danger' },
+  // Not installed is a normal state with an Install action, not a failure.
+  notInstalled: { labelKey: 'cli.statusNotInstalled', color: 'default' },
   external: { labelKey: 'cli.statusExternal', color: 'default' },
 };
 
@@ -73,11 +75,12 @@ export function CliManagerPanel({ session }: { session: TodeXSession }) {
         if (cancelled) return;
         reportedPollError = false;
         setOperation(next);
+        const installing = next.action === 'install';
         if (next.status === 'succeeded') {
-          toast.success(t('cli.upgraded'));
+          toast.success(t(installing ? 'cli.installed' : 'cli.upgraded'));
           void refresh(true);
         } else if (next.status === 'failed') {
-          toast.danger(next.error || t('cli.upgradeFailed'));
+          toast.danger(next.error || t(installing ? 'cli.installFailed' : 'cli.upgradeFailed'));
         } else {
           timer = window.setTimeout(() => void poll(), 1200);
         }
@@ -94,15 +97,16 @@ export function CliManagerPanel({ session }: { session: TodeXSession }) {
     return () => { cancelled = true; window.clearTimeout(timer); };
   }, [api, operation, refresh]);
 
-  const upgrade = async (provider: ManagedCliProvider) => {
+  const startOperation = async (provider: ManagedCliProvider, action: CliOperationAction) => {
     const generation = backendGeneration.current;
     setSubmittingProvider(provider);
     try {
-      const next = await api().upgradeCli(provider);
+      const next = action === 'install' ? await api().installCli(provider) : await api().upgradeCli(provider);
       if (generation === backendGeneration.current) setOperation(next);
     } catch (error) {
       if (generation === backendGeneration.current) {
-        toast.danger(error instanceof Error ? error.message : t('cli.upgradeStartFailed'));
+        const fallback = action === 'install' ? t('cli.installStartFailed') : t('cli.upgradeStartFailed');
+        toast.danger(error instanceof Error ? error.message : fallback);
       }
     } finally {
       if (generation === backendGeneration.current) setSubmittingProvider(undefined);
@@ -132,7 +136,12 @@ export function CliManagerPanel({ session }: { session: TodeXSession }) {
         <div className="grid gap-3 sm:grid-cols-2">
           {clis.map((cli) => {
             const status = STATUS[cli.status] ?? { labelKey: 'cli.statusUnknown' as MessageKey, color: 'default' as const };
-            const upgrading = operation?.provider === cli.id && operation.status === 'running';
+            const running = operation?.provider === cli.id && operation.status === 'running';
+            const installing = running && operation?.action === 'install';
+            const notInstalled = cli.status === 'notInstalled';
+            // Older backends attach the lookup failure to a missing CLI.
+            const error = notInstalled ? undefined : cli.error;
+            const busyLabel = installing ? t('cli.installing') : t('cli.upgrading');
             return (
               <Card key={cli.id} className="min-w-0 rounded-lg p-4">
                 <div className="flex items-start gap-3">
@@ -142,26 +151,37 @@ export function CliManagerPanel({ session }: { session: TodeXSession }) {
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <h3 className="truncate text-sm font-semibold">{cli.name}</h3>
-                      <Chip size="sm" variant="soft" color={status.color}>{upgrading ? t('cli.upgrading') : t(status.labelKey)}</Chip>
+                      <Chip size="sm" variant="soft" color={status.color}>{running ? busyLabel : t(status.labelKey)}</Chip>
                     </div>
                     <dl className="mt-3 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-xs">
-                      <dt className="text-muted">{t('cli.currentVersion')}</dt><dd className="truncate font-medium tabular-nums">{cli.currentVersion || t('cli.unavailable')}</dd>
+                      <dt className="text-muted">{t('cli.currentVersion')}</dt><dd className="truncate font-medium tabular-nums">{cli.currentVersion || t(notInstalled ? 'cli.statusNotInstalled' : 'cli.unavailable')}</dd>
                       <dt className="text-muted">{t('cli.latestVersion')}</dt><dd className="truncate font-medium tabular-nums">{cli.latestVersion || t('cli.notFetched')}</dd>
                     </dl>
-                    <NoticeToast message={cli.error && cli.error !== operation?.error ? t('cli.namedError', { name: cli.name, error: cli.error }) : null}
+                    <NoticeToast message={error && error !== operation?.error ? t('cli.namedError', { name: cli.name, error }) : null}
                       variant="danger" scope={session.activeBackendConnectionId} />
                   </div>
                 </div>
-                {cli.kind === 'managed' ? (
+                {cli.kind === 'managed' && notInstalled ? (
+                  <Button
+                    className="mt-4 w-full"
+                    size="sm"
+                    variant={cli.installSupported ? 'primary' : 'secondary'}
+                    isDisabled={!cli.installSupported || Boolean(operation?.status === 'running') || Boolean(submittingProvider)}
+                    onPress={() => void startOperation(cli.id, 'install')}
+                  >
+                    {running ? <Spinner size="sm" /> : <RiDownload2Line className="size-4" />}
+                    {running ? t('cli.installingNow') : t('cli.install')}
+                  </Button>
+                ) : cli.kind === 'managed' ? (
                   <Button
                     className="mt-4 w-full"
                     size="sm"
                     variant={cli.status === 'updateAvailable' ? 'primary' : 'secondary'}
                     isDisabled={!cli.upgradeSupported || Boolean(operation?.status === 'running') || Boolean(submittingProvider)}
-                    onPress={() => void upgrade(cli.id)}
+                    onPress={() => void startOperation(cli.id, 'upgrade')}
                   >
-                    {upgrading ? <Spinner size="sm" /> : <RiDownloadCloud2Line className="size-4" />}
-                    {upgrading ? t('cli.upgradingNow') : t('cli.upgradeToLatest')}
+                    {running ? <Spinner size="sm" /> : <RiDownloadCloud2Line className="size-4" />}
+                    {running ? t('cli.upgradingNow') : t('cli.upgradeToLatest')}
                   </Button>
                 ) : null}
               </Card>

@@ -1326,3 +1326,345 @@ body {
     animation: none;
   }
 }
+
+/* user_input questions: one card at a time. The remaining questions peek out
+   beneath the current card; switching cards is animated by motion/react in
+   ConversationRunStatus.tsx. */
+.question-deck {
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+  width: 100%;
+  min-width: 0;
+  padding-block: 0.25rem;
+}
+
+.question-deck__bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.question-deck__steps {
+  display: flex;
+  flex: 1;
+  gap: 0.375rem;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.question-deck__step {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.125rem 0.625rem 0.125rem 0.5rem;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: var(--surface-tertiary);
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.2s, color 0.2s, border-color 0.2s;
+}
+
+.question-deck__step[data-answered] {
+  color: var(--foreground);
+}
+
+.question-deck__step[aria-current='step'] {
+  border-color: color-mix(in oklab, var(--accent) 35%, transparent);
+  background: var(--accent-soft);
+  color: var(--accent-soft-foreground);
+}
+
+.question-deck__step:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+@media (hover: hover) {
+  .question-deck__step:hover:not([aria-current='step']) {
+    background: var(--default);
+    color: var(--foreground);
+  }
+}
+
+.question-deck__step-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.5;
+}
+
+.question-deck__step[aria-current='step'] .question-deck__step-dot {
+  opacity: 1;
+}
+
+.question-deck__step-check {
+  width: 12px;
+  height: 12px;
+  color: var(--success);
+}
+
+.question-deck__count {
+  flex: none;
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.question-deck__stack {
+  position: relative;
+  padding-bottom: 12px;
+}
+
+.question-deck__ghost {
+  position: absolute;
+  inset: 0 0 12px;
+  border: 1px solid var(--separator);
+  border-radius: var(--radius);
+  background: var(--surface);
+  opacity: 0;
+  transform: scale(0.9);
+  transform-origin: 50% 100%;
+  transition: transform 0.32s cubic-bezier(0.32, 0.72, 0, 1), opacity 0.32s cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.question-deck__ghost--1[data-visible] {
+  opacity: 0.75;
+  transform: translateY(6px) scale(0.965);
+}
+
+.question-deck__ghost--2[data-visible] {
+  opacity: 0.45;
+  transform: translateY(12px) scale(0.93);
+}
+
+.question-deck__viewport {
+  position: relative;
+  border-radius: var(--radius);
+}
+
+/* Clip only while cards fly in and out so the resting card keeps its shadow. */
+.question-deck__viewport[data-switching] {
+  overflow: clip;
+}
+
+.question-deck__card {
+  position: relative;
+  padding: 0.875rem 0.875rem 0.75rem;
+  border: 1px solid var(--separator);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--surface-shadow);
+}
+
+.question-deck__meta {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.375rem;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.question-deck__chip {
+  padding: 1px 0.5rem;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-soft-foreground);
+  font-weight: 600;
+}
+
+.question-deck__question {
+  margin: 0 0 0.75rem;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  line-height: 1.45;
+  text-wrap: pretty;
+  overflow-wrap: anywhere;
+}
+
+.question-deck__options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.question-deck__option {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.625rem;
+  padding: 0.5625rem 0.625rem;
+  border: 1px solid var(--separator);
+  border-radius: 0.75rem;
+  cursor: pointer;
+  transition: background-color 0.15s, border-color 0.15s, transform 0.12s cubic-bezier(0.32, 0.72, 0, 1);
+  -webkit-tap-highlight-color: transparent;
+}
+
+@media (hover: hover) {
+  .question-deck__option:hover {
+    background: var(--surface-secondary);
+  }
+}
+
+.question-deck__option:active {
+  transform: scale(0.99);
+}
+
+.question-deck__option:has(input:focus-visible),
+.question-deck__option--other:focus-within {
+  outline: 2px solid color-mix(in oklab, var(--accent) 55%, transparent);
+  outline-offset: 1px;
+}
+
+.question-deck__option[data-selected] {
+  border-color: color-mix(in oklab, var(--accent) 55%, transparent);
+  background: var(--accent-soft);
+}
+
+.question-deck__option--other {
+  align-items: center;
+  cursor: text;
+}
+
+.question-deck__key {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  margin-top: 1px;
+  border-radius: 7px;
+  background: var(--surface-tertiary);
+  color: var(--muted);
+  font: 600 11px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  transition: background-color 0.15s, color 0.15s;
+}
+
+.question-deck__option--other .question-deck__key {
+  margin-top: 0;
+}
+
+.question-deck__option[data-selected] .question-deck__key {
+  background: var(--accent);
+  color: var(--accent-foreground);
+}
+
+.question-deck__text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.question-deck__label {
+  font-weight: 500;
+}
+
+.question-deck__description {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.question-deck__other {
+  flex: 1;
+  min-width: 0;
+  padding: 1px 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+.question-deck__other::placeholder {
+  color: var(--muted);
+}
+
+/* Round mark for single choice, rounded square for multiple choice. */
+.question-deck__mark {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  margin-top: 3px;
+  border: 1.5px solid var(--default);
+  border-radius: 999px;
+  transition: background-color 0.15s, border-color 0.15s;
+}
+
+.question-deck__option--other .question-deck__mark {
+  margin-top: 0;
+}
+
+.question-deck__options[data-multiple] .question-deck__mark {
+  border-radius: 6px;
+}
+
+.question-deck__mark svg {
+  width: 12px;
+  height: 12px;
+  color: var(--accent-foreground);
+  opacity: 0;
+  transform: scale(0.6);
+  transition: opacity 0.15s, transform 0.2s cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.question-deck__option[data-selected] .question-deck__mark {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.question-deck__option[data-selected] .question-deck__mark svg {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.question-deck__hint {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.75rem;
+  margin: 0.625rem 0 0;
+  color: var(--muted);
+  font-size: 0.71875rem;
+}
+
+.question-deck__hint kbd {
+  height: 1.125rem;
+  padding-inline: 0.3rem;
+  font-size: 10.5px;
+}
+
+/* Key hints only help with a keyboard at hand. */
+@media (pointer: coarse) {
+  .question-deck__hint {
+    display: none;
+  }
+}
+
+.question-deck__footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .question-deck__step,
+  .question-deck__ghost,
+  .question-deck__option,
+  .question-deck__key,
+  .question-deck__mark,
+  .question-deck__mark svg {
+    transition: none;
+  }
+}

@@ -1,12 +1,14 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Card, Chip, ComboBox, Input, Label, ListBox, Select, Spinner, Switch, TextArea, TextField, toast } from '@heroui/react';
-import { RiAddLine, RiArrowDownSLine, RiCheckLine, RiCloseLine, RiDeleteBinLine, RiEdit2Line, RiRefreshLine, RiUserSettingsLine } from '@remixicon/react';
+import { RiAddLine, RiArrowDownSLine, RiCheckLine, RiCloseLine, RiDeleteBinLine, RiDownload2Line, RiEdit2Line, RiRefreshLine, RiUpload2Line, RiUserSettingsLine } from '@remixicon/react';
 import {
+  AGENT_PROVIDER_TRANSFER_FORMAT,
   MANAGED_PROVIDER_AGENTS,
   PROVIDER_DISPLAY_NAMES,
   V2ApiClient,
   type AgentProviderBucket,
   type AgentProviderProfile,
+  type AgentProviderTransfer,
   type AgentProvidersResponse,
   type ManagedProviderAgent,
 } from '@todex/protocol/v2';
@@ -62,6 +64,7 @@ export function AgentProvidersPanel({ session }: { session: TodeXSession }) {
   const [busy, setBusy] = useState<string>();
   const [editor, setEditor] = useState<EditorState>(null);
   const requestGeneration = useRef(0);
+  const importInput = useRef<HTMLInputElement>(null);
   const api = useCallback(() => new V2ApiClient({
     serverUrl: session.settings.serverUrl,
     device: deviceIdentityFromSecret(session.settings.deviceSecret),
@@ -116,6 +119,43 @@ export function AgentProvidersPanel({ session }: { session: TodeXSession }) {
       await api().deleteAgentProvider(agent, profile.id);
       await refresh(true);
     }, 'ap.deleted');
+  };
+
+  /// The file carries every secret in clear so another backend can use it;
+  /// the toast says so because nothing else in the panel shows raw keys.
+  const exportProviders = () => {
+    void run('export', async () => {
+      const transfer = await api().exportAgentProviders(agent);
+      const now = new Date();
+      const pad = (value: number) => String(value).padStart(2, '0');
+      const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+      downloadJson(`todex-${agent}-providers-${stamp}.json`, transfer);
+    }, 'ap.exported');
+  };
+
+  const importProviders = async (file: File) => {
+    let transfer: AgentProviderTransfer;
+    try {
+      const parsed = JSON.parse(await file.text()) as Partial<AgentProviderTransfer> | null;
+      if (parsed?.format !== AGENT_PROVIDER_TRANSFER_FORMAT || !Array.isArray(parsed.providers)) {
+        toast.danger(t('ap.importInvalid'));
+        return;
+      }
+      if (parsed.agent !== agent) {
+        toast.danger(t('ap.importWrongAgent', { agent: PROVIDER_DISPLAY_NAMES[parsed.agent as ManagedProviderAgent] ?? String(parsed.agent) }));
+        return;
+      }
+      transfer = parsed as AgentProviderTransfer;
+    } catch {
+      toast.danger(t('ap.importInvalid'));
+      return;
+    }
+    setEditor(null);
+    await run('import', async () => {
+      const next = await api().importAgentProviders(agent, transfer);
+      toast.success(t('ap.importedCount', { count: transfer.providers.length }));
+      return next;
+    });
   };
 
   const activeBackend = session.backendConnections.find((item) => item.id === session.activeBackendConnectionId);
@@ -303,15 +343,47 @@ export function AgentProvidersPanel({ session }: { session: TodeXSession }) {
           </div>
 
           {editor?.kind === 'new' ? renderEditor() : (
-            <Button variant="secondary" onPress={() => setEditor({ kind: 'new' })}>
-              <RiAddLine className="size-4" />
-              {t('ap.add')}
-            </Button>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button variant="secondary" onPress={() => setEditor({ kind: 'new' })}>
+                <RiAddLine className="size-4" />
+                {t('ap.add')}
+              </Button>
+              <Button variant="tertiary" isDisabled={Boolean(busy) || bucket.providers.length === 0} onPress={exportProviders}>
+                {busy === 'export' ? <Spinner size="sm" /> : <RiDownload2Line className="size-4" />}
+                {t('ap.export')}
+              </Button>
+              <Button variant="tertiary" isDisabled={Boolean(busy)} onPress={() => importInput.current?.click()}>
+                {busy === 'import' ? <Spinner size="sm" /> : <RiUpload2Line className="size-4" />}
+                {t('ap.import')}
+              </Button>
+              <input
+                ref={importInput}
+                className="hidden"
+                type="file"
+                accept="application/json,.json"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  // Reset so picking the same file again still fires onChange.
+                  event.target.value = '';
+                  if (file) void importProviders(file);
+                }}
+              />
+            </div>
           )}
         </>
       )}
     </div>
   );
+}
+
+function downloadJson(fileName: string, value: unknown) {
+  const url = URL.createObjectURL(new Blob([`${JSON.stringify(value, null, 2)}\n`], { type: 'application/json' }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = fileName;
+  link.click();
+  // Revoke after the click has handed the blob to the download manager.
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 function ProviderEditor({

@@ -39,7 +39,8 @@ Built with **Electron 44**, **React 19**, **Vite 7**, **Tailwind CSS v4**, and *
     - **Capabilities**: Real-time read-only catalog of active Skills and MCP servers.
     - **Experiments**: Feature toggles and developer diagnostics.
 - **Pairing & Connection Management**:
-  - Inspect the active Backend's Codex, Pi, Claude Code, Grok Build, and ACP CLI inventory, compare installed and latest versions, and start managed CLI upgrades.
+  - Inspect the active Backend's Codex, Pi, Claude Code, Grok Build, and ACP CLI inventory, compare installed and latest versions, install missing CLIs in one click, and start managed CLI upgrades.
+  - Export and import one agent's provider accounts as a JSON file to sync them between hosts (the file holds keys in plain text).
   - Connect via direct host/port URL; requests are signed with the per-device key enrolled through device verification.
   - [Device verification](docs/device-verification.md): compare a random code with the backend TUI and approve once to save the token; encryption public keys still require QR or manual import.
   - Paste pairing JSON or multi-frame segmented QR payloads.

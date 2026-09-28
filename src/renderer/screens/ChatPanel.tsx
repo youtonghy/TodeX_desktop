@@ -6,7 +6,7 @@ import type { Dispatch, KeyboardEvent, SetStateAction } from 'react';
 import { Button, Label, ListBox, Popover, ScrollShadow, Select, Spinner, Tooltip, toast } from '@heroui/react';
 import { ChainOfThought, ChatAttachment, ChatAttachmentGroup, ChatAttachmentInput, ChatMessage, HoverCard, PromptInput } from '@heroui-pro/react';
 import { ChatMessageActions } from '@heroui-pro/react/chat-message-actions';
-import { ChatTool } from '@heroui-pro/react/chat-tool';
+import { ChatTool, type ToolPartState } from '@heroui-pro/react/chat-tool';
 import { Markdown, type MarkdownProps } from '@heroui-pro/react/markdown';
 import { baseMarkdownComponents } from '../components/markdownComponents';
 import { providerDisplayName, type ProviderKind, type PermissionMode } from '@todex/protocol/v2';
@@ -46,11 +46,13 @@ import {
   STREAMING_REPLY_PLACEHOLDER,
   canAutoLoadEarlierHistory,
   type ComposerAttachmentDraft,
+  type TimelineEntry,
 } from '../session/helpers';
 import { selectionInside } from '../lib/selection';
 import type { SentAttachment } from '../session/sentAttachments';
 import { findCapabilityHashTrigger, insertCapabilityReference } from '@todex/protocol/todex';
 import { buildCapabilitySuggestions, capabilityCatalogsPending, type CapabilitySuggestion } from '@todex/protocol/capabilityCatalog';
+import { describeToolCall, type ToolCallKind } from '@todex/protocol/toolPresentation';
 import { getLocale, t, useT } from '../i18n';
 
 type Props = {
@@ -104,21 +106,32 @@ function attachmentName(file: File, index: number, mimeType: string, source: 'cl
   return `${source === 'clipboard' ? 'pasted' : 'attachment'}-${index + 1}.${extension}`;
 }
 
-function toolPresentation(raw: string) {
-  try {
-    const value = JSON.parse(raw) as Record<string, unknown>;
-    const toolName = typeof value.toolName === 'string' ? value.toolName
-      : typeof value.tool === 'string' ? value.tool
-        : typeof value.command === 'string' ? t('chat.toolCommand') : t('chat.toolCall');
-    const args = value.arguments ?? value.input ?? (typeof value.command === 'string' ? { command: value.command } : undefined);
-    const emptyObject = typeof args === 'object' && args !== null && !Array.isArray(args) && Object.keys(args).length === 0;
-    const argsText = typeof args === 'string' ? args
-      : args === undefined || args === null || emptyObject ? ''
-        : JSON.stringify(args, null, 2);
-    return { toolName, argsText };
-  } catch {
-    return { toolName: t('chat.toolCall'), argsText: raw };
+function toolKindLabel(kind: ToolCallKind): string {
+  switch (kind) {
+    case 'command': return t('chat.toolCommand');
+    case 'fileChange': return t('chat.toolFileChange');
+    case 'webSearch': return t('chat.toolWebSearch');
+    default: return t('chat.toolCall');
   }
+}
+
+/** Tool rows name the tool and show its key argument (command, path, query)
+ * without expanding; arguments, output and errors stay in the body. */
+function toolCardPresentation(entry: TimelineEntry, active: boolean) {
+  const tool = describeToolCall(entry.subtitle);
+  const state: ToolPartState = tool.status === 'failed' ? 'output-error'
+    : tool.status === 'completed' || entry.phase === 'completed' || !active ? 'output-available'
+      : 'input-available';
+  return {
+    label: tool.name || toolKindLabel(tool.kind),
+    summary: tool.summary,
+    argsText: tool.argsText,
+    // ChatTool hides the result section in the error state, so a failed
+    // call's output is surfaced as its error text.
+    output: state === 'output-error' ? undefined : tool.outputText,
+    errorText: state === 'output-error' ? (tool.errorText ?? tool.outputText) : undefined,
+    state,
+  };
 }
 
 /// Sent attachments open a read-only preview on click/Enter; content comes
@@ -429,14 +442,21 @@ const ChatTimelineItem = memo(function ChatTimelineItem({
             )
           ) : (
             <ChainOfThought.Steps>
-              {item.entries.map((entry) => (
-                <ChainOfThought.Step key={entry.id} label={entry.title}>
-                  {isChatToolEntry(entry) ? (() => {
-                    const { toolName, argsText } = toolPresentation(entry.subtitle);
-                    return <ChatTool defaultExpanded={false} state={entry.phase === 'completed' ? 'output-available' : 'input-streaming'} toolName={toolName} argsText={argsText} />;
-                  })() : <p className="max-w-full overflow-x-auto whitespace-pre-wrap wrap-anywhere text-xs">{entry.subtitle || entry.title}</p>}
-                </ChainOfThought.Step>
-              ))}
+              {item.entries.map((entry) => {
+                if (!isChatToolEntry(entry)) {
+                  return (
+                    <ChainOfThought.Step key={entry.id} label={entry.title}>
+                      <p className="max-w-full overflow-x-auto whitespace-pre-wrap wrap-anywhere text-xs">{entry.subtitle || entry.title}</p>
+                    </ChainOfThought.Step>
+                  );
+                }
+                const tool = toolCardPresentation(entry, isStreamingGroup);
+                return (
+                  <ChainOfThought.Step key={entry.id} label={tool.label}>
+                    <ChatTool defaultExpanded={false} state={tool.state} toolName={tool.summary || tool.label} argsText={tool.argsText} output={tool.output} errorText={tool.errorText} />
+                  </ChainOfThought.Step>
+                );
+              })}
             </ChainOfThought.Steps>
           )}
         </ChainOfThought.Content> : null}
@@ -445,8 +465,8 @@ const ChatTimelineItem = memo(function ChatTimelineItem({
   }
   const entry = item.entry;
   if (isChatToolEntry(entry)) {
-    const { toolName, argsText } = toolPresentation(entry.subtitle);
-    return <ChatTool defaultExpanded={false} state={entry.phase === 'completed' ? 'output-available' : 'input-streaming'} toolName={toolName} argsText={argsText} triggerPrefix={thinking ? t('chat.toolCalling') : t('chat.toolCalled')} />;
+    const tool = toolCardPresentation(entry, thinking);
+    return <ChatTool defaultExpanded={false} state={tool.state} toolName={tool.summary ? `${tool.label} · ${tool.summary}` : tool.label} argsText={tool.argsText} output={tool.output} errorText={tool.errorText} triggerPrefix={thinking ? t('chat.toolCalling') : t('chat.toolCalled')} />;
   }
   // Progress narration renders like a normal message; empty detail stubs hide.
   if (entry.category === 'assistant_progress' && !entry.subtitle.trim()) return null;

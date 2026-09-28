@@ -1,7 +1,7 @@
 import { Kbd } from '@heroui/react';
 import { useEffect, useRef } from 'react';
 
-const isMacLike = window.todexDesktop?.shell.platform === 'darwin'
+export const isMacLike = window.todexDesktop?.shell.platform === 'darwin'
   || navigator.userAgent.includes('Mac');
 
 export type ShortcutId =

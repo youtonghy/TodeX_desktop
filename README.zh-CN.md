@@ -41,7 +41,8 @@
     - **能力目录（Capabilities）**：实时查看当前生效的 Skills 与 MCP Servers。
     - **实验特性（Experiments）**：特性开关与开发者诊断面板。
 - **配对与连接管理**：
-  - 查看当前后端连接的 Codex、Pi、Claude Code、Grok Build 与 ACP CLI，比较当前/最新版本并一键升级受管 CLI。
+  - 查看当前后端连接的 Codex、Pi、Claude Code、Grok Build 与 ACP CLI，比较当前/最新版本，一键安装缺失的 CLI 或升级受管 CLI。
+  - Agent 账户支持按 Agent 导出/导入供应商 JSON 文件，便于多台主机同步（文件含明文密钥）。
   - 支持通过主机/端口直接连接；请求使用设备验证登记的设备密钥签名。
   - 支持粘贴配对 JSON 文本或多段分片二维码数据。
   - **拖拽二维码图片配对**：支持直接将二维码截图/图片拖入应用窗口（基于 `jsqr` 本地解码）。
