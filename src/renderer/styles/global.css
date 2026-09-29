@@ -652,7 +652,7 @@ body {
   background: var(--surface-secondary) !important;
 }
 
-.composer-model-card__trigger [data-slot="select-value"] {
+.composer-model-card__value {
   display: inline-flex;
   align-items: baseline;
   justify-content: center;
@@ -723,6 +723,22 @@ body {
   min-width: 0;
   white-space: normal;
   overflow-wrap: anywhere;
+}
+
+.composer-model-card__option-detail {
+  margin-left: 0.45rem;
+  font-size: 0.78rem;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.composer-model-card__menu-scope {
+  display: contents;
+}
+
+.composer-model-card__submenu {
+  width: 14rem;
+  min-width: min(11rem, calc(100vw - 2rem));
 }
 
 .composer-model-card__listbox {

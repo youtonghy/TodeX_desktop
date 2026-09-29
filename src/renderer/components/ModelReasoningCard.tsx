@@ -1,6 +1,6 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronRight, Thunderbolt, ThunderboltFill } from '@gravity-ui/icons';
-import { Autocomplete, EmptyState, ListBox, SearchField, Select, Tooltip, useFilter } from '@heroui/react';
+import { Dropdown, EmptyState, SearchField, Tooltip, useFilter } from '@heroui/react';
 import type { ProviderModelDescriptor } from '@todex/protocol/v2';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { reasoningEffortLabel, modelDisplayLabel } from '../session/helpers';
@@ -35,9 +35,66 @@ export function ModelReasoningCard({
   onSelectReasoningEffort,
 }: ModelReasoningCardProps) {
   const trackRef = useRef<HTMLDivElement>(null);
+  const menuScopeRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [modelSearch, setModelSearch] = useState('');
+  const [isPickerOpen, setPickerOpen] = useState(false);
   const { contains } = useFilter({ sensitivity: 'base' });
+
+  // Focus the search input once the popover content is mounted so typing
+  // filters immediately.
+  useEffect(() => {
+    if (isPickerOpen) searchInputRef.current?.focus();
+  }, [isPickerOpen]);
+
+  const handlePickerOpenChange = useCallback((isOpen: boolean) => {
+    setPickerOpen(isOpen);
+    if (isOpen) setModelSearch('');
+  }, []);
+
+  // Models tagged with a `family` collapse into a two-level menu: level one
+  // lists families, level two offers "latest" (the family alias) plus each
+  // pinned version. Untagged models stay as flat top-level entries.
+  const { ungroupedModels, familyGroups } = useMemo(() => {
+    const ungroupedModels: ProviderModelDescriptor[] = [];
+    const groups = new Map<string, ProviderModelDescriptor[]>();
+    for (const item of providerModels) {
+      const family = item.family?.trim().toLowerCase();
+      if (!family) {
+        ungroupedModels.push(item);
+        continue;
+      }
+      const group = groups.get(family);
+      if (group) {
+        group.push(item);
+      } else {
+        groups.set(family, [item]);
+      }
+    }
+    return {
+      ungroupedModels,
+      familyGroups: [...groups].map(([family, items]) => ({ family, items })),
+    };
+  }, [providerModels]);
+
+  const searchQuery = modelSearch.trim();
+  const filteredModels = searchQuery
+    ? providerModels.filter(
+        (item) => contains(item.displayName, searchQuery) || contains(item.id, searchQuery),
+      )
+    : null;
+  const selectedKeys = useMemo(() => (currentModel ? [currentModel] : []), [currentModel]);
+
+  const familyLabel = (family: string) => family.charAt(0).toUpperCase() + family.slice(1);
+
+  const focusFirstMenuItem = useCallback((fromEnd = false) => {
+    const items = menuScopeRef.current?.querySelectorAll<HTMLElement>(
+      '[role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"]',
+    );
+    if (!items?.length) return;
+    (fromEnd ? items[items.length - 1] : items[0]).focus();
+  }, []);
 
   const modelDisplayName =
     currentModelDescriptor?.displayName || modelDisplayLabel(currentModel, modelCatalog);
@@ -165,56 +222,136 @@ export function ModelReasoningCard({
         ) : null}
 
         {/* Model dropdown trigger */}
-        <Select
+        <Dropdown
           className="composer-model-card__select"
-          selectedKey={currentModel || null}
-          allowsEmptyCollection
-          onOpenChange={(isOpen) => {
-            if (isOpen) setModelSearch('');
-          }}
-          onSelectionChange={(key) => {
-            if (typeof key === 'string' && key) {
-              onSelectModel(key);
-            }
-          }}
-          aria-label="选择模型"
+          isOpen={isPickerOpen}
+          onOpenChange={handlePickerOpenChange}
         >
-          <Select.Trigger className="composer-model-card__trigger">
-            <Select.Value>
+          <Dropdown.Trigger className="composer-model-card__trigger" aria-label="选择模型">
+            <span className="composer-model-card__value">
               <span className="composer-model-card__model-title">{modelDisplayName}</span>
               {effortLabel ? (
                 <span className="composer-model-card__effort-badge">{effortLabel}</span>
               ) : null}
-            </Select.Value>
+            </span>
             <ChevronRight className="composer-model-card__chevron" aria-hidden="true" />
-          </Select.Trigger>
-          <Select.Popover className="composer-model-card__dropdown" placement="bottom" offset={8}>
-            <Autocomplete.Filter
-              inputValue={modelSearch}
-              onInputChange={setModelSearch}
-              filter={(textValue, inputValue) => contains(textValue, inputValue.trim())}
+          </Dropdown.Trigger>
+          <Dropdown.Popover className="composer-model-card__dropdown" placement="bottom" offset={8}>
+            <SearchField
+              autoFocus
+              aria-label="搜索模型"
+              className="composer-model-card__search"
+              variant="secondary"
+              value={modelSearch}
+              onChange={setModelSearch}
             >
-              <SearchField autoFocus aria-label="搜索模型" className="composer-model-card__search" variant="secondary">
-                <SearchField.Group>
-                  <SearchField.SearchIcon />
-                  <SearchField.Input placeholder="搜索模型…" />
-                  <SearchField.ClearButton aria-label="清除搜索" />
-                </SearchField.Group>
-              </SearchField>
-              <ListBox
-                className="composer-model-card__listbox"
-                renderEmptyState={() => <EmptyState className="composer-model-card__empty">未找到匹配的模型</EmptyState>}
-              >
-                {providerModels.map((item) => (
-                  <ListBox.Item key={item.id} id={item.id} textValue={item.displayName} className="composer-model-card__list-item">
-                    <span className="composer-model-card__option-name">{item.displayName}</span>
-                    <ListBox.ItemIndicator />
-                  </ListBox.Item>
-                ))}
-              </ListBox>
-            </Autocomplete.Filter>
-          </Select.Popover>
-        </Select>
+              <SearchField.Group>
+                <SearchField.SearchIcon />
+                <SearchField.Input
+                  ref={searchInputRef}
+                  placeholder="搜索模型…"
+                  onKeyDown={(event) => {
+                    if (event.key === 'ArrowDown') {
+                      event.preventDefault();
+                      focusFirstMenuItem();
+                    } else if (event.key === 'ArrowUp') {
+                      event.preventDefault();
+                      focusFirstMenuItem(true);
+                    }
+                  }}
+                />
+                <SearchField.ClearButton aria-label="清除搜索" />
+              </SearchField.Group>
+            </SearchField>
+            <div ref={menuScopeRef} className="composer-model-card__menu-scope">
+              {filteredModels ? (
+                filteredModels.length === 0 ? (
+                  <EmptyState className="composer-model-card__empty">未找到匹配的模型</EmptyState>
+                ) : (
+                  <Dropdown.Menu
+                    className="composer-model-card__listbox"
+                    aria-label="选择模型"
+                    autoFocus={false}
+                    selectionMode="single"
+                    selectedKeys={selectedKeys}
+                    onAction={(key) => onSelectModel(String(key))}
+                  >
+                    {filteredModels.map((item) => (
+                      <Dropdown.Item key={item.id} id={item.id} textValue={item.displayName} className="composer-model-card__list-item">
+                        <span className="composer-model-card__option-name">{item.displayName}</span>
+                        <Dropdown.ItemIndicator />
+                      </Dropdown.Item>
+                    ))}
+                  </Dropdown.Menu>
+                )
+              ) : providerModels.length === 0 ? (
+                <EmptyState className="composer-model-card__empty">未找到匹配的模型</EmptyState>
+              ) : (
+                <Dropdown.Menu
+                  className="composer-model-card__listbox"
+                  aria-label="选择模型"
+                  autoFocus={false}
+                  selectionMode="single"
+                  selectedKeys={selectedKeys}
+                  onAction={(key) => onSelectModel(String(key))}
+                >
+                  {ungroupedModels.map((item) => (
+                    <Dropdown.Item key={item.id} id={item.id} textValue={item.displayName} className="composer-model-card__list-item">
+                      <span className="composer-model-card__option-name">{item.displayName}</span>
+                      <Dropdown.ItemIndicator />
+                    </Dropdown.Item>
+                  ))}
+                  {familyGroups.map((group) => {
+                    const selectedInFamily = group.items.find((item) => item.id === currentModel);
+                    return (
+                      <Dropdown.SubmenuTrigger key={group.family}>
+                        <Dropdown.Item
+                          id={`family:${group.family}`}
+                          textValue={familyLabel(group.family)}
+                          className="composer-model-card__list-item"
+                        >
+                          <span className="composer-model-card__option-name">
+                            {familyLabel(group.family)}
+                            {selectedInFamily && selectedInFamily.id !== group.family ? (
+                              <span className="composer-model-card__option-detail">{selectedInFamily.displayName}</span>
+                            ) : null}
+                          </span>
+                          <Dropdown.SubmenuIndicator />
+                        </Dropdown.Item>
+                        <Dropdown.Popover className="composer-model-card__dropdown composer-model-card__submenu">
+                          <Dropdown.Menu
+                            className="composer-model-card__listbox"
+                            aria-label={familyLabel(group.family)}
+                            selectionMode="single"
+                            selectedKeys={selectedKeys}
+                            onAction={(key) => onSelectModel(String(key))}
+                          >
+                            {group.items.map((item) => (
+                              <Dropdown.Item
+                                key={item.id}
+                                id={item.id}
+                                textValue={item.displayName}
+                                className="composer-model-card__list-item"
+                              >
+                                <span className="composer-model-card__option-name">
+                                  {item.id === group.family ? '最新' : item.displayName}
+                                  {item.id === group.family && item.description ? (
+                                    <span className="composer-model-card__option-detail">{item.description}</span>
+                                  ) : null}
+                                </span>
+                                <Dropdown.ItemIndicator />
+                              </Dropdown.Item>
+                            ))}
+                          </Dropdown.Menu>
+                        </Dropdown.Popover>
+                      </Dropdown.SubmenuTrigger>
+                    );
+                  })}
+                </Dropdown.Menu>
+              )}
+            </div>
+          </Dropdown.Popover>
+        </Dropdown>
       </div>
 
       {/* Bottom row: Stepped Slider */}
