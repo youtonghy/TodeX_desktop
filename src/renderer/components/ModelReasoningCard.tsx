@@ -5,6 +5,34 @@ import type { ProviderModelDescriptor } from '@todex/protocol/v2';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { reasoningEffortLabel, modelDisplayLabel } from '../session/helpers';
 
+// Pretty labels for vendor-style families emitted by providers like Devin
+// (vendor token of the model id) and Pi (provider prefix). Anything unknown
+// falls back to capitalizing the family key.
+const FAMILY_LABELS: Record<string, string> = {
+  anthropic: 'Anthropic',
+  cerebras: 'Cerebras',
+  claude: 'Claude',
+  deepseek: 'DeepSeek',
+  gemini: 'Gemini',
+  glm: 'GLM',
+  google: 'Google',
+  gpt: 'GPT',
+  grok: 'Grok',
+  groq: 'Groq',
+  kimi: 'Kimi',
+  meta: 'Meta',
+  minimax: 'MiniMax',
+  mistral: 'Mistral',
+  moonshot: 'Moonshot',
+  openai: 'OpenAI',
+  openrouter: 'OpenRouter',
+  qwen: 'Qwen',
+  swe: 'SWE',
+  xai: 'xAI',
+  zai: 'Z.ai',
+  zhipu: 'Zhipu',
+};
+
 interface ModelReasoningCardProps {
   currentModel: string;
   currentModelDescriptor?: ProviderModelDescriptor;
@@ -108,7 +136,8 @@ export function ModelReasoningCard({
     [currentFamily, familyGroups],
   );
 
-  const familyLabel = (family: string) => family.charAt(0).toUpperCase() + family.slice(1);
+  const familyLabel = (family: string) =>
+    FAMILY_LABELS[family] ?? family.charAt(0).toUpperCase() + family.slice(1);
 
   const familyItemRefs = useRef(new Map<string, HTMLElement>());
 
