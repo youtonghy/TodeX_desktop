@@ -736,18 +736,34 @@ body {
   display: contents;
 }
 
-.composer-model-card__section-header {
-  display: block;
-  padding: 0.4rem 0.65rem 0.15rem;
-  font-size: 0.72rem;
-  font-weight: 600;
-  letter-spacing: 0.03em;
-  color: var(--muted);
-  user-select: none;
+.composer-model-card__split {
+  display: flex;
+  flex: 1;
+  min-height: 0;
 }
 
-.composer-model-card__list-item--nested {
-  padding-inline-start: 1.5rem;
+.composer-model-card__families {
+  flex: 0 0 9.5rem;
+  border-inline-end: 1px solid var(--separator);
+  margin-inline-end: 0.15rem;
+  padding-inline-end: 0.15rem;
+}
+
+.composer-model-card__versions {
+  flex: 1;
+  min-width: 0;
+}
+
+.composer-model-card__list-item.is-active {
+  background: var(--surface-secondary);
+}
+
+.composer-model-card__option-chevron {
+  margin-left: auto;
+  width: 0.9rem;
+  height: 0.9rem;
+  flex-shrink: 0;
+  color: var(--muted);
 }
 
 .composer-model-card__listbox {

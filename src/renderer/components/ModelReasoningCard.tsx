@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronRight, Thunderbolt, ThunderboltFill } from '@gravity-ui/icons';
-import { Dropdown, EmptyState, Header, SearchField, Tooltip, useFilter } from '@heroui/react';
+import { Dropdown, EmptyState, SearchField, Tooltip, useFilter } from '@heroui/react';
 import type { ProviderModelDescriptor } from '@todex/protocol/v2';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { reasoningEffortLabel, modelDisplayLabel } from '../session/helpers';
@@ -40,6 +40,7 @@ export function ModelReasoningCard({
   const [isDragging, setIsDragging] = useState(false);
   const [modelSearch, setModelSearch] = useState('');
   const [isPickerOpen, setPickerOpen] = useState(false);
+  const [activeFamily, setActiveFamily] = useState<string | null>(null);
   const { contains } = useFilter({ sensitivity: 'base' });
 
   // Focus the search input once the popover content is mounted so typing
@@ -48,14 +49,9 @@ export function ModelReasoningCard({
     if (isPickerOpen) searchInputRef.current?.focus();
   }, [isPickerOpen]);
 
-  const handlePickerOpenChange = useCallback((isOpen: boolean) => {
-    setPickerOpen(isOpen);
-    if (isOpen) setModelSearch('');
-  }, []);
-
-  // Models tagged with a `family` group into menu sections: the family name
-  // is the section header, and its items offer "latest" (the family alias)
-  // plus each pinned version. Untagged models stay as flat top-level entries.
+  // Models tagged with a `family` show in a two-pane layout: the left pane
+  // lists untagged models plus one row per family, and the right pane shows
+  // the active family's versions ("latest" alias first, then pinned versions).
   const { ungroupedModels, familyGroups } = useMemo(() => {
     const ungroupedModels: ProviderModelDescriptor[] = [];
     const groups = new Map<string, ProviderModelDescriptor[]>();
@@ -86,7 +82,43 @@ export function ModelReasoningCard({
     : null;
   const selectedKeys = useMemo(() => (currentModel ? [currentModel] : []), [currentModel]);
 
+  const currentFamily = useMemo(() => {
+    const match = providerModels.find((item) => item.id === currentModel);
+    return match?.family?.trim().toLowerCase() || null;
+  }, [providerModels, currentModel]);
+
+  const activeGroup =
+    familyGroups.find((group) => group.family === activeFamily) ?? familyGroups[0] ?? null;
+
+  // The left pane marks the family containing the current model as selected,
+  // or the untagged model itself when it has no family.
+  const familyPaneSelectedKeys = useMemo(
+    () => (currentFamily ? [`family:${currentFamily}`] : selectedKeys),
+    [currentFamily, selectedKeys],
+  );
+
+  const handlePickerOpenChange = useCallback(
+    (isOpen: boolean) => {
+      setPickerOpen(isOpen);
+      if (isOpen) {
+        setModelSearch('');
+        setActiveFamily(currentFamily ?? familyGroups[0]?.family ?? null);
+      }
+    },
+    [currentFamily, familyGroups],
+  );
+
   const familyLabel = (family: string) => family.charAt(0).toUpperCase() + family.slice(1);
+
+  const familyItemRefs = useRef(new Map<string, HTMLElement>());
+
+  const focusVersionItem = useCallback((fromEnd = false) => {
+    const items = menuScopeRef.current?.querySelectorAll<HTMLElement>(
+      '.composer-model-card__versions [role="menuitemradio"], .composer-model-card__versions [role="menuitem"], .composer-model-card__versions [role="menuitemcheckbox"]',
+    );
+    if (!items?.length) return;
+    (fromEnd ? items[items.length - 1] : items[0]).focus();
+  }, []);
 
   const focusFirstMenuItem = useCallback((fromEnd = false) => {
     const items = menuScopeRef.current?.querySelectorAll<HTMLElement>(
@@ -287,44 +319,121 @@ export function ModelReasoningCard({
               ) : providerModels.length === 0 ? (
                 <EmptyState className="composer-model-card__empty">未找到匹配的模型</EmptyState>
               ) : (
-                <Dropdown.Menu
-                  className="composer-model-card__listbox"
-                  aria-label="选择模型"
-                  autoFocus={false}
-                  selectionMode="single"
-                  selectedKeys={selectedKeys}
-                  onAction={(key) => onSelectModel(String(key))}
-                >
-                  {ungroupedModels.map((item) => (
-                    <Dropdown.Item key={item.id} id={item.id} textValue={item.displayName} className="composer-model-card__list-item">
-                      <span className="composer-model-card__option-name">{item.displayName}</span>
-                      <Dropdown.ItemIndicator />
-                    </Dropdown.Item>
-                  ))}
-                  {familyGroups.map((group) => (
-                    <Dropdown.Section key={group.family} className="composer-model-card__section">
-                      <Header className="composer-model-card__section-header">
-                        {familyLabel(group.family)}
-                      </Header>
-                      {group.items.map((item) => (
-                        <Dropdown.Item
-                          key={item.id}
-                          id={item.id}
-                          textValue={item.displayName}
-                          className="composer-model-card__list-item composer-model-card__list-item--nested"
+                familyGroups.length === 0 ? (
+                  <Dropdown.Menu
+                    className="composer-model-card__listbox"
+                    aria-label="选择模型"
+                    autoFocus={false}
+                    selectionMode="single"
+                    selectedKeys={selectedKeys}
+                    onAction={(key) => onSelectModel(String(key))}
+                  >
+                    {providerModels.map((item) => (
+                      <Dropdown.Item key={item.id} id={item.id} textValue={item.displayName} className="composer-model-card__list-item">
+                        <span className="composer-model-card__option-name">{item.displayName}</span>
+                        <Dropdown.ItemIndicator />
+                      </Dropdown.Item>
+                    ))}
+                  </Dropdown.Menu>
+                ) : (
+                  <div className="composer-model-card__split">
+                    <div
+                      className="composer-model-card__families"
+                      onKeyDown={(event) => {
+                        if (event.key !== 'ArrowRight') return;
+                        const target = event.target as HTMLElement;
+                        for (const el of familyItemRefs.current.values()) {
+                          if (el === target || el.contains(target)) {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            focusVersionItem();
+                            break;
+                          }
+                        }
+                      }}
+                    >
+                      <Dropdown.Menu
+                        className="composer-model-card__listbox"
+                        aria-label="模型系列"
+                        autoFocus={false}
+                        selectionMode="single"
+                        selectedKeys={familyPaneSelectedKeys}
+                        onAction={(key) => {
+                          const id = String(key);
+                          if (id.startsWith('family:')) setActiveFamily(id.slice(7));
+                          else onSelectModel(id);
+                        }}
+                      >
+                        {ungroupedModels.map((item) => (
+                          <Dropdown.Item key={item.id} id={item.id} textValue={item.displayName} className="composer-model-card__list-item">
+                            <span className="composer-model-card__option-name">{item.displayName}</span>
+                            <Dropdown.ItemIndicator />
+                          </Dropdown.Item>
+                        ))}
+                        {familyGroups.map((group) => (
+                          <Dropdown.Item
+                            key={group.family}
+                            id={`family:${group.family}`}
+                            ref={(el) => {
+                              if (el) familyItemRefs.current.set(group.family, el);
+                              else familyItemRefs.current.delete(group.family);
+                            }}
+                            textValue={familyLabel(group.family)}
+                            shouldCloseOnSelect={false}
+                            className={`composer-model-card__list-item ${group.family === activeGroup?.family ? 'is-active' : ''}`}
+                            onHoverStart={() => setActiveFamily(group.family)}
+                            onFocusChange={(focused) => {
+                              if (focused) setActiveFamily(group.family);
+                            }}
+                          >
+                            <span className="composer-model-card__option-name">{familyLabel(group.family)}</span>
+                            <Dropdown.ItemIndicator />
+                            <ChevronRight className="composer-model-card__option-chevron" aria-hidden="true" />
+                          </Dropdown.Item>
+                        ))}
+                      </Dropdown.Menu>
+                    </div>
+                    {activeGroup ? (
+                      <div
+                        className="composer-model-card__versions"
+                        onKeyDown={(event) => {
+                          if (event.key === 'ArrowLeft') {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            familyItemRefs.current.get(activeGroup.family)?.focus();
+                          }
+                        }}
+                      >
+                        <Dropdown.Menu
+                          key={activeGroup.family}
+                          className="composer-model-card__listbox"
+                          aria-label={`${familyLabel(activeGroup.family)} 版本`}
+                          autoFocus={false}
+                          selectionMode="single"
+                          selectedKeys={selectedKeys}
+                          onAction={(key) => onSelectModel(String(key))}
                         >
-                          <span className="composer-model-card__option-name">
-                            {item.id === group.family ? '最新' : item.displayName}
-                            {item.id === group.family && item.description ? (
-                              <span className="composer-model-card__option-detail">{item.description}</span>
-                            ) : null}
-                          </span>
-                          <Dropdown.ItemIndicator />
-                        </Dropdown.Item>
-                      ))}
-                    </Dropdown.Section>
-                  ))}
-                </Dropdown.Menu>
+                          {activeGroup.items.map((item) => (
+                            <Dropdown.Item
+                              key={item.id}
+                              id={item.id}
+                              textValue={item.displayName}
+                              className="composer-model-card__list-item"
+                            >
+                              <span className="composer-model-card__option-name">
+                                {item.id === activeGroup.family ? '最新' : item.displayName}
+                                {item.id === activeGroup.family && item.description ? (
+                                  <span className="composer-model-card__option-detail">{item.description}</span>
+                                ) : null}
+                              </span>
+                              <Dropdown.ItemIndicator />
+                            </Dropdown.Item>
+                          ))}
+                        </Dropdown.Menu>
+                      </div>
+                    ) : null}
+                  </div>
+                )
               )}
             </div>
           </Dropdown.Popover>
