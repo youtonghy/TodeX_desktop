@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronRight, Thunderbolt, ThunderboltFill } from '@gravity-ui/icons';
-import { Dropdown, EmptyState, SearchField, Tooltip, useFilter } from '@heroui/react';
+import { Dropdown, EmptyState, Header, SearchField, Tooltip, useFilter } from '@heroui/react';
 import type { ProviderModelDescriptor } from '@todex/protocol/v2';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { reasoningEffortLabel, modelDisplayLabel } from '../session/helpers';
@@ -53,9 +53,9 @@ export function ModelReasoningCard({
     if (isOpen) setModelSearch('');
   }, []);
 
-  // Models tagged with a `family` collapse into a two-level menu: level one
-  // lists families, level two offers "latest" (the family alias) plus each
-  // pinned version. Untagged models stay as flat top-level entries.
+  // Models tagged with a `family` group into menu sections: the family name
+  // is the section header, and its items offer "latest" (the family alias)
+  // plus each pinned version. Untagged models stay as flat top-level entries.
   const { ungroupedModels, familyGroups } = useMemo(() => {
     const ungroupedModels: ProviderModelDescriptor[] = [];
     const groups = new Map<string, ProviderModelDescriptor[]>();
@@ -301,52 +301,29 @@ export function ModelReasoningCard({
                       <Dropdown.ItemIndicator />
                     </Dropdown.Item>
                   ))}
-                  {familyGroups.map((group) => {
-                    const selectedInFamily = group.items.find((item) => item.id === currentModel);
-                    return (
-                      <Dropdown.SubmenuTrigger key={group.family}>
+                  {familyGroups.map((group) => (
+                    <Dropdown.Section key={group.family} className="composer-model-card__section">
+                      <Header className="composer-model-card__section-header">
+                        {familyLabel(group.family)}
+                      </Header>
+                      {group.items.map((item) => (
                         <Dropdown.Item
-                          id={`family:${group.family}`}
-                          textValue={familyLabel(group.family)}
-                          className="composer-model-card__list-item"
+                          key={item.id}
+                          id={item.id}
+                          textValue={item.displayName}
+                          className="composer-model-card__list-item composer-model-card__list-item--nested"
                         >
                           <span className="composer-model-card__option-name">
-                            {familyLabel(group.family)}
-                            {selectedInFamily && selectedInFamily.id !== group.family ? (
-                              <span className="composer-model-card__option-detail">{selectedInFamily.displayName}</span>
+                            {item.id === group.family ? '最新' : item.displayName}
+                            {item.id === group.family && item.description ? (
+                              <span className="composer-model-card__option-detail">{item.description}</span>
                             ) : null}
                           </span>
-                          <Dropdown.SubmenuIndicator />
+                          <Dropdown.ItemIndicator />
                         </Dropdown.Item>
-                        <Dropdown.Popover className="composer-model-card__dropdown composer-model-card__submenu">
-                          <Dropdown.Menu
-                            className="composer-model-card__listbox"
-                            aria-label={familyLabel(group.family)}
-                            selectionMode="single"
-                            selectedKeys={selectedKeys}
-                            onAction={(key) => onSelectModel(String(key))}
-                          >
-                            {group.items.map((item) => (
-                              <Dropdown.Item
-                                key={item.id}
-                                id={item.id}
-                                textValue={item.displayName}
-                                className="composer-model-card__list-item"
-                              >
-                                <span className="composer-model-card__option-name">
-                                  {item.id === group.family ? '最新' : item.displayName}
-                                  {item.id === group.family && item.description ? (
-                                    <span className="composer-model-card__option-detail">{item.description}</span>
-                                  ) : null}
-                                </span>
-                                <Dropdown.ItemIndicator />
-                              </Dropdown.Item>
-                            ))}
-                          </Dropdown.Menu>
-                        </Dropdown.Popover>
-                      </Dropdown.SubmenuTrigger>
-                    );
-                  })}
+                      ))}
+                    </Dropdown.Section>
+                  ))}
                 </Dropdown.Menu>
               )}
             </div>

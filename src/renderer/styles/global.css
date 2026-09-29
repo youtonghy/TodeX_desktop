@@ -736,9 +736,18 @@ body {
   display: contents;
 }
 
-.composer-model-card__submenu {
-  width: 14rem;
-  min-width: min(11rem, calc(100vw - 2rem));
+.composer-model-card__section-header {
+  display: block;
+  padding: 0.4rem 0.65rem 0.15rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+  user-select: none;
+}
+
+.composer-model-card__list-item--nested {
+  padding-inline-start: 1.5rem;
 }
 
 .composer-model-card__listbox {
