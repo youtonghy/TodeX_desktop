@@ -6,6 +6,8 @@ import { ContextMenu as HeroContextMenu, ChatListView, Sidebar, useSidebar } fro
 import { useSidebarPins } from '../session/useSidebarPins';
 import { useKanbanTasks } from '../session/kanbanTasks';
 import { BACKEND_LABEL_COLORS, backendLabelColor } from '../session/backendColors';
+import type { BackendConnectionProfile } from '../session/backendColors';
+import type { WorkspaceRecord } from '@todex/protocol/todex';
 import { ProviderIcon } from './ProviderIcon';
 import { AppIcon } from './AppIcon';
 import { WORKSPACE_ICON_CHOICES, WORKSPACE_RING_STYLES, WorkspaceStatusRing, ringStyleKey, workspaceIconComponent } from './WorkspaceIcon';
@@ -65,7 +67,31 @@ export function AppSidebar({
     )
   ), [session.activeWorkspaceId, session.conversations]);
 
-  const orderedWorkspaces = [...session.workspaces].sort((a, b) => Number(pins.workspace.includes(b.id)) - Number(pins.workspace.includes(a.id)) || (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || (a.createdAt - b.createdAt) || a.id.localeCompare(b.id));
+  // Workspaces cached under other backend profiles are read-only and render in
+  // their own sections; only the active backend's workspaces are editable here.
+  const ownWorkspaces = useMemo(() => session.workspaces.filter(
+    (workspace) => !workspace.backendConnectionId || workspace.backendConnectionId === session.activeBackendConnectionId,
+  ), [session.workspaces, session.activeBackendConnectionId]);
+
+  const foreignWorkspaceGroups = useMemo(() => {
+    const groups = new Map<string, { profile: BackendConnectionProfile | undefined; workspaces: WorkspaceRecord[] }>();
+    for (const workspace of session.workspaces) {
+      const profileId = workspace.backendConnectionId;
+      if (!profileId || profileId === session.activeBackendConnectionId) continue;
+      const group = groups.get(profileId) ?? {
+        profile: session.backendConnections.find((item) => item.id === profileId),
+        workspaces: [],
+      };
+      group.workspaces.push(workspace);
+      groups.set(profileId, group);
+    }
+    for (const group of groups.values()) {
+      group.workspaces.sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || (a.createdAt - b.createdAt) || a.id.localeCompare(b.id));
+    }
+    return [...groups.values()].sort((a, b) => (a.profile?.name ?? '').localeCompare(b.profile?.name ?? ''));
+  }, [session.backendConnections, session.workspaces, session.activeBackendConnectionId]);
+
+  const orderedWorkspaces = [...ownWorkspaces].sort((a, b) => Number(pins.workspace.includes(b.id)) - Number(pins.workspace.includes(a.id)) || (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || (a.createdAt - b.createdAt) || a.id.localeCompare(b.id));
   const [draggedWorkspaceId, setDraggedWorkspaceId] = useState<string | null>(null);
   const [dragIndicator, setDragIndicator] = useState<{ id: string; position: 'before' | 'after' } | null>(null);
   const healthColor = session.connectionState !== 'open'
@@ -212,7 +238,7 @@ export function AppSidebar({
   }, [session, timelineInfoMap]);
 
   // Workspaces use an explicit manual order and never move when a conversation updates.
-  const sortedWorkspaces = useMemo(() => [...session.workspaces].sort((a, b) => Number(pins.workspace.includes(b.id)) - Number(pins.workspace.includes(a.id)) || (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || (a.createdAt - b.createdAt) || a.id.localeCompare(b.id)), [session.workspaces, pins.workspace]);
+  const sortedWorkspaces = useMemo(() => [...ownWorkspaces].sort((a, b) => Number(pins.workspace.includes(b.id)) - Number(pins.workspace.includes(a.id)) || (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || (a.createdAt - b.createdAt) || a.id.localeCompare(b.id)), [ownWorkspaces, pins.workspace]);
 
   // Conversations order by the last finished/stopped turn, so a running
   // conversation no longer re-sorts while it streams. Items that have never
@@ -394,7 +420,7 @@ export function AppSidebar({
                 {t('sidebar.workspaces')}
               </Sidebar.GroupLabel>
               <span className="text-[11px] text-muted font-normal">
-                ({session.workspaces.length})
+                ({ownWorkspaces.length})
               </span>
             </div>
             <span className="relative inline-flex shrink-0">
@@ -414,9 +440,10 @@ export function AppSidebar({
           </div>
 
           {!workspacesCollapsed && (
-            session.workspaces.length === 0 ? (
-              <p className="sidebar-empty-hint text-muted px-3 py-2 text-xs">{t('sidebar.noWorkspaces')}</p>
-            ) : (
+            <>
+              {ownWorkspaces.length === 0 ? (
+                <p className="sidebar-empty-hint text-muted px-3 py-2 text-xs">{t('sidebar.noWorkspaces')}</p>
+              ) : (
               <>
                 <ChatListView
                   key={`workspaces_${workspaceLimit}`}
@@ -513,7 +540,54 @@ export function AppSidebar({
                   </div>
                 )}
               </>
-            )
+              )}
+              {foreignWorkspaceGroups.map((group) => {
+                const backendLabel = group.profile
+                  ? t('sidebar.backendLabel', { name: group.profile.name, url: group.profile.serverUrl })
+                  : t('sidebar.backendRemoved');
+                return (
+                  <div key={group.profile?.id ?? 'removed'} className="mt-1.5 border-t border-separator/60 pt-1.5">
+                    <div className="flex items-center gap-1.5 px-3 pb-0.5 pt-1">
+                      <span aria-hidden="true" className="size-2.5 shrink-0 rounded-full ring-1 ring-foreground/10" style={{ backgroundColor: backendLabelColor(group.profile) }} />
+                      <span className="text-muted min-w-0 flex-1 truncate text-[11px] font-medium" title={backendLabel}>
+                        {group.profile?.name || t('sidebar.backendRemoved')}
+                      </span>
+                      <Chip size="sm" variant="soft">{t('sidebar.otherBackend')}</Chip>
+                    </div>
+                    <ChatListView
+                      aria-label={backendLabel}
+                      density="compact"
+                      className="sidebar-chat-list"
+                      onAction={(key) => session.selectWorkspace(String(key))}
+                    >
+                      {group.workspaces.map((workspace) => {
+                        const WorkspaceGlyph = workspaceIconComponent(workspace.icon);
+                        return (
+                          <ChatListView.Item
+                            key={workspace.id}
+                            id={workspace.id}
+                            className="sidebar-item"
+                            textValue={workspaceDisplayName(workspace)}
+                          >
+                            <ChatListView.ItemContent>
+                              <ChatListView.Icon>
+                                <span className="relative flex size-5 items-center justify-center">
+                                  <WorkspaceGlyph className="size-4" color={workspace.iconColor} />
+                                </span>
+                              </ChatListView.Icon>
+                              <ChatListView.Text className="flex-1">
+                                <ChatListView.Title>{workspaceDisplayName(workspace)}</ChatListView.Title>
+                                <ChatListView.Preview>{workspace.path}</ChatListView.Preview>
+                              </ChatListView.Text>
+                            </ChatListView.ItemContent>
+                          </ChatListView.Item>
+                        );
+                      })}
+                    </ChatListView>
+                  </div>
+                );
+              })}
+            </>
           )}
         </Sidebar.Group>
 

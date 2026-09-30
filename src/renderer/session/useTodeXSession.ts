@@ -132,7 +132,8 @@ import {
   MAX_WORKSPACE_TOMBSTONES,
   MAX_EVENTS,
   CHAT_ATTACH_REPLAY_LIMIT,
-  TERMINAL_MAX_OUTPUT_ENTRIES,
+  capTerminalOutput,
+  evictIdleTerminalStates,
   DEFAULT_TERMINAL_ROWS,
   DEFAULT_TERMINAL_COLS,
   LOCAL_SESSION_IDLE_SUSPEND_MS,
@@ -2616,14 +2617,14 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       if (!existing) {
         return current;
       }
-      return {
+      return evictIdleTerminalStates({
         ...current,
         [terminalId]: {
           ...existing,
-          output: [...existing.output, entry].slice(-TERMINAL_MAX_OUTPUT_ENTRIES),
+          output: capTerminalOutput([...existing.output, entry]),
           updatedAt: Date.now(),
         },
-      };
+      });
     });
   }, []);
 
@@ -2667,10 +2668,11 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
             cols: typeof record.cols === 'number' ? record.cols : existing.cols,
             pid: typeof record.pid === 'number' ? record.pid : existing.pid,
             error: '',
+            stopRequested: false,
             updatedAt: Date.now(),
           };
         });
-        return next;
+        return evictIdleTerminalStates(next);
       });
       return true;
     }
@@ -2710,42 +2712,49 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       let error = base.error;
       let output = base.output;
       let exitCode = base.exitCode;
+      let stopRequested = base.stopRequested ?? false;
 
       if (event.type === 'terminal.started') {
         status = 'running';
         error = '';
-        output = [
+        stopRequested = false;
+        output = capTerminalOutput([
           ...output,
           terminalOutputLine('system', `terminal started: ${cwd || base.cwd}`),
-        ].slice(-TERMINAL_MAX_OUTPUT_ENTRIES);
+        ]);
       } else if (event.type === 'terminal.stopping') {
         status = 'stopping';
-        output = [
+        stopRequested = true;
+        output = capTerminalOutput([
           ...output,
           terminalOutputLine('system', 'terminal stopping'),
-        ].slice(-TERMINAL_MAX_OUTPUT_ENTRIES);
+        ]);
       } else if (event.type === 'terminal.exited') {
         status = 'exited';
         exitCode = typeof data.exitCode === 'number' ? data.exitCode : null;
-        output = [
+        // Same as the mobile client: an exit only suppresses the auto-restart
+        // when it was requested — either the backend flagged the payload or we
+        // had already observed the terminal.stopping lifecycle state.
+        stopRequested = stopRequested || base.status === 'stopping' || data.stoppedByRequest === true;
+        output = capTerminalOutput([
           ...output,
           terminalOutputLine('system', `terminal exited${exitCode === null ? '' : ` with code ${exitCode}`}`),
-        ].slice(-TERMINAL_MAX_OUTPUT_ENTRIES);
+        ]);
       } else if (event.type === 'terminal.error') {
         status = 'error';
         error = typeof data.error === 'string' ? data.error : 'terminal error';
-        output = [
+        output = capTerminalOutput([
           ...output,
           terminalOutputLine('error', error),
-        ].slice(-TERMINAL_MAX_OUTPUT_ENTRIES);
+        ]);
       } else if (event.type === 'terminal.resized') {
-        output = [
+        output = capTerminalOutput([
           ...output,
           terminalOutputLine('system', `size ${typeof data.cols === 'number' ? data.cols : base.cols}x${typeof data.rows === 'number' ? data.rows : base.rows}`),
-        ].slice(-TERMINAL_MAX_OUTPUT_ENTRIES);
+        ]);
       }
 
-      return {
+      return evictIdleTerminalStates({
         ...current,
         [terminalId]: {
           ...base,
@@ -2761,9 +2770,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           status,
           output,
           error,
+          stopRequested,
           updatedAt: Date.now(),
         },
-      };
+      });
     });
 
     if (event.type === 'terminal.output') {
@@ -4036,7 +4046,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     [appendTimeline, autoConnectEnabled, connect, sendRawProtocolFrame],
   );
 
-  const seedTerminalState = useCallback((workspace: WorkspaceRecord, conversation: ConversationRecord, patch: Partial<TerminalClientState> = {}) => {
+  const seedTerminalState = useCallback((workspace: WorkspaceRecord, conversation: ConversationRecord, patch: Partial<TerminalClientState> = {}, notice?: TerminalOutputEntry) => {
     const terminalId = patch.terminalId?.trim() || terminalIdForConversation(conversation.id);
     setTerminalById((current) => {
       const existing = current[terminalId];
@@ -4056,10 +4066,12 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         exitCode: null,
         updatedAt: Date.now(),
       };
-      return {
+      const merged: TerminalClientState = { ...base, ...existing, ...patch };
+      merged.output = capTerminalOutput(notice ? [...merged.output, notice] : merged.output);
+      return evictIdleTerminalStates({
         ...current,
-        [terminalId]: { ...base, ...existing, ...patch },
-      };
+        [terminalId]: merged,
+      });
     });
     return terminalId;
   }, [settings.tenantId]);
@@ -4067,7 +4079,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const startTerminalSession = useCallback((
     workspace: WorkspaceRecord,
     conversation: ConversationRecord,
-    options: { cwd: string; shell: string; rows: number; cols: number; terminalId?: string },
+    options: { cwd: string; shell: string; rows: number; cols: number; terminalId?: string; preserveOutput?: boolean },
   ) => {
     const cwd = options.cwd.trim() || workspace.path;
     const shell = options.shell.trim();
@@ -4082,10 +4094,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       status: 'starting',
       error: '',
       exitCode: null,
-      output: [
-        terminalOutputLine('system', `starting terminal in ${cwd}`),
-      ],
-    });
+      stopRequested: false,
+      ...(options.preserveOutput ? {} : {
+        output: [
+          terminalOutputLine('system', `starting terminal in ${cwd}`),
+        ],
+      }),
+    }, options.preserveOutput ? terminalOutputLine('system', 'restarting terminal') : undefined);
     const sent = sendProtocolMessage('terminal.start', {
       terminalId,
       tenantId: workspace.tenantId || settings.tenantId,
@@ -4107,10 +4122,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
             ...existing,
             status: 'error',
             error: t('sess.connectBackendFirst'),
-            output: [
+            output: capTerminalOutput([
               ...existing.output,
               terminalOutputLine('error', t('sess.connectBackendFirst')),
-            ].slice(-TERMINAL_MAX_OUTPUT_ENTRIES),
+            ]),
             updatedAt: Date.now(),
           },
         };
@@ -4147,10 +4162,11 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         [terminalId]: {
           ...existing,
           status: 'stopping',
-          output: [
+          stopRequested: true,
+          output: capTerminalOutput([
             ...existing.output,
             terminalOutputLine('system', force ? 'force stopping terminal' : 'stopping terminal'),
-          ].slice(-TERMINAL_MAX_OUTPUT_ENTRIES),
+          ]),
           updatedAt: Date.now(),
         },
       };

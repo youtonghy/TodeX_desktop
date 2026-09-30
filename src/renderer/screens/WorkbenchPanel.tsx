@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { MouseEvent as ReactMouseEvent, ReactNode, RefObject } from 'react';
 import { RiAppsLine, RiCloseLine, RiTerminalBoxLine, RiGitBranchLine, RiAddLine, RiArrowLeftDoubleLine, RiArrowRightDoubleLine, RiExternalLinkLine, RiFileTextLine, RiFolder3Line, RiFolderOpenLine, RiGlobalLine, RiFocus3Line, RiLayoutColumnLine, RiLayoutRowLine, RiRefreshLine, RiStopCircleLine } from '@remixicon/react';
-import { Button, Chip, Dropdown, Input, Label, Popover, ScrollShadow, Spinner, TextField, Tooltip, toast } from '@heroui/react';
+import { AlertDialog, Button, Chip, Dropdown, Input, Label, Popover, ScrollShadow, Spinner, TextField, Tooltip, toast } from '@heroui/react';
 import type { Selection } from '@heroui/react';
 import { ContextMenu as HeroContextMenu, FileTree } from '@heroui-pro/react';
 import { Resizable } from '@heroui-pro/react/resizable';
 import type { PanelImperativeHandle } from '@heroui-pro/react/resizable';
-import { WorkspaceFilePreview, type PreviewFile, type ReferenceSelection } from '../components/WorkspaceFilePreview';
+import { WorkspaceFilePreview, type PreviewFile, type ReferenceSelection, type WorkspaceFileSaveOutcome } from '../components/WorkspaceFilePreview';
 import { useNoticeToast } from '../components/NoticeToast';
 import { XtermTerminal } from '../components/XtermTerminal';
 import type { TodeXSession } from '../session/useTodeXSession';
@@ -22,6 +22,7 @@ import { normalizeWorkbenchLayout } from '../session/workbenchLayout';
 import { SETTINGS_STORAGE_KEY, attachmentId, referenceToken, uniqueReferenceName } from '../session/helpers';
 import { V2ApiClient } from '@todex/protocol/v2';
 import { deviceIdentityFromSecret } from '@todex/protocol/deviceAuth';
+import { isConflictError } from '@todex/protocol/connectionError';
 import { isLoopbackUrl } from '@todex/protocol/mobileParity';
 import { t, useT, type MessageKey } from '../i18n';
 
@@ -185,7 +186,9 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
     setActiveId(item.id);
     onTabChange(type);
   };
-  const closeTab = useCallback((id: string) => {
+  const [terminalCloseTarget, setTerminalCloseTarget] = useState<WorkbenchItem | null>(null);
+
+  const removeTab = useCallback((id: string) => {
     setItems((current) => {
       const next = current.filter((item) => item.id !== id);
       if (id === activeId) {
@@ -196,6 +199,18 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
       return next;
     });
   }, [activeId, onTabChange]);
+
+  // Mirrors the mobile client: closing a terminal tab that holds a live PTY
+  // asks whether to stop the PTY or keep it running in the background.
+  const closeTab = useCallback((id: string) => {
+    const item = items.find((entry) => entry.id === id);
+    const terminal = item?.type === 'terminal' ? session.terminalById[terminalIdForConversation(scopeKey, id)] : undefined;
+    if (item && terminal && (terminal.status === 'running' || terminal.status === 'starting' || terminal.status === 'stopping')) {
+      setTerminalCloseTarget(item);
+      return;
+    }
+    removeTab(id);
+  }, [items, removeTab, scopeKey, session.terminalById]);
 
   const closeActiveTab = useCallback(() => {
     if (!activeId) return false;
@@ -349,6 +364,35 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
           </div>
         ))}
       </div>
+      <AlertDialog isOpen={terminalCloseTarget !== null} onOpenChange={(open) => { if (!open) setTerminalCloseTarget(null); }}>
+        <AlertDialog.Backdrop>
+          <AlertDialog.Container>
+            <AlertDialog.Dialog className="sm:max-w-md">
+              <AlertDialog.Header>
+                <AlertDialog.Heading>{t('workbench.closeTerminalTitle')}</AlertDialog.Heading>
+              </AlertDialog.Header>
+              <AlertDialog.Body>
+                <p className="text-muted text-sm">{t('workbench.closeTerminalBody')}</p>
+              </AlertDialog.Body>
+              <AlertDialog.Footer>
+                <Button slot="close" variant="tertiary">{t('common.cancel')}</Button>
+                <Button variant="secondary" onPress={() => {
+                  if (!terminalCloseTarget) return;
+                  removeTab(terminalCloseTarget.id);
+                  setTerminalCloseTarget(null);
+                }}>{t('workbench.closeTerminalKeep')}</Button>
+                <Button variant="danger-soft" onPress={() => {
+                  if (!terminalCloseTarget) return;
+                  const terminalId = terminalIdForConversation(scopeKey, terminalCloseTarget.id);
+                  session.stopTerminalSession(terminalId, session.activeWorkspace?.tenantId || session.settings.tenantId);
+                  removeTab(terminalCloseTarget.id);
+                  setTerminalCloseTarget(null);
+                }}>{t('workbench.closeTerminalStop')}</Button>
+              </AlertDialog.Footer>
+            </AlertDialog.Dialog>
+          </AlertDialog.Container>
+        </AlertDialog.Backdrop>
+      </AlertDialog>
     </div>
   );
 }
@@ -361,6 +405,7 @@ function TerminalPane({ session, terminalId, isActive }: { session: TodeXSession
   const autoStartAttempts = useRef(new Set<string>());
   const manualStopRef = useRef(false);
   const reconnectTimerRef = useRef<number | null>(null);
+  const statusCheckTimerRef = useRef<number | null>(null);
   const reconnectAttemptRef = useRef(0);
   const terminalByIdRef = useRef(session.terminalById);
   const terminalSizeRef = useRef({ rows: DEFAULT_TERMINAL_ROWS, cols: DEFAULT_TERMINAL_COLS });
@@ -375,6 +420,10 @@ function TerminalPane({ session, terminalId, isActive }: { session: TodeXSession
     if (reconnectTimerRef.current !== null) {
       window.clearTimeout(reconnectTimerRef.current);
       reconnectTimerRef.current = null;
+    }
+    if (statusCheckTimerRef.current !== null) {
+      window.clearTimeout(statusCheckTimerRef.current);
+      statusCheckTimerRef.current = null;
     }
   }, [terminalId, backendIdentity]);
 
@@ -421,15 +470,27 @@ function TerminalPane({ session, terminalId, isActive }: { session: TodeXSession
     workspace?.path,
   ]);
 
+  // Mirror the mobile client: the backoff counter only resets after the PTY
+  // stayed up for a stable window, so a shell that exits on launch cannot
+  // crash-loop at the minimum delay.
+  useEffect(() => {
+    if (terminal?.status !== 'running') {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      reconnectAttemptRef.current = 0;
+    }, 10_000);
+    return () => window.clearTimeout(timer);
+  }, [terminal?.status]);
+
   useEffect(() => {
     if (!workspace || !conversation || !terminalId || session.connectionState !== 'open' || manualStopRef.current) {
       return;
     }
-    if (terminal?.status === 'running') {
-      reconnectAttemptRef.current = 0;
+    if (terminal?.status !== 'error' && terminal?.status !== 'exited') {
       return;
     }
-    if (terminal?.status !== 'error' && terminal?.status !== 'exited') {
+    if (terminal.stopRequested) {
       return;
     }
     if (reconnectTimerRef.current !== null) {
@@ -439,23 +500,44 @@ function TerminalPane({ session, terminalId, isActive }: { session: TodeXSession
     reconnectAttemptRef.current += 1;
     reconnectTimerRef.current = window.setTimeout(() => {
       reconnectTimerRef.current = null;
-      const latest = terminalByIdRef.current[terminalId];
-      const size = terminalSizeRef.current;
-      session.startTerminalSession(workspace, conversation, {
-        terminalId,
-        cwd: latest?.cwd || workspace.path,
-        shell: latest?.shell || '',
-        rows: size.rows,
-        cols: size.cols,
-      });
+      // Ask the backend first — another client may already hold a live PTY
+      // under this id, in which case terminal.status flips us back to running
+      // and restarting would spawn a duplicate shell.
+      session.requestTerminalStatus(workspace, conversation, terminalId);
+      statusCheckTimerRef.current = window.setTimeout(() => {
+        statusCheckTimerRef.current = null;
+        if (manualStopRef.current) {
+          return;
+        }
+        const latest = terminalByIdRef.current[terminalId];
+        if (latest?.status !== 'error' && latest?.status !== 'exited' && latest?.status !== 'idle') {
+          return;
+        }
+        if (latest?.stopRequested) {
+          return;
+        }
+        const size = terminalSizeRef.current;
+        session.startTerminalSession(workspace, conversation, {
+          terminalId,
+          cwd: latest?.cwd || workspace.path,
+          shell: latest?.shell || '',
+          rows: size.rows,
+          cols: size.cols,
+          preserveOutput: true,
+        });
+      }, 300);
     }, delay);
     return () => {
       if (reconnectTimerRef.current !== null) {
         window.clearTimeout(reconnectTimerRef.current);
         reconnectTimerRef.current = null;
       }
+      if (statusCheckTimerRef.current !== null) {
+        window.clearTimeout(statusCheckTimerRef.current);
+        statusCheckTimerRef.current = null;
+      }
     };
-  }, [conversation, session.connectionState, session.startTerminalSession, terminal?.status, terminalId, workspace]);
+  }, [conversation, session.connectionState, session.requestTerminalStatus, session.startTerminalSession, terminal?.status, terminal?.stopRequested, terminalId, workspace]);
 
   const handleTerminalData = useCallback((data: string) => {
     const current = terminalByIdRef.current[terminalId];
@@ -516,6 +598,10 @@ function TerminalPane({ session, terminalId, isActive }: { session: TodeXSession
               if (reconnectTimerRef.current !== null) {
                 window.clearTimeout(reconnectTimerRef.current);
                 reconnectTimerRef.current = null;
+              }
+              if (statusCheckTimerRef.current !== null) {
+                window.clearTimeout(statusCheckTimerRef.current);
+                statusCheckTimerRef.current = null;
               }
               if (terminalId) {
                 session.stopTerminalSession(terminalId, workspace?.tenantId || session.settings.tenantId);
@@ -918,6 +1004,7 @@ function FilesPane({ session, target, onTargetChange }: { session: TodeXSession;
   const [file, setFile] = useState<PreviewFile | null>(null);
   const [fileLoading, setFileLoading] = useState(false);
   const fileRequestRef = useRef(0);
+  const fileDirtyRef = useRef(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [treeCollapsed, setTreeCollapsed] = useState(false);
@@ -940,6 +1027,7 @@ function FilesPane({ session, target, onTargetChange }: { session: TodeXSession;
   }, [currentPath]);
 
   const readFile = useCallback(async (path: string, sourceTarget?: OpenPanelOptions) => {
+    if (fileDirtyRef.current && path !== selected && !window.confirm(t('filePreview.discardChanges'))) return;
     targetChangeRef.current?.(sourceTarget ?? { filePath: path });
     const request = ++fileRequestRef.current;
     setSelected(path);
@@ -954,6 +1042,34 @@ function FilesPane({ session, target, onTargetChange }: { session: TodeXSession;
       if (request === fileRequestRef.current) setError(reason instanceof Error ? reason.message : t('workbench.fileReadFailed'));
     } finally {
       if (request === fileRequestRef.current) setFileLoading(false);
+    }
+  }, [selected, session.settings.deviceSecret, session.settings.serverUrl, t]);
+
+  const saveWorkspaceFile = useCallback(async (path: string, text: string, expectedText: string): Promise<WorkspaceFileSaveOutcome> => {
+    const api = new V2ApiClient({ serverUrl: session.settings.serverUrl, device: deviceIdentityFromSecret(session.settings.deviceSecret) });
+    try {
+      const result = await api.saveWorkspaceFile(path, text, expectedText);
+      if (!result?.saved) {
+        setError(t('workbench.fileSaveFailed'));
+        return 'failed';
+      }
+      setFile((current) => (current && current.path === path ? { ...current, text, sizeBytes: new TextEncoder().encode(text).length } : current));
+      return 'saved';
+    } catch (reason) {
+      if (isConflictError(reason)) return 'conflict';
+      setError(reason instanceof Error ? reason.message : t('workbench.fileSaveFailed'));
+      return 'failed';
+    }
+  }, [session.settings.deviceSecret, session.settings.serverUrl, t]);
+
+  const reloadWorkspaceFile = useCallback(async (path: string): Promise<PreviewFile | null> => {
+    const api = new V2ApiClient({ serverUrl: session.settings.serverUrl, device: deviceIdentityFromSecret(session.settings.deviceSecret) });
+    try {
+      const latest = await api.readWorkspaceFile(path);
+      setFile((current) => (current && current.path === path ? latest : current));
+      return latest;
+    } catch {
+      return null;
     }
   }, [session.settings.deviceSecret, session.settings.serverUrl]);
 
@@ -1014,6 +1130,10 @@ function FilesPane({ session, target, onTargetChange }: { session: TodeXSession;
   const handleNavigatePath = (path: string) => {
     const trimmed = path.trim();
     if (!trimmed) return;
+    if (fileDirtyRef.current && !window.confirm(t('filePreview.discardChanges'))) {
+      setPathDraft(currentPath);
+      return;
+    }
     setCurrentPath(trimmed);
   };
 
@@ -1176,7 +1296,7 @@ function FilesPane({ session, target, onTargetChange }: { session: TodeXSession;
         <Resizable.Panel defaultSize="70%" minSize="50%" className="min-h-0">
           <ScrollShadow className="bg-surface-secondary h-full min-h-0 rounded-xl p-3">
             <p className="text-muted mb-2 truncate text-xs">{selected || t('workbench.selectFile')}</p>
-            {fileLoading ? <Spinner size="sm" aria-label={t('workbench.readingFile')} /> : error ? null : <WorkspaceFilePreview file={file} onAddReference={addReferenceToChat} />}
+            {fileLoading ? <Spinner size="sm" aria-label={t('workbench.readingFile')} /> : error ? null : <WorkspaceFilePreview file={file} onAddReference={addReferenceToChat} onSaveFile={saveWorkspaceFile} onReloadFile={reloadWorkspaceFile} onDirtyChange={(dirty) => { fileDirtyRef.current = dirty; }} />}
           </ScrollShadow>
         </Resizable.Panel>
       </Resizable>

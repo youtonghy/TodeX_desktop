@@ -62,6 +62,7 @@ import {
   parseCodexNativeThread,
   prepareWorkspaceSyncPayload,
   shortJson,
+  utf8ByteLength,
   type CodexThreadHistoryEntry,
 } from '@todex/protocol/todex';
 import type { TransportCryptoSession } from '@todex/protocol/transportCrypto';
@@ -319,6 +320,10 @@ export type TerminalClientState = {
   status: TerminalLifecycleState;
   output: TerminalOutputEntry[];
   error: string;
+  /** Set when the exit was requested (terminal.stop from any client or an
+   * observed terminal.stopping); suppresses the auto-restart, matching the
+   * mobile client's `state == .stopping` check. Cleared on terminal.started. */
+  stopRequested?: boolean;
   pid?: number | null;
   exitCode?: number | null;
   updatedAt: number;
@@ -1479,10 +1484,35 @@ export const RECONNECT_MAX_DELAY_MS = 30_000;
 export const CHAT_ATTACH_REPLAY_LIMIT = 200;
 export const CHAT_BOTTOM_FOLLOW_THRESHOLD = 72;
 export const TERMINAL_MAX_OUTPUT_ENTRIES = 420;
+/** Per-terminal replay budget — mirrors the mobile client's 256 KiB (+32 KiB
+ * slack) in-memory TerminalOutputCache. Oldest entries drop first; a single
+ * oversized entry is head-trimmed just after the first newline found within a
+ * 4 KiB scan window so replay rarely splits escape sequences mid-stream. */
+export const TERMINAL_MAX_OUTPUT_BYTES = 256 * 1024;
+export const TERMINAL_OUTPUT_SLACK_BYTES = 32 * 1024;
+/** At most this many non-live terminal records are kept (LRU by updatedAt);
+ * live PTYs are never evicted. Mirrors the mobile client's maxTerminals = 8. */
+export const TERMINAL_MAX_CACHED_TERMINALS = 8;
+const TERMINAL_LIVE_STATUSES: ReadonlySet<TerminalLifecycleState> = new Set(['starting', 'running', 'stopping']);
+
 export const DEFAULT_TERMINAL_ROWS = 24;
 export const DEFAULT_TERMINAL_COLS = 80;
 export const LOCAL_SESSION_IDLE_SUSPEND_MS = 30 * 60 * 1000;
 export const LOCAL_SESSION_IDLE_SWEEP_MS = 2 * 60 * 1000;
+
+/** Mirrors the backend's MAX_WORKSPACE_TEXT_BYTES compare-and-save limit. */
+export const WORKSPACE_FILE_MAX_TEXT_BYTES = 1024 * 1024;
+
+/** git-style conflict marker document for the manual merge flow, matching the
+ * mobile client's `<<<<<<< local … ======= … >>>>>>> remote` splice. */
+export function buildConflictMergeDocument(local: string, remote: string, localLabel: string, remoteLabel: string): string {
+  return [`<<<<<<< ${localLabel}`, local, '=======', remote, `>>>>>>> ${remoteLabel}`].join('\n');
+}
+
+/** A merged document can only be adopted once every marker line is removed. */
+export function conflictMarkersRemain(text: string): boolean {
+  return text.split('\n').some((line) => line.startsWith('<<<<<<<') || line.startsWith('>>>>>>>') || line.trim() === '=======');
+}
 
 export const SLASH_COMMANDS: SlashCommand[] = [
   { command: '/model', title: 'Model', description: 'choose what model and reasoning effort to use', category: 'settings' },
@@ -1909,6 +1939,53 @@ export function terminalOutputLine(kind: TerminalOutputEntry['kind'], text: stri
     text,
     at: Date.now(),
   };
+}
+
+function trimTerminalEntryHead(text: string, dropBytes: number): string {
+  let units = 0;
+  let scanned = 0;
+  for (const char of text) {
+    if (scanned >= dropBytes) break;
+    scanned += utf8ByteLength(char);
+    units += char.length;
+  }
+  const newline = text.indexOf('\n', units);
+  const cut = newline !== -1 && newline - units <= 4096 ? newline + 1 : units;
+  return text.slice(cut);
+}
+
+/** Caps a terminal's replay entries at TERMINAL_MAX_OUTPUT_ENTRIES and
+ * TERMINAL_MAX_OUTPUT_BYTES, dropping the oldest entries first. */
+export function capTerminalOutput(output: TerminalOutputEntry[]): TerminalOutputEntry[] {
+  let next = output.length > TERMINAL_MAX_OUTPUT_ENTRIES ? output.slice(-TERMINAL_MAX_OUTPUT_ENTRIES) : output;
+  let bytes = 0;
+  for (const entry of next) bytes += utf8ByteLength(entry.text);
+  if (bytes <= TERMINAL_MAX_OUTPUT_BYTES + TERMINAL_OUTPUT_SLACK_BYTES) return next;
+  let start = 0;
+  while (start < next.length - 1 && bytes > TERMINAL_MAX_OUTPUT_BYTES) {
+    bytes -= utf8ByteLength(next[start].text);
+    start += 1;
+  }
+  next = next.slice(start);
+  if (bytes > TERMINAL_MAX_OUTPUT_BYTES && next.length === 1) {
+    const entry = next[0];
+    next = [{ ...entry, text: trimTerminalEntryHead(entry.text, bytes - TERMINAL_MAX_OUTPUT_BYTES) }];
+  }
+  return next;
+}
+
+/** LRU-evicts terminal records past TERMINAL_MAX_CACHED_TERMINALS, skipping any
+ * PTY that may still be alive so its state stays queryable. Returns the input
+ * unchanged when nothing needs to go. */
+export function evictIdleTerminalStates(current: Record<string, TerminalClientState>): Record<string, TerminalClientState> {
+  const idle = Object.values(current)
+    .filter((terminal) => !TERMINAL_LIVE_STATUSES.has(terminal.status))
+    .sort((a, b) => a.updatedAt - b.updatedAt);
+  if (idle.length <= TERMINAL_MAX_CACHED_TERMINALS) return current;
+  const evicted = new Set(idle.slice(0, idle.length - TERMINAL_MAX_CACHED_TERMINALS).map((terminal) => terminal.terminalId));
+  const next = { ...current };
+  for (const terminalId of evicted) delete next[terminalId];
+  return next;
 }
 
 export function nowLabel(timestamp: number): string {
