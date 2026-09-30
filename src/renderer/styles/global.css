@@ -801,6 +801,9 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
+  /* The listbox is a column flex container; without this, overflowing items
+     shrink to min-height and their wrapped text overlaps adjacent rows. */
+  flex-shrink: 0;
   padding: 0.45rem 0.65rem;
   font-size: 0.85rem;
   font-weight: 500;
