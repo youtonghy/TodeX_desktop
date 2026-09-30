@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { MouseEvent as ReactMouseEvent, ReactNode, RefObject } from 'react';
 import { RiAppsLine, RiCloseLine, RiTerminalBoxLine, RiGitBranchLine, RiAddLine, RiArrowLeftDoubleLine, RiArrowRightDoubleLine, RiExternalLinkLine, RiFileTextLine, RiFolder3Line, RiFolderOpenLine, RiGlobalLine, RiFocus3Line, RiLayoutColumnLine, RiLayoutRowLine, RiRefreshLine, RiStopCircleLine } from '@remixicon/react';
-import { AlertDialog, Button, Chip, Dropdown, Input, Label, Popover, ScrollShadow, Spinner, TextField, Tooltip, toast } from '@heroui/react';
+import { Button, Chip, Dropdown, Input, Label, Popover, ScrollShadow, Spinner, TextField, Tooltip, toast } from '@heroui/react';
 import type { Selection } from '@heroui/react';
 import { ContextMenu as HeroContextMenu, FileTree } from '@heroui-pro/react';
 import { Resizable } from '@heroui-pro/react/resizable';
@@ -186,8 +186,6 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
     setActiveId(item.id);
     onTabChange(type);
   };
-  const [terminalCloseTarget, setTerminalCloseTarget] = useState<WorkbenchItem | null>(null);
-
   const removeTab = useCallback((id: string) => {
     setItems((current) => {
       const next = current.filter((item) => item.id !== id);
@@ -200,17 +198,16 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
     });
   }, [activeId, onTabChange]);
 
-  // Mirrors the mobile client: closing a terminal tab that holds a live PTY
-  // asks whether to stop the PTY or keep it running in the background.
+  // Closing a terminal tab that holds a live PTY stops the backend PTY
+  // instead of leaving it running in the background.
   const closeTab = useCallback((id: string) => {
     const item = items.find((entry) => entry.id === id);
     const terminal = item?.type === 'terminal' ? session.terminalById[terminalIdForConversation(scopeKey, id)] : undefined;
     if (item && terminal && (terminal.status === 'running' || terminal.status === 'starting' || terminal.status === 'stopping')) {
-      setTerminalCloseTarget(item);
-      return;
+      session.stopTerminalSession(terminalIdForConversation(scopeKey, id), session.activeWorkspace?.tenantId || session.settings.tenantId);
     }
     removeTab(id);
-  }, [items, removeTab, scopeKey, session.terminalById]);
+  }, [items, removeTab, scopeKey, session.activeWorkspace?.tenantId, session.settings.tenantId, session.stopTerminalSession, session.terminalById]);
 
   const closeActiveTab = useCallback(() => {
     if (!activeId) return false;
@@ -364,35 +361,6 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
           </div>
         ))}
       </div>
-      <AlertDialog isOpen={terminalCloseTarget !== null} onOpenChange={(open) => { if (!open) setTerminalCloseTarget(null); }}>
-        <AlertDialog.Backdrop>
-          <AlertDialog.Container>
-            <AlertDialog.Dialog className="sm:max-w-md">
-              <AlertDialog.Header>
-                <AlertDialog.Heading>{t('workbench.closeTerminalTitle')}</AlertDialog.Heading>
-              </AlertDialog.Header>
-              <AlertDialog.Body>
-                <p className="text-muted text-sm">{t('workbench.closeTerminalBody')}</p>
-              </AlertDialog.Body>
-              <AlertDialog.Footer>
-                <Button slot="close" variant="tertiary">{t('common.cancel')}</Button>
-                <Button variant="secondary" onPress={() => {
-                  if (!terminalCloseTarget) return;
-                  removeTab(terminalCloseTarget.id);
-                  setTerminalCloseTarget(null);
-                }}>{t('workbench.closeTerminalKeep')}</Button>
-                <Button variant="danger-soft" onPress={() => {
-                  if (!terminalCloseTarget) return;
-                  const terminalId = terminalIdForConversation(scopeKey, terminalCloseTarget.id);
-                  session.stopTerminalSession(terminalId, session.activeWorkspace?.tenantId || session.settings.tenantId);
-                  removeTab(terminalCloseTarget.id);
-                  setTerminalCloseTarget(null);
-                }}>{t('workbench.closeTerminalStop')}</Button>
-              </AlertDialog.Footer>
-            </AlertDialog.Dialog>
-          </AlertDialog.Container>
-        </AlertDialog.Backdrop>
-      </AlertDialog>
     </div>
   );
 }
