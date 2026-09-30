@@ -1308,10 +1308,11 @@ export const REASONING_EFFORT_LABELS: Record<string, string> = {
   low: 'low',
   medium: 'medium',
   high: 'high',
-  xhigh: 'max',
+  xhigh: 'xhigh',
   max: 'max',
   ultra: 'ultra',
   highest: 'ultra',
+  ultracode: 'ultracode',
 };
 
 export function reasoningEffortLabel(value: string | null | undefined): string {

@@ -843,7 +843,13 @@ body {
   --effort-color: var(--effort-high);
 }
 .composer-model-card[data-effort='xhigh'],
-.composer-model-control__trigger[data-effort='xhigh'] {
+.composer-model-card[data-effort='max'],
+.composer-model-card[data-effort='ultra'],
+.composer-model-card[data-effort='ultracode'],
+.composer-model-control__trigger[data-effort='xhigh'],
+.composer-model-control__trigger[data-effort='max'],
+.composer-model-control__trigger[data-effort='ultra'],
+.composer-model-control__trigger[data-effort='ultracode'] {
   --effort-color: var(--effort-xhigh);
 }
 
@@ -875,8 +881,11 @@ body {
   transition: width 0.18s cubic-bezier(0.16, 1, 0.3, 1), background 0.18s ease, box-shadow 0.18s ease;
 }
 
-/* Max effort gets a flowing gradient and a soft glow */
-.composer-model-card[data-effort='xhigh'] .composer-model-card__fill {
+/* Top effort tiers get a flowing gradient and a soft glow */
+.composer-model-card[data-effort='xhigh'] .composer-model-card__fill,
+.composer-model-card[data-effort='max'] .composer-model-card__fill,
+.composer-model-card[data-effort='ultra'] .composer-model-card__fill,
+.composer-model-card[data-effort='ultracode'] .composer-model-card__fill {
   background: linear-gradient(
     100deg,
     var(--effort-xhigh) 0%,
@@ -895,7 +904,10 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .composer-model-card[data-effort='xhigh'] .composer-model-card__fill {
+  .composer-model-card[data-effort='xhigh'] .composer-model-card__fill,
+  .composer-model-card[data-effort='max'] .composer-model-card__fill,
+  .composer-model-card[data-effort='ultra'] .composer-model-card__fill,
+  .composer-model-card[data-effort='ultracode'] .composer-model-card__fill {
     animation: none;
   }
 }
@@ -959,7 +971,10 @@ body {
   transition: background 0.18s ease;
 }
 
-.composer-model-card[data-effort='xhigh'] .composer-model-card__thumb {
+.composer-model-card[data-effort='xhigh'] .composer-model-card__thumb,
+.composer-model-card[data-effort='max'] .composer-model-card__thumb,
+.composer-model-card[data-effort='ultra'] .composer-model-card__thumb,
+.composer-model-card[data-effort='ultracode'] .composer-model-card__thumb {
   box-shadow: 0 2px 7px rgba(0, 0, 0, 0.18), 0 1px 2px rgba(0, 0, 0, 0.08),
     0 0 12px color-mix(in oklab, var(--effort-xhigh) 50%, transparent);
 }
@@ -974,7 +989,10 @@ body {
   box-shadow: 0 3px 9px rgba(0, 0, 0, 0.22), 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
-.composer-model-card[data-effort='xhigh'] .composer-model-card__track:hover .composer-model-card__thumb {
+.composer-model-card[data-effort='xhigh'] .composer-model-card__track:hover .composer-model-card__thumb,
+.composer-model-card[data-effort='max'] .composer-model-card__track:hover .composer-model-card__thumb,
+.composer-model-card[data-effort='ultra'] .composer-model-card__track:hover .composer-model-card__thumb,
+.composer-model-card[data-effort='ultracode'] .composer-model-card__track:hover .composer-model-card__thumb {
   box-shadow: 0 3px 9px rgba(0, 0, 0, 0.22), 0 1px 3px rgba(0, 0, 0, 0.1),
     0 0 14px color-mix(in oklab, var(--effort-xhigh) 60%, transparent);
 }
