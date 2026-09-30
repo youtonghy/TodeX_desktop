@@ -269,7 +269,7 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
               : 'size-10 min-w-10 rounded-none text-inherit'}
             onPress={() => { setActiveId(item.id); onTabChange(item.type); }}
           >
-            <Icon aria-hidden="true" className={`size-4 transition-opacity group-hover:opacity-0 group-focus-within:opacity-0${isActive ? ' [@media(hover:none)]:opacity-0' : ''}`} />
+            <Icon aria-hidden="true" className={`size-4 transition-opacity${isActive ? ' group-hover:opacity-0 group-focus-within:opacity-0 [@media(hover:none)]:opacity-0' : ''}`} />
           </Button>
           <Tooltip.Content placement={vertical ? 'right' : 'bottom'} className="max-w-sm break-all text-xs">
             {title}
@@ -277,7 +277,7 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
         </Tooltip>
         <Button
           isIconOnly size="sm" variant="ghost" aria-label={t('workbench.closeTab', { title })}
-          className={`pointer-events-none absolute inset-0 m-auto size-6 min-w-6 rounded-md text-muted opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100${isActive ? ' [@media(hover:none)]:pointer-events-auto [@media(hover:none)]:opacity-100' : ''}`}
+          className={`pointer-events-none absolute inset-0 m-auto size-6 min-w-6 rounded-md text-muted opacity-0 transition-opacity${isActive ? ' group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 [@media(hover:none)]:pointer-events-auto [@media(hover:none)]:opacity-100' : ''}`}
           onPress={() => closeTab(item.id)}
         >
           <RiCloseLine aria-hidden="true" className="size-4" />
