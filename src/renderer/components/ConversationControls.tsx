@@ -16,6 +16,8 @@ type Props = {
   controlStatus?: 'pending' | 'unknown';
   localQueue: readonly QueuedChatSubmission[];
   localPaused: boolean;
+  /** Active provider rate-limit wait (e.g. Claude Code's five-hour window). */
+  rateLimited?: { until: number; label: string };
   onRecover: () => void;
   onRemoveNative: (id: string) => void;
   onClearNative: () => void;
@@ -25,6 +27,12 @@ type Props = {
 };
 
 type AttachmentPreview = { name: string; order: number; path?: string; file: PreviewFile };
+
+function formatResetInstant(until: number): string {
+  return new Intl.DateTimeFormat(undefined, {
+    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+  }).format(new Date(until));
+}
 
 function previewFile(attachment: ComposerAttachmentDraft): PreviewFile {
   return {
@@ -38,7 +46,7 @@ function previewFile(attachment: ComposerAttachmentDraft): PreviewFile {
 }
 
 export function ConversationControls({ runtime, reportedError, running, canUseNativeQueue,
-  piQueue, controlStatus, localQueue, localPaused,
+  piQueue, controlStatus, localQueue, localPaused, rateLimited,
   onRecover, onRemoveNative, onClearNative, onRemoveLocal, onResumeLocal, onRevealPath }: Props) {
   const t = useT();
   const nativeItems = runtime?.queueItems.filter(item => ['queued', 'pending', 'delivering', 'unknown'].includes(item.status)) ?? [];
@@ -57,7 +65,7 @@ export function ConversationControls({ runtime, reportedError, running, canUseNa
     onAction: onRecover,
   });
   return <>
-    {nativeItems.length || localQueue.length ? <div className="mb-2 space-y-2">
+    {nativeItems.length || localQueue.length || rateLimited ? <div className="mb-2 space-y-2">
       {nativeItems.length > 0 ? <div className="border-border rounded-lg border p-2 text-xs">
         <div className="mb-1 flex items-center justify-between gap-2">
           <span>{t('controls.agentQueue', { count: nativeItems.length })}{runtime?.queuePaused ? ` · ${t('controls.queuePausedCheck')}` : ''}</span>
@@ -70,10 +78,13 @@ export function ConversationControls({ runtime, reportedError, running, canUseNa
             aria-label={t('controls.removeQueued', { text: item.text })} onPress={() => onRemoveNative(item.id)}>{t('controls.remove')}</Button> : null}
         </div>)}
       </div> : null}
+      {rateLimited && localQueue.length === 0 ? <div className="border-border rounded-lg border p-2 text-xs text-muted">
+        {t('controls.sessionLimitWait', { time: formatResetInstant(rateLimited.until), reset: rateLimited.label })}
+      </div> : null}
       {localQueue.length > 0 ? <div className="border-border rounded-lg border p-2 text-xs">
         <div className="mb-1 flex items-center justify-between gap-2">
-          <span>{t('controls.localQueue', { count: localQueue.length })}{localPaused ? ` · ${t('controls.queuePaused')}` : ` · ${t('controls.sendWhenDone')}`}</span>
-          {!running ? <Button size="sm" variant="secondary" isDisabled={disabled} onPress={onResumeLocal}>{t('controls.resumeSend')}</Button> : null}
+          <span>{t('controls.localQueue', { count: localQueue.length })}{rateLimited ? ` · ${t('controls.waitingReset', { time: formatResetInstant(rateLimited.until) })}` : localPaused ? ` · ${t('controls.queuePaused')}` : ` · ${t('controls.sendWhenDone')}`}</span>
+          {!running && !rateLimited ? <Button size="sm" variant="secondary" isDisabled={disabled} onPress={onResumeLocal}>{t('controls.resumeSend')}</Button> : null}
         </div>
         <ol className="space-y-1.5">
           {localQueue.map((item, index) => {

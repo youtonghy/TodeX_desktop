@@ -11,6 +11,7 @@ import { configureKanbanSync, syncKanbanTasksFromBackend } from './kanbanTasks';
 import { ENCRYPTION_VERIFICATION_ERROR, TransportVerificationError, validateTransportEncryption, verifyEncryptedSocket } from './transportVerification';
 import { t } from '../i18n';
 import { QueuedFollowUps, restoreQueuedFollowUps } from './queuedFollowUps';
+import { parseSessionLimitReset, restoreRateLimitWaits, type SessionLimitReset } from './sessionRateLimit';
 import { LegacyEventRecovery } from './legacyEventRecovery';
 import { ConversationRecovery, isConversationRuntimeBusy, type ConversationOpenStatus, type EarlierHistoryResult } from './conversationRecovery';
 import { type ConversationRuntime } from '@todex/protocol/conversationRuntime';
@@ -538,6 +539,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const [queuedChatDrafts, setQueuedChatDrafts] = useState<Record<string, QueuedChatSubmission[]>>({});
   const [queueHydrated, setQueueHydrated] = useState(false);
   const [queuePausedByConversation, setQueuePausedByConversation] = useState<Record<string, boolean>>({});
+  const [rateLimitedUntilByConversation, setRateLimitedUntilByConversation] = useState<Record<string, SessionLimitReset>>({});
+  const rateLimitedUntilRef = useRef<Record<string, SessionLimitReset>>({});
   const [controlStatusByConversation, setControlStatusByConversation] = useState<Record<string, 'pending' | 'unknown' | undefined>>({});
   const controlRequestsRef = useRef(new Map<string, string>());
   const controlDraftsRef = useRef(new Map<string, { conversationId: string; text: string }>());
@@ -876,6 +879,33 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       .catch(() => setLastError(t('sess.candidateSaveFailed')));
   }, [queueHydrated, queuedChatDrafts]);
 
+  useEffect(() => {
+    let disposed = false;
+    void loadJson<unknown>('todex.rate-limits.v1', {}).then((value) => {
+      if (disposed) return;
+      const waits = restoreRateLimitWaits(value);
+      if (Object.keys(waits).length === 0) return;
+      rateLimitedUntilRef.current = { ...waits, ...rateLimitedUntilRef.current };
+      setRateLimitedUntilByConversation(rateLimitedUntilRef.current);
+    }).catch(() => undefined);
+    return () => { disposed = true; };
+  }, []);
+  useEffect(() => {
+    if (queueHydrated) void saveJson('todex.rate-limits.v1', rateLimitedUntilByConversation).catch(() => undefined);
+  }, [queueHydrated, rateLimitedUntilByConversation]);
+
+  const setConversationRateLimit = useCallback((conversationId: string, wait: SessionLimitReset | null) => {
+    if (wait) {
+      rateLimitedUntilRef.current = { ...rateLimitedUntilRef.current, [conversationId]: wait };
+    } else if (conversationId in rateLimitedUntilRef.current) {
+      const { [conversationId]: _removed, ...rest } = rateLimitedUntilRef.current;
+      rateLimitedUntilRef.current = rest;
+    } else {
+      return;
+    }
+    setRateLimitedUntilByConversation(rateLimitedUntilRef.current);
+  }, []);
+
   const removeQueuedFollowUp = useCallback((conversationId: string, itemId: string) => {
     const items = (queuedChatDraftsRef.current[conversationId] ?? []).filter(item => item.id !== itemId);
     queuedChatDraftsRef.current = { ...queuedChatDraftsRef.current, [conversationId]: items };
@@ -883,6 +913,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   }, []);
 
   const resumeQueuedFollowUps = useCallback(async (conversationId: string) => {
+    // A conversation still inside a provider rate-limit window holds its queue
+    // until the recorded reset instant; the timer below resumes it then.
+    const wait = rateLimitedUntilRef.current[conversationId];
+    if (wait && wait.until > Date.now()) return;
     if (thinkingConversationsRef.current[conversationId] || pendingV2SubmissionsRef.current.has(conversationId)) return;
     await followUpsRef.current.resume(conversationId,
       () => queuedChatDraftsRef.current[conversationId]?.[0],
@@ -890,6 +924,24 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       (itemId) => removeQueuedFollowUp(conversationId, itemId));
     setQueuePausedByConversation(current => ({ ...current, [conversationId]: followUpsRef.current.isPaused(conversationId) }));
   }, [removeQueuedFollowUp]);
+
+  // Provider rate-limit windows (e.g. Claude Code's five-hour limit) end at
+  // the parsed reset instant; the queued follow-ups then drain normally.
+  useEffect(() => {
+    const waits = Object.values(rateLimitedUntilByConversation).map((wait) => wait.until);
+    if (waits.length === 0) return;
+    const timer = window.setTimeout(() => {
+      const now = Date.now();
+      const expired = Object.keys(rateLimitedUntilRef.current)
+        .filter((id) => rateLimitedUntilRef.current[id].until <= now);
+      if (expired.length === 0) return;
+      rateLimitedUntilRef.current = { ...rateLimitedUntilRef.current };
+      for (const id of expired) delete rateLimitedUntilRef.current[id];
+      setRateLimitedUntilByConversation(rateLimitedUntilRef.current);
+      for (const id of expired) void resumeQueuedFollowUps(id);
+    }, Math.max(0, Math.min(...waits) - Date.now()));
+    return () => window.clearTimeout(timer);
+  }, [rateLimitedUntilByConversation, resumeQueuedFollowUps]);
 
   const setConversationComposerSelection = useCallback((conversationId: string, value: SetStateAction<ComposerSelection>) => {
     if (!conversationId) {
@@ -1871,11 +1923,33 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         if (type === 'turn.completed' && firstSettle && !replayed) {
           notifyTurnCompletedRef.current(localId, state, turnId);
         }
+        // Claude Code reports its five-hour window as provider_unavailable with
+        // "session limit · resets <time> (<tz>)". Recording the reset arms the
+        // wait: sends join the candidate queue until it passes, and the failed
+        // prompt is re-queued at the head so everything replays in order.
+        // Replayed journal entries are skipped — their wall-time report would
+        // resolve against now, while the persisted wait already holds the
+        // instant computed when the failure was live.
+        const rateLimited = !replayed && type === 'turn.failed' && typeof data.message === 'string'
+          ? parseSessionLimitReset(data.message) : null;
+        if (type === 'turn.completed') setConversationRateLimit(localId, null);
+        if (rateLimited) {
+          setConversationRateLimit(localId, rateLimited);
+          setLastError(t('sess.sessionLimitReached', { reset: rateLimited.label }));
+        }
         if (submission && turnId && submission.turnId === turnId) {
           if (type === 'turn.completed') removeQueuedFollowUp(localId, submission.requestId);
           if (type === 'turn.failed') {
-            restorePendingSubmission(localId);
-            setLastError(typeof data.message === 'string' ? data.message : t('sess.taskExecFailed'));
+            const queued = queuedChatDraftsRef.current[localId] ?? [];
+            if (rateLimited && queued.length < 32) {
+              queuedChatDraftsRef.current = { ...queuedChatDraftsRef.current,
+                [localId]: [{ id: createRequestId('queued'), text: submission.text,
+                  attachments: submission.attachments, skills: submission.skills }, ...queued] };
+              setQueuedChatDrafts(queuedChatDraftsRef.current);
+            } else {
+              restorePendingSubmission(localId);
+              if (!rateLimited) setLastError(typeof data.message === 'string' ? data.message : t('sess.taskExecFailed'));
+            }
           }
           pendingV2SubmissionsRef.current.delete(localId);
           setSubmissionStatusByConversation((current) => ({ ...current, [localId]: undefined }));
@@ -6334,6 +6408,26 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           setConversationAttachments(conversation.id, (current) => current.length > 0 ? current : attachments);
         }
       };
+      // Inside a provider rate-limit window every send route lands here, so a
+      // single gate moves it to the candidate queue until the reset passes.
+      // Queue dispatches report false instead so their entry stays at the head.
+      const rateLimitWait = rateLimitedUntilRef.current[conversation.id];
+      if (rateLimitWait && rateLimitWait.until > Date.now()) {
+        if (queuedRequestId) return false;
+        const queued = queuedChatDraftsRef.current[conversation.id] ?? [];
+        if (queued.length >= 32) {
+          setLastError(t('sess.candidateQueueFull'));
+          restoreSubmission();
+          return false;
+        }
+        queuedChatDraftsRef.current = { ...queuedChatDraftsRef.current,
+          [conversation.id]: [...queued, { id: createRequestId('queued'), text, attachments, skills }] };
+        setQueuedChatDrafts(queuedChatDraftsRef.current);
+        appendTimeline(makeSystemEntry(t('sess.sessionLimitQueued'),
+          t('sess.sessionLimitQueuedHint', { reset: rateLimitWait.label }), workspace.id, conversation.id));
+        return true;
+      }
+      if (rateLimitWait) setConversationRateLimit(conversation.id, null);
       const socket = socketRef.current;
       if (!socket || socket.readyState !== WebSocket.OPEN || !socketVerifiedRef.current) {
         if (autoConnectEnabled && !manualDisconnectRef.current) {
@@ -6415,10 +6509,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         if (typeof result.turnId === 'string') submission.turnId = result.turnId;
         const terminal = submission.turnId ? settledV2TurnsRef.current.get(`${v2Id}:${submission.turnId}`) : undefined;
         if (terminal) {
-          if (terminal === 'turn.failed') restoreSubmission();
+          // A rate-limited failure already re-queued the prompt at the head —
+          // treat it as accepted so the composer clears instead of restoring.
+          const waitActive = (rateLimitedUntilRef.current[conversation.id]?.until ?? 0) > Date.now();
+          if (terminal === 'turn.failed' && !waitActive) restoreSubmission();
           pendingV2SubmissionsRef.current.delete(conversation.id);
           setSubmissionStatusByConversation((current) => ({ ...current, [conversation.id]: undefined }));
-          if (terminal === 'turn.failed') return false;
+          if (terminal === 'turn.failed') return waitActive;
         } else if (pendingV2SubmissionsRef.current.get(conversation.id) === submission) {
           submission.phase = 'running';
           setSubmissionStatusByConversation((current) => ({ ...current, [conversation.id]: 'running' }));
@@ -6442,7 +6539,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           const latest = pendingV2SubmissionsRef.current.get(conversation.id);
           const v2Id = conversationsRef.current.find((item) => item.id === conversation.id)?.v2ConversationId;
           const terminal = v2Id && submission.turnId ? settledV2TurnsRef.current.get(`${v2Id}:${submission.turnId}`) : undefined;
-          if (terminal) return terminal !== 'turn.failed';
+          if (terminal) {
+            const waitActive = (rateLimitedUntilRef.current[conversation.id]?.until ?? 0) > Date.now();
+            return terminal !== 'turn.failed' || waitActive;
+          }
           return latest?.phase === 'running';
         }
         updateSentAttachmentRecords(sentAttachmentRecordsRef.current.filter((record) =>
@@ -6462,7 +6562,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         }
       }
     },
-    [updateSentAttachmentRecords, getConversationContext, materializeV2Conversation, reconcilePendingSubmission, promptContentFromAttachments, promptSkillsFromAttachments, sendProtocolCommand, setConversationAttachments, setConversationChatDraft, setConversationSelectedSkills, setConversationThinking, settings.defaultModel, updateConversation, autoConnectEnabled, connect],
+    [updateSentAttachmentRecords, appendTimeline, getConversationContext, materializeV2Conversation, reconcilePendingSubmission, promptContentFromAttachments, promptSkillsFromAttachments, sendProtocolCommand, setConversationAttachments, setConversationChatDraft, setConversationRateLimit, setConversationSelectedSkills, setConversationThinking, settings.defaultModel, updateConversation, autoConnectEnabled, connect],
   );
 
   const sendLocalTurn = useCallback(
@@ -8155,6 +8255,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     chatDrafts,
     queuedChatDrafts,
     queuePausedByConversation,
+    rateLimitedUntilByConversation,
     removeQueuedFollowUp,
     resumeQueuedFollowUps,
     controlConversation,

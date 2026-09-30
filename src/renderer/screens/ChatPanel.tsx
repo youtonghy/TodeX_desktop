@@ -1255,6 +1255,7 @@ export function ChatPanel({ session }: Props) {
             controlStatus={session.controlStatusByConversation[conversation.id]}
             localQueue={session.queuedChatDrafts[conversation.id] ?? []}
             localPaused={session.queuePausedByConversation[conversation.id] === true}
+            rateLimited={session.rateLimitedUntilByConversation[conversation.id]}
             onRecover={() => { void session.recoverConversation(conversation.id); }}
             onRemoveNative={itemId => { void session.controlConversation(conversation.id, { action: 'queueRemove', itemId }); }}
             onClearNative={() => { void session.controlConversation(conversation.id, { action: 'queueClear' }); }}
