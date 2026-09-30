@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronRight, Thunderbolt, ThunderboltFill } from '@gravity-ui/icons';
 import { Dropdown, EmptyState, SearchField, Tooltip, useFilter } from '@heroui/react';
 import type { ProviderModelDescriptor } from '@todex/protocol/v2';
+import { normalizeReasoningEffort } from '@todex/protocol/todex';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { reasoningEffortLabel, modelDisplayLabel } from '../session/helpers';
 
@@ -169,6 +170,12 @@ export function ModelReasoningCard({
     0,
     supportedReasoningEfforts.indexOf(displayedReasoningEffort ?? '')
   );
+  // Level key drives the per-intensity color ramp in CSS. When the displayed
+  // effort is unset, tint by the step currently under the thumb instead.
+  const effortLevel =
+    normalizeReasoningEffort(displayedReasoningEffort) ??
+    normalizeReasoningEffort(supportedReasoningEfforts[currentIndex]) ??
+    undefined;
 
   const updateEffortByIndex = useCallback(
     (index: number) => {
@@ -259,7 +266,7 @@ export function ModelReasoningCard({
         : `calc(14px + (100% - 28px) * ${currentIndex / (totalSteps - 1)})`;
 
   return (
-    <div className="composer-model-card">
+    <div className="composer-model-card" data-effort={effortLevel}>
       {/* Top row: Fast toggle & Model + Reasoning Trigger */}
       <div className="composer-model-card__header">
         {canToggleFast ? (

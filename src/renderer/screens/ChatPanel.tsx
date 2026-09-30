@@ -50,7 +50,7 @@ import {
 } from '../session/helpers';
 import { selectionInside } from '../lib/selection';
 import type { SentAttachment } from '../session/sentAttachments';
-import { findCapabilityHashTrigger, insertCapabilityReference } from '@todex/protocol/todex';
+import { findCapabilityHashTrigger, insertCapabilityReference, normalizeReasoningEffort } from '@todex/protocol/todex';
 import { buildCapabilitySuggestions, capabilityCatalogsPending, type CapabilitySuggestion } from '@todex/protocol/capabilityCatalog';
 import { describeToolCall, type ToolCallKind } from '@todex/protocol/toolPresentation';
 import { getLocale, t, useT } from '../i18n';
@@ -889,6 +889,7 @@ export function ChatPanel({ session }: Props) {
     ?? (supportedReasoningEfforts.includes('medium') ? 'medium' : supportedReasoningEfforts[0])
     ?? null;
   const reasoningIndex = Math.max(0, supportedReasoningEfforts.indexOf(displayedReasoningEffort ?? ''));
+  const displayedEffortLevel = normalizeReasoningEffort(displayedReasoningEffort) ?? undefined;
   const fastEnabled = workspace.serviceTier === 'priority' || workspace.serviceTier === 'fast';
   const contextUsage = session.contextUsageByConversation[conversation.id];
   const contextModelId = contextUsage?.model || currentModel;
@@ -1408,6 +1409,7 @@ export function ChatPanel({ session }: Props) {
                         variant="secondary"
                         isDisabled={providerModels.length === 0}
                         aria-label={t('chat.selectModel')}
+                        data-effort={displayedEffortLevel}
                       >
                         <RiCpuLine className={`composer-control__icon ${displayedReasoningEffort ? 'text-accent' : ''}`} />
                         <span className="composer-control__text">{modelDisplayLabel(currentModel, session.modelCatalog)}</span>

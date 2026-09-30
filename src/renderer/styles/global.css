@@ -114,6 +114,15 @@
   --warning-soft-foreground: #896535;
   --warning-soft-hover: rgba(245, 165, 36, 0.2);
 
+  /* Reasoning-effort intensity ramp: gray → teal → green → blue → amber → violet */
+  --effort-none: #8E959D;
+  --effort-minimal: #0FA9A0;
+  --effort-low: var(--success);
+  --effort-medium: var(--accent);
+  --effort-high: var(--warning);
+  --effort-xhigh: #7C5CFC;
+  --effort-xhigh-alt: #C14DF3;
+
   --border: #D4D8DC;
   --border-secondary: #C0C3C6;
   --border-tertiary: #A4A8AB;
@@ -209,6 +218,15 @@
   --warning-soft: rgba(247, 183, 80, 0.12);
   --warning-soft-foreground: #F9CB86;
   --warning-soft-hover: rgba(247, 183, 80, 0.16);
+
+  /* Reasoning-effort intensity ramp, brightened for dark surfaces */
+  --effort-none: #8B9095;
+  --effort-minimal: #2DD4BF;
+  --effort-low: var(--success);
+  --effort-medium: var(--accent);
+  --effort-high: var(--warning);
+  --effort-xhigh: #9D7BFF;
+  --effort-xhigh-alt: #D075F5;
 
   --border: #2A2E32;
   --border-secondary: #3E4244;
@@ -536,12 +554,16 @@ body {
   padding-inline: 0.65rem !important;
 }
 
+.composer-model-control__trigger[data-effort] .composer-control__icon {
+  color: var(--effort-color);
+}
+
 .composer-control__effort {
   display: inline-flex;
   align-items: center;
   font-size: 0.75rem;
   font-weight: 600;
-  color: var(--accent);
+  color: var(--effort-color, var(--accent));
   white-space: nowrap;
   flex-shrink: 0;
 }
@@ -673,7 +695,7 @@ body {
 .composer-model-card__effort-badge {
   font-size: 0.975rem;
   font-weight: 600;
-  color: var(--accent);
+  color: var(--effort-color, var(--accent));
   letter-spacing: -0.015em;
   white-space: nowrap;
 }
@@ -799,6 +821,32 @@ body {
   font-weight: 600;
 }
 
+/* Effort level → color mapping for the card and the composer trigger */
+.composer-model-card[data-effort='none'],
+.composer-model-control__trigger[data-effort='none'] {
+  --effort-color: var(--effort-none);
+}
+.composer-model-card[data-effort='minimal'],
+.composer-model-control__trigger[data-effort='minimal'] {
+  --effort-color: var(--effort-minimal);
+}
+.composer-model-card[data-effort='low'],
+.composer-model-control__trigger[data-effort='low'] {
+  --effort-color: var(--effort-low);
+}
+.composer-model-card[data-effort='medium'],
+.composer-model-control__trigger[data-effort='medium'] {
+  --effort-color: var(--effort-medium);
+}
+.composer-model-card[data-effort='high'],
+.composer-model-control__trigger[data-effort='high'] {
+  --effort-color: var(--effort-high);
+}
+.composer-model-card[data-effort='xhigh'],
+.composer-model-control__trigger[data-effort='xhigh'] {
+  --effort-color: var(--effort-xhigh);
+}
+
 /* Stepped Slider Track */
 .composer-model-card__track {
   position: relative;
@@ -813,18 +861,43 @@ body {
 }
 
 .composer-model-card__track:focus-visible {
-  box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent);
+  box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--effort-color, var(--accent));
 }
 
-/* Active green fill */
+/* Fill tinted by the current effort level */
 .composer-model-card__fill {
   position: absolute;
   left: 0;
   top: 0;
   bottom: 0;
-  background: var(--accent);
+  background: var(--effort-color, var(--accent));
   pointer-events: none;
-  transition: width 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: width 0.18s cubic-bezier(0.16, 1, 0.3, 1), background 0.18s ease, box-shadow 0.18s ease;
+}
+
+/* Max effort gets a flowing gradient and a soft glow */
+.composer-model-card[data-effort='xhigh'] .composer-model-card__fill {
+  background: linear-gradient(
+    100deg,
+    var(--effort-xhigh) 0%,
+    var(--effort-xhigh-alt) 50%,
+    var(--effort-xhigh) 100%
+  );
+  background-size: 200% 100%;
+  box-shadow: 0 0 14px color-mix(in oklab, var(--effort-xhigh) 45%, transparent);
+  animation: composer-model-card__effort-flow 3.2s linear infinite;
+}
+
+@keyframes composer-model-card__effort-flow {
+  to {
+    background-position: -200% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .composer-model-card[data-effort='xhigh'] .composer-model-card__fill {
+    animation: none;
+  }
 }
 
 .composer-model-card__track.is-dragging .composer-model-card__fill {
@@ -857,7 +930,7 @@ body {
   background: color-mix(in oklab, var(--foreground) 26%, transparent);
 }
 
-/* Tactile solid white thumb */
+/* Tactile solid white thumb with a level-colored center pip */
 .composer-model-card__thumb {
   position: absolute;
   top: 50%;
@@ -870,7 +943,25 @@ body {
   cursor: grab;
   z-index: 2;
   pointer-events: none;
-  transition: left 0.18s cubic-bezier(0.16, 1, 0.3, 1), transform 0.15s ease;
+  transition: left 0.18s cubic-bezier(0.16, 1, 0.3, 1), transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.composer-model-card__thumb::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0.375rem;
+  height: 0.375rem;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  background: var(--effort-color, var(--accent));
+  transition: background 0.18s ease;
+}
+
+.composer-model-card[data-effort='xhigh'] .composer-model-card__thumb {
+  box-shadow: 0 2px 7px rgba(0, 0, 0, 0.18), 0 1px 2px rgba(0, 0, 0, 0.08),
+    0 0 12px color-mix(in oklab, var(--effort-xhigh) 50%, transparent);
 }
 
 .composer-model-card__track.is-dragging .composer-model-card__thumb {
@@ -881,6 +972,11 @@ body {
 
 .composer-model-card__track:hover .composer-model-card__thumb {
   box-shadow: 0 3px 9px rgba(0, 0, 0, 0.22), 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.composer-model-card[data-effort='xhigh'] .composer-model-card__track:hover .composer-model-card__thumb {
+  box-shadow: 0 3px 9px rgba(0, 0, 0, 0.22), 0 1px 3px rgba(0, 0, 0, 0.1),
+    0 0 14px color-mix(in oklab, var(--effort-xhigh) 60%, transparent);
 }
 
 .composer-model-card__no-effort {
