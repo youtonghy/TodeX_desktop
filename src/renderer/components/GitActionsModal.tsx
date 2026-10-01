@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { Button, Checkbox, Input, Label, ListBox, Modal, Select, Spinner, TextArea, TextField, toast } from '@heroui/react';
+import { Button, Checkbox, Input, Label, Link, ListBox, Modal, Select, Spinner, TextArea, TextField, toast } from '@heroui/react';
 import { Command } from '@heroui-pro/react/command';
+import { buttonVariants } from '@heroui/styles';
 import { RiArrowRightLine, RiCloseLine, RiGitBranchLine, RiGitCommitLine, RiGitMergeLine,
   RiGitPullRequestLine, RiGithubLine, RiSearchLine, RiStackLine, RiUploadCloud2Line } from '@remixicon/react';
 import { providerDisplayName } from '@todex/protocol/v2';
@@ -23,6 +24,18 @@ const prMethods: readonly GitPullRequestMethod[] = ['merge', 'squash', 'rebase']
 const prMethodLabelKeys: Record<GitPullRequestMethod, MessageKey> = { merge: 'git.methodMerge', squash: 'git.methodSquash', rebase: 'git.methodRebase' };
 const prMergeStateLabelKeys: Record<string, MessageKey> = { clean: 'git.mergeStateClean', dirty: 'git.mergeStateDirty', blocked: 'git.mergeStateBlocked',
   behind: 'git.mergeStateBehind', unstable: 'git.mergeStateUnstable', unknown: 'git.mergeStateUnknown' };
+
+// PR links open in the system browser (desktop routes target=_blank to shell.openExternal),
+// so only hand over http(s) URLs.
+function externalHttpUrl(url: string | undefined) {
+  if (!url) return '';
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? parsed.href : '';
+  } catch {
+    return '';
+  }
+}
 
 export function GitActionsModal({ session, isOpen, onOpenChange }: Props) {
   const t = useT();
@@ -167,6 +180,7 @@ export function GitActionsModal({ session, isOpen, onOpenChange }: Props) {
   };
   const isPrView = view !== null && prViewActions.has(view);
   const prItem = pr?.pullRequest ?? null;
+  const prUrl = externalHttpUrl(prItem?.url);
   const workspaceState = isPrView ? pr : snapshot;
   const noticeScope = `${conversation?.id}:${session.activeBackendConnectionId}:${session.settings?.serverUrl}`;
   useNoticeToast(isOpen && error ? error : null, {
@@ -218,7 +232,8 @@ export function GitActionsModal({ session, isOpen, onOpenChange }: Props) {
             {prItem ? <div className="space-y-2 rounded-xl border border-default p-3">
               <div className="flex items-start justify-between gap-3">
                 <p className="min-w-0 break-all text-sm font-medium">#{prItem.number} {prItem.title}</p>
-                <Button size="sm" variant="ghost" isDisabled={!prItem.url} onPress={() => session.openPanel('Browser', { url: prItem.url })}>{t('git.open')}</Button>
+                <Link href={prUrl || undefined} target="_blank" rel="noopener noreferrer" isDisabled={!prUrl}
+                  className={buttonVariants({ variant: 'ghost', size: 'sm' })}>{t('git.open')}<Link.Icon /></Link>
               </div>
               <p className="text-muted break-all text-xs">{prItem.headRef} → {prItem.baseRef}{prItem.draft ? ` · ${t('git.draft')}` : ''}</p>
               <p className="text-muted text-xs">{prItem.state === 'merged' ? t('git.prStateMerged') : prItem.state === 'closed' ? t('git.prStateClosed') : t('git.prStateOpen')}
