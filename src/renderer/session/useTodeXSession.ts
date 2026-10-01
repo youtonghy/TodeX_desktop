@@ -927,10 +927,11 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
 
   // Provider rate-limit windows (e.g. Claude Code's five-hour limit) end at
   // the parsed reset instant; the queued follow-ups then drain normally.
+  // A single long setTimeout is unreliable in a hidden/frozen/slept renderer,
+  // so expired waits are also swept on an interval and whenever the window
+  // regains focus or visibility.
   useEffect(() => {
-    const waits = Object.values(rateLimitedUntilByConversation).map((wait) => wait.until);
-    if (waits.length === 0) return;
-    const timer = window.setTimeout(() => {
+    const sweepExpiredWaits = () => {
       const now = Date.now();
       const expired = Object.keys(rateLimitedUntilRef.current)
         .filter((id) => rateLimitedUntilRef.current[id].until <= now);
@@ -939,8 +940,20 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       for (const id of expired) delete rateLimitedUntilRef.current[id];
       setRateLimitedUntilByConversation(rateLimitedUntilRef.current);
       for (const id of expired) void resumeQueuedFollowUps(id);
-    }, Math.max(0, Math.min(...waits) - Date.now()));
-    return () => window.clearTimeout(timer);
+    };
+    const waits = Object.values(rateLimitedUntilByConversation).map((wait) => wait.until);
+    if (waits.length === 0) return;
+    const timer = window.setTimeout(sweepExpiredWaits, Math.max(0, Math.min(...waits) - Date.now()));
+    const watchdog = window.setInterval(sweepExpiredWaits, 30_000);
+    const onWake = () => { if (document.visibilityState === 'visible') sweepExpiredWaits(); };
+    document.addEventListener('visibilitychange', onWake);
+    window.addEventListener('focus', onWake);
+    return () => {
+      window.clearTimeout(timer);
+      window.clearInterval(watchdog);
+      document.removeEventListener('visibilitychange', onWake);
+      window.removeEventListener('focus', onWake);
+    };
   }, [rateLimitedUntilByConversation, resumeQueuedFollowUps]);
 
   const setConversationComposerSelection = useCallback((conversationId: string, value: SetStateAction<ComposerSelection>) => {
@@ -6436,7 +6449,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         } else {
           setLastError(t('sess.connectBackendFirst'));
         }
-        restoreSubmission();
+        // Queued dispatches keep their entry on failure; only composer sends
+        // restore the draft.
+        if (!queuedRequestId) restoreSubmission();
         return false;
       }
       if (attachments.some((attachment) => attachment.kind === 'image')) {
@@ -6448,7 +6463,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         });
         if (!imageSupport.supported) {
           setLastError(imageSupport.reason || t('image.agentUnsupportedShort'));
-          restoreSubmission();
+          if (!queuedRequestId) restoreSubmission();
           return false;
         }
       }

@@ -110,8 +110,11 @@ export function parseSessionLimitReset(message: string, now: number = Date.now()
  * so the replay frames it as resuming unfinished work rather than issuing a
  * fresh request. Stays English because it is model-facing regardless of the
  * UI locale. */
+const RATE_LIMIT_CONTINUE_PREFIX =
+  'The previous request was interrupted by a provider session limit before it could finish. Continue where it left off and complete the task:\n\n';
+
 export function rateLimitContinuationText(text: string): string {
-  return `The previous request was interrupted by a provider session limit before it could finish. Continue where it left off and complete the task:\n\n${text}`;
+  return text.startsWith(RATE_LIMIT_CONTINUE_PREFIX) ? text : RATE_LIMIT_CONTINUE_PREFIX + text;
 }
 
 /** Validates the persisted conversation → reset map, dropping entries whose
