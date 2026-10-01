@@ -105,6 +105,15 @@ export function parseSessionLimitReset(message: string, now: number = Date.now()
   return { until, label: match[1].trim() };
 }
 
+/** Prefix for the prompt re-queued at the head when a rate limit fails its
+ * turn: the interrupted request may already sit in the provider transcript,
+ * so the replay frames it as resuming unfinished work rather than issuing a
+ * fresh request. Stays English because it is model-facing regardless of the
+ * UI locale. */
+export function rateLimitContinuationText(text: string): string {
+  return `The previous request was interrupted by a provider session limit before it could finish. Continue where it left off and complete the task:\n\n${text}`;
+}
+
 /** Validates the persisted conversation → reset map, dropping entries whose
  * wait already elapsed. */
 export function restoreRateLimitWaits(value: unknown, now: number = Date.now()): Record<string, SessionLimitReset> {
