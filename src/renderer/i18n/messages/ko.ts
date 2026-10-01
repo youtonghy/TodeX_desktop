@@ -648,6 +648,7 @@ export const ko: Messages = {
   'git.noRemote': '원격 없음',
   'git.commitHistory': '커밋 기록',
   'git.noCommits': '아직 커밋 없음',
+  'git.commitsUnsupported': '이 백엔드 버전은 커밋 기록을 지원하지 않습니다. 백엔드를 업데이트하고 다시 시작하면 볼 수 있습니다.',
   'git.unpushed': '푸시 안 됨',
   'git.showEarlierCommits': '이전 커밋 {count}개 보기',
   'git.collapse': '접기',

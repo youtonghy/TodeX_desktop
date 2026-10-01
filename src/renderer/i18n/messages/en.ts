@@ -648,6 +648,7 @@ export const en: Messages = {
   'git.noRemote': 'No remote',
   'git.commitHistory': 'Commit history',
   'git.noCommits': 'No commits yet',
+  'git.commitsUnsupported': 'This backend version cannot list commits; update and restart the backend to see them.',
   'git.unpushed': 'Not pushed',
   'git.showEarlierCommits': 'Show {count} earlier commits',
   'git.collapse': 'Collapse',

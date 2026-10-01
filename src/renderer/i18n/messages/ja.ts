@@ -648,6 +648,7 @@ export const ja: Messages = {
   'git.noRemote': 'リモートなし',
   'git.commitHistory': 'コミット履歴',
   'git.noCommits': 'まだコミットがありません',
+  'git.commitsUnsupported': 'このバックエンドのバージョンはコミット履歴に対応していません。更新して再起動すると表示されます。',
   'git.unpushed': '未プッシュ',
   'git.showEarlierCommits': '以前のコミットを {count} 件表示',
   'git.collapse': '折りたたむ',

@@ -15,10 +15,11 @@ export const GIT_LOG_PAGE_SIZE = 5;
 const BUSY_RETRY_DELAYS_MS = [500, 1_500, 3_000];
 
 export type GitOverviewSection<T> = { data: T | null; error: string; loading: boolean };
-export type GitOverviewCommits = { items: GitLogCommit[]; hasMore: boolean; error: string; loading: boolean };
+/** `unsupported`: the backend predates GET /v2/git/log (404), so there is no history to show. */
+export type GitOverviewCommits = { items: GitLogCommit[]; hasMore: boolean; error: string; loading: boolean; unsupported: boolean };
 
 const idle = { data: null, error: '', loading: false };
-const idleCommits: GitOverviewCommits = { items: [], hasMore: false, error: '', loading: false };
+const idleCommits: GitOverviewCommits = { items: [], hasMore: false, error: '', loading: false, unsupported: false };
 
 function sleep(ms: number, signal: AbortSignal) {
   return new Promise<void>(resolve => {
@@ -75,14 +76,14 @@ export function useGitOverview({ settings, repoPath, enabled }: {
       loadedIdentity.current = identity;
       setStatus(idle); setWorkspace(idle); setPullRequest(idle); setCommits(idleCommits);
     }
-    const step = async <T>(read: () => Promise<T>, apply: (result: { data: T } | { error: string }) => void) => {
+    const step = async <T>(read: () => Promise<T>, apply: (result: { data: T } | { error: string; status?: number }) => void) => {
       if (signal.aborted) return null;
       try {
         const data = await retryWhenBusy(read, signal);
         if (!signal.aborted) apply({ data });
         return data;
       } catch (cause) {
-        if (!signal.aborted) apply({ error: message(cause) });
+        if (!signal.aborted) apply({ error: message(cause), status: cause instanceof GitWorkspaceError ? cause.status : undefined });
         return null;
       }
     };
@@ -97,8 +98,10 @@ export function useGitOverview({ settings, repoPath, enabled }: {
       setCommits(current => ({ ...current, loading: true }));
       await step(() => readGitLog(settings, repoPath, 0, 1, signal),
         result => setCommits('data' in result
-          ? { items: result.data.commits, hasMore: result.data.hasMore, error: '', loading: false }
-          : { items: [], hasMore: false, error: result.error, loading: false }));
+          ? { items: result.data.commits, hasMore: result.data.hasMore, error: '', loading: false, unsupported: false }
+          : result.status === 404
+            ? { ...idleCommits, unsupported: true }
+            : { items: [], hasMore: false, error: result.error, loading: false, unsupported: false }));
       setWorkspace(current => ({ ...current, loading: true }));
       await step(() => readGitWorkspace(settings, repoPath, signal),
         result => setWorkspace('data' in result ? { data: result.data, error: '', loading: false } : { data: null, error: result.error, loading: false }));
@@ -122,7 +125,7 @@ export function useGitOverview({ settings, repoPath, enabled }: {
     try {
       const page = await retryWhenBusy(() => readGitLog(settings, repoPath, current.items.length, GIT_LOG_PAGE_SIZE, signal), signal);
       if (signal.aborted) return;
-      setCommits(latest => ({ items: [...latest.items, ...page.commits], hasMore: page.hasMore, error: '', loading: false }));
+      setCommits(latest => ({ ...latest, items: [...latest.items, ...page.commits], hasMore: page.hasMore, error: '', loading: false }));
     } catch (cause) {
       if (!signal.aborted) setCommits(latest => ({ ...latest, loading: false, error: message(cause) }));
     }

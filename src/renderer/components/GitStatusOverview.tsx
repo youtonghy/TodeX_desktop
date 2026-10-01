@@ -157,6 +157,7 @@ function CommitHistory({ overview }: { overview: GitOverview }) {
     setShown(target);
   };
   if (!commits.items.length) {
+    if (commits.unsupported) return <p className="text-muted text-xs">{t('git.commitsUnsupported')}</p>;
     if (commits.loading) return <Spinner size="sm" />;
     if (commits.error) return <SectionError error={commits.error} />;
     return <p className="text-muted text-xs">{t('git.noCommits')}</p>;

@@ -648,6 +648,7 @@ export const zhCN = {
   'git.noRemote': '没有远端',
   'git.commitHistory': '提交记录',
   'git.noCommits': '还没有提交',
+  'git.commitsUnsupported': '当前后端版本不支持提交记录，更新并重启后端后可查看。',
   'git.unpushed': '未推送',
   'git.showEarlierCommits': '显示更早的 {count} 个提交',
   'git.collapse': '收起',
