@@ -143,6 +143,18 @@ export interface GitPullRequestSnapshot {
   pullRequest: GitPullRequest | null;
 }
 
+// PR links open in the system browser (desktop routes target=_blank to shell.openExternal),
+// so only hand over http(s) URLs.
+export function externalHttpUrl(url: string | undefined) {
+  if (!url) return '';
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? parsed.href : '';
+  } catch {
+    return '';
+  }
+}
+
 export function readGitPullRequest(settings: ConnectionSettings, workspacePath: string, signal?: AbortSignal): Promise<GitPullRequestSnapshot> {
   const url = new URL(buildHttpUrl(settings.serverUrl, '/v2/git/pull-request'));
   url.searchParams.set('workspacePath', workspacePath);
@@ -158,6 +170,27 @@ export interface GitStatusSummary {
   additions: number;
   deletions: number;
   statsTruncated: boolean;
+  /** Absent when the backend predates upstream reporting. */
+  upstream?: string | null;
+  ahead?: number | null;
+  behind?: number | null;
+}
+
+export interface GitLogCommit {
+  sha: string;
+  subject: string;
+  authorName: string;
+  /** Unix seconds. */
+  authoredAt: number;
+  /** null: no remote to compare with, or too many unpushed commits to tell. */
+  pushed: boolean | null;
+}
+
+export interface GitLogPage {
+  repositoryPath: string;
+  initialized: boolean;
+  commits: GitLogCommit[];
+  hasMore: boolean;
 }
 
 export interface GitRepositoryFile {
@@ -199,6 +232,15 @@ export function gitPollDelayMs(thinking: boolean, consecutiveFailures: number): 
 export function readGitScan(settings: ConnectionSettings, workspacePath: string, signal?: AbortSignal): Promise<GitScanResult> {
   const url = new URL(buildHttpUrl(settings.serverUrl, '/v2/git/scan'));
   url.searchParams.set('workspacePath', workspacePath);
+  return request(settings, url.toString(), undefined, undefined, signal);
+}
+
+export function readGitLog(settings: ConnectionSettings, workspacePath: string, skip: number, limit: number,
+  signal?: AbortSignal): Promise<GitLogPage> {
+  const url = new URL(buildHttpUrl(settings.serverUrl, '/v2/git/log'));
+  url.searchParams.set('workspacePath', workspacePath);
+  url.searchParams.set('skip', String(skip));
+  url.searchParams.set('limit', String(limit));
   return request(settings, url.toString(), undefined, undefined, signal);
 }
 

@@ -125,10 +125,13 @@ export function useConversationGitStatus(session: TodeXSession, gitOpen: boolean
     if (workspace) session.selectGitRepo(workspace.id, path);
   };
   const refresh = () => { status.refresh(); scan.refresh(); };
+  // Per-file changes only come from the scan; empty until it covers the repo.
+  const files = selectedSummary && !selectedSummary.error ? selectedSummary.files : [];
   return {
     workspace, connected, data, error,
     loading: status.loading && !data,
     refresh, repoOptions, dirtyRepos, selectedPath, containingRepo, selectRepo,
+    files, filesTruncated: Boolean(selectedSummary?.filesTruncated),
   };
 }
 

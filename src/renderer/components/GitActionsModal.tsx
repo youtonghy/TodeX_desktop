@@ -1,19 +1,22 @@
 import { useEffect, useRef, useState } from 'react';
-import { Button, Checkbox, Input, Label, Link, ListBox, Modal, Select, Spinner, TextArea, TextField, toast } from '@heroui/react';
+import { Button, Checkbox, Chip, Input, Label, Link, ListBox, Modal, Select, Spinner, Tabs, TextArea, TextField, toast } from '@heroui/react';
 import { Command } from '@heroui-pro/react/command';
 import { buttonVariants } from '@heroui/styles';
-import { RiArrowRightLine, RiCloseLine, RiGitBranchLine, RiGitCommitLine, RiGitMergeLine,
-  RiGitPullRequestLine, RiGithubLine, RiSearchLine, RiStackLine, RiUploadCloud2Line } from '@remixicon/react';
+import { RiArrowRightLine, RiArrowUpLine, RiCloseLine, RiFlashlightLine, RiGitBranchLine, RiGitCommitLine, RiGitMergeLine,
+  RiGitPullRequestLine, RiGithubLine, RiPulseLine, RiSearchLine, RiStackLine, RiUploadCloud2Line } from '@remixicon/react';
 import { providerDisplayName } from '@todex/protocol/v2';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { buildGitAgentPrompt, buildGitFailurePrompt, gitAgentActionGroups, type GitAgentActionId } from '../session/gitAgentActions';
-import { GitWorkspaceError, readGitPullRequest, readGitWorkspace, runGitWorkspaceOperation, type GitPullRequestMethod, type GitPullRequestSnapshot, type GitWorkspaceOperation, type GitWorkspaceSnapshot } from '../lib/gitWorkspace';
+import { externalHttpUrl, GitWorkspaceError, readGitPullRequest, readGitWorkspace, runGitWorkspaceOperation, type GitPullRequestMethod, type GitPullRequestSnapshot, type GitWorkspaceOperation, type GitWorkspaceSnapshot } from '../lib/gitWorkspace';
 import { useConversationGitStatus } from './GitStatusIndicator';
+import { GitStatusOverview } from './GitStatusOverview';
+import { useGitOverview } from '../session/useGitOverview';
 import { ProviderIcon } from './ProviderIcon';
 import { useNoticeToast } from './NoticeToast';
 import { useT, type MessageKey } from '../i18n';
 
 type Props = { session: TodeXSession; isOpen: boolean; onOpenChange: (open: boolean) => void };
+type MenuTab = 'status' | 'operations';
 const groupIcons = { repository: RiGitCommitLine, branches: RiGitBranchLine, worktrees: RiStackLine,
   collaboration: RiGitMergeLine };
 const prViewActions = new Set<GitAgentActionId>(['view-pr', 'close-pr', 'reopen-pr', 'draft-pr', 'ready-pr',
@@ -24,18 +27,6 @@ const prMethods: readonly GitPullRequestMethod[] = ['merge', 'squash', 'rebase']
 const prMethodLabelKeys: Record<GitPullRequestMethod, MessageKey> = { merge: 'git.methodMerge', squash: 'git.methodSquash', rebase: 'git.methodRebase' };
 const prMergeStateLabelKeys: Record<string, MessageKey> = { clean: 'git.mergeStateClean', dirty: 'git.mergeStateDirty', blocked: 'git.mergeStateBlocked',
   behind: 'git.mergeStateBehind', unstable: 'git.mergeStateUnstable', unknown: 'git.mergeStateUnknown' };
-
-// PR links open in the system browser (desktop routes target=_blank to shell.openExternal),
-// so only hand over http(s) URLs.
-function externalHttpUrl(url: string | undefined) {
-  if (!url) return '';
-  try {
-    const parsed = new URL(url);
-    return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? parsed.href : '';
-  } catch {
-    return '';
-  }
-}
 
 export function GitActionsModal({ session, isOpen, onOpenChange }: Props) {
   const t = useT();
@@ -56,11 +47,14 @@ export function GitActionsModal({ session, isOpen, onOpenChange }: Props) {
   const [confirming, setConfirming] = useState<GitAgentActionId | null>(null);
   const [mergeMethod, setMergeMethod] = useState<GitPullRequestMethod>('merge');
   const [failure, setFailure] = useState<{ id: GitAgentActionId; operation?: unknown; error: string; unknown: boolean } | null>(null);
+  const [tab, setTab] = useState<MenuTab>('status');
+  const [jumpGroup, setJumpGroup] = useState<string | null>(null);
   const outcomeUnknown = useRef(false);
   const generation = useRef(0);
   useEffect(() => {
     generation.current++;
     setView(null); setSnapshot(null); setPr(null); setConfirming(null); setError(''); setFailure(null); setOutput(''); setRemovePath('');
+    setTab('status'); setJumpGroup(null);
     outcomeUnknown.current = false;
     return () => { generation.current++; };
   }, [isOpen, session.activeConversation?.id, session.activeBackendConnectionId, session.settings?.serverUrl]);
@@ -69,6 +63,16 @@ export function GitActionsModal({ session, isOpen, onOpenChange }: Props) {
   const workspace = session.workspaces.find(item => item.id === conversation?.workspaceId);
   const git = useConversationGitStatus(session, isOpen, isOpen);
   const repoPath = git.selectedPath || workspace?.path || '';
+  // Reloads whenever the menu (re)appears, including after returning from an action view.
+  const overview = useGitOverview({ settings: session.settings, repoPath, enabled: isOpen && !view && git.connected });
+  useEffect(() => {
+    if (tab !== 'operations' || !jumpGroup) return;
+    const firstAction = gitAgentActionGroups.find(group => group.id === jumpGroup)?.actions[0]?.id;
+    setJumpGroup(null);
+    // Command.Group renders no id; its first item carries the action id as data-key.
+    document.querySelector(`[data-slot="command-list"] [data-key="${firstAction}"]`)
+      ?.closest('[data-slot="command-group"]')?.scrollIntoView({ block: 'start' });
+  }, [tab, jumpGroup]);
   const chooseRepo = (key: React.Key | null) => {
     const path = typeof key === 'string' ? key : '';
     if (!workspace || !path || path === repoPath) return;
@@ -309,7 +313,8 @@ export function GitActionsModal({ session, isOpen, onOpenChange }: Props) {
   return <Command>
     <Command.Backdrop isOpen={isOpen} onOpenChange={onOpenChange}>
       <Command.Container className="w-[calc(100vw-2rem)] max-w-xl">
-        <Command.Dialog aria-label={t('git.operations')} className="max-h-[88dvh] overflow-hidden">
+        {/* One fixed height for both tabs; the scrolling area of the active tab takes what the header leaves. */}
+        <Command.Dialog aria-label={t('git.operations')} className="flex h-[min(46rem,88dvh)] max-h-[88dvh] flex-col overflow-hidden">
           <Command.Header className="flex items-start justify-between gap-4 px-5 pt-5 pb-3">
             <div className="min-w-0 flex-1">
               <h2 className="flex items-center gap-2 text-lg font-semibold"><RiGithubLine className="size-5" />{t('git.operations')}</h2>
@@ -339,16 +344,43 @@ export function GitActionsModal({ session, isOpen, onOpenChange }: Props) {
             </div>
             <Button isIconOnly variant="ghost" size="sm" aria-label={t('git.closeOperations')} onPress={() => onOpenChange(false)}><RiCloseLine className="size-5" /></Button>
           </Command.Header>
-          <div className="text-muted flex items-center gap-2 px-5 pb-3 text-xs">
+          <Tabs selectedKey={tab} onSelectionChange={key => setTab(key === 'operations' ? 'operations' : 'status')} className="px-5 pb-2">
+            <Tabs.ListContainer className="w-full">
+              <Tabs.List aria-label={t('git.pagesLabel')} className="grid w-full grid-cols-2">
+                <Tabs.Tab id="status" className="gap-1.5">
+                  <RiPulseLine className="size-4" />{t('git.tabStatus')}
+                  {overview.status.data?.changedFiles ? <Chip size="sm" variant="soft" color="warning" className="tabular-nums">{overview.status.data.changedFiles}</Chip> : null}
+                  <Tabs.Indicator />
+                </Tabs.Tab>
+                <Tabs.Tab id="operations" className="gap-1.5">
+                  <RiFlashlightLine className="size-4" />{t('git.tabOperations')}
+                  <Tabs.Indicator />
+                </Tabs.Tab>
+              </Tabs.List>
+            </Tabs.ListContainer>
+          </Tabs>
+          {tab === 'status' ? <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-4">
+            <GitStatusOverview key={repoPath} overview={overview} files={git.files} filesTruncated={git.filesTruncated}
+              onJump={group => { setTab('operations'); setJumpGroup(group); }} />
+          </div> : <>
+          <div className="text-muted flex items-center gap-2 px-5 pb-2 text-xs">
             <ProviderIcon provider={provider} className="size-4" />
             <span className="truncate">{conversation ? t('git.sendTo', { provider: providerDisplayName(provider), title: conversation.title }) : t('git.pickAgent')}</span>
           </div>
+          {overview.status.data?.initialized ? <div className="flex flex-wrap items-center gap-1.5 px-5 pb-2">
+            <Chip size="sm" variant="soft"><RiGitBranchLine className="size-3" /><span className="font-mono">{overview.status.data.branch || t('git.detachedHead')}</span></Chip>
+            {overview.status.data.changedFiles
+              ? <Chip size="sm" variant="soft" color="warning">{t('git.changedFiles', { count: overview.status.data.changedFiles })}</Chip>
+              : <Chip size="sm" variant="soft" color="success">{t('git.cleanTree')}</Chip>}
+            {overview.status.data.ahead ? <Chip size="sm" variant="soft" color="warning"><RiArrowUpLine className="size-3" />{overview.status.data.ahead}</Chip> : null}
+            {overview.pullRequest.data?.pullRequest ? <Chip size="sm" variant="soft" color="accent"><RiGitPullRequestLine className="size-3" />#{overview.pullRequest.data.pullRequest.number}</Chip> : null}
+          </div> : null}
           <Command.InputGroup aria-label={t('git.searchOps')} className="mx-3">
             <Command.InputGroup.Prefix><RiSearchLine className="size-4" /></Command.InputGroup.Prefix>
             <Command.InputGroup.Input placeholder={t('git.searchPlaceholder')} />
             <Command.InputGroup.ClearButton aria-label={t('git.clearSearch')} />
           </Command.InputGroup>
-          <Command.List aria-label={t('git.opsList')} className="min-h-0 max-h-[55dvh] overflow-y-auto px-3 pb-3"
+          <Command.List aria-label={t('git.opsList')} className="min-h-0 flex-1 overflow-y-auto px-3 pb-3"
             disabledKeys={allActions.filter(action => unavailable || sending || (writingBlocked && (action.id === 'init' || action.id === 'push'))).map(action => action.id)}
             onAction={key => { const action = allActions.find(item => item.id === String(key)); if (action) choose(action.id); }}
             renderEmptyState={() => <span>{t('git.noMatch')}</span>}>
@@ -371,6 +403,7 @@ export function GitActionsModal({ session, isOpen, onOpenChange }: Props) {
               </Command.Group>;
             })}
           </Command.List>
+          </>}
         </Command.Dialog>
       </Command.Container>
     </Command.Backdrop>
