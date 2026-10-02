@@ -15,6 +15,7 @@ import { parseSessionLimitReset, rateLimitContinuationText, restoreRateLimitWait
 import { LegacyEventRecovery } from './legacyEventRecovery';
 import { ConversationRecovery, isConversationRuntimeBusy, type ConversationOpenStatus, type EarlierHistoryResult } from './conversationRecovery';
 import { type ConversationRuntime } from '@todex/protocol/conversationRuntime';
+import { conversationTranscriptMarkdown, fetchConversationTranscript, transcriptEntries } from '@todex/protocol/conversationExport';
 import { canonicalConversationEventType, type ConversationEvent } from '@todex/protocol/v2';
 import { ProtocolCommands, ProtocolCommandError, type ProtocolCommand } from './protocolCommands';
 import {
@@ -7136,6 +7137,19 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     return true;
   }, [appendTimeline, getConversationContext]);
 
+  /** Export a conversation's user and assistant messages as Markdown, for
+   * referencing it from another conversation (`@chat:`). Replays the whole
+   * journal because the conversation may never have been opened here. */
+  const exportConversationMarkdown = useCallback(async (conversationId: string, maxBytes?: number) => {
+    const conversation = conversationsRef.current.find((item) => item.id === conversationId);
+    if (!conversation) throw new Error(t('alert.noConversation'));
+    const v2Id = conversation.v2ConversationId;
+    const entries = v2Id
+      ? await fetchConversationTranscript((id, after, limit) => v2ApiForConversation(id).replayEvents(id, after, limit, 'summary'), v2Id, conversation.workspaceId)
+      : transcriptEntries(timelineRef.current.filter((entry) => entry.conversationId === conversationId));
+    return conversationTranscriptMarkdown(entries, { title: conversation.title, maxBytes });
+  }, [v2ApiForConversation]);
+
   const sendSlashCommand = useCallback(
     (input: string, conversationId = activeConversationRef.current) => {
       const trimmed = input.trim();
@@ -8374,6 +8388,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     sendSlashCommand,
     openSlashCommandActionPage,
     copyLastAgentMessage,
+    exportConversationMarkdown,
     runWorkspaceCommand,
     runThreadMenuAction,
     submitThreadCommandPrompt,

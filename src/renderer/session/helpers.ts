@@ -1276,6 +1276,8 @@ export type MentionSuggestion = {
   title: string;
   description: string;
   insertText: string;
+  /** Set for `@chat:` suggestions: the conversation to export and attach. */
+  conversationId?: string;
 };
 
 export type PermissionPresetId = 'read-only' | 'default' | 'auto-review' | 'full-access';
@@ -2628,6 +2630,42 @@ export function buildMentionSuggestions(
     description: entry.path,
     insertText: entry.kind === 'directory' ? `@${entry.path}` : `@${entry.path} `,
   }));
+}
+
+/** `@chat:<query>` references another conversation of the same workspace. */
+export const CHAT_MENTION_PREFIX = 'chat:';
+
+/** The conversation filter of an `@chat:` trigger, or null for file mentions. */
+export function chatMentionQuery(trigger: MentionTrigger | null): string | null {
+  if (!trigger || !trigger.query.toLowerCase().startsWith(CHAT_MENTION_PREFIX)) return null;
+  return trigger.query.slice(CHAT_MENTION_PREFIX.length);
+}
+
+/** Offers `@chat:` itself while the typed query is still a prefix of it. */
+export function chatMentionPrefixSuggestion(trigger: MentionTrigger | null, description: string): MentionSuggestion | null {
+  if (!trigger || !CHAT_MENTION_PREFIX.startsWith(trigger.query.toLowerCase())) return null;
+  return { id: 'chat-prefix', title: CHAT_MENTION_PREFIX, description, insertText: `@${CHAT_MENTION_PREFIX}` };
+}
+
+export function buildChatMentionSuggestions(
+  query: string,
+  conversations: readonly ConversationRecord[],
+  workspaceId: string,
+  currentConversationId: string,
+): MentionSuggestion[] {
+  // The trigger ends at whitespace, so titles match with their spaces removed.
+  const needle = query.toLowerCase();
+  return conversations
+    .filter((item) => item.workspaceId === workspaceId && item.id !== currentConversationId && !item.archived)
+    .filter((item) => !needle || item.title.toLowerCase().replace(/\s+/g, '').includes(needle))
+    .slice(0, 8)
+    .map((item) => ({
+      id: `chat-${item.id}`,
+      title: item.title || item.id,
+      description: (item.preview ?? '').replace(/\s+/g, ' ').trim().slice(0, 80),
+      insertText: '',
+      conversationId: item.id,
+    }));
 }
 
 export function insertMention(text: string, trigger: MentionTrigger, insertText: string): string {

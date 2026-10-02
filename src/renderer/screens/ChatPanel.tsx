@@ -35,7 +35,11 @@ import {
   attachmentToken,
   findMentionTrigger,
   buildMentionSuggestions,
+  buildChatMentionSuggestions,
+  chatMentionPrefixSuggestion,
+  chatMentionQuery,
   insertMention,
+  tokenSafeName,
   canonicalSlashCommand,
   modelDisplayLabel,
   reasoningEffortLabel,
@@ -46,6 +50,8 @@ import {
   STREAMING_REPLY_PLACEHOLDER,
   canAutoLoadEarlierHistory,
   type ComposerAttachmentDraft,
+  type MentionSuggestion,
+  type MentionTrigger,
   type TimelineEntry,
 } from '../session/helpers';
 import { selectionInside } from '../lib/selection';
@@ -527,6 +533,8 @@ export function ChatPanel({ session }: Props) {
   // that started the read.
   const draftRef = useRef(draft);
   draftRef.current = draft;
+  const conversationIdRef = useRef(conversation?.id);
+  conversationIdRef.current = conversation?.id;
   const composerSelectionRef = useRef(session.composerSelections[conversation?.id ?? '']);
   composerSelectionRef.current = session.composerSelections[conversation?.id ?? ''];
   const mention = findMentionTrigger(draft, conversation ? (session.composerSelections[conversation.id]?.end ?? draft.length) : 0);
@@ -535,7 +543,15 @@ export function ChatPanel({ session }: Props) {
   // trigger closest to the caret wins.
   const mentionActive = Boolean(mention && (!capability || mention.start > capability.start));
   const capabilityActive = Boolean(capability && !mentionActive);
-  const [mentionSuggestions, setMentionSuggestions] = useState<Array<{ id: string; title: string; description: string; insertText: string }>>([]);
+  const [fileMentionSuggestions, setFileMentionSuggestions] = useState<MentionSuggestion[]>([]);
+  const chatQuery = chatMentionQuery(mention);
+  const chatMentionSuggestions = useMemo(() => chatQuery === null || !conversation ? []
+    : buildChatMentionSuggestions(chatQuery, session.conversations, conversation.workspaceId, conversation.id),
+  [chatQuery, conversation?.id, conversation?.workspaceId, session.conversations]);
+  const chatPrefixSuggestion = chatMentionPrefixSuggestion(mention, t('chat.chatMentionHint'));
+  const mentionSuggestions = chatQuery !== null ? chatMentionSuggestions
+    // Listed after the files so Enter on a plain `@` still picks the first file.
+    : chatPrefixSuggestion ? [...fileMentionSuggestions, chatPrefixSuggestion] : fileMentionSuggestions;
   const [mentionSearchPending, setMentionSearchPending] = useState(false);
   const [suggestionIndex, setSuggestionIndex] = useState(0);
   const [expandedProcessIds, setExpandedProcessIds] = useState<Set<string>>(() => new Set());
@@ -545,8 +561,8 @@ export function ChatPanel({ session }: Props) {
   const isComposingRef = useRef(false);
   useEffect(() => {
     let active = true;
-    if (!mention || !workspace) {
-      setMentionSuggestions([]);
+    if (!mention || !workspace || chatQuery !== null) {
+      setFileMentionSuggestions([]);
       setMentionSearchPending(false);
       return () => { active = false; };
     }
@@ -554,16 +570,16 @@ export function ChatPanel({ session }: Props) {
     void session.fetchWorkspaceEntries(workspace.path, mention.query)
       .then((result) => {
         if (!active) return;
-        setMentionSuggestions(buildMentionSuggestions(mention, result.entries));
+        setFileMentionSuggestions(buildMentionSuggestions(mention, result.entries));
         setMentionSearchPending(false);
       })
       .catch(() => {
         if (!active) return;
-        setMentionSuggestions([]);
+        setFileMentionSuggestions([]);
         setMentionSearchPending(false);
       });
     return () => { active = false; };
-  }, [mention?.query, mention?.start, workspace?.path, session.fetchWorkspaceEntries]);
+  }, [mention?.query, mention?.start, workspace?.path, chatQuery, session.fetchWorkspaceEntries]);
   const chatEntries = useMemo(() => {
     if (!conversation) return [];
     return session.timeline
@@ -814,11 +830,7 @@ export function ChatPanel({ session }: Props) {
       return;
     }
     const item = mentionSuggestions[index];
-    if (!item || !mention) return;
-    session.setConversationChatDraft(conversation.id, insertMention(draft, mention, item.insertText));
-    const cursor = mention.start + item.insertText.length;
-    session.setConversationComposerSelection(conversation.id, { start: cursor, end: cursor });
-    composerRef.current?.focus(cursor);
+    if (item) applyMentionSuggestion(item);
   };
   const handleSuggestionKeyDown = (event: KeyboardEvent) => {
     if (isComposingRef.current || isImeCompositionKey(event)) return;
@@ -938,6 +950,55 @@ export function ChatPanel({ session }: Props) {
     session.setConversationChatDraft(conversation.id, `${before}${lead}${insertion}${tail}${after}`);
     session.setConversationComposerSelection(conversation.id, { start: cursor, end: cursor });
     composerRef.current?.focus(cursor);
+  };
+
+  const applyMentionSuggestion = (item: MentionSuggestion) => {
+    if (!mention) return;
+    if (item.conversationId) {
+      void attachConversationMention(item.conversationId, item.title, mention);
+      return;
+    }
+    session.setConversationChatDraft(conversation.id, insertMention(draft, mention, item.insertText));
+    const cursor = mention.start + item.insertText.length;
+    session.setConversationComposerSelection(conversation.id, { start: cursor, end: cursor });
+    composerRef.current?.focus(cursor);
+  };
+
+  /** `@chat:` exports the picked conversation as Markdown and attaches it as
+   * a file capsule in place of the trigger text. */
+  const attachConversationMention = async (referencedId: string, title: string, trigger: MentionTrigger) => {
+    const conversationId = conversation.id;
+    session.setConversationChatDraft(conversationId, insertMention(draft, trigger, ''));
+    session.setConversationComposerSelection(conversationId, { start: trigger.start, end: trigger.start });
+    composerRef.current?.focus(trigger.start);
+    if (attachments.length >= MAX_COMPOSER_ATTACHMENTS) {
+      toast.danger(t('chat.maxAttachments', { max: MAX_COMPOSER_ATTACHMENTS }));
+      return;
+    }
+    let markdown: string;
+    try {
+      markdown = await session.exportConversationMarkdown(referencedId, MAX_COMPOSER_TEXT_BYTES);
+    } catch (error) {
+      toast.danger(t('chat.chatMentionFailed'), { description: error instanceof Error ? error.message : String(error) });
+      return;
+    }
+    const stillActive = conversationIdRef.current === conversationId;
+    const currentDraft = stillActive ? draftRef.current : (session.chatDrafts[conversationId] ?? '');
+    const attachment: ComposerAttachmentDraft = {
+      id: attachmentId(),
+      kind: 'file',
+      // Every attachment is a token in the draft, so the live draft catches name clashes.
+      name: uniqueAttachmentName(`${tokenSafeName(title).trim() || 'conversation'}.md`, session.composerAttachments[conversationId] ?? [], currentDraft),
+      mimeType: 'text/markdown',
+      sizeBytes: new TextEncoder().encode(markdown).length,
+      dataUrl: '',
+      textContent: markdown,
+      source: 'file',
+    };
+    session.setConversationAttachments(conversationId, (current) => [...current, attachment]);
+    if (stillActive) insertAttachmentTokens([attachmentToken(attachment)]);
+    else session.setConversationChatDraft(conversationId, (current) => `${current}${current && !/\s$/.test(current) ? ' ' : ''}${attachmentToken(attachment)}`);
+    toast.success(t('chat.chatMentionAdded'));
   };
 
   const addBrowserFiles = async (files: File[], source: 'clipboard' | 'file' = 'file') => {
@@ -1198,14 +1259,10 @@ export function ChatPanel({ session }: Props) {
                 )
               ) : mentionSuggestions.length > 0 ? (
                 <ListBox
-                  aria-label={t('chat.fileSuggestions')}
+                  aria-label={chatQuery !== null ? t('chat.chatSuggestions') : t('chat.fileSuggestions')}
                   onAction={(key) => {
                     const item = mentionSuggestions.find((candidate) => candidate.id === String(key));
-                    if (!item || !mention) return;
-                    session.setConversationChatDraft(conversation.id, insertMention(draft, mention, item.insertText));
-                    const cursor = mention.start + item.insertText.length;
-                    session.setConversationComposerSelection(conversation.id, { start: cursor, end: cursor });
-                    composerRef.current?.focus(cursor);
+                    if (item) applyMentionSuggestion(item);
                   }}
                 >
                   {mentionSuggestions.map((item, index) => (
@@ -1215,7 +1272,7 @@ export function ChatPanel({ session }: Props) {
                     </ListBox.Item>
                   ))}
                 </ListBox>
-              ) : mention ? <p className="text-muted px-2 py-1 text-xs">{mentionSearchPending ? t('chat.searchingFiles') : t('chat.noFileSuggestions')}</p> : null}
+              ) : mention ? <p className="text-muted px-2 py-1 text-xs">{chatQuery !== null ? t('chat.noChatSuggestions') : mentionSearchPending ? t('chat.searchingFiles') : t('chat.noFileSuggestions')}</p> : null}
             </div>
           ) : null}
           {(session.selectedSkills[conversation.id] ?? []).length > 0 ? (
