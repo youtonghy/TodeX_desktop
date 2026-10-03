@@ -28,7 +28,7 @@ export function refreshUpdateMenu(): void {
   Menu.setApplicationMenu(menu);
 }
 
-export function startAutoUpdates(buildVersion: string): void {
+export function startAutoUpdates(buildVersion: string, onAppImageMoved?: (destination: string) => void): void {
   // Both independent build identities must agree. Source runs and unversioned
   // local packages must not contact the release service, even via the menu.
   if (!canAutoUpdate(app.isPackaged, buildVersion, app.getVersion())) return;
@@ -43,6 +43,9 @@ export function startAutoUpdates(buildVersion: string): void {
   autoUpdater.autoInstallOnAppQuit = true;
   autoUpdater.logger = console;
   autoUpdater.on('error', (error) => console.warn('[updates]', error.message));
+  // Fired after the installed AppImage is moved to its new versioned file
+  // name; the launcher entry is repointed before the old process exits.
+  autoUpdater.on('appimage-filename-updated', (destination) => onAppImageMoved?.(destination));
   const check = createUpdateCheck(autoUpdater, buildVersion);
 
   const run = async (interactive: boolean) => {

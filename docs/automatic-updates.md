@@ -6,6 +6,8 @@
 
 原生菜单 **更新 → 检查更新…** 可立即检查并显示结果。检查或下载失败保留当前版本，下次检查重试；已成功下载的版本保留到退出，不重复下载或降级。这些逻辑仅存在于 Electron 主进程，无需修改 web 共用界面。
 
+Linux 下安装更新会删除运行中的 AppImage，并在同目录写入带新版本号的文件，因此启动器入口若仍指向旧路径就会失效（`TryExec` 失效时桌面环境会隐藏整个入口）。应用在启动时把 `~/.local/share/applications/todex.desktop` 重写为指向当前 AppImage（不写 `TryExec`），在更新换名后立即同步，并清理仍指向已删除 TodeX AppImage 的旧入口；图标安装到 hicolor 主题目录。
+
 ## 发布配置
 
 发布流程生成并上传安装包、macOS ZIP、`latest*.yml` 更新元数据、blockmap 和 `SHA256SUMS`。上传前验证元数据版本、文件是否存在、大小和 SHA-512。不能仅上传安装包；应通过 Release desktop packages 工作流发布。新版本必须高于已发布版本，`0.0.0` 保留给开发占位。

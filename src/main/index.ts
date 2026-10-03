@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { startAutoUpdates, refreshUpdateMenu } from './autoUpdates';
+import { syncDesktopEntry } from './desktopEntry';
 import { isMainLocale, mainT, setMainLocale } from './i18n';
 import {
   DEBUG_BUILD_VERSION,
@@ -229,6 +230,32 @@ function appIconPath(variant: 'dark' | 'light' = 'dark'): string {
 
 function themedAppIconPath(): string {
   return appIconPath(nativeTheme.shouldUseDarkColors ? 'dark' : 'light');
+}
+
+// Rewrites ~/.local/share/applications/todex.desktop so it always points at
+// the running AppImage. The updater swaps the file for a new versioned name
+// when it installs an update; without this the launcher entry keeps pointing
+// at the deleted file and desktops honoring TryExec hide TodeX entirely.
+function syncLinuxDesktopEntry(appImagePath?: string): void {
+  const appImage = appImagePath ?? process.env.APPIMAGE;
+  if (process.platform !== 'linux' || !appImage) return;
+  try {
+    const result = syncDesktopEntry({
+      appImage,
+      iconSource: appIconPath(),
+      name: 'TodeX',
+      comment: 'TodeX desktop client',
+      wmClass: app.getName(),
+    });
+    if (result.rewritten || result.removedEntries.length > 0) {
+      const stale = result.removedEntries.length ? `; removed stale: ${result.removedEntries.join(', ')}` : '';
+      console.info(`[${APP_IDENTITY}] desktop entry updated (${result.entry})${stale}`);
+    }
+    debugLog('info', 'desktop.entry.sync', result);
+  } catch (error) {
+    debugLog('warn', 'desktop.entry.sync.error', { error });
+    console.warn(`[${APP_IDENTITY}] desktop entry sync failed: ${error instanceof Error ? error.message : error}`);
+  }
 }
 
 function applySystemAppIcon(): void {
@@ -652,7 +679,8 @@ app.whenReady().then(() => {
   });
 
   createWindow();
-  startAutoUpdates(BUILD_VERSION);
+  syncLinuxDesktopEntry();
+  startAutoUpdates(BUILD_VERSION, syncLinuxDesktopEntry);
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
