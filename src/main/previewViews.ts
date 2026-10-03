@@ -102,6 +102,11 @@ export class PreviewViews {
     try {
       await preview.view.webContents.loadURL(url);
     } catch (error) {
+      // A load cut short is not a page error: the tab was closed (e.g. a
+      // remount, which may already have opened a new view under the same
+      // key) or another navigation replaced it.
+      if (this.previews.get(key) !== preview || preview.view.webContents.isDestroyed()) return;
+      if ((error as { code?: unknown })?.code === 'ERR_ABORTED') return;
       // An error page is still shown; report it with the state.
       this.emit(key, error instanceof Error ? error.message : String(error));
     }
