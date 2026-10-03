@@ -17,10 +17,12 @@ export type DesktopPanel =
   | 'v2'
   | 'subagents'
   | 'kanban'
+  /** Read-only Workbench tab following one agent `ssh_exec` call. */
+  | 'ssh-exec'
   /** SSH hosts, keys and connections; renders as the main content inside AppLayout. */
   | 'ssh';
 
-export type WorkbenchTab = 'terminal' | 'browser' | 'files' | 'git-diff';
+export type WorkbenchTab = 'terminal' | 'browser' | 'files' | 'git-diff' | 'ssh-exec';
 
 export type OpenPanelOptions = {
   workspaceId?: string;
@@ -31,7 +33,7 @@ export type OpenPanelOptions = {
 };
 
 export function isWorkbenchTab(panel: DesktopPanel | null): panel is WorkbenchTab {
-  return panel === 'terminal' || panel === 'browser' || panel === 'files' || panel === 'git-diff';
+  return panel === 'terminal' || panel === 'browser' || panel === 'files' || panel === 'git-diff' || panel === 'ssh-exec';
 }
 
 export function panelFromRoute(name: string): DesktopPanel | null {
@@ -77,7 +79,8 @@ export function panelFromRoute(name: string): DesktopPanel | null {
 
 /** One tab in the Workbench side panel. `ssh` binds a terminal tab to
  * `ssh -tt <host>`; `remote` binds a files tab to a remote SFTP/FTP
- * connection instead of the active workspace. */
+ * connection instead of the active workspace; `sshExec` binds a session-only
+ * `ssh-exec` tab to one agent call in a conversation runtime. */
 export type WorkbenchItem = {
   id: string;
   type: WorkbenchTab;
@@ -85,11 +88,14 @@ export type WorkbenchItem = {
   target?: OpenPanelOptions;
   ssh?: { host: string };
   remote?: RemoteFilesBinding;
+  sshExec?: { conversationId: string; execId: string };
 };
 
-/** Imperative requests from outside the Workbench (the SSH view), applied
- * in id order once the tab list has been restored. */
+/** Imperative requests from outside the Workbench (the SSH view, or a new
+ * agent `ssh_exec` call in the viewed conversation), applied in id order once
+ * the tab list has been restored. */
 export type WorkbenchRequest =
   | { id: number; kind: 'ssh-terminal'; host: string }
   | { id: number; kind: 'remote-files'; remote: RemoteFilesBinding }
+  | { id: number; kind: 'ssh-exec'; conversationId: string; execId: string; title: string }
   | { id: number; kind: 'close'; itemId: string };

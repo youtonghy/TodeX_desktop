@@ -38,6 +38,7 @@ function safeTarget(value: unknown): OpenPanelOptions {
 
 export function normalizeWorkbenchLayout(value: unknown): SavedLayout {
   const source = value && typeof value === 'object' ? value as Record<string, unknown> : {};
+  // 'ssh-exec' tabs are session-only, so a saved layout never points at one.
   const tab = ['terminal', 'browser', 'files', 'git-diff'].includes(String(source.tab)) ? source.tab as WorkbenchTab : 'terminal';
   return { isOpen: source.isOpen === true, tab, target: safeTarget(source.target) };
 }

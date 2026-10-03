@@ -243,3 +243,90 @@ export function XtermTerminal({ entries, isActive, isDisabled = false, onData, o
     />
   );
 }
+
+/** Output-only terminal: no stdin, no cursor. `text` is append-only in
+ * practice; when it grows the new suffix is written, anything else
+ * (history paged in above it) rewrites the buffer. */
+export function ReadOnlyXtermTerminal({ text, isActive, ariaLabel }: { text: string; isActive: boolean; ariaLabel: string }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const terminalRef = useRef<Terminal | null>(null);
+  const fitAddonRef = useRef<FitAddon | null>(null);
+  const writtenRef = useRef('');
+  const isActiveRef = useRef(isActive);
+  isActiveRef.current = isActive;
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const terminal = new Terminal({
+      cursorBlink: false,
+      cursorInactiveStyle: 'none',
+      disableStdin: true,
+      fontFamily: '"SFMono-Regular", "Cascadia Code", "Liberation Mono", Menlo, monospace',
+      fontSize: 13,
+      lineHeight: 1.25,
+      scrollback: 10_000,
+      theme: getTerminalTheme(container),
+    });
+    const fitAddon = new FitAddon();
+    terminal.loadAddon(fitAddon);
+    terminal.open(container);
+    terminalRef.current = terminal;
+    fitAddonRef.current = fitAddon;
+    let animationFrame = 0;
+    const fit = () => {
+      window.cancelAnimationFrame(animationFrame);
+      animationFrame = window.requestAnimationFrame(() => {
+        if (!isActiveRef.current || container.clientWidth === 0 || container.clientHeight === 0) return;
+        fitAddon.fit();
+      });
+    };
+    const resizeObserver = new ResizeObserver(fit);
+    resizeObserver.observe(container);
+    const themeObserver = new MutationObserver(() => { terminal.options.theme = getTerminalTheme(container); });
+    themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'data-theme'] });
+    fit();
+    return () => {
+      window.cancelAnimationFrame(animationFrame);
+      resizeObserver.disconnect();
+      themeObserver.disconnect();
+      terminal.dispose();
+      terminalRef.current = null;
+      fitAddonRef.current = null;
+      writtenRef.current = '';
+    };
+  }, []);
+
+  useEffect(() => {
+    const terminal = terminalRef.current;
+    if (!terminal || !isActive) return;
+    const animationFrame = window.requestAnimationFrame(() => {
+      fitAddonRef.current?.fit();
+      terminal.refresh(0, terminal.rows - 1);
+    });
+    return () => window.cancelAnimationFrame(animationFrame);
+  }, [isActive]);
+
+  useEffect(() => {
+    const terminal = terminalRef.current;
+    if (!terminal) return;
+    const written = writtenRef.current;
+    if (text === written) return;
+    if (text.startsWith(written)) {
+      terminal.write(text.slice(written.length));
+    } else {
+      terminal.reset();
+      terminal.write(text);
+    }
+    writtenRef.current = text;
+  }, [text]);
+
+  return (
+    <div
+      ref={containerRef}
+      aria-label={ariaLabel}
+      className="h-full min-h-0 w-full overflow-hidden px-3 py-2"
+      role="log"
+    />
+  );
+}

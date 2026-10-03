@@ -4,6 +4,7 @@ import { AppLayout, Navbar } from '@heroui-pro/react';
 import { RiAddLine, RiGithubLine, RiLayoutLeftLine, RiLayoutRightLine, RiRobot2Line } from '@remixicon/react';
 import { useWorkbenchLayout } from './session/useWorkbenchLayout';
 import { sshWorkbenchScopeKey, workbenchScopeKey } from './session/workbenchLayout';
+import { createSshExecWatch, sshExecTabTitle, takeNewSshExecs } from './session/sshExecTabs';
 import { useTodeXSession, type TodeXSession } from './session/useTodeXSession';
 import { ConversationHeaderDetails } from './components/ConversationHeaderDetails';
 import { GitActionsModal } from './components/GitActionsModal';
@@ -181,6 +182,22 @@ export function App() {
     setWorkbenchRequests([]);
     setWorkbenchItems([]);
   }, [scopeKey]);
+  // Each agent `ssh_exec` call that starts in the viewed conversation opens a
+  // read-only Workbench tab. Calls already in the runtime when the
+  // conversation became the viewed one (history, replay) are only recorded,
+  // and the SSH view (another Workbench scope) records without opening.
+  const sshExecWatchRef = useRef(createSshExecWatch());
+  const viewedConversationId = session.activeConversation?.id ?? '';
+  const viewedRuntime = viewedConversationId ? session.conversationRuntimeById[viewedConversationId] : undefined;
+  const viewedRecovering = viewedConversationId ? session.recoveringConversations[viewedConversationId] === true : false;
+  useEffect(() => {
+    const fresh = takeNewSshExecs(sshExecWatchRef.current, viewedConversationId, viewedRuntime, viewedRecovering);
+    if (!fresh.length || sshActive || !scopeKey) return;
+    for (const run of fresh) {
+      queueWorkbenchRequest(id => ({ id, kind: 'ssh-exec', conversationId: viewedConversationId, execId: run.id, title: sshExecTabTitle(run) }));
+    }
+    persistAsideOpen(true);
+  }, [persistAsideOpen, queueWorkbenchRequest, scopeKey, sshActive, viewedConversationId, viewedRecovering, viewedRuntime]);
   const changeWorkbenchTab = useCallback((next: WorkbenchTab) => {
     setWorkbenchTab(next);
     setPanelTarget({});
