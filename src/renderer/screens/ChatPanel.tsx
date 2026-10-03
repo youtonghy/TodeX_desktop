@@ -9,7 +9,7 @@ import { ChatMessageActions } from '@heroui-pro/react/chat-message-actions';
 import { ChatTool, type ToolPartState } from '@heroui-pro/react/chat-tool';
 import { Markdown, type MarkdownProps } from '@heroui-pro/react/markdown';
 import { baseMarkdownComponents } from '../components/markdownComponents';
-import { providerDisplayName, type ProviderKind, type PermissionMode } from '@todex/protocol/v2';
+import { providerDisplayName, type ProviderKind, type PermissionMode, type SkillCatalogDescriptor } from '@todex/protocol/v2';
 import { ConversationPermissionActions, ConversationPromptInput, ConversationRunStatus, TurnUsageSummary } from '../components/ConversationRunStatus';
 import { ReferenceComposer, type ReferenceComposerHandle } from '../components/ReferenceComposer';
 import { ComposerAttachmentPreview } from '../components/ComposerAttachmentPreview';
@@ -34,10 +34,6 @@ import {
   SLASH_COMMANDS,
   attachmentToken,
   findMentionTrigger,
-  buildMentionSuggestions,
-  buildChatMentionSuggestions,
-  chatMentionPrefixSuggestion,
-  chatMentionQuery,
   insertMention,
   tokenSafeName,
   canonicalSlashCommand,
@@ -50,7 +46,6 @@ import {
   STREAMING_REPLY_PLACEHOLDER,
   canAutoLoadEarlierHistory,
   type ComposerAttachmentDraft,
-  type MentionSuggestion,
   type MentionTrigger,
   type TimelineEntry,
 } from '../session/helpers';
@@ -58,12 +53,30 @@ import { selectionInside } from '../lib/selection';
 import type { SentAttachment } from '../session/sentAttachments';
 import { findCapabilityHashTrigger, insertCapabilityReference, normalizeReasoningEffort } from '@todex/protocol/todex';
 import { buildCapabilitySuggestions, capabilityCatalogsPending, type CapabilitySuggestion } from '@todex/protocol/capabilityCatalog';
+import {
+  buildCapabilityReferenceSuggestions,
+  buildChatReferenceSuggestions,
+  buildEntryReferenceSuggestions,
+  buildReferenceTypeSuggestions,
+  referenceMenuState,
+  TYPED_ENTRY_FETCH_LIMIT,
+  type ReferenceSuggestion,
+  type ReferenceType,
+} from '@todex/protocol/referenceMenu';
 import { describeToolCall, type ToolCallKind } from '@todex/protocol/toolPresentation';
 import { getLocale, t, useT } from '../i18n';
 
 type Props = {
   session: TodeXSession;
 };
+
+const REFERENCE_TYPE_KEYS = {
+  file: 'chat.referenceTypeFile',
+  folder: 'chat.referenceTypeFolder',
+  chat: 'chat.referenceTypeChat',
+  skill: 'chat.referenceTypeSkill',
+  mcp: 'chat.referenceTypeMcp',
+} as const satisfies Record<ReferenceType, string>;
 
 const MAX_COMPOSER_IMAGE_BYTES = 2_500_000;
 const MAX_COMPOSER_TEXT_BYTES = 512 * 1024;
@@ -543,15 +556,17 @@ export function ChatPanel({ session }: Props) {
   // trigger closest to the caret wins.
   const mentionActive = Boolean(mention && (!capability || mention.start > capability.start));
   const capabilityActive = Boolean(capability && !mentionActive);
-  const [fileMentionSuggestions, setFileMentionSuggestions] = useState<MentionSuggestion[]>([]);
-  const chatQuery = chatMentionQuery(mention);
-  const chatMentionSuggestions = useMemo(() => chatQuery === null || !conversation ? []
-    : buildChatMentionSuggestions(chatQuery, session.conversations, conversation.workspaceId, conversation.id),
-  [chatQuery, conversation?.id, conversation?.workspaceId, session.conversations]);
-  const chatPrefixSuggestion = chatMentionPrefixSuggestion(mention, t('chat.chatMentionHint'));
-  const mentionSuggestions = chatQuery !== null ? chatMentionSuggestions
-    // Listed after the files so Enter on a plain `@` still picks the first file.
-    : chatPrefixSuggestion ? [...fileMentionSuggestions, chatPrefixSuggestion] : fileMentionSuggestions;
+  // `@` opens a type menu; `@type:query` searches one type (see referenceMenu).
+  const referenceState = mention ? referenceMenuState(mention.query) : null;
+  const referenceType = referenceState?.stage === 'item' ? referenceState.type : null;
+  const referenceQuery = referenceState?.stage === 'item' ? referenceState.query
+    : referenceState?.stage === 'type' ? referenceState.prefix : '';
+  // Workspace entries back an untyped `@query` (the old file search) and the
+  // `@file:` / `@folder:` lists.
+  const entryMode = referenceState?.stage === 'type' ? (referenceState.prefix ? 'any' : null)
+    : referenceType === 'file' || referenceType === 'folder' ? referenceType : null;
+  const [entryResults, setEntryResults] = useState<{ mode: string; query: string; items: ReferenceSuggestion[]; truncated: boolean }>(
+    { mode: '', query: '', items: [], truncated: false });
   const [mentionSearchPending, setMentionSearchPending] = useState(false);
   const [suggestionIndex, setSuggestionIndex] = useState(0);
   const [expandedProcessIds, setExpandedProcessIds] = useState<Set<string>>(() => new Set());
@@ -561,25 +576,25 @@ export function ChatPanel({ session }: Props) {
   const isComposingRef = useRef(false);
   useEffect(() => {
     let active = true;
-    if (!mention || !workspace || chatQuery !== null) {
-      setFileMentionSuggestions([]);
+    if (!entryMode || !workspace) {
       setMentionSearchPending(false);
       return () => { active = false; };
     }
     setMentionSearchPending(true);
-    void session.fetchWorkspaceEntries(workspace.path, mention.query)
-      .then((result) => {
-        if (!active) return;
-        setFileMentionSuggestions(buildMentionSuggestions(mention, result.entries));
-        setMentionSearchPending(false);
-      })
-      .catch(() => {
-        if (!active) return;
-        setFileMentionSuggestions([]);
-        setMentionSearchPending(false);
-      });
+    // The backend has no kind filter: typed lists fetch more and filter here.
+    const limit = entryMode === 'any' ? undefined : TYPED_ENTRY_FETCH_LIMIT;
+    const settle = (items: ReferenceSuggestion[], truncated: boolean) => {
+      if (!active) return;
+      setEntryResults({ mode: entryMode, query: referenceQuery, items, truncated });
+      setMentionSearchPending(false);
+    };
+    void session.fetchWorkspaceEntries(workspace.path, referenceQuery, limit)
+      .then((result) => settle(
+        buildEntryReferenceSuggestions(result.entries, entryMode === 'any' ? undefined : entryMode),
+        limit !== undefined && result.entries.length >= limit))
+      .catch(() => settle([], false));
     return () => { active = false; };
-  }, [mention?.query, mention?.start, workspace?.path, chatQuery, session.fetchWorkspaceEntries]);
+  }, [entryMode, referenceQuery, workspace?.path, session.fetchWorkspaceEntries]);
   const chatEntries = useMemo(() => {
     if (!conversation) return [];
     return session.timeline
@@ -791,33 +806,51 @@ export function ChatPanel({ session }: Props) {
     ? [currentProvider as ProviderKind, ...session.v2Providers.map(item => item.id).filter(id => id !== currentProvider)]
     : session.v2Providers.map(item => item.id);
   const selectedSkillAttachments = session.selectedSkills[conversation.id] ?? [];
+  const isSkillAttached = (skill: SkillCatalogDescriptor) =>
+    selectedSkillAttachments.some(item => item.resourceId === skill.resourceId || (item.name === skill.name && item.path === skill.source));
   const capabilitySuggestions = capabilityActive && capability
-    ? buildCapabilitySuggestions(session.capabilityCatalogs, capabilityProviderOrder, capability.query, {
-      isSkillAttached: (skill) => selectedSkillAttachments.some(item =>
-        item.resourceId === skill.resourceId || (item.name === skill.name && item.path === skill.source)),
-    })
+    ? buildCapabilitySuggestions(session.capabilityCatalogs, capabilityProviderOrder, capability.query, { isSkillAttached })
     : [];
   const capabilityLoading = capabilityActive && capabilityCatalogsPending(session.capabilityCatalogs, capabilityProviderOrder);
-  const applyCapabilitySuggestion = (item: CapabilitySuggestion) => {
-    if (!capability) return;
+  const capabilityDescription = (item: CapabilitySuggestion) => item.kind === 'skill'
+    ? `Skill${item.attached ? ` · ${t('chat.capabilityAttached')}` : ''}${item.description ? ` · ${item.description}` : ''}`
+    : `MCP${item.description ? ` · ${item.description}` : ''}`;
+  const entryRows = entryMode && entryResults.mode === entryMode && entryResults.query === referenceQuery ? entryResults.items : [];
+  const referenceSuggestions: ReferenceSuggestion[] = !referenceState ? []
+    : referenceState.stage === 'type'
+      ? [...buildReferenceTypeSuggestions(referenceState.prefix, (type) => t(REFERENCE_TYPE_KEYS[type])), ...entryRows]
+      : referenceType === 'chat'
+        ? buildChatReferenceSuggestions(referenceQuery, session.conversations, conversation.workspaceId, conversation.id, t('chat.newConversation'))
+        : referenceType === 'skill' || referenceType === 'mcp'
+          ? buildCapabilityReferenceSuggestions(
+            buildCapabilitySuggestions(session.capabilityCatalogs, capabilityProviderOrder, referenceQuery, { limit: 100, isSkillAttached }),
+            referenceType)
+          : entryRows;
+  const referenceEmptyText = referenceType === 'chat' ? t('chat.noChatSuggestions')
+    : referenceType === 'skill' || referenceType === 'mcp'
+      ? (capabilityCatalogsPending(session.capabilityCatalogs, capabilityProviderOrder) ? t('chat.loadingCapabilities') : t('chat.noCapabilities'))
+      : mentionSearchPending ? t('chat.searchingFiles')
+        : referenceType === 'folder' ? t('chat.noFolderSuggestions') : t('chat.noFileSuggestions');
+  /** Shared by the `#` list and `@skill:` / `@mcp:`; `trigger` is the text it replaces. */
+  const applyCapabilitySuggestion = (item: CapabilitySuggestion, trigger: { start: number; end: number; query: string }) => {
     if (item.kind === 'skill') {
       // Attaching produces the same chip the capability manager creates, so
-      // the `#name` trigger text is dropped instead of sent as literal text.
+      // the trigger text (`#name`, `@skill:name`) is dropped instead of sent.
       session.toggleCatalogSkill(conversation.id, item.skill, item.provider);
-      session.setConversationChatDraft(conversation.id, insertCapabilityReference(draft, capability, ''));
-      session.setConversationComposerSelection(conversation.id, { start: capability.start, end: capability.start });
-      composerRef.current?.focus(capability.start);
+      session.setConversationChatDraft(conversation.id, insertCapabilityReference(draft, trigger, ''));
+      session.setConversationComposerSelection(conversation.id, { start: trigger.start, end: trigger.start });
+      composerRef.current?.focus(trigger.start);
       return;
     }
     const insertText = `#${item.name} `;
-    session.setConversationChatDraft(conversation.id, insertCapabilityReference(draft, capability, insertText));
-    const cursor = capability.start + insertText.length;
+    session.setConversationChatDraft(conversation.id, insertCapabilityReference(draft, trigger, insertText));
+    const cursor = trigger.start + insertText.length;
     session.setConversationComposerSelection(conversation.id, { start: cursor, end: cursor });
     composerRef.current?.focus(cursor);
   };
   const suggestionCount = slashSuggestions.length > 0
     ? Math.min(12, slashSuggestions.length)
-    : capabilityActive ? capabilitySuggestions.length : mentionSuggestions.length;
+    : capabilityActive ? capabilitySuggestions.length : referenceSuggestions.length;
   const applySuggestion = (index: number) => {
     if (slashSuggestions.length > 0) {
       const item = slashSuggestions[index];
@@ -826,11 +859,11 @@ export function ChatPanel({ session }: Props) {
     }
     if (capabilityActive) {
       const item = capabilitySuggestions[index];
-      if (item) applyCapabilitySuggestion(item);
+      if (item && capability) applyCapabilitySuggestion(item, capability);
       return;
     }
-    const item = mentionSuggestions[index];
-    if (item) applyMentionSuggestion(item);
+    const item = referenceSuggestions[index];
+    if (item) applyReferenceSuggestion(item);
   };
   const handleSuggestionKeyDown = (event: KeyboardEvent) => {
     if (isComposingRef.current || isImeCompositionKey(event)) return;
@@ -952,14 +985,20 @@ export function ChatPanel({ session }: Props) {
     composerRef.current?.focus(cursor);
   };
 
-  const applyMentionSuggestion = (item: MentionSuggestion) => {
+  const applyReferenceSuggestion = (item: ReferenceSuggestion) => {
     if (!mention) return;
-    if (item.conversationId) {
-      void attachConversationMention(item.conversationId, item.title, mention);
+    const { action } = item;
+    setSuggestionIndex(0);
+    if (action.kind === 'conversation') {
+      void attachConversationMention(action.conversationId, action.title, mention);
       return;
     }
-    session.setConversationChatDraft(conversation.id, insertMention(draft, mention, item.insertText));
-    const cursor = mention.start + item.insertText.length;
+    if (action.kind === 'capability') {
+      applyCapabilitySuggestion(action.item, mention);
+      return;
+    }
+    session.setConversationChatDraft(conversation.id, insertMention(draft, mention, action.text));
+    const cursor = mention.start + action.text.length;
     session.setConversationComposerSelection(conversation.id, { start: cursor, end: cursor });
     composerRef.current?.focus(cursor);
   };
@@ -1217,7 +1256,7 @@ export function ChatPanel({ session }: Props) {
             <p className="mb-2 text-xs font-medium">{sessionPermissionIds.has(request.requestId) ? t('chat.piPluginRequest') : request.title || t('chat.permissionApproval')}</p>
             <ConversationPermissionActions request={request} onSelect={(option, data) => { session.sendApprovalResponse(option, request, data); }} />
           </div>)}
-          {(slashSuggestions.length > 0 || mentionSuggestions.length > 0 || (mentionActive && mentionSuggestions.length === 0) || capabilityActive) ? (
+          {(slashSuggestions.length > 0 || referenceSuggestions.length > 0 || (mentionActive && referenceSuggestions.length === 0) || capabilityActive) ? (
             <div className="composer-suggestions-popover">
               {slashSuggestions.length > 0 ? (
                 <ListBox
@@ -1240,39 +1279,40 @@ export function ChatPanel({ session }: Props) {
                     aria-label={t('chat.capabilitySuggestions')}
                     onAction={(key) => {
                       const item = capabilitySuggestions.find((candidate) => candidate.id === String(key));
-                      if (item) applyCapabilitySuggestion(item);
+                      if (item && capability) applyCapabilitySuggestion(item, capability);
                     }}
                   >
                     {capabilitySuggestions.map((item, index) => (
                       <ListBox.Item key={item.id} id={item.id} textValue={`#${item.name} ${item.description}`} className={`composer-suggestion-item ${index === suggestionIndex ? 'composer-suggestion-item--active' : ''}`}>
                         <span className="composer-suggestion-command">#{item.name}</span>
-                        <span className="composer-suggestion-description">
-                          {item.kind === 'skill'
-                            ? `Skill${item.attached ? ` · ${t('chat.capabilityAttached')}` : ''}${item.description ? ` · ${item.description}` : ''}`
-                            : `MCP${item.description ? ` · ${item.description}` : ''}`}
-                        </span>
+                        <span className="composer-suggestion-description">{capabilityDescription(item)}</span>
                       </ListBox.Item>
                     ))}
                   </ListBox>
                 ) : (
                   <p className="text-muted px-2 py-1 text-xs">{capabilityLoading ? t('chat.loadingCapabilities') : t('chat.noCapabilities')}</p>
                 )
-              ) : mentionSuggestions.length > 0 ? (
-                <ListBox
-                  aria-label={chatQuery !== null ? t('chat.chatSuggestions') : t('chat.fileSuggestions')}
-                  onAction={(key) => {
-                    const item = mentionSuggestions.find((candidate) => candidate.id === String(key));
-                    if (item) applyMentionSuggestion(item);
-                  }}
-                >
-                  {mentionSuggestions.map((item, index) => (
-                    <ListBox.Item key={item.id} id={item.id} textValue={`@${item.title} ${item.description}`} className={`composer-suggestion-item ${index === suggestionIndex ? 'composer-suggestion-item--active' : ''}`}>
-                      <span className="composer-suggestion-command">@{item.title}</span>
-                      <span className="composer-suggestion-description">{item.description}</span>
-                    </ListBox.Item>
-                  ))}
-                </ListBox>
-              ) : mention ? <p className="text-muted px-2 py-1 text-xs">{chatQuery !== null ? t('chat.noChatSuggestions') : mentionSearchPending ? t('chat.searchingFiles') : t('chat.noFileSuggestions')}</p> : null}
+              ) : referenceSuggestions.length > 0 ? (
+                <>
+                  <ListBox
+                    aria-label={t('chat.referenceSuggestions')}
+                    onAction={(key) => {
+                      const item = referenceSuggestions.find((candidate) => candidate.id === String(key));
+                      if (item) applyReferenceSuggestion(item);
+                    }}
+                  >
+                    {referenceSuggestions.map((item, index) => (
+                      <ListBox.Item key={item.id} id={item.id} textValue={`${item.label} ${item.description}`} className={`composer-suggestion-item ${index === suggestionIndex ? 'composer-suggestion-item--active' : ''}`}>
+                        <span className="composer-suggestion-command">{item.label}</span>
+                        <span className="composer-suggestion-description">
+                          {item.action.kind === 'capability' ? capabilityDescription(item.action.item) : item.description}
+                        </span>
+                      </ListBox.Item>
+                    ))}
+                  </ListBox>
+                  {referenceType === 'folder' && entryResults.truncated ? <p className="text-muted px-2 py-1 text-xs">{t('chat.folderSearchHint')}</p> : null}
+                </>
+              ) : mention ? <p className="text-muted px-2 py-1 text-xs">{referenceEmptyText}</p> : null}
             </div>
           ) : null}
           {(session.selectedSkills[conversation.id] ?? []).length > 0 ? (
