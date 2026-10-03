@@ -61,7 +61,6 @@ export const ja: Messages = {
   'sidebar.newConversation': '新しい会話',
   'sidebar.kanban': 'タスクボード',
   'sidebar.terminal': 'ターミナル',
-  'sidebar.usage': '使用量',
   'sidebar.workspaces': 'ワークスペース',
   'sidebar.expandWorkspaces': 'ワークスペースを展開',
   'sidebar.collapseWorkspaces': 'ワークスペースを折りたたむ',

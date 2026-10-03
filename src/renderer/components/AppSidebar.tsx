@@ -1,4 +1,4 @@
-import { RiPushpin2Fill, RiAddLine, RiPencilLine, RiEdit2Line, RiErrorWarningLine, RiFolder3Line, RiGitBranchLine, RiDeleteBinLine, RiArrowDownSLine, RiBarChartBoxLine, RiInformationLine, RiKanbanView2, RiPaletteLine, RiPriceTag3Line, RiPuzzle2Line, RiSettings3Line, RiTerminalBoxLine, RiTerminalLine, RiUserSettingsLine } from '@remixicon/react';
+import { RiPushpin2Fill, RiAddLine, RiPencilLine, RiEdit2Line, RiErrorWarningLine, RiFolder3Line, RiGitBranchLine, RiDeleteBinLine, RiArrowDownSLine, RiBarChartBoxLine, RiInformationLine, RiKanbanView2, RiPaletteLine, RiPriceTag3Line, RiPuzzle2Line, RiSettings3Line, RiTerminalBoxLine, RiTerminalLine, RiUserSettingsLine, RiVipCrownLine } from '@remixicon/react';
 import { Badge, Button, Chip, ColorSwatchPicker, Dropdown, Label, Tooltip } from '@heroui/react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { DragEvent, FocusEvent, MouseEvent } from 'react';
@@ -26,6 +26,7 @@ type Props = {
   onOpenCliManager: () => void;
   onOpenAgentProviders: () => void;
   onOpenUsage: () => void;
+  onOpenQuota: () => void;
   onOpenAbout: () => void;
   onOpenKanban: () => void;
   /** Toggles the SSH view (hosts, keys, SSH terminals, remote files). */
@@ -47,6 +48,7 @@ export function AppSidebar({
   onOpenCliManager,
   onOpenAgentProviders,
   onOpenUsage,
+  onOpenQuota,
   onOpenAbout,
   onOpenKanban,
   onOpenTerminal,
@@ -371,6 +373,7 @@ export function AppSidebar({
             onOpenAgentProviders();
           }
           if (key === 'usage') onOpenUsage();
+          if (key === 'quota') onOpenQuota();
           if (key === 'about') onOpenAbout();
         }}>
           <Dropdown.Item id="settings" textValue={t('app.settings')}><RiSettings3Line className="text-muted size-4 shrink-0" /><Label>{t('app.settings')}</Label></Dropdown.Item>
@@ -378,6 +381,7 @@ export function AppSidebar({
           <Dropdown.Item id="cli-manager" textValue={t('app.cliManager')}><RiTerminalBoxLine className="text-muted size-4 shrink-0" /><Label>{t('app.cliManager')}</Label></Dropdown.Item>
           <Dropdown.Item id="agent-providers" textValue={t('app.agentProviders')}><RiUserSettingsLine className="text-muted size-4 shrink-0" /><Label>{t('app.agentProviders')}</Label></Dropdown.Item>
           <Dropdown.Item id="usage" textValue={t('app.usage')}><RiBarChartBoxLine className="text-muted size-4 shrink-0" /><Label>{t('app.usage')}</Label></Dropdown.Item>
+          <Dropdown.Item id="quota" textValue={t('usage.quotaTitle')}><RiVipCrownLine className="text-muted size-4 shrink-0" /><Label>{t('usage.quotaTitle')}</Label></Dropdown.Item>
           <Dropdown.Item id="about" textValue={t('app.about')}><RiInformationLine className="text-muted size-4 shrink-0" /><Label>{t('app.about')}</Label></Dropdown.Item>
         </Dropdown.Menu>
       </Dropdown.Popover>
@@ -908,19 +912,6 @@ export function AppSidebar({
       <Sidebar.Footer>
         <div className="sidebar-footer-row flex items-center gap-1">
           {identityMenu}
-          <Button
-            variant="ghost"
-            size="sm"
-            className="shrink-0 text-muted hover:text-foreground"
-            aria-label={t('sidebar.usage')}
-            onPress={() => {
-              if (isMobile) setMobileOpen(false);
-              onOpenUsage();
-            }}
-          >
-            <RiBarChartBoxLine className="size-4" />
-            <span data-sidebar="label">{t('sidebar.usage')}</span>
-          </Button>
         </div>
       </Sidebar.Footer>
     </Sidebar>

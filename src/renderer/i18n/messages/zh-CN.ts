@@ -61,7 +61,6 @@ export const zhCN = {
   'sidebar.newConversation': '增加对话',
   'sidebar.kanban': '任务看板',
   'sidebar.terminal': '终端',
-  'sidebar.usage': '用量',
   'sidebar.workspaces': '工作区',
   'sidebar.expandWorkspaces': '展开工作区',
   'sidebar.collapseWorkspaces': '收起工作区',

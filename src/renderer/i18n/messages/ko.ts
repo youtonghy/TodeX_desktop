@@ -61,7 +61,6 @@ export const ko: Messages = {
   'sidebar.newConversation': '새 대화',
   'sidebar.kanban': '태스크 보드',
   'sidebar.terminal': '터미널',
-  'sidebar.usage': '사용량',
   'sidebar.workspaces': '워크스페이스',
   'sidebar.expandWorkspaces': '워크스페이스 펼치기',
   'sidebar.collapseWorkspaces': '워크스페이스 접기',

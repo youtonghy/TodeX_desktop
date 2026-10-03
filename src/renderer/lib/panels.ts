@@ -3,6 +3,7 @@ import type { RemoteFilesBinding } from '../session/fileSources';
 export type DesktopPanel =
   | 'settings'
   | 'usage'
+  | 'quota'
   | 'about'
   | 'cli-manager'
   | 'agent-providers'
@@ -42,6 +43,8 @@ export function panelFromRoute(name: string): DesktopPanel | null {
       return 'settings';
     case 'Usage':
       return 'usage';
+    case 'Quota':
+      return 'quota';
     case 'About':
       return 'about';
     case 'CliManager':

@@ -61,7 +61,6 @@ export const en: Messages = {
   'sidebar.newConversation': 'New conversation',
   'sidebar.kanban': 'Task board',
   'sidebar.terminal': 'Terminal',
-  'sidebar.usage': 'Usage',
   'sidebar.workspaces': 'Workspaces',
   'sidebar.expandWorkspaces': 'Expand workspaces',
   'sidebar.collapseWorkspaces': 'Collapse workspaces',
