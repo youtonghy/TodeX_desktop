@@ -416,6 +416,8 @@ export const zhCN = {
   'runStatus.reject': '拒绝',
   'runStatus.rejectStop': '拒绝并停止本轮',
   'runStatus.approve': '同意',
+  'runStatus.answerOnDevice': '请在 {devices} 上确认',
+  'runStatus.answerOnOtherDevice': '请在将执行它的桌面端上确认',
 
   // header
   'header.legacyCodex': '历史 Codex',

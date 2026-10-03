@@ -416,6 +416,8 @@ export const ko: Messages = {
   'runStatus.reject': '거부',
   'runStatus.rejectStop': '거부하고 이번 차례 중지',
   'runStatus.approve': '동의',
+  'runStatus.answerOnDevice': '{devices}에서 확인하세요',
+  'runStatus.answerOnOtherDevice': '실행할 데스크톱에서 확인하세요',
 
   // header
   'header.legacyCodex': '이전 Codex',

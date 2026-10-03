@@ -416,6 +416,8 @@ export const en: Messages = {
   'runStatus.reject': 'Reject',
   'runStatus.rejectStop': 'Reject and stop this turn',
   'runStatus.approve': 'Approve',
+  'runStatus.answerOnDevice': 'Confirm this on {devices}',
+  'runStatus.answerOnOtherDevice': 'Confirm this on the desktop that will run it',
 
   // header
   'header.legacyCodex': 'Legacy Codex',

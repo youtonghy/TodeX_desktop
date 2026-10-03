@@ -1,4 +1,4 @@
-import React, { useEffect, useLayoutEffect, useRef, useState, type ComponentProps } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps } from 'react';
 import { toast, Button, Description, Form, Input, Kbd, Label, Link, TextArea, TextField } from '@heroui/react';
 import { Check, ChevronLeft, ChevronRight } from '@gravity-ui/icons';
 import { NativeSelect } from '@heroui-pro/react/native-select';
@@ -6,7 +6,8 @@ import { PromptInput } from '@heroui-pro/react/prompt-input';
 import { AnimatePresence, motion, useReducedMotion, type Variants } from 'motion/react';
 import { usageTotalTokens, type ConversationRuntime } from '@todex/protocol/conversationRuntime';
 import type { ContextCompactionState } from '@todex/protocol/v2';
-import { permissionActions, type PendingRequest, type PermissionOption } from '@todex/protocol/todex';
+import { permissionActions, permissionDeviceGate, type PendingRequest, type PermissionOption } from '@todex/protocol/todex';
+import { deviceIdentityFromSecret } from '@todex/protocol/deviceAuth';
 import type { UsageRecord } from '@todex/protocol/mobileParity';
 import { hasActiveConversationWork } from './conversationProgress';
 import { useNoticeToast } from './NoticeToast';
@@ -517,9 +518,18 @@ function UserInputQuestions({ request, form, onSelect }: { request: PendingReque
   </div>;
 }
 
-export function ConversationPermissionActions({ request, onSelect }:
-  { request: PendingRequest; onSelect: (option: boolean | PermissionOption, data?: PermissionAnswerData) => void }) {
+export function ConversationPermissionActions({ request, deviceSecret, onSelect }:
+  { request: PendingRequest; deviceSecret?: string; onSelect: (option: boolean | PermissionOption, data?: PermissionAnswerData) => void }) {
   const t = useT();
+  // Only requests that name their answering devices need this device's id.
+  const gate = useMemo(() => permissionDeviceGate(request, Array.isArray(request.data.allowedDeviceIds)
+    ? deviceIdentityFromSecret(deviceSecret)?.deviceId
+    : undefined), [deviceSecret, request]);
+  if (!gate.allowed) {
+    return <p className="text-muted text-xs">{gate.deviceNames.length
+      ? t('runStatus.answerOnDevice', { devices: gate.deviceNames.join(', ') })
+      : t('runStatus.answerOnOtherDevice')}</p>;
+  }
   const form = permissionForm(request);
   if (form?.mode === 'user_input' && !form.unsupported) return <UserInputQuestions key={request.requestId} request={request} form={form} onSelect={onSelect} />;
   if (form) return <PermissionResponseForm key={request.requestId} request={request} form={form} onSelect={onSelect} />;

@@ -416,6 +416,8 @@ export const ja: Messages = {
   'runStatus.reject': '拒否',
   'runStatus.rejectStop': '拒否してこのターンを停止',
   'runStatus.approve': '承認',
+  'runStatus.answerOnDevice': '{devices} で確認してください',
+  'runStatus.answerOnOtherDevice': '実行するデスクトップで確認してください',
 
   // header
   'header.legacyCodex': '従来の Codex',
