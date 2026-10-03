@@ -10,6 +10,8 @@ import { WorkspaceFilePreview, type PreviewFile, type ReferenceSelection, type W
 import { useNoticeToast } from '../components/NoticeToast';
 import { XtermTerminal } from '../components/XtermTerminal';
 import { SshExecPane } from '../components/ssh/SshExecPane';
+import { AgentBrowserPane } from '../components/AgentBrowserPane';
+import { agentBrowserKey, useAgentBrowserTabs } from '../session/agentBrowserTabs';
 import { capSshExecTabs, rememberSessionSshExecTabs, sessionSshExecTabsFor, sshExecTabTitle } from '../session/sshExecTabs';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { useRemoteConnector } from '../components/ssh/useRemoteConnector';
@@ -54,7 +56,7 @@ type StoredWorkbenchState = {
   activeId: string;
 };
 
-/** Types written to the tab store; 'ssh-exec' tabs are session-only. */
+/** Types written to the tab store; 'ssh-exec' and 'agent-browser' tabs are session-only. */
 const WORKBENCH_TYPES = new Set<WorkbenchTab>(['terminal', 'browser', 'files', 'git-diff']);
 
 const WORKBENCH_LABEL_KEYS: Record<WorkbenchTab, MessageKey> = {
@@ -63,6 +65,7 @@ const WORKBENCH_LABEL_KEYS: Record<WorkbenchTab, MessageKey> = {
   files: 'workbench.tabFiles',
   'git-diff': 'workbench.tabGitDiff',
   'ssh-exec': 'workbench.tabSshExec',
+  'agent-browser': 'agentBrowser.title',
 };
 
 const workbenchLabel = (tab: WorkbenchTab) => t(WORKBENCH_LABEL_KEYS[tab]);
@@ -73,6 +76,7 @@ const WORKBENCH_ICONS = {
   files: RiFileTextLine,
   'git-diff': RiGitBranchLine,
   'ssh-exec': RiTerminalWindowLine,
+  'agent-browser': RiGlobalLine,
 };
 
 const REMOTE_ICONS = {
@@ -178,7 +182,7 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
   useEffect(() => {
     if (!restored) return;
     rememberSessionSshExecTabs(storageKey, items);
-    const persisted = items.filter(item => item.type !== 'ssh-exec').map(normalizeWorkbenchItem);
+    const persisted = items.filter(item => WORKBENCH_TYPES.has(item.type)).map(normalizeWorkbenchItem);
     void window.todexDesktop.store.set(storageKey, { items: persisted, activeId } satisfies StoredWorkbenchState)
       .catch((reason) => {
         console.error('Failed to persist workbench tabs', reason);
@@ -276,6 +280,11 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
   const sshExecRun = useCallback((item: WorkbenchItem) => item.sshExec
     ? session.conversationRuntimeById[item.sshExec.conversationId]?.sshExecs.find(run => run.id === item.sshExec!.execId)
     : undefined, [session.conversationRuntimeById]);
+  const agentTabs = useAgentBrowserTabs();
+  const agentProfileId = session.activeWorkspace?.backendConnectionId || session.activeBackendConnectionId;
+  const agentTabFor = useCallback((item: WorkbenchItem) => item.agentBrowser
+    ? agentTabs.find(tab => tab.key === agentBrowserKey(agentProfileId, item.agentBrowser!.conversationId))
+    : undefined, [agentProfileId, agentTabs]);
   const isSshExecRunning = useCallback((item: WorkbenchItem) => sshExecRun(item)?.status === 'running', [sshExecRun]);
 
   const handledRequestRef = useRef(0);
@@ -292,6 +301,17 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
     for (const request of pending) {
       if (request.kind === 'close') {
         if (items.some(item => item.id === request.itemId)) closeTab(request.itemId);
+        continue;
+      }
+      if (request.kind === 'agent-browser') {
+        const existing = [...items, ...added].find(item => item.agentBrowser?.conversationId === request.conversationId);
+        if (existing) {
+          opened = existing;
+          continue;
+        }
+        const item: WorkbenchItem = { id: `agent-browser-${Date.now()}-${request.id}`, type: 'agent-browser', title: t('agentBrowser.title'), agentBrowser: { conversationId: request.conversationId } };
+        added.push(item);
+        opened = item;
         continue;
       }
       if (request.kind === 'ssh-exec') {
@@ -365,6 +385,8 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
     const execRun = item.type === 'ssh-exec' ? sshExecRun(item) : undefined;
     const location = item.type === 'ssh-exec'
       ? (execRun && sshExecTabTitle(execRun)) || item.title
+      : item.type === 'agent-browser'
+      ? agentTabFor(item)?.url || ''
       : item.ssh
       ? `ssh ${item.ssh.host}`
       : item.remote
@@ -484,6 +506,7 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
             {item.type === 'files' ? <FilesPane session={session} remote={item.remote} onRemoteRebind={next => updateRemoteBinding(item.id, next)} target={item.type === tab && item.id === active?.id && (target?.filePath || target?.url) ? target : item.target} onTargetChange={next => updateTabTarget(item.id, next)} /> : null}
             {item.type === 'git-diff' ? <GitDiffPane session={session} /> : null}
             {item.type === 'ssh-exec' ? <SshExecPane run={sshExecRun(item)} isActive={item.id === active?.id} onClose={() => closeTab(item.id)} /> : null}
+            {item.type === 'agent-browser' && item.agentBrowser ? <AgentBrowserPane tab={agentTabFor(item)} session={session} isActive={item.id === active?.id} conversationId={item.agentBrowser.conversationId} /> : null}
           </div>
         ))}
       </div>

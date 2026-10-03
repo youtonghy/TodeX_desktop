@@ -6,6 +6,7 @@ import { useWorkbenchLayout } from './session/useWorkbenchLayout';
 import { sshWorkbenchScopeKey, workbenchScopeKey } from './session/workbenchLayout';
 import { createSshExecWatch, sshExecTabTitle, takeNewSshExecs } from './session/sshExecTabs';
 import { useTodeXSession, type TodeXSession } from './session/useTodeXSession';
+import { agentBrowserKey, useAgentBrowserTabs } from './session/agentBrowserTabs';
 import { ConversationHeaderDetails } from './components/ConversationHeaderDetails';
 import { GitActionsModal } from './components/GitActionsModal';
 import { DesktopAlertHost } from './components/DesktopAlertHost';
@@ -201,6 +202,24 @@ export function App() {
     }
     persistAsideOpen(true);
   }, [persistAsideOpen, queueWorkbenchRequest, scopeKey, sshActive, viewedConversationId, viewedRecovering, viewedRuntime]);
+  // The agent's browser tab for the viewed conversation opens in the
+  // Workbench when it first appears, and when switching to a conversation
+  // that already has one.
+  const agentTabs = useAgentBrowserTabs();
+  const agentProfileId = session.activeWorkspace?.backendConnectionId || session.activeBackendConnectionId;
+  const viewedAgentKey = viewedConversationId ? agentBrowserKey(agentProfileId, viewedConversationId) : '';
+  const viewedAgentTabOpen = Boolean(viewedAgentKey) && agentTabs.some(tab => tab.key === viewedAgentKey);
+  const shownAgentKeyRef = useRef('');
+  useEffect(() => {
+    if (!viewedAgentTabOpen) {
+      if (shownAgentKeyRef.current === viewedAgentKey) shownAgentKeyRef.current = '';
+      return;
+    }
+    if (sshActive || !scopeKey || shownAgentKeyRef.current === viewedAgentKey) return;
+    shownAgentKeyRef.current = viewedAgentKey;
+    queueWorkbenchRequest(id => ({ id, kind: 'agent-browser', conversationId: viewedConversationId }));
+    persistAsideOpen(true);
+  }, [persistAsideOpen, queueWorkbenchRequest, scopeKey, sshActive, viewedAgentKey, viewedAgentTabOpen, viewedConversationId]);
   const changeWorkbenchTab = useCallback((next: WorkbenchTab) => {
     setWorkbenchTab(next);
     setPanelTarget({});

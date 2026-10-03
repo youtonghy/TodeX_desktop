@@ -10,7 +10,18 @@
     "isolatedModules": true,
     "noEmit": true,
     "allowImportingTsExtensions": true,
-    "types": ["node"]
+    "types": [
+      "node"
+    ],
+    "baseUrl": ".",
+    "paths": {
+      "@todex/protocol/*": [
+        "../TodeX_protocol/src/*"
+      ],
+      "@react-native-community/netinfo": [
+        "src/renderer/stubs/netinfo.ts"
+      ]
+    }
   },
   "include": [
     "electron.vite.config.ts",

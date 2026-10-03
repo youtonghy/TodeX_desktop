@@ -18,6 +18,20 @@ export type GitRepositorySummary = {
   initialEligible?: boolean;
   error?: string;
 };
+export type AgentBrowserTab = {
+  key: string;
+  profileId: string;
+  conversationId: string;
+  url: string;
+  title: string;
+  tunnel?: { remotePort: number; localPort: number };
+};
+export type AgentBrowserPartitionState = {
+  partitions: Array<{ id: string; name: string; createdAt: number }>;
+  /** `<profileId>:<workspace id or path>` → partition id. */
+  workspaces: Record<string, string>;
+};
+export type AgentBrowserBounds = { x: number; y: number; width: number; height: number };
 export type DesktopDebugLogInfo = {
   enabled: boolean;
   buildVersion: string;
@@ -78,6 +92,30 @@ const api = {
       return () => {
         ipcRenderer.removeListener('theme:updated', handler);
       };
+    },
+  },
+  agentBrowser: {
+    list: () => ipcRenderer.invoke('agentBrowser:list') as Promise<AgentBrowserTab[]>,
+    onTabs: (listener: (tabs: AgentBrowserTab[]) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, tabs: AgentBrowserTab[]) => listener(tabs);
+      ipcRenderer.on('agentBrowser:tabs', handler);
+      return () => {
+        ipcRenderer.removeListener('agentBrowser:tabs', handler);
+      };
+    },
+    /** Window-relative CSS pixels; `null` hides the live view. */
+    setBounds: (key: string, bounds: AgentBrowserBounds | null) => {
+      ipcRenderer.send('agentBrowser:setBounds', key, bounds);
+    },
+    capture: (key: string) => ipcRenderer.invoke('agentBrowser:capture', key) as Promise<string | null>,
+    close: (key: string) => ipcRenderer.invoke('agentBrowser:close', key) as Promise<void>,
+    partitions: () => ipcRenderer.invoke('agentBrowser:partitions') as Promise<AgentBrowserPartitionState>,
+    createPartition: (name: string) => ipcRenderer.invoke('agentBrowser:createPartition', name) as Promise<{ id: string; name: string; createdAt: number }>,
+    assignPartition: (workspace: string, partitionId: string) => ipcRenderer.invoke('agentBrowser:assignPartition', workspace, partitionId) as Promise<void>,
+    deletePartition: (partitionId: string) => ipcRenderer.invoke('agentBrowser:deletePartition', partitionId) as Promise<void>,
+    /** Re-check backends now, e.g. after switching desktop tools on. */
+    refreshExecutors: () => {
+      ipcRenderer.send('agentDesktop:refresh');
     },
   },
   debug: {

@@ -418,6 +418,13 @@ export const ja: Messages = {
   'runStatus.approve': '承認',
   'runStatus.answerOnDevice': '{devices} で確認してください',
   'runStatus.answerOnOtherDevice': '実行するデスクトップで確認してください',
+  'agentBrowser.closed': 'エージェントはまだページを開いていないか、タブが閉じられました。',
+  'agentBrowser.tunnel': 'トンネル {remote}→{local}',
+  'agentBrowser.tunnelHint': 'リモートバックエンドのローカルポートを暗号化接続でこのデスクトップに転送しています',
+  'agentBrowser.title': 'エージェントブラウザー',
+  'agentBrowser.controlled': 'エージェントが操作中',
+  'agentBrowser.stop': '停止',
+  'agentBrowser.stopFailed': 'エージェントブラウザーを停止できません',
 
   // header
   'header.legacyCodex': '従来の Codex',

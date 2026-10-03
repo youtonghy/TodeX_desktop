@@ -418,6 +418,13 @@ export const ko: Messages = {
   'runStatus.approve': '동의',
   'runStatus.answerOnDevice': '{devices}에서 확인하세요',
   'runStatus.answerOnOtherDevice': '실행할 데스크톱에서 확인하세요',
+  'agentBrowser.closed': '에이전트가 아직 페이지를 열지 않았거나 탭이 닫혔습니다.',
+  'agentBrowser.tunnel': '터널 {remote}→{local}',
+  'agentBrowser.tunnelHint': '원격 백엔드의 로컬 포트를 암호화된 연결로 이 데스크톱에 전달합니다',
+  'agentBrowser.title': '에이전트 브라우저',
+  'agentBrowser.controlled': '에이전트 제어 중',
+  'agentBrowser.stop': '중지',
+  'agentBrowser.stopFailed': '에이전트 브라우저를 중지할 수 없습니다',
 
   // header
   'header.legacyCodex': '이전 Codex',

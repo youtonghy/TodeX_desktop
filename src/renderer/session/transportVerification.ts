@@ -1,6 +1,7 @@
 import { buildHttpUrl, type ConnectionSettings } from '@todex/protocol/todex';
 import { t, subscribeLocale } from '../i18n';
 import type { TransportCryptoSession } from '@todex/protocol/transportCrypto';
+import { SocketVerificationError, verifyEncryptedSocket as verifySocket } from '@todex/protocol/socketVerification';
 
 export let ENCRYPTION_VERIFICATION_ERROR = t('transport.notVerified');
 subscribeLocale(() => { ENCRYPTION_VERIFICATION_ERROR = t('transport.notVerified'); });
@@ -63,47 +64,13 @@ export async function validateTransportEncryption(settings: ConnectionSettings, 
 }
 
 /** Consume the encrypted ping response before the normal message dispatcher
- * starts. This verifies actual possession of the imported server key, rather
- * than treating the HTTP WebSocket upgrade as a successful encrypted session. */
-export function verifyEncryptedSocket(socket: WebSocket, session: TransportCryptoSession, signal?: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const id = `transport-verification-${globalThis.crypto.randomUUID()}`;
-    let finished = false;
-    const cleanup = () => {
-      clearTimeout(timer);
-      socket.removeEventListener('message', onMessage);
-      socket.removeEventListener('close', onTransportFailure);
-      socket.removeEventListener('error', onTransportFailure);
-      signal?.removeEventListener('abort', onAbort);
-    };
-    const finish = (error?: Error) => {
-      if (finished) return;
-      finished = true;
-      cleanup();
-      if (error) reject(error); else resolve();
-    };
-    // A dropped socket during the handshake is transient; an undecryptable or
-    // wrong reply means the imported key does not match the server.
-    const onTransportFailure = () => finish(new TransportVerificationError(ENCRYPTION_VERIFICATION_ERROR, true));
-    const onProtocolFailure = () => finish(new TransportVerificationError(ENCRYPTION_VERIFICATION_ERROR));
-    const onAbort = () => finish(new DOMException('Aborted', 'AbortError'));
-    const onMessage = (event: MessageEvent) => {
-      try {
-        const value = JSON.parse(session.decryptServerText(String(event.data))) as Record<string, unknown>;
-        if (value.id !== id) return;
-        const payload = value.payload as { pong?: unknown } | undefined;
-        if (value.type !== 'server.result' || payload?.pong !== true) { onProtocolFailure(); return; }
-        finish();
-      } catch { onProtocolFailure(); }
-    };
-    const timer = setTimeout(onTransportFailure, TIMEOUT_MS);
-    socket.addEventListener('message', onMessage);
-    socket.addEventListener('close', onTransportFailure);
-    socket.addEventListener('error', onTransportFailure);
-    signal?.addEventListener('abort', onAbort, { once: true });
-    if (signal?.aborted) { onAbort(); return; }
-    try {
-      socket.send(session.encryptClientText(JSON.stringify({ id, type: 'server.ping', payload: {} })));
-    } catch { onTransportFailure(); }
-  });
+ * starts; see the shared `verifyEncryptedSocket`. Failures carry the
+ * localized verification message. */
+export async function verifyEncryptedSocket(socket: WebSocket, session: TransportCryptoSession, signal?: AbortSignal): Promise<void> {
+  try {
+    await verifySocket(socket, session, { signal, timeoutMs: TIMEOUT_MS });
+  } catch (error) {
+    if (error instanceof SocketVerificationError) throw new TransportVerificationError(ENCRYPTION_VERIFICATION_ERROR, error.retryable);
+    throw error;
+  }
 }

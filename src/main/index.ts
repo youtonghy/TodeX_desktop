@@ -6,6 +6,7 @@ import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { startAutoUpdates, refreshUpdateMenu } from './autoUpdates';
 import { syncDesktopEntry } from './desktopEntry';
+import { startAgentDesktop } from './agentDesktop';
 import { isMainLocale, mainT, setMainLocale } from './i18n';
 import {
   DEBUG_BUILD_VERSION,
@@ -34,6 +35,8 @@ const DEBUG_BUILD = isDebugBuild(BUILD_VERSION);
 type StoreShape = Record<string, unknown>;
 
 let debugLogger: DebugLogger | null = null;
+let mainWindow: BrowserWindow | null = null;
+let agentDesktop: ReturnType<typeof startAgentDesktop> | null = null;
 
 function debugLog(level: DebugLogLevel, event: string, data?: unknown): void {
   debugLogger?.write(level, event, data);
@@ -518,6 +521,7 @@ app.whenReady().then(() => {
       next[key] = value;
     }
     writeStore(next);
+    agentDesktop?.storeChanged(key);
   });
 
   handleIpc('dialog:openDirectory', async () => {
@@ -678,19 +682,32 @@ app.whenReady().then(() => {
     }
   });
 
-  createWindow();
+  mainWindow = createWindow();
+  mainWindow.on('closed', () => agentDesktop?.windowClosed());
+  agentDesktop = startAgentDesktop({
+    window: () => (mainWindow && !mainWindow.isDestroyed() ? mainWindow : null),
+    store: {
+      read: readStore,
+      write: (key, value) => writeStore({ ...readStore(), [key]: value }),
+    },
+    defaultServerUrl: DEFAULT_BACKEND_URL,
+    log: (level, event, data) => debugLog(level, event, data),
+    handle: handleIpc,
+  });
   syncLinuxDesktopEntry();
   startAutoUpdates(BUILD_VERSION, syncLinuxDesktopEntry);
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
+      mainWindow = createWindow();
+      mainWindow.on('closed', () => agentDesktop?.windowClosed());
     }
   });
 });
 
 app.on('before-quit', () => {
   debugLog('info', 'app.before-quit');
+  agentDesktop?.stop();
   flushStore();
 });
 app.on('child-process-gone', (_event, details) => debugLog('error', 'app.child-process-gone', { details }));

@@ -418,6 +418,13 @@ export const en: Messages = {
   'runStatus.approve': 'Approve',
   'runStatus.answerOnDevice': 'Confirm this on {devices}',
   'runStatus.answerOnOtherDevice': 'Confirm this on the desktop that will run it',
+  'agentBrowser.closed': 'The agent has not opened a page, or the tab was closed.',
+  'agentBrowser.tunnel': 'Tunnel {remote}→{local}',
+  'agentBrowser.tunnelHint': 'A local port of the remote backend, forwarded to this desktop over the encrypted connection',
+  'agentBrowser.title': 'Agent browser',
+  'agentBrowser.controlled': 'Agent in control',
+  'agentBrowser.stop': 'Stop',
+  'agentBrowser.stopFailed': 'Could not stop the agent browser',
 
   // header
   'header.legacyCodex': 'Legacy Codex',

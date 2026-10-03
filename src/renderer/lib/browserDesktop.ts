@@ -87,6 +87,21 @@ export function installBrowserDesktopBridge(): void {
         return () => media.removeEventListener('change', handler);
       },
     },
+    // No Electron: no agent browser views, no executor.
+    agentBrowser: {
+      list: async () => [],
+      onTabs: () => () => undefined,
+      setBounds: () => undefined,
+      capture: async () => null,
+      close: async () => undefined,
+      partitions: async () => ({ partitions: [], workspaces: {} }),
+      createPartition: async () => {
+        throw new Error(t('storage.browserShell'));
+      },
+      assignPartition: async () => undefined,
+      deletePartition: async () => undefined,
+      refreshExecutors: () => undefined,
+    },
     debug: {
       info: async () => ({ enabled: false, buildVersion: 'browser', configPath: '', logPath: '', chromiumLogPath: '' }),
       log: () => undefined,

@@ -11,6 +11,13 @@ export default defineConfig({
     define: {
       __TODEX_BUILD_VERSION__: JSON.stringify(buildVersion),
     },
+    // The agent desktop executor speaks the shared protocol from main.
+    resolve: {
+      alias: {
+        '@todex/protocol': resolve(desktopRoot, '../TodeX_protocol/src'),
+        '@react-native-community/netinfo': resolve(desktopRoot, 'src/renderer/stubs/netinfo.ts'),
+      },
+    },
     plugins: [externalizeDepsPlugin()],
   },
   preload: {

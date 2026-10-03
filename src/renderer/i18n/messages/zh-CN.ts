@@ -418,6 +418,13 @@ export const zhCN = {
   'runStatus.approve': '同意',
   'runStatus.answerOnDevice': '请在 {devices} 上确认',
   'runStatus.answerOnOtherDevice': '请在将执行它的桌面端上确认',
+  'agentBrowser.closed': 'Agent 尚未打开页面，或标签已关闭。',
+  'agentBrowser.tunnel': '隧道 {remote}→{local}',
+  'agentBrowser.tunnelHint': '远程后端的本机端口，经加密连接转发到此桌面',
+  'agentBrowser.title': 'Agent 浏览器',
+  'agentBrowser.controlled': 'Agent 控制中',
+  'agentBrowser.stop': '停止',
+  'agentBrowser.stopFailed': '无法停止 Agent 浏览器',
 
   // header
   'header.legacyCodex': '历史 Codex',
