@@ -176,6 +176,8 @@ export function App() {
   }, [persistAsideOpen, queueWorkbenchRequest]);
   const closeWorkbenchItem = useCallback((itemId: string) => queueWorkbenchRequest(id => ({ id, kind: 'close', itemId })), [queueWorkbenchRequest]);
   const toggleSshView = useCallback(() => {
+    // Git actions belong to the conversation view, not the SSH view.
+    setGitOpen(false);
     setPanel(current => current === 'ssh' ? null : 'ssh');
   }, []);
   // Requests and the reported tab list belong to the scope that produced them.
@@ -222,7 +224,10 @@ export function App() {
       if (!scopeKey) return;
       persistAsideOpen(!asideOpen);
     },
-    gitActions: () => setGitOpen((open) => !open),
+    gitActions: () => {
+      if (sshActive) return;
+      setGitOpen((open) => !open);
+    },
     kanban: () => {
       if (panel === 'kanban') {
         setPanel(null);
@@ -359,12 +364,14 @@ export function App() {
                   <ConversationHeaderDetails session={session} title={session.activeConversation?.title ?? t('app.conversation')} gitOpen={gitOpen} onOpenGit={() => setGitOpen(true)} />
                 )}
                 <Navbar.Content className="shrink-0 gap-2">
-                  <span className="relative inline-flex shrink-0">
-                    <Button isIconOnly size="sm" variant="ghost" aria-label={t('app.githubActions')} onPress={() => setGitOpen(true)}>
-                      <RiGithubLine className="size-4" />
-                    </Button>
-                    <ShortcutHint id="gitActions" className="absolute -top-1.5 -right-1.5 z-10" />
-                  </span>
+                  {!sshActive ? (
+                    <span className="relative inline-flex shrink-0">
+                      <Button isIconOnly size="sm" variant="ghost" aria-label={t('app.githubActions')} onPress={() => setGitOpen(true)}>
+                        <RiGithubLine className="size-4" />
+                      </Button>
+                      <ShortcutHint id="gitActions" className="absolute -top-1.5 -right-1.5 z-10" />
+                    </span>
+                  ) : null}
                   {subagentRuns.length > 0 ? (
                     <span className="relative">
                       <Button isIconOnly size="sm" variant={panel === 'subagents' && asideOpen ? 'secondary' : 'ghost'} aria-label={t('app.subagents')} aria-expanded={asideOpen && panel === 'subagents'} onPress={() => openPanel('Subagents')}>
