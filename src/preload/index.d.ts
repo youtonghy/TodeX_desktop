@@ -41,6 +41,16 @@ export type TodeXDesktopApi = {
     shouldUseDark: () => Promise<boolean>;
     onUpdated: (listener: (dark: boolean) => void) => () => void;
   };
+  preview: {
+    open: (key: string, target: { url: string } | { html: string }) => Promise<void>;
+    reload: (key: string) => Promise<void>;
+    capture: (key: string) => Promise<string | null>;
+    inspect: (key: string, colors: { hover: string; selected: string } | null) => Promise<void>;
+    close: (key: string) => Promise<void>;
+    setBounds: (key: string, bounds: AgentBrowserBounds | null) => void;
+    onState: (listener: (state: PreviewState) => void) => () => void;
+    onPicked: (listener: (picked: PreviewPicked) => void) => () => void;
+  };
   agentBrowser: {
     list: () => Promise<AgentBrowserTab[]>;
     onTabs: (listener: (tabs: AgentBrowserTab[]) => void) => () => void;
@@ -73,6 +83,8 @@ export type AgentBrowserPartitionState = {
   workspaces: Record<string, string>;
 };
 export type AgentBrowserBounds = { x: number; y: number; width: number; height: number };
+export type PreviewState = { key: string; url: string; title: string; loading: boolean; error?: string };
+export type PreviewPicked = { key: string; tag: string; id: string; text: string };
 export type DesktopDebugLogInfo = {
   enabled: boolean;
   buildVersion: string;

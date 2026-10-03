@@ -11,6 +11,7 @@ import { useNoticeToast } from '../components/NoticeToast';
 import { XtermTerminal } from '../components/XtermTerminal';
 import { SshExecPane } from '../components/ssh/SshExecPane';
 import { AgentBrowserPane } from '../components/AgentBrowserPane';
+import { useNativeViewHost } from '../components/nativeViewHost';
 import { agentBrowserKey, useAgentBrowserTabs } from '../session/agentBrowserTabs';
 import { capSshExecTabs, rememberSessionSshExecTabs, sessionSshExecTabsFor, sshExecTabTitle } from '../session/sshExecTabs';
 import type { TodeXSession } from '../session/useTodeXSession';
@@ -502,7 +503,7 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
                 autoConnect={!item.ssh || freshSshTabsRef.current.has(item.id)}
               />
             ) : null}
-            {item.type === 'browser' ? <BrowserPane workspacePath={session.activeWorkspace?.path} session={session} target={item.type === tab && item.id === active?.id && (target?.filePath || target?.url) ? target : item.target} onTargetChange={next => updateTabTarget(item.id, next)} /> : null}
+            {item.type === 'browser' ? <BrowserPane itemId={item.id} isActive={item.id === active?.id} workspacePath={session.activeWorkspace?.path} session={session} target={item.type === tab && item.id === active?.id && (target?.filePath || target?.url) ? target : item.target} onTargetChange={next => updateTabTarget(item.id, next)} /> : null}
             {item.type === 'files' ? <FilesPane session={session} remote={item.remote} onRemoteRebind={next => updateRemoteBinding(item.id, next)} target={item.type === tab && item.id === active?.id && (target?.filePath || target?.url) ? target : item.target} onTargetChange={next => updateTabTarget(item.id, next)} /> : null}
             {item.type === 'git-diff' ? <GitDiffPane session={session} /> : null}
             {item.type === 'ssh-exec' ? <SshExecPane run={sshExecRun(item)} isActive={item.id === active?.id} onClose={() => closeTab(item.id)} /> : null}
@@ -804,24 +805,30 @@ function TerminalPane({ session, terminalId, isActive, workspaceTarget, sshHost,
   );
 }
 
-function BrowserPane({ workspacePath, session, target, onTargetChange }: { workspacePath?: string; session: TodeXSession; target?: OpenPanelOptions; onTargetChange?: (target: OpenPanelOptions) => void }) {
+/** A Workbench browser tab. The page is a native view drawn by the main
+ * process (see `previewViews.ts`); this pane holds the address bar and the
+ * rectangle the view fills. Only loopback pages and workspace HTML files load. */
+function BrowserPane({ itemId, isActive, workspacePath, session, target, onTargetChange }: { itemId: string; isActive: boolean; workspacePath?: string; session: TodeXSession; target?: OpenPanelOptions; onTargetChange?: (target: OpenPanelOptions) => void }) {
   const t = useT();
+  const preview = window.todexDesktop.preview;
   const targetChangeRef = useRef(onTargetChange);
   targetChangeRef.current = onTargetChange;
   // Every URL source (typed, chat link, restored layout) must stay loopback.
   const targetUrl = target?.url && isLoopbackUrl(target.url) ? target.url : undefined;
   const defaultUrl = targetUrl ? targetUrl : (target?.filePath ? '' : 'http://127.0.0.1:7345');
   const [draft, setDraft] = useState(defaultUrl || 'http://127.0.0.1:7345');
-  const [url, setUrl] = useState(defaultUrl);
-  const [srcDoc, setSrcDoc] = useState('');
+  const [hasPage, setHasPage] = useState(false);
   const [error, setError] = useState('');
   const [inspect, setInspect] = useState(false);
-  // State rather than a ref: the iframe is recreated whenever the page is
-  // (re)loaded, and the element picker has to re-attach to the new one.
-  const [frame, setFrame] = useState<HTMLIFrameElement | null>(null);
-  const selectedRef = useRef<HTMLElement | null>(null);
-  const selectionAnchorRef = useRef<HTMLElement | null>(null);
+  const loadedUrlRef = useRef('');
   useNoticeToast(error, { variant: 'danger', scope: workspacePath });
+  const { hostRef, covered, still } = useNativeViewHost(hasPage ? itemId : undefined, isActive, preview);
+
+  const load = useCallback((page: { url: string } | { html: string }) => {
+    setError('');
+    setHasPage(true);
+    void preview.open(itemId, page).catch((reason) => setError(reason instanceof Error ? reason.message : t('workbench.invalidUrl')));
+  }, [itemId, preview]);
 
   const navigateTo = useCallback((input: string) => {
     const trimmed = input.trim();
@@ -829,25 +836,13 @@ function BrowserPane({ workspacePath, session, target, onTargetChange }: { works
       const parsed = new URL(trimmed);
       if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error(t('workbench.httpOnly'));
       if (!isLoopbackUrl(parsed)) throw new Error(t('workbench.loopbackOnly'));
-      setUrl(parsed.toString());
       setDraft(parsed.toString());
       targetChangeRef.current?.({ url: parsed.toString() });
-      setSrcDoc('');
-      setError('');
+      load({ url: parsed.toString() });
     } catch (reason) {
       toast.danger(reason instanceof Error ? reason.message : t('workbench.invalidUrl'));
     }
-  }, []);
-
-  const handleReload = () => {
-    if (frame) {
-      if (url) {
-        frame.src = url;
-      } else if (srcDoc) {
-        frame.srcdoc = srcDoc;
-      }
-    }
-  };
+  }, [load]);
 
   useEffect(() => {
     if (target?.url) {
@@ -855,169 +850,58 @@ function BrowserPane({ workspacePath, session, target, onTargetChange }: { works
         setError(t('workbench.loopbackOnly'));
         return;
       }
+      if (target.url === loadedUrlRef.current) return;
       targetChangeRef.current?.(target);
       setDraft(target.url);
-      setUrl(target.url);
-      setSrcDoc('');
-      setError('');
+      load({ url: target.url });
       return;
     }
-    if (!target?.filePath) return;
+    if (!target?.filePath) {
+      if (defaultUrl && !loadedUrlRef.current) load({ url: defaultUrl });
+      return;
+    }
     targetChangeRef.current?.(target);
     setDraft(target.filePath);
-    setUrl('');
-    setSrcDoc('');
-    setError('');
     const api = new V2ApiClient({ serverUrl: session.settings.serverUrl, device: deviceIdentityFromSecret(session.settings.deviceSecret) });
     void api.readWorkspaceFile(target.filePath)
       .then((file) => {
         if (!file.text) throw new Error(t('workbench.webFileNotText'));
-        setSrcDoc(file.text);
+        load({ html: file.text });
       })
       .catch((reason) => setError(reason instanceof Error ? reason.message : t('workbench.webFileReadFailed')));
   }, [session.settings.deviceSecret, session.settings.serverUrl, target?.filePath, target?.url]);
 
-  const appendReference = useCallback((element: HTMLElement) => {
-    const tag = element.tagName.toLowerCase();
-    const text = (element.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 160);
-    const id = element.id ? `#${element.id}` : '';
-    const reference = t('workbench.webElement', { tag, id, text: text ? `: ${text}` : '' });
+  // The page navigates on its own (links, redirects): follow it.
+  useEffect(() => preview.onState((state) => {
+    if (state.key !== itemId) return;
+    if (state.error) setError(state.error);
+    if (state.url && state.url !== loadedUrlRef.current) {
+      loadedUrlRef.current = state.url;
+      setDraft(state.url);
+      targetChangeRef.current?.({ url: state.url });
+    }
+  }), [itemId, preview]);
+
+  const appendReference = useCallback((picked: { tag: string; id: string; text: string }) => {
+    const reference = t('workbench.webElement', { tag: picked.tag, id: picked.id ? `#${picked.id}` : '', text: picked.text ? `: ${picked.text}` : '' });
     const conversationId = session.activeConversation?.id;
     if (conversationId) {
       session.setConversationChatDraft(conversationId, (current) => `${current}${current ? '\n' : ''}${reference}`);
     }
   }, [session.activeConversation?.id, session.setConversationChatDraft]);
+  useEffect(() => preview.onPicked((picked) => {
+    if (picked.key === itemId) appendReference(picked);
+  }), [appendReference, itemId, preview]);
 
   useEffect(() => {
-    if (!frame || !inspect) return;
-    const bind = () => {
-      try {
-        const doc = frame.contentDocument;
-        const frameWindow = frame.contentWindow;
-        if (!doc || !frameWindow) return;
-        const FrameHTMLElement = (frameWindow as Window & typeof globalThis).HTMLElement;
-        let hovered: HTMLElement | null = null;
-        const isFrameElement = (value: EventTarget | Element | null): value is HTMLElement => (
-          value instanceof FrameHTMLElement
-        );
-        const createOverlay = (color: string) => {
-          const overlay = doc.createElement('div');
-          overlay.setAttribute('aria-hidden', 'true');
-          Object.assign(overlay.style, {
-            position: 'fixed',
-            pointerEvents: 'none',
-            zIndex: '2147483647',
-            border: `2px solid ${color}`,
-            boxSizing: 'border-box',
-            display: 'none',
-          });
-          doc.body.appendChild(overlay);
-          return overlay;
-        };
-        const rootStyle = getComputedStyle(document.documentElement);
-        const tokenColor = (name: string) => rootStyle.getPropertyValue(name).trim() || '#128DDB';
-        const hoverOverlay = createOverlay(tokenColor('--chart-4'));
-        const selectedOverlay = createOverlay(tokenColor('--accent'));
-        const positionOverlay = (overlay: HTMLDivElement, element: HTMLElement | null) => {
-          if (!element || !element.isConnected) {
-            overlay.style.display = 'none';
-            return;
-          }
-          const rect = element.getBoundingClientRect();
-          Object.assign(overlay.style, {
-            display: 'block',
-            left: `${rect.left}px`,
-            top: `${rect.top}px`,
-            width: `${rect.width}px`,
-            height: `${rect.height}px`,
-          });
-        };
-        const previousCursor = doc.documentElement.style.cursor;
-        doc.documentElement.style.cursor = 'crosshair';
-        const move = (event: MouseEvent) => {
-          const element = isFrameElement(event.target) ? event.target : null;
-          hovered = element;
-          if (!selectedRef.current) selectionAnchorRef.current = element;
-          positionOverlay(hoverOverlay, element === selectedRef.current ? null : element);
-        };
-        const click = (event: MouseEvent) => {
-          event.preventDefault(); event.stopPropagation();
-          if (isFrameElement(event.target)) {
-            selectedRef.current = event.target;
-            selectionAnchorRef.current = event.target;
-            positionOverlay(selectedOverlay, event.target);
-            positionOverlay(hoverOverlay, null);
-            appendReference(event.target);
-          }
-        };
-        const wheel = (event: WheelEvent) => {
-          const current = selectedRef.current ?? hovered;
-          if (!current) return;
-          event.preventDefault();
-          const anchor = selectionAnchorRef.current ?? current;
-          selectionAnchorRef.current = anchor;
-          const candidate = event.deltaY > 0
-            ? current.parentElement && current.parentElement !== doc.documentElement ? current.parentElement : null
-            : anchor && current !== anchor
-              ? Array.from(current.children).find((child) => child.contains(anchor))
-              : current.firstElementChild;
-          const next = candidate ?? null;
-          if (isFrameElement(next)) {
-            if (selectedRef.current) {
-              selectedRef.current = next;
-              positionOverlay(selectedOverlay, next);
-            } else {
-              hovered = next;
-              positionOverlay(hoverOverlay, next);
-            }
-          }
-        };
-        const reposition = () => {
-          positionOverlay(hoverOverlay, hovered === selectedRef.current ? null : hovered);
-          positionOverlay(selectedOverlay, selectedRef.current);
-        };
-        doc.addEventListener('mousemove', move, true);
-        doc.addEventListener('click', click, true);
-        frameWindow.addEventListener('wheel', wheel, { capture: true, passive: false });
-        doc.addEventListener('scroll', reposition, true);
-        frameWindow.addEventListener('resize', reposition);
-        return () => {
-          doc.removeEventListener('mousemove', move, true);
-          doc.removeEventListener('click', click, true);
-          frameWindow.removeEventListener('wheel', wheel, true);
-          doc.removeEventListener('scroll', reposition, true);
-          frameWindow.removeEventListener('resize', reposition);
-          doc.documentElement.style.cursor = previousCursor;
-          hoverOverlay.remove();
-          selectedOverlay.remove();
-        };
-      } catch { toast.danger(t('workbench.inspectBlocked')); }
-      return undefined;
-    };
-    // A cross-origin page leaves contentDocument null; say so instead of
-    // leaving a picker that silently selects nothing. A detached frame (one
-    // being replaced by a reload) is also null and is not a blocked page.
-    const bindOrReportBlocked = () => {
-      const unbind = bind();
-      if (frame.isConnected && frame.contentDocument === null) {
-        toast.danger(t('workbench.inspectBlocked'));
-        setInspect(false);
-      }
-      return unbind;
-    };
-    let cleanup = bindOrReportBlocked();
-    const handleLoad = () => {
-      cleanup?.();
-      selectedRef.current = null;
-      selectionAnchorRef.current = null;
-      cleanup = bindOrReportBlocked();
-    };
-    frame.addEventListener('load', handleLoad);
-    return () => {
-      frame.removeEventListener('load', handleLoad);
-      cleanup?.();
-    };
-  }, [appendReference, frame, inspect]);
+    if (!hasPage) return;
+    const rootStyle = getComputedStyle(document.documentElement);
+    const tokenColor = (name: string) => rootStyle.getPropertyValue(name).trim() || '#128DDB';
+    void preview.inspect(itemId, inspect ? { hover: tokenColor('--chart-4'), selected: tokenColor('--accent') } : null)
+      .catch(() => toast.danger(t('workbench.inspectBlocked')));
+  }, [hasPage, inspect, itemId, preview]);
+
+  useEffect(() => () => { void preview.close(itemId); }, [itemId, preview]);
 
   return (
     <div className="flex h-full min-h-0 flex-col px-4 pb-4 pt-3">
@@ -1037,8 +921,8 @@ function BrowserPane({ workspacePath, session, target, onTargetChange }: { works
           <Button
             size="sm"
             variant="tertiary"
-            isDisabled={!url && !srcDoc}
-            onPress={handleReload}
+            isDisabled={!hasPage}
+            onPress={() => { void preview.reload(itemId); }}
             aria-label={t('workbench.refreshPage')}
             className="expandable-action-btn"
           >
@@ -1050,15 +934,8 @@ function BrowserPane({ workspacePath, session, target, onTargetChange }: { works
           <Button
             size="sm"
             variant={inspect ? 'primary' : 'tertiary'}
-            onPress={() => {
-              setInspect((current) => {
-                if (!current) {
-                  selectedRef.current = null;
-                  selectionAnchorRef.current = null;
-                }
-                return !current;
-              });
-            }}
+            isDisabled={!hasPage}
+            onPress={() => setInspect((current) => !current)}
             aria-label={inspect ? t('workbench.exitInspect') : t('workbench.selectElement')}
             className="expandable-action-btn"
           >
@@ -1069,9 +946,9 @@ function BrowserPane({ workspacePath, session, target, onTargetChange }: { works
           </Button>
         </div>
       </div>
-      {url || srcDoc ? (
-        <div className="bg-surface min-h-0 flex-1 overflow-hidden rounded-xl border border-separator">
-          <iframe ref={setFrame} title={t('workbench.webPreview')} src={url || undefined} srcDoc={srcDoc || undefined} className="size-full border-0" sandbox="allow-forms allow-modals allow-popups allow-same-origin allow-scripts" />
+      {hasPage ? (
+        <div ref={hostRef} className="bg-surface relative min-h-0 flex-1 overflow-hidden rounded-xl border border-separator" aria-label={t('workbench.webPreview')}>
+          {covered && still ? <img src={still} alt="" className="size-full object-contain object-top" /> : null}
         </div>
       ) : (
         <div className="bg-surface-secondary flex min-h-0 flex-1 flex-col items-center justify-center gap-2 rounded-xl px-6 text-center">
@@ -1086,7 +963,6 @@ function BrowserPane({ workspacePath, session, target, onTargetChange }: { works
     </div>
   );
 }
-
 function GitDiffPane({ session }: { session: TodeXSession }) {
   const t = useT();
   const conversation = session.activeConversation;

@@ -7,6 +7,7 @@ import { promisify } from 'node:util';
 import { startAutoUpdates, refreshUpdateMenu } from './autoUpdates';
 import { syncDesktopEntry } from './desktopEntry';
 import { startAgentDesktop } from './agentDesktop';
+import { PreviewViews, type InspectColors, type PreviewTarget } from './previewViews';
 import { isMainLocale, mainT, setMainLocale } from './i18n';
 import {
   DEBUG_BUILD_VERSION,
@@ -37,6 +38,7 @@ type StoreShape = Record<string, unknown>;
 let debugLogger: DebugLogger | null = null;
 let mainWindow: BrowserWindow | null = null;
 let agentDesktop: ReturnType<typeof startAgentDesktop> | null = null;
+let previews: PreviewViews | null = null;
 
 function debugLog(level: DebugLogLevel, event: string, data?: unknown): void {
   debugLogger?.write(level, event, data);
@@ -683,7 +685,26 @@ app.whenReady().then(() => {
   });
 
   mainWindow = createWindow();
-  mainWindow.on('closed', () => agentDesktop?.windowClosed());
+  mainWindow.on('closed', () => {
+    agentDesktop?.windowClosed();
+    previews?.closeAll();
+  });
+  const liveWindow = () => (mainWindow && !mainWindow.isDestroyed() ? mainWindow : null);
+  previews = new PreviewViews(
+    liveWindow,
+    state => liveWindow()?.webContents.send('preview:state', state),
+    picked => liveWindow()?.webContents.send('preview:picked', picked),
+  );
+  handleIpc('preview:open', (_event, key: string, target: PreviewTarget) => previews?.open(String(key), target));
+  handleIpc('preview:reload', (_event, key: string) => previews?.reload(String(key)));
+  handleIpc('preview:capture', (_event, key: string) => previews?.capture(String(key)) ?? null);
+  handleIpc('preview:inspect', (_event, key: string, colors: InspectColors | null) => previews?.inspect(String(key), colors));
+  handleIpc('preview:close', (_event, key: string) => previews?.close(String(key)));
+  ipcMain.on('preview:setBounds', (event, key: unknown, bounds: unknown) => {
+    if (event.sender !== liveWindow()?.webContents || typeof key !== 'string') return;
+    const rect = bounds && typeof bounds === 'object' ? bounds as Electron.Rectangle : null;
+    previews?.setBounds(key, rect && [rect.x, rect.y, rect.width, rect.height].every(Number.isFinite) ? rect : null);
+  });
   agentDesktop = startAgentDesktop({
     window: () => (mainWindow && !mainWindow.isDestroyed() ? mainWindow : null),
     store: {
@@ -700,7 +721,10 @@ app.whenReady().then(() => {
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       mainWindow = createWindow();
-      mainWindow.on('closed', () => agentDesktop?.windowClosed());
+      mainWindow.on('closed', () => {
+        agentDesktop?.windowClosed();
+        previews?.closeAll();
+      });
     }
   });
 });

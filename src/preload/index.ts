@@ -32,6 +32,8 @@ export type AgentBrowserPartitionState = {
   workspaces: Record<string, string>;
 };
 export type AgentBrowserBounds = { x: number; y: number; width: number; height: number };
+export type PreviewState = { key: string; url: string; title: string; loading: boolean; error?: string };
+export type PreviewPicked = { key: string; tag: string; id: string; text: string };
 export type DesktopDebugLogInfo = {
   enabled: boolean;
   buildVersion: string;
@@ -91,6 +93,31 @@ const api = {
       ipcRenderer.on('theme:updated', handler);
       return () => {
         ipcRenderer.removeListener('theme:updated', handler);
+      };
+    },
+  },
+  /** Workbench browser tabs, rendered as native views by the main process. */
+  preview: {
+    open: (key: string, target: { url: string } | { html: string }) => ipcRenderer.invoke('preview:open', key, target) as Promise<void>,
+    reload: (key: string) => ipcRenderer.invoke('preview:reload', key) as Promise<void>,
+    capture: (key: string) => ipcRenderer.invoke('preview:capture', key) as Promise<string | null>,
+    inspect: (key: string, colors: { hover: string; selected: string } | null) => ipcRenderer.invoke('preview:inspect', key, colors) as Promise<void>,
+    close: (key: string) => ipcRenderer.invoke('preview:close', key) as Promise<void>,
+    setBounds: (key: string, bounds: AgentBrowserBounds | null) => {
+      ipcRenderer.send('preview:setBounds', key, bounds);
+    },
+    onState: (listener: (state: PreviewState) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, state: PreviewState) => listener(state);
+      ipcRenderer.on('preview:state', handler);
+      return () => {
+        ipcRenderer.removeListener('preview:state', handler);
+      };
+    },
+    onPicked: (listener: (picked: PreviewPicked) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, picked: PreviewPicked) => listener(picked);
+      ipcRenderer.on('preview:picked', handler);
+      return () => {
+        ipcRenderer.removeListener('preview:picked', handler);
       };
     },
   },

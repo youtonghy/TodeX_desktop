@@ -87,7 +87,19 @@ export function installBrowserDesktopBridge(): void {
         return () => media.removeEventListener('change', handler);
       },
     },
-    // No Electron: no agent browser views, no executor.
+    // No Electron: no native preview or agent browser views, no executor.
+    preview: {
+      open: async () => {
+        throw new Error(t('storage.browserShell'));
+      },
+      reload: async () => undefined,
+      capture: async () => null,
+      inspect: async () => undefined,
+      close: async () => undefined,
+      setBounds: () => undefined,
+      onState: () => () => undefined,
+      onPicked: () => () => undefined,
+    },
     agentBrowser: {
       list: async () => [],
       onTabs: () => () => undefined,
