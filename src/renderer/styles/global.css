@@ -1342,6 +1342,19 @@ body {
   display: none;
 }
 
+/* The footer row (identity + usage) is wider than the 48px rail — stack it so
+   each control keeps a centered icon form. */
+.sidebar[data-peek='true'][data-state='collapsed'] .sidebar-footer-row {
+  flex-direction: column;
+  align-items: center;
+}
+
+.sidebar[data-peek='true'][data-state='collapsed'] .sidebar-footer-row > * {
+  justify-content: center;
+  gap: 0;
+  padding-inline: 0;
+}
+
 /* Secondary list items carry a bottom separator hairline that renders as stray
    dashes between rail icons — drop it. And pin the selection bar flush to the
    rail's left edge instead of floating inside the inset row. */

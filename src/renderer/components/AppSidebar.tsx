@@ -343,49 +343,52 @@ export function AppSidebar({
     return <Sidebar {...railProps}><Sidebar.Content><p className="sidebar-empty-hint text-muted px-3 py-4 text-sm">{t('sidebar.syncing')}</p></Sidebar.Content></Sidebar>;
   }
 
+  const identityMenu = (
+    <Dropdown onOpenChange={setHeaderMenuOpen}>
+      <Dropdown.Trigger
+        aria-label={t('sidebar.menu')}
+        className="flex min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2 py-2 text-left hover:bg-surface-secondary active:bg-surface-secondary/70 transition-colors cursor-pointer select-none outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+      >
+        <Badge.Anchor className="shrink-0">
+          <AppIcon />
+          <Badge color={healthColor} placement="bottom-right" size="sm" aria-label={session.connectionState === 'open' ? t('sidebar.backendConnected') : t('sidebar.backendDisconnected')} />
+        </Badge.Anchor>
+        <span className="flex min-w-0 flex-1 items-center gap-1.5" data-sidebar="label">
+          <span className="text-foreground truncate text-sm font-semibold tracking-tight">TodeX</span>
+          <Chip size="sm" variant="soft">V2</Chip>
+        </span>
+      </Dropdown.Trigger>
+      <Dropdown.Popover>
+        <Dropdown.Menu onAction={(key) => {
+          if (key === 'settings') onOpenSettings();
+          if (key === 'capabilities') onOpenCapabilities();
+          if (key === 'cli-manager') {
+            if (isMobile) setMobileOpen(false);
+            onOpenCliManager();
+          }
+          if (key === 'agent-providers') {
+            if (isMobile) setMobileOpen(false);
+            onOpenAgentProviders();
+          }
+          if (key === 'usage') onOpenUsage();
+          if (key === 'about') onOpenAbout();
+        }}>
+          <Dropdown.Item id="settings" textValue={t('app.settings')}><RiSettings3Line className="text-muted size-4 shrink-0" /><Label>{t('app.settings')}</Label></Dropdown.Item>
+          <Dropdown.Item id="capabilities" textValue={t('app.mcpSkillManager')}><RiPuzzle2Line className="text-muted size-4 shrink-0" /><Label>{t('app.mcpSkillManager')}</Label></Dropdown.Item>
+          <Dropdown.Item id="cli-manager" textValue={t('app.cliManager')}><RiTerminalBoxLine className="text-muted size-4 shrink-0" /><Label>{t('app.cliManager')}</Label></Dropdown.Item>
+          <Dropdown.Item id="agent-providers" textValue={t('app.agentProviders')}><RiUserSettingsLine className="text-muted size-4 shrink-0" /><Label>{t('app.agentProviders')}</Label></Dropdown.Item>
+          <Dropdown.Item id="usage" textValue={t('app.usage')}><RiBarChartBoxLine className="text-muted size-4 shrink-0" /><Label>{t('app.usage')}</Label></Dropdown.Item>
+          <Dropdown.Item id="about" textValue={t('app.about')}><RiInformationLine className="text-muted size-4 shrink-0" /><Label>{t('app.about')}</Label></Dropdown.Item>
+        </Dropdown.Menu>
+      </Dropdown.Popover>
+    </Dropdown>
+  );
+
   return (
     <Sidebar {...railProps}>
       <Sidebar.Header>
-        <Dropdown onOpenChange={setHeaderMenuOpen}>
-          <Dropdown.Trigger
-            aria-label={t('sidebar.menu')}
-            className="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left hover:bg-surface-secondary active:bg-surface-secondary/70 transition-colors cursor-pointer select-none outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
-          >
-            <Badge.Anchor className="shrink-0">
-              <AppIcon />
-              <Badge color={healthColor} placement="bottom-right" size="sm" aria-label={session.connectionState === 'open' ? t('sidebar.backendConnected') : t('sidebar.backendDisconnected')} />
-            </Badge.Anchor>
-            <span className="flex min-w-0 flex-1 items-center gap-1.5" data-sidebar="label">
-              <span className="text-foreground truncate text-sm font-semibold tracking-tight">TodeX</span>
-              <Chip size="sm" variant="soft">V2</Chip>
-            </span>
-          </Dropdown.Trigger>
-          <Dropdown.Popover>
-            <Dropdown.Menu onAction={(key) => {
-              if (key === 'settings') onOpenSettings();
-              if (key === 'capabilities') onOpenCapabilities();
-              if (key === 'cli-manager') {
-                if (isMobile) setMobileOpen(false);
-                onOpenCliManager();
-              }
-              if (key === 'agent-providers') {
-                if (isMobile) setMobileOpen(false);
-                onOpenAgentProviders();
-              }
-              if (key === 'usage') onOpenUsage();
-              if (key === 'about') onOpenAbout();
-            }}>
-              <Dropdown.Item id="settings" textValue={t('app.settings')}><RiSettings3Line className="text-muted size-4 shrink-0" /><Label>{t('app.settings')}</Label></Dropdown.Item>
-              <Dropdown.Item id="capabilities" textValue={t('app.mcpSkillManager')}><RiPuzzle2Line className="text-muted size-4 shrink-0" /><Label>{t('app.mcpSkillManager')}</Label></Dropdown.Item>
-              <Dropdown.Item id="cli-manager" textValue={t('app.cliManager')}><RiTerminalBoxLine className="text-muted size-4 shrink-0" /><Label>{t('app.cliManager')}</Label></Dropdown.Item>
-              <Dropdown.Item id="agent-providers" textValue={t('app.agentProviders')}><RiUserSettingsLine className="text-muted size-4 shrink-0" /><Label>{t('app.agentProviders')}</Label></Dropdown.Item>
-              <Dropdown.Item id="usage" textValue={t('app.usage')}><RiBarChartBoxLine className="text-muted size-4 shrink-0" /><Label>{t('app.usage')}</Label></Dropdown.Item>
-              <Dropdown.Item id="about" textValue={t('app.about')}><RiInformationLine className="text-muted size-4 shrink-0" /><Label>{t('app.about')}</Label></Dropdown.Item>
-            </Dropdown.Menu>
-          </Dropdown.Popover>
-        </Dropdown>
         <Button
-          className="connection-create-button mt-1 w-full justify-start"
+          className="connection-create-button w-full justify-start"
           variant="secondary"
           isDisabled={!session.activeWorkspaceId}
           onPress={onCreateConversation}
@@ -901,6 +904,25 @@ export function AppSidebar({
           </div>
         </HeroContextMenu>
       ) : null}
+
+      <Sidebar.Footer>
+        <div className="sidebar-footer-row flex items-center gap-1">
+          {identityMenu}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="shrink-0 text-muted hover:text-foreground"
+            aria-label={t('sidebar.usage')}
+            onPress={() => {
+              if (isMobile) setMobileOpen(false);
+              onOpenUsage();
+            }}
+          >
+            <RiBarChartBoxLine className="size-4" />
+            <span data-sidebar="label">{t('sidebar.usage')}</span>
+          </Button>
+        </div>
+      </Sidebar.Footer>
     </Sidebar>
   );
 }
