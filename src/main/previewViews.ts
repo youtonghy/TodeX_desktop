@@ -1,5 +1,6 @@
 import { WebContentsView, type BrowserWindow, type Rectangle } from 'electron';
 import { isLoopbackUrl } from '@todex/protocol/mobileParity';
+import { PARKED } from './agentDesktop/browser';
 
 /** Workbench preview pages share one partition, apart from the app's own storage. */
 const PARTITION = 'persist:todex-preview';
@@ -115,9 +116,10 @@ export class PreviewViews {
     if (!preview) return;
     if (bounds && bounds.width > 0 && bounds.height > 0) {
       preview.view.setBounds({ x: Math.round(bounds.x), y: Math.round(bounds.y), width: Math.round(bounds.width), height: Math.round(bounds.height) });
-      preview.view.setVisible(true);
     } else {
-      preview.view.setVisible(false);
+      // Parked rather than hidden, so a still can still be captured.
+      const current = preview.view.getBounds();
+      preview.view.setBounds({ ...PARKED, width: current.width || PARKED.width, height: current.height || PARKED.height });
     }
   }
 
@@ -212,7 +214,7 @@ export class PreviewViews {
     // A new document needs the picker again.
     contents.on('did-finish-load', () => { void this.injectPicker(preview).catch(() => undefined); });
     contents.on('render-process-gone', () => this.close(key));
-    view.setVisible(false);
+    view.setBounds(PARKED);
     window.contentView.addChildView(view);
     this.previews.set(key, preview);
     return preview;

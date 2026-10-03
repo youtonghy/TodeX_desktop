@@ -15,6 +15,10 @@ import { ExecutorFailure, type ExecutorLogger } from './executorLink';
 /** Agent tabs open at once on this desktop. */
 const MAX_TABS = 4;
 const VIEWPORT = { width: 1280, height: 800 };
+/** Off-window bounds for tabs nobody is looking at. A view hidden with
+ * setVisible(false) loses its display surface and cannot be captured;
+ * a parked one keeps rendering. */
+export const PARKED = { x: -VIEWPORT.width - 200, y: 0, ...VIEWPORT };
 const SCREENSHOT_MAX_WIDTH = 1280;
 const SCREENSHOT_QUALITY = 70;
 /** Store key: named partitions and which workspace uses which. */
@@ -154,8 +158,7 @@ export class AgentBrowser {
       });
       tab.view.setVisible(true);
     } else {
-      tab.view.setVisible(false);
-      tab.view.setBounds({ x: 0, y: 0, ...VIEWPORT });
+      tab.view.setBounds(PARKED);
     }
   }
 
@@ -309,17 +312,14 @@ export class AgentBrowser {
     tab.refs = formatted.refs;
     const result: Record<string, unknown> = { ...this.page(tab), tree: formatted.tree, truncated: formatted.truncated };
     if (args.screenshot) {
-      const metrics = await this.cdp<{ cssVisualViewport?: { clientWidth: number; clientHeight: number } }>(tab, 'Page.getLayoutMetrics');
-      const width = metrics.cssVisualViewport?.clientWidth ?? VIEWPORT.width;
-      const height = metrics.cssVisualViewport?.clientHeight ?? VIEWPORT.height;
-      const scale = Math.min(1, SCREENSHOT_MAX_WIDTH / Math.max(1, width));
-      const shot = await this.cdp<{ data: string }>(tab, 'Page.captureScreenshot', {
-        format: 'jpeg',
-        quality: SCREENSHOT_QUALITY,
-        clip: { x: 0, y: 0, width, height, scale },
-        captureBeyondViewport: false,
-      });
-      result.screenshot = { mimeType: 'image/jpeg', data: shot.data, width: Math.round(width * scale), height: Math.round(height * scale) };
+      // capturePage renders a hidden view for the capture; CDP screenshots
+      // wait for frames a hidden view never produces.
+      let image = await tab.view.webContents.capturePage(undefined, { stayHidden: true });
+      if (image.isEmpty()) throw new ExecutorFailure('EXECUTOR_FAILED', 'the page could not be captured');
+      const size = image.getSize();
+      if (size.width > SCREENSHOT_MAX_WIDTH) image = image.resize({ width: SCREENSHOT_MAX_WIDTH, quality: 'good' });
+      const { width, height } = image.getSize();
+      result.screenshot = { mimeType: 'image/jpeg', data: image.toJPEG(SCREENSHOT_QUALITY).toString('base64'), width, height };
     }
     return result as AgentBrowserResult;
   }
@@ -463,8 +463,9 @@ export class AgentBrowser {
     contents.on('did-navigate', () => this.emitTabs());
     contents.on('page-title-updated', () => this.emitTabs());
     contents.on('render-process-gone', () => this.close(key));
-    view.setBounds({ x: 0, y: 0, ...VIEWPORT });
-    view.setVisible(false);
+    // Agents act on pages nobody is looking at; keep their timers running.
+    contents.setBackgroundThrottling(false);
+    view.setBounds(PARKED);
     window.contentView.addChildView(view);
     this.tabs.set(key, tab);
     this.emitTabs();
