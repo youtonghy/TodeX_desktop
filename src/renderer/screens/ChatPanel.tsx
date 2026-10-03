@@ -569,6 +569,7 @@ export function ChatPanel({ session }: Props) {
     { mode: '', query: '', items: [], truncated: false });
   const [mentionSearchPending, setMentionSearchPending] = useState(false);
   const [suggestionIndex, setSuggestionIndex] = useState(0);
+  const suggestionsPopoverRef = useRef<HTMLDivElement>(null);
   const [expandedProcessIds, setExpandedProcessIds] = useState<Set<string>>(() => new Set());
   const [processGroupLoad, setProcessGroupLoad] = useState<Record<string, 'loading' | 'error'>>({});
   const [isDraggingAttachment, setIsDraggingAttachment] = useState(false);
@@ -595,6 +596,16 @@ export function ChatPanel({ session }: Props) {
       .catch(() => settle([], false));
     return () => { active = false; };
   }, [entryMode, referenceQuery, workspace?.path, session.fetchWorkspaceEntries]);
+  // Keyboard navigation keeps the active row centered inside the popover;
+  // near the list edges scrollTop simply clamps at the boundary.
+  useEffect(() => {
+    const popover = suggestionsPopoverRef.current;
+    const active = popover?.querySelector<HTMLElement>('.composer-suggestion-item--active');
+    if (!popover || !active) return;
+    const popRect = popover.getBoundingClientRect();
+    const itemRect = active.getBoundingClientRect();
+    popover.scrollTop += itemRect.top + itemRect.height / 2 - (popRect.top + popRect.height / 2);
+  }, [suggestionIndex, draft]);
   const chatEntries = useMemo(() => {
     if (!conversation) return [];
     return session.timeline
@@ -1257,7 +1268,7 @@ export function ChatPanel({ session }: Props) {
             <ConversationPermissionActions request={request} onSelect={(option, data) => { session.sendApprovalResponse(option, request, data); }} />
           </div>)}
           {(slashSuggestions.length > 0 || referenceSuggestions.length > 0 || (mentionActive && referenceSuggestions.length === 0) || capabilityActive) ? (
-            <div className="composer-suggestions-popover">
+            <div ref={suggestionsPopoverRef} className="composer-suggestions-popover">
               {slashSuggestions.length > 0 ? (
                 <ListBox
                   aria-label={t('chat.commandSuggestions')}
