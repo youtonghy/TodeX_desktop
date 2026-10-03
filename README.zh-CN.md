@@ -39,6 +39,8 @@
     - **Git Diff**：工作区实时代码改动差异检查。
     - **终端（Terminal）**：基于 xterm.js 的交互式 PTY 会话，支持原始键盘输入、ANSI 输出与行列尺寸自动同步。
     - **能力目录（Capabilities）**：实时查看当前生效的 Skills 与 MCP Servers。
+    - **浏览器（Browser）**：以原生视图打开本机回环页面与工作区 HTML 文件（独立的 `persist:todex-preview` 分区），元素拾取会把引用写入聊天草稿。
+    - **Agent 浏览器**：开启 Agent 桌面工具后，当前会话中 Agent 正在操作的标签，带“Agent 控制中”边框与“停止”按钮。
   - **终端视图（侧边栏）**：管理后端主机的 SSH 主机（自动读取 `~/.ssh/config`、手动添加/导入、连接测试、按主机开启 Agent 访问）、SSH 密钥（查看、导入、生成）与 FTP 站点；在右侧工作台中打开 SSH 终端和 SFTP/FTP 文件浏览。
     - **实验特性（Experiments）**：特性开关与开发者诊断面板。
 - **配对与连接管理**：
@@ -52,6 +54,11 @@
   - 安全隔离的 Electron 架构：开启 Preload 上下文隔离（`contextIsolation: true`），禁用渲染进程 Node 集成（`nodeIntegration: false`）。
   - 本地工作区支持调用 macOS 原生系统文件夹选择对话框。
   - 数据安全保存在 Electron `userData` 目录中（`todex.desktop.*`）。
+- **Agent 桌面工具**（`todex_desktop` MCP，在设置中按后端开启）：
+  - 主进程为每个开启了该功能的已配对后端保持一条加密、设备签名的执行端连接（与界面当前选中的后端无关），任何后端的 Agent 都能在本机驱动浏览器标签；关闭“本机作为执行端”即可退出。
+  - 每个会话第一次使用需在本机确认。顶层页面只允许回环地址；拒绝下载与网站权限请求；向密码框输入前会先询问。
+  - 每个工作区使用独立的持久分区；在“设置 → 浏览器分区”中切换、新建或删除（连同 Cookie、存储与缓存）。
+  - 远程后端的 `localhost` 端口经执行端连接转发到本机 `127.0.0.1` 监听（端口空闲时使用同一端口号）。测试时可用 `TODEX_FORCE_AGENT_TUNNEL=1` 让本机后端也走隧道。
 - **后量子传输加密**：
   - 集成 `@noble` 密码学套件，支持 **X25519** 与 **ML-KEM-768**（后量子密码学标准）端到端会话加密。
 
@@ -161,6 +168,8 @@ pnpm run dev
 | `pnpm run preview` | 本地预览生产构建产物。 |
 | `pnpm run typecheck` | 执行全工程 TypeScript 类型静态检查。 |
 | `pnpm run check:electron` | 校验本地 Electron 二进制文件完整性。 |
+| `pnpm run test:updates` | 更新策略与 Linux 桌面入口的单元测试。 |
+| `pnpm run test:agent-browser` | Agent 浏览器无障碍快照的单元测试。 |
 
 ## 桌面端发布
 
@@ -209,6 +218,7 @@ SmartScreen 或 Gatekeeper。由于桌面端直接共享移动端协议源码，
 - **进程隔离**：渲染进程始终运行于 `nodeIntegration: false` 与 `contextIsolation: true` 模式。
 - **IPC 白名单**：本地文件操作、原生对话框弹出与安全存储均通过 Preload 安全白名单通道进行。
 - **作用域约束**：仅与用户明确指定的后端 daemon 实例进行通信。
+- **浏览器视图**：工作台与 Agent 页面运行在沙箱化的 `WebContentsView` 中，使用独立分区而非应用自身存储，顶层导航在主进程中校验。
 
 ---
 

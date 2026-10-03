@@ -38,19 +38,19 @@ export function formatAxTree(nodes: AXNode[]): { tree: string; refs: Map<string,
   let truncated = false;
   const visited = new Set<string>();
 
-  const walk = (node: AXNode, depth: number, parentName: string) => {
+  const walk = (node: AXNode, depth: number, parent: { name: string; value: string }) => {
     if (truncated || visited.has(node.nodeId)) return;
     visited.add(node.nodeId);
     const role = text(node.role?.value);
     const name = text(node.name?.value).trim();
     const children = (node.childIds ?? []).map(id => byId.get(id)).filter((child): child is AXNode => Boolean(child));
-    // Static text repeating its parent's accessible name adds nothing.
+    const value = text(node.value?.value);
+    // Static text repeating its parent's name or value adds nothing.
     const printed = !node.ignored && role && !(TRANSPARENT.has(role) && !name)
-      && !(role === 'StaticText' && (!name || name === parentName));
+      && !(role === 'StaticText' && (!name || name === parent.name || name === parent.value));
     if (printed) {
       let line = `${'  '.repeat(depth)}- ${role === 'StaticText' ? 'text' : role}`;
       if (name) line += ` ${quote(name)}`;
-      const value = text(node.value?.value);
       if (value && value !== name) line += ` value=${quote(value)}`;
       for (const property of node.properties ?? []) {
         if (STATES.includes(property.name) && property.value?.value) {
@@ -70,8 +70,8 @@ export function formatAxTree(nodes: AXNode[]): { tree: string; refs: Map<string,
       lines.push(line);
     }
     if (role === 'StaticText') return;
-    for (const child of children) walk(child, printed ? depth + 1 : depth, printed ? name : parentName);
+    for (const child of children) walk(child, printed ? depth + 1 : depth, printed ? { name, value } : parent);
   };
-  if (root) walk(root, 0, '');
+  if (root) walk(root, 0, { name: '', value: '' });
   return { tree: lines.join('\n'), refs, truncated };
 }
