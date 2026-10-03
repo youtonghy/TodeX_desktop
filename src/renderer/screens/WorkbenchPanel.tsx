@@ -785,7 +785,9 @@ function BrowserPane({ workspacePath, session, target, onTargetChange }: { works
   const t = useT();
   const targetChangeRef = useRef(onTargetChange);
   targetChangeRef.current = onTargetChange;
-  const defaultUrl = target?.url ? target.url : (target?.filePath ? '' : 'http://127.0.0.1:7345');
+  // Every URL source (typed, chat link, restored layout) must stay loopback.
+  const targetUrl = target?.url && isLoopbackUrl(target.url) ? target.url : undefined;
+  const defaultUrl = targetUrl ? targetUrl : (target?.filePath ? '' : 'http://127.0.0.1:7345');
   const [draft, setDraft] = useState(defaultUrl || 'http://127.0.0.1:7345');
   const [url, setUrl] = useState(defaultUrl);
   const [srcDoc, setSrcDoc] = useState('');
@@ -803,9 +805,7 @@ function BrowserPane({ workspacePath, session, target, onTargetChange }: { works
     try {
       const parsed = new URL(trimmed);
       if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error(t('workbench.httpOnly'));
-      const host = parsed.hostname.toLowerCase();
-      const loopback = host === 'localhost' || host === '::1' || /^127(?:\.\d{1,3}){3}$/.test(host);
-      if (!loopback) throw new Error(t('workbench.loopbackOnly'));
+      if (!isLoopbackUrl(parsed)) throw new Error(t('workbench.loopbackOnly'));
       setUrl(parsed.toString());
       setDraft(parsed.toString());
       targetChangeRef.current?.({ url: parsed.toString() });
@@ -828,6 +828,10 @@ function BrowserPane({ workspacePath, session, target, onTargetChange }: { works
 
   useEffect(() => {
     if (target?.url) {
+      if (!isLoopbackUrl(target.url)) {
+        setError(t('workbench.loopbackOnly'));
+        return;
+      }
       targetChangeRef.current?.(target);
       setDraft(target.url);
       setUrl(target.url);
