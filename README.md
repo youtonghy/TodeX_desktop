@@ -37,6 +37,7 @@ Built with **Electron 44**, **React 19**, **Vite 7**, **Tailwind CSS v4**, and *
     - **Git Diff**: Live inspection of working directory changes.
     - **Terminal**: Embedded xterm.js PTY session with direct keyboard input, ANSI output, and automatic row/column synchronization.
     - **Capabilities**: Real-time read-only catalog of active Skills and MCP servers.
+  - **Terminal view (sidebar)**: Manage the backend host's SSH hosts (auto-read from `~/.ssh/config`, manual add/import, connection test, per-host Agent access), SSH keys (list, import, generate) and FTP sites; open SSH terminals and SFTP/FTP file browsers as Workbench tabs.
     - **Experiments**: Feature toggles and developer diagnostics.
 - **Pairing & Connection Management**:
   - Inspect the active Backend's Codex, Pi, Claude Code, Grok Build, and ACP CLI inventory, compare installed and latest versions, install missing CLIs in one click, and start managed CLI upgrades.

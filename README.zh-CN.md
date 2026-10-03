@@ -39,6 +39,7 @@
     - **Git Diff**：工作区实时代码改动差异检查。
     - **终端（Terminal）**：基于 xterm.js 的交互式 PTY 会话，支持原始键盘输入、ANSI 输出与行列尺寸自动同步。
     - **能力目录（Capabilities）**：实时查看当前生效的 Skills 与 MCP Servers。
+  - **终端视图（侧边栏）**：管理后端主机的 SSH 主机（自动读取 `~/.ssh/config`、手动添加/导入、连接测试、按主机开启 Agent 访问）、SSH 密钥（查看、导入、生成）与 FTP 站点；在右侧工作台中打开 SSH 终端和 SFTP/FTP 文件浏览。
     - **实验特性（Experiments）**：特性开关与开发者诊断面板。
 - **配对与连接管理**：
   - 查看当前后端连接的 Codex、Pi、Claude Code、Grok Build 与 ACP CLI，比较当前/最新版本，一键安装缺失的 CLI 或升级受管 CLI。
