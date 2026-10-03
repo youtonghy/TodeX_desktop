@@ -1,13 +1,13 @@
 import type { V2ApiClient } from '@todex/protocol/v2';
 import {
   REMOTE_TRANSFER_MAX_BYTES,
+  REMOTE_UPLOAD_CHUNK_BYTES,
   remoteBaseName,
   remoteJoinPath,
   remoteParentPath,
   type RemoteConnection,
   type RemoteConnectionKind,
 } from '@todex/protocol/ssh';
-import { base64FromDataUrl } from './helpers';
 import { t } from '../i18n';
 
 export type FileSourceEntry = { name: string; path: string; kind: 'directory' | 'file' | 'symlink' };
@@ -107,22 +107,6 @@ export function normalizeRemoteFilesBinding(value: unknown): RemoteFilesBinding 
   };
 }
 
-function readFileAsBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(reader.error ?? new Error(t('ssh.files.readLocalFailed')));
-    reader.onload = () => resolve(typeof reader.result === 'string' ? base64FromDataUrl(reader.result) : '');
-    reader.readAsDataURL(file);
-  });
-}
-
-function bytesFromBase64(data: string): Uint8Array<ArrayBuffer> {
-  const binary = atob(data);
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
-  return bytes;
-}
-
 function saveBlobAs(name: string, blob: Blob) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
@@ -133,19 +117,25 @@ function saveBlobAs(name: string, blob: Blob) {
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-/** Uploads one local file to `path` on the remote connection. The wire
- * format (JSON + base64) lives only here. */
+/** Uploads one local file to `path` on the remote connection in raw
+ * chunks; the wire format lives only here. */
 export async function uploadRemoteFile(api: V2ApiClient, connectionId: string, path: string, file: File, overwrite = false): Promise<void> {
   if (file.size > REMOTE_TRANSFER_MAX_BYTES) throw new Error(t('ssh.files.tooLarge', { name: file.name }));
-  const data = await readFileAsBase64(file);
-  await api.uploadRemoteFile(connectionId, path, data, overwrite);
+  let offset = 0;
+  do {
+    const end = Math.min(offset + REMOTE_UPLOAD_CHUNK_BYTES, file.size);
+    const bytes = new Uint8Array(await file.slice(offset, end).arrayBuffer());
+    // Only the first chunk creates (or replaces) the file; the rest append.
+    await api.uploadRemoteChunk(connectionId, path, offset, bytes, offset === 0 && overwrite);
+    offset = end;
+  } while (offset < file.size);
 }
 
 /** Downloads `path` from the remote connection and hands it to the
  * browser/Electron download manager. */
 export async function downloadRemoteFile(api: V2ApiClient, connectionId: string, path: string): Promise<void> {
-  const file = await api.downloadRemoteFile(connectionId, path);
-  saveBlobAs(file.name || remoteBaseName(path), new Blob([bytesFromBase64(file.data)], { type: 'application/octet-stream' }));
+  const bytes = await api.downloadRemoteFile(connectionId, path);
+  saveBlobAs(remoteBaseName(path), new Blob([bytes as Uint8Array<ArrayBuffer>], { type: 'application/octet-stream' }));
 }
 
 export function remoteFileSource(api: () => V2ApiClient, binding: RemoteFilesBinding): FileSource {
