@@ -1536,6 +1536,7 @@ export const en: Messages = {
   'ssh.files.overwriteConfirm': '{name} already exists on the remote host. Overwrite it?',
   'ssh.files.uploaded': '{count, plural, one {Uploaded # file} other {Uploaded # files}}',
   'ssh.files.tooLarge': '{name} exceeds the 100 MiB per-file limit',
+  'ssh.files.uploadIncomplete': 'Upload of {name} stopped after {sent} bytes; the remote file is incomplete. {detail}',
   'ssh.files.readLocalFailed': 'Failed to read the local file',
   'ssh.files.deleteTitle': 'Delete remote entry',
   'ssh.files.deleteFileBody': 'Permanently delete {path}? This cannot be undone.',

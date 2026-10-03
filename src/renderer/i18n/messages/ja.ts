@@ -1536,6 +1536,7 @@ export const ja: Messages = {
   'ssh.files.overwriteConfirm': 'リモートに {name} が既にあります。上書きしますか？',
   'ssh.files.uploaded': '{count} 件のファイルをアップロードしました',
   'ssh.files.tooLarge': '{name} は 1 ファイルあたり 100 MiB の上限を超えています',
+  'ssh.files.uploadIncomplete': '{name} のアップロードが {sent} バイトで中断しました。リモートのファイルは不完全です。{detail}',
   'ssh.files.readLocalFailed': 'ローカルファイルの読み込みに失敗しました',
   'ssh.files.deleteTitle': 'リモート項目を削除',
   'ssh.files.deleteFileBody': '{path} を完全に削除しますか？元に戻せません。',

@@ -264,6 +264,8 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
   useEffect(() => { onItemsChange?.(items); }, [items, onItemsChange]);
 
   const handledRequestRef = useRef(0);
+  /** SSH tabs opened during this mount connect at once; restored ones wait for Connect. */
+  const freshSshTabsRef = useRef(new Set<string>());
   useEffect(() => {
     if (!restored || !requests?.length) return;
     const pending = requests.filter(request => request.id > handledRequestRef.current);
@@ -280,6 +282,7 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
       const item: WorkbenchItem = request.kind === 'ssh-terminal'
         ? { id, type: 'terminal', title: request.host, ssh: { host: request.host } }
         : { id, type: 'files', title: request.remote.label, remote: request.remote };
+      if (item.ssh) freshSshTabsRef.current.add(item.id);
       setItems(current => [...current, item]);
       opened = item;
     }
@@ -439,6 +442,7 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
                 terminalId={terminalIdForConversation(scopeKey, item.id)}
                 workspaceTarget={workspaceTerminalTarget}
                 sshHost={item.ssh?.host}
+                autoConnect={!item.ssh || freshSshTabsRef.current.has(item.id)}
               />
             ) : null}
             {item.type === 'browser' ? <BrowserPane workspacePath={session.activeWorkspace?.path} session={session} target={item.type === tab && item.id === active?.id && (target?.filePath || target?.url) ? target : item.target} onTargetChange={next => updateTabTarget(item.id, next)} /> : null}
@@ -451,13 +455,16 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
   );
 }
 
-function TerminalPane({ session, terminalId, isActive, workspaceTarget, sshHost }: {
+function TerminalPane({ session, terminalId, isActive, workspaceTarget, sshHost, autoConnect = true }: {
   session: TodeXSession;
   terminalId: string;
   isActive: boolean;
   workspaceTarget: TerminalTarget | null;
   /** Set for SSH tabs: the terminal runs `ssh -tt <host>` on the backend. */
   sshHost?: string;
+  /** False for restored SSH tabs: they reattach to a live session but only
+   * start `ssh` (and its password/host-key prompts) on an explicit Connect. */
+  autoConnect?: boolean;
 }) {
   const t = useT();
   const target = useMemo<TerminalTarget | null>(
@@ -515,7 +522,7 @@ function TerminalPane({ session, terminalId, isActive, workspaceTarget, sshHost 
     session.requestTerminalStatus(target, terminalId);
     const timeoutId = window.setTimeout(() => {
       const latest = terminalByIdRef.current[terminalId];
-      if (!latest || latest.status === 'idle') {
+      if ((!latest || latest.status === 'idle') && (!isSsh || autoConnect)) {
         const size = terminalSizeRef.current;
         session.startTerminalSession(target, {
           terminalId,
@@ -528,6 +535,8 @@ function TerminalPane({ session, terminalId, isActive, workspaceTarget, sshHost 
     }, 300);
     return () => window.clearTimeout(timeoutId);
   }, [
+    autoConnect,
+    isSsh,
     targetKey,
     session.connectionState,
     session.requestTerminalStatus,
@@ -636,7 +645,11 @@ function TerminalPane({ session, terminalId, isActive, workspaceTarget, sshHost 
     session.sendTerminalInput(terminalId, tenantId, `cd "${trimmed.replace(/"/g, '\\"')}"\r`);
   };
 
-  const sshEnded = isSsh && (terminal?.status === 'exited' || terminal?.status === 'error');
+  const sshEnded = isSsh && (
+    terminal?.status === 'exited'
+    || terminal?.status === 'error'
+    || (!autoConnect && (!terminal || terminal.status === 'idle'))
+  );
   const reconnectSsh = () => {
     if (!target || !terminalId) return;
     manualStopRef.current = false;
@@ -1393,9 +1406,10 @@ function FilesPane({ session, target, onTargetChange, remote, onRemoteRebind }: 
 
   const reconnectRemote = async () => {
     if (!remote) return;
+    // FTP: try without a password first; the connector prompts on REMOTE_AUTH_FAILED.
     const connection = await remoteConnector.connect(remote.kind === 'sftp'
       ? { kind: 'sftp', host: remote.host ?? remote.label, label: remote.label }
-      : { kind: 'ftp', siteId: remote.siteId ?? '', label: remote.label, askPassword: true });
+      : { kind: 'ftp', siteId: remote.siteId ?? '', label: remote.label, askPassword: false });
     if (!connection) return;
     // The previous session is normally gone already; close it in case it is not.
     void api().closeRemoteConnection(remote.connectionId).catch(() => undefined);

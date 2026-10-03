@@ -1536,6 +1536,7 @@ export const zhCN = {
   'ssh.files.overwriteConfirm': '远程已存在 {name}，是否覆盖？',
   'ssh.files.uploaded': '已上传 {count} 个文件',
   'ssh.files.tooLarge': '{name} 超过 100 MiB 的单文件上限',
+  'ssh.files.uploadIncomplete': '{name} 上传在 {sent} 字节后中断，远程文件不完整。{detail}',
   'ssh.files.readLocalFailed': '读取本地文件失败',
   'ssh.files.deleteTitle': '删除远程条目',
   'ssh.files.deleteFileBody': '永久删除 {path}？此操作无法撤销。',

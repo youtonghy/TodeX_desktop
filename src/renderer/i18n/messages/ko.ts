@@ -1536,6 +1536,7 @@ export const ko: Messages = {
   'ssh.files.overwriteConfirm': '원격에 {name}이(가) 이미 있습니다. 덮어쓸까요?',
   'ssh.files.uploaded': '파일 {count}개를 업로드했습니다',
   'ssh.files.tooLarge': '{name}이(가) 파일당 100MiB 제한을 초과합니다',
+  'ssh.files.uploadIncomplete': '{name} 업로드가 {sent} 바이트 후 중단되어 원격 파일이 불완전합니다. {detail}',
   'ssh.files.readLocalFailed': '로컬 파일을 읽지 못했습니다',
   'ssh.files.deleteTitle': '원격 항목 삭제',
   'ssh.files.deleteFileBody': '{path}을(를) 영구 삭제할까요? 되돌릴 수 없습니다.',

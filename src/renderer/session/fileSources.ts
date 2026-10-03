@@ -126,7 +126,15 @@ export async function uploadRemoteFile(api: V2ApiClient, connectionId: string, p
     const end = Math.min(offset + REMOTE_UPLOAD_CHUNK_BYTES, file.size);
     const bytes = new Uint8Array(await file.slice(offset, end).arrayBuffer());
     // Only the first chunk creates (or replaces) the file; the rest append.
-    await api.uploadRemoteChunk(connectionId, path, offset, bytes, offset === 0 && overwrite);
+    try {
+      await api.uploadRemoteChunk(connectionId, path, offset, bytes, offset === 0 && overwrite);
+    } catch (reason) {
+      // A first-chunk 409 means "file exists" and callers may retry with
+      // overwrite; any later failure leaves a truncated remote file instead.
+      if (offset === 0) throw reason;
+      const detail = reason instanceof Error ? reason.message : String(reason);
+      throw new Error(t('ssh.files.uploadIncomplete', { name: file.name, sent: String(offset), detail }));
+    }
     offset = end;
   } while (offset < file.size);
 }
