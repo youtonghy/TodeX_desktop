@@ -250,7 +250,7 @@ function TerminalAside({ session, terminalId }: { session: TodeXSession; termina
             isDisabled={terminal?.status === 'running' || terminal?.status === 'starting'}
             onPress={() => {
               const size = terminalSizeRef.current;
-              session.startTerminalSession(workspace, conversation, {
+              session.startTerminalSession({ kind: 'workspace', workspace, conversation }, {
                 cwd: workspace.path,
                 shell: '',
                 rows: size.rows,

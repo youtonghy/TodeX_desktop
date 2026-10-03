@@ -163,6 +163,7 @@ import {
   type PluginsCatalogState,
   type MemorySettingsState,
   type TerminalClientState,
+  type TerminalTarget,
   type PendingThreadAction,
   type ComposerSelection,
   type ComposerAttachmentDraft,
@@ -2799,14 +2800,17 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       let output = base.output;
       let exitCode = base.exitCode;
       let stopRequested = base.stopRequested ?? false;
+      let sshHost = base.ssh?.host;
 
       if (event.type === 'terminal.started') {
         status = 'running';
+        const startedSsh = data.ssh && typeof data.ssh === 'object' ? (data.ssh as Record<string, unknown>).host : undefined;
+        if (typeof startedSsh === 'string' && startedSsh) sshHost = startedSsh;
         error = '';
         stopRequested = false;
         output = capTerminalOutput([
           ...output,
-          terminalOutputLine('system', `terminal started: ${cwd || base.cwd}`),
+          terminalOutputLine('system', sshHost ? `ssh connected: ${sshHost}` : `terminal started: ${cwd || base.cwd}`),
         ]);
       } else if (event.type === 'terminal.stopping') {
         status = 'stopping';
@@ -2844,6 +2848,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         ...current,
         [terminalId]: {
           ...base,
+          ...(sshHost ? { ssh: { host: sshHost } } : {}),
           workspaceId: workspaceId || base.workspaceId,
           conversationId: base.conversationId || conversationId,
           tenantId: tenantId || base.tenantId,
@@ -4132,16 +4137,20 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     [appendTimeline, autoConnectEnabled, connect, sendRawProtocolFrame],
   );
 
-  const seedTerminalState = useCallback((workspace: WorkspaceRecord, conversation: ConversationRecord, patch: Partial<TerminalClientState> = {}, notice?: TerminalOutputEntry) => {
-    const terminalId = patch.terminalId?.trim() || terminalIdForConversation(conversation.id);
+  const seedTerminalState = useCallback((target: TerminalTarget, patch: Partial<TerminalClientState> = {}, notice?: TerminalOutputEntry) => {
+    const workspace = target.kind === 'workspace' ? target.workspace : null;
+    const terminalId = patch.terminalId?.trim() || terminalIdForConversation(
+      target.kind === 'workspace' ? target.conversation.id : `ssh_${target.host}`,
+    );
     setTerminalById((current) => {
       const existing = current[terminalId];
       const base: TerminalClientState = {
         terminalId,
-        workspaceId: workspace.id,
-        conversationId: conversation.id,
-        tenantId: workspace.tenantId || settings.tenantId,
-        cwd: workspace.path,
+        ...(target.kind === 'ssh' ? { ssh: { host: target.host } } : {}),
+        workspaceId: workspace?.id ?? '',
+        conversationId: target.kind === 'workspace' ? target.conversation.id : '',
+        tenantId: workspace?.tenantId || settings.tenantId,
+        cwd: workspace?.path ?? '',
         shell: '',
         rows: DEFAULT_TERMINAL_ROWS,
         cols: DEFAULT_TERMINAL_COLS,
@@ -4163,15 +4172,16 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   }, [settings.tenantId]);
 
   const startTerminalSession = useCallback((
-    workspace: WorkspaceRecord,
-    conversation: ConversationRecord,
+    target: TerminalTarget,
     options: { cwd: string; shell: string; rows: number; cols: number; terminalId?: string; preserveOutput?: boolean },
   ) => {
-    const cwd = options.cwd.trim() || workspace.path;
+    const workspace = target.kind === 'workspace' ? target.workspace : null;
+    // SSH terminals run `ssh -tt <host>` on the backend; cwd/workspace are ignored.
+    const cwd = workspace ? options.cwd.trim() || workspace.path : '';
     const shell = options.shell.trim();
     const rows = Number.isFinite(options.rows) ? Math.round(options.rows) : DEFAULT_TERMINAL_ROWS;
     const cols = Number.isFinite(options.cols) ? Math.round(options.cols) : DEFAULT_TERMINAL_COLS;
-    const terminalId = seedTerminalState(workspace, conversation, {
+    const terminalId = seedTerminalState(target, {
       terminalId: options.terminalId,
       cwd,
       shell,
@@ -4183,14 +4193,21 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       stopRequested: false,
       ...(options.preserveOutput ? {} : {
         output: [
-          terminalOutputLine('system', `starting terminal in ${cwd}`),
+          terminalOutputLine('system', target.kind === 'ssh' ? `connecting to ${target.host}` : `starting terminal in ${cwd}`),
         ],
       }),
     }, options.preserveOutput ? terminalOutputLine('system', 'restarting terminal') : undefined);
-    const sent = sendProtocolMessage('terminal.start', {
+    const sent = sendProtocolMessage('terminal.start', target.kind === 'ssh' ? {
       terminalId,
-      tenantId: workspace.tenantId || settings.tenantId,
-      workspaceId: workspace.id,
+      tenantId: settings.tenantId,
+      cwd: '',
+      ssh: { host: target.host },
+      rows,
+      cols,
+    } : {
+      terminalId,
+      tenantId: target.workspace.tenantId || settings.tenantId,
+      workspaceId: target.workspace.id,
       cwd,
       shell: shell || undefined,
       rows,
@@ -4290,11 +4307,14 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     }, createRequestId('terminal-resize'));
   }, [sendProtocolMessage]);
 
-  const requestTerminalStatus = useCallback((workspace: WorkspaceRecord, conversation: ConversationRecord, terminalId?: string) => {
-    const resolvedTerminalId = seedTerminalState(workspace, conversation, { terminalId });
-    return sendProtocolMessage('terminal.status', {
-      tenantId: workspace.tenantId || settings.tenantId,
-      workspaceId: workspace.id,
+  const requestTerminalStatus = useCallback((target: TerminalTarget, terminalId?: string) => {
+    const resolvedTerminalId = seedTerminalState(target, { terminalId });
+    return sendProtocolMessage('terminal.status', target.kind === 'ssh' ? {
+      tenantId: settings.tenantId,
+      terminalId: resolvedTerminalId,
+    } : {
+      tenantId: target.workspace.tenantId || settings.tenantId,
+      workspaceId: target.workspace.id,
       terminalId: resolvedTerminalId,
     }, createRequestId('terminal-status'));
   }, [seedTerminalState, sendProtocolMessage, settings.tenantId]);
@@ -5784,13 +5804,14 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       desktopAlert(t('alert.noConversation'), t('alert.pickCodexConversation'));
       return;
     }
-    seedTerminalState(context.workspace, context.conversation);
+    const target: TerminalTarget = { kind: 'workspace', workspace: context.workspace, conversation: context.conversation };
+    seedTerminalState(target);
     openPanel('Terminal', {
       workspaceId: context.workspace.id,
       conversationId: context.conversation.id,
     });
     if (connectionState === 'open') {
-      requestTerminalStatus(context.workspace, context.conversation);
+      requestTerminalStatus(target);
     }
   }, [connectionState, getConversationContext, requestTerminalStatus, seedTerminalState]);
 

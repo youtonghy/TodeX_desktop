@@ -1,4 +1,4 @@
-import { RiPushpin2Fill, RiAddLine, RiPencilLine, RiEdit2Line, RiErrorWarningLine, RiFolder3Line, RiGitBranchLine, RiDeleteBinLine, RiArrowDownSLine, RiBarChartBoxLine, RiInformationLine, RiKanbanView2, RiPaletteLine, RiPriceTag3Line, RiPuzzle2Line, RiSettings3Line, RiTerminalBoxLine, RiUserSettingsLine } from '@remixicon/react';
+import { RiPushpin2Fill, RiAddLine, RiPencilLine, RiEdit2Line, RiErrorWarningLine, RiFolder3Line, RiGitBranchLine, RiDeleteBinLine, RiArrowDownSLine, RiBarChartBoxLine, RiInformationLine, RiKanbanView2, RiPaletteLine, RiPriceTag3Line, RiPuzzle2Line, RiSettings3Line, RiTerminalBoxLine, RiTerminalLine, RiUserSettingsLine } from '@remixicon/react';
 import { Badge, Button, Chip, ColorSwatchPicker, Dropdown, Label, Tooltip } from '@heroui/react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { DragEvent, FocusEvent, MouseEvent } from 'react';
@@ -28,6 +28,11 @@ type Props = {
   onOpenUsage: () => void;
   onOpenAbout: () => void;
   onOpenKanban: () => void;
+  /** Toggles the SSH view (hosts, keys, SSH terminals, remote files). */
+  onOpenTerminal: () => void;
+  terminalActive?: boolean;
+  /** Called after the user picks a conversation, e.g. to leave the SSH view. */
+  onSelectConversation?: () => void;
 };
 
 type ContextMenu = { kind: 'workspace' | 'conversation'; id: string; x: number; y: number } | null;
@@ -44,6 +49,9 @@ export function AppSidebar({
   onOpenUsage,
   onOpenAbout,
   onOpenKanban,
+  onOpenTerminal,
+  terminalActive = false,
+  onSelectConversation,
 }: Props) {
   const t = useT();
   const { isMobile, isOpen, setMobileOpen } = useSidebar();
@@ -386,6 +394,19 @@ export function AppSidebar({
           <span data-sidebar="label">{t('sidebar.newConversation')}</span>
           <ShortcutHint id="newConversation" className="ml-auto" />
         </Button>
+        <Button
+          className="mt-1 w-full justify-start"
+          variant={terminalActive ? 'secondary' : 'ghost'}
+          aria-pressed={terminalActive}
+          onPress={() => {
+            if (isMobile) setMobileOpen(false);
+            onOpenTerminal();
+          }}
+        >
+          <RiTerminalLine className="size-4" />
+          <span data-sidebar="label">{t('sidebar.terminal')}</span>
+          <ShortcutHint id="sshTerminal" className="ml-auto" />
+        </Button>
         <Button className="mt-1 w-full justify-start" variant="ghost" onPress={onOpenKanban}>
           <RiKanbanView2 className="size-4" />
           <span data-sidebar="label">{t('sidebar.kanban')}</span>
@@ -653,6 +674,7 @@ export function AppSidebar({
                     const conversation = workspaceConversations.find((item) => item.id === String(key));
                     if (conversation) {
                       session.selectConversation(conversation.workspaceId, conversation.id);
+                      onSelectConversation?.();
                     }
                   }}
                 >

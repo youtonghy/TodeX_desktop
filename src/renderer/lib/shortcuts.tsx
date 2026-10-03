@@ -8,6 +8,7 @@ export type ShortcutId =
   | 'newConversation'
   | 'newWorkspace'
   | 'kanban'
+  | 'sshTerminal'
   | 'gitActions'
   | 'toggleSidebar'
   | 'toggleAside';
@@ -30,6 +31,7 @@ const COMBOS: Record<ShortcutId, ShortcutCombo> = {
   newConversation: { code: 'KeyN', label: 'N', mod: true },
   newWorkspace: { code: 'KeyN', label: 'N', mod: true, shift: true },
   kanban: { code: 'KeyK', label: 'K', mod: true, shift: true },
+  sshTerminal: { code: 'KeyT', label: 'T', mod: true, shift: true },
 };
 
 const MODIFIER_KEY = isMacLike ? 'Meta' : 'Control';

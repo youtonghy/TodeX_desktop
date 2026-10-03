@@ -3,7 +3,7 @@ import { Button, Label, ListBox, Modal, Select, Toast, toast } from '@heroui/rea
 import { AppLayout, Navbar } from '@heroui-pro/react';
 import { RiAddLine, RiGithubLine, RiLayoutLeftLine, RiLayoutRightLine, RiRobot2Line } from '@remixicon/react';
 import { useWorkbenchLayout } from './session/useWorkbenchLayout';
-import { workbenchScopeKey } from './session/workbenchLayout';
+import { sshWorkbenchScopeKey, workbenchScopeKey } from './session/workbenchLayout';
 import { useTodeXSession, type TodeXSession } from './session/useTodeXSession';
 import { ConversationHeaderDetails } from './components/ConversationHeaderDetails';
 import { GitActionsModal } from './components/GitActionsModal';
@@ -15,7 +15,8 @@ import { AppIcon } from './components/AppIcon';
 import { ChatPanel } from './screens/ChatPanel';
 import { Field } from './components/Field';
 import { connectionStateLabel, fetchWorkspaceDirectorySnapshot } from './session/helpers';
-import { isWorkbenchTab, panelFromRoute, type DesktopPanel, type OpenPanelOptions, type WorkbenchTab } from './lib/panels';
+import { isWorkbenchTab, panelFromRoute, type DesktopPanel, type OpenPanelOptions, type WorkbenchItem, type WorkbenchRequest, type WorkbenchTab } from './lib/panels';
+import type { RemoteFilesBinding } from './session/fileSources';
 import { ShortcutHint, useAppShortcuts, useShortcutHintTracking } from './lib/shortcuts';
 import { useT } from './i18n';
 
@@ -29,6 +30,7 @@ const AboutPanel = lazy(() => import('./screens/AboutPanel').then((module) => ({
 const CliManagerPanel = lazy(() => import('./screens/CliManagerPanel').then((module) => ({ default: module.CliManagerPanel })));
 const AgentProvidersPanel = lazy(() => import('./screens/AgentProvidersPanel').then((module) => ({ default: module.AgentProvidersPanel })));
 const KanbanPanel = lazy(() => import('./screens/KanbanPanel').then((module) => ({ default: module.KanbanPanel })));
+const SshPanel = lazy(() => import('./screens/SshPanel').then((module) => ({ default: module.SshPanel })));
 
 function PanelFallback() {
   const t = useT();
@@ -101,11 +103,16 @@ export function App() {
   const openPanelHandlerRef = useRef<(name: string, params?: OpenPanelOptions) => void>(() => {});
   const forwardOpenPanel = useCallback((name: string, params?: OpenPanelOptions) => openPanelHandlerRef.current(name, params), []);
   const session = useTodeXSession(forwardOpenPanel);
-  const scopeKey = session.hydrated && session.workbenchSharingHydrated ? workbenchScopeKey(
-    session.workbenchSharing,
-    session.activeWorkspace?.backendConnectionId || session.activeBackendConnectionId || session.settings.serverUrl,
-    session.activeWorkspace?.id || '', session.activeConversation?.id || '',
-  ) : '';
+  // The SSH view swaps the main content but keeps sidebar and Workbench; its
+  // Workbench tabs (SSH terminals, remote files) live in a per-backend scope.
+  const sshActive = panel === 'ssh';
+  const scopeKey = !session.hydrated || !session.workbenchSharingHydrated ? ''
+    : sshActive ? sshWorkbenchScopeKey(session.activeBackendConnectionId || session.settings.serverUrl)
+      : workbenchScopeKey(
+        session.workbenchSharing,
+        session.activeWorkspace?.backendConnectionId || session.activeBackendConnectionId || session.settings.serverUrl,
+        session.activeWorkspace?.id || '', session.activeConversation?.id || '',
+      );
   const layout = useWorkbenchLayout(scopeKey);
   const { isOpen: asideOpen, setOpen: setAsideOpenRaw, tab: workbenchTab, setTab: setWorkbenchTab,
     target: panelTarget, setTarget: setPanelTarget } = layout;
@@ -140,11 +147,40 @@ export function App() {
   openPanelHandlerRef.current = openPanel;
 
   useEffect(() => {
-    setPanel(current => current && ['settings', 'usage', 'about', 'cli-manager', 'agent-providers', 'kanban'].includes(current) ? current : null);
+    setPanel(current => current && ['settings', 'usage', 'about', 'cli-manager', 'agent-providers', 'kanban', 'ssh'].includes(current) ? current : null);
     setSlashCommand(undefined);
   }, [scopeKey]);
 
   const consumePanelTarget = useCallback(() => setPanelTarget({}), [setPanelTarget]);
+
+  const [workbenchRequests, setWorkbenchRequests] = useState<WorkbenchRequest[]>([]);
+  const [workbenchItems, setWorkbenchItems] = useState<WorkbenchItem[]>([]);
+  const workbenchRequestIdRef = useRef(0);
+  const queueWorkbenchRequest = useCallback((build: (id: number) => WorkbenchRequest) => {
+    workbenchRequestIdRef.current += 1;
+    const request = build(workbenchRequestIdRef.current);
+    setWorkbenchRequests(current => [...current, request]);
+  }, []);
+  const workbenchRequestsHandled = useCallback((lastId: number) => {
+    setWorkbenchRequests(current => current.filter(request => request.id > lastId));
+  }, []);
+  const openSshTerminal = useCallback((host: string) => {
+    queueWorkbenchRequest(id => ({ id, kind: 'ssh-terminal', host }));
+    persistAsideOpen(true);
+  }, [persistAsideOpen, queueWorkbenchRequest]);
+  const openRemoteFiles = useCallback((remote: RemoteFilesBinding) => {
+    queueWorkbenchRequest(id => ({ id, kind: 'remote-files', remote }));
+    persistAsideOpen(true);
+  }, [persistAsideOpen, queueWorkbenchRequest]);
+  const closeWorkbenchItem = useCallback((itemId: string) => queueWorkbenchRequest(id => ({ id, kind: 'close', itemId })), [queueWorkbenchRequest]);
+  const toggleSshView = useCallback(() => {
+    setPanel(current => current === 'ssh' ? null : 'ssh');
+  }, []);
+  // Requests and the reported tab list belong to the scope that produced them.
+  useEffect(() => {
+    setWorkbenchRequests([]);
+    setWorkbenchItems([]);
+  }, [scopeKey]);
   const changeWorkbenchTab = useCallback((next: WorkbenchTab) => {
     setWorkbenchTab(next);
     setPanelTarget({});
@@ -177,6 +213,7 @@ export function App() {
       setPanel('kanban');
       persistAsideOpen(false);
     },
+    sshTerminal: toggleSshView,
     newConversation: () => {
       if (!session.activeWorkspaceId) return;
       session.createConversation(session.activeWorkspaceId);
@@ -216,7 +253,7 @@ export function App() {
   const activeSubagents = subagentRuns.filter(
     (run) => run.status === 'running' || run.status === 'queued',
   ).length;
-  const overlayPanel = panelScopeRef.current === scopeKey && panel && panel !== 'kanban' && !modalPanel && !isWorkbenchTab(panel) ? panel : null;
+  const overlayPanel = panelScopeRef.current === scopeKey && panel && panel !== 'kanban' && panel !== 'ssh' && !modalPanel && !isWorkbenchTab(panel) ? panel : null;
 
   return (
     <div className="bg-background text-foreground h-full" data-panel-motion={panelMotion || undefined}>
@@ -256,7 +293,8 @@ export function App() {
                     onBack={() => setPanel(workbenchTab)}
                   />
                 ) : (
-                  <WorkbenchPanel key={scopeKey} scopeKey={scopeKey} session={session} tab={workbenchTab} target={panelTarget} onTabChange={changeWorkbenchTab} onTargetConsumed={consumePanelTarget} closeRequestRef={workbenchCloseRef} />
+                  <WorkbenchPanel key={scopeKey} scopeKey={scopeKey} session={session} tab={workbenchTab} target={panelTarget} onTabChange={changeWorkbenchTab} onTargetConsumed={consumePanelTarget} closeRequestRef={workbenchCloseRef}
+                    sshMode={sshActive} requests={workbenchRequests} onRequestsHandled={workbenchRequestsHandled} onItemsChange={sshActive ? setWorkbenchItems : undefined} />
                 )}
               </Suspense>
             )
@@ -280,6 +318,9 @@ export function App() {
               onOpenUsage={() => setPanel('usage')}
               onOpenAbout={() => setPanel('about')}
               onOpenKanban={() => { setPanel('kanban'); persistAsideOpen(false); }}
+              onOpenTerminal={toggleSshView}
+              terminalActive={sshActive}
+              onSelectConversation={() => setPanel(current => current === 'ssh' ? null : current)}
             />
           }
           navbar={
@@ -292,7 +333,11 @@ export function App() {
                   </Button>
                   <ShortcutHint id="toggleSidebar" className="absolute -top-1.5 -right-1.5 z-10" />
                 </span>
-                <ConversationHeaderDetails session={session} title={session.activeConversation?.title ?? t('app.conversation')} gitOpen={gitOpen} onOpenGit={() => setGitOpen(true)} />
+                {sshActive ? (
+                  <span className="min-w-0 flex-1 truncate text-sm font-semibold">{t('ssh.title')}</span>
+                ) : (
+                  <ConversationHeaderDetails session={session} title={session.activeConversation?.title ?? t('app.conversation')} gitOpen={gitOpen} onOpenGit={() => setGitOpen(true)} />
+                )}
                 <Navbar.Content className="shrink-0 gap-2">
                   <span className="relative inline-flex shrink-0">
                     <Button isIconOnly size="sm" variant="ghost" aria-label={t('app.githubActions')} onPress={() => setGitOpen(true)}>
@@ -321,7 +366,18 @@ export function App() {
             </Navbar>
           }
         >
-          <ChatPanel session={session} />
+          {sshActive ? (
+            <Suspense fallback={panelFallback}>
+              <SshPanel
+                session={session}
+                scopeKey={scopeKey}
+                workbenchItems={workbenchItems}
+                onOpenSshTerminal={openSshTerminal}
+                onOpenRemoteFiles={openRemoteFiles}
+                onCloseWorkbenchItem={closeWorkbenchItem}
+              />
+            </Suspense>
+          ) : <ChatPanel session={session} />}
         </AppLayout>
         )
       ) : (

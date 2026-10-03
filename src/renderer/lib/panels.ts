@@ -1,3 +1,5 @@
+import type { RemoteFilesBinding } from '../session/fileSources';
+
 export type DesktopPanel =
   | 'settings'
   | 'usage'
@@ -14,7 +16,9 @@ export type DesktopPanel =
   | 'experimental'
   | 'v2'
   | 'subagents'
-  | 'kanban';
+  | 'kanban'
+  /** SSH hosts, keys and connections; renders as the main content inside AppLayout. */
+  | 'ssh';
 
 export type WorkbenchTab = 'terminal' | 'browser' | 'files' | 'git-diff';
 
@@ -64,7 +68,28 @@ export function panelFromRoute(name: string): DesktopPanel | null {
       return 'subagents';
     case 'Kanban':
       return 'kanban';
+    case 'Ssh':
+      return 'ssh';
     default:
       return null;
   }
 }
+
+/** One tab in the Workbench side panel. `ssh` binds a terminal tab to
+ * `ssh -tt <host>`; `remote` binds a files tab to a remote SFTP/FTP
+ * connection instead of the active workspace. */
+export type WorkbenchItem = {
+  id: string;
+  type: WorkbenchTab;
+  title: string;
+  target?: OpenPanelOptions;
+  ssh?: { host: string };
+  remote?: RemoteFilesBinding;
+};
+
+/** Imperative requests from outside the Workbench (the SSH view), applied
+ * in id order once the tab list has been restored. */
+export type WorkbenchRequest =
+  | { id: number; kind: 'ssh-terminal'; host: string }
+  | { id: number; kind: 'remote-files'; remote: RemoteFilesBinding }
+  | { id: number; kind: 'close'; itemId: string };

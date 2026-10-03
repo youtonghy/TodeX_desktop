@@ -6,6 +6,12 @@ export function workbenchScopeKey(mode: 'conversation' | 'workspace', backendId:
   return JSON.stringify([mode, backendId, workspaceId, ...(mode === 'conversation' ? [conversationId] : [])]);
 }
 
+/** The SSH view keeps its own workbench (SSH terminals, remote file tabs) per
+ * backend, independent of the active workspace and conversation. */
+export function sshWorkbenchScopeKey(backendId: string): string {
+  return backendId ? JSON.stringify(['ssh', backendId]) : '';
+}
+
 export type WorkbenchLayout = { hydrated: boolean; isOpen: boolean; tab: WorkbenchTab; target: OpenPanelOptions };
 type SavedLayout = Omit<WorkbenchLayout, 'hydrated'>;
 type Storage = { load: (key: string) => Promise<unknown>; save: (key: string, value: SavedLayout) => Promise<void> };

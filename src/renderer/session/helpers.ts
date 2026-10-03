@@ -308,8 +308,16 @@ export type TerminalOutputEntry = {
   at: number;
 };
 
+/** What a terminal runs: a local shell in a conversation's workspace, or
+ * `ssh -tt <host>` on the backend machine (`terminal.start` with `ssh`). */
+export type TerminalTarget =
+  | { kind: 'workspace'; workspace: WorkspaceRecord; conversation: ConversationRecord }
+  | { kind: 'ssh'; host: string };
+
 export type TerminalClientState = {
   terminalId: string;
+  /** Set for SSH terminals; `workspaceId`/`conversationId`/`cwd` are empty then. */
+  ssh?: { host: string };
   workspaceId: string;
   conversationId: string;
   tenantId: string;
