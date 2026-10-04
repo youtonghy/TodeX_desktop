@@ -1,16 +1,7 @@
+import { useSyncExternalStore } from 'react';
 import type { ConversationRuntime } from '@todex/protocol/conversationRuntime';
 import type { SshExecRun } from '@todex/protocol/ssh';
 import type { WorkbenchItem } from '../lib/panels';
-
-/** Agent `ssh_exec` tabs kept per workbench before finished ones are closed. */
-export const SSH_EXEC_TAB_LIMIT = 20;
-const TITLE_COMMAND_CHARS = 24;
-
-export function sshExecTabTitle(run: Pick<SshExecRun, 'host' | 'command'>): string {
-  const command = run.command.replace(/\s+/g, ' ').trim();
-  const short = command.length > TITLE_COMMAND_CHARS ? `${command.slice(0, TITLE_COMMAND_CHARS)}…` : command;
-  return [run.host, short].filter(Boolean).join(' · ');
-}
 
 export function formatSshExecDuration(ms: number): string {
   if (!Number.isFinite(ms) || ms < 0) return '';
@@ -32,7 +23,7 @@ export function createSshExecWatch(): SshExecWatch {
  * the viewed one. The first runtime seen for a conversation, recovery
  * batches, and updates that did not advance the applied sequence (history
  * paged in below the window) only mark their calls as known, so replayed
- * history never opens tabs. Each id is reported at most once per activation.
+ * history never opens the log. Each id is reported at most once per activation.
  */
 export function takeNewSshExecs(
   watch: SshExecWatch,
@@ -59,27 +50,8 @@ export function takeNewSshExecs(
   return fresh;
 }
 
-/** Closes the oldest finished exec tabs beyond the limit; `keep` (the tabs
- * just opened) and running calls stay, so the limit may be exceeded. */
-export function capSshExecTabs(
-  items: WorkbenchItem[],
-  isRunning: (item: WorkbenchItem) => boolean,
-  keep: ReadonlySet<string>,
-): WorkbenchItem[] {
-  let excess = items.filter(item => item.type === 'ssh-exec').length - SSH_EXEC_TAB_LIMIT;
-  if (excess <= 0) return items;
-  const evicted = new Set<string>();
-  for (const item of items) {
-    if (excess <= 0) break;
-    if (item.type !== 'ssh-exec' || keep.has(item.id) || isRunning(item)) continue;
-    evicted.add(item.id);
-    excess -= 1;
-  }
-  return evicted.size ? items.filter(item => !evicted.has(item.id)) : items;
-}
-
-/** Exec tabs are session-only; they survive a workbench remount (switching
- * conversations and back) but are never written to the tab store. */
+/** The Agent SSH tab is session-only; it survives a workbench remount
+ * (switching conversations and back) but is never written to the tab store. */
 const sessionSshExecTabs = new Map<string, WorkbenchItem[]>();
 
 export function sessionSshExecTabsFor(storageKey: string): WorkbenchItem[] {
@@ -90,4 +62,95 @@ export function rememberSessionSshExecTabs(storageKey: string, items: WorkbenchI
   const execItems = items.filter(item => item.type === 'ssh-exec');
   if (execItems.length) sessionSshExecTabs.set(storageKey, execItems);
   else sessionSshExecTabs.delete(storageKey);
+}
+
+/** A non-zero exit code counts as a failure, like a failed or cancelled call. */
+export function isSshExecFailed(run: SshExecRun): boolean {
+  return run.status === 'failed' || run.status === 'cancelled' || (run.exitCode !== undefined && run.exitCode !== 0);
+}
+
+// CSI (colours, cursor moves), OSC (titles, hyperlinks) and the remaining
+// two-byte escapes. A trailing incomplete sequence of a still-growing chunk
+// is dropped as well, so it never flashes as garbage.
+// eslint-disable-next-line no-control-regex
+const ANSI_PATTERN = /\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-Z\\-_]|\x1b(?:\[[0-?]*[ -/]*|\][^\x07\x1b]*)?$/g;
+
+export function stripAnsi(text: string): string {
+  return text.replace(ANSI_PATTERN, '').replace(/\r\n/g, '\n');
+}
+
+/** Lines of output as shown, ignoring a final newline. */
+export function countLines(text: string): number {
+  if (!text) return 0;
+  let lines = 1;
+  for (let index = text.indexOf('\n'); index !== -1; index = text.indexOf('\n', index + 1)) lines += 1;
+  return text.endsWith('\n') ? lines - 1 : lines;
+}
+
+export function sshExecOutputText(run: Pick<SshExecRun, 'output'>): string {
+  return stripAnsi(run.output.map(chunk => chunk.data).join(''));
+}
+
+/** Plain-text transcript of the given calls, for "copy all". */
+export function sshExecTranscript(runs: readonly SshExecRun[]): string {
+  return runs.map((run) => {
+    const output = sshExecOutputText(run).replace(/\n$/, '');
+    return output ? `$ ${run.command}\n${output}` : `$ ${run.command}`;
+  }).join('\n\n');
+}
+
+const pad = (value: number) => String(value).padStart(2, '0');
+
+/** Local wall-clock time of an ISO timestamp, `HH:MM` or `HH:MM:SS`. */
+export function formatSshExecTime(iso: string | undefined, withSeconds: boolean): string {
+  const time = iso ? Date.parse(iso) : NaN;
+  if (!Number.isFinite(time)) return '';
+  const date = new Date(time);
+  const clock = `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  return withSeconds ? `${clock}:${pad(date.getSeconds())}` : clock;
+}
+
+export type SshExecTurn = { ordinal: number; startedAt?: string };
+
+/** 1-based ordinal of each distinct turn and the start of its first call. */
+export function sshExecTurns(runs: readonly SshExecRun[]): Map<string, SshExecTurn> {
+  const turns = new Map<string, SshExecTurn>();
+  for (const run of runs) {
+    if (!run.turnId) continue;
+    const turn = turns.get(run.turnId);
+    if (!turn) turns.set(run.turnId, { ordinal: turns.size + 1, startedAt: run.startedAt });
+    else if (!turn.startedAt && run.startedAt) turn.startedAt = run.startedAt;
+  }
+  return turns;
+}
+
+/** "Clear view" hides every call known at the click, plus older ones paged in
+ * later (compared in the backend's clock). Client-side and session-only. */
+export type SshExecClear = { ids: ReadonlySet<string>; before: number };
+
+const sshExecClears = new Map<string, SshExecClear>();
+const clearListeners = new Set<() => void>();
+
+function subscribeSshExecClears(listener: () => void): () => void {
+  clearListeners.add(listener);
+  return () => { clearListeners.delete(listener); };
+}
+
+export function clearSshExecView(conversationId: string, runs: readonly SshExecRun[]): void {
+  const before = runs.reduce((latest, run) => Math.max(latest, (run.startedAt && Date.parse(run.startedAt)) || 0), 0);
+  sshExecClears.set(conversationId, { ids: new Set(runs.map(run => run.id)), before });
+  clearListeners.forEach(listener => listener());
+}
+
+export function useSshExecClear(conversationId: string): SshExecClear | undefined {
+  return useSyncExternalStore(subscribeSshExecClears, () => sshExecClears.get(conversationId));
+}
+
+export function visibleSshExecs(runs: readonly SshExecRun[], clear: SshExecClear | undefined): readonly SshExecRun[] {
+  if (!clear) return runs;
+  return runs.filter((run) => {
+    if (clear.ids.has(run.id)) return false;
+    const started = run.startedAt ? Date.parse(run.startedAt) : NaN;
+    return !(Number.isFinite(started) && started <= clear.before);
+  });
 }

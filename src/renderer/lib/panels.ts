@@ -84,8 +84,8 @@ export function panelFromRoute(name: string): DesktopPanel | null {
 
 /** One tab in the Workbench side panel. `ssh` binds a terminal tab to
  * `ssh -tt <host>`; `remote` binds a files tab to a remote SFTP/FTP
- * connection instead of the active workspace; `sshExec` binds a session-only
- * `ssh-exec` tab to one agent call in a conversation runtime. */
+ * connection instead of the active workspace; `sshExec` binds the session-only
+ * `ssh-exec` tab to the agent SSH call log of one conversation. */
 export type WorkbenchItem = {
   id: string;
   type: WorkbenchTab;
@@ -93,7 +93,7 @@ export type WorkbenchItem = {
   target?: OpenPanelOptions;
   ssh?: { host: string };
   remote?: RemoteFilesBinding;
-  sshExec?: { conversationId: string; execId: string };
+  sshExec?: { conversationId: string };
   /** Session-only `agent-browser` tab of one conversation. */
   agentBrowser?: { conversationId: string };
 };
@@ -104,6 +104,6 @@ export type WorkbenchItem = {
 export type WorkbenchRequest =
   | { id: number; kind: 'ssh-terminal'; host: string }
   | { id: number; kind: 'remote-files'; remote: RemoteFilesBinding }
-  | { id: number; kind: 'ssh-exec'; conversationId: string; execId: string; title: string }
+  | { id: number; kind: 'ssh-exec'; conversationId: string }
   | { id: number; kind: 'agent-browser'; conversationId: string }
   | { id: number; kind: 'close'; itemId: string };
