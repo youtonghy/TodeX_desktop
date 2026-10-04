@@ -1028,14 +1028,6 @@ export function ChatPanel({ session }: Props) {
       applyCapabilitySuggestion(action.item, mention);
       return;
     }
-    if (action.kind === 'ssh') {
-      // The host summons a Workbench terminal; the trigger text is dropped.
-      session.setConversationChatDraft(conversation.id, insertMention(draft, mention, ''));
-      session.setConversationComposerSelection(conversation.id, { start: mention.start, end: mention.start });
-      composerRef.current?.focus(mention.start);
-      session.openPanel('Terminal', { sshHost: action.host });
-      return;
-    }
     session.setConversationChatDraft(conversation.id, insertMention(draft, mention, action.text));
     const cursor = mention.start + action.text.length;
     session.setConversationComposerSelection(conversation.id, { start: cursor, end: cursor });
