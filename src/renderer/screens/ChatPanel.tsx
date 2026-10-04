@@ -1,4 +1,5 @@
 import { ConversationControls } from '../components/ConversationControls';
+import { ComputerLiveView } from '../components/ComputerLiveView';
 import { NoticeToast } from '../components/NoticeToast';
 import { RiArrowDownDoubleLine, RiAttachment2, RiBarChartBoxLine, RiClipboardLine, RiCpuLine, RiGitBranchLine, RiListCheck2, RiShieldLine, RiStopCircleLine } from '@remixicon/react';
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -1283,6 +1284,7 @@ export function ChatPanel({ session }: Props) {
       />
       <div className="border-separator border-t px-5 py-4">
         <div className="composer-container mx-auto max-w-2xl">
+          <ComputerLiveView session={session} conversationId={conversation.id} state={session.conversationRuntimeById[conversation.id]?.desktopComputer} />
           {permissionRequests.map(request => <div key={request.requestId} className="mb-3 rounded-xl border border-separator p-3">
             <p className="mb-2 text-xs font-medium">{sessionPermissionIds.has(request.requestId) ? t('chat.piPluginRequest') : request.title || t('chat.permissionApproval')}</p>
             <ConversationPermissionActions request={request} deviceSecret={session.settings.deviceSecret} onSelect={(option, data) => { session.sendApprovalResponse(option, request, data); }} />

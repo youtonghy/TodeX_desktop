@@ -5,12 +5,13 @@ import type { AgentDesktopSettings as Settings } from '@todex/protocol/agentDesk
 import { ConnectionError } from '@todex/protocol/connectionError';
 import { deviceIdentityFromSecret } from '@todex/protocol/deviceAuth';
 import { V2ApiClient } from '@todex/protocol/v2';
-import type { AgentBrowserPartitionState } from '../../preload/index';
+import type { AgentBrowserPartitionState, ComputerPermissions } from '../../preload/index';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { useT } from '../i18n';
 
-/** Store key read by the main process (`agentDesktop/profiles.ts`). */
+/** Store keys read by the main process (`agentDesktop/profiles.ts`). */
 const EXECUTOR_ENABLED_KEY = 'todex.desktop.agentDesktopExecutor.v1';
+const COMPUTER_ENABLED_KEY = 'todex.desktop.computerUse.v1';
 
 function SettingSwitch({ selected, disabled, onChange, title, hint }: {
   selected: boolean; disabled?: boolean; onChange: (selected: boolean) => void; title: string; hint: string;
@@ -45,6 +46,8 @@ export function AgentDesktopSettings({ session }: { session: TodeXSession }) {
   const [settings, setSettings] = useState<Settings | null | undefined>(undefined);
   const [saving, setSaving] = useState(false);
   const [executorEnabled, setExecutorEnabled] = useState(true);
+  const [computerLocal, setComputerLocal] = useState(false);
+  const [permissions, setPermissions] = useState<ComputerPermissions | null>(null);
   const [partitions, setPartitions] = useState<AgentBrowserPartitionState>({ partitions: [], workspaces: {} });
   const desktop = window.todexDesktop;
 
@@ -58,9 +61,15 @@ export function AgentDesktopSettings({ session }: { session: TodeXSession }) {
   useEffect(() => {
     void refresh();
     void desktop.store.get(EXECUTOR_ENABLED_KEY).then(value => setExecutorEnabled(value !== false));
+    void desktop.store.get(COMPUTER_ENABLED_KEY).then(value => setComputerLocal(value === true));
+    void desktop.computer.permissions().then(setPermissions);
     void desktop.agentBrowser.partitions().then(setPartitions);
     // Executors come and go; keep the list current while settings are open.
-    const timer = setInterval(() => { void refresh(); }, 5000);
+    const timer = setInterval(() => {
+      void refresh();
+      // Granted in System Settings, outside the app.
+      void desktop.computer.permissions().then(setPermissions);
+    }, 5000);
     return () => clearInterval(timer);
   }, [desktop, refresh]);
 
@@ -74,6 +83,24 @@ export function AgentDesktopSettings({ session }: { session: TodeXSession }) {
     } finally {
       setSaving(false);
     }
+  };
+
+  const setComputerEnabled = async (computerEnabled: boolean) => {
+    setSaving(true);
+    try {
+      setSettings(await api.setAgentComputerEnabled(computerEnabled));
+      desktop.agentBrowser.refreshExecutors();
+    } catch (error) {
+      toast.danger(error instanceof Error ? error.message : t('agentDesktop.saveFailed'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const setComputerLocalEnabled = async (enabled: boolean) => {
+    setComputerLocal(enabled);
+    await desktop.store.set(COMPUTER_ENABLED_KEY, enabled);
+    if (enabled) setPermissions(await desktop.computer.requestPermissions());
   };
 
   const setLocalExecutor = async (enabled: boolean) => {
@@ -148,6 +175,46 @@ export function AgentDesktopSettings({ session }: { session: TodeXSession }) {
               ))}
             </div>
           ) : <p className="text-muted text-xs">{t('agentDesktop.noExecutors')}</p>}
+        </div>
+      ) : null}
+      {settings?.enabled ? (
+        <div className="border-separator flex flex-col gap-3 border-t pt-4">
+          <p className="text-sm font-medium">{t('computerSettings.title')}</p>
+          <SettingSwitch
+            selected={settings.computerEnabled}
+            disabled={saving}
+            onChange={selected => { void setComputerEnabled(selected); }}
+            title={t('computerSettings.enable')}
+            hint={t('computerSettings.enableHint')}
+          />
+          {permissions && !permissions.supported ? (
+            <p className="text-muted text-xs">{t('computerSettings.unsupported')}</p>
+          ) : (
+            <>
+              <SettingSwitch
+                selected={computerLocal}
+                onChange={selected => { void setComputerLocalEnabled(selected); }}
+                title={t('computerSettings.local')}
+                hint={t('computerSettings.localHint')}
+              />
+              {computerLocal && permissions ? (
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  <Chip size="sm" variant="soft" color={permissions.screen === 'granted' ? 'success' : 'warning'}>
+                    {t(permissions.screen === 'granted' ? 'computerSettings.screenOk' : 'computerSettings.screenMissing')}
+                  </Chip>
+                  <Chip size="sm" variant="soft" color={permissions.accessibility ? 'success' : 'warning'}>
+                    {t(permissions.accessibility ? 'computerSettings.axOk' : 'computerSettings.axMissing')}
+                  </Chip>
+                  {!permissions.helper ? <Chip size="sm" variant="soft" color="danger">{t('computerSettings.helperMissing')}</Chip> : null}
+                  {permissions.screen !== 'granted' || !permissions.accessibility ? (
+                    <Button size="sm" variant="secondary" onPress={() => { void desktop.computer.requestPermissions().then(setPermissions); }}>
+                      {t('computerSettings.grant')}
+                    </Button>
+                  ) : null}
+                </div>
+              ) : null}
+            </>
+          )}
         </div>
       ) : null}
       <div className="border-separator flex flex-col gap-3 border-t pt-4">
