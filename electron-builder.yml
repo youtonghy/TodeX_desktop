@@ -28,6 +28,17 @@ publish:
 
 mac:
   icon: build/icon.icns
+  # The Computer Use helper (scripts/build-computer-helper.mjs), signed with
+  # the app so it shares TodeX's Screen Recording / Accessibility grants.
+  extraResources:
+    - from: build/bin
+      to: bin
+      filter:
+        - todex-computer
+    - from: native/macos/TodexComputer/THIRD_PARTY_NOTICES.txt
+      to: bin/THIRD_PARTY_NOTICES.txt
+  binaries:
+    - Contents/Resources/bin/todex-computer
   target:
     - target: dmg
       arch:
