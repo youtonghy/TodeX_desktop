@@ -53,6 +53,11 @@ Built with **Electron 44**, **React 19**, **Vite 7**, **Tailwind CSS v4**, and *
   - Secure Electron architecture: Preload bridge with isolated context (`contextBridge`) and `nodeIntegration: false`.
   - Native file and directory chooser dialogs for loopback local workspaces.
   - Electron `userData` file persistence (`todex.desktop.*`).
+- **Computer Use** (macOS 14+, `computer_*` tools of `todex_desktop`; off by default on both the backend and this Mac):
+  - Agents observe a window (accessibility tree with refs plus a screenshot) and act on it. Actions on a ref run in the background — no pointer movement, no focus change, text inserted without keystrokes so input methods do not interfere; only coordinate actions move the pointer, and they wait while you are using it.
+  - Each conversation is approved on this Mac, each new app once more, every password field every time. TodeX itself, authentication dialogs, System Settings, Keychain Access and password managers are never controlled. One conversation controls the screen at a time.
+  - While an agent is in control, a live view sits above the composer (screenshots on other devices), a pill on the screen shows what it does, and Stop or ⌘⇧⎋ ends it. The pill and pointer ring are excluded from captures.
+  - Native work runs in `native/macos/TodexComputer` (built on [Peekaboo](https://github.com/openclaw/Peekaboo), MIT), built by `pnpm run build:computer-helper` and shipped signed in `Resources/bin` with its third-party notices. Grant TodeX Screen Recording and Accessibility in System Settings (Settings → Computer Use helps).
 - **Agent desktop tools** (`todex_desktop` MCP, switched on per backend in Settings):
   - The main process keeps one encrypted, device-signed executor connection per paired backend that has the tools on (independent of the UI's backend), so agents of any backend can drive a browser tab here; turn off "This desktop runs agent tools" to opt out.
   - Each conversation's first use is approved on this desktop. Top-level pages are limited to loopback; downloads and site permission prompts are refused; typing into a password field asks first.
@@ -168,7 +173,9 @@ The desktop window will launch at 1280×800.
 | `pnpm run typecheck` | Validates TypeScript types across main and renderer targets. |
 | `pnpm run check:electron` | Verifies that the native Electron binary is intact. |
 | `pnpm run test:updates` | Unit tests for the update policy and Linux desktop entry. |
-| `pnpm run test:agent-browser` | Unit tests for the agent browser's accessibility snapshot. |
+| `pnpm run test:agent-browser` | Unit tests for the agent browser's accessibility snapshot and the Computer Use policy. |
+| `pnpm run build:computer-helper` | Builds the macOS Computer Use helper into `build/bin` (Swift 6.2+; `pnpm run package` runs it). |
+| `pnpm run test:computer-helper` | Swift tests of the helper's protocol, key chords and tree format. |
 
 ## Desktop Releases
 

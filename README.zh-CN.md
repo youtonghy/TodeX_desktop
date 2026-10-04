@@ -54,6 +54,11 @@
   - 安全隔离的 Electron 架构：开启 Preload 上下文隔离（`contextIsolation: true`），禁用渲染进程 Node 集成（`nodeIntegration: false`）。
   - 本地工作区支持调用 macOS 原生系统文件夹选择对话框。
   - 数据安全保存在 Electron `userData` 目录中（`todex.desktop.*`）。
+- **Computer Use**（macOS 14+，`todex_desktop` 的 `computer_*` 工具；后端与本机两个开关默认都关闭）：
+  - Agent 观察窗口（带 ref 的无障碍树和截图）并执行操作。针对 ref 的操作在后台完成：不移动指针、不抢焦点，文字直接插入而不模拟按键，不受输入法干扰；只有坐标操作会移动指针，并且在你正在使用鼠标键盘时暂停。
+  - 每个会话需在本机确认，每个新应用再确认一次，每次向密码框输入都要确认。TodeX 自身、系统认证窗口、系统设置、钥匙串访问和密码管理器永远不会被操作。同一时间只有一个会话能控制屏幕。
+  - Agent 控制期间，输入框上方显示实时画面（其他设备显示截图），屏幕上的浮动条显示当前操作，点“停止”或按 ⌘⇧⎋ 即可终止；浮动条和指针标记不会出现在截图与实时画面中。
+  - 原生部分位于 `native/macos/TodexComputer`（基于 MIT 许可的 [Peekaboo](https://github.com/openclaw/Peekaboo)），由 `pnpm run build:computer-helper` 构建，随应用签名后放在 `Resources/bin` 并附第三方许可。需要在系统设置中为 TodeX 授予屏幕录制和辅助功能权限（设置 → Computer Use 中有引导）。
 - **Agent 桌面工具**（`todex_desktop` MCP，在设置中按后端开启）：
   - 主进程为每个开启了该功能的已配对后端保持一条加密、设备签名的执行端连接（与界面当前选中的后端无关），任何后端的 Agent 都能在本机驱动浏览器标签；关闭“本机作为执行端”即可退出。
   - 每个会话第一次使用需在本机确认。顶层页面只允许回环地址；拒绝下载与网站权限请求；向密码框输入前会先询问。
@@ -169,7 +174,9 @@ pnpm run dev
 | `pnpm run typecheck` | 执行全工程 TypeScript 类型静态检查。 |
 | `pnpm run check:electron` | 校验本地 Electron 二进制文件完整性。 |
 | `pnpm run test:updates` | 更新策略与 Linux 桌面入口的单元测试。 |
-| `pnpm run test:agent-browser` | Agent 浏览器无障碍快照的单元测试。 |
+| `pnpm run test:agent-browser` | Agent 浏览器无障碍快照与 Computer Use 策略的单元测试。 |
+| `pnpm run build:computer-helper` | 构建 macOS Computer Use 助手到 `build/bin`（需 Swift 6.2+；`pnpm run package` 会自动执行）。 |
+| `pnpm run test:computer-helper` | 助手协议、按键组合与无障碍树格式的 Swift 测试。 |
 
 ## 桌面端发布
 
