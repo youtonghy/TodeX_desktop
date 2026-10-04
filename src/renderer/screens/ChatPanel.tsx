@@ -58,11 +58,13 @@ import {
   buildChatReferenceSuggestions,
   buildEntryReferenceSuggestions,
   buildReferenceTypeSuggestions,
+  buildSshReferenceSuggestions,
   referenceMenuState,
   TYPED_ENTRY_FETCH_LIMIT,
   type ReferenceSuggestion,
   type ReferenceType,
 } from '@todex/protocol/referenceMenu';
+import type { SshHost } from '@todex/protocol/ssh';
 import { describeToolCall, type ToolCallKind } from '@todex/protocol/toolPresentation';
 import { getLocale, t, useT } from '../i18n';
 
@@ -76,6 +78,7 @@ const REFERENCE_TYPE_KEYS = {
   chat: 'chat.referenceTypeChat',
   skill: 'chat.referenceTypeSkill',
   mcp: 'chat.referenceTypeMcp',
+  ssh: 'chat.referenceTypeSsh',
 } as const satisfies Record<ReferenceType, string>;
 
 const MAX_COMPOSER_IMAGE_BYTES = 2_500_000;
@@ -596,6 +599,19 @@ export function ChatPanel({ session }: Props) {
       .catch(() => settle([], false));
     return () => { active = false; };
   }, [entryMode, referenceQuery, workspace?.path, session.fetchWorkspaceEntries]);
+  // `@ssh:` hosts come from the backend once and are filtered client-side;
+  // the list stays cached for the mounted panel.
+  const [sshHosts, setSshHosts] = useState<SshHost[] | null>(null);
+  useEffect(() => {
+    let active = true;
+    if (referenceType !== 'ssh' || sshHosts !== null) {
+      return () => { active = false; };
+    }
+    void session.fetchSshHosts()
+      .then((result) => { if (active) setSshHosts(result.hosts); })
+      .catch(() => { if (active) setSshHosts([]); });
+    return () => { active = false; };
+  }, [referenceType, sshHosts, session.fetchSshHosts]);
   // Keyboard navigation keeps the active row centered inside the popover;
   // near the list edges scrollTop simply clamps at the boundary.
   useEffect(() => {
@@ -836,11 +852,15 @@ export function ChatPanel({ session }: Props) {
           ? buildCapabilityReferenceSuggestions(
             buildCapabilitySuggestions(session.capabilityCatalogs, capabilityProviderOrder, referenceQuery, { limit: 100, isSkillAttached }),
             referenceType)
-          : entryRows;
+          : referenceType === 'ssh'
+            ? buildSshReferenceSuggestions(referenceQuery, sshHosts ?? [])
+            : entryRows;
   const referenceEmptyText = referenceType === 'chat' ? t('chat.noChatSuggestions')
     : referenceType === 'skill' || referenceType === 'mcp'
       ? (capabilityCatalogsPending(session.capabilityCatalogs, capabilityProviderOrder) ? t('chat.loadingCapabilities') : t('chat.noCapabilities'))
-      : mentionSearchPending ? t('chat.searchingFiles')
+      : referenceType === 'ssh'
+        ? (sshHosts === null ? t('chat.loadingSshHosts') : t('chat.noSshSuggestions'))
+        : mentionSearchPending ? t('chat.searchingFiles')
         : referenceType === 'folder' ? t('chat.noFolderSuggestions') : t('chat.noFileSuggestions');
   /** Shared by the `#` list and `@skill:` / `@mcp:`; `trigger` is the text it replaces. */
   const applyCapabilitySuggestion = (item: CapabilitySuggestion, trigger: { start: number; end: number; query: string }) => {
@@ -1006,6 +1026,14 @@ export function ChatPanel({ session }: Props) {
     }
     if (action.kind === 'capability') {
       applyCapabilitySuggestion(action.item, mention);
+      return;
+    }
+    if (action.kind === 'ssh') {
+      // The host summons a Workbench terminal; the trigger text is dropped.
+      session.setConversationChatDraft(conversation.id, insertMention(draft, mention, ''));
+      session.setConversationComposerSelection(conversation.id, { start: mention.start, end: mention.start });
+      composerRef.current?.focus(mention.start);
+      session.openPanel('Terminal', { sshHost: action.host });
       return;
     }
     session.setConversationChatDraft(conversation.id, insertMention(draft, mention, action.text));

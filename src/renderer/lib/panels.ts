@@ -33,6 +33,8 @@ export type OpenPanelOptions = {
   command?: string;
   url?: string;
   filePath?: string;
+  /** SSH host alias: opens a `ssh -tt <host>` terminal tab in the Workbench. */
+  sshHost?: string;
 };
 
 export function isWorkbenchTab(panel: DesktopPanel | null): panel is WorkbenchTab {

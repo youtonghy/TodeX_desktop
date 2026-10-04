@@ -8266,6 +8266,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     return api.listWorkspaceEntries(cwd, query, limit);
   }, [settings.serverUrl, settings.deviceSecret]);
 
+  // Stable for the same reason as fetchWorkspaceEntries: the composer @ssh:
+  // effect depends on it.
+  const fetchSshHosts = useCallback(async () => {
+    const api = new V2ApiClient({ serverUrl: settings.serverUrl, device: deviceIdentityFromSecret(settings.deviceSecret) });
+    return api.listSshHosts();
+  }, [settings.serverUrl, settings.deviceSecret]);
+
   return {
     ...workbenchSharingState,
     ...completionNotificationsState,
@@ -8400,6 +8407,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     callMcpTool,
     fetchWorkspaceDirectorySnapshot: (path?: string) => fetchWorkspaceDirectorySnapshot(settings, path),
     fetchWorkspaceEntries,
+    fetchSshHosts,
     openModelPicker,
     applyModelCommand,
     applyWorkspaceModelSelection,
