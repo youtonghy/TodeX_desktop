@@ -21,8 +21,11 @@ const string = (value: unknown): string => (typeof value === 'string' ? value : 
 const protocol = (value: unknown): ExecutorProfile['encryptionProtocol'] =>
   value === 'x25519' || value === 'ml-kem-768' ? value : 'none';
 
+/** This Mac may run Computer Use. Default off. */
+export const COMPUTER_ENABLED_KEY = 'todex.desktop.computerUse.v1';
+
 export function isStoreKeyRelevant(key: string): boolean {
-  return key === SETTINGS_KEY || key === BACKEND_CONNECTIONS_KEY || key === EXECUTOR_ENABLED_KEY
+  return key === SETTINGS_KEY || key === BACKEND_CONNECTIONS_KEY || key === EXECUTOR_ENABLED_KEY || key === COMPUTER_ENABLED_KEY
     || key === DEVICE_ORIGIN_KEY || key === DEVICE_SECRET_KEY || key.startsWith(`${DEVICE_SECRET_KEY}.`);
 }
 

@@ -51,6 +51,12 @@ export type TodeXDesktopApi = {
     onState: (listener: (state: PreviewState) => void) => () => void;
     onPicked: (listener: (picked: PreviewPicked) => void) => () => void;
   };
+  computer: {
+    permissions: () => Promise<ComputerPermissions>;
+    requestPermissions: () => Promise<ComputerPermissions>;
+    sessions: () => Promise<ComputerSessionInfo[]>;
+    onSessions: (listener: (sessions: ComputerSessionInfo[]) => void) => () => void;
+  };
   agentBrowser: {
     list: () => Promise<AgentBrowserTab[]>;
     onTabs: (listener: (tabs: AgentBrowserTab[]) => void) => () => void;
@@ -83,6 +89,9 @@ export type AgentBrowserPartitionState = {
   workspaces: Record<string, string>;
 };
 export type AgentBrowserBounds = { x: number; y: number; width: number; height: number };
+export type ComputerSessionInfo = { key: string; profileId: string; conversationId: string; displayId: number; summary: string };
+export type ComputerPermissions = { supported: boolean; helper: boolean; screen: string; accessibility: boolean };
+
 export type PreviewState = { key: string; url: string; title: string; loading: boolean; error?: string };
 export type PreviewPicked = { key: string; tag: string; id: string; text: string };
 export type DesktopDebugLogInfo = {
