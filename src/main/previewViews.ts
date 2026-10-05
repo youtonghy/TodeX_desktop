@@ -1,6 +1,11 @@
 import { WebContentsView, type BrowserWindow, type Rectangle } from 'electron';
 import { isLoopbackUrl } from '@todex/protocol/mobileParity';
-import { PARKED } from './agentDesktop/browser';
+
+const VIEWPORT = { width: 1280, height: 800 };
+/** Off-window bounds for previews nobody is looking at. A view hidden with
+ * setVisible(false) loses its display surface and cannot be captured; a
+ * parked one keeps rendering. */
+const PARKED = { x: -VIEWPORT.width - 200, y: 0, ...VIEWPORT };
 
 /** Workbench preview pages share one partition, apart from the app's own storage. */
 const PARTITION = 'persist:todex-preview';

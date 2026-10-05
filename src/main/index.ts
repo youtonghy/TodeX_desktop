@@ -1,12 +1,12 @@
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme, shell } from 'electron';
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { startAutoUpdates, refreshUpdateMenu } from './autoUpdates';
 import { syncDesktopEntry } from './desktopEntry';
-import { startAgentDesktop } from './agentDesktop';
 import { PreviewViews, type InspectColors, type PreviewTarget } from './previewViews';
 import { isMainLocale, mainT, setMainLocale } from './i18n';
 import {
@@ -28,6 +28,15 @@ const MAX_RENDERER_CRASH_RELOADS = 5;
 const APP_IDENTITY = 'todex-desktop';
 const PROTOCOL_VERSION = 'v2';
 const DEFAULT_BACKEND_URL = process.env.TODEX_BACKEND_URL?.trim() || 'http://127.0.0.1:7345';
+/** Store keys of the desktop-run agent browser (before it moved to the backend). */
+const LEGACY_AGENT_BROWSER_KEYS = ['todex.desktop.agentBrowserPartitions.v1', 'todex.desktop.agentDesktopExecutor.v1', 'todex.desktop.computerUse.v1'];
+
+/** Electron partition directories of that browser (`persist:todex-agent-*`). */
+function legacyAgentPartitionDirs(): string[] {
+  const root = join(app.getPath('userData'), 'Partitions');
+  if (!existsSync(root)) return [];
+  return readdirSync(root).filter(name => name.startsWith('todex-agent-')).map(name => join(root, name));
+}
 const BUILD_VERSION = typeof __TODEX_BUILD_VERSION__ === 'string'
   ? __TODEX_BUILD_VERSION__
   : process.env.TODEX_BUILD_VERSION?.trim() || (app.isPackaged ? app.getVersion() : DEBUG_BUILD_VERSION);
@@ -37,7 +46,6 @@ type StoreShape = Record<string, unknown>;
 
 let debugLogger: DebugLogger | null = null;
 let mainWindow: BrowserWindow | null = null;
-let agentDesktop: ReturnType<typeof startAgentDesktop> | null = null;
 let previews: PreviewViews | null = null;
 
 function debugLog(level: DebugLogLevel, event: string, data?: unknown): void {
@@ -523,7 +531,6 @@ app.whenReady().then(() => {
       next[key] = value;
     }
     writeStore(next);
-    agentDesktop?.storeChanged(key);
   });
 
   handleIpc('dialog:openDirectory', async () => {
@@ -686,7 +693,6 @@ app.whenReady().then(() => {
 
   mainWindow = createWindow();
   mainWindow.on('closed', () => {
-    agentDesktop?.windowClosed();
     previews?.closeAll();
   });
   const liveWindow = () => (mainWindow && !mainWindow.isDestroyed() ? mainWindow : null);
@@ -700,20 +706,20 @@ app.whenReady().then(() => {
   handleIpc('preview:capture', (_event, key: string) => previews?.capture(String(key)) ?? null);
   handleIpc('preview:inspect', (_event, key: string, colors: InspectColors | null) => previews?.inspect(String(key), colors));
   handleIpc('preview:close', (_event, key: string) => previews?.close(String(key)));
+  // The agent browser used to run here (Electron partitions and store keys);
+  // it runs on the backend now, and settings offer to clear what is left.
+  handleIpc('legacyAgentBrowser:hasData', () =>
+    legacyAgentPartitionDirs().length > 0 || LEGACY_AGENT_BROWSER_KEYS.some(key => readStore()[key] !== undefined));
+  handleIpc('legacyAgentBrowser:clear', async () => {
+    for (const dir of legacyAgentPartitionDirs()) await rm(dir, { recursive: true, force: true });
+    const next = { ...readStore() };
+    for (const key of LEGACY_AGENT_BROWSER_KEYS) delete next[key];
+    writeStore(next);
+  });
   ipcMain.on('preview:setBounds', (event, key: unknown, bounds: unknown) => {
     if (event.sender !== liveWindow()?.webContents || typeof key !== 'string') return;
     const rect = bounds && typeof bounds === 'object' ? bounds as Electron.Rectangle : null;
     previews?.setBounds(key, rect && [rect.x, rect.y, rect.width, rect.height].every(Number.isFinite) ? rect : null);
-  });
-  agentDesktop = startAgentDesktop({
-    window: () => (mainWindow && !mainWindow.isDestroyed() ? mainWindow : null),
-    store: {
-      read: readStore,
-      write: (key, value) => writeStore({ ...readStore(), [key]: value }),
-    },
-    defaultServerUrl: DEFAULT_BACKEND_URL,
-    log: (level, event, data) => debugLog(level, event, data),
-    handle: handleIpc,
   });
   syncLinuxDesktopEntry();
   startAutoUpdates(BUILD_VERSION, syncLinuxDesktopEntry);
@@ -722,7 +728,6 @@ app.whenReady().then(() => {
     if (BrowserWindow.getAllWindows().length === 0) {
       mainWindow = createWindow();
       mainWindow.on('closed', () => {
-        agentDesktop?.windowClosed();
         previews?.closeAll();
       });
     }
@@ -731,7 +736,6 @@ app.whenReady().then(() => {
 
 app.on('before-quit', () => {
   debugLog('info', 'app.before-quit');
-  agentDesktop?.stop();
   flushStore();
 });
 app.on('child-process-gone', (_event, details) => debugLog('error', 'app.child-process-gone', { details }));

@@ -100,19 +100,9 @@ export function installBrowserDesktopBridge(): void {
       onState: () => () => undefined,
       onPicked: () => () => undefined,
     },
-    agentBrowser: {
-      list: async () => [],
-      onTabs: () => () => undefined,
-      setBounds: () => undefined,
-      capture: async () => null,
-      close: async () => undefined,
-      partitions: async () => ({ partitions: [], workspaces: {} }),
-      createPartition: async () => {
-        throw new Error(t('storage.browserShell'));
-      },
-      assignPartition: async () => undefined,
-      deletePartition: async () => undefined,
-      refreshExecutors: () => undefined,
+    legacyAgentBrowser: {
+      hasData: async () => false,
+      clear: async () => undefined,
     },
     debug: {
       info: async () => ({ enabled: false, buildVersion: 'browser', configPath: '', logPath: '', chromiumLogPath: '' }),

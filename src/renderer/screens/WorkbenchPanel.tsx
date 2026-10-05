@@ -10,9 +10,8 @@ import { WorkspaceFilePreview, type PreviewFile, type ReferenceSelection, type W
 import { useNoticeToast } from '../components/NoticeToast';
 import { XtermTerminal } from '../components/XtermTerminal';
 import { SshExecPane } from '../components/ssh/SshExecPane';
-import { AgentBrowserPane } from '../components/AgentBrowserPane';
+import { AgentBrowserLiveView } from '../components/AgentBrowserLiveView';
 import { useNativeViewHost } from '../components/nativeViewHost';
-import { agentBrowserKey, useAgentBrowserTabs } from '../session/agentBrowserTabs';
 import { rememberSessionSshExecTabs, sessionSshExecTabsFor, useSshExecClear, visibleSshExecs } from '../session/sshExecTabs';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { useRemoteConnector } from '../components/ssh/useRemoteConnector';
@@ -278,12 +277,6 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
 
   useEffect(() => { onItemsChange?.(items); }, [items, onItemsChange]);
 
-  const agentTabs = useAgentBrowserTabs();
-  const agentProfileId = session.activeWorkspace?.backendConnectionId || session.activeBackendConnectionId;
-  const agentTabFor = useCallback((item: WorkbenchItem) => item.agentBrowser
-    ? agentTabs.find(tab => tab.key === agentBrowserKey(agentProfileId, item.agentBrowser!.conversationId))
-    : undefined, [agentProfileId, agentTabs]);
-
   const handledRequestRef = useRef(0);
   /** SSH tabs opened during this mount connect at once; restored ones wait for Connect. */
   const freshSshTabsRef = useRef(new Set<string>());
@@ -379,7 +372,7 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
     const location = item.type === 'ssh-exec'
       ? ''
       : item.type === 'agent-browser'
-      ? agentTabFor(item)?.url || ''
+      ? [...(session.conversationRuntimeById[item.agentBrowser?.conversationId ?? '']?.desktopBrowser.actions ?? [])].reverse().find(action => action.url)?.url || ''
       : item.ssh
       ? `ssh ${item.ssh.host}`
       : item.remote
@@ -502,7 +495,7 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
             {item.type === 'files' ? <FilesPane session={session} remote={item.remote} onRemoteRebind={next => updateRemoteBinding(item.id, next)} target={item.type === tab && item.id === active?.id && (target?.filePath || target?.url) ? target : item.target} onTargetChange={next => updateTabTarget(item.id, next)} /> : null}
             {item.type === 'git-diff' ? <GitDiffPane session={session} /> : null}
             {item.type === 'ssh-exec' && item.sshExec ? <SshExecPane conversationId={item.sshExec.conversationId} runs={session.conversationRuntimeById[item.sshExec.conversationId]?.sshExecs ?? NO_SSH_EXECS} isActive={item.id === active?.id} /> : null}
-            {item.type === 'agent-browser' && item.agentBrowser ? <AgentBrowserPane tab={agentTabFor(item)} session={session} isActive={item.id === active?.id} conversationId={item.agentBrowser.conversationId} /> : null}
+            {item.type === 'agent-browser' && item.agentBrowser ? <AgentBrowserLiveView session={session} isActive={item.id === active?.id} conversationId={item.agentBrowser.conversationId} /> : null}
           </div>
         ))}
       </div>

@@ -47,21 +47,13 @@ export type TodeXDesktopApi = {
     capture: (key: string) => Promise<string | null>;
     inspect: (key: string, colors: { hover: string; selected: string } | null) => Promise<void>;
     close: (key: string) => Promise<void>;
-    setBounds: (key: string, bounds: AgentBrowserBounds | null) => void;
+    setBounds: (key: string, bounds: ViewBounds | null) => void;
     onState: (listener: (state: PreviewState) => void) => () => void;
     onPicked: (listener: (picked: PreviewPicked) => void) => () => void;
   };
-  agentBrowser: {
-    list: () => Promise<AgentBrowserTab[]>;
-    onTabs: (listener: (tabs: AgentBrowserTab[]) => void) => () => void;
-    setBounds: (key: string, bounds: AgentBrowserBounds | null) => void;
-    capture: (key: string) => Promise<string | null>;
-    close: (key: string) => Promise<void>;
-    partitions: () => Promise<AgentBrowserPartitionState>;
-    createPartition: (name: string) => Promise<{ id: string; name: string; createdAt: number }>;
-    assignPartition: (workspace: string, partitionId: string) => Promise<void>;
-    deletePartition: (partitionId: string) => Promise<void>;
-    refreshExecutors: () => void;
+  legacyAgentBrowser: {
+    hasData: () => Promise<boolean>;
+    clear: () => Promise<void>;
   };
   debug: {
     info: () => Promise<DesktopDebugLogInfo>;
@@ -69,20 +61,8 @@ export type TodeXDesktopApi = {
   };
 };
 
-export type AgentBrowserTab = {
-  key: string;
-  profileId: string;
-  conversationId: string;
-  url: string;
-  title: string;
-  tunnel?: { remotePort: number; localPort: number };
-};
-export type AgentBrowserPartitionState = {
-  partitions: Array<{ id: string; name: string; createdAt: number }>;
-  /** `<profileId>:<workspace id or path>` → partition id. */
-  workspaces: Record<string, string>;
-};
-export type AgentBrowserBounds = { x: number; y: number; width: number; height: number };
+/** Window-relative CSS pixels of a native view. */
+export type ViewBounds = { x: number; y: number; width: number; height: number };
 export type PreviewState = { key: string; url: string; title: string; loading: boolean; error?: string };
 export type PreviewPicked = { key: string; tag: string; id: string; text: string };
 export type DesktopDebugLogInfo = {

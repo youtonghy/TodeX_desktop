@@ -14,6 +14,7 @@ import { QueuedFollowUps, restoreQueuedFollowUps } from './queuedFollowUps';
 import { parseSessionLimitReset, rateLimitContinuationText, restoreRateLimitWaits, type SessionLimitReset } from './sessionRateLimit';
 import { LegacyEventRecovery } from './legacyEventRecovery';
 import { ConversationRecovery, isConversationRuntimeBusy, type ConversationOpenStatus, type EarlierHistoryResult } from './conversationRecovery';
+import type { AgentBrowserFrame } from '@todex/protocol/agentDesktop';
 import { type ConversationRuntime } from '@todex/protocol/conversationRuntime';
 import { conversationTranscriptMarkdown, fetchConversationTranscript, transcriptEntries } from '@todex/protocol/conversationExport';
 import { canonicalConversationEventType, type ConversationEvent } from '@todex/protocol/v2';
@@ -405,6 +406,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const workbenchSharingState = useWorkbenchSharing();
   const completionNotificationsState = useCompletionNotifications();
   const socketRef = useRef<WebSocket | null>(null);
+  /** Live agent browser views: conversation → frame listeners. The socket
+   * watches a conversation while it has listeners (re-sent on reconnect). */
+  const agentBrowserWatchersRef = useRef(new Map<string, Set<(frame: AgentBrowserFrame) => void>>());
   const connectionAttemptRef = useRef<AbortController | null>(null);
   const socketVerifiedRef = useRef(false);
   const transportFailureRef = useRef(false);
@@ -3416,6 +3420,11 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         setLastError(message);
         return;
       }
+      if (messageType === 'agentBrowser.frame') {
+        const frame = parsed.payload as AgentBrowserFrame | undefined;
+        if (frame?.conversationId) agentBrowserWatchersRef.current.get(frame.conversationId)?.forEach(listener => listener(frame));
+        return;
+      }
       if (messageType === 'conversation.event') {
         const event = normalizeConversationEvent(parsed.payload ?? parsed);
         if (!event) throw new Error(t('sess.invalidConversationEvent'));
@@ -3488,6 +3497,25 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     socket.send(frame);
     return message;
   }, []);
+
+  /** Streams the conversation's agent browser tab while subscribed; returns
+   * the unsubscribe. */
+  const watchAgentBrowser = useCallback((conversationId: string, listener: (frame: AgentBrowserFrame) => void) => {
+    const watchers = agentBrowserWatchersRef.current;
+    let listeners = watchers.get(conversationId);
+    if (!listeners) {
+      listeners = new Set();
+      watchers.set(conversationId, listeners);
+      sendRawProtocolFrame({ id: createRequestId('abw'), type: 'agentBrowser.watch', payload: { conversationId } });
+    }
+    listeners.add(listener);
+    return () => {
+      const current = watchers.get(conversationId);
+      if (!current?.delete(listener) || current.size) return;
+      watchers.delete(conversationId);
+      sendRawProtocolFrame({ id: createRequestId('abu'), type: 'agentBrowser.unwatch', payload: { conversationId } });
+    };
+  }, [sendRawProtocolFrame]);
 
   const unsubscribeV2Conversation = useCallback((v2ConversationId: string) => {
     if (!v2SubscriptionsRef.current.delete(v2ConversationId)) return;
@@ -3858,6 +3886,11 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           socketVerifiedRef.current = true;
           // Server-side subscriptions are per-socket; this socket starts empty.
           v2SubscriptionsRef.current.clear();
+          // So are live browser views: watch again what is still on screen.
+          for (const watched of agentBrowserWatchersRef.current.keys()) {
+            const watchFrame = JSON.stringify({ id: createRequestId('abw'), type: 'agentBrowser.watch', payload: { conversationId: watched } });
+            socket.send(socketCryptoRef.current?.encryptClientText(watchFrame) ?? watchFrame);
+          }
           pendingV2SubscribeRef.current.clear();
           reconnectAttemptRef.current = 0;
           lastFailureRetryableRef.current = true;
@@ -8274,6 +8307,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   }, [settings.serverUrl, settings.deviceSecret]);
 
   return {
+    watchAgentBrowser,
     ...workbenchSharingState,
     ...completionNotificationsState,
     hydrated,

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { AgentBrowserBounds } from '../../preload/index';
+import type { ViewBounds } from '../../preload/index';
 
 /** Overlays a native view would cover: dialogs, menus, popovers, listboxes. */
 const OVERLAY_SELECTOR = '[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"], [data-slot="popover"]';
@@ -15,7 +15,7 @@ function overlayOpen(): boolean {
  * page, should stand in.
  */
 export function useNativeViewHost(key: string | undefined, isActive: boolean, api: {
-  setBounds: (key: string, bounds: AgentBrowserBounds | null) => void;
+  setBounds: (key: string, bounds: ViewBounds | null) => void;
   capture: (key: string) => Promise<string | null>;
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
