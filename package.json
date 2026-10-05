@@ -12,12 +12,10 @@
     "predev": "node ./scripts/check-electron.mjs",
     "dev": "electron-vite dev",
     "build": "electron-vite build",
-    "package": "pnpm run build && pnpm run build:computer-helper && electron-builder",
-    "build:computer-helper": "node ./scripts/build-computer-helper.mjs",
-    "test:computer-helper": "swift test --package-path native/macos/TodexComputer",
+    "package": "pnpm run build && electron-builder",
     "preview": "electron-vite preview",
     "test:updates": "node --experimental-strip-types --test scripts/update-policy.test.ts scripts/desktop-entry.test.ts",
-    "test:agent-browser": "node --experimental-strip-types --test scripts/agent-browser.test.ts scripts/computer-policy.test.ts",
+    "test:agent-browser": "node --experimental-strip-types --test scripts/agent-browser.test.ts",
     "typecheck": "tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.node.json"
   },
   "dependencies": {

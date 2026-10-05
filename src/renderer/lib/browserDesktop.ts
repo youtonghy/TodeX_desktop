@@ -88,12 +88,6 @@ export function installBrowserDesktopBridge(): void {
       },
     },
     // No Electron: no native preview or agent browser views, no executor.
-    computer: {
-      permissions: async () => ({ supported: false, helper: false, screen: 'unknown', accessibility: false }),
-      requestPermissions: async () => ({ supported: false, helper: false, screen: 'unknown', accessibility: false }),
-      sessions: async () => [],
-      onSessions: () => () => undefined,
-    },
     preview: {
       open: async () => {
         throw new Error(t('storage.browserShell'));

@@ -32,9 +32,6 @@ export type AgentBrowserPartitionState = {
   workspaces: Record<string, string>;
 };
 export type AgentBrowserBounds = { x: number; y: number; width: number; height: number };
-export type ComputerSessionInfo = { key: string; profileId: string; conversationId: string; displayId: number; summary: string };
-export type ComputerPermissions = { supported: boolean; helper: boolean; screen: string; accessibility: boolean };
-
 export type PreviewState = { key: string; url: string; title: string; loading: boolean; error?: string };
 export type PreviewPicked = { key: string; tag: string; id: string; text: string };
 export type DesktopDebugLogInfo = {
@@ -121,19 +118,6 @@ const api = {
       ipcRenderer.on('preview:picked', handler);
       return () => {
         ipcRenderer.removeListener('preview:picked', handler);
-      };
-    },
-  },
-  /** Computer Use on this Mac: permissions and active sessions. */
-  computer: {
-    permissions: () => ipcRenderer.invoke('computer:permissions') as Promise<ComputerPermissions>,
-    requestPermissions: () => ipcRenderer.invoke('computer:requestPermissions') as Promise<ComputerPermissions>,
-    sessions: () => ipcRenderer.invoke('computer:sessions') as Promise<ComputerSessionInfo[]>,
-    onSessions: (listener: (sessions: ComputerSessionInfo[]) => void) => {
-      const handler = (_event: Electron.IpcRendererEvent, sessions: ComputerSessionInfo[]) => listener(sessions);
-      ipcRenderer.on('computer:sessions', handler);
-      return () => {
-        ipcRenderer.removeListener('computer:sessions', handler);
       };
     },
   },

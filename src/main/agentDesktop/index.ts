@@ -1,12 +1,7 @@
 import { BrowserWindow, ipcMain, type Rectangle } from 'electron';
-import type { ExecutorCapability } from '@todex/protocol/agentDesktop';
-import { deviceIdentityFromSecret } from '@todex/protocol/deviceAuth';
 import { isLoopbackUrl } from '@todex/protocol/mobileParity';
-import { V2ApiClient } from '@todex/protocol/v2';
-import { mainT } from '../i18n';
 import { AgentBrowser, type BrowserStore } from './browser';
 import { ExecutorFailure, type ExecutorLogger } from './executorLink';
-import { ComputerController, installLiveViewHandler } from './computer';
 import { ExecutorManager } from './manager';
 import { TunnelManager } from './tunnel';
 import { isStoreKeyRelevant } from './profiles';
@@ -57,51 +52,17 @@ export function startAgentDesktop(options: AgentDesktopOptions): { storeChanged(
     tabs => window()?.webContents.send('agentBrowser:tabs', tabs),
     log,
   );
-  const computer = new ComputerController(
-    window,
-    store.read,
-    async (profileId, conversationId) => {
-      const profile = manager?.link(profileId)?.profile;
-      if (!profile) return;
-      const api = new V2ApiClient({ serverUrl: profile.serverUrl, device: deviceIdentityFromSecret(profile.deviceSecret) });
-      await api.revokeAgentDesktop(conversationId, 'screen');
-    },
-    sessions => window()?.webContents.send('computer:sessions', sessions),
-    () => ({ controlling: mainT('main.computerControlling'), stop: mainT('main.computerStop') }),
-    log,
-  );
-  installLiveViewHandler(computer, window);
   manager = new ExecutorManager(store.read, options.defaultServerUrl, {
-    capabilities: () => (computer.available() ? ['browser', 'screen'] : ['browser']) as ExecutorCapability[],
-    invoke: (profileId, payload, signal) => (payload.tool.startsWith('computer_')
-      ? computer.invoke(profileId, payload, signal)
-      : browser.invoke(profileId, payload, signal)),
-    release: (profileId, conversationId, capability) => {
-      if (capability !== 'browser') computer.release(profileId, conversationId);
-      if (capability !== 'screen') {
-        browser.release(profileId, conversationId);
-        tunnels.releaseConversation(profileId, conversationId);
-      }
+    capabilities: ['browser'],
+    invoke: (profileId, payload, signal) => browser.invoke(profileId, payload, signal),
+    release: (profileId, conversationId) => {
+      browser.release(profileId, conversationId);
+      tunnels.releaseConversation(profileId, conversationId);
     },
     frame: (_profileId, type, payload) => tunnels.frame(type, payload),
-    disconnected: profileId => {
-      tunnels.disconnected(profileId);
-      computer.disconnected(profileId);
-    },
+    disconnected: profileId => tunnels.disconnected(profileId),
   }, log);
   manager.start();
-
-  // Permissions are granted in System Settings, outside the app: notice.
-  const capabilityTimer = setInterval(() => manager?.refreshCapabilities(), 15_000);
-  capabilityTimer.unref?.();
-
-  options.handle('computer:permissions', () => computer.permissions());
-  options.handle('computer:requestPermissions', async () => {
-    const status = await computer.requestPermissions();
-    manager?.refresh();
-    return status;
-  });
-  options.handle('computer:sessions', () => computer.sessionsInfo());
 
   options.handle('agentBrowser:list', () => browser.tabsInfo());
   options.handle('agentBrowser:capture', (_event, key: string) => browser.capture(String(key)));
@@ -127,9 +88,7 @@ export function startAgentDesktop(options: AgentDesktopOptions): { storeChanged(
       browser.closeAll();
     },
     stop() {
-      clearInterval(capabilityTimer);
       manager?.stop();
-      computer.stop();
       tunnels.closeAll();
       browser.closeAll();
     },

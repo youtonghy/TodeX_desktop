@@ -21,22 +21,18 @@ const SETTINGS_POLL_MS = 60_000;
 /** A failure the executor reports to the daemon with a stable code. */
 export class ExecutorFailure extends Error {
   readonly code: string;
-  readonly detail?: Record<string, unknown>;
 
-  constructor(code: string, message: string, detail?: Record<string, unknown>) {
+  constructor(code: string, message: string) {
     super(message);
     this.name = 'ExecutorFailure';
     this.code = code;
-    this.detail = detail;
   }
 }
 
 export interface ExecutorHandlers {
-  /** Evaluated at (re)registration; `screen` depends on switches and permissions. */
-  capabilities(): ExecutorCapability[];
+  capabilities: ExecutorCapability[];
   invoke(profileId: string, payload: ExecutorInvokePayload, signal: AbortSignal): Promise<AgentBrowserResult>;
-  /** `capability`: only that part ended (tab or screen); absent: everything. */
-  release(profileId: string, conversationId: string, capability?: ExecutorCapability): void;
+  release(profileId: string, conversationId: string): void;
   /** Frames other than executor ones (`tunnel.*`). */
   frame?(profileId: string, type: string, payload: Record<string, unknown>): void;
   /** The connection dropped; anything bound to it is gone. */
@@ -57,7 +53,6 @@ export class ExecutorLink {
   private crypto: TransportCryptoSession | null = null;
   private wake: (() => void) | null = null;
   private readonly pending = new Map<string, AbortController>();
-  private registered: ExecutorCapability[] = [];
   status: ExecutorStatus = 'idle';
 
   constructor(
@@ -79,16 +74,6 @@ export class ExecutorLink {
   /** Re-check the backend now (e.g. after the user switched tools on). */
   refresh(): void {
     this.wake?.();
-    this.refreshCapabilities();
-  }
-
-  /** Re-registers when the offered capabilities changed (switches, permissions). */
-  refreshCapabilities(): void {
-    if (this.status !== 'online') return;
-    const next = this.handlers.capabilities();
-    if (next.join() === this.registered.join()) return;
-    this.registered = next;
-    this.send('executor.register', { capabilities: next, platform: process.platform }, `executor-reregister-${globalThis.crypto.randomUUID()}`);
   }
 
   /** Sends a frame on the live connection; false when there is none or it is too large. */
@@ -179,8 +164,7 @@ export class ExecutorLink {
           }
           verifying = false;
         }
-        this.registered = this.handlers.capabilities();
-        this.send('executor.register', { capabilities: this.registered, platform: process.platform }, registerId);
+        this.send('executor.register', { capabilities: this.handlers.capabilities, platform: process.platform }, registerId);
         registerTimer = setTimeout(() => socket.close(), REGISTER_TIMEOUT_MS);
       });
       socket.addEventListener('message', (event: MessageEvent) => {
@@ -232,11 +216,9 @@ export class ExecutorLink {
       case 'executor.cancel':
         this.pending.get(String(payload.invokeId))?.abort();
         return;
-      case 'executor.release': {
-        const capability = payload.capability === 'browser' || payload.capability === 'screen' ? payload.capability : undefined;
-        this.handlers.release(this.profile.id, String(payload.conversationId), capability);
+      case 'executor.release':
+        this.handlers.release(this.profile.id, String(payload.conversationId));
         return;
-      }
       case 'server.error':
         this.log('warn', 'agentDesktop.executor.serverError', { profileId: this.profile.id, payload });
         return;
@@ -261,7 +243,7 @@ export class ExecutorLink {
     } catch (error) {
       if (controller.signal.aborted) return;
       const failure = error instanceof ExecutorFailure
-        ? { code: error.code, message: error.message, ...(error.detail ? { detail: error.detail } : {}) }
+        ? { code: error.code, message: error.message }
         : { code: 'EXECUTOR_FAILED', message: error instanceof Error ? error.message : String(error) };
       this.send('executor.result', { invokeId: payload.invokeId, ok: false, error: failure });
     } finally {

@@ -35,11 +35,6 @@ export class ExecutorManager {
     for (const link of this.links.values()) link.refresh();
   }
 
-  /** Re-register links whose capabilities changed (e.g. permissions granted). */
-  refreshCapabilities(): void {
-    for (const link of this.links.values()) link.refreshCapabilities();
-  }
-
   link(profileId: string): ExecutorLink | undefined {
     return this.links.get(profileId);
   }
@@ -60,11 +55,7 @@ export class ExecutorManager {
       }
     }
     for (const profile of profiles) {
-      const existing = this.links.get(profile.id);
-      if (existing) {
-        existing.refreshCapabilities();
-        continue;
-      }
+      if (this.links.has(profile.id)) continue;
       const link = new ExecutorLink(profile, this.handlers, this.log);
       this.links.set(profile.id, link);
       link.start();

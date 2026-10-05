@@ -9,5 +9,3 @@ release/
 !.env.example
 *.tsbuildinfo
 .playwright-cli/
-build/bin/
-native/macos/TodexComputer/.build/
