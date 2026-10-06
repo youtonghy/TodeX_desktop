@@ -31,7 +31,7 @@ import {
 import type { ConversationReplay, ProviderDescriptor, ProviderKind, ConversationManifest, PromptContentRef, PromptSkillRef, SkillCatalogDescriptor, ProviderModelDescriptor, ProviderCommandDescriptor, ContextCompactionState, SubagentRun, MemoryEntry } from '@todex/protocol/v2';
 import { contextCompactionStatus } from '@todex/protocol/v2';
 import { HISTORY_ENCRYPTION_CAPABILITY, V2ApiClient, buildV2WebSocketUrlWithOptions, normalizeConversationEvent } from '@todex/protocol/v2';
-import { historyRetryPrompt } from '@todex/protocol/historyEncryption';
+import { historyRetryPrompt, historyRetryRequest, historyRetrySequence } from '@todex/protocol/historyEncryption';
 import { historyErrorMessage, useHistoryEncryption, type HistoryEncryptionSession } from './useHistoryEncryption';
 import { retryWithDelays } from '@todex/protocol/retry';
 import { probeBackendConnection, nextReconnectDelayMs, inspectServerUrl, credentialMatchesOrigin } from '@todex/protocol/connectionProbe';
@@ -7494,21 +7494,32 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
             void sendV2Prompt(trimmed, conversation.id);
             return;
           }
-          // An e2e backend cannot read the original prompt back (§7): retry
-          // carries the text this device decrypted.
-          let retryPrompt: string | undefined;
-          if (lower === 'retry' && historyEncryptionRef.current?.e2e) {
-            const prompt = historyRetryPrompt(conversationRecoveryRef.current?.get(conversation.v2ConversationId)?.timeline ?? []);
-            if (prompt === null) {
+          // An e2e backend cannot read the original request back (§7): retry
+          // returns the `retryRequest` the latest user message carries, read
+          // in full detail since summary pages leave it out. Messages written
+          // before it existed fall back to the text this device decrypted.
+          const v2Id = conversation.v2ConversationId;
+          const retryFields = async (): Promise<Record<string, unknown> | null> => {
+            if (lower !== 'retry' || !historyEncryptionRef.current?.e2e) return {};
+            const timeline = conversationRecoveryRef.current?.get(v2Id)?.timeline ?? [];
+            const sequence = historyRetrySequence(timeline);
+            if (sequence === null) return null;
+            const page = await decryptedHistoryReplay(v2Id, v2ApiForConversation(v2Id).replayEvents(v2Id, sequence - 1, 1), 'full');
+            const request = historyRetryRequest(page.events.find((event) => event.sequence === sequence)?.payload);
+            if (request) return { text: request.text, content: request.content };
+            const prompt = historyRetryPrompt(timeline);
+            return prompt === null ? null : { prompt };
+          };
+          void retryFields().then((fields) => {
+            if (fields === null) {
               setLastError(t('history.retryNeedsPrompt'));
               return;
             }
-            retryPrompt = prompt;
-          }
-          void sendProtocolCommand({ id: createRequestId(lower), type: `conversation.${lower}`, payload: {
-            conversationId: conversation.v2ConversationId,
-            ...(retryPrompt !== undefined ? { prompt: retryPrompt } : {}),
-          } }).then(() => recoverConversation(conversation.id)).catch((error: unknown) => {
+            return sendProtocolCommand({ id: createRequestId(lower), type: `conversation.${lower}`, payload: {
+              conversationId: v2Id,
+              ...fields,
+            } }).then(() => recoverConversation(conversation.id));
+          }).catch((error: unknown) => {
             setLastError(error instanceof Error ? error.message : t('sess.operationFailed'));
             void recoverConversation(conversation.id);
           });
@@ -8015,6 +8026,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       sendV2Prompt,
       sendProtocolCommand,
       recoverConversation,
+      decryptedHistoryReplay,
+      v2ApiForConversation,
       setConversationChatDraft,
       setConversationComposerSelection,
       setLastError,
