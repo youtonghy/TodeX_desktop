@@ -367,6 +367,7 @@ export const ja: Messages = {
   'controls.backendPaused.turn_interrupted': '前のターンが中断されたため一時停止中',
   'controls.backendPaused.start_failed': '次のメッセージを開始できず一時停止中',
   'controls.backendPaused.daemon_restarted': 'バックエンドの再起動により一時停止中',
+  'controls.backendPaused.rate_limited': '利用上限に達しました · {time} のリセット後に自動で続行',
   'controls.backendPaused.other': '一時停止中',
   'controls.clearQueue': 'クリア',
   'controls.queuedContent': '添付ファイル {count} 件',

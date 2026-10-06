@@ -1999,7 +1999,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         // Claude Code reports its five-hour window as provider_unavailable with
         // "session limit · resets <time> (<tz>)". Recording the reset arms the
         // wait: sends join the candidate queue until it passes, and the failed
-        // prompt is re-queued at the head so everything replays in order.
+        // prompt is re-queued at the head so everything replays in order. A
+        // backend with its own queue inserts that continuation itself — for
+        // every client and with no window open — so it is not queued here.
         // Replayed journal entries are skipped — their wall-time report would
         // resolve against now, while the persisted wait already holds the
         // instant computed when the failure was live.
@@ -2012,7 +2014,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         }
         if (submission && turnId && submission.turnId === turnId) {
           if (type === 'turn.completed') removeQueuedFollowUp(localId, submission.requestId);
-          if (type === 'turn.failed') {
+          const backendContinues = Boolean(rateLimited)
+            && hasBackendQueue(v2ProvidersRef.current, conversationsRef.current.find((item) => item.id === localId));
+          if (type === 'turn.failed' && !backendContinues) {
             const queued = queuedChatDraftsRef.current[localId] ?? [];
             if (rateLimited && queued.length < 32) {
               queuedChatDraftsRef.current = { ...queuedChatDraftsRef.current,

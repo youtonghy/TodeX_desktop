@@ -367,6 +367,7 @@ export const zhCN = {
   'controls.backendPaused.turn_interrupted': '上一轮被中断，已暂停',
   'controls.backendPaused.start_failed': '无法开始，已暂停',
   'controls.backendPaused.daemon_restarted': '后端已重启，已暂停',
+  'controls.backendPaused.rate_limited': '额度已用尽 · {time} 重置后自动继续',
   'controls.backendPaused.other': '已暂停',
   'controls.clearQueue': '清空',
   'controls.queuedContent': '{count} 个附件',

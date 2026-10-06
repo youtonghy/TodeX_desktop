@@ -367,6 +367,7 @@ export const en: Messages = {
   'controls.backendPaused.turn_interrupted': 'Paused after the last turn was interrupted',
   'controls.backendPaused.start_failed': 'Paused: the next message could not start',
   'controls.backendPaused.daemon_restarted': 'Paused after the backend restarted',
+  'controls.backendPaused.rate_limited': 'Usage limit reached · continues automatically at {time}',
   'controls.backendPaused.other': 'Paused',
   'controls.clearQueue': 'Clear',
   'controls.queuedContent': '{count} attachments',

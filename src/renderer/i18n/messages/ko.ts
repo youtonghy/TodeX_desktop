@@ -367,6 +367,7 @@ export const ko: Messages = {
   'controls.backendPaused.turn_interrupted': '이전 차례가 중단되어 일시 중지됨',
   'controls.backendPaused.start_failed': '다음 메시지를 시작하지 못해 일시 중지됨',
   'controls.backendPaused.daemon_restarted': '백엔드가 다시 시작되어 일시 중지됨',
+  'controls.backendPaused.rate_limited': '사용 한도 도달 · {time} 초기화 후 자동으로 계속',
   'controls.backendPaused.other': '일시 중지됨',
   'controls.clearQueue': '비우기',
   'controls.queuedContent': '첨부 파일 {count}개',

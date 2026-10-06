@@ -32,7 +32,7 @@ type Props = {
 
 type AttachmentPreview = { name: string; order: number; path?: string; file: PreviewFile };
 
-const BACKEND_PAUSE_REASONS = ['turn_failed', 'turn_cancelled', 'turn_interrupted', 'start_failed', 'daemon_restarted'] as const;
+const BACKEND_PAUSE_REASONS = ['turn_failed', 'turn_cancelled', 'turn_interrupted', 'start_failed', 'daemon_restarted', 'rate_limited'] as const;
 
 function formatResetInstant(until: number): string {
   return new Intl.DateTimeFormat(undefined, {
@@ -61,6 +61,9 @@ export function ConversationControls({ runtime, reportedError, running, canUseNa
   const backendItems = backendQueue?.items ?? [];
   const backendPauseReason = backendQueue?.paused ? (BACKEND_PAUSE_REASONS as readonly string[]).includes(backendQueue.pauseReason)
     ? backendQueue.pauseReason as typeof BACKEND_PAUSE_REASONS[number] : 'other' : null;
+  // The daemon resumes a rate-limited queue by itself at `resumeAt`.
+  const backendResumeAt = backendPauseReason === 'rate_limited' ? Date.parse(backendQueue?.resumeAt ?? '') : NaN;
+  const backendWaitsForReset = backendPauseReason === 'rate_limited';
   const disabled = Boolean(controlStatus);
   const scope = runtime?.conversationId;
   const [preview, setPreview] = useState<AttachmentPreview | null>(null);
@@ -80,10 +83,11 @@ export function ConversationControls({ runtime, reportedError, running, canUseNa
       {backendItems.length > 0 ? <div className="border-border rounded-lg border p-2 text-xs">
         <div className="mb-1 flex items-center justify-between gap-2">
           <span className="min-w-0">{t('controls.backendQueue', { count: backendItems.length })} · {backendPauseReason
-            ? <span title={backendQueue?.pauseMessage || undefined}>{t(`controls.backendPaused.${backendPauseReason}`)}</span>
+            ? <span title={backendQueue?.pauseMessage || undefined}>{t(`controls.backendPaused.${backendPauseReason}`,
+              { time: Number.isFinite(backendResumeAt) ? formatResetInstant(backendResumeAt) : '—' })}</span>
             : t('controls.backendQueueHint')}</span>
           <span className="flex shrink-0 gap-1">
-            {backendPauseReason && !running && !rateLimited ? <Button size="sm" variant="secondary" onPress={onResumeBackend}>{t('controls.resumeSend')}</Button> : null}
+            {backendPauseReason && !running && !rateLimited && !backendWaitsForReset ? <Button size="sm" variant="secondary" onPress={onResumeBackend}>{t('controls.resumeSend')}</Button> : null}
             <Button size="sm" variant="ghost" onPress={onClearBackend}>{t('controls.clearQueue')}</Button>
           </span>
         </div>
@@ -116,7 +120,7 @@ export function ConversationControls({ runtime, reportedError, running, canUseNa
             aria-label={t('controls.removeQueued', { text: item.text })} onPress={() => onRemoveNative(item.id)}>{t('controls.remove')}</Button> : null}
         </div>)}
       </div> : null}
-      {rateLimited && localQueue.length === 0 ? <div className="border-border rounded-lg border p-2 text-xs text-muted">
+      {rateLimited && localQueue.length === 0 && !backendWaitsForReset ? <div className="border-border rounded-lg border p-2 text-xs text-muted">
         {t('controls.sessionLimitWait', { time: formatResetInstant(rateLimited.until), reset: rateLimited.label })}
       </div> : null}
       {localQueue.length > 0 ? <div className="border-border rounded-lg border p-2 text-xs">
