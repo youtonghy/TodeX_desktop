@@ -31,6 +31,7 @@ import {
 import type { ConversationReplay, ProviderDescriptor, ProviderKind, ConversationManifest, PromptContentRef, PromptSkillRef, SkillCatalogDescriptor, ProviderModelDescriptor, ProviderCommandDescriptor, ContextCompactionState, SubagentRun, MemoryEntry } from '@todex/protocol/v2';
 import { contextCompactionStatus } from '@todex/protocol/v2';
 import { HISTORY_ENCRYPTION_CAPABILITY, V2ApiClient, buildV2WebSocketUrlWithOptions, normalizeConversationEvent } from '@todex/protocol/v2';
+import { historyRetryPrompt } from '@todex/protocol/historyEncryption';
 import { historyErrorMessage, useHistoryEncryption, type HistoryEncryptionSession } from './useHistoryEncryption';
 import { retryWithDelays } from '@todex/protocol/retry';
 import { probeBackendConnection, nextReconnectDelayMs, inspectServerUrl, credentialMatchesOrigin } from '@todex/protocol/connectionProbe';
@@ -7497,13 +7498,12 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           // carries the text this device decrypted.
           let retryPrompt: string | undefined;
           if (lower === 'retry' && historyEncryptionRef.current?.e2e) {
-            const timeline = conversationRecoveryRef.current?.get(conversation.v2ConversationId)?.timeline ?? [];
-            const original = [...timeline].reverse().find((entry) => entry.kind === 'outgoing');
-            if (!original || original.detailLocked || !original.subtitle.trim()) {
+            const prompt = historyRetryPrompt(conversationRecoveryRef.current?.get(conversation.v2ConversationId)?.timeline ?? []);
+            if (prompt === null) {
               setLastError(t('history.retryNeedsPrompt'));
               return;
             }
-            retryPrompt = original.subtitle;
+            retryPrompt = prompt;
           }
           void sendProtocolCommand({ id: createRequestId(lower), type: `conversation.${lower}`, payload: {
             conversationId: conversation.v2ConversationId,

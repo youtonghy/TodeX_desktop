@@ -60,6 +60,9 @@ export function historyErrorMessage(code: string): string | null {
 const ridOf = (publicKey: Uint8Array) => encodeBase64Url(historyRecipientId(publicKey));
 /** keys.wraps calls in flight while decrypting manifest titles. */
 const TITLE_CONCURRENCY = 4;
+/** How often a device waiting for its grant re-reads the state: the backend
+ * does not push grant progress (§7). */
+const GRANT_POLL_MS = 15_000;
 
 export function useHistoryEncryption({ activeBackendId, connected, supported, sendCommand, onUnlocked }: {
   activeBackendId: string;
@@ -268,6 +271,25 @@ export function useHistoryEncryption({ activeBackendId, connected, supported, se
     titles.current.clear();
     live.current.onUnlocked();
   }, []);
+
+  // While this device waits for a grant, poll the state; once the grant is
+  // fulfilled, rows locked so far may open.
+  const waitingGrants = useRef(new Set<string>());
+  const ownPendingGrants = view.state?.grants
+    .filter((grant) => grant.status === 'pending' && grant.rid === view.localRid)
+    .map((grant) => grant.grantId).join(',') ?? '';
+  useEffect(() => {
+    const state = view.state;
+    if (!state || !view.localRid) return;
+    const fulfilled = state.grants.some((grant) => grant.status === 'fulfilled' && waitingGrants.current.has(grant.grantId));
+    waitingGrants.current = new Set(ownPendingGrants ? ownPendingGrants.split(',') : []);
+    if (fulfilled) unlocked();
+  }, [ownPendingGrants, unlocked, view.localRid, view.state]);
+  useEffect(() => {
+    if (!connected || !ownPendingGrants) return;
+    const timer = setInterval(() => { void refresh(false); }, GRANT_POLL_MS);
+    return () => clearInterval(timer);
+  }, [connected, ownPendingGrants, refresh]);
 
   const actions = useMemo(() => ({
     refresh: () => refresh(false),
