@@ -1303,8 +1303,10 @@ body {
   width: var(--sidebar-width);
 }
 
+/* Above the sticky app-layout header/toolbar (z 40/39) so the peek isn't
+   clipped at the top, but below HeroUI popovers and modals (z 50). */
 .sidebar[data-peek='true'] {
-  z-index: 30;
+  z-index: 45;
 }
 
 .sidebar[data-peek='true'][data-state='expanded'] {
@@ -1368,6 +1370,14 @@ body {
   bottom: 8px;
 }
 
+/* The icon slot is 16px, but workspace glyphs sit in a 20px status-ring box;
+   center it so the overflow is symmetric instead of spilling to the right. */
+.sidebar-chat-list .chat-list-view__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 /* Give the rail glyphs a bit more presence (16px icon -> ~19px visual). */
 .sidebar[data-peek='true'][data-state='collapsed'] .chat-list-view__icon {
   transform: scale(1.2);
@@ -1377,9 +1387,15 @@ body {
   transform: scale(1.15);
 }
 
+/* HeroUI centers header children in the collapsed rail, but that rule sits in
+   a cascade layer, so the triggers' own `justify-start` / `gap-*` / `px-*`
+   utilities win and push the glyphs to the left edge. Re-center them here. */
 .sidebar[data-peek='true'][data-state='collapsed'] [data-slot='sidebar-header'] > * {
   width: 2.5rem;
   min-height: 2.5rem;
+  justify-content: center;
+  gap: 0;
+  padding-inline: 0;
 }
 
 .sidebar[data-peek='true'][data-state='collapsed'] [data-slot='sidebar-group'] + [data-slot='sidebar-group'] {

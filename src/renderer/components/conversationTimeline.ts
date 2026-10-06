@@ -113,6 +113,9 @@ export function buildChatRenderItems(entries: readonly TimelineEntry[]): ChatRen
   return items;
 }
 
+/// The execution group that is still live for the running turn. A group the
+/// agent has already replied after is finished — its tools may still run in
+/// the background, but the live status belongs below the newest reply.
 export function activeChatProcessId(items: readonly ChatRenderItem[], activeTurnId?: string): string {
   const latestUser = [...items].reverse().find(item => item.type === 'entry' && item.entry.kind === 'outgoing');
   const user = latestUser?.type === 'entry' ? latestUser.entry : undefined;
@@ -121,5 +124,7 @@ export function activeChatProcessId(items: readonly ChatRenderItem[], activeTurn
   ));
   if (group?.type !== 'executionGroup') return '';
   if (user && group.userMessageId !== user.id && user.turnId !== group.turnId) return '';
+  const after = items.slice(items.indexOf(group) + 1);
+  if (after.some(item => item.type === 'entry' && item.entry.kind === 'incoming')) return '';
   return group.id;
 }

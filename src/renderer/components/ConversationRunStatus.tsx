@@ -1,12 +1,12 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps } from 'react';
 import { toast, Button, Description, Form, Input, Kbd, Label, Link, TextArea, TextField } from '@heroui/react';
-import { Check, ChevronLeft, ChevronRight } from '@gravity-ui/icons';
+import { Check, ChevronLeft, ChevronRight, ShieldExclamation, Terminal, Xmark } from '@gravity-ui/icons';
 import { NativeSelect } from '@heroui-pro/react/native-select';
 import { PromptInput } from '@heroui-pro/react/prompt-input';
 import { AnimatePresence, motion, useReducedMotion, type Variants } from 'motion/react';
 import { usageTotalTokens, type ConversationRuntime } from '@todex/protocol/conversationRuntime';
 import type { ContextCompactionState } from '@todex/protocol/v2';
-import { permissionActions, permissionDeviceGate, type PendingRequest, type PermissionOption } from '@todex/protocol/todex';
+import { permissionActions, permissionDeviceGate, permissionRequestSummary, type PendingRequest, type PermissionOption } from '@todex/protocol/todex';
 import { deviceIdentityFromSecret } from '@todex/protocol/deviceAuth';
 import type { UsageRecord } from '@todex/protocol/mobileParity';
 import { hasActiveConversationWork } from './conversationProgress';
@@ -533,12 +533,69 @@ export function ConversationPermissionActions({ request, deviceSecret, onSelect 
   const form = permissionForm(request);
   if (form?.mode === 'user_input' && !form.unsupported) return <UserInputQuestions key={request.requestId} request={request} form={form} onSelect={onSelect} />;
   if (form) return <PermissionResponseForm key={request.requestId} request={request} form={form} onSelect={onSelect} />;
-  return <>{permissionActions(request).map(option => <Button
-    key={typeof option === 'boolean' ? String(option) : option.optionId}
-    size="sm"
-    variant={typeof option === 'boolean' ? (option ? 'primary' : 'danger-soft')
-      : option.kind.startsWith('reject') || option.kind === 'abort_turn' ? 'danger-soft' : 'primary'}
-    onPress={() => onSelect(option)}
-  >{typeof option === 'boolean' ? (option ? t('runStatus.approve') : t('runStatus.reject'))
-    : option.kind === 'abort_turn' ? t('runStatus.rejectStop') : option.name}</Button>)}</>;
+  return <div className="flex flex-wrap gap-2">{permissionActions(request).map(option => {
+    const allow = typeof option === 'boolean' ? option : option.kind.startsWith('allow');
+    const reject = typeof option === 'boolean' ? !option : option.kind.startsWith('reject') || option.kind === 'abort_turn';
+    return <Button
+      key={typeof option === 'boolean' ? String(option) : option.optionId}
+      size="sm"
+      variant={reject ? 'danger' : 'primary'}
+      // Green allow / red reject reads at a glance; other kinds keep the accent.
+      className={allow ? 'bg-success text-success-foreground' : undefined}
+      onPress={() => onSelect(option)}
+    >
+      {allow ? <Check aria-hidden /> : reject ? <Xmark aria-hidden /> : null}
+      {permissionOptionLabel(option, t)}
+    </Button>;
+  })}</div>;
+}
+
+/// Backends send English option names; localize the shared approval ones and
+/// keep provider-specific names (plan review, elicitation) as sent.
+function permissionOptionLabel(option: boolean | PermissionOption, t: ReturnType<typeof useT>): string {
+  if (typeof option === 'boolean') return option ? t('runStatus.approve') : t('runStatus.reject');
+  if (option.kind === 'abort_turn') return t('runStatus.rejectStop');
+  switch (option.name) {
+    case 'Allow once': return t('runStatus.allowOnce');
+    case 'Allow for session': return t('runStatus.allowSession');
+    case 'Reject':
+    case 'Decline': return t('runStatus.reject');
+    default: return option.name;
+  }
+}
+
+/// Composer-side approval card: says what will run (the full command, never
+/// clipped) and why the provider asked before offering the actions.
+export function PermissionRequestCard({ request, fallbackTitle, deviceSecret, onSelect }: {
+  request: PendingRequest;
+  fallbackTitle: string;
+  deviceSecret?: string;
+  onSelect: (option: boolean | PermissionOption, data?: PermissionAnswerData) => void;
+}) {
+  const t = useT();
+  const summary = useMemo(() => permissionRequestSummary(request), [request]);
+  const heading = summary.command ? t('runStatus.runCommand')
+    : summary.tool ? t('runStatus.useTool', { tool: summary.tool })
+      : fallbackTitle;
+  return <div className="mb-3 rounded-xl border border-separator p-3">
+    <div className="mb-2 flex items-start gap-2">
+      {summary.command ? <Terminal className="mt-0.5 size-4 shrink-0 text-muted" aria-hidden /> : null}
+      <div className="min-w-0 flex-1">
+        <p className="text-xs font-medium">{heading}</p>
+        {summary.description ? <p className="text-muted mt-0.5 text-xs">{summary.description}</p> : null}
+      </div>
+      {summary.tool && summary.command ? <code className="shrink-0 rounded bg-default px-1.5 py-0.5 text-[11px] text-muted">{summary.tool}</code> : null}
+    </div>
+    {summary.reason ? <div className="mb-2 flex items-start gap-1.5 rounded-lg bg-warning/10 px-2 py-1.5 text-xs">
+      <ShieldExclamation className="mt-0.5 size-3.5 shrink-0 text-warning" aria-hidden />
+      <p className="min-w-0 wrap-anywhere">
+        {summary.safetyCheck ? <span className="font-medium text-warning">{t('runStatus.safetyCheck')} · </span> : null}
+        {summary.reason}
+        {summary.safetyCheck ? <span className="text-muted"> {t('runStatus.safetyCheckHint')}</span> : null}
+      </p>
+    </div> : null}
+    {summary.command ? <pre className="mb-2 max-h-60 overflow-auto rounded-lg bg-default px-3 py-2 font-mono text-xs whitespace-pre-wrap wrap-anywhere select-text">{summary.command}</pre> : null}
+    {summary.cwd ? <p className="text-muted mb-2 font-mono text-[11px] wrap-anywhere">{t('runStatus.cwd')}: {summary.cwd}</p> : null}
+    <ConversationPermissionActions request={request} deviceSecret={deviceSecret} onSelect={onSelect} />
+  </div>;
 }
