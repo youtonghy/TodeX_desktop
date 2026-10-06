@@ -101,6 +101,8 @@ export type ServerVersion = {
   version: string;
   data_dir: string;
   workspace_root: string;
+  /** `1` when the backend serves end-to-end encrypted history. */
+  historyEncryption?: number;
 };
 
 // Dev builds report "DEV0.0.0" (backend and clients) or a bare "0.0.0"; warning

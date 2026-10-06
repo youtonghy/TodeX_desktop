@@ -21,6 +21,7 @@ import {
 import { generateHistoryRecipientKeyPair, historyRecipientId, historyRecipientKeyPairFromSeed } from '@todex/protocol/historyCrypto';
 import { parseRecoveryKey, recoveryQrPayload, recoveryWordsFromSeed } from '@todex/protocol/recoveryKey';
 import { createRequestId } from '@todex/protocol/todex';
+import { ProtocolCommandError } from './protocolCommands';
 import { decodeBase64UrlBytes, encodeBase64Url } from '@todex/protocol/transportCrypto';
 import type { ConversationManifest } from '@todex/protocol/v2';
 import { t } from '../i18n';
@@ -60,10 +61,12 @@ const ridOf = (publicKey: Uint8Array) => encodeBase64Url(historyRecipientId(publ
 /** keys.wraps calls in flight while decrypting manifest titles. */
 const TITLE_CONCURRENCY = 4;
 
-export function useHistoryEncryption({ activeBackendId, connected, sendCommand, onUnlocked }: {
+export function useHistoryEncryption({ activeBackendId, connected, supported, sendCommand, onUnlocked }: {
   activeBackendId: string;
   /** The verified socket of the active backend is open. */
   connected: boolean;
+  /** `/v2/version` reports `historyEncryption: 1`; `undefined` until known. */
+  supported: boolean | undefined;
   sendCommand: CommandSender;
   /** Keys arrived (grant, recovery import): locked rows may now open. */
   onUnlocked: () => void;
@@ -73,8 +76,8 @@ export function useHistoryEncryption({ activeBackendId, connected, sendCommand, 
   const [titleRevision, setTitleRevision] = useState(0);
   const grantRunsRef = useRef(grantRuns);
   grantRunsRef.current = grantRuns;
-  const live = useRef({ activeBackendId, connected, sendCommand, onUnlocked, view });
-  live.current = { activeBackendId, connected, sendCommand, onUnlocked, view };
+  const live = useRef({ activeBackendId, connected, supported, sendCommand, onUnlocked, view });
+  live.current = { activeBackendId, connected, supported, sendCommand, onUnlocked, view };
   const decryptors = useRef(new Map<string, { decryptor: HistoryDecryptor; ready: Promise<void> }>());
   const liveChains = useRef(new Map<string, Promise<void>>());
   const titles = useRef(new Map<string, string | null>());
@@ -187,6 +190,12 @@ export function useHistoryEncryption({ activeBackendId, connected, sendCommand, 
   const refresh = useCallback(async (register = false) => {
     const backendId = live.current.activeBackendId;
     const current = () => live.current.activeBackendId === backendId;
+    // Nothing to ask before the socket is up; an old backend never is asked.
+    if (!live.current.connected || live.current.supported === undefined) return;
+    if (!live.current.supported) {
+      setView({ backendId, status: 'unavailable' });
+      return;
+    }
     setView((previous) => ({ ...(previous.backendId === backendId ? previous : { backendId }), backendId, status: 'loading' }));
     let state: HistoryEncryptionState;
     try {
@@ -212,7 +221,20 @@ export function useHistoryEncryption({ activeBackendId, connected, sendCommand, 
         decryptor.forgetMissing();
         seed.fill(0);
         if (register && state.myRid !== localRid) {
-          await send(historyCommands.register(publicKey));
+          try {
+            await send(historyCommands.register(publicKey));
+          } catch (error) {
+            // A revoked key can never be registered again (CONFLICT): this
+            // device continues with a fresh key, which needs a new grant
+            // (or the recovery key) for history wrapped before.
+            if (!(error instanceof ProtocolCommandError && error.code === 'CONFLICT')) throw error;
+            const fresh = generateHistoryRecipientKeyPair();
+            await saveHistorySeed(backendId, fresh.secretKey);
+            decryptor.setSeeds([fresh.secretKey]);
+            fresh.secretKey.fill(0);
+            localRid = ridOf(fresh.publicKey);
+            await send(historyCommands.register(fresh.publicKey));
+          }
           state = parseHistoryEncryptionState(await send(historyCommands.get()));
         }
       }
@@ -222,11 +244,11 @@ export function useHistoryEncryption({ activeBackendId, connected, sendCommand, 
     if (current()) setView({ backendId, status: 'ready', state, localRid, keyError });
   }, [decryptorFor, send]);
 
-  // Register on every (re)connect of the active backend.
+  // Register on every (re)connect of a backend that serves encrypted history.
   useEffect(() => {
-    if (!connected) return;
+    if (!connected || supported === undefined) return;
     void refresh(true);
-  }, [activeBackendId, connected, refresh]);
+  }, [activeBackendId, connected, refresh, supported]);
 
   /** Runs a settings action that answers with the encryption state. */
   const applyState = useCallback(async (frame: HistoryCommandFrame) => {
@@ -279,8 +301,8 @@ export function useHistoryEncryption({ activeBackendId, connected, sendCommand, 
      * from where an interrupted run stopped. */
     authorizeGrant: async (grant: HistoryGrant) => {
       if (grantControllers.current.has(grant.grantId)) return;
-      const recipient = live.current.view.state?.recipients.find((item) => item.rid === grant.rid && !item.revokedAt);
-      if (!recipient) throw new Error(t('history.grantRecipientMissing'));
+      if (!grant.publicKey) throw new Error(t('history.grantRecipientMissing'));
+      const targetPublicKey = decodeBase64UrlBytes(grant.publicKey);
       const controller = new AbortController();
       grantControllers.current.set(grant.grantId, controller);
       // An interrupted run resumes from its cursor; a finished one starts over.
@@ -296,7 +318,7 @@ export function useHistoryEncryption({ activeBackendId, connected, sendCommand, 
       let last = start;
       try {
         const result = await rewrapHistoryKeys({
-          send, sourceSeed: seed, targetPublicKey: decodeBase64UrlBytes(recipient.publicKey), grantId: grant.grantId,
+          send, sourceSeed: seed, targetPublicKey, grantId: grant.grantId,
           cursor: start.cursor, signal: controller.signal,
           onProgress: (progress) => {
             last = { processed: start.processed + progress.processed, added: start.added + progress.added, skipped: start.skipped + progress.skipped, ...(progress.cursor ? { cursor: progress.cursor } : {}) };

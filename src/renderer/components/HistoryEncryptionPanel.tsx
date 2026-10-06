@@ -44,6 +44,9 @@ export function HistoryEncryptionPanel({ history }: Props) {
   // A recovery key never outlives the dialog that shows it.
   useEffect(() => () => { if (step?.kind === 'recovery') step.draft.seed.fill(0); }, [step]);
   useEffect(() => { setStep(null); setConfirm(null); setImportProgress(null); setRequestedGrant(''); }, [view.backendId]);
+  // Grants are not pushed: opening the panel reads the current state.
+  const { refresh } = history;
+  useEffect(() => { void refresh(); }, [refresh, view.backendId]);
 
   const run = async (name: string, action: () => Promise<unknown>, success?: string) => {
     setBusy(name);
