@@ -1189,6 +1189,8 @@ export type TimelineEntry = {
   contentIndex?: number;
   /** Placeholder for a `detail=summary` replay event: content loads on expand. */
   detailStub?: boolean;
+  /** Encrypted history this device holds no key for (one notice per turn). */
+  detailLocked?: boolean;
 };
 
 export function workspaceDisplayName(workspace: Pick<WorkspaceRecord, 'name' | 'path'>): string {

@@ -28,9 +28,10 @@ import {
   useState,
   type SetStateAction,
 } from 'react';
-import type { ProviderDescriptor, ProviderKind, ConversationManifest, PromptContentRef, PromptSkillRef, SkillCatalogDescriptor, ProviderModelDescriptor, ProviderCommandDescriptor, ContextCompactionState, SubagentRun, MemoryEntry } from '@todex/protocol/v2';
+import type { ConversationReplay, ProviderDescriptor, ProviderKind, ConversationManifest, PromptContentRef, PromptSkillRef, SkillCatalogDescriptor, ProviderModelDescriptor, ProviderCommandDescriptor, ContextCompactionState, SubagentRun, MemoryEntry } from '@todex/protocol/v2';
 import { contextCompactionStatus } from '@todex/protocol/v2';
-import { V2ApiClient, buildV2WebSocketUrlWithOptions, normalizeConversationEvent } from '@todex/protocol/v2';
+import { HISTORY_ENCRYPTION_CAPABILITY, V2ApiClient, buildV2WebSocketUrlWithOptions, normalizeConversationEvent } from '@todex/protocol/v2';
+import { historyErrorMessage, useHistoryEncryption, type HistoryEncryptionSession } from './useHistoryEncryption';
 import { retryWithDelays } from '@todex/protocol/retry';
 import { probeBackendConnection, nextReconnectDelayMs, inspectServerUrl, credentialMatchesOrigin } from '@todex/protocol/connectionProbe';
 import { deviceIdentityFromSecret } from '@todex/protocol/deviceAuth';
@@ -509,14 +510,29 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   // journal, and the next visit continues from where it stopped.
   const v2ApiForConversation = useCallback((conversationId: string) => {
     const { settings: activeSettings, backendConnections: profiles } = connectionRoutingRef.current;
-    const conversation = conversationsRef.current.find((item) => item.v2ConversationId === conversationId || item.id === conversationId);
-    const backendId = conversation?.backendConnectionId
-      ?? workspacesRef.current.find((item) => item.id === conversation?.workspaceId)?.backendConnectionId;
-    const profile = backendId && backendId !== activeBackendConnectionIdRef.current
+    const backendId = backendIdForConversation(conversationId);
+    const profile = backendId !== activeBackendConnectionIdRef.current
       ? profiles.find((item) => item.id === backendId)
       : undefined;
     const target = profile ?? activeSettings;
-    return new V2ApiClient({ serverUrl: target.serverUrl, device: deviceIdentityFromSecret(target.deviceSecret) });
+    return new V2ApiClient({ serverUrl: target.serverUrl, device: deviceIdentityFromSecret(target.deviceSecret), historyEncryption: true });
+  }, []);
+  /** Backend profile owning a conversation (the active one when untagged). */
+  function backendIdForConversation(conversationId: string): string {
+    const conversation = conversationsRef.current.find((item) => item.v2ConversationId === conversationId || item.id === conversationId);
+    return conversation?.backendConnectionId
+      ?? workspacesRef.current.find((item) => item.id === conversation?.workspaceId)?.backendConnectionId
+      ?? activeBackendConnectionIdRef.current;
+  }
+  // End-to-end encrypted history: every page is decrypted before it reaches
+  // the projection (set once the hook below has run).
+  const historyEncryptionRef = useRef<HistoryEncryptionSession | null>(null);
+  const withDecryptedTitles = (backendId: string, manifests: ConversationManifest[]) =>
+    historyEncryptionRef.current?.withDecryptedTitles(backendId, manifests) ?? manifests;
+  const decryptedHistoryReplay = useCallback(async <P extends ConversationReplay>(conversationId: string, page: Promise<P>, detail: 'summary' | 'full'): Promise<P> => {
+    const history = historyEncryptionRef.current;
+    const result = await page;
+    return history ? history.decryptPage(backendIdForConversation(conversationId), conversationId, result, detail) : result;
   }, []);
   const [workspaces, setWorkspaces] = useState<WorkspaceRecord[]>([]);
   const [workspaceTombstones, setWorkspaceTombstones] = useState<WorkspaceTombstone[]>([]);
@@ -626,9 +642,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   // History replays fetch summary events only; folded process groups fetch
   // their full sequence range back when the user expands them.
   if (!conversationRecoveryRef.current) conversationRecoveryRef.current = new ConversationRecovery(
-    (id, after, limit) => v2ApiForConversation(id).replayEvents(id, after, limit, 'summary'),
+    (id, after, limit) => decryptedHistoryReplay(id, v2ApiForConversation(id).replayEvents(id, after, limit, 'summary'), 'summary'),
     (state, applied, recovering, live) => runtimeUpdateRef.current(state, applied, recovering, live), setLastError,
-    (id, before, limit) => v2ApiForConversation(id).replayEventsBefore(id, before, limit, 'summary'),
+    (id, before, limit) => decryptedHistoryReplay(id, v2ApiForConversation(id).replayEventsBefore(id, before, limit, 'summary'), 'summary'),
     (id, status) => {
       const localId = conversationsRef.current.find((item) => item.v2ConversationId === id || item.id === id)?.id;
       if (!localId) return;
@@ -682,7 +698,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         if (!active) return;
         setBackendProviders(backendId, providers.providers);
         setV2Conversations(conversations.conversations);
-        setConversations((current) => mergeManifestConversations(current, conversations.conversations, workspacesRef.current, backendId));
+        setConversations((current) => mergeManifestConversations(current, withDecryptedTitles(backendId, conversations.conversations), workspacesRef.current, backendId));
         setDirectorySyncStatus('ready');
       })
       .catch(() => {
@@ -695,7 +711,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       void api.listConversations().then((response) => {
         if (!active) return;
         setV2Conversations(response.conversations);
-        setConversations((current) => mergeManifestConversations(current, response.conversations, workspacesRef.current, backendId));
+        setConversations((current) => mergeManifestConversations(current, withDecryptedTitles(backendId, response.conversations), workspacesRef.current, backendId));
       }).catch(() => undefined);
     }, 15000);
     // The main connection below is the single `/v2/ws` socket; providers and
@@ -1631,7 +1647,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         try {
           const conversationResponse = await new V2ApiClient({ serverUrl: settings.serverUrl, device: deviceIdentityFromSecret(settings.deviceSecret) }).listConversations();
           setV2Conversations(conversationResponse.conversations);
-          setConversations((current) => mergeManifestConversations(current, conversationResponse.conversations, nextWorkspaces, activeBackendConnectionId));
+          setConversations((current) => mergeManifestConversations(current, withDecryptedTitles(activeBackendConnectionId, conversationResponse.conversations), nextWorkspaces, activeBackendConnectionId));
         } catch (error) {
           setLastError(error instanceof Error ? error.message : t('sess.conversationDirSyncFailed'));
         }
@@ -3465,7 +3481,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       if (messageType === 'server.error' && parsed.id !== undefined) {
         const payload = parsed.payload as { code?: unknown; message?: unknown; conversationId?: unknown } | undefined;
         const code = typeof payload?.code === 'string' ? payload.code : '';
-        const detail = typeof payload?.message === 'string' ? payload.message : t('sess.v2CommandFailed');
+        const detail = historyErrorMessage(code) ?? (typeof payload?.message === 'string' ? payload.message : t('sess.v2CommandFailed'));
         const message = code ? `[${code}] ${detail}` : detail;
         const requestId = typeof parsed.id === 'string' ? parsed.id : '';
         const failedSubscribe = pendingV2SubscribeRef.current.get(requestId);
@@ -3490,10 +3506,22 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         return;
       }
       if (messageType === 'conversation.event') {
-        const event = normalizeConversationEvent(parsed.payload ?? parsed);
-        if (!event) throw new Error(t('sess.invalidConversationEvent'));
-        const conversation = conversationsRef.current.find((item) => item.v2ConversationId === event.conversationId || item.id === event.conversationId);
-        if (conversation) conversationRecoveryRef.current!.receive(event.conversationId, conversation.workspaceId, [event]);
+        const raw = (parsed.payload ?? parsed) as Record<string, unknown>;
+        const rawConversationId = typeof raw.conversationId === 'string' ? raw.conversationId : '';
+        const backendId = connectedBackendIdRef.current ?? activeBackendConnectionIdRef.current;
+        const generation = frame.generation;
+        // Encrypted payloads are opened before normalization; per
+        // conversation the arrival order is kept even when a wrap is fetched.
+        const deliver = (opened: Record<string, unknown>) => {
+          if (generation !== socketGenerationRef.current) return;
+          const event = normalizeConversationEvent(opened);
+          if (!event) throw new Error(t('sess.invalidConversationEvent'));
+          const conversation = conversationsRef.current.find((item) => item.v2ConversationId === event.conversationId || item.id === event.conversationId);
+          if (conversation) conversationRecoveryRef.current!.receive(event.conversationId, conversation.workspaceId, [event]);
+        };
+        const history = historyEncryptionRef.current;
+        if (!history || !rawConversationId) deliver(raw);
+        else history.receiveSocketEvent(backendId, rawConversationId, raw, parsed.frames, parsed.delivery === 'replay' ? 'summary' : 'full', deliver, setLastError);
         return;
       }
       enqueueServerEvent(parsed as unknown as ServerEvent);
@@ -3629,6 +3657,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         // (servers without these fields ignore them).
         detail: 'summary',
         backfillLimit: V2_SUBSCRIBE_BACKFILL_LIMIT,
+        historyEncryption: HISTORY_ENCRYPTION_CAPABILITY,
       },
     });
     if (!sent) return false;
@@ -3642,6 +3671,33 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
 
   const sendProtocolCommand = useCallback((message: ProtocolCommand, timeoutMs = 15_000) =>
     protocolCommandsRef.current!.request(message, timeoutMs), []);
+
+  const historyEncryption = useHistoryEncryption({
+    activeBackendId: activeBackendConnectionId,
+    connected: connectionState === 'open' && connectedBackendIdRef.current === activeBackendConnectionId,
+    sendCommand: sendProtocolCommand,
+    // Keys arrived: drop projections that may hold locked rows and reopen
+    // the visible conversation so it decrypts now.
+    onUnlocked: () => {
+      const recovery = conversationRecoveryRef.current;
+      if (!recovery) return;
+      for (const id of recovery.loadedConversationIds()) recovery.release(id);
+      if (activeConversationRef.current) void openConversation(activeConversationRef.current);
+    },
+  });
+  historyEncryptionRef.current = historyEncryption;
+
+  // Encrypted manifest titles (§3.2): decrypt what is new, then re-merge the
+  // listed manifests once more titles are readable.
+  const { decryptManifestTitles: decryptTitles, titleRevision: decryptedTitleRevision, view: historyView } = historyEncryption;
+  useEffect(() => {
+    if (historyView.status !== 'ready') return;
+    void decryptTitles(activeBackendConnectionId, v2Conversations);
+  }, [activeBackendConnectionId, decryptTitles, historyView.status, v2Conversations]);
+  useEffect(() => {
+    if (!decryptedTitleRevision) return;
+    setConversations((current) => mergeManifestConversations(current, withDecryptedTitles(activeBackendConnectionId, v2Conversations), workspacesRef.current, activeBackendConnectionId));
+  }, [decryptedTitleRevision]);
 
   const controlConversation = useCallback(async (conversationId: string, control: LiveConversationControl): Promise<boolean> => {
     const conversation = conversationsRef.current.find(item => item.id === conversationId);
@@ -3897,6 +3953,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       const wsUrl = buildV2WebSocketUrlWithOptions(inspected.origin, {
         cryptoQueryString: crypto?.queryString,
         device: deviceIdentityFromSecret(settings.deviceSecret),
+        historyEncryption: true,
       });
 
       try {
@@ -4546,6 +4603,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
 
   const removeBackendConnection = useCallback((id: string) => {
     if (backendConnections.length <= 1) return;
+    void historyEncryptionRef.current?.forgetBackend(id).catch((error: unknown) => {
+      setLastError(error instanceof Error ? error.message : t('history.keyFailed'));
+    });
     const next = backendConnections.filter((profile) => profile.id !== id);
     setBackendConnections(next);
     if (activeBackendConnectionId === id && next[0]) {
@@ -7383,10 +7443,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     if (!conversation) throw new Error(t('alert.noConversation'));
     const v2Id = conversation.v2ConversationId;
     const entries = v2Id
-      ? await fetchConversationTranscript((id, after, limit) => v2ApiForConversation(id).replayEvents(id, after, limit, 'summary'), v2Id, conversation.workspaceId)
+      ? await fetchConversationTranscript((id, after, limit) => decryptedHistoryReplay(id, v2ApiForConversation(id).replayEvents(id, after, limit, 'summary'), 'summary'), v2Id, conversation.workspaceId)
       : transcriptEntries(timelineRef.current.filter((entry) => entry.conversationId === conversationId));
     return conversationTranscriptMarkdown(entries, { title: conversation.title, maxBytes });
-  }, [v2ApiForConversation]);
+  }, [decryptedHistoryReplay, v2ApiForConversation]);
 
   const sendSlashCommand = useCallback(
     (input: string, conversationId = activeConversationRef.current) => {
@@ -7430,8 +7490,21 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
             void sendV2Prompt(trimmed, conversation.id);
             return;
           }
+          // An e2e backend cannot read the original prompt back (§7): retry
+          // carries the text this device decrypted.
+          let retryPrompt: string | undefined;
+          if (lower === 'retry' && historyEncryptionRef.current?.e2e) {
+            const timeline = conversationRecoveryRef.current?.get(conversation.v2ConversationId)?.timeline ?? [];
+            const original = [...timeline].reverse().find((entry) => entry.kind === 'outgoing');
+            if (!original || original.detailLocked || !original.subtitle.trim()) {
+              setLastError(t('history.retryNeedsPrompt'));
+              return;
+            }
+            retryPrompt = original.subtitle;
+          }
           void sendProtocolCommand({ id: createRequestId(lower), type: `conversation.${lower}`, payload: {
             conversationId: conversation.v2ConversationId,
+            ...(retryPrompt !== undefined ? { prompt: retryPrompt } : {}),
           } }).then(() => recoverConversation(conversation.id)).catch((error: unknown) => {
             setLastError(error instanceof Error ? error.message : t('sess.operationFailed'));
             void recoverConversation(conversation.id);
@@ -8468,7 +8541,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     for (const [fromSequence, toSequence] of merged) {
       let cursor = fromSequence - 1;
       while (cursor < toSequence) {
-        const page = await api.replayEvents(v2Id, cursor, Math.min(500, toSequence - cursor));
+        const page = await decryptedHistoryReplay(v2Id, api.replayEvents(v2Id, cursor, Math.min(500, toSequence - cursor)), 'full');
         let reached = false;
         for (const event of page.events) {
           if (event.sequence > cursor && event.sequence <= toSequence) {
@@ -8482,7 +8555,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     }
     return events.length > 0
       && (conversationRecoveryRef.current?.hydrate(v2Id, conversation?.workspaceId ?? '', events) ?? false);
-  }, [v2ApiForConversation]);
+  }, [decryptedHistoryReplay, v2ApiForConversation]);
 
   // Kept referentially stable: the composer @-mention effect depends on this
   // callback, and a new identity per render would re-fire (and discard) the
@@ -8529,6 +8602,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     events,
     timeline: visibleTimeline,
     hydrateProcessGroup,
+    historyEncryption,
     mentionHistory,
     experimentalFeatures,
     setExperimentalFeatures,

@@ -11,6 +11,10 @@ export type TodeXDesktopApi = {
     get: (key: string) => Promise<unknown>;
     set: (key: string, value: unknown) => Promise<void>;
   };
+  secureStore: {
+    get: (key: string) => Promise<string | null>;
+    set: (key: string, value: string | null) => Promise<void>;
+  };
   dialog: {
     openDirectory: () => Promise<string | null>;
     openFiles: (options?: { images?: boolean }) => Promise<string[]>;

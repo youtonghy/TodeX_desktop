@@ -8,6 +8,7 @@ import { normalizeServerUrl } from '@todex/protocol/todex';
 import { BACKEND_LABEL_COLORS, backendLabelColor } from '../session/backendColors';
 import { Field } from '../components/Field';
 import { DevicePairingPanel } from '../components/DevicePairingPanel';
+import { HistoryEncryptionPanel } from '../components/HistoryEncryptionPanel';
 import { AgentDesktopSettings } from '../components/AgentDesktopSettings';
 import { pairingConnectionPatch } from '../session/pairingImport';
 import type { TodeXSession } from '../session/useTodeXSession';
@@ -168,6 +169,7 @@ export function SettingsPanel({ session }: Props) {
             </Select>
             {activeProfile.encryptionProtocol !== 'none' ? <Field label={t('settings.encryptionKey')} value={activeProfile.encryptionPublicKey} onChange={(encryptionPublicKey) => { updateBackendConnection(activeProfile.id, { encryptionPublicKey }); setSettings((current) => ({ ...current, encryptionPublicKey })); }} /> : null}
             <DevicePairingPanel session={session} deviceName="TodeX Desktop" autoStartNonce={pairingAutoStart} />
+            <HistoryEncryptionPanel history={session.historyEncryption} />
             <div className="flex gap-2"><Button onPress={() => (connected ? closeSocket(true) : connect())}>{connected ? t('settings.disconnect') : connectionState === 'error' ? t('settings.retry') : t('settings.connect')}</Button>{backendConnections.length > 1 ? <Button variant="danger-soft" onPress={() => removeBackendConnection(activeProfile.id)}>{t('settings.removeBackend')}</Button> : null}</div>
           </>
         ) : null}

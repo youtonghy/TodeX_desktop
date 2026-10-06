@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, nativeTheme, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, nativeTheme, safeStorage, shell } from 'electron';
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
@@ -124,6 +124,22 @@ async function probeDefaultBackend(): Promise<void> {
   } catch (error) {
     debugLog('warn', 'backend.probe.error', { target, error });
     console.warn(`[${APP_IDENTITY}] backendProbe ${target} failed: ${error instanceof Error ? error.message : error}`);
+  }
+}
+
+function secureStoreKey(key: string): string {
+  if (typeof key !== 'string' || !key) throw new Error('secureStore key must be a non-empty string');
+  return `secure:${key}`;
+}
+
+/** safeStorage must be backed by the OS keychain; Linux without a secret
+ * service falls back to a hard-coded key (`basic_text`), which is refused. */
+async function requireSecureStorage(): Promise<void> {
+  if (!(await safeStorage.isAsyncEncryptionAvailable())) {
+    throw new Error(mainT('secureStore.unavailable'));
+  }
+  if (process.platform === 'linux' && safeStorage.getSelectedStorageBackend() === 'basic_text') {
+    throw new Error(mainT('secureStore.basicText'));
   }
 }
 
@@ -529,6 +545,28 @@ app.whenReady().then(() => {
       delete next[key];
     } else {
       next[key] = value;
+    }
+    writeStore(next);
+  });
+
+  // Secrets (history device keys) are sealed by the OS keychain and kept in the
+  // store as base64 under a `secure:` prefix; the plaintext never touches disk.
+  handleIpc('secureStore:get', async (_event, key: string) => {
+    const sealed = readStore()[secureStoreKey(key)];
+    if (typeof sealed !== 'string') return null;
+    await requireSecureStorage();
+    const { result } = await safeStorage.decryptStringAsync(Buffer.from(sealed, 'base64'));
+    return result;
+  });
+
+  handleIpc('secureStore:set', async (_event, key: string, value: string | null) => {
+    const next = readStore();
+    if (value === null || value === undefined) {
+      delete next[secureStoreKey(key)];
+    } else {
+      if (typeof value !== 'string') throw new Error('secureStore values must be strings');
+      await requireSecureStorage();
+      next[secureStoreKey(key)] = (await safeStorage.encryptStringAsync(value)).toString('base64');
     }
     writeStore(next);
   });

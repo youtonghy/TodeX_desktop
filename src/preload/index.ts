@@ -35,6 +35,12 @@ const api = {
     get: (key: string) => ipcRenderer.invoke('store:get', key) as Promise<unknown>,
     set: (key: string, value: unknown) => ipcRenderer.invoke('store:set', key, value) as Promise<void>,
   },
+  /** Secrets sealed with the OS keychain (Electron safeStorage); `null` when
+   * the key is unset. Rejects when no OS-backed encryption is available. */
+  secureStore: {
+    get: (key: string) => ipcRenderer.invoke('secureStore:get', key) as Promise<string | null>,
+    set: (key: string, value: string | null) => ipcRenderer.invoke('secureStore:set', key, value) as Promise<void>,
+  },
   dialog: {
     openDirectory: () => ipcRenderer.invoke('dialog:openDirectory') as Promise<string | null>,
     openFiles: (options?: { images?: boolean }) =>

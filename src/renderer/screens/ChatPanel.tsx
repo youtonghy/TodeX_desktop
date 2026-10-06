@@ -487,6 +487,11 @@ const ChatTimelineItem = memo(function ChatTimelineItem({
     );
   }
   const entry = item.entry;
+  // End-to-end encrypted history this device holds no key for: one quiet
+  // line per turn (docs/history-encryption.md §5.3).
+  if (entry.detailLocked) {
+    return <p data-message-id={entry.id} role="note" className="text-muted py-1 text-center text-xs">{t('chat.historyLocked')}</p>;
+  }
   if (isChatToolEntry(entry)) {
     const tool = toolCardPresentation(entry, thinking);
     return <ChatTool defaultExpanded={false} state={tool.state} toolName={tool.summary ? `${tool.label} · ${tool.summary}` : tool.label} argsText={tool.argsText} output={tool.output} errorText={tool.errorText} triggerPrefix={thinking ? t('chat.toolCalling') : t('chat.toolCalled')} />;

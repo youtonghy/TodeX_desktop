@@ -33,6 +33,14 @@ export function installBrowserDesktopBridge(): void {
         writeLocal(key, value);
       },
     },
+    // A browser tab has no OS keychain; secrets are refused rather than kept
+    // in plaintext localStorage (only absent keys read back).
+    secureStore: {
+      get: async () => null,
+      set: async (_key, value) => {
+        if (value !== null) throw new Error(t('history.keyFailed'));
+      },
+    },
     dialog: {
       openDirectory: async () => null,
       openFiles: async () => [],
