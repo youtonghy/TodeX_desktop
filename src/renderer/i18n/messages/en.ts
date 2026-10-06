@@ -1681,7 +1681,8 @@ export const en: Messages = {
   'history.revoked': 'Revoked',
   'history.revoke': 'Revoke',
   'history.revokeTitle': 'Revoke this key?',
-  'history.revokeBody': '"{name}" will not be able to read history written from now on. Older history it was already given stays readable to it.',
+  'history.revokeBody': '"{name}" will be revoked permanently: it can no longer read any encrypted history (including older history it was given) or register again until another authorized device restores its access.',
+  'history.revokeRecoveryBody': '"{name}" will not be able to read history written from now on. Older history it was already given stays readable to it.',
   'history.enable': 'Turn on end-to-end encryption',
   'history.enableNeedsDevice': 'This device\'s history key must be registered first (it registers automatically once connected).',
   'history.enabled': 'End-to-end encryption is on',
@@ -1733,5 +1734,12 @@ export const en: Messages = {
   'history.clientUpgradeRequired': 'This backend\'s history is end-to-end encrypted and this client version cannot read it. Please update TodeX.',
   'history.storageLow': 'The backend\'s disk has less than 1 GiB free, so new messages cannot be sent. Free up space and try again.',
   'history.retryNeedsPrompt': 'History is encrypted and the original message cannot be decrypted on this device, so it cannot be retried.',
+  'history.accessRevoked': 'This device\'s history access was revoked. Another authorized device must restore it.',
+  'history.revokedDevices': 'Revoked devices',
+  'history.revokedDevice': '{device}, revoked {time}',
+  'history.restore': 'Restore access',
+  'history.restoreTitle': 'Restore this device\'s history access?',
+  'history.restoreBody': '"{name}" will be able to register a new history key. It needs a new grant or the recovery key to read older history.',
+  'history.restored': 'History access restored for that device',
 
 };

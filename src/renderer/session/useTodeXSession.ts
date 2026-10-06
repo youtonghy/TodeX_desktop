@@ -31,7 +31,7 @@ import {
 import type { ConversationReplay, ProviderDescriptor, ProviderKind, ConversationManifest, PromptContentRef, PromptSkillRef, SkillCatalogDescriptor, ProviderModelDescriptor, ProviderCommandDescriptor, ContextCompactionState, SubagentRun, MemoryEntry } from '@todex/protocol/v2';
 import { contextCompactionStatus } from '@todex/protocol/v2';
 import { HISTORY_ENCRYPTION_CAPABILITY, V2ApiClient, buildV2WebSocketUrlWithOptions, normalizeConversationEvent } from '@todex/protocol/v2';
-import { historyRetryPrompt, historyRetryRequest, historyRetrySequence } from '@todex/protocol/historyEncryption';
+import { HISTORY_ENCRYPTION_UPDATED, historyRetryPrompt, historyRetryRequest, historyRetrySequence } from '@todex/protocol/historyEncryption';
 import { historyErrorMessage, useHistoryEncryption, type HistoryEncryptionSession } from './useHistoryEncryption';
 import { retryWithDelays } from '@todex/protocol/retry';
 import { probeBackendConnection, nextReconnectDelayMs, inspectServerUrl, credentialMatchesOrigin } from '@todex/protocol/connectionProbe';
@@ -3501,6 +3501,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         if (!callerReports) setLastError(message);
         return;
       }
+      if (messageType === HISTORY_ENCRYPTION_UPDATED) {
+        historyEncryptionRef.current?.receiveUpdate(connectedBackendIdRef.current ?? activeBackendConnectionIdRef.current, parsed.payload);
+        return;
+      }
       if (messageType === 'agentBrowser.frame') {
         const frame = parsed.payload as AgentBrowserFrame | undefined;
         if (frame?.conversationId) agentBrowserWatchersRef.current.get(frame.conversationId)?.forEach(listener => listener(frame));
@@ -3678,16 +3682,28 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     connected: connectionState === 'open' && connectedBackendIdRef.current === activeBackendConnectionId,
     supported: serverVersion ? serverVersion.historyEncryption === 1 : undefined,
     sendCommand: sendProtocolCommand,
-    // Keys arrived: drop projections that may hold locked rows and reopen
-    // the visible conversation so it decrypts now.
-    onUnlocked: () => {
+    // Keys arrived: drop the projections (of the named conversations, or
+    // all) that hold locked rows and reopen the visible conversation so it
+    // decrypts now.
+    onUnlocked: (conversationIds) => {
       const recovery = conversationRecoveryRef.current;
       if (!recovery) return;
-      for (const id of recovery.loadedConversationIds()) recovery.release(id);
-      if (activeConversationRef.current) void openConversation(activeConversationRef.current);
+      const activeV2Id = conversationsRef.current.find((item) => item.id === activeConversationRef.current)?.v2ConversationId;
+      let reopenActive = false;
+      for (const id of conversationIds ?? recovery.loadedConversationIds()) {
+        if (!recovery.get(id)?.timeline.some((entry) => entry.detailLocked)) continue;
+        if (recovery.release(id) && id === activeV2Id) reopenActive = true;
+      }
+      if (reopenActive && activeConversationRef.current) void openConversation(activeConversationRef.current);
     },
   });
   historyEncryptionRef.current = historyEncryption;
+
+  // A revoked device says so once instead of only showing locked rows.
+  const historyRevoked = historyEncryption.revoked;
+  useEffect(() => {
+    if (historyRevoked) setLastError(t('history.accessRevoked'));
+  }, [historyRevoked]);
 
   // Encrypted manifest titles (§3.2): decrypt what is new, then re-merge the
   // listed manifests once more titles are readable.

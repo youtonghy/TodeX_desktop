@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AlertDialog, Button, Checkbox, Chip, Label, ProgressBar, Spinner, TextArea, TextField, toast } from '@heroui/react';
 import { encodeQrCode } from '@todex/protocol/qrCode';
-import type { HistoryRecipient, HistoryRewrapProgress } from '@todex/protocol/historyEncryption';
+import type { HistoryRecipient, HistoryRevokedDevice, HistoryRewrapProgress } from '@todex/protocol/historyEncryption';
 import type { HistoryEncryptionSession, RecoveryKeyDraft } from '../session/useHistoryEncryption';
 import { useT } from '../i18n';
 
@@ -9,7 +9,7 @@ type Props = { history: HistoryEncryptionSession };
 /** `recovery`: showing a new recovery key; `skip`: second warning before
  * enabling without one (docs/history-encryption.md §3.3). */
 type EnableStep = { kind: 'recovery'; draft: RecoveryKeyDraft; enable: boolean } | { kind: 'skip' } | null;
-type Confirm = { kind: 'disable' } | { kind: 'revoke'; recipient: HistoryRecipient } | { kind: 'resetKey' } | null;
+type Confirm = { kind: 'disable' } | { kind: 'revoke'; recipient: HistoryRecipient } | { kind: 'restore'; device: HistoryRevokedDevice } | { kind: 'resetKey' } | null;
 
 export function RecoveryQrCode({ payload, label }: { payload: string; label: string }) {
   const qr = useMemo(() => encodeQrCode(payload), [payload]);
@@ -28,7 +28,7 @@ function progressText(t: ReturnType<typeof useT>, progress: HistoryRewrapProgres
 }
 
 /** History encryption for the active backend: mode, recipients, recovery
- * key, access requests from new devices and recovery import. */
+ * key, access requests from new devices, revoked devices and recovery import. */
 export function HistoryEncryptionPanel({ history }: Props) {
   const t = useT();
   const { view, grantRuns } = history;
@@ -44,7 +44,8 @@ export function HistoryEncryptionPanel({ history }: Props) {
   // A recovery key never outlives the dialog that shows it.
   useEffect(() => () => { if (step?.kind === 'recovery') step.draft.seed.fill(0); }, [step]);
   useEffect(() => { setStep(null); setConfirm(null); setImportProgress(null); setRequestedGrant(''); }, [view.backendId]);
-  // Grants are not pushed: opening the panel reads the current state.
+  // Updates are pushed while connected; opening the panel still re-reads the
+  // state in case one was missed.
   const { refresh } = history;
   useEffect(() => { void refresh(); }, [refresh, view.backendId]);
 
@@ -82,7 +83,10 @@ export function HistoryEncryptionPanel({ history }: Props) {
   }
 
   const e2e = state.mode === 'e2e';
-  const registered = Boolean(view.localRid && state.myRid === view.localRid);
+  // A revoked device can only read the state until another device restores it.
+  const revoked = Boolean(view.accessRevoked);
+  const registered = !revoked && Boolean(view.localRid && state.myRid === view.localRid);
+  const locked = Boolean(busy) || revoked;
   const activeRecipients = state.recipients.filter((item) => !item.revokedAt);
   const recovery = activeRecipients.find((item) => item.kind === 'recovery');
   const pendingGrants = state.grants.filter((grant) => grant.status === 'pending');
@@ -91,6 +95,9 @@ export function HistoryEncryptionPanel({ history }: Props) {
   const recipientLabel = (item: HistoryRecipient) => item.kind === 'recovery' ? t('history.recipientRecovery')
     : item.rid === view.localRid ? t('history.recipientThisDevice')
     : t('history.recipientDevice', { device: item.deviceId ?? item.rid.slice(0, 8) });
+  const ownDeviceId = state.recipients.find((item) => item.rid === view.localRid)?.deviceId;
+  const deviceLabel = (device: HistoryRevokedDevice) => device.deviceId === ownDeviceId ? t('history.recipientThisDevice')
+    : t('history.recipientDevice', { device: device.deviceId });
 
   const startEnable = () => {
     setSavedConfirmed(false);
@@ -115,10 +122,10 @@ export function HistoryEncryptionPanel({ history }: Props) {
         <Chip size="sm" variant="soft" color={e2e ? 'success' : 'default'}>{t(e2e ? 'history.modeE2e' : 'history.modeOff')}</Chip>
       </div>
 
-      {view.keyError ? (
+      {revoked ? <p role="alert" className="text-danger text-xs">{t('history.accessRevoked')}</p> : view.keyError ? (
         <div className="flex flex-col gap-2">
           <p className="text-danger text-xs">{view.keyError}</p>
-          <div><Button size="sm" variant="secondary" onPress={() => setConfirm({ kind: 'resetKey' })}>{t('history.resetKey')}</Button></div>
+          <div><Button size="sm" variant="secondary" isDisabled={locked} onPress={() => setConfirm({ kind: 'resetKey' })}>{t('history.resetKey')}</Button></div>
         </div>
       ) : !registered ? <p className="text-warning text-xs">{t('history.notRegistered')}</p> : null}
 
@@ -131,7 +138,7 @@ export function HistoryEncryptionPanel({ history }: Props) {
                 <span className={item.revokedAt ? 'text-muted line-through' : ''}>{recipientLabel(item)}</span>
                 {item.revokedAt ? <Chip size="sm" variant="soft">{t('history.revoked')}</Chip>
                   : item.rid !== view.localRid ? (
-                    <Button size="sm" variant="tertiary" isDisabled={Boolean(busy)} onPress={() => setConfirm({ kind: 'revoke', recipient: item })}>{t('history.revoke')}</Button>
+                    <Button size="sm" variant="tertiary" isDisabled={locked} onPress={() => setConfirm({ kind: 'revoke', recipient: item })}>{t('history.revoke')}</Button>
                   ) : null}
               </li>
             ))}
@@ -139,12 +146,29 @@ export function HistoryEncryptionPanel({ history }: Props) {
         ) : <p className="text-muted text-xs">{t('history.noRecipients')}</p>}
       </div>
 
+      {state.revokedDevices.length ? (
+        <div className="flex flex-col gap-1.5">
+          <p className="text-sm font-medium">{t('history.revokedDevices')}</p>
+          <ul className="flex flex-col gap-1.5" aria-label={t('history.revokedDevices')}>
+            {state.revokedDevices.map((device) => (
+              <li key={device.deviceId} className="flex items-center justify-between gap-2 text-xs">
+                <span>{t('history.revokedDevice', { device: deviceLabel(device), time: device.revokedAt })}</span>
+                {/* Only a device that still has access restores another. */}
+                {!revoked ? (
+                  <Button size="sm" variant="tertiary" isDisabled={locked} onPress={() => setConfirm({ kind: 'restore', device })}>{t('history.restore')}</Button>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
       <div className="flex flex-wrap gap-2">
         {e2e ? (
           <>
-            <Button size="sm" variant="danger-soft" isDisabled={Boolean(busy)} onPress={() => setConfirm({ kind: 'disable' })}>{t('history.disable')}</Button>
+            <Button size="sm" variant="danger-soft" isDisabled={locked} onPress={() => setConfirm({ kind: 'disable' })}>{t('history.disable')}</Button>
             {!recovery ? (
-              <Button size="sm" variant="secondary" isDisabled={Boolean(busy)} onPress={() => { setSavedConfirmed(false); setStep({ kind: 'recovery', draft: history.createRecoveryDraft(), enable: false }); }}>{t('history.createRecovery')}</Button>
+              <Button size="sm" variant="secondary" isDisabled={locked} onPress={() => { setSavedConfirmed(false); setStep({ kind: 'recovery', draft: history.createRecoveryDraft(), enable: false }); }}>{t('history.createRecovery')}</Button>
             ) : null}
           </>
         ) : (
@@ -155,7 +179,7 @@ export function HistoryEncryptionPanel({ history }: Props) {
           {ownPending || requestedGrant ? t('history.requestPending') : t('history.requestAccess')}
         </Button>
       </div>
-      {!e2e && !registered ? <p className="text-muted text-xs">{t('history.enableNeedsDevice')}</p> : null}
+      {!e2e && !registered && !revoked ? <p className="text-muted text-xs">{t('history.enableNeedsDevice')}</p> : null}
 
       {incoming.length ? (
         <div className="flex flex-col gap-2">
@@ -182,7 +206,7 @@ export function HistoryEncryptionPanel({ history }: Props) {
                       });
                     }}>{progress?.progress.cursor ? t('history.resume') : t('history.authorize')}</Button>
                   )}
-                  <Button size="sm" variant="tertiary" isDisabled={progress?.running || Boolean(busy)} onPress={() => { void run('dismiss', () => history.dismissGrant(grant.grantId)); }}>{t('history.dismiss')}</Button>
+                  <Button size="sm" variant="tertiary" isDisabled={progress?.running || locked} onPress={() => { void run('dismiss', () => history.dismissGrant(grant.grantId)); }}>{t('history.dismiss')}</Button>
                 </div>
               </div>
             );
@@ -254,21 +278,25 @@ export function HistoryEncryptionPanel({ history }: Props) {
           <AlertDialog.Container>
             <AlertDialog.Dialog className="sm:max-w-md">
               <AlertDialog.Header>
-                <AlertDialog.Heading>{confirm?.kind === 'disable' ? t('history.disableTitle') : confirm?.kind === 'resetKey' ? t('history.resetKeyTitle') : t('history.revokeTitle')}</AlertDialog.Heading>
+                <AlertDialog.Heading>{confirm?.kind === 'disable' ? t('history.disableTitle') : confirm?.kind === 'resetKey' ? t('history.resetKeyTitle')
+                  : confirm?.kind === 'restore' ? t('history.restoreTitle') : t('history.revokeTitle')}</AlertDialog.Heading>
               </AlertDialog.Header>
               <AlertDialog.Body>
                 <p className="text-muted text-sm">{confirm?.kind === 'disable' ? t('history.disableBody') : confirm?.kind === 'resetKey' ? t('history.resetKeyBody')
-                  : confirm?.kind === 'revoke' ? t('history.revokeBody', { name: recipientLabel(confirm.recipient) }) : null}</p>
+                  : confirm?.kind === 'restore' ? t('history.restoreBody', { name: deviceLabel(confirm.device) })
+                  : confirm?.kind === 'revoke' ? t(confirm.recipient.kind === 'recovery' ? 'history.revokeRecoveryBody' : 'history.revokeBody', { name: recipientLabel(confirm.recipient) }) : null}</p>
               </AlertDialog.Body>
               <AlertDialog.Footer>
                 <Button slot="close" variant="tertiary">{t('common.cancel')}</Button>
-                <Button variant="danger" isPending={Boolean(busy)} onPress={() => {
+                <Button variant={confirm?.kind === 'restore' ? 'primary' : 'danger'} isPending={Boolean(busy)} onPress={() => {
                   const current = confirm;
                   if (!current) return;
                   void run(current.kind, () => current.kind === 'disable' ? history.disable()
                     : current.kind === 'resetKey' ? history.resetDeviceKey()
-                    : history.revoke(current.recipient.rid)).then((ok) => { if (ok) setConfirm(null); });
-                }}>{confirm?.kind === 'disable' ? t('history.disable') : confirm?.kind === 'resetKey' ? t('history.resetKey') : t('history.revoke')}</Button>
+                    : current.kind === 'restore' ? history.restoreDevice(current.device.deviceId)
+                    : history.revoke(current.recipient.rid), current.kind === 'restore' ? t('history.restored') : undefined).then((ok) => { if (ok) setConfirm(null); });
+                }}>{confirm?.kind === 'disable' ? t('history.disable') : confirm?.kind === 'resetKey' ? t('history.resetKey')
+                  : confirm?.kind === 'restore' ? t('history.restore') : t('history.revoke')}</Button>
               </AlertDialog.Footer>
             </AlertDialog.Dialog>
           </AlertDialog.Container>

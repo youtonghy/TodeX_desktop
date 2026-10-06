@@ -1681,7 +1681,8 @@ export const zhCN = {
   'history.revoked': '已吊销',
   'history.revoke': '吊销',
   'history.revokeTitle': '吊销此密钥？',
-  'history.revokeBody': '「{name}」将无法读取此后新写入的历史。已授权给它的旧历史不受影响。',
+  'history.revokeBody': '「{name}」将被永久吊销：它不能再读取任何加密历史（包括已授权的旧历史），也不能重新登记，直到由其他已授权设备恢复访问。',
+  'history.revokeRecoveryBody': '「{name}」将无法读取此后新写入的历史。已授权给它的旧历史不受影响。',
   'history.enable': '开启端到端加密',
   'history.enableNeedsDevice': '开启前需要先登记此设备的历史密钥（连接后会自动登记）。',
   'history.enabled': '已开启端到端加密',
@@ -1733,5 +1734,12 @@ export const zhCN = {
   'history.clientUpgradeRequired': '此后端的会话历史已端到端加密，当前客户端版本无法读取，请升级 TodeX。',
   'history.storageLow': '后端所在磁盘可用空间不足 1 GiB，暂时无法发送新消息，请清理磁盘后重试。',
   'history.retryNeedsPrompt': '历史已加密且原始消息无法在此设备解密，无法重试。',
+  'history.accessRevoked': '此设备的历史访问已被吊销，需由其他已授权设备恢复',
+  'history.revokedDevices': '已吊销的设备',
+  'history.revokedDevice': '{device}，吊销于 {time}',
+  'history.restore': '恢复访问',
+  'history.restoreTitle': '恢复此设备的历史访问？',
+  'history.restoreBody': '「{name}」将可以重新登记新的历史密钥。它需要再次获得授权或导入恢复密钥才能读取旧历史。',
+  'history.restored': '已恢复该设备的历史访问',
 
 } satisfies Record<string, string>;

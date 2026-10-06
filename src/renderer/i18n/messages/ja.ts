@@ -1681,7 +1681,8 @@ export const ja: Messages = {
   'history.revoked': '失効済み',
   'history.revoke': '失効',
   'history.revokeTitle': 'この鍵を失効させますか？',
-  'history.revokeBody': '「{name}」はこれ以降に書き込まれる履歴を読めなくなります。既に許可された過去の履歴には影響しません。',
+  'history.revokeBody': '「{name}」は永久に失効します。他の許可済みデバイスがアクセスを復元するまで、暗号化された履歴（許可済みの過去の履歴を含む）を読めず、再登録もできません。',
+  'history.revokeRecoveryBody': '「{name}」はこれ以降に書き込まれる履歴を読めなくなります。既に許可された過去の履歴には影響しません。',
   'history.enable': 'エンドツーエンド暗号化を有効にする',
   'history.enableNeedsDevice': '有効にする前にこのデバイスの履歴キーを登録する必要があります（接続すると自動で登録されます）。',
   'history.enabled': 'エンドツーエンド暗号化を有効にしました',
@@ -1733,5 +1734,12 @@ export const ja: Messages = {
   'history.clientUpgradeRequired': 'このバックエンドの履歴はエンドツーエンド暗号化されており、このバージョンでは読めません。TodeX を更新してください。',
   'history.storageLow': 'バックエンドのディスク空き容量が 1 GiB 未満のため、新しいメッセージを送信できません。容量を空けてから再試行してください。',
   'history.retryNeedsPrompt': '履歴が暗号化されており、元のメッセージをこのデバイスで復号できないため再試行できません。',
+  'history.accessRevoked': 'このデバイスの履歴アクセスは失効しています。他の許可済みデバイスから復元する必要があります',
+  'history.revokedDevices': '失効したデバイス',
+  'history.revokedDevice': '{device}（{time} に失効）',
+  'history.restore': 'アクセスを復元',
+  'history.restoreTitle': 'このデバイスの履歴アクセスを復元しますか？',
+  'history.restoreBody': '「{name}」は新しい履歴キーを登録できるようになります。過去の履歴を読むには、再度の許可または復元キーが必要です。',
+  'history.restored': 'このデバイスの履歴アクセスを復元しました',
 
 };

@@ -1,14 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  HISTORY_ACCESS_REVOKED,
   HISTORY_CLIENT_UPGRADE_REQUIRED,
   HISTORY_STORAGE_LOW,
   HistoryDecryptor,
   historyCommands,
   historyEventsNeedDecryption,
+  historyUpdateReaction,
   historyWrapsFetcher,
   isHistoryEncryptedPayload,
   parseFrames,
   parseHistoryEncryptionState,
+  parseHistoryEncryptionUpdate,
   rewrapHistoryKeys,
   type HistoryCommandFrame,
   type HistoryDetail,
@@ -30,7 +33,9 @@ import { deleteHistorySeed, loadHistorySeed, saveHistorySeed } from '../lib/hist
 // End-to-end encrypted conversation history (TodeX_backend
 // docs/history-encryption.md) for the active backend: this device's history
 // key, its registration, decryption of every history path before projection,
-// and the settings actions (enable/disable, recovery key, grants).
+// and the settings actions (enable/disable, recovery key, grants, restoring
+// revoked devices). State changes are pushed (`history.encryption.updated`);
+// the state is also re-read on every (re)connect and when settings open.
 
 type CommandSender = (message: { id: string; type: string; payload: Record<string, unknown> }, timeoutMs?: number) => Promise<Record<string, unknown>>;
 
@@ -44,6 +49,10 @@ export type HistoryEncryptionView = {
   error?: string;
   /** Why this device's history key could not be loaded or created. */
   keyError?: string;
+  /** This device was revoked (`myAccess`, or a command failed with
+   * HISTORY_ACCESS_REVOKED): no registration and no history actions until
+   * another device restores it. */
+  accessRevoked?: boolean;
 };
 
 export type HistoryGrantRun = { running: boolean; progress: HistoryRewrapProgress; error?: string };
@@ -54,15 +63,18 @@ export type RecoveryKeyDraft = { seed: Uint8Array; words: string[]; qrPayload: s
 export function historyErrorMessage(code: string): string | null {
   if (code === HISTORY_CLIENT_UPGRADE_REQUIRED) return t('history.clientUpgradeRequired');
   if (code === HISTORY_STORAGE_LOW) return t('history.storageLow');
+  if (code === HISTORY_ACCESS_REVOKED) return t('history.accessRevoked');
   return null;
 }
+
+const isAccessRevoked = (error: unknown) => error instanceof ProtocolCommandError && error.code === HISTORY_ACCESS_REVOKED;
 
 const ridOf = (publicKey: Uint8Array) => encodeBase64Url(historyRecipientId(publicKey));
 /** keys.wraps calls in flight while decrypting manifest titles. */
 const TITLE_CONCURRENCY = 4;
-/** How often a device waiting for its grant re-reads the state: the backend
- * does not push grant progress (§7). */
-const GRANT_POLL_MS = 15_000;
+/** Pushed updates arrive in bursts (one per grant batch): they are folded
+ * into one state read and one unlock. */
+const UPDATE_DEBOUNCE_MS = 300;
 
 export function useHistoryEncryption({ activeBackendId, connected, supported, sendCommand, onUnlocked }: {
   activeBackendId: string;
@@ -71,8 +83,9 @@ export function useHistoryEncryption({ activeBackendId, connected, supported, se
   /** `/v2/version` reports `historyEncryption: 1`; `undefined` until known. */
   supported: boolean | undefined;
   sendCommand: CommandSender;
-  /** Keys arrived (grant, recovery import): locked rows may now open. */
-  onUnlocked: () => void;
+  /** Keys arrived (grant, recovery import): locked rows of these
+   * conversations (all when omitted) may now open. */
+  onUnlocked: (conversationIds?: readonly string[]) => void;
 }) {
   const [view, setView] = useState<HistoryEncryptionView>({ backendId: activeBackendId, status: 'idle' });
   const [grantRuns, setGrantRuns] = useState<Record<string, HistoryGrantRun>>({});
@@ -85,11 +98,31 @@ export function useHistoryEncryption({ activeBackendId, connected, supported, se
   const liveChains = useRef(new Map<string, Promise<void>>());
   const titles = useRef(new Map<string, string | null>());
   const grantControllers = useRef(new Map<string, AbortController>());
+  /** Backends that revoked this device. */
+  const revokedBackends = useRef(new Set<string>());
+
+  /** A revoked device keeps no unwrapped keys and fetches no wraps: its
+   * encrypted rows project locked. */
+  const markRevoked = useCallback((backendId: string, revoked: boolean) => {
+    if (!revoked) { revokedBackends.current.delete(backendId); return; }
+    if (revokedBackends.current.has(backendId)) return;
+    revokedBackends.current.add(backendId);
+    decryptors.current.get(backendId)?.decryptor.clear();
+    decryptors.current.delete(backendId);
+    titles.current.clear();
+    setView((previous) => (previous.backendId === backendId ? { ...previous, accessRevoked: true } : previous));
+  }, []);
 
   const send = useCallback(async (frame: HistoryCommandFrame) => {
     if (!live.current.connected) throw new Error(t('history.notConnected'));
-    return live.current.sendCommand({ id: createRequestId('history'), ...frame }, 30_000);
-  }, []);
+    const backendId = live.current.activeBackendId;
+    try {
+      return await live.current.sendCommand({ id: createRequestId('history'), ...frame }, 30_000);
+    } catch (error) {
+      if (isAccessRevoked(error)) markRevoked(backendId, true);
+      throw error;
+    }
+  }, [markRevoked]);
 
   /** Wraps are fetched over the active backend's socket only. */
   const sendFor = useCallback((backendId: string) => (frame: HistoryCommandFrame) => {
@@ -100,7 +133,18 @@ export function useHistoryEncryption({ activeBackendId, connected, supported, se
   const decryptorFor = useCallback((backendId: string) => {
     let entry = decryptors.current.get(backendId);
     if (!entry) {
-      const decryptor = new HistoryDecryptor({ fetchWraps: historyWrapsFetcher(sendFor(backendId)) });
+      const fetchWraps = historyWrapsFetcher(sendFor(backendId));
+      const decryptor = new HistoryDecryptor({
+        fetchWraps: async (request) => {
+          if (revokedBackends.current.has(backendId)) return {};
+          try {
+            return await fetchWraps(request);
+          } catch (error) {
+            if (isAccessRevoked(error)) return {};
+            throw error;
+          }
+        },
+      });
       // A missing or unreadable key leaves the decryptor seedless: encrypted
       // events then project as locked and the settings panel shows why.
       const ready = loadHistorySeed(backendId).then((seed) => {
@@ -209,9 +253,12 @@ export function useHistoryEncryption({ activeBackendId, connected, supported, se
     }
     let localRid: string | undefined;
     let keyError: string | undefined;
+    // A revoked device never registers (nor re-keys) until it is restored.
+    let revoked = state.myAccess === 'revoked';
+    markRevoked(backendId, revoked);
     try {
       let seed = await loadHistorySeed(backendId);
-      if (!seed && register) {
+      if (!seed && register && !revoked) {
         seed = generateHistoryRecipientKeyPair().secretKey;
         await saveHistorySeed(backendId, seed);
       }
@@ -223,7 +270,7 @@ export function useHistoryEncryption({ activeBackendId, connected, supported, se
         if (decryptor.recipientIds[0] !== localRid) decryptor.setSeeds([seed]);
         decryptor.forgetMissing();
         seed.fill(0);
-        if (register && state.myRid !== localRid) {
+        if (register && !revoked && state.myRid !== localRid) {
           try {
             await send(historyCommands.register(publicKey));
           } catch (error) {
@@ -242,10 +289,11 @@ export function useHistoryEncryption({ activeBackendId, connected, supported, se
         }
       }
     } catch (error) {
-      keyError = error instanceof Error ? error.message : t('history.keyFailed');
+      if (isAccessRevoked(error)) revoked = true;
+      else keyError = error instanceof Error ? error.message : t('history.keyFailed');
     }
-    if (current()) setView({ backendId, status: 'ready', state, localRid, keyError });
-  }, [decryptorFor, send]);
+    if (current()) setView({ backendId, status: 'ready', state, localRid, keyError, accessRevoked: revoked });
+  }, [decryptorFor, markRevoked, send]);
 
   // Register on every (re)connect of a backend that serves encrypted history.
   useEffect(() => {
@@ -256,9 +304,12 @@ export function useHistoryEncryption({ activeBackendId, connected, supported, se
   /** Runs a settings action that answers with the encryption state. */
   const applyState = useCallback(async (frame: HistoryCommandFrame) => {
     const state = parseHistoryEncryptionState(await send(frame));
-    setView((previous) => (previous.backendId === live.current.activeBackendId ? { ...previous, status: 'ready', state } : previous));
+    const backendId = live.current.activeBackendId;
+    if (state.myAccess) markRevoked(backendId, state.myAccess === 'revoked');
+    setView((previous) => (previous.backendId === backendId
+      ? { ...previous, status: 'ready', state, ...(state.myAccess ? { accessRevoked: state.myAccess === 'revoked' } : {}) } : previous));
     return state;
-  }, [send]);
+  }, [markRevoked, send]);
 
   const ownSeed = useCallback(async () => {
     const seed = await loadHistorySeed(live.current.activeBackendId);
@@ -266,15 +317,47 @@ export function useHistoryEncryption({ activeBackendId, connected, supported, se
     return seed;
   }, []);
 
-  const unlocked = useCallback(() => {
+  const unlocked = useCallback((conversationIds?: readonly string[]) => {
     for (const { decryptor } of decryptors.current.values()) decryptor.forgetMissing();
     titles.current.clear();
-    live.current.onUnlocked();
+    live.current.onUnlocked(conversationIds);
   }, []);
 
-  // While this device waits for a grant, poll the state; once the grant is
-  // fulfilled, rows locked so far may open.
+  // Pushed `history.encryption.updated` frames: every one re-reads the state
+  // (registering once a revoked device is restored); wraps that arrived for
+  // this device unlock the conversations they cover.
   const waitingGrants = useRef(new Set<string>());
+  const pendingUpdate = useRef<{ backendId: string; unlock: Set<string> | 'all' | null; timer: ReturnType<typeof setTimeout> } | null>(null);
+  const flushUpdate = useCallback(() => {
+    const pending = pendingUpdate.current;
+    pendingUpdate.current = null;
+    if (!pending || pending.backendId !== live.current.activeBackendId) return;
+    if (pending.unlock) unlocked(pending.unlock === 'all' ? undefined : [...pending.unlock]);
+    void refresh(true);
+  }, [refresh, unlocked]);
+  const receiveUpdate = useCallback((backendId: string, payload: unknown) => {
+    if (backendId !== live.current.activeBackendId) return;
+    const update = parseHistoryEncryptionUpdate(payload);
+    if (!update) return;
+    const localRids = [live.current.view.localRid, ...(decryptors.current.get(backendId)?.decryptor.recipientIds ?? [])];
+    const { unlock } = historyUpdateReaction(update, localRids);
+    // Unlocked here already; the state read must not unlock it again.
+    if (unlock && update.reason === 'grant.fulfilled' && update.grantId) waitingGrants.current.delete(update.grantId);
+    let pending = pendingUpdate.current;
+    if (pending && pending.backendId !== backendId) { clearTimeout(pending.timer); pending = null; }
+    const merged = !unlock ? pending?.unlock ?? null
+      : unlock === 'all' || pending?.unlock === 'all' ? 'all'
+      : new Set([...(pending?.unlock ?? []), ...unlock]);
+    if (pending) clearTimeout(pending.timer);
+    pendingUpdate.current = { backendId, unlock: merged, timer: setTimeout(flushUpdate, UPDATE_DEBOUNCE_MS) };
+  }, [flushUpdate]);
+  useEffect(() => () => {
+    if (pendingUpdate.current) clearTimeout(pendingUpdate.current.timer);
+    pendingUpdate.current = null;
+  }, []);
+
+  // A grant this device waited for shows up fulfilled in a state read (an
+  // update missed while disconnected): rows locked so far may open.
   const ownPendingGrants = view.state?.grants
     .filter((grant) => grant.status === 'pending' && grant.rid === view.localRid)
     .map((grant) => grant.grantId).join(',') ?? '';
@@ -285,17 +368,15 @@ export function useHistoryEncryption({ activeBackendId, connected, supported, se
     waitingGrants.current = new Set(ownPendingGrants ? ownPendingGrants.split(',') : []);
     if (fulfilled) unlocked();
   }, [ownPendingGrants, unlocked, view.localRid, view.state]);
-  useEffect(() => {
-    if (!connected || !ownPendingGrants) return;
-    const timer = setInterval(() => { void refresh(false); }, GRANT_POLL_MS);
-    return () => clearInterval(timer);
-  }, [connected, ownPendingGrants, refresh]);
 
   const actions = useMemo(() => ({
     refresh: () => refresh(false),
     enable: () => applyState(historyCommands.enable()),
     disable: () => applyState(historyCommands.disable()),
     revoke: (rid: string) => applyState(historyCommands.revoke(rid)),
+    /** Lifts another device's revocation; it registers a fresh key and
+     * needs a new grant for older history. */
+    restoreDevice: (deviceId: string) => applyState(historyCommands.restoreDevice(deviceId)),
     /** A fresh recovery key, shown to the user before anything is uploaded. */
     createRecoveryDraft: (): RecoveryKeyDraft => {
       const { secretKey } = generateHistoryRecipientKeyPair();
@@ -408,12 +489,15 @@ export function useHistoryEncryption({ activeBackendId, connected, supported, se
     view: activeView,
     /** The active backend writes history end-to-end encrypted. */
     e2e: activeView.state?.mode === 'e2e',
+    /** This device's history access was revoked on the active backend. */
+    revoked: Boolean(activeView.accessRevoked),
     grantRuns,
     titleRevision,
     decryptPage,
     receiveSocketEvent,
     withDecryptedTitles,
     decryptManifestTitles,
+    receiveUpdate,
     forgetBackend,
     ...actions,
   };

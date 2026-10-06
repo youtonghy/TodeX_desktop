@@ -1681,7 +1681,8 @@ export const ko: Messages = {
   'history.revoked': '해지됨',
   'history.revoke': '해지',
   'history.revokeTitle': '이 키를 해지할까요?',
-  'history.revokeBody': '"{name}"은(는) 이후에 기록되는 내용을 읽을 수 없습니다. 이미 허용된 이전 기록에는 영향이 없습니다.',
+  'history.revokeBody': '"{name}"은(는) 영구적으로 해지됩니다. 다른 승인된 기기가 접근을 복원할 때까지 암호화된 기록(이미 허용된 이전 기록 포함)을 읽거나 다시 등록할 수 없습니다.',
+  'history.revokeRecoveryBody': '"{name}"은(는) 이후에 기록되는 내용을 읽을 수 없습니다. 이미 허용된 이전 기록에는 영향이 없습니다.',
   'history.enable': '종단 간 암호화 켜기',
   'history.enableNeedsDevice': '켜기 전에 이 기기의 기록 키를 등록해야 합니다(연결되면 자동으로 등록됩니다).',
   'history.enabled': '종단 간 암호화를 켰습니다',
@@ -1733,5 +1734,12 @@ export const ko: Messages = {
   'history.clientUpgradeRequired': '이 백엔드의 기록은 종단 간 암호화되어 현재 버전으로 읽을 수 없습니다. TodeX를 업데이트하세요.',
   'history.storageLow': '백엔드 디스크 여유 공간이 1GiB 미만이라 새 메시지를 보낼 수 없습니다. 공간을 확보한 뒤 다시 시도하세요.',
   'history.retryNeedsPrompt': '기록이 암호화되어 있고 원본 메시지를 이 기기에서 복호화할 수 없어 다시 시도할 수 없습니다.',
+  'history.accessRevoked': '이 기기의 기록 접근이 해지되었습니다. 다른 승인된 기기에서 복원해야 합니다',
+  'history.revokedDevices': '해지된 기기',
+  'history.revokedDevice': '{device}, {time}에 해지됨',
+  'history.restore': '접근 복원',
+  'history.restoreTitle': '이 기기의 기록 접근을 복원할까요?',
+  'history.restoreBody': '"{name}"은(는) 새 기록 키를 등록할 수 있게 됩니다. 이전 기록을 읽으려면 새 승인 또는 복구 키가 필요합니다.',
+  'history.restored': '해당 기기의 기록 접근을 복원했습니다',
 
 };
