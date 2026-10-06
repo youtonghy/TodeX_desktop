@@ -1,4 +1,4 @@
-import { adoptConversationRuntimeTurn, applyConversationRuntimeEvents, createConversationRuntime, hydrateConversationRuntimeEvents, prependConversationRuntimeEvents, type ConversationRuntime } from '@todex/protocol/conversationRuntime';
+import { adoptConversationRuntimeTurn, applyConversationRuntimeEvents, createConversationRuntime, hydrateConversationRuntimeEvents, prependConversationRuntimeEvents, type ConversationRuntime, type FollowUpQueueState } from '@todex/protocol/conversationRuntime';
 import { t } from '../i18n';
 import { MAX_CONVERSATION_TIMELINE_ITEMS } from './helpers';
 import { canonicalConversationEventType } from '@todex/protocol/v2';
@@ -469,6 +469,17 @@ export class ConversationRecovery {
     });
     this.turnScans.set(conversationId, work);
     return work;
+  }
+
+  /** Adopt the daemon's follow-up queue as read by `conversation.queue.list`
+   * (or returned by a queue edit). A lazily loaded window may not hold the
+   * latest `followups.updated`; later events still replace this snapshot.
+   * No-op before the conversation's runtime exists. */
+  adoptFollowUpQueue(conversationId: string, followUps: FollowUpQueueState): void {
+    const current = this.states.get(conversationId);
+    if (!current || current.followUps === followUps) return;
+    this.states.set(conversationId, { ...current, followUps });
+    this.deliver(conversationId, [], false);
   }
 
   /** Prepend the next older history page into the projected timeline.

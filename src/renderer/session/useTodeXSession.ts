@@ -15,7 +15,8 @@ import { parseSessionLimitReset, rateLimitContinuationText, restoreRateLimitWait
 import { LegacyEventRecovery } from './legacyEventRecovery';
 import { ConversationRecovery, isConversationRuntimeBusy, type ConversationOpenStatus, type EarlierHistoryResult } from './conversationRecovery';
 import type { AgentBrowserFrame } from '@todex/protocol/agentDesktop';
-import { type ConversationRuntime } from '@todex/protocol/conversationRuntime';
+import { parseFollowUpQueue, type ConversationRuntime } from '@todex/protocol/conversationRuntime';
+import { followUpQueueFrame } from '@todex/protocol/conversationCommands';
 import { conversationTranscriptMarkdown, fetchConversationTranscript, transcriptEntries } from '@todex/protocol/conversationExport';
 import { canonicalConversationEventType, type ConversationEvent } from '@todex/protocol/v2';
 import { ProtocolCommands, ProtocolCommandError, type ProtocolCommand } from './protocolCommands';
@@ -303,6 +304,7 @@ import {
   conversationFromManifest,
   mergeManifestConversations,
   isV2Conversation,
+  hasBackendQueue,
   conversationImageInputSupport,
   canSwitchConversationAgent,
   resolveCreateConversationAgent,
@@ -722,6 +724,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   }, [timeline]);
   const queuedChatDispatchingRef = useRef(new Set<string>());
   const sendQueuedChatDraftRef = useRef<(submission: QueuedChatSubmission, conversationId: string) => Promise<boolean>>(async () => false);
+  const queueV2FollowUpRef = useRef<(conversationId: string, item: QueuedChatSubmission) => Promise<'queued' | 'started' | false>>(async () => false);
+  const refreshFollowUpQueueRef = useRef<(conversationId: string) => Promise<void>>(async () => undefined);
+  const editFollowUpQueueRef = useRef<(conversationId: string, operation: 'remove' | 'clear' | 'resume', itemId?: string) => Promise<boolean>>(async () => false);
+  // Conversations whose candidate queue is being handed to the backend.
+  const followUpHandoverRef = useRef(new Set<string>());
+  // Resumes that waited for the backend's provider capabilities to load.
+  const deferredFollowUpResumesRef = useRef(new Set<string>());
 
   const activeTurnId = activeConversationId ? turnIds[activeConversationId] ?? '' : '';
   const modelCatalog = useMemo(
@@ -916,12 +925,44 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     setQueuedChatDrafts(queuedChatDraftsRef.current);
   }, []);
 
-  const resumeQueuedFollowUps = useCallback(async (conversationId: string) => {
+  const resumeQueuedFollowUps = useCallback(async (conversationId: string, options: { rateLimitEnded?: boolean } = {}) => {
     // A conversation still inside a provider rate-limit window holds its queue
     // until the recorded reset instant; the timer below resumes it then.
     const wait = rateLimitedUntilRef.current[conversationId];
     if (wait && wait.until > Date.now()) return;
+    const conversation = conversationsRef.current.find((item) => item.id === conversationId);
+    // Whether the backend holds the queue is unknown until its providers
+    // load (right after a reload or reconnect); decide then.
+    if (conversation?.v2ConversationId && v2ProvidersRef.current.length === 0) {
+      deferredFollowUpResumesRef.current.add(conversationId);
+      return;
+    }
+    if (hasBackendQueue(v2ProvidersRef.current, conversation)) {
+      // The backend decides when queued prompts run, busy or not: hand the
+      // candidates over in order instead of dispatching them from here.
+      if (followUpHandoverRef.current.has(conversationId)) return;
+      followUpHandoverRef.current.add(conversationId);
+      try {
+        for (let item = queuedChatDraftsRef.current[conversationId]?.[0]; item;
+          item = queuedChatDraftsRef.current[conversationId]?.[0]) {
+          if (!await queueV2FollowUpRef.current(conversationId, item)) break;
+          removeQueuedFollowUp(conversationId, item.id);
+        }
+      } finally {
+        followUpHandoverRef.current.delete(conversationId);
+      }
+      // A queue paused by the rate-limited turn continues once the window ends.
+      const followUps = conversation?.v2ConversationId
+        ? conversationRecoveryRef.current?.get(conversation.v2ConversationId)?.followUps : undefined;
+      if (options.rateLimitEnded && followUps?.paused && followUps.pauseReason === 'turn_failed') {
+        await editFollowUpQueueRef.current(conversationId, 'resume');
+      }
+      return;
+    }
     if (thinkingConversationsRef.current[conversationId] || pendingV2SubmissionsRef.current.has(conversationId)) return;
+    // A backend without its own queue: its manifest still reports a turn the
+    // lazily loaded window has not adopted yet.
+    if (conversation?.nativeStatus === 'running' || conversation?.nativeStatus === 'waiting_permission') return;
     await followUpsRef.current.resume(conversationId,
       () => queuedChatDraftsRef.current[conversationId]?.[0],
       (item) => sendQueuedChatDraftRef.current(item, conversationId),
@@ -943,7 +984,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       rateLimitedUntilRef.current = { ...rateLimitedUntilRef.current };
       for (const id of expired) delete rateLimitedUntilRef.current[id];
       setRateLimitedUntilByConversation(rateLimitedUntilRef.current);
-      for (const id of expired) void resumeQueuedFollowUps(id);
+      for (const id of expired) void resumeQueuedFollowUps(id, { rateLimitEnded: true });
     };
     const waits = Object.values(rateLimitedUntilByConversation).map((wait) => wait.until);
     if (waits.length === 0) return;
@@ -1338,6 +1379,21 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   useEffect(() => {
     v2ProvidersRef.current = v2Providers;
   }, [v2Providers]);
+
+  // Candidates restored from storage move to the backend queue as soon as
+  // the connected backend is known to hold one; resumes deferred while its
+  // providers loaded run now.
+  useEffect(() => {
+    if (!queueHydrated || connectionState !== 'open' || v2Providers.length === 0) return;
+    const deferred = [...deferredFollowUpResumesRef.current];
+    deferredFollowUpResumesRef.current.clear();
+    for (const id of new Set([...deferred, ...Object.keys(queuedChatDraftsRef.current)])) {
+      const conversation = conversationsRef.current.find((item) => item.id === id);
+      if (deferred.includes(id) || (queuedChatDraftsRef.current[id]?.length && hasBackendQueue(v2Providers, conversation))) {
+        void resumeQueuedFollowUps(id);
+      }
+    }
+  }, [connectionState, queueHydrated, resumeQueuedFollowUps, v2Providers]);
 
   useEffect(() => {
     turnIdsRef.current = turnIds;
@@ -1961,7 +2017,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
             if (rateLimited && queued.length < 32) {
               queuedChatDraftsRef.current = { ...queuedChatDraftsRef.current,
                 [localId]: [{ id: createRequestId('queued'), text: rateLimitContinuationText(submission.text),
-                  attachments: submission.attachments, skills: submission.skills }, ...queued] };
+                  attachments: submission.attachments, skills: submission.skills, front: true }, ...queued] };
               setQueuedChatDrafts(queuedChatDraftsRef.current);
             } else {
               restorePendingSubmission(localId);
@@ -2010,6 +2066,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       highWater: conversation.lastSequence ?? 0,
       turnActive: status === 'running' || status === 'waiting_permission',
     });
+    await refreshFollowUpQueueRef.current(conversation.id);
   }, []);
 
   const recoverConversation = useCallback(async (conversationId: string) => {
@@ -3416,8 +3473,11 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         // drop the local marker so a later subscribe is not deduped away.
         const endedConversationId = typeof payload?.conversationId === 'string' ? payload.conversationId : '';
         if (endedConversationId) v2SubscriptionsRef.current.delete(endedConversationId);
+        // A busy conversation's prompt may still join the backend queue;
+        // sendV2Prompt reports the conflict itself when it cannot.
+        const callerReports = code === 'CONFLICT' && protocolCommandsRef.current?.typeOf(requestId) === 'conversation.prompt';
         protocolCommandsRef.current?.reject(requestId, message, code);
-        setLastError(message);
+        if (!callerReports) setLastError(message);
         return;
       }
       if (messageType === 'agentBrowser.frame') {
@@ -6327,6 +6387,33 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     return content;
   }, []);
 
+  /** `conversation.prompt` fields shared by direct sends and backend queue
+   * items: permissions, work mode, model, skills and content. */
+  const v2PromptFields = useCallback((
+    conversation: ConversationRecord,
+    workspace: WorkspaceRecord,
+    permissionMode: string,
+    text: string,
+    skills: SelectedSkillAttachment[],
+    attachments: ComposerAttachmentDraft[],
+  ): Record<string, unknown> => {
+    const skillRefs = promptSkillsFromAttachments(skills);
+    const content = promptContentFromAttachments(attachments);
+    const model = conversation.provider === 'codex'
+      ? conversation.model || workspace.model || settings.defaultModel || undefined
+      : conversation.model || undefined;
+    const reasoningEffort = conversation.reasoningEffort || undefined;
+    return {
+      text,
+      permissionMode,
+      workMode: conversation.mode === 'plan' ? 'plan' : 'implement',
+      ...(model ? { model } : {}),
+      ...(reasoningEffort ? { reasoningEffort } : {}),
+      ...(skillRefs.length ? { skills: skillRefs } : {}),
+      ...(content.length ? { content } : {}),
+    };
+  }, [promptContentFromAttachments, promptSkillsFromAttachments, settings.defaultModel]);
+
   const materializeV2Conversation = useCallback(async (
     conversationId: string,
     firstMessageText: string,
@@ -6552,25 +6639,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
             { conversationId: conversation.id, requestId, text, attachments: previews },
           ]);
         }
-        const skillRefs = promptSkillsFromAttachments(skills);
-        const content = promptContentFromAttachments(attachments);
-        const model = readyConversation.provider === 'codex'
-          ? readyConversation.model || workspace.model || settings.defaultModel || undefined
-          : readyConversation.model || undefined;
-        const reasoningEffort = readyConversation.reasoningEffort || undefined;
         const result = await sendProtocolCommand({
           id: requestId,
           type: 'conversation.prompt',
           payload: {
             conversationId: v2Id,
             clientRequestId: requestId,
-            text,
-            permissionMode,
-            workMode: readyConversation.mode === 'plan' ? 'plan' : 'implement',
-            ...(model ? { model } : {}),
-            ...(reasoningEffort ? { reasoningEffort } : {}),
-            ...(skillRefs.length ? { skills: skillRefs } : {}),
-            ...(content.length ? { content } : {}),
+            ...v2PromptFields(readyConversation, workspace, permissionMode, text, skills, attachments),
           },
         });
         updateConversation(readyConversation.id, { permissionMode, mode: readyConversation.mode === 'plan' ? 'plan' : 'implement' });
@@ -6613,6 +6688,18 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           }
           return latest?.phase === 'running';
         }
+        // The backend was busy after all (a turn started below the loaded
+        // window, or on another device): hand the prompt to its queue under
+        // the same id instead of reporting the conflict.
+        if (error instanceof ProtocolCommandError && error.code === 'CONFLICT' && !isFirstPrompt
+          && hasBackendQueue(v2ProvidersRef.current, conversation)) {
+          pendingV2SubmissionsRef.current.delete(conversation.id);
+          setSubmissionStatusByConversation((current) => ({ ...current, [conversation.id]: undefined }));
+          const queued = await queueV2FollowUpRef.current(conversation.id, { id: requestId, text, attachments, skills });
+          if (queued) return true;
+          restoreSubmission();
+          return false;
+        }
         updateSentAttachmentRecords(sentAttachmentRecordsRef.current.filter((record) =>
           record.conversationId !== conversation.id || record.requestId !== requestId || Boolean(record.eventId)));
         setConversationThinking(conversation.id, false);
@@ -6630,8 +6717,94 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         }
       }
     },
-    [updateSentAttachmentRecords, appendTimeline, getConversationContext, materializeV2Conversation, reconcilePendingSubmission, promptContentFromAttachments, promptSkillsFromAttachments, sendProtocolCommand, setConversationAttachments, setConversationChatDraft, setConversationRateLimit, setConversationSelectedSkills, setConversationThinking, settings.defaultModel, updateConversation, autoConnectEnabled, connect],
+    [updateSentAttachmentRecords, appendTimeline, getConversationContext, materializeV2Conversation, reconcilePendingSubmission, v2PromptFields, sendProtocolCommand, setConversationAttachments, setConversationChatDraft, setConversationRateLimit, setConversationSelectedSkills, setConversationThinking, updateConversation, autoConnectEnabled, connect],
   );
+
+  /** Hands a follow-up to the backend queue (`conversation.queue.add`). The
+   * item id doubles as the prompt's clientRequestId, so re-adding after a
+   * lost ACK or a reload is idempotent. Resolves 'started' when the
+   * conversation was idle and the backend began it at once, false when it
+   * was not accepted (the reason is reported). */
+  const queueV2FollowUp = useCallback(async (
+    conversationId: string,
+    item: QueuedChatSubmission,
+  ): Promise<'queued' | 'started' | false> => {
+    const context = getConversationContext(conversationId);
+    const v2Id = context?.conversation.v2ConversationId;
+    if (!context || !v2Id) return false;
+    const { workspace, conversation } = context;
+    const permissionMode = conversationPermissionMode(conversation, workspace, v2ProvidersRef.current);
+    if (!permissionMode) {
+      setLastError(t('sess.permissionSelectRequired'));
+      return false;
+    }
+    const attachments = liveComposerAttachments(item.text, item.attachments);
+    let fields: Record<string, unknown>;
+    try {
+      fields = v2PromptFields(conversation, workspace, permissionMode, item.text, item.skills, attachments);
+    } catch (error) {
+      setLastError(error instanceof Error ? error.message : t('sess.sendFailedShort'));
+      return false;
+    }
+    if (attachments.length && !sentAttachmentRecordsRef.current.some((record) =>
+      record.conversationId === conversation.id && record.requestId === item.id)) {
+      const previews = await prepareSentAttachments(attachments);
+      updateSentAttachmentRecords([...sentAttachmentRecordsRef.current,
+        { conversationId: conversation.id, requestId: item.id, text: item.text, attachments: previews }]);
+    }
+    try {
+      const frame = followUpQueueFrame('add', v2Id, { ...fields, itemId: item.id, ...(item.front ? { front: true } : {}) });
+      const result = await sendProtocolCommand({ id: createRequestId('queue-add'), ...frame });
+      const started = result.status === 'started';
+      if (started) setConversationThinking(conversation.id, true);
+      return started ? 'started' : 'queued';
+    } catch (error) {
+      if (!(error instanceof ProtocolCommandError && error.state === 'unknown')) {
+        updateSentAttachmentRecords(sentAttachmentRecordsRef.current.filter((record) =>
+          record.conversationId !== conversation.id || record.requestId !== item.id || Boolean(record.eventId)));
+      }
+      setLastError(error instanceof Error ? error.message : t('sess.sendFailedShort'));
+      return false;
+    }
+  }, [getConversationContext, sendProtocolCommand, setConversationThinking, setLastError, updateSentAttachmentRecords, v2PromptFields]);
+
+  useEffect(() => {
+    queueV2FollowUpRef.current = queueV2FollowUp;
+  }, [queueV2FollowUp]);
+
+  /** Reads the backend queue into the runtime: the loaded window may not
+   * hold its latest `followups.updated`. */
+  const refreshFollowUpQueue = useCallback(async (conversationId: string) => {
+    const conversation = conversationsRef.current.find((item) => item.id === conversationId);
+    const v2Id = conversation?.v2ConversationId;
+    if (!conversation || !v2Id || !hasBackendQueue(v2ProvidersRef.current, conversation)) return;
+    try {
+      const result = await sendProtocolCommand({ id: createRequestId('queue-list'), ...followUpQueueFrame('list', v2Id) });
+      conversationRecoveryRef.current?.adoptFollowUpQueue(v2Id, parseFollowUpQueue(result.queue));
+    } catch (error) {
+      setLastError(error instanceof Error ? error.message : t('sess.requestFailed', { method: 'conversation.queue.list' }));
+    }
+  }, [sendProtocolCommand, setLastError]);
+
+  /** Removes one item, clears, or resumes the backend queue. */
+  const editFollowUpQueue = useCallback(async (conversationId: string, operation: 'remove' | 'clear' | 'resume', itemId?: string) => {
+    const v2Id = conversationsRef.current.find((item) => item.id === conversationId)?.v2ConversationId;
+    if (!v2Id) return false;
+    try {
+      const result = await sendProtocolCommand({ id: createRequestId(`queue-${operation}`),
+        ...followUpQueueFrame(operation, v2Id, itemId ? { itemId } : {}) });
+      conversationRecoveryRef.current?.adoptFollowUpQueue(v2Id, parseFollowUpQueue(result.queue));
+      return true;
+    } catch (error) {
+      setLastError(error instanceof Error ? error.message : t('sess.requestFailed', { method: `conversation.queue.${operation}` }));
+      return false;
+    }
+  }, [sendProtocolCommand, setLastError]);
+
+  useEffect(() => {
+    refreshFollowUpQueueRef.current = refreshFollowUpQueue;
+    editFollowUpQueueRef.current = editFollowUpQueue;
+  }, [editFollowUpQueue, refreshFollowUpQueue]);
 
   const sendLocalTurn = useCallback(
     async (
@@ -6744,12 +6917,17 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   useEffect(() => {
     sendQueuedChatDraftRef.current = async (submission, conversationId) => {
       const conversation = conversationsRef.current.find((item) => item.id === conversationId) ?? null;
+      // A dispatch that reaches a backend-queue conversation joins that queue,
+      // which is safe whether or not a turn is running.
+      if (hasBackendQueue(v2ProvidersRef.current, conversation)) {
+        return Boolean(await queueV2FollowUp(conversationId, submission));
+      }
       if (isV2Conversation(conversation)) {
         return sendV2Prompt(submission.text, conversationId, submission.skills, submission.attachments, submission.id);
       }
       return sendLocalTurn(submission.text, 'implement', conversationId, submission.attachments, submission.skills);
     };
-  }, [sendLocalTurn, sendV2Prompt]);
+  }, [queueV2FollowUp, sendLocalTurn, sendV2Prompt]);
 
   // Action menus send a separate message without replacing the composer's draft.
   const sendAgentMessage = useCallback(async (text: string, conversationId: string): Promise<'sent' | 'queued' | false> => {
@@ -6761,6 +6939,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       return false;
     }
     if (thinkingConversationsRef.current[conversationId] || pending) {
+      if (hasBackendQueue(v2ProvidersRef.current, context.conversation)) {
+        return await queueV2FollowUp(conversationId, { id: createRequestId('queued'), text, attachments: [], skills: [] })
+          ? 'queued' : false;
+      }
       if (!queueHydrated) {
         setLastError(t('sess.candidateRestoring'));
         return false;
@@ -6779,7 +6961,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       ? await sendV2Prompt(text, conversationId)
       : await sendLocalTurn(text, context.conversation.mode ?? 'implement', conversationId);
     return accepted ? 'sent' : false;
-  }, [getConversationContext, queueHydrated, sendLocalTurn, sendV2Prompt]);
+  }, [getConversationContext, queueHydrated, queueV2FollowUp, sendLocalTurn, sendV2Prompt]);
 
   const toggleSelectedSkill = useCallback((conversationId: string, skill: SkillListItem) => {
     if (!skill.enabled) {
@@ -7981,6 +8163,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       setConversationSelectedSkills(conversationId, (current) => current === skills ? [] : current);
       setConversationComposerSelection(conversationId, DEFAULT_COMPOSER_SELECTION);
     };
+    const rateLimitWait = rateLimitedUntilRef.current[conversationId];
+    if (isThinking && hasBackendQueue(v2ProvidersRef.current, conversation)
+      && !(rateLimitWait && rateLimitWait.until > Date.now())) {
+      void queueV2FollowUp(conversationId, { id: createRequestId('queued'), text, attachments: liveAttachments, skills })
+        .then((queued) => { if (queued) clearSubmittedComposer(); });
+      return;
+    }
     if (isThinking) {
       const nativeQueue = v2ProvidersRef.current.find(item => item.id === conversation.provider)?.capabilities.followUpQueue === true;
       if (conversation.v2ConversationId && nativeQueue && !liveAttachments.length && !skills.length) {
@@ -8013,7 +8202,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       return;
     }
     sendSlashCommand(text, conversationId);
-  }, [appendTimeline, chatDrafts, composerAttachments, controlConversation, getConversationContext, rememberMentionReferences, selectedSkills, sendLocalTurn, sendSlashCommand, sendV2Prompt, setConversationAttachments, setConversationChatDraft, setConversationComposerSelection, setConversationSelectedSkills, thinkingConversations]);
+  }, [appendTimeline, chatDrafts, composerAttachments, controlConversation, getConversationContext, queueV2FollowUp, rememberMentionReferences, selectedSkills, sendLocalTurn, sendSlashCommand, sendV2Prompt, setConversationAttachments, setConversationChatDraft, setConversationComposerSelection, setConversationSelectedSkills, thinkingConversations]);
 
   const runWorkspaceCommand = useCallback((workspace: WorkspaceRecord, conversation: ConversationRecord, command: 'start' | 'status' | 'attach' | 'stop' | 'interrupt') => {
     if (command === 'start') {
@@ -8347,6 +8536,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     rateLimitedUntilByConversation,
     removeQueuedFollowUp,
     resumeQueuedFollowUps,
+    editFollowUpQueue,
     controlConversation,
     controlStatusByConversation,
     composerAttachments,

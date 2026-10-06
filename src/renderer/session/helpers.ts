@@ -408,6 +408,9 @@ export type QueuedChatSubmission = {
   text: string;
   attachments: ComposerAttachmentDraft[];
   skills: SelectedSkillAttachment[];
+  /** Goes ahead of the backend queue's items when handed over (the
+   * rate-limit continuation of an interrupted turn). */
+  front?: boolean;
 };
 
 export type PendingLocalStart = {
@@ -2036,6 +2039,13 @@ export function healthLabelOf(health: ConnectionHealth): string {
 
 export function isV2Conversation(conversation: ConversationRecord | null | undefined): boolean {
   return Boolean(conversation?.v2ConversationId || (conversation?.provider && conversation.provider !== ''));
+}
+
+/** The connected backend holds this conversation's follow-ups
+ * (`conversation.queue.*`) instead of the client-side candidate queue. */
+export function hasBackendQueue(providers: readonly ProviderDescriptor[], conversation: ConversationRecord | null | undefined): boolean {
+  return Boolean(conversation?.v2ConversationId && conversation.provider
+    && providers.find((provider) => provider.id === conversation.provider)?.capabilities.backendQueue === true);
 }
 
 export function conversationImageInputSupport(

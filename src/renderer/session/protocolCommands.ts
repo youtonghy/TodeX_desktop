@@ -7,6 +7,8 @@ export class ProtocolCommandError extends Error {
     message: string,
     readonly state: 'not-sent' | 'rejected' | 'unknown',
     readonly requestId: string,
+    /** Backend error code (`CONFLICT`, …) when the server answered. */
+    readonly code = '',
   ) {
     super(message);
     this.name = 'ProtocolCommandError';
@@ -48,6 +50,11 @@ export class ProtocolCommands {
     });
   }
 
+  /** Command type of a request still awaiting its answer. */
+  typeOf(id: string): string | undefined {
+    return this.pending.get(id)?.message.type;
+  }
+
   resolve(id: string, result: Record<string, unknown>): boolean {
     const entry = this.take(id);
     if (!entry) return false;
@@ -59,7 +66,7 @@ export class ProtocolCommands {
     const entry = this.take(id);
     if (!entry) return false;
     const uncertain = entry.message.type === 'conversation.control' && ['PROVIDER_UNAVAILABLE', 'IO_ERROR', 'INTERNAL_ERROR', 'EVENT_STREAM_CLOSED', 'CONTROL_OUTCOME_UNKNOWN'].includes(code);
-    entry.reject(new ProtocolCommandError(message, uncertain ? 'unknown' : 'rejected', id));
+    entry.reject(new ProtocolCommandError(message, uncertain ? 'unknown' : 'rejected', id, code));
     return true;
   }
 

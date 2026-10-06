@@ -23,10 +23,16 @@ type Props = {
   onClearNative: () => void;
   onRemoveLocal: (id: string) => void;
   onResumeLocal: () => void;
+  /** Daemon-held follow-up queue (`runtime.followUps`) edits. */
+  onRemoveBackend: (id: string) => void;
+  onClearBackend: () => void;
+  onResumeBackend: () => void;
   onRevealPath?: (path: string) => void;
 };
 
 type AttachmentPreview = { name: string; order: number; path?: string; file: PreviewFile };
+
+const BACKEND_PAUSE_REASONS = ['turn_failed', 'turn_cancelled', 'turn_interrupted', 'start_failed', 'daemon_restarted'] as const;
 
 function formatResetInstant(until: number): string {
   return new Intl.DateTimeFormat(undefined, {
@@ -47,9 +53,14 @@ function previewFile(attachment: ComposerAttachmentDraft): PreviewFile {
 
 export function ConversationControls({ runtime, reportedError, running, canUseNativeQueue,
   piQueue, controlStatus, localQueue, localPaused, rateLimited,
-  onRecover, onRemoveNative, onClearNative, onRemoveLocal, onResumeLocal, onRevealPath }: Props) {
+  onRecover, onRemoveNative, onClearNative, onRemoveLocal, onResumeLocal,
+  onRemoveBackend, onClearBackend, onResumeBackend, onRevealPath }: Props) {
   const t = useT();
   const nativeItems = runtime?.queueItems.filter(item => ['queued', 'pending', 'delivering', 'unknown'].includes(item.status)) ?? [];
+  const backendQueue = runtime?.followUps;
+  const backendItems = backendQueue?.items ?? [];
+  const backendPauseReason = backendQueue?.paused ? (BACKEND_PAUSE_REASONS as readonly string[]).includes(backendQueue.pauseReason)
+    ? backendQueue.pauseReason as typeof BACKEND_PAUSE_REASONS[number] : 'other' : null;
   const disabled = Boolean(controlStatus);
   const scope = runtime?.conversationId;
   const [preview, setPreview] = useState<AttachmentPreview | null>(null);
@@ -65,7 +76,34 @@ export function ConversationControls({ runtime, reportedError, running, canUseNa
     onAction: onRecover,
   });
   return <>
-    {nativeItems.length || localQueue.length || rateLimited ? <div className="mb-2 space-y-2">
+    {nativeItems.length || backendItems.length || localQueue.length || rateLimited ? <div className="mb-2 space-y-2">
+      {backendItems.length > 0 ? <div className="border-border rounded-lg border p-2 text-xs">
+        <div className="mb-1 flex items-center justify-between gap-2">
+          <span className="min-w-0">{t('controls.backendQueue', { count: backendItems.length })} · {backendPauseReason
+            ? <span title={backendQueue?.pauseMessage || undefined}>{t(`controls.backendPaused.${backendPauseReason}`)}</span>
+            : t('controls.backendQueueHint')}</span>
+          <span className="flex shrink-0 gap-1">
+            {backendPauseReason && !running && !rateLimited ? <Button size="sm" variant="secondary" onPress={onResumeBackend}>{t('controls.resumeSend')}</Button> : null}
+            <Button size="sm" variant="ghost" onPress={onClearBackend}>{t('controls.clearQueue')}</Button>
+          </span>
+        </div>
+        {backendPauseReason === 'start_failed' && backendQueue?.pauseMessage
+          ? <p className="text-danger mb-1 break-words">{backendQueue.pauseMessage}</p> : null}
+        <ol className="space-y-1">
+          {backendItems.map((item, index) => <li key={item.id} className="flex items-start justify-between gap-2">
+            <span aria-hidden className="text-muted mt-0.5 w-5 shrink-0 select-none text-right tabular-nums">{index + 1}.</span>
+            <div className="min-w-0 flex-1">
+              <p className="line-clamp-2 whitespace-pre-wrap break-words leading-snug" title={item.text}>{item.text.trim() || t('controls.pendingMessage')}</p>
+              {item.contentCount || item.skills.length ? <p className="text-muted truncate">
+                {[item.contentCount ? t('controls.queuedContent', { count: item.contentCount }) : '',
+                  item.skills.length ? `Skill · ${item.skills.join(', ')}` : ''].filter(Boolean).join(' · ')}
+              </p> : null}
+            </div>
+            <Button size="sm" variant="ghost" aria-label={t('controls.removeQueued', { text: item.text })}
+              onPress={() => onRemoveBackend(item.id)}>{t('controls.remove')}</Button>
+          </li>)}
+        </ol>
+      </div> : null}
       {nativeItems.length > 0 ? <div className="border-border rounded-lg border p-2 text-xs">
         <div className="mb-1 flex items-center justify-between gap-2">
           <span>{t('controls.agentQueue', { count: nativeItems.length })}{runtime?.queuePaused ? ` · ${t('controls.queuePausedCheck')}` : ''}</span>

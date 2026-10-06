@@ -1391,6 +1391,9 @@ export function ChatPanel({ session }: Props) {
             onClearNative={() => { void session.controlConversation(conversation.id, { action: 'queueClear' }); }}
             onRemoveLocal={itemId => session.removeQueuedFollowUp(conversation.id, itemId)}
             onResumeLocal={() => { void session.resumeQueuedFollowUps(conversation.id); }}
+            onRemoveBackend={itemId => { void session.editFollowUpQueue(conversation.id, 'remove', itemId); }}
+            onClearBackend={() => { void session.editFollowUpQueue(conversation.id, 'clear'); }}
+            onResumeBackend={() => { void session.editFollowUpQueue(conversation.id, 'resume'); }}
             onRevealPath={filePath => session.openPanel('Files', { filePath })}
           /> : null}
           <NoticeToast message={hasBlockedImageAttachment ? t('chat.imageSendBlocked') : null}
