@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   HISTORY_ACCESS_REVOKED,
   HISTORY_CLIENT_UPGRADE_REQUIRED,
+  HISTORY_KEY_REQUIRED,
+  HISTORY_READ_ONLY,
   HISTORY_STORAGE_LOW,
   HistoryDecryptor,
   historyCommands,
@@ -31,11 +33,12 @@ import { t } from '../i18n';
 import { deleteHistorySeed, loadHistorySeed, saveHistorySeed } from '../lib/historyKeyStore';
 
 // End-to-end encrypted conversation history (TodeX_backend
-// docs/history-encryption.md) for the active backend: this device's history
-// key, its registration, decryption of every history path before projection,
-// and the settings actions (enable/disable, recovery key, grants, restoring
-// revoked devices). State changes are pushed (`history.encryption.updated`);
-// the state is also re-read on every (re)connect and when settings open.
+// docs/history-encryption.md) for the active backend. History is always
+// encrypted: this device's history key is created and registered on every
+// (re)connect, every history path is decrypted before projection, and the
+// settings actions cover the recovery key, grants and restoring revoked
+// devices. State changes are pushed (`history.encryption.updated`); the state
+// is also re-read on every (re)connect and when settings open.
 
 type CommandSender = (message: { id: string; type: string; payload: Record<string, unknown> }, timeoutMs?: number) => Promise<Record<string, unknown>>;
 
@@ -64,7 +67,29 @@ export function historyErrorMessage(code: string): string | null {
   if (code === HISTORY_CLIENT_UPGRADE_REQUIRED) return t('history.clientUpgradeRequired');
   if (code === HISTORY_STORAGE_LOW) return t('history.storageLow');
   if (code === HISTORY_ACCESS_REVOKED) return t('history.accessRevoked');
+  if (code === HISTORY_READ_ONLY) return t('history.readOnlyError');
+  if (code === HISTORY_KEY_REQUIRED) return t('history.keyRequired');
   return null;
+}
+
+/** Backends whose "no recovery key" notice the user dismissed. */
+const RECOVERY_NOTICE_STORAGE_KEY = 'todex.history.recoveryNoticeDismissed.v1';
+
+function readDismissedRecoveryNotices(): string[] {
+  try {
+    const saved: unknown = JSON.parse(localStorage.getItem(RECOVERY_NOTICE_STORAGE_KEY) || '[]');
+    return Array.isArray(saved) ? saved.filter((id): id is string => typeof id === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeDismissedRecoveryNotices(backendIds: readonly string[]): void {
+  try {
+    localStorage.setItem(RECOVERY_NOTICE_STORAGE_KEY, JSON.stringify(backendIds));
+  } catch {
+    // Storage may be disabled: the notice then only stays hidden this session.
+  }
 }
 
 const isAccessRevoked = (error: unknown) => error instanceof ProtocolCommandError && error.code === HISTORY_ACCESS_REVOKED;
@@ -90,6 +115,7 @@ export function useHistoryEncryption({ activeBackendId, connected, supported, se
   const [view, setView] = useState<HistoryEncryptionView>({ backendId: activeBackendId, status: 'idle' });
   const [grantRuns, setGrantRuns] = useState<Record<string, HistoryGrantRun>>({});
   const [titleRevision, setTitleRevision] = useState(0);
+  const [dismissedRecoveryNotices, setDismissedRecoveryNotices] = useState(readDismissedRecoveryNotices);
   const grantRunsRef = useRef(grantRuns);
   grantRunsRef.current = grantRuns;
   const live = useRef({ activeBackendId, connected, supported, sendCommand, onUnlocked, view });
@@ -295,11 +321,22 @@ export function useHistoryEncryption({ activeBackendId, connected, supported, se
     if (current()) setView({ backendId, status: 'ready', state, localRid, keyError, accessRevoked: revoked });
   }, [decryptorFor, markRevoked, send]);
 
-  // Register on every (re)connect of a backend that serves encrypted history.
+  // Register on every (re)connect: history is always encrypted, so a write
+  // needs this device's key among the recipients.
   useEffect(() => {
     if (!connected || supported === undefined) return;
     void refresh(true);
   }, [activeBackendId, connected, refresh, supported]);
+
+  /** A write failed with HISTORY_KEY_REQUIRED: registers this device's key
+   * again, once at a time. */
+  const reregistering = useRef<Promise<void> | null>(null);
+  const keyRequired = useCallback(() => {
+    if (reregistering.current) return reregistering.current;
+    const run = refresh(true).finally(() => { reregistering.current = null; });
+    reregistering.current = run;
+    return run;
+  }, [refresh]);
 
   /** Runs a settings action that answers with the encryption state. */
   const applyState = useCallback(async (frame: HistoryCommandFrame) => {
@@ -371,8 +408,6 @@ export function useHistoryEncryption({ activeBackendId, connected, supported, se
 
   const actions = useMemo(() => ({
     refresh: () => refresh(false),
-    enable: () => applyState(historyCommands.enable()),
-    disable: () => applyState(historyCommands.disable()),
     revoke: (rid: string) => applyState(historyCommands.revoke(rid)),
     /** Lifts another device's revocation; it registers a fresh key and
      * needs a new grant for older history. */
@@ -481,12 +516,39 @@ export function useHistoryEncryption({ activeBackendId, connected, supported, se
   const forgetBackend = useCallback(async (backendId: string) => {
     decryptors.current.get(backendId)?.decryptor.clear();
     decryptors.current.delete(backendId);
+    setDismissedRecoveryNotices((current) => {
+      if (!current.includes(backendId)) return current;
+      const next = current.filter((id) => id !== backendId);
+      writeDismissedRecoveryNotices(next);
+      return next;
+    });
     await deleteHistorySeed(backendId);
   }, []);
 
+  /** Hides the "no recovery key" notice for this backend (the settings
+   * section keeps the warning). */
+  const dismissRecoveryNotice = useCallback(() => {
+    const backendId = live.current.activeBackendId;
+    setDismissedRecoveryNotices((current) => {
+      if (current.includes(backendId)) return current;
+      const next = [...current, backendId];
+      writeDismissedRecoveryNotices(next);
+      return next;
+    });
+  }, []);
+
   const activeView = view.backendId === activeBackendId ? view : { backendId: activeBackendId, status: 'idle' as const };
+  const activeState = activeView.state;
+  /** No active recovery recipient: losing every device loses the history. */
+  const recoveryMissing = Boolean(activeState && !activeView.accessRevoked
+    && !activeState.recipients.some((item) => item.kind === 'recovery' && !item.revokedAt));
   return {
     view: activeView,
+    recoveryMissing,
+    /** The non-blocking "no recovery key" notice should show. */
+    recoveryNoticeVisible: recoveryMissing && !dismissedRecoveryNotices.includes(activeBackendId),
+    dismissRecoveryNotice,
+    keyRequired,
     /** The active backend writes history end-to-end encrypted. */
     e2e: activeView.state?.mode === 'e2e',
     /** This device's history access was revoked on the active backend. */
