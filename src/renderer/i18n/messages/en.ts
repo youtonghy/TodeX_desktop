@@ -1162,6 +1162,14 @@ export const en: Messages = {
   'conn.waiting': 'Waiting to check',
   'conn.versionMismatch': 'Backend {backend} does not match this app {app}. Upgrade to avoid incompatibility.',
   'conn.versionMismatchShort': 'version mismatch',
+  'conn.failure.backend_unreachable': 'Backend not running or wrong port',
+  'conn.failure.invalid_server_url': 'Invalid backend address',
+  'conn.failure.authentication_failed': 'Token missing or invalid',
+  'conn.failure.protocol_mismatch': 'Protocol retired (/v1)',
+  'conn.failure.websocket_failed': 'WebSocket handshake failed',
+  'conn.failure.provider_unavailable': 'Agent unavailable',
+  'conn.failure.encryption_required': 'Encrypted pairing required',
+  'conn.failure.request_failed': 'Request failed',
 
   // exp
   'exp.composerFileMentionsDesc': 'Enables file mention assistance and recent file history in the composer.',
@@ -1275,6 +1283,7 @@ export const en: Messages = {
   'sess.imageAttachmentName': 'Image {count}',
   'sess.injectWarning': 'Appends Responses API items directly to the thread history. Only paste trusted JSON arrays.',
   'sess.invalidConversationEvent': 'Received an invalid conversation event; recovery position not advanced.',
+  'sess.socketBacklog': 'Too many incoming messages piled up; reconnecting to resync.',
   'sess.invalidatedThreadTitle': 'Invalid thread reset',
   'sess.localNotStarted': 'Local session not started',
   'sess.localSessionStopped': 'Local session stopped',

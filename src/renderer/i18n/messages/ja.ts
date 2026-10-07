@@ -1162,6 +1162,14 @@ export const ja: Messages = {
   'conn.waiting': '確認待ち',
   'conn.versionMismatch': 'バックエンド {backend} とアプリ {app} のバージョンが一致しません。互換性のためアップグレードしてください。',
   'conn.versionMismatchShort': 'バージョン不一致',
+  'conn.failure.backend_unreachable': 'Backend が起動していないか、ポートが違います',
+  'conn.failure.invalid_server_url': 'Backend のアドレスが無効です',
+  'conn.failure.authentication_failed': 'トークンがないか無効です',
+  'conn.failure.protocol_mismatch': 'プロトコルは廃止されました（/v1）',
+  'conn.failure.websocket_failed': 'WebSocket ハンドシェイクに失敗しました',
+  'conn.failure.provider_unavailable': 'Agent を利用できません',
+  'conn.failure.encryption_required': '暗号化ペアリングが必要です',
+  'conn.failure.request_failed': 'リクエストに失敗しました',
 
   // exp
   'exp.composerFileMentionsDesc': '入力ボックス内のファイルメンション補助と最近使ったファイル履歴を有効にします。',
@@ -1275,6 +1283,7 @@ export const ja: Messages = {
   'sess.imageAttachmentName': '画像 {count}',
   'sess.injectWarning': 'Responses API items を thread 履歴に直接追加します。信頼できる JSON 配列のみ貼り付けてください。',
   'sess.invalidConversationEvent': '無効な会話イベントを受信しました。復元位置は進みませんでした。',
+  'sess.socketBacklog': '未処理のメッセージがたまりすぎたため、再接続して最新の状態に同期します。',
   'sess.invalidatedThreadTitle': '無効な Thread をリセットしました',
   'sess.localNotStarted': 'ローカルセッションが起動していません',
   'sess.localSessionStopped': 'ローカルセッションが停止しました',

@@ -38,7 +38,7 @@ export function buildConversationControlMessage(
 }
 import { providerDisplayName } from '@todex/protocol/v2';
 import { ConnectionError, type ConnectionFailureCode } from '@todex/protocol/connectionError';
-import { matchesMessage, t } from '../i18n';
+import { matchesMessage, t, type MessageKey } from '../i18n';
 
 // Sentinel produced while an assistant reply is streaming. The shared
 // protocol lib merges against this exact zh literal, so it stays untranslated;
@@ -610,6 +610,33 @@ export const MAX_FILE_ATTACHMENT_BYTES = 512 * 1024;
 
 export function localConversationStateOf(conversation: ConversationRecord | null): LocalAdapterState {
   return conversation?.localAdapterState ?? 'idle';
+}
+
+/** Whether showing this conversation should start its local Codex adapter
+ * right away. Only a legacy native thread needs it; v2 conversations run on
+ * the backend's providers and unsent drafts become v2 on their first prompt.
+ * Every legacy command still starts the adapter on demand. */
+export function shouldAutoStartLocalAdapter(conversation: ConversationRecord | null | undefined): boolean {
+  if (!conversation || conversation.archived === true || isV2Conversation(conversation)) return false;
+  if (!normalizeThreadId(conversation.threadId)) return false;
+  const state = localConversationStateOf(conversation);
+  return state !== 'running' && state !== 'starting';
+}
+
+const CONNECTION_FAILURE_LABELS: Record<ConnectionFailureCode, MessageKey> = {
+  backend_unreachable: 'conn.failure.backend_unreachable',
+  invalid_server_url: 'conn.failure.invalid_server_url',
+  authentication_failed: 'conn.failure.authentication_failed',
+  protocol_mismatch: 'conn.failure.protocol_mismatch',
+  websocket_failed: 'conn.failure.websocket_failed',
+  provider_unavailable: 'conn.failure.provider_unavailable',
+  encryption_required: 'conn.failure.encryption_required',
+  request_failed: 'conn.failure.request_failed',
+};
+
+/** Short, localized label for a connection failure code; empty when unknown. */
+export function connectionFailureLabel(code?: ConnectionFailureCode | ''): string {
+  return code && Object.prototype.hasOwnProperty.call(CONNECTION_FAILURE_LABELS, code) ? t(CONNECTION_FAILURE_LABELS[code]) : '';
 }
 
 export function isConversationHighlighted(conversation: ConversationRecord, _activeConversationId: string, activeTurns: Record<string, string>): boolean {
@@ -1491,6 +1518,11 @@ export const WORKSPACE_SYNC_DEBOUNCE_MS = 900;
 export const SOCKET_EVENT_BATCH_SIZE = 24;
 export const SOCKET_FRAME_DECODE_BATCH_SIZE = 8;
 export const SOCKET_FRAME_DECODE_BUDGET_MS = 10;
+/** Opened socket messages waiting to be decoded. A renderer this far behind
+ * drops the backlog and reconnects; resubscribing replays every
+ * conversation from its cursor, so memory stays bounded without losing
+ * events. */
+export const MAX_PENDING_SOCKET_FRAMES = 5000;
 export const MAX_TRANSPORT_HELLO_SESSION_CURSORS = 12;
 // Keep enough local history for completed execution traces to remain
 // inspectable after a long Claude Code turn. The backend remains the source

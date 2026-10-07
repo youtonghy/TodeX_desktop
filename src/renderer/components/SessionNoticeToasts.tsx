@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
-import { connectionFailureLabel } from '@todex/protocol/connectionError';
-import type { ConnectionHealth } from '../session/helpers';
+import { connectionFailureLabel, type ConnectionHealth } from '../session/helpers';
 import { useNoticeToast } from './NoticeToast';
 
 type Props = { lastError: string; health: ConnectionHealth; scope: string };

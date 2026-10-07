@@ -1162,6 +1162,14 @@ export const zhCN = {
   'conn.waiting': '等待检测',
   'conn.versionMismatch': '后端 {backend} 与本应用 {app} 版本不一致，请升级以避免不兼容。',
   'conn.versionMismatchShort': '版本不一致',
+  'conn.failure.backend_unreachable': 'Backend 未启动或端口错误',
+  'conn.failure.invalid_server_url': 'Backend 地址无效',
+  'conn.failure.authentication_failed': 'Token 缺失或无效',
+  'conn.failure.protocol_mismatch': '协议已废弃（/v1）',
+  'conn.failure.websocket_failed': 'WebSocket 握手失败',
+  'conn.failure.provider_unavailable': 'Agent 不可用',
+  'conn.failure.encryption_required': '需要加密配对',
+  'conn.failure.request_failed': '请求失败',
 
   // exp
   'exp.composerFileMentionsDesc': '启用输入框内的文件提及辅助和最近文件记录。',
@@ -1275,6 +1283,7 @@ export const zhCN = {
   'sess.imageAttachmentName': '图片 {count}',
   'sess.injectWarning': '会直接追加 Responses API items 到 thread 历史。请只粘贴可信 JSON 数组。',
   'sess.invalidConversationEvent': '收到无效的对话事件，未推进恢复位置。',
+  'sess.socketBacklog': '待处理的消息积压过多，已重新连接以同步最新状态。',
   'sess.invalidatedThreadTitle': '已重置失效 Thread',
   'sess.localNotStarted': '本地会话未启动',
   'sess.localSessionStopped': '本地会话已停止',

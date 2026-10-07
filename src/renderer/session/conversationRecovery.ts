@@ -2,6 +2,7 @@ import { adoptConversationRuntimeTurn, applyConversationRuntimeEvents, createCon
 import { t } from '../i18n';
 import { MAX_CONVERSATION_TIMELINE_ITEMS } from './helpers';
 import { canonicalConversationEventType } from '@todex/protocol/v2';
+import { jitteredBackoffMs } from '@todex/protocol/backoff';
 import type { ConversationEvent, ConversationReplay } from '@todex/protocol/v2';
 
 type Replay = (conversationId: string, afterSequence: number, limit: number) => Promise<ConversationReplay>;
@@ -25,6 +26,10 @@ const NO_LIVE: ReadonlySet<number> = new Set();
 /** Journal events past the cursor beyond which an idle, lazily opened
  * conversation reopens from the journal tail instead of replaying the gap. */
 export const REOPEN_GAP_EVENTS = 2000;
+/** After a failed gap recovery the next automatic attempt waits 1 s,
+ * doubling up to 60 s (jittered); live frames meanwhile only buffer. */
+export const GAP_RETRY_BASE_MS = 1000;
+export const GAP_RETRY_CAP_MS = 60_000;
 
 const isTurnLifecycle = (event: ConversationEvent) => TURN_LIFECYCLE_TYPES.has(canonicalConversationEventType(event));
 
@@ -86,6 +91,9 @@ export class ConversationRecovery {
   private readonly turnResolved = new Set<string>();
   private readonly turnScans = new Map<string, Promise<void>>();
   private readonly openStatuses = new Map<string, ConversationOpenStatus>();
+  /** Consecutive failed recoveries per conversation and the timer of the
+   * next automatic retry; cleared by the first recovery that succeeds. */
+  private readonly gapRetries = new Map<string, { attempt: number; timer: ReturnType<typeof setTimeout> | null }>();
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
   private epoch = 0;
 
@@ -129,6 +137,7 @@ export class ConversationRecovery {
     this.turnResolved.clear();
     this.turnScans.clear();
     this.openStatuses.clear();
+    for (const conversationId of [...this.gapRetries.keys()]) this.clearGapRetry(conversationId);
     if (this.flushTimer) {
       clearTimeout(this.flushTimer);
       this.flushTimer = null;
@@ -146,7 +155,35 @@ export class ConversationRecovery {
     this.liveSequences.delete(conversationId);
     this.turnResolved.delete(conversationId);
     this.openStatuses.delete(conversationId);
+    this.clearGapRetry(conversationId);
     return true;
+  }
+
+  private clearGapRetry(conversationId: string): void {
+    const retry = this.gapRetries.get(conversationId);
+    if (retry?.timer) clearTimeout(retry.timer);
+    this.gapRetries.delete(conversationId);
+  }
+
+  /** Back off before the next automatic recovery of a conversation whose
+   * replay failed, instead of refetching on every live frame. */
+  private scheduleGapRetry(conversationId: string, workspaceId: string): void {
+    const retry = this.gapRetries.get(conversationId) ?? { attempt: 0, timer: null };
+    if (retry.timer) clearTimeout(retry.timer);
+    const epoch = this.epoch;
+    const delay = jitteredBackoffMs(retry.attempt, { baseMs: GAP_RETRY_BASE_MS, capMs: GAP_RETRY_CAP_MS });
+    retry.attempt += 1;
+    retry.timer = setTimeout(() => {
+      retry.timer = null;
+      if (epoch !== this.epoch || this.gapRetries.get(conversationId) !== retry) return;
+      const state = this.states.get(conversationId);
+      if (!state || (state.appliedSequence >= state.highWaterSequence && !this.incomplete.has(conversationId))) {
+        this.gapRetries.delete(conversationId);
+        return;
+      }
+      void this.recover(conversationId, workspaceId);
+    }, delay);
+    this.gapRetries.set(conversationId, retry);
   }
 
   /** Release an idle, lazily opened runtime whose cursor lags the journal by
@@ -302,7 +339,8 @@ export class ConversationRecovery {
         throw error;
       }
     }
-    if (result.missingSequences.length && !this.recovering.has(conversationId)) {
+    // After a failed recovery the scheduled retry owns the gap.
+    if (result.missingSequences.length && !this.recovering.has(conversationId) && !this.gapRetries.get(conversationId)?.timer) {
       void this.recover(conversationId, workspaceId);
     }
   }
@@ -548,16 +586,20 @@ export class ConversationRecovery {
     const tail = this.releaseLaggingRuntime(conversationId, highWater);
     if (tail) return this.open(conversationId, workspaceId, { highWater: tail, turnActive: true });
     const epoch = this.epoch;
+    let failed = false;
     // Defer work until the single-flight entry exists, including synchronous
     // replay mocks. This also suppresses stale approval prompts during replay.
     const work = Promise.resolve().then(() => this.replayForward(conversationId, workspaceId, epoch)).catch((error: unknown) => {
       if (epoch === this.epoch) {
+        failed = true;
         this.incomplete.add(conversationId);
         this.onError(error instanceof Error ? error.message : t('rec.recoveryFailed'));
       }
     }).finally(() => {
       if (epoch !== this.epoch) return;
       this.recovering.delete(conversationId);
+      if (failed) this.scheduleGapRetry(conversationId, workspaceId);
+      else this.clearGapRetry(conversationId);
       this.flushConversation(conversationId);
       const state = this.states.get(conversationId);
       if (state) this.update(state, [], this.isRecovering(conversationId), NO_LIVE);

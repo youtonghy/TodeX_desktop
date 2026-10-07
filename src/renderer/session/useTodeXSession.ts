@@ -18,6 +18,7 @@ import { parseFollowUpQueue, type ConversationRuntime } from '@todex/protocol/co
 import { followUpQueueFrame } from '@todex/protocol/conversationCommands';
 import { conversationTranscriptMarkdown, fetchConversationTranscript, transcriptEntries } from '@todex/protocol/conversationExport';
 import { canonicalConversationEventType, type ConversationEvent } from '@todex/protocol/v2';
+import { ConversationEventBatcher } from '@todex/protocol/frameBatch';
 import { ProtocolCommands, ProtocolCommandError, type ProtocolCommand } from './protocolCommands';
 import {
   useCallback,
@@ -124,6 +125,7 @@ import {
   SOCKET_EVENT_BATCH_SIZE,
   SOCKET_FRAME_DECODE_BATCH_SIZE,
   SOCKET_FRAME_DECODE_BUDGET_MS,
+  MAX_PENDING_SOCKET_FRAMES,
   MAX_TRANSPORT_HELLO_SESSION_CURSORS,
   MAX_TIMELINE_ITEMS,
   capTimelinePerConversation,
@@ -268,6 +270,7 @@ import {
   resolveFileSizeBytes,
   readTextAttachmentContent,
   localConversationStateOf,
+  shouldAutoStartLocalAdapter,
   sessionIdForConversation,
   commandWorkspaceForConversation,
   isLocalAdapterAlreadyRunning,
@@ -434,6 +437,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const providerModelsByBackendRef = useRef<Record<string, ProviderModelCatalog>>({});
   const providerImageInputRef = useRef<Record<string, { status: 'loading' | 'ready' | 'error'; imageInput?: boolean; reason?: string }>>({});
   const pendingLocalStartsRef = useRef(new Map<string, PendingLocalStart>());
+  const autoStartedLocalConversationsRef = useRef(new Set<string>());
   const pendingThreadStartsRef = useRef(new Map<string, PendingThreadStart>());
   const pendingThreadListsRef = useRef(new Map<string, PendingThreadList>());
   const pendingThreadActionsRef = useRef(new Map<string, PendingThreadAction>());
@@ -661,6 +665,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       const localId = conversationsRef.current.find((item) => item.v2ConversationId === id || item.id === id)?.id;
       return Boolean(localId && conversationHasPendingWork(localId));
     },
+  );
+  // Realtime events project once per animation frame: a streaming burst
+  // costs one runtime batch and one timeline render instead of one per delta.
+  const conversationEventBatcherRef = useRef<ConversationEventBatcher<ConversationEvent> | null>(null);
+  if (!conversationEventBatcherRef.current) conversationEventBatcherRef.current = new ConversationEventBatcher<ConversationEvent>(
+    (conversationId, workspaceId, events) => conversationRecoveryRef.current?.receive(conversationId, workspaceId, events),
+    (error) => setLastError(error instanceof Error ? error.message : t('rec.submitFailed')),
   );
   // Runtime subagent and usage arrays keep their identity until an event
   // changes them; the copies stamped with local ids are only rebuilt then.
@@ -1157,6 +1168,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   }, []);
 
   const closeSocket = useCallback((manual = true) => {
+    // Events this socket already delivered are valid; project them before
+    // its generation ends.
+    conversationEventBatcherRef.current?.flush();
     socketGenerationRef.current += 1;
     connectionAttemptRef.current?.abort();
     connectionAttemptRef.current = null;
@@ -1207,6 +1221,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   useEffect(() => {
     return () => {
       flushJsonSave();
+      conversationEventBatcherRef.current?.discard();
       pendingServerEventsRef.current = [];
       if (pendingServerEventFrameRef.current !== null) {
         cancelMessageTask(pendingServerEventFrameRef.current);
@@ -2211,6 +2226,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     // flush onto the next socket.
     protocolCommandsRef.current?.dispose();
     if (previous && previous.backendId !== activeBackendConnectionId) return;
+    conversationEventBatcherRef.current?.discard();
     conversationRecoveryRef.current?.reset();
     legacyRecoveryRef.current = new LegacyEventRecovery<ServerEvent>();
     setConversationRuntimeById({});
@@ -3483,6 +3499,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       const text = frame.data;
       const parsed = JSON.parse(text) as Record<string, unknown>;
       const messageType = typeof parsed.type === 'string' ? parsed.type : '';
+      // Anything else may depend on the events received before it (a
+      // command result, a legacy frame): project those first.
+      if (messageType !== 'conversation.event') conversationEventBatcherRef.current?.flush();
       if (messageType === 'server.result') {
         const id = typeof parsed.id === 'string' ? parsed.id : '';
         const payload = parsed.payload && typeof parsed.payload === 'object' && !Array.isArray(parsed.payload)
@@ -3544,7 +3563,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           const event = normalizeConversationEvent(opened);
           if (!event) throw new Error(t('sess.invalidConversationEvent'));
           const conversation = conversationsRef.current.find((item) => item.v2ConversationId === event.conversationId || item.id === event.conversationId);
-          if (conversation) conversationRecoveryRef.current!.receive(event.conversationId, conversation.workspaceId, [event]);
+          if (conversation) conversationEventBatcherRef.current!.push(event.conversationId, conversation.workspaceId, event);
         };
         const history = historyEncryptionRef.current;
         if (!history || !rawConversationId) deliver(raw);
@@ -3589,9 +3608,19 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   }, [decodeSocketFrame]);
 
   const enqueueSocketFrame = useCallback((frame: PendingSocketFrame) => {
+    if (pendingSocketFramesRef.current.length >= MAX_PENDING_SOCKET_FRAMES) {
+      // The renderer fell too far behind the socket. Drop the backlog and
+      // reconnect like any transient drop: resubscribing replays each
+      // conversation from its cursor, and gaps recover over REST.
+      closeSocket(false);
+      lastFailureRetryableRef.current = true;
+      setConnectionState('closed');
+      setLastError(t('sess.socketBacklog'));
+      return;
+    }
     pendingSocketFramesRef.current.push(frame);
     scheduleSocketFrameDrain();
-  }, [scheduleSocketFrameDrain]);
+  }, [closeSocket, scheduleSocketFrameDrain, setLastError]);
 
   /** Raw `{id, type, payload}` frame on the unified /v2/ws socket: the secure
    * socket checks the 8 MiB frame limit before sealing, then sends. Returns
@@ -8097,32 +8126,33 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     setActiveConversationId(nextConversation.id);
   }, [activeConversationId, activeWorkspaceId, conversations, hydrated, workspaces]);
 
+  // At most one automatic start per conversation and connection: a failed
+  // start used to flip the state to 'error', re-run this effect and start
+  // again on every round trip.
+  useEffect(() => {
+    if (connectionState !== 'open') autoStartedLocalConversationsRef.current.clear();
+  }, [connectionState]);
+
   useEffect(() => {
     if (
       !hydrated ||
       connectionState !== 'open' ||
       !activeWorkspace ||
-      !activeConversation ||
-      isV2Conversation(activeConversation) ||
-      activeConversation.archived === true
+      !shouldAutoStartLocalAdapter(activeConversation) ||
+      pendingLocalStartsRef.current.has(activeConversation!.id) ||
+      autoStartedLocalConversationsRef.current.has(activeConversation!.id)
     ) {
       return;
     }
-    const state = localConversationStateOf(activeConversation);
-    if (
-      state === 'running' ||
-      state === 'starting' ||
-      pendingLocalStartsRef.current.has(activeConversation.id)
-    ) {
-      return;
-    }
-    void startLocalAdapter(activeWorkspace, activeConversation).catch(() => undefined);
+    autoStartedLocalConversationsRef.current.add(activeConversation!.id);
+    void startLocalAdapter(activeWorkspace, activeConversation!).catch(() => undefined);
   }, [
     activeConversation?.archived,
     activeConversation?.id,
     activeConversation?.localAdapterState,
     activeConversation?.provider,
     activeConversation?.sessionId,
+    activeConversation?.threadId,
     activeConversation?.v2ConversationId,
     activeWorkspace?.approvalPolicy,
     activeWorkspace?.approvalsReviewer,

@@ -1162,6 +1162,14 @@ export const ko: Messages = {
   'conn.waiting': '확인 대기',
   'conn.versionMismatch': '백엔드 {backend}와 앱 {app}의 버전이 일치하지 않습니다. 호환성을 위해 업그레이드하세요.',
   'conn.versionMismatchShort': '버전 불일치',
+  'conn.failure.backend_unreachable': 'Backend가 실행되지 않았거나 포트가 잘못되었습니다',
+  'conn.failure.invalid_server_url': 'Backend 주소가 잘못되었습니다',
+  'conn.failure.authentication_failed': '토큰이 없거나 유효하지 않습니다',
+  'conn.failure.protocol_mismatch': '프로토콜이 폐기되었습니다(/v1)',
+  'conn.failure.websocket_failed': 'WebSocket 핸드셰이크에 실패했습니다',
+  'conn.failure.provider_unavailable': 'Agent를 사용할 수 없습니다',
+  'conn.failure.encryption_required': '암호화 페어링이 필요합니다',
+  'conn.failure.request_failed': '요청에 실패했습니다',
 
   // exp
   'exp.composerFileMentionsDesc': '입력창의 파일 멘션 보조와 최근 파일 기록을 활성화합니다.',
@@ -1275,6 +1283,7 @@ export const ko: Messages = {
   'sess.imageAttachmentName': '이미지 {count}',
   'sess.injectWarning': 'Responses API items를 thread 기록에 직접 추가합니다. 신뢰할 수 있는 JSON 배열만 붙여넣으세요.',
   'sess.invalidConversationEvent': '유효하지 않은 대화 이벤트를 받았습니다. 복구 위치가 진행되지 않았습니다.',
+  'sess.socketBacklog': '처리 대기 중인 메시지가 너무 많아 최신 상태로 동기화하기 위해 다시 연결합니다.',
   'sess.invalidatedThreadTitle': '무효화된 Thread 재설정됨',
   'sess.localNotStarted': '로컬 세션이 시작되지 않았습니다',
   'sess.localSessionStopped': '로컬 세션이 중지되었습니다',
