@@ -1251,6 +1251,7 @@ export const zhCN = {
   'sess.conversationDirSyncFailed': '对话目录同步失败',
   'sess.copiedLastResponse': '最近一条 Codex 回复已复制到剪贴板。',
   'sess.credentialClearFailed': '无法清除已删除后端的凭据',
+  'sess.credentialSaveFailed': '无法安全保存设备密钥',
   'sess.defaultValue': '默认',
   'sess.filesReferenced': '已引用文件',
   'sess.firstMessageCreating': '第一条消息正在创建对话，请稍候。',

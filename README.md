@@ -106,7 +106,7 @@ Built with **Electron 44**, **React 19**, **Vite 7**, **Tailwind CSS v4**, and *
 | **UI Components** | UIKit (Liquid Glass) | `@heroui/react` + `@heroui-pro/react` (Tailwind v4) |
 | **Layout** | Mobile Stack Navigation | 3-Pane Resizable Desktop Layout |
 | **Protocol Layer** | Swift port (`TodexCore`) | `@todex/protocol` alias mapped to `../TodeX_protocol/src` |
-| **Local Storage** | iOS Keychain / local persistence | Electron `userData` JSON (`todex.desktop.*`) |
+| **Local Storage** | iOS Keychain / local persistence | Electron `userData` JSON (`todex.desktop.*`); device and history keys sealed with the OS keychain (safeStorage) |
 | **Pairing Input** | Live Device Camera Scanner | Text Paste / Image File Drag & Drop QR Decoding |
 
 ---

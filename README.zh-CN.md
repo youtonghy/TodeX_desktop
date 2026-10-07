@@ -107,7 +107,7 @@
 | **UI 组件库** | UIKit（Liquid Glass） | `@heroui/react` + `@heroui-pro/react` (Tailwind v4) |
 | **界面布局** | 移动端堆叠导航（Stack Navigation） | 三栏可调节桌面工作台布局 |
 | **协议层实现** | Swift 实现（`TodexCore`） | `@todex/protocol` 路径别名映射至 `../TodeX_protocol/src` |
-| **本地持久化** | iOS Keychain / 本地持久化 | Electron `userData` JSON 文件（`todex.desktop.*`） |
+| **本地持久化** | iOS Keychain / 本地持久化 | Electron `userData` JSON 文件（`todex.desktop.*`）；设备密钥与历史密钥由系统钥匙串（safeStorage）加密 |
 | **配对输入** | 手机摄像头实时扫描二维码 | 文本粘贴 / 图片拖拽二维码本地解码 |
 
 ---

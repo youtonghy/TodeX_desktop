@@ -1,3 +1,5 @@
+import { redactUrlQuery } from './logRedaction';
+
 type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal';
 
 const DEBUG_ENABLED = __TODEX_BUILD_VERSION__ === 'DEV0.0.0';
@@ -28,7 +30,7 @@ function installFetchTracing(): void {
   window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const requestId = `fetch-${++sequence}`;
     const request = input instanceof Request ? input : null;
-    const url = input instanceof URL ? input.href : typeof input === 'string' ? input : request?.url || String(input);
+    const url = redactUrlQuery(input instanceof URL ? input.href : typeof input === 'string' ? input : request?.url || String(input));
     const method = init?.method || request?.method || 'GET';
     const started = performance.now();
     debugLog('fetch.request', { requestId, url, method, hasBody: Boolean(init?.body || request?.body) });
@@ -55,7 +57,7 @@ function installWebSocketTracing(): void {
   const WrappedWebSocket = function (this: WebSocket, url: string | URL, protocols?: string | string[]) {
     const socket = protocols === undefined ? new NativeWebSocket(url) : new NativeWebSocket(url, protocols);
     const socketId = `ws-${++sequence}`;
-    debugLog('websocket.create', { socketId, url: String(url), protocols: protocols ? '[provided]' : undefined });
+    debugLog('websocket.create', { socketId, url: redactUrlQuery(String(url)), protocols: protocols ? '[provided]' : undefined });
     const nativeSend = socket.send.bind(socket);
     socket.send = (data: string | ArrayBufferLike | Blob | ArrayBufferView) => {
       // Frames arrive many times per second during a live session; logging the

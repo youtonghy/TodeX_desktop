@@ -1251,6 +1251,7 @@ export const en: Messages = {
   'sess.conversationDirSyncFailed': 'Failed to sync conversation directory',
   'sess.copiedLastResponse': 'The latest Codex reply has been copied to the clipboard.',
   'sess.credentialClearFailed': 'Could not clear credentials of the removed backend',
+  'sess.credentialSaveFailed': 'Could not save the device key securely',
   'sess.defaultValue': 'default',
   'sess.filesReferenced': 'Files referenced',
   'sess.firstMessageCreating': 'The first message is creating the conversation. Please wait.',

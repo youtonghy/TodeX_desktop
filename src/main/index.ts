@@ -1,7 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme, safeStorage, shell } from 'electron';
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -68,13 +68,28 @@ function summarizeIpcValue(value: unknown): unknown {
   return `[object ${keys.slice(0, 16).join(',')}${keys.length > 16 ? ',…' : ''}]`;
 }
 
+/** Store channels can carry device keys (legacy plaintext and secureStore
+ * values): trace logs keep the key name and the value's size only. */
+const SENSITIVE_IPC_CHANNELS = new Set(['store:get', 'store:set', 'secureStore:get', 'secureStore:set']);
+
+function redactIpcValue(value: unknown): unknown {
+  if (value === null || value === undefined) return value;
+  if (typeof value === 'string') return `[redacted ${value.length} chars]`;
+  if (Array.isArray(value)) return `[redacted array ${value.length} items]`;
+  return `[redacted ${typeof value}]`;
+}
+
 function handleIpc(channel: string, handler: (event: Electron.IpcMainInvokeEvent, ...args: any[]) => unknown): void {
+  const sensitive = SENSITIVE_IPC_CHANNELS.has(channel);
   ipcMain.handle(channel, async (event, ...args: any[]) => {
     const started = Date.now();
-    debugLog('trace', 'ipc.request', { channel, senderId: event.sender.id, args: args.map(summarizeIpcValue) });
+    const loggedArgs = sensitive
+      ? args.map((arg, index) => (index === 0 ? summarizeIpcValue(arg) : redactIpcValue(arg)))
+      : args.map(summarizeIpcValue);
+    debugLog('trace', 'ipc.request', { channel, senderId: event.sender.id, args: loggedArgs });
     try {
       const result = await handler(event, ...args);
-      debugLog('trace', 'ipc.response', { channel, senderId: event.sender.id, durationMs: Date.now() - started, result: summarizeIpcValue(result) });
+      debugLog('trace', 'ipc.response', { channel, senderId: event.sender.id, durationMs: Date.now() - started, result: sensitive ? redactIpcValue(result) : summarizeIpcValue(result) });
       return result;
     } catch (error) {
       debugLog('error', 'ipc.error', { channel, senderId: event.sender.id, durationMs: Date.now() - started, error });
@@ -297,6 +312,38 @@ function applySystemAppIcon(): void {
   }
 }
 
+/** Only web links leave the app; other schemes (file:, custom app handlers,
+ * smb:, …) could launch local programs through the OS. */
+function isExternalWebUrl(url: string): boolean {
+  try {
+    const { protocol } = new URL(url);
+    return protocol === 'http:' || protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+function rendererHtmlPath(): string {
+  return join(__dirname, '../renderer/index.html');
+}
+
+/** The renderer may only (re)load its own entry: the dev server origin in
+ * development, the bundled index.html otherwise. */
+function isRendererEntryUrl(target: string): boolean {
+  try {
+    const url = new URL(target);
+    const devUrl = process.env.ELECTRON_RENDERER_URL;
+    if (devUrl) return url.origin === new URL(devUrl).origin;
+    return url.protocol === 'file:' && resolve(fileURLToPath(url)) === resolve(rendererHtmlPath());
+  } catch {
+    return false;
+  }
+}
+
+/** Paths the user picked in `dialog:openFiles` this session; `fs:readFile`
+ * reads nothing else, so a compromised renderer cannot read arbitrary files. */
+const pickedFilePaths = new Set<string>();
+
 function createWindow(): BrowserWindow {
   const window = new BrowserWindow({
     width: 1280,
@@ -330,9 +377,24 @@ function createWindow(): BrowserWindow {
   }
 
   window.webContents.setWindowOpenHandler(({ url }) => {
-    debugLog('debug', 'window.open.request', { url });
-    void shell.openExternal(url);
+    const external = isExternalWebUrl(url);
+    debugLog(external ? 'debug' : 'warn', 'window.open.request', { url, external });
+    if (external) {
+      shell.openExternal(url).catch((error: unknown) => debugLog('error', 'window.open.external.error', { url, error }));
+    }
     return { action: 'deny' };
+  });
+
+  // A link without target=_blank (or injected script) would otherwise replace
+  // the app with a remote page that keeps the preload bridge.
+  window.webContents.on('will-navigate', (details) => {
+    if (isRendererEntryUrl(details.url)) return;
+    details.preventDefault();
+    const external = isExternalWebUrl(details.url);
+    debugLog('warn', 'window.navigate.blocked', { url: details.url, external });
+    if (external) {
+      shell.openExternal(details.url).catch((error: unknown) => debugLog('error', 'window.open.external.error', { url: details.url, error }));
+    }
   });
 
   window.webContents.on('console-message', (_event, level, message, line, sourceId) => {
@@ -382,7 +444,7 @@ function createWindow(): BrowserWindow {
     console.log(`[${APP_IDENTITY}] loading renderer URL ${process.env.ELECTRON_RENDERER_URL}`);
     void window.loadURL(process.env.ELECTRON_RENDERER_URL);
   } else {
-    const html = join(__dirname, '../renderer/index.html');
+    const html = rendererHtmlPath();
     console.log(`[${APP_IDENTITY}] loading renderer file ${html}`);
     void window.loadFile(html);
   }
@@ -585,10 +647,16 @@ app.whenReady().then(() => {
         ? [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp'] }]
         : undefined,
     });
-    return result.canceled ? [] : result.filePaths;
+    if (result.canceled) return [];
+    for (const filePath of result.filePaths) pickedFilePaths.add(resolve(filePath));
+    return result.filePaths;
   });
 
-  handleIpc('fs:readFile', async (_event, filePath: string) => {
+  handleIpc('fs:readFile', async (_event, requestedPath: string) => {
+    if (typeof requestedPath !== 'string' || !pickedFilePaths.has(resolve(requestedPath))) {
+      throw new Error(mainT('main.fileNotPicked'));
+    }
+    const filePath = resolve(requestedPath);
     if (!existsSync(filePath)) {
       throw new Error(mainT('main.fileNotFound'));
     }

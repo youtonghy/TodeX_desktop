@@ -1251,6 +1251,7 @@ export const ja: Messages = {
   'sess.conversationDirSyncFailed': '会話ディレクトリの同期に失敗しました',
   'sess.copiedLastResponse': '最新の Codex 返信をクリップボードにコピーしました。',
   'sess.credentialClearFailed': '削除した Backend の認証情報を消去できません',
+  'sess.credentialSaveFailed': 'デバイスキーを安全に保存できません',
   'sess.defaultValue': 'デフォルト',
   'sess.filesReferenced': 'ファイルを参照しました',
   'sess.firstMessageCreating': '最初のメッセージが会話を作成しています。しばらくお待ちください。',

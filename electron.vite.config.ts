@@ -2,9 +2,43 @@ import { resolve } from 'node:path';
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
+import type { Plugin } from 'vite';
 
 const desktopRoot = import.meta.dirname;
 const buildVersion = process.env.TODEX_BUILD_VERSION?.trim() || 'DEV0.0.0';
+
+/**
+ * Content Security Policy of the bundled renderer. Scripts only come from the
+ * app bundle ('wasm-unsafe-eval' lets Shiki compile its bundled Oniguruma
+ * WebAssembly; it does not allow JS eval); connections go to whatever backend the user configured (any
+ * http/https/ws/wss host). Images allow remote http(s) for Markdown in chat.
+ * Styles keep 'unsafe-inline' because HeroUI and xterm inject <style> tags.
+ * Build-only: the dev server needs inline React Refresh code and its HMR socket.
+ */
+const RENDERER_CSP = [
+  "default-src 'self'",
+  "script-src 'self' 'wasm-unsafe-eval'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob: http: https:",
+  "font-src 'self' data:",
+  "connect-src 'self' data: blob: http: https: ws: wss:",
+  "media-src 'self' data: blob:",
+  "worker-src 'self' blob:",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "form-action 'none'",
+  "frame-src 'none'",
+].join('; ');
+
+const rendererCsp: Plugin = {
+  name: 'todex-renderer-csp',
+  apply: 'build',
+  transformIndexHtml: () => [{
+    tag: 'meta',
+    attrs: { 'http-equiv': 'Content-Security-Policy', content: RENDERER_CSP },
+    injectTo: 'head-prepend',
+  }],
+};
 
 export default defineConfig({
   main: {
@@ -63,6 +97,6 @@ export default defineConfig({
         '@react-native-community/netinfo': resolve(desktopRoot, 'src/renderer/stubs/netinfo.ts'),
       },
     },
-    plugins: [react(), tailwindcss()],
+    plugins: [react(), tailwindcss(), rendererCsp],
   },
 });

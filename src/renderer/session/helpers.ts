@@ -37,7 +37,7 @@ export function buildConversationControlMessage(
   };
 }
 import { providerDisplayName } from '@todex/protocol/v2';
-import type { ConnectionFailureCode } from '@todex/protocol/connectionError';
+import { ConnectionError, type ConnectionFailureCode } from '@todex/protocol/connectionError';
 import { matchesMessage, t } from '../i18n';
 
 // Sentinel produced while an assistant reply is streaming. The shared
@@ -67,8 +67,9 @@ import {
 } from '@todex/protocol/todex';
 import type { TransportCryptoSession } from '@todex/protocol/transportCrypto';
 import type { PairingQrChunk } from '@todex/protocol/transportCrypto';
-import { deviceAuthHeaders, deviceIdentityFromSecret } from '@todex/protocol/deviceAuth';
+import { deviceAuthHeaders, deviceIdentityFromSecret, type DeviceIdentity } from '@todex/protocol/deviceAuth';
 import {
+  MAX_LEGACY_MESSAGE_BYTES,
   cursorFromEvent as transportCursorFromEvent,
   sessionIdFromEvent as transportSessionIdFromEvent,
 } from '@todex/protocol/transport';
@@ -1885,6 +1886,19 @@ export function normalizeBackendConnectionProfile(value: unknown): BackendConnec
   return { id, labelColor: normalizeBackendLabelColor(raw.labelColor), name: typeof raw.name === 'string' && raw.name.trim() ? raw.name.trim() : t('session.backend'), serverUrl: normalizeServerUrl(serverUrl), deviceSecret: typeof raw.deviceSecret === 'string' ? raw.deviceSecret : '', tenantId: typeof raw.tenantId === 'string' && raw.tenantId.trim() ? raw.tenantId.trim() : 'local', encryptionProtocol: raw.encryptionProtocol === 'x25519' || raw.encryptionProtocol === 'ml-kem-768' ? raw.encryptionProtocol : 'none', encryptionPublicKey: typeof raw.encryptionPublicKey === 'string' ? raw.encryptionPublicKey : '', createdAt: typeof raw.createdAt === 'number' ? raw.createdAt : now, updatedAt: typeof raw.updatedAt === 'number' ? raw.updatedAt : now };
 }
 
+const DEVICE_IDENTITY_CACHE_LIMIT = 16;
+const deviceIdentityCache = new Map<string, DeviceIdentity | null>();
+
+/** `deviceIdentityFromSecret` derives the Ed25519 public key on every call;
+ * request signing reuses the identity of each (few) device secrets. */
+export function cachedDeviceIdentity(secret: string): DeviceIdentity | null {
+  if (deviceIdentityCache.has(secret)) return deviceIdentityCache.get(secret) ?? null;
+  const identity = deviceIdentityFromSecret(secret);
+  if (deviceIdentityCache.size >= DEVICE_IDENTITY_CACHE_LIMIT) deviceIdentityCache.clear();
+  deviceIdentityCache.set(secret, identity);
+  return identity;
+}
+
 export function authHeaders(
   settings: ConnectionSettings,
   method = 'GET',
@@ -1892,11 +1906,37 @@ export function authHeaders(
   body: Uint8Array = new Uint8Array(),
   extra: Record<string, string> = {},
 ): Record<string, string> {
-  const device = deviceIdentityFromSecret(settings.deviceSecret);
+  const device = cachedDeviceIdentity(settings.deviceSecret);
   return {
     ...extra,
     ...(device ? deviceAuthHeaders(device, method, pathAndQuery, body) : {}),
   };
+}
+
+function base64UrlLength(bytes: number): number {
+  return Math.floor(bytes / 3) * 4 + [0, 2, 3][bytes % 3];
+}
+
+/** Bytes of the `todex.crypto.v1` envelope that `encryptClientText` builds
+ * for `plaintextBytes` of UTF-8 (XChaCha20-Poly1305: 24-byte nonce, 16-byte
+ * tag, both unpadded base64url). Mirrors transportCrypto.ts; a unit test pins
+ * it against the real encryption. */
+export function encryptedFrameByteLength(plaintextBytes: number, protocol: TransportCryptoSession['protocol']): number {
+  const envelope = JSON.stringify({ type: 'todex.crypto.v1', protocol, nonce: '', ciphertext: '' }).length;
+  return envelope + base64UrlLength(24) + base64UrlLength(plaintextBytes + 16);
+}
+
+/** Turns a serialized frame into wire text, throwing ConnectionError when the
+ * backend would reject its size. The check runs before encryption: each
+ * `encryptClientText` advances the nonce counter, so a frame encrypted but
+ * never sent would make the backend reject every later frame. */
+export function encodeOutboundFrame(frame: string, crypto: TransportCryptoSession | null | undefined): string {
+  const plaintextBytes = utf8ByteLength(frame);
+  const size = crypto ? encryptedFrameByteLength(plaintextBytes, crypto.protocol) : plaintextBytes;
+  if (size > MAX_LEGACY_MESSAGE_BYTES) {
+    throw ConnectionError.messageTooLarge(size, MAX_LEGACY_MESSAGE_BYTES);
+  }
+  return crypto ? crypto.encryptClientText(frame) : frame;
 }
 
 export function workspaceSyncPayloadEquals(left: WorkspaceRecord[], right: WorkspaceRecord[]): boolean {

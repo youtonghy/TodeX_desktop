@@ -1251,6 +1251,7 @@ export const ko: Messages = {
   'sess.conversationDirSyncFailed': '대화 디렉터리 동기화 실패',
   'sess.copiedLastResponse': '최근 Codex 답변이 클립보드에 복사되었습니다.',
   'sess.credentialClearFailed': '삭제된 Backend의 자격 증명을 지울 수 없습니다',
+  'sess.credentialSaveFailed': '기기 키를 안전하게 저장할 수 없습니다',
   'sess.defaultValue': '기본값',
   'sess.filesReferenced': '파일 참조됨',
   'sess.firstMessageCreating': '첫 번째 메시지가 대화를 생성하는 중입니다. 잠시 기다려 주세요.',
