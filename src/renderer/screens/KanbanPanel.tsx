@@ -749,7 +749,8 @@ export function KanbanPanel({ session, onOpenConversation }: Props) {
             }
           }}
         >
-          <Kanban hideScrollBar className="items-start overflow-visible px-5 pb-5" isEnabled={false}>
+          {/* Cap column width so a lone workspace doesn't stretch full-width. */}
+          <Kanban hideScrollBar className="auto-cols-[minmax(280px,360px)] items-start overflow-visible px-5 pb-5" isEnabled={false}>
             {columns.map(({ workspace, tasks }, index) => (
               <WorkspaceColumn
                 key={workspace.id}
