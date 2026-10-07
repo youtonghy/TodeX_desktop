@@ -2,12 +2,11 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button, Surface, Switch, toast } from '@heroui/react';
 import type { AgentDesktopSettings as Settings } from '@todex/protocol/agentDesktop';
 import { ConnectionError } from '@todex/protocol/connectionError';
-import { deviceIdentityFromSecret } from '@todex/protocol/deviceAuth';
-import { V2ApiClient } from '@todex/protocol/v2';
 import { AgentBrowserSettings } from './AgentBrowserSettings';
 import { ComputerUseSettings } from './ComputerUseSettings';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { useT } from '../i18n';
+import { backendApi } from '../session/helpers';
 
 /**
  * Agent desktop tools for the active backend. The agent browser and
@@ -17,8 +16,8 @@ import { useT } from '../i18n';
 export function AgentDesktopSettings({ session }: { session: TodeXSession }) {
   const t = useT();
   const api = useMemo(
-    () => new V2ApiClient({ serverUrl: session.settings.serverUrl, device: deviceIdentityFromSecret(session.settings.deviceSecret) }),
-    [session.settings.deviceSecret, session.settings.serverUrl],
+    () => backendApi(session.settings),
+    [session.settings.deviceSecret, session.settings.encryptionProtocol, session.settings.encryptionPublicKey, session.settings.serverUrl],
   );
   // `null`: the backend predates desktop tools.
   const [settings, setSettings] = useState<Settings | null | undefined>(undefined);

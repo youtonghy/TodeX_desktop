@@ -45,7 +45,7 @@ Built with **Electron 44**, **React 19**, **Vite 7**, **Tailwind CSS v4**, and *
   - Inspect the active Backend's Codex, Pi, Claude Code, Grok Build, and ACP CLI inventory, compare installed and latest versions, install missing CLIs in one click, and start managed CLI upgrades.
   - Export and import one agent's provider accounts as a JSON file to sync them between hosts (the file holds keys in plain text).
   - Connect via direct host/port URL; requests are signed with the per-device key enrolled through device verification.
-  - [Device verification](docs/device-verification.md): compare a random code with the backend TUI and approve once to save the token; encryption public keys still require QR or manual import.
+  - [Device verification](docs/device-verification.md) (pairing v3, commit then reveal): import the backend's pairing QR code (it pins the transport public key), then compare a random code with the backend TUI and approve once to enroll this device's signing key.
   - Paste pairing JSON or multi-frame segmented QR payloads.
   - **Drag & Drop QR pairing**: Drop QR screenshot/image files directly into the window (parsed locally via `jsqr`).
   - Clear connection diagnostic states (categorizes connection errors such as unstarted backend, port mismatch, token error, deprecated `/v1` endpoints, or handshake issues).
@@ -57,8 +57,10 @@ Built with **Electron 44**, **React 19**, **Vite 7**, **Tailwind CSS v4**, and *
   - The **agent browser** (`browser_*`) runs in the backend, as a Chromium window on the computer the backend runs on (so `localhost` is that computer); this app only watches it live in the Workbench. Any paired device approves a conversation's first use. Top-level pages are limited to loopback; downloads and site permission prompts are refused; typing into a password field asks first.
   - Settings show the backend's Chromium (download it there) and its per-workspace browser profiles (switch, create, delete with their cookies, storage and cache). Data left from when the browser ran in this app can be cleared there.
   - **Computer Use** (`computer_*`) runs in the backend on the computer it runs on, not here: this app shows a live view of that computer above the composer (the latest screenshot when the live frame is unavailable) with Stop, and Settings shows the host's switch and Screen Recording / Accessibility status and asks for them there. Each conversation's first use is confirmed by someone at that computer.
-- **Transport Encryption**:
-  - Cryptographic session negotiation supporting **X25519** and **ML-KEM-768** (Post-Quantum) via the `@noble` cryptography suite.
+- **Transport Encryption** ([transport v2](docs/device-verification.md#传输加密transport-v2)):
+  - **X25519** or **ML-KEM-768** (post-quantum) key agreement against the backend key pinned at pairing, via the `@noble` cryptography suite; every session key mixes in fresh server randomness.
+  - With a pinned key every call is encrypted, loopback included: the WebSocket uses `tv=2` binary frames and every REST request goes through the `POST /v2/sealed` tunnel. Only `/health`, `/v2/transport-policy` and device verification are called directly.
+  - Without a pinned key only a loopback backend can be reached (in plaintext); a remote address is refused with a prompt to pair with encryption. A changed backend protocol asks for re-pairing instead of downgrading.
 
 ---
 
@@ -211,7 +213,8 @@ The Settings screen in TodeX Desktop provides clear diagnostic feedback:
 | **Invalid Backend URL** | The provided URL cannot be parsed. | Use a standard origin format such as `http://127.0.0.1:7345`. |
 | **Authentication Failed** | HTTP 401/403 returned by backend. | Enter the correct `Auth Token` matching the backend configuration. |
 | **Deprecated Protocol** | The URL path contains `/v1`. | Update the connection URL to use `/v2`. |
-| **WebSocket Failure** | HTTP probes succeed but `/v2/ws` fails. | Check network firewall rules, token headers, or crypto mismatches. |
+| **WebSocket Failure** | HTTP probes succeed but `/v2/ws` fails. | Check network firewall rules. A `4400` close means the pinned key does not match: re-import the backend pairing QR code. |
+| **Encrypted pairing required** | A remote backend without a pinned transport key, or the backend now requires another protocol. | Import the backend pairing QR code in Settings → Pairing, then run device verification. |
 | **Agent Unavailable** | Provider shows `available = false`. | Verify that the underlying agent CLI (`codex`, `pi`, `claude`) is installed and authenticated. |
 
 ---

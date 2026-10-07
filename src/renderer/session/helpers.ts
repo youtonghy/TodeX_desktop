@@ -45,7 +45,6 @@ import { matchesMessage, t } from '../i18n';
 // the UI maps it to t('chat.replying') at render time.
 export const STREAMING_REPLY_PLACEHOLDER = '正在回复...';
 import {
-  buildHttpUrl,
   createRequestId,
   eventId,
   eventPayloadData,
@@ -65,11 +64,23 @@ import {
   utf8ByteLength,
   type CodexThreadHistoryEntry,
 } from '@todex/protocol/todex';
-import type { TransportCryptoSession } from '@todex/protocol/transportCrypto';
 import type { PairingQrChunk } from '@todex/protocol/transportCrypto';
-import { deviceAuthHeaders, deviceIdentityFromSecret, type DeviceIdentity } from '@todex/protocol/deviceAuth';
+import { deviceIdentityFromSecret, type DeviceIdentity } from '@todex/protocol/deviceAuth';
 import {
-  MAX_LEGACY_MESSAGE_BYTES,
+  EncryptionRequiredError,
+  InvalidPinnedKeyError,
+  TransportPolicyError,
+  TransportRepairRequiredError,
+  cachedSecureTransport,
+  toFetchResponse,
+  type SecureRequest,
+  type SecureSocket,
+  type SecureTransport,
+} from '@todex/protocol/secureTransport';
+import { TransportCryptoError, TransportPayloadTooLargeError } from '@todex/protocol/secureChannel';
+import { SocketVerificationError } from '@todex/protocol/socketVerification';
+import { V2ApiClient, type V2ApiOptions } from '@todex/protocol/v2';
+import {
   cursorFromEvent as transportCursorFromEvent,
   sessionIdFromEvent as transportSessionIdFromEvent,
 } from '@todex/protocol/transport';
@@ -453,10 +464,10 @@ export type PendingJsonSave = {
   value: unknown;
 };
 
+/** One opened (plaintext) JSON message from the secure socket. */
 export type PendingSocketFrame = {
   data: string;
   generation: number;
-  crypto: TransportCryptoSession | null;
 };
 
 export type ConversationContext = {
@@ -558,6 +569,8 @@ export const CONNECTION_HEALTH_TIMEOUT_MS = 3500;
 export const SOCKET_WATCHDOG_INTERVAL_MS = 15_000;
 export const SOCKET_LIVENESS_TIMEOUT_MS = 15_000;
 export const SOCKET_LIVENESS_MAX_FAILURES = 3;
+/** How long a new encrypted socket may take to answer its verification ping. */
+export const SOCKET_VERIFICATION_TIMEOUT_MS = 10_000;
 
 /** requestAnimationFrame stops firing while the window is hidden or occluded,
  * which freezes protocol frame processing even though the socket stays alive.
@@ -1905,44 +1918,88 @@ export function cachedDeviceIdentity(secret: string): DeviceIdentity | null {
   return identity;
 }
 
-export function authHeaders(
-  settings: ConnectionSettings,
-  method = 'GET',
-  pathAndQuery = '/',
-  body: Uint8Array = new Uint8Array(),
-  extra: Record<string, string> = {},
-): Record<string, string> {
-  const device = cachedDeviceIdentity(settings.deviceSecret);
-  return {
-    ...extra,
-    ...(device ? deviceAuthHeaders(device, method, pathAndQuery, body) : {}),
-  };
+/** The parts of a backend profile the transport depends on. */
+export type BackendTransportProfile = Pick<ConnectionSettings, 'serverUrl' | 'deviceSecret' | 'encryptionProtocol' | 'encryptionPublicKey'>;
+
+/**
+ * The profile's transport v2 entry point (cached per profile): a pinned key
+ * sends every REST call through `POST /v2/sealed` and opens `tv=2` sockets,
+ * an unpaired remote host is refused, an unpaired loopback host is plaintext.
+ */
+export function backendTransport(settings: BackendTransportProfile): SecureTransport {
+  return cachedSecureTransport(settings, cachedDeviceIdentity(settings.deviceSecret));
 }
 
-function base64UrlLength(bytes: number): number {
-  return Math.floor(bytes / 3) * 4 + [0, 2, 3][bytes % 3];
+/** A signed backend request through the profile's transport, answered as a standard `Response`. */
+export async function backendFetch(settings: BackendTransportProfile, request: SecureRequest): Promise<Response> {
+  return toFetchResponse(await backendTransport(settings).fetch(request));
 }
 
-/** Bytes of the `todex.crypto.v1` envelope that `encryptClientText` builds
- * for `plaintextBytes` of UTF-8 (XChaCha20-Poly1305: 24-byte nonce, 16-byte
- * tag, both unpadded base64url). Mirrors transportCrypto.ts; a unit test pins
- * it against the real encryption. */
-export function encryptedFrameByteLength(plaintextBytes: number, protocol: TransportCryptoSession['protocol']): number {
-  const envelope = JSON.stringify({ type: 'todex.crypto.v1', protocol, nonce: '', ciphertext: '' }).length;
-  return envelope + base64UrlLength(24) + base64UrlLength(plaintextBytes + 16);
-}
-
-/** Turns a serialized frame into wire text, throwing ConnectionError when the
- * backend would reject its size. The check runs before encryption: each
- * `encryptClientText` advances the nonce counter, so a frame encrypted but
- * never sent would make the backend reject every later frame. */
-export function encodeOutboundFrame(frame: string, crypto: TransportCryptoSession | null | undefined): string {
-  const plaintextBytes = utf8ByteLength(frame);
-  const size = crypto ? encryptedFrameByteLength(plaintextBytes, crypto.protocol) : plaintextBytes;
-  if (size > MAX_LEGACY_MESSAGE_BYTES) {
-    throw ConnectionError.messageTooLarge(size, MAX_LEGACY_MESSAGE_BYTES);
+/**
+ * Sends one JSON text message over the secure socket. The size check runs on
+ * the plaintext before sealing (no counter is consumed) and surfaces as the
+ * usual `ConnectionError`.
+ */
+export function sendSocketText(socket: SecureSocket, text: string): void {
+  try {
+    socket.send(text);
+  } catch (error) {
+    if (error instanceof TransportPayloadTooLargeError) throw ConnectionError.messageTooLarge(error.size, error.limit);
+    throw error;
   }
-  return crypto ? crypto.encryptClientText(frame) : frame;
+}
+
+export type TransportFailure = { message: string; retryable: boolean; code: ConnectionFailureCode };
+
+/**
+ * Localized message, retry policy and health code for a transport v2
+ * failure, or null when `error` is not one. Pairing problems (no key for a
+ * remote host, a changed or invalid key, an outdated backend) stop the
+ * automatic reconnect; crypto failures (`4400`, `TRANSPORT_CRYPTO_FAILED`)
+ * and an unreachable policy check keep retrying.
+ */
+export function describeTransportFailure(error: unknown): TransportFailure | null {
+  if (error instanceof EncryptionRequiredError) {
+    return { message: t('transport.encryptionRequired'), retryable: false, code: 'encryption_required' };
+  }
+  if (error instanceof InvalidPinnedKeyError) {
+    return { message: t('transport.invalidKey'), retryable: false, code: 'encryption_required' };
+  }
+  if (error instanceof TransportRepairRequiredError) {
+    return { message: t('transport.repairRequired', { protocol: error.required }), retryable: false, code: 'encryption_required' };
+  }
+  if (error instanceof TransportPolicyError) {
+    switch (error.reason) {
+      case 'outdated':
+        return { message: t('transport.backendOutdated'), retryable: false, code: 'protocol_mismatch' };
+      case 'invalid':
+        return { message: t('transport.invalidPolicy'), retryable: false, code: 'protocol_mismatch' };
+      case 'timeout':
+        return { message: t('transport.policyTimeout'), retryable: true, code: 'backend_unreachable' };
+      case 'unreachable':
+        return { message: t('transport.policyUnreachable'), retryable: true, code: 'backend_unreachable' };
+      default:
+        return { message: t('transport.cannotConfirmPolicy'), retryable: error.retryable, code: 'backend_unreachable' };
+    }
+  }
+  if (error instanceof TransportCryptoError
+    || (error instanceof ConnectionError && error.backendCode === 'TRANSPORT_CRYPTO_FAILED')) {
+    return { message: t('transport.cryptoFailed'), retryable: true, code: 'protocol_mismatch' };
+  }
+  if (error instanceof ConnectionError && error.backendCode === 'PROTOCOL_UPGRADE_REQUIRED') {
+    return { message: t('transport.upgradeRequired'), retryable: false, code: 'encryption_required' };
+  }
+  if (error instanceof SocketVerificationError) {
+    return { message: t('transport.notVerified'), retryable: error.retryable, code: 'protocol_mismatch' };
+  }
+  return null;
+}
+
+export function backendApi(
+  settings: BackendTransportProfile,
+  options: Pick<V2ApiOptions, 'historyEncryption' | 'timeout'> = {},
+): V2ApiClient {
+  return new V2ApiClient({ ...options, serverUrl: settings.serverUrl, transport: backendTransport(settings) });
 }
 
 export function workspaceSyncPayloadEquals(left: WorkspaceRecord[], right: WorkspaceRecord[]): boolean {
@@ -2765,12 +2822,11 @@ export async function fetchWorkspaceDirectorySnapshot(
   settings: ConnectionSettings,
   path?: string,
 ): Promise<WorkspaceDirectorySnapshot> {
-  const url = new URL(buildHttpUrl(settings.serverUrl, '/v2/workspace/directories'));
-  if (path) {
-    url.searchParams.set('path', path);
-  }
-  const response = await fetch(url.toString(), {
-    headers: authHeaders(settings, 'GET', `${url.pathname}${url.search}`),
+  const response = await backendFetch(settings, {
+    method: 'GET',
+    path: '/v2/workspace/directories',
+    query: path ? { path } : undefined,
+    headers: { accept: 'application/json' },
   });
   const body = await response.json().catch(() => null);
   if (!response.ok) {

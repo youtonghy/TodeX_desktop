@@ -5,14 +5,12 @@ import {
   AGENT_PROVIDER_TRANSFER_FORMAT,
   MANAGED_PROVIDER_AGENTS,
   PROVIDER_DISPLAY_NAMES,
-  V2ApiClient,
   type AgentProviderBucket,
   type AgentProviderProfile,
   type AgentProviderTransfer,
   type AgentProvidersResponse,
   type ManagedProviderAgent,
 } from '@todex/protocol/v2';
-import { deviceIdentityFromSecret } from '@todex/protocol/deviceAuth';
 import { ConnectionError } from '@todex/protocol/connectionError';
 import { ProviderIcon } from '../components/ProviderIcon';
 import { Field } from '../components/Field';
@@ -34,6 +32,7 @@ import {
 } from '../lib/agentProviders';
 import { useT } from '../i18n';
 import type { TodeXSession } from '../session/useTodeXSession';
+import { backendApi } from '../session/helpers';
 
 type EditorState =
   | { kind: 'new' }
@@ -65,10 +64,7 @@ export function AgentProvidersPanel({ session }: { session: TodeXSession }) {
   const [editor, setEditor] = useState<EditorState>(null);
   const requestGeneration = useRef(0);
   const importInput = useRef<HTMLInputElement>(null);
-  const api = useCallback(() => new V2ApiClient({
-    serverUrl: session.settings.serverUrl,
-    device: deviceIdentityFromSecret(session.settings.deviceSecret),
-  }), [session.settings.deviceSecret, session.settings.serverUrl]);
+  const api = useCallback(() => backendApi(session.settings), [session.settings.deviceSecret, session.settings.encryptionProtocol, session.settings.encryptionPublicKey, session.settings.serverUrl]);
 
   const refresh = useCallback(async (quiet = false) => {
     const generation = ++requestGeneration.current;
@@ -441,10 +437,7 @@ function ProviderEditor({
   // The backend resolves masked secrets against the stored profile or the
   // live additive node of the same id, so this works pre-save in all modes.
   const fetchEditorModels = async () => {
-    const client = new V2ApiClient({
-      serverUrl: session.settings.serverUrl,
-      device: deviceIdentityFromSecret(session.settings.deviceSecret),
-    });
+    const client = backendApi(session.settings);
     const response = await client.previewAgentProviderModels(
       agent,
       id.trim() || 'preview',

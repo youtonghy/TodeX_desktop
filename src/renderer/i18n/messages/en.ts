@@ -1400,11 +1400,15 @@ export const en: Messages = {
   // transport
   'transport.cannotConfirmPolicy': 'Could not confirm the backend encryption requirement. Check the backend status and retry.',
   'transport.invalidPolicy': 'Invalid backend encryption requirement response.',
-  'transport.invalidPolicyUpdate': 'Invalid backend encryption requirement response. Please update the client or backend.',
-  'transport.notVerified': 'Encryption key transport verification has not passed. Import the correct encryption public key via the backend QR code or copy-paste, then reconnect.',
+  'transport.notVerified': 'The encrypted connection could not be verified (the backend did not answer with the paired key). Re-import the backend pairing QR code in Settings → Pairing, then reconnect.',
   'transport.policyTimeout': 'Confirming the backend encryption requirement timed out. Check the connection and retry.',
   'transport.policyUnreachable': 'Cannot reach the backend to confirm encryption requirements; retrying automatically.',
-  'transport.protocolRequired': 'The backend requires {protocol} encryption and this connection has not passed encryption key transport verification. Import the matching public key via QR code or copy-paste, select {protocol}, and reconnect.',
+  'transport.encryptionRequired': 'This remote backend only accepts encrypted connections, and no encryption key is paired for it yet. Scan or paste the pairing QR code shown by the backend TUI in Settings → Pairing, complete device verification, then connect.',
+  'transport.repairRequired': 'The backend now requires {protocol} encryption, which does not match the key pinned when this device was paired. Re-import the backend pairing QR code in Settings → Pairing.',
+  'transport.backendOutdated': 'The backend is too old for transport v2 encryption. Update the backend, then reconnect.',
+  'transport.cryptoFailed': 'Encrypted transport check failed and the connection was closed; reconnecting automatically. If this keeps happening, re-import the backend pairing QR code in Settings → Pairing.',
+  'transport.upgradeRequired': 'The backend rejected an unencrypted request. Import the backend pairing QR code in Settings → Pairing to pair with encryption.',
+  'transport.invalidKey': 'The saved encryption public key is invalid. Re-import the backend pairing QR code in Settings → Pairing.',
 
   // workspace
   'workspace.dirReadFailed': 'Failed to read directory: {status}',

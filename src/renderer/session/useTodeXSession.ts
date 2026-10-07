@@ -8,7 +8,6 @@ import {
 } from './completionNotifications';
 import { bindSentAttachmentEvents, prepareSentAttachments, projectSentAttachments, pruneSentAttachmentRecords, type SentAttachmentRecord } from './sentAttachments';
 import { configureKanbanSync, syncKanbanTasksFromBackend } from './kanbanTasks';
-import { ENCRYPTION_VERIFICATION_ERROR, TransportVerificationError, validateTransportEncryption, verifyEncryptedSocket } from './transportVerification';
 import { t } from '../i18n';
 import { QueuedFollowUps, restoreQueuedFollowUps } from './queuedFollowUps';
 import { parseSessionLimitReset, rateLimitContinuationText, restoreRateLimitWaits, type SessionLimitReset } from './sessionRateLimit';
@@ -30,12 +29,14 @@ import {
 } from 'react';
 import type { ConversationReplay, ProviderDescriptor, ProviderKind, ConversationManifest, PromptContentRef, PromptSkillRef, SkillCatalogDescriptor, ProviderModelDescriptor, ProviderCommandDescriptor, ContextCompactionState, SubagentRun, MemoryEntry } from '@todex/protocol/v2';
 import { contextCompactionStatus } from '@todex/protocol/v2';
-import { HISTORY_ENCRYPTION_CAPABILITY, V2ApiClient, buildV2WebSocketUrlWithOptions, normalizeConversationEvent } from '@todex/protocol/v2';
+import { HISTORY_ENCRYPTION_CAPABILITY, normalizeConversationEvent } from '@todex/protocol/v2';
+import { verifyTransportPolicy, type SecureSocket } from '@todex/protocol/secureTransport';
+import { TRANSPORT_V2_WS_CLOSE_CODE, TransportCryptoError } from '@todex/protocol/secureChannel';
+import { startSocketVerification, type SocketVerification } from '@todex/protocol/socketVerification';
 import { HISTORY_ENCRYPTION_UPDATED, historyRetryPrompt, historyRetryRequest, historyRetrySequence } from '@todex/protocol/historyEncryption';
 import { historyErrorMessage, useHistoryEncryption, type HistoryEncryptionSession } from './useHistoryEncryption';
 import { retryWithDelays } from '@todex/protocol/retry';
 import { probeBackendConnection, nextReconnectDelayMs, inspectServerUrl, credentialMatchesOrigin } from '@todex/protocol/connectionProbe';
-import { deviceIdentityFromSecret } from '@todex/protocol/deviceAuth';
 import {
   ConnectionSettings,
   CodexMemorySettings,
@@ -91,11 +92,9 @@ import { loadJson, loadSecret, saveJson, saveSecret } from '../lib/storage';
 import {
   applyPairingToSettings,
   assemblePairingQrChunkPayload,
-  createTransportCryptoSession,
   parsePairingQrFrame,
   resolvePairingPayload,
   type PairingQrChunk,
-  type TransportCryptoSession,
 } from '@todex/protocol/transportCrypto';
 import { ConnectionError } from '@todex/protocol/connectionError';
 import { desktopAlert } from '../lib/desktopAlert';
@@ -204,8 +203,12 @@ import {
   serviceTierSlashCommandsForModel,
   toPersistedSettings,
   fromPersistedSettings,
-  authHeaders,
-  encodeOutboundFrame,
+  backendApi,
+  backendFetch,
+  backendTransport,
+  describeTransportFailure,
+  sendSocketText,
+  type TransportFailure,
   workspaceSyncPayloadEquals,
   createSessionId,
   terminalIdForConversation,
@@ -341,6 +344,7 @@ import {
   CONNECTION_HEALTH_TIMEOUT_MS,
   SOCKET_WATCHDOG_INTERVAL_MS,
   SOCKET_LIVENESS_TIMEOUT_MS,
+  SOCKET_VERIFICATION_TIMEOUT_MS,
   SOCKET_LIVENESS_MAX_FAILURES,
   MAX_COMPOSER_ATTACHMENTS,
   scheduleMessageTask,
@@ -406,7 +410,7 @@ export type { CatalogState };
 export function useTodeXSession(openPanel: OpenPanelFn) {
   const workbenchSharingState = useWorkbenchSharing();
   const completionNotificationsState = useCompletionNotifications();
-  const socketRef = useRef<WebSocket | null>(null);
+  const socketRef = useRef<SecureSocket | null>(null);
   /** Live agent browser views: conversation → frame listeners. The socket
    * watches a conversation while it has listeners (re-sent on reconnect). */
   const agentBrowserWatchersRef = useRef(new Map<string, Set<(frame: AgentBrowserFrame) => void>>());
@@ -417,7 +421,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const protocolCommandsRef = useRef<ProtocolCommands | null>(null);
   if (!protocolCommandsRef.current) protocolCommandsRef.current = new ProtocolCommands((message) => rawProtocolSenderRef.current(message));
   useEffect(() => () => protocolCommandsRef.current?.dispose(), []);
-  const socketCryptoRef = useRef<TransportCryptoSession | null>(null);
   const activeWorkspaceRef = useRef('');
   const activeConversationRef = useRef('');
   const workspacesRef = useRef<WorkspaceRecord[]>([]);
@@ -513,7 +516,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       ? profiles.find((item) => item.id === backendId)
       : undefined;
     const target = profile ?? activeSettings;
-    return new V2ApiClient({ serverUrl: target.serverUrl, device: deviceIdentityFromSecret(target.deviceSecret), historyEncryption: true });
+    return backendApi(target, { historyEncryption: true });
   }, []);
   /** Backend profile owning a conversation (the active one when untagged). */
   function backendIdForConversation(conversationId: string): string {
@@ -687,7 +690,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       if (hydrated) setDirectorySyncStatus('ready');
       return;
     }
-    const api = new V2ApiClient({ serverUrl: settings.serverUrl, device: deviceIdentityFromSecret(settings.deviceSecret) });
+    const api = backendApi(settings);
     const backendId = activeBackendConnectionId;
     let active = true;
     setDirectorySyncStatus('loading');
@@ -1182,7 +1185,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       }
       socketRef.current = null;
     }
-    socketCryptoRef.current = null;
     pendingServerEventsRef.current = [];
     if (pendingServerEventFrameRef.current !== null) {
       cancelMessageTask(pendingServerEventFrameRef.current);
@@ -1519,9 +1521,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           !workspace.backendConnectionId || workspace.backendConnectionId === activeBackendConnectionId,
         );
         const body = JSON.stringify({ workspaces: prepareWorkspaceSyncPayload(activeSnapshot) });
-        const response = await fetch(buildHttpUrl(settings.serverUrl, '/v2/workspaces'), {
+        const response = await backendFetch(settings, {
           method: 'PUT',
-          headers: authHeaders(settings, 'PUT', '/v2/workspaces', new TextEncoder().encode(body), { 'Content-Type': 'application/json' }),
+          path: '/v2/workspaces',
+          headers: { 'content-type': 'application/json', accept: 'application/json' },
           body,
         });
         if (!response.ok) {
@@ -1560,8 +1563,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const syncWorkspacesFromBackend = useCallback(async ({ listConversations = true }: { listConversations?: boolean } = {}) => {
     workspaceBackendReadyRef.current = false;
     try {
-      const response = await fetch(buildHttpUrl(settings.serverUrl, '/v2/workspaces'), {
-        headers: authHeaders(settings, 'GET', '/v2/workspaces'),
+      const response = await backendFetch(settings, {
+        method: 'GET',
+        path: '/v2/workspaces',
+        headers: { accept: 'application/json' },
       });
       if (!response.ok) {
         const errorBody = await response.json().catch(() => null) as { message?: unknown } | null;
@@ -1597,9 +1602,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         if (keptRemoteWorkspaces.includes(remote)) {
           continue;
         }
-        void fetch(buildHttpUrl(settings.serverUrl, `/v2/workspaces/${encodeURIComponent(remote.id)}`), {
+        void backendFetch(settings, {
           method: 'DELETE',
-          headers: authHeaders(settings, 'DELETE', `/v2/workspaces/${encodeURIComponent(remote.id)}`),
+          path: `/v2/workspaces/${encodeURIComponent(remote.id)}`,
         }).catch(() => {});
       }
       // Prune tombstones once the backend no longer stores a matching record.
@@ -1661,7 +1666,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       workspaceBackendReadyRef.current = true;
       if (listConversations) {
         try {
-          const conversationResponse = await new V2ApiClient({ serverUrl: settings.serverUrl, device: deviceIdentityFromSecret(settings.deviceSecret) }).listConversations();
+          const conversationResponse = await backendApi(settings).listConversations();
           setV2Conversations(conversationResponse.conversations);
           setConversations((current) => mergeManifestConversations(current, withDecryptedTitles(activeBackendConnectionId, conversationResponse.conversations), nextWorkspaces, activeBackendConnectionId));
         } catch (error) {
@@ -1687,6 +1692,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     configureKanbanSync({
       serverUrl: settings.serverUrl,
       deviceSecret: settings.deviceSecret,
+      encryptionProtocol: settings.encryptionProtocol,
+      encryptionPublicKey: settings.encryptionPublicKey,
       backendConnectionId: activeBackendConnectionId,
     });
     const timer = setInterval(() => {
@@ -1694,7 +1701,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       void syncKanbanTasksFromBackend();
     }, 15000);
     return () => clearInterval(timer);
-  }, [activeBackendConnectionId, connectionState, hydrated, settings.deviceSecret, settings.serverUrl, syncWorkspacesFromBackend]);
+  }, [activeBackendConnectionId, connectionState, hydrated, settings.deviceSecret, settings.encryptionProtocol, settings.encryptionPublicKey, settings.serverUrl, syncWorkspacesFromBackend]);
 
   useEffect(() => {
     if (!hydrated) {
@@ -1774,7 +1781,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     const workspacePath = activeWorkspace?.path || settings.defaultWorkspacePath;
     if (!workspacePath) return;
     setCapabilityCatalogs((current) => ({ ...current, [provider]: { ...(current[provider] ?? {}), status: 'loading', error: undefined } }));
-    const api = new V2ApiClient({ serverUrl: settings.serverUrl, device: deviceIdentityFromSecret(settings.deviceSecret) });
+    const api = backendApi(settings);
     try {
       const [skills, mcp] = await Promise.all([
         discoveryLimit(() => api.listSkillCatalog(provider, workspacePath)),
@@ -1810,7 +1817,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   useEffect(() => {
     if (!hydrated || !activeWorkspace?.path || v2Providers.length === 0) return;
     const backendId = activeBackendConnectionId;
-    const api = new V2ApiClient({ serverUrl: settings.serverUrl, device: deviceIdentityFromSecret(settings.deviceSecret) });
+    const api = backendApi(settings);
     const scope = JSON.stringify([backendId, activeWorkspace.path, settings.serverUrl, settings.deviceSecret]);
     if (modelDiscoveryRef.current.scope !== scope) modelDiscoveryRef.current = emptyDiscoveryProgress(scope);
     const progress = modelDiscoveryRef.current;
@@ -1865,7 +1872,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   useEffect(() => {
     if (!hydrated || !activeWorkspace?.path || v2Providers.length === 0) return;
     const backendId = activeBackendConnectionId;
-    const api = new V2ApiClient({ serverUrl: settings.serverUrl, device: deviceIdentityFromSecret(settings.deviceSecret) });
+    const api = backendApi(settings);
     const scope = JSON.stringify([backendId, activeWorkspace.path, settings.serverUrl, settings.deviceSecret]);
     if (commandDiscoveryRef.current.scope !== scope) commandDiscoveryRef.current = emptyDiscoveryProgress(scope);
     const progress = commandDiscoveryRef.current;
@@ -1906,7 +1913,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       ...current,
       [conversationId]: { status: 'loading' },
     }));
-    const api = new V2ApiClient({ serverUrl: settings.serverUrl, device: deviceIdentityFromSecret(settings.deviceSecret) });
+    const api = backendApi(settings);
     void api.getProviderImageInput(
       descriptor.id,
       activeWorkspace.path,
@@ -3473,7 +3480,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     }
 
     try {
-      const text = frame.crypto?.decryptServerText(frame.data) ?? frame.data;
+      const text = frame.data;
       const parsed = JSON.parse(text) as Record<string, unknown>;
       const messageType = typeof parsed.type === 'string' ? parsed.type : '';
       if (messageType === 'server.result') {
@@ -3586,12 +3593,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     scheduleSocketFrameDrain();
   }, [scheduleSocketFrameDrain]);
 
-  /** Raw `{id, type, payload}` frame on the unified /v2/ws socket: guard the
-   * 8 MiB backend limit, encrypt, send. Returns null when the frame never
-   * left (socket closed) and throws ConnectionError on oversize payloads. */
+  /** Raw `{id, type, payload}` frame on the unified /v2/ws socket: the secure
+   * socket checks the 8 MiB frame limit before sealing, then sends. Returns
+   * null when the frame never left (socket closed) and throws ConnectionError
+   * on oversize payloads. */
   const sendRawProtocolFrame = useCallback((message: { id: string; type: string; payload: Record<string, unknown> }) => {
     const socket = socketRef.current;
-    if (!socket || socket.readyState !== WebSocket.OPEN || !socketVerifiedRef.current) {
+    if (!socket?.ready || !socketVerifiedRef.current) {
       return null;
     }
     let frame: string;
@@ -3601,7 +3609,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       setLastError(error instanceof Error ? error.message : t('sess.serializeFailed'));
       return null;
     }
-    socket.send(encodeOutboundFrame(frame, socketCryptoRef.current));
+    sendSocketText(socket, frame);
     return message;
   }, []);
 
@@ -3786,9 +3794,12 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
 
   const refreshServerVersion = useCallback(async () => {
     try {
-      // Signed so the daemon also returns its data and workspace paths.
-      const response = await fetch(buildHttpUrl(settings.serverUrl, '/v2/version'), {
-        headers: authHeaders(settings, 'GET', '/v2/version'),
+      // Signed so the daemon also returns its data and workspace paths;
+      // tunnelled like every other call when a key is pinned.
+      const response = await backendFetch(settings, {
+        method: 'GET',
+        path: '/v2/version',
+        headers: { accept: 'application/json' },
       });
       if (!response.ok) {
         throw new Error(`version endpoint returned ${response.status}`);
@@ -3881,15 +3892,16 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     transportFailureRef.current = false;
     const isAttemptCurrent = () => socketGenerationRef.current === generation
       && connectionAttemptRef.current === attempt && !attempt.signal.aborted;
-    const failTransport = (error: unknown) => {
-      if (!isAttemptCurrent()) return;
-      const message = error instanceof Error ? error.message : ENCRYPTION_VERIFICATION_ERROR;
-      lastFailureRetryableRef.current = false;
-      transportFailureRef.current = true;
+    const failTransport = (failure: TransportFailure) => {
+      if (connectionAttemptRef.current !== attempt) return;
+      // A definitive failure stops the reconnect loop and keeps the health
+      // poll from overwriting the message; a retryable one only reports.
+      transportFailureRef.current = !failure.retryable;
       closeSocket(false);
+      lastFailureRetryableRef.current = failure.retryable;
       setConnectionState('error');
-      setLastError(message);
-      setConnectionHealth({ status: 'offline', latencyMs: null, lastCheckedAt: Date.now(), error: message, code: 'protocol_mismatch' });
+      setLastError(failure.message);
+      setConnectionHealth({ status: 'offline', latencyMs: null, lastCheckedAt: Date.now(), error: failure.message, code: failure.code });
     };
     setLastError('');
     setConnectionState('connecting');
@@ -3911,27 +3923,26 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         return;
       }
 
+      const profile = { ...settings, serverUrl: inspected.origin };
       try {
-        await validateTransportEncryption({ ...settings, serverUrl: inspected.origin }, attempt.signal);
+        await verifyTransportPolicy(profile, { signal: attempt.signal });
       } catch (error) {
-        if (error instanceof TransportVerificationError && error.retryable) {
-          lastFailureRetryableRef.current = true;
-          setConnectionState('error');
-          setLastError(error.message);
-          setConnectionHealth({ status: 'offline', latencyMs: null, lastCheckedAt: Date.now(), error: error.message, code: 'backend_unreachable' });
-          return;
-        }
-        failTransport(error);
+        if (!isAttemptCurrent()) return;
+        failTransport(describeTransportFailure(error)
+          ?? { message: t('transport.cannotConfirmPolicy'), retryable: true, code: 'backend_unreachable' });
         return;
       }
       if (!isAttemptCurrent()) return;
-      const probe = await probeBackendConnection({
-        serverUrl: inspected.origin,
-        device: deviceIdentityFromSecret(settings.deviceSecret),
-      });
+      const transport = backendTransport(profile);
+      const probe = await probeBackendConnection({ serverUrl: inspected.origin, transport });
       if (!isAttemptCurrent()) return;
       if (!probe.ok || probe.error) {
         const error = probe.error ?? ConnectionError.unreachable('backend probe failed');
+        const transportFailure = describeTransportFailure(error);
+        if (transportFailure) {
+          failTransport(transportFailure);
+          return;
+        }
         lastFailureRetryableRef.current = error.retryable;
         setConnectionState('error');
         setLastError(error.userMessage);
@@ -3975,215 +3986,194 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         code: '',
       });
 
-      let crypto: TransportCryptoSession | null = null;
-      try {
-        crypto = createTransportCryptoSession({ ...settings, serverUrl: inspected.origin });
-      } catch (error) {
-        failTransport(new Error(`${ENCRYPTION_VERIFICATION_ERROR}${error instanceof Error && error.message ? `（${error.message}）` : ''}`));
-        return;
-      }
-
-      const wsUrl = buildV2WebSocketUrlWithOptions(inspected.origin, {
-        cryptoQueryString: crypto?.queryString,
-        device: deviceIdentityFromSecret(settings.deviceSecret),
-        historyEncryption: true,
-      });
-
-      try {
-        const socket = new WebSocket(wsUrl);
-        socketRef.current = socket;
-        socketCryptoRef.current = crypto;
-        let verified = false;
-        const isSocketCurrent = () => isAttemptCurrent() && socketRef.current === socket;
-
-        socket.onopen = async () => {
+      let verification: SocketVerification | null = null;
+      let verified = false;
+      let cryptoFailed = false;
+      let socket: SecureSocket;
+      const isSocketCurrent = () => isAttemptCurrent() && socketRef.current === socket;
+      const markVerified = () => {
+        if (!isSocketCurrent() || !socket.ready) return;
+        verified = true;
+        socketVerifiedRef.current = true;
+        // Server-side subscriptions are per-socket; this socket starts empty.
+        v2SubscriptionsRef.current.clear();
+        // So are live browser views: watch again what is still on screen.
+        for (const watched of agentBrowserWatchersRef.current.keys()) {
+          const watchFrame = JSON.stringify({ id: createRequestId('abw'), type: 'agentBrowser.watch', payload: { conversationId: watched } });
+          sendSocketText(socket, watchFrame);
+        }
+        pendingV2SubscribeRef.current.clear();
+        reconnectAttemptRef.current = 0;
+        lastFailureRetryableRef.current = true;
+        setConnectionState('open');
+        setConnectionEpoch((current) => current + 1);
+        sendSessionResume(getSessionCursorSnapshot());
+        void checkConnectionHealth();
+        void refreshServerVersion();
+        // Only the open conversation replays history eagerly. Other
+        // conversations subscribe at their known high-water mark and
+        // recover on demand (open, or a live event exposing a gap), so a
+        // reconnect no longer replays every journal at once.
+        const foregroundConversation = conversationsRef.current.find(
+          (item) => item.id === activeConversationRef.current,
+        );
+        // Returning to a backend continues its history where it stopped:
+        // a loaded conversation catches up from its cursor, an unloaded one
+        // opens lazily from the journal tail.
+        if (foregroundConversation?.v2ConversationId) {
+          void openConversation(foregroundConversation.id);
+        }
+        // Prompt submissions whose ACK was lost are reconciled against the
+        // journal: delivered ones resume tracking, the rest return to drafts.
+        for (const [pendingId, pending] of pendingV2SubmissionsRef.current) {
+          if (pending.phase === 'unknown') void reconcilePendingSubmission(pendingId);
+        }
+        void (async () => {
+          await syncWorkspacesFromBackend();
           if (!isSocketCurrent()) return;
-          if (crypto) {
+          const backendId = activeBackendConnectionIdRef.current;
+          const candidates = conversationsRef.current.filter((conversation) => {
+            if (!conversation.v2ConversationId || conversation.archived === true) return false;
+            // Manifest-imported conversations are untagged; their workspace
+            // names the backend that owns them.
+            const ownerId = conversation.backendConnectionId
+              ?? workspacesRef.current.find((item) => item.id === conversation.workspaceId)?.backendConnectionId;
+            return !ownerId || ownerId === backendId;
+          });
+          // The foreground conversation must keep its live subscription even
+          // when the list exceeds the server's per-socket subscription cap.
+          candidates.sort((left, right) =>
+            Number(right.id === foregroundConversation?.id) - Number(left.id === foregroundConversation?.id));
+          for (const conversation of candidates) {
+            if (v2SubscriptionsRef.current.size >= V2_WS_SUBSCRIPTION_BUDGET) break;
+            const v2ConversationId = conversation.v2ConversationId as string;
             try {
-              await verifyEncryptedSocket(socket, crypto, attempt.signal);
-            } catch (error) {
-              // The verifier's verdict is authoritative even when the socket
-              // already closed mid-handshake; only a newer connection attempt
-              // or our own abort may supersede it.
-              if (connectionAttemptRef.current !== attempt) return;
-              if (error instanceof DOMException && error.name === 'AbortError') return;
-              if (error instanceof TransportVerificationError && error.retryable) {
-                if (!isSocketCurrent()) return;
-                // Transient drop mid-handshake: supersede this socket so its
-                // onclose no-ops, then let the reconnect effect retry.
-                closeSocket(false);
-                lastFailureRetryableRef.current = true;
-                setConnectionState('closed');
-                return;
+              // Conversations whose last recovery was cut short resume here.
+              if (conversationRecoveryRef.current?.isRecovering(v2ConversationId)) {
+                void openConversation(conversation.id);
               }
-              const message = error instanceof TransportVerificationError
-                ? error.message
-                : `${ENCRYPTION_VERIFICATION_ERROR}${error instanceof Error && error.message ? `（${error.message}）` : ''}`;
-              transportFailureRef.current = true;
-              try {
-                socket.close();
-              } catch {
-                // already closed
-              }
-              closeSocket(false);
-              // Set after socket.close(): the re-entrant onclose marks the
-              // mid-handshake drop retryable; the verifier's rejection wins.
-              lastFailureRetryableRef.current = false;
-              setConnectionState('error');
-              setLastError(message);
-              setConnectionHealth({ status: 'offline', latencyMs: null, lastCheckedAt: Date.now(), error: message, code: 'protocol_mismatch' });
+              subscribeV2Conversation(v2ConversationId, {
+                // Subscribe at the known high-water mark instead of
+                // replaying the backfill; a stale cursor still surfaces
+                // missed events, and gaps trigger an on-demand recover.
+                afterSequence: Math.max(
+                  conversationRecoveryRef.current?.get(v2ConversationId)?.appliedSequence ?? 0,
+                  conversation.lastSequence ?? 0,
+                ),
+                limit: 200,
+              });
+            } catch {
+              // subscribe is best-effort after resume
+            }
+          }
+        })();
+        flushQueuedProtocolCommands();
+        for (const queuedConversationId of Object.keys(queuedChatDraftsRef.current)) {
+          void resumeQueuedFollowUps(queuedConversationId);
+        }
+      };
+      const failVerification = (error: unknown) => {
+        // The verifier's verdict is authoritative even when the socket
+        // already closed mid-handshake; only a newer connection attempt or
+        // our own abort may supersede it.
+        if (connectionAttemptRef.current !== attempt) return;
+        if (error instanceof DOMException && error.name === 'AbortError') return;
+        const failure = describeTransportFailure(error)
+          ?? { message: t('transport.notVerified'), retryable: false, code: 'protocol_mismatch' as const };
+        if (failure.retryable) {
+          if (!isSocketCurrent()) return;
+          // Transient drop mid-handshake: supersede this socket so its
+          // onClose no-ops, then let the reconnect effect retry.
+          closeSocket(false);
+          lastFailureRetryableRef.current = true;
+          setConnectionState('closed');
+          return;
+        }
+        socket.close();
+        failTransport(failure);
+      };
+
+      try {
+        socket = transport.openSocket({
+          query: { historyEncryption: String(HISTORY_ENCRYPTION_CAPABILITY) },
+          onOpen: () => {
+            if (!isSocketCurrent()) return;
+            if (!socket.encrypted) {
+              markVerified();
               return;
             }
-          }
-          if (!isSocketCurrent() || socket.readyState !== WebSocket.OPEN) return;
-          verified = true;
-          socketVerifiedRef.current = true;
-          // Server-side subscriptions are per-socket; this socket starts empty.
-          v2SubscriptionsRef.current.clear();
-          // So are live browser views: watch again what is still on screen.
-          for (const watched of agentBrowserWatchersRef.current.keys()) {
-            const watchFrame = JSON.stringify({ id: createRequestId('abw'), type: 'agentBrowser.watch', payload: { conversationId: watched } });
-            socket.send(encodeOutboundFrame(watchFrame, socketCryptoRef.current));
-          }
-          pendingV2SubscribeRef.current.clear();
-          reconnectAttemptRef.current = 0;
-          lastFailureRetryableRef.current = true;
-          setConnectionState('open');
-          setConnectionEpoch((current) => current + 1);
-          sendSessionResume(getSessionCursorSnapshot());
-          void checkConnectionHealth();
-          void refreshServerVersion();
-          // Only the open conversation replays history eagerly. Other
-          // conversations subscribe at their known high-water mark and
-          // recover on demand (open, or a live event exposing a gap), so a
-          // reconnect no longer replays every journal at once.
-          const foregroundConversation = conversationsRef.current.find(
-            (item) => item.id === activeConversationRef.current,
-          );
-          // Returning to a backend continues its history where it stopped:
-          // a loaded conversation catches up from its cursor, an unloaded one
-          // opens lazily from the journal tail.
-          if (foregroundConversation?.v2ConversationId) {
-            void openConversation(foregroundConversation.id);
-          }
-          // Prompt submissions whose ACK was lost are reconciled against the
-          // journal: delivered ones resume tracking, the rest return to drafts.
-          for (const [pendingId, pending] of pendingV2SubmissionsRef.current) {
-            if (pending.phase === 'unknown') void reconcilePendingSubmission(pendingId);
-          }
-          void (async () => {
-            await syncWorkspacesFromBackend();
-            if (!isSocketCurrent()) return;
-            const backendId = activeBackendConnectionIdRef.current;
-            const candidates = conversationsRef.current.filter((conversation) => {
-              if (!conversation.v2ConversationId || conversation.archived === true) return false;
-              // Manifest-imported conversations are untagged; their workspace
-              // names the backend that owns them.
-              const ownerId = conversation.backendConnectionId
-                ?? workspacesRef.current.find((item) => item.id === conversation.workspaceId)?.backendConnectionId;
-              return !ownerId || ownerId === backendId;
+            // The first sealed frame is a ping: its pong proves the server
+            // opened it with the pinned key (a wrong key closes with 4400).
+            verification = startSocketVerification((text) => sendSocketText(socket, text), {
+              signal: attempt.signal,
+              timeoutMs: SOCKET_VERIFICATION_TIMEOUT_MS,
             });
-            // The foreground conversation must keep its live subscription even
-            // when the list exceeds the server's per-socket subscription cap.
-            candidates.sort((left, right) =>
-              Number(right.id === foregroundConversation?.id) - Number(left.id === foregroundConversation?.id));
-            for (const conversation of candidates) {
-              if (v2SubscriptionsRef.current.size >= V2_WS_SUBSCRIPTION_BUDGET) break;
-              const v2ConversationId = conversation.v2ConversationId as string;
-              try {
-                // Conversations whose last recovery was cut short resume here.
-                if (conversationRecoveryRef.current?.isRecovering(v2ConversationId)) {
-                  void openConversation(conversation.id);
-                }
-                subscribeV2Conversation(v2ConversationId, {
-                  // Subscribe at the known high-water mark instead of
-                  // replaying the backfill; a stale cursor still surfaces
-                  // missed events, and gaps trigger an on-demand recover.
-                  afterSequence: Math.max(
-                    conversationRecoveryRef.current?.get(v2ConversationId)?.appliedSequence ?? 0,
-                    conversation.lastSequence ?? 0,
-                  ),
-                  limit: 200,
-                });
-              } catch {
-                // subscribe is best-effort after resume
-              }
+            void verification.done.then(markVerified, failVerification);
+          },
+          onMessage: (text) => {
+            if (!isSocketCurrent()) return;
+            // The verifier alone reads messages until its challenge succeeds.
+            if (!verified) {
+              verification?.handleMessage(text);
+              return;
             }
-          })();
-          flushQueuedProtocolCommands();
-          for (const queuedConversationId of Object.keys(queuedChatDraftsRef.current)) {
-            void resumeQueuedFollowUps(queuedConversationId);
-          }
-        };
-
-        socket.onmessage = (event) => {
-          // The verifier alone decrypts frames until its challenge succeeds.
-          if (!isSocketCurrent() || !verified) return;
-          enqueueSocketFrame({
-            data: String(event.data),
-            generation,
-            crypto,
-          });
-        };
-
-        socket.onerror = () => {
-          if (!isSocketCurrent()) return;
-          if (crypto && !verified) {
-            // A transport error before the encrypted handshake finishes is
-            // ambiguous (dropped connection vs rejected key); keep retrying
-            // rather than latching the socket dead.
+            enqueueSocketFrame({ data: text, generation });
+          },
+          onError: (error) => {
+            if (!isSocketCurrent()) return;
+            if (error instanceof TransportCryptoError) {
+              // The socket already closed with 4400; onClose reports it.
+              cryptoFailed = true;
+              return;
+            }
+            const message = socket.encrypted && !verified
+              ? t('transport.notVerified')
+              : ConnectionError.websocketFailed(inspected.origin).userMessage;
             lastFailureRetryableRef.current = true;
             setConnectionState('error');
-            setLastError(ENCRYPTION_VERIFICATION_ERROR);
+            setLastError(message);
             setConnectionHealth((current) => ({
               ...current,
               status: 'offline',
-              error: ENCRYPTION_VERIFICATION_ERROR,
+              error: message,
               code: 'websocket_failed',
             }));
-            return;
-          }
-          lastFailureRetryableRef.current = true;
-          setConnectionState('error');
-          setLastError(ConnectionError.websocketFailed(wsUrl).userMessage);
-          setConnectionHealth((current) => ({
-            ...current,
-            status: 'offline',
-            error: ConnectionError.websocketFailed(wsUrl).userMessage,
-            code: 'websocket_failed',
-          }));
-        };
-
-        socket.onclose = () => {
-          if (!isSocketCurrent()) return;
-          if (crypto && !verified) {
-            // A drop before the encrypted handshake finishes is transient;
-            // keep auto-reconnect alive instead of latching a verification
-            // error. The verifier's rejection may run after this callback.
-            lastFailureRetryableRef.current = true;
-            setConnectionState('closed');
-            setLastError(ENCRYPTION_VERIFICATION_ERROR);
+          },
+          onClose: (event) => {
+            if (!isSocketCurrent()) return;
+            verification?.fail();
             socketVerifiedRef.current = false;
             socketRef.current = null;
-            socketCryptoRef.current = null;
             attempt.abort();
             protocolCommandsRef.current?.disconnect();
-            return;
-          }
-          socketVerifiedRef.current = false;
-          setConnectionState((current) => (current === 'open' || current === 'connecting' ? 'closed' : current));
-          socketRef.current = null;
-          socketCryptoRef.current = null;
-          attempt.abort();
-          protocolCommandsRef.current?.disconnect();
-        };
+            if (cryptoFailed || event.code === TRANSPORT_V2_WS_CLOSE_CODE) {
+              // A transport crypto failure: reconnect with a fresh handshake
+              // and tell the user how to recover if it keeps happening.
+              const failure = describeTransportFailure(new TransportCryptoError('socket closed')) as TransportFailure;
+              lastFailureRetryableRef.current = true;
+              setConnectionState('error');
+              setLastError(failure.message);
+              setConnectionHealth((current) => ({ ...current, status: 'offline', error: failure.message, code: failure.code }));
+              return;
+            }
+            if (socket.encrypted && !verified) {
+              // A drop before the encrypted handshake finishes is transient;
+              // keep auto-reconnect alive instead of latching an error.
+              lastFailureRetryableRef.current = true;
+              setConnectionState('closed');
+              setLastError(t('transport.notVerified'));
+              return;
+            }
+            setConnectionState((current) => (current === 'open' || current === 'connecting' ? 'closed' : current));
+          },
+        });
       } catch (error) {
         if (!isAttemptCurrent()) return;
-        lastFailureRetryableRef.current = true;
-        setConnectionState('error');
-        socketCryptoRef.current = null;
-        setLastError(error instanceof Error ? error.message : ConnectionError.websocketFailed(wsUrl).userMessage);
+        failTransport(describeTransportFailure(error)
+          ?? { message: error instanceof Error ? error.message : t('transport.invalidKey'), retryable: false, code: 'encryption_required' });
+        return;
       }
+      socketRef.current = socket;
     })().catch((error: unknown) => {
       if (!isAttemptCurrent()) return;
       lastFailureRetryableRef.current = true;
@@ -4235,7 +4225,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     const tick = () => {
       if (manualDisconnectRef.current) return;
       const socket = socketRef.current;
-      if (!socket || socket.readyState === WebSocket.CLOSING || socket.readyState === WebSocket.CLOSED) {
+      if (!socket || socket.closed) {
         socketVerifiedRef.current = false;
         socketWatchdogFailuresRef.current = 0;
         setConnectionState((current) => (current === 'open' ? 'closed' : current));
@@ -4243,7 +4233,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         connect();
         return;
       }
-      if (socket.readyState !== WebSocket.OPEN || !socketVerifiedRef.current) return;
+      if (!socket.ready || !socketVerifiedRef.current) return;
       const livenessProbe = socket;
       void sendProtocolCommand({ id: createRequestId('watchdog'), type: 'server.ping', payload: {} }, SOCKET_LIVENESS_TIMEOUT_MS)
         .then(() => {
@@ -4289,7 +4279,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       target?: TimelineTarget,
     ) => {
       const socket = socketRef.current;
-      if (!socket || socket.readyState !== WebSocket.OPEN || !socketVerifiedRef.current) {
+      if (!socket?.ready || !socketVerifiedRef.current) {
         if (autoConnectEnabled && !manualDisconnectRef.current) {
           setLastError(t('sess.reconnecting'));
           connect();
@@ -4730,9 +4720,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         removedWorkspace &&
         (!removedWorkspace.backendConnectionId || removedWorkspace.backendConnectionId === activeBackendConnectionId)
       ) {
-        void fetch(buildHttpUrl(settings.serverUrl, `/v2/workspaces/${encodeURIComponent(workspaceId)}`), {
+        void backendFetch(settings, {
           method: 'DELETE',
-          headers: authHeaders(settings, 'DELETE', `/v2/workspaces/${encodeURIComponent(workspaceId)}`),
+          path: `/v2/workspaces/${encodeURIComponent(workspaceId)}`,
         }).then((response) => {
           // 404 means the backend holds no matching record — the desired state.
           if (!response.ok && response.status !== 404) throw new Error(`workspace delete returned ${response.status}`);
@@ -6356,7 +6346,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
             conversationId: conversation.v2ConversationId, title: t('sess.forkTitle', { title: conversation.title || t('sess.conversation') }),
           } }, 45_000);
           if (typeof result.conversationId !== 'string') throw new Error(t('sess.forkNoId'));
-          const api = new V2ApiClient({ serverUrl: settings.serverUrl, device: deviceIdentityFromSecret(settings.deviceSecret) });
+          const api = backendApi(settings);
           const created = await api.getConversation(result.conversationId);
           const record = { ...conversationFromManifest(created, workspace.id), backendConnectionId: conversation.backendConnectionId,
             model: conversation.model, reasoningEffort: conversation.reasoningEffort,
@@ -6550,10 +6540,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       const firstMessageTitle = firstMessageText.trim().slice(0, 18);
 
       try {
-        const api = new V2ApiClient({
-          serverUrl: backendProfile?.serverUrl ?? settings.serverUrl,
-          device: deviceIdentityFromSecret(backendProfile?.deviceSecret ?? settings.deviceSecret),
-        });
+        const api = backendApi(backendProfile ?? settings);
         const created = await api.createConversation({
           provider: provider.id,
           workspace: workspace.path,
@@ -6682,7 +6669,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       }
       if (rateLimitWait) setConversationRateLimit(conversation.id, null);
       const socket = socketRef.current;
-      if (!socket || socket.readyState !== WebSocket.OPEN || !socketVerifiedRef.current) {
+      if (!socket?.ready || !socketVerifiedRef.current) {
         if (autoConnectEnabled && !manualDisconnectRef.current) {
           setLastError(t('sess.reconnecting'));
           connect();
@@ -7108,7 +7095,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     if (!workspacePath) {
       throw new Error(t('sess.pickWorkspaceFirst'));
     }
-    const api = new V2ApiClient({ serverUrl: settings.serverUrl, device: deviceIdentityFromSecret(settings.deviceSecret) });
+    const api = backendApi(settings);
     const result = await api.getSkillResource(provider, workspacePath, resourceId);
     return result.content;
   }, [activeWorkspace?.path, settings.deviceSecret, settings.defaultWorkspacePath, settings.serverUrl]);
@@ -8609,14 +8596,14 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   // callback, and a new identity per render would re-fire (and discard) the
   // lookup on every unrelated session update.
   const fetchWorkspaceEntries = useCallback(async (cwd: string, query: string, limit?: number) => {
-    const api = new V2ApiClient({ serverUrl: settings.serverUrl, device: deviceIdentityFromSecret(settings.deviceSecret) });
+    const api = backendApi(settings);
     return api.listWorkspaceEntries(cwd, query, limit);
   }, [settings.serverUrl, settings.deviceSecret]);
 
   // Stable for the same reason as fetchWorkspaceEntries: the composer @ssh:
   // effect depends on it.
   const fetchSshHosts = useCallback(async () => {
-    const api = new V2ApiClient({ serverUrl: settings.serverUrl, device: deviceIdentityFromSecret(settings.deviceSecret) });
+    const api = backendApi(settings);
     return api.listSshHosts();
   }, [settings.serverUrl, settings.deviceSecret]);
 

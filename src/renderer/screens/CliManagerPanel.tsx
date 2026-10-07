@@ -2,18 +2,17 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button, Card, Chip, Spinner, toast } from '@heroui/react';
 import { RiDownload2Line, RiDownloadCloud2Line, RiRefreshLine, RiServerLine } from '@remixicon/react';
 import {
-  V2ApiClient,
   type CliOperationAction,
   type CliUpgradeOperation,
   type CliVersionInfo,
   type CliVersionStatus,
   type ManagedCliProvider,
 } from '@todex/protocol/v2';
-import { deviceIdentityFromSecret } from '@todex/protocol/deviceAuth';
 import { ProviderIcon } from '../components/ProviderIcon';
 import { NoticeToast } from '../components/NoticeToast';
 import { t, useT, type MessageKey } from '../i18n';
 import type { TodeXSession } from '../session/useTodeXSession';
+import { backendApi } from '../session/helpers';
 
 const STATUS: Record<CliVersionStatus, { labelKey: MessageKey; color: 'success' | 'warning' | 'default' | 'danger' }> = {
   upToDate: { labelKey: 'cli.statusUpToDate', color: 'success' },
@@ -33,10 +32,7 @@ export function CliManagerPanel({ session }: { session: TodeXSession }) {
   const [submittingProvider, setSubmittingProvider] = useState<ManagedCliProvider>();
   const requestGeneration = useRef(0);
   const backendGeneration = useRef(0);
-  const api = useCallback(() => new V2ApiClient({
-    serverUrl: session.settings.serverUrl,
-    device: deviceIdentityFromSecret(session.settings.deviceSecret),
-  }), [session.settings.deviceSecret, session.settings.serverUrl]);
+  const api = useCallback(() => backendApi(session.settings), [session.settings.deviceSecret, session.settings.encryptionProtocol, session.settings.encryptionPublicKey, session.settings.serverUrl]);
 
   const refresh = useCallback(async (quiet = false) => {
     const generation = ++requestGeneration.current;

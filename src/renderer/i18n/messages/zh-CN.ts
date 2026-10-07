@@ -1400,11 +1400,15 @@ export const zhCN = {
   // transport
   'transport.cannotConfirmPolicy': '无法确认后端加密要求，请检查后端状态后重试。',
   'transport.invalidPolicy': '后端加密要求响应无效。',
-  'transport.invalidPolicyUpdate': '后端加密要求响应无效，请更新客户端或后端。',
-  'transport.notVerified': '尚未通过加密密钥传输验证。请通过后端二维码或复制粘贴导入正确的加密公钥后重新连接。',
+  'transport.notVerified': '加密连接未通过验证（后端没有用配对时的密钥应答）。请在 设置 → 配对 中重新导入后端配对二维码后重新连接。',
   'transport.policyTimeout': '确认后端加密要求超时，请检查连接后重试。',
   'transport.policyUnreachable': '无法连接后端以确认加密要求，将自动重试。',
-  'transport.protocolRequired': '后端要求 {protocol} 加密，当前连接尚未完成加密密钥传输验证。请通过二维码或复制粘贴导入对应公钥，并选择 {protocol} 后重新连接。',
+  'transport.encryptionRequired': '远程后端只接受加密连接，而此连接还没有配对加密密钥。请在 设置 → 配对 中扫描或粘贴后端 TUI 显示的配对二维码，完成设备验证后再连接。',
+  'transport.repairRequired': '后端现在要求 {protocol} 加密，与本机配对时固定的密钥不一致。请在 设置 → 配对 中重新导入后端配对二维码完成配对。',
+  'transport.backendOutdated': '后端版本过旧，不支持 transport v2 加密传输。请升级后端后重新连接。',
+  'transport.cryptoFailed': '加密传输校验失败，连接已关闭，正在自动重连。若反复出现，请在 设置 → 配对 中重新导入后端配对二维码。',
+  'transport.upgradeRequired': '后端拒绝了未加密的请求。请在 设置 → 配对 中导入后端配对二维码完成加密配对。',
+  'transport.invalidKey': '已保存的加密公钥无效。请在 设置 → 配对 中重新导入后端配对二维码。',
 
   // workspace
   'workspace.dirReadFailed': '目录读取失败: {status}',

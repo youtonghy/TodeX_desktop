@@ -2,10 +2,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { RiArrowDownSLine, RiArrowUpSLine, RiComputerLine, RiStopCircleLine } from '@remixicon/react';
 import { Button, Chip, toast } from '@heroui/react';
 import type { DesktopComputerState } from '@todex/protocol/conversationRuntime';
-import { deviceIdentityFromSecret } from '@todex/protocol/deviceAuth';
-import { V2ApiClient } from '@todex/protocol/v2';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { useT } from '../i18n';
+import { backendApi } from '../session/helpers';
 
 /** Polling cadence of the live frame while it is visible. */
 const FRAME_INTERVAL_MS = 350;
@@ -29,8 +28,8 @@ export function ComputerLiveView({ session, conversationId, state }: {
   const [frame, setFrame] = useState<string | null>(null);
   const [shot, setShot] = useState<{ shotId: string; dataUrl: string } | null>(null);
   const api = useMemo(
-    () => new V2ApiClient({ serverUrl: session.settings.serverUrl, device: deviceIdentityFromSecret(session.settings.deviceSecret) }),
-    [session.settings.deviceSecret, session.settings.serverUrl],
+    () => backendApi(session.settings),
+    [session.settings.deviceSecret, session.settings.encryptionProtocol, session.settings.encryptionPublicKey, session.settings.serverUrl],
   );
   const active = Boolean(state?.active);
   const awaiting = Boolean(state?.awaitingHost) && !active;

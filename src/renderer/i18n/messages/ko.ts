@@ -1400,11 +1400,15 @@ export const ko: Messages = {
   // transport
   'transport.cannotConfirmPolicy': 'Backend 암호화 요구 사항을 확인할 수 없습니다. Backend 상태를 확인한 후 다시 시도하세요.',
   'transport.invalidPolicy': 'Backend 암호화 요구 사항 응답이 유효하지 않습니다.',
-  'transport.invalidPolicyUpdate': 'Backend 암호화 요구 사항 응답이 유효하지 않습니다. 클라이언트 또는 Backend를 업데이트하세요.',
-  'transport.notVerified': '암호화 키 전송 검증을 통과하지 않았습니다. Backend QR 코드 또는 복사/붙여넣기로 올바른 암호화 공개 키를 가져온 후 다시 연결하세요.',
+  'transport.notVerified': '암호화 연결을 검증하지 못했습니다(Backend가 페어링한 키로 응답하지 않음). 설정 → 페어링에서 Backend 페어링 QR 코드를 다시 가져온 후 다시 연결하세요.',
   'transport.policyTimeout': 'Backend 암호화 요구 사항 확인 시간이 초과되었습니다. 연결을 확인한 후 다시 시도하세요.',
   'transport.policyUnreachable': '암호화 요구 사항을 확인하기 위해 Backend에 연결할 수 없습니다. 자동으로 다시 시도합니다.',
-  'transport.protocolRequired': 'Backend는 {protocol} 암호화를 요구하지만 현재 연결은 암호화 키 전송 검증을 완료하지 않았습니다. QR 코드 또는 복사/붙여넣기로 해당 공개 키를 가져오고 {protocol}을 선택한 후 다시 연결하세요.',
+  'transport.encryptionRequired': '원격 Backend는 암호화 연결만 허용하지만 이 연결에는 아직 암호화 키가 페어링되지 않았습니다. 설정 → 페어링에서 Backend TUI에 표시된 페어링 QR 코드를 스캔하거나 붙여넣고 기기 인증을 마친 후 연결하세요.',
+  'transport.repairRequired': 'Backend가 이제 {protocol} 암호화를 요구하며, 이 기기를 페어링할 때 고정한 키와 일치하지 않습니다. 설정 → 페어링에서 Backend 페어링 QR 코드를 다시 가져오세요.',
+  'transport.backendOutdated': 'Backend 버전이 오래되어 transport v2 암호화를 지원하지 않습니다. Backend를 업데이트한 후 다시 연결하세요.',
+  'transport.cryptoFailed': '암호화 전송 검증에 실패하여 연결이 닫혔습니다. 자동으로 다시 연결합니다. 계속 발생하면 설정 → 페어링에서 Backend 페어링 QR 코드를 다시 가져오세요.',
+  'transport.upgradeRequired': 'Backend가 암호화되지 않은 요청을 거부했습니다. 설정 → 페어링에서 Backend 페어링 QR 코드를 가져와 암호화 페어링을 완료하세요.',
+  'transport.invalidKey': '저장된 암호화 공개 키가 유효하지 않습니다. 설정 → 페어링에서 Backend 페어링 QR 코드를 다시 가져오세요.',
 
   // workspace
   'workspace.dirReadFailed': '디렉터리 읽기 실패: {status}',

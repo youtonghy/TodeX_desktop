@@ -1,5 +1,5 @@
 import { buildHttpUrl, type ConnectionSettings } from '@todex/protocol/todex';
-import { deviceAuthHeaders, deviceIdentityFromSecret } from '@todex/protocol/deviceAuth';
+import { backendFetch } from '../session/helpers';
 import { t } from '../i18n';
 
 export interface GitWorkspaceBranch {
@@ -71,18 +71,13 @@ async function request<T>(settings: ConnectionSettings, url: string, operation?:
   else externalSignal?.addEventListener('abort', abort, { once: true });
   const timeout = setTimeout(() => controller.abort(), operation ? 120_000 : 15_000);
   try {
-    const requestBody = operation ? JSON.stringify({ workspacePath, operation }) : '';
-    const device = deviceIdentityFromSecret(settings.deviceSecret);
     const parsedUrl = new URL(url);
-    const response = await fetch(url, {
+    const response = await backendFetch(settings, {
       method: operation ? 'POST' : 'GET',
-      headers: {
-        ...(device
-          ? deviceAuthHeaders(device, operation ? 'POST' : 'GET', `${parsedUrl.pathname}${parsedUrl.search}`, new TextEncoder().encode(requestBody))
-          : {}),
-        ...(operation ? { 'Content-Type': 'application/json' } : {}),
-      },
-      ...(operation ? { body: requestBody } : {}),
+      path: parsedUrl.pathname,
+      query: parsedUrl.search,
+      headers: operation ? { 'content-type': 'application/json', accept: 'application/json' } : { accept: 'application/json' },
+      body: operation ? JSON.stringify({ workspacePath, operation }) : undefined,
       signal: controller.signal,
     });
     const body: unknown = await response.json().catch(() => null);

@@ -2,10 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { RiGlobalLine, RiStopCircleLine } from '@remixicon/react';
 import { Button, Chip, toast } from '@heroui/react';
 import type { AgentBrowserFrame } from '@todex/protocol/agentDesktop';
-import { deviceIdentityFromSecret } from '@todex/protocol/deviceAuth';
-import { V2ApiClient } from '@todex/protocol/v2';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { useT } from '../i18n';
+import { backendApi } from '../session/helpers';
 
 /** A frame decoded into a bitmap, or the latest screenshot as a data URL. */
 type Still = { shotId: string; dataUrl: string };
@@ -28,8 +27,8 @@ export function AgentBrowserLiveView({ session, conversationId, isActive }: {
   const [still, setStill] = useState<Still | null>(null);
   const [visible, setVisible] = useState(() => document.visibilityState === 'visible');
   const api = useMemo(
-    () => new V2ApiClient({ serverUrl: session.settings.serverUrl, device: deviceIdentityFromSecret(session.settings.deviceSecret) }),
-    [session.settings.deviceSecret, session.settings.serverUrl],
+    () => backendApi(session.settings),
+    [session.settings.deviceSecret, session.settings.encryptionProtocol, session.settings.encryptionPublicKey, session.settings.serverUrl],
   );
   const state = session.conversationRuntimeById[conversationId]?.desktopBrowser;
   const latest = state?.actions.at(-1);

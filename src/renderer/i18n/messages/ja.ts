@@ -1400,11 +1400,15 @@ export const ja: Messages = {
   // transport
   'transport.cannotConfirmPolicy': 'Backend の暗号化要件を確認できません。Backend の状態を確認して再試行してください。',
   'transport.invalidPolicy': 'Backend の暗号化要件の応答が無効です。',
-  'transport.invalidPolicyUpdate': 'Backend の暗号化要件の応答が無効です。クライアントまたは Backend を更新してください。',
-  'transport.notVerified': '暗号化キー転送の検証がまだ完了していません。Backend の QR コードまたはコピー＆ペーストで正しい暗号化公開鍵をインポートしてから再接続してください。',
+  'transport.notVerified': '暗号化接続を検証できませんでした（Backend がペアリング時の鍵で応答しませんでした）。設定 → ペアリング で Backend のペアリング QR コードを再インポートしてから再接続してください。',
   'transport.policyTimeout': 'Backend の暗号化要件の確認がタイムアウトしました。接続を確認して再試行してください。',
   'transport.policyUnreachable': '暗号化要件を確認するため Backend に接続できません。自動で再試行します。',
-  'transport.protocolRequired': 'Backend は {protocol} 暗号化を要求していますが、この接続は暗号化キー転送の検証を完了していません。QR コードまたはコピー＆ペーストで対応する公開鍵をインポートし、{protocol} を選択して再接続してください。',
+  'transport.encryptionRequired': 'リモートの Backend は暗号化接続のみ受け付けますが、この接続にはまだ暗号化キーがペアリングされていません。設定 → ペアリング で Backend の TUI に表示されたペアリング QR コードを読み取るか貼り付け、デバイス認証を完了してから接続してください。',
+  'transport.repairRequired': 'Backend は現在 {protocol} 暗号化を要求しており、このデバイスのペアリング時に固定した鍵と一致しません。設定 → ペアリング で Backend のペアリング QR コードを再インポートしてください。',
+  'transport.backendOutdated': 'Backend が古いため transport v2 暗号化に対応していません。Backend を更新してから再接続してください。',
+  'transport.cryptoFailed': '暗号化転送の検証に失敗したため接続が閉じられました。自動で再接続します。繰り返し発生する場合は、設定 → ペアリング で Backend のペアリング QR コードを再インポートしてください。',
+  'transport.upgradeRequired': 'Backend が暗号化されていないリクエストを拒否しました。設定 → ペアリング で Backend のペアリング QR コードをインポートして暗号化ペアリングを行ってください。',
+  'transport.invalidKey': '保存されている暗号化公開鍵が無効です。設定 → ペアリング で Backend のペアリング QR コードを再インポートしてください。',
 
   // workspace
   'workspace.dirReadFailed': 'ディレクトリの読み取りに失敗: {status}',

@@ -26,9 +26,7 @@ import {
 } from '../session/helpers';
 import type { OpenPanelOptions, WorkbenchItem, WorkbenchRequest, WorkbenchTab } from '../lib/panels';
 import { normalizeWorkbenchLayout } from '../session/workbenchLayout';
-import { SETTINGS_STORAGE_KEY, attachmentId, referenceToken, uniqueReferenceName } from '../session/helpers';
-import { V2ApiClient } from '@todex/protocol/v2';
-import { deviceIdentityFromSecret } from '@todex/protocol/deviceAuth';
+import { SETTINGS_STORAGE_KEY, attachmentId, backendApi, referenceToken, uniqueReferenceName } from '../session/helpers';
 import { isConflictError } from '@todex/protocol/connectionError';
 import { isNotFoundError, type SshExecRun } from '@todex/protocol/ssh';
 import { isLoopbackUrl } from '@todex/protocol/mobileParity';
@@ -125,7 +123,7 @@ function normalizeWorkbenchItem(item: WorkbenchItem): WorkbenchItem {
 }
 
 function v2Api(session: TodeXSession) {
-  return new V2ApiClient({ serverUrl: session.settings.serverUrl, device: deviceIdentityFromSecret(session.settings.deviceSecret) });
+  return backendApi(session.settings);
 }
 
 function placeholderFiles(): Record<string, { title: string; language: string; body: string }> {
@@ -864,7 +862,7 @@ function BrowserPane({ itemId, isActive, workspacePath, session, target, onTarge
     }
     targetChangeRef.current?.(target);
     setDraft(target.filePath);
-    const api = new V2ApiClient({ serverUrl: session.settings.serverUrl, device: deviceIdentityFromSecret(session.settings.deviceSecret) });
+    const api = backendApi(session.settings);
     void api.readWorkspaceFile(target.filePath)
       .then((file) => {
         if (!file.text) throw new Error(t('workbench.webFileNotText'));
@@ -1059,9 +1057,8 @@ function FilesPane({ session, target, onTargetChange, remote, onRemoteRebind }: 
   const t = useT();
   const targetChangeRef = useRef(onTargetChange);
   targetChangeRef.current = onTargetChange;
-  const serverUrl = session.settings.serverUrl;
-  const deviceSecret = session.settings.deviceSecret;
-  const api = useCallback(() => new V2ApiClient({ serverUrl, device: deviceIdentityFromSecret(deviceSecret) }), [deviceSecret, serverUrl]);
+  const { serverUrl, deviceSecret, encryptionProtocol, encryptionPublicKey } = session.settings;
+  const api = useCallback(() => backendApi({ serverUrl, deviceSecret, encryptionProtocol, encryptionPublicKey }), [deviceSecret, encryptionProtocol, encryptionPublicKey, serverUrl]);
   const workspacePath = session.activeWorkspace?.path || '';
   // shell.openPath/showItemInFolder act on the desktop's own filesystem, so
   // the menu only makes sense when the backend runs on this machine.

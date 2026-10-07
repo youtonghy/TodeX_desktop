@@ -1,13 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button, Card, Chip } from '@heroui/react';
 import { RiRefreshLine, RiVipCrownLine } from '@remixicon/react';
-import { deviceIdentityFromSecret } from '@todex/protocol/deviceAuth';
-import { V2ApiClient } from '@todex/protocol/v2';
 import type { ProviderQuotaSnapshot, QuotaWindow } from '@todex/protocol/v2';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { ProviderIcon } from '../components/ProviderIcon';
 import { getLocale, t, useT } from '../i18n';
 import type { MessageKey } from '../i18n';
+import { backendApi } from '../session/helpers';
 
 type Props = {
   session: TodeXSession;
@@ -100,10 +99,7 @@ export function QuotaPanel({ session }: Props) {
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const api = new V2ApiClient({
-        serverUrl: session.settings.serverUrl,
-        device: deviceIdentityFromSecret(session.settings.deviceSecret),
-      });
+      const api = backendApi(session.settings);
       const response = await api.getProviderQuotas();
       setSnapshots(response.providers ?? {});
       setError(null);

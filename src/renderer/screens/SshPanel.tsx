@@ -2,8 +2,6 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Button, Spinner, Tabs, toast } from '@heroui/react';
 import { EmptyState } from '@heroui-pro/react';
 import { RiKey2Line, RiLinksLine, RiRefreshLine, RiServerLine, RiTerminalLine } from '@remixicon/react';
-import { V2ApiClient } from '@todex/protocol/v2';
-import { deviceIdentityFromSecret } from '@todex/protocol/deviceAuth';
 import { isNotFoundError, type SshHostsResponse, type SshKeysResponse } from '@todex/protocol/ssh';
 import type { TodeXSession } from '../session/useTodeXSession';
 import type { WorkbenchItem } from '../lib/panels';
@@ -14,6 +12,7 @@ import { SshConnectionsTab } from '../components/ssh/SshConnectionsTab';
 import { useRemoteConnector, type RemoteConnectTarget } from '../components/ssh/useRemoteConnector';
 import { errorMessage } from '../components/ssh/sshShared';
 import { useT } from '../i18n';
+import { backendApi } from '../session/helpers';
 
 type SshTab = 'hosts' | 'keys' | 'connections';
 
@@ -35,9 +34,8 @@ type Props = {
  */
 export function SshPanel({ session, scopeKey, workbenchItems, onOpenSshTerminal, onOpenRemoteFiles, onCloseWorkbenchItem }: Props) {
   const t = useT();
-  const serverUrl = session.settings.serverUrl;
-  const deviceSecret = session.settings.deviceSecret;
-  const api = useCallback(() => new V2ApiClient({ serverUrl, device: deviceIdentityFromSecret(deviceSecret) }), [deviceSecret, serverUrl]);
+  const { serverUrl, deviceSecret, encryptionProtocol, encryptionPublicKey } = session.settings;
+  const api = useCallback(() => backendApi({ serverUrl, deviceSecret, encryptionProtocol, encryptionPublicKey }), [deviceSecret, encryptionProtocol, encryptionPublicKey, serverUrl]);
   const remoteConnector = useRemoteConnector(api);
   const [tab, setTab] = useState<SshTab>('hosts');
   const [hosts, setHosts] = useState<SshHostsResponse | null>(null);
