@@ -939,6 +939,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     setQueuedChatDrafts(queuedChatDraftsRef.current);
   }, []);
 
+  const clearQueuedFollowUps = useCallback((conversationId: string) => {
+    if (!(conversationId in queuedChatDraftsRef.current)) return;
+    const { [conversationId]: _removed, ...rest } = queuedChatDraftsRef.current;
+    queuedChatDraftsRef.current = rest;
+    setQueuedChatDrafts(rest);
+  }, []);
+
   const resumeQueuedFollowUps = useCallback(async (conversationId: string, options: { rateLimitEnded?: boolean } = {}) => {
     // A conversation still inside a provider rate-limit window holds its queue
     // until the recorded reset instant; the timer below resumes it then.
@@ -8654,6 +8661,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     queuePausedByConversation,
     rateLimitedUntilByConversation,
     removeQueuedFollowUp,
+    clearQueuedFollowUps,
     resumeQueuedFollowUps,
     editFollowUpQueue,
     controlConversation,
