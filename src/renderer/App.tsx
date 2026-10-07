@@ -424,12 +424,14 @@ export function App() {
               />
             </Suspense>
           ) : session.historyEncryption.recoveryNoticeVisible ? (
-            <div className="flex h-full min-h-0 flex-col">
-              <HistoryRecoveryNotice
-                className="mx-5 mt-3 shrink-0"
-                onSetup={() => { setHistoryRecoverySetup(true); setPanel('settings'); }}
-                onDismiss={session.historyEncryption.dismissRecoveryNotice}
-              />
+            <div className="flex h-full min-h-0 w-full min-w-0 flex-col">
+              <div className="shrink-0 px-5 pt-3">
+                <HistoryRecoveryNotice
+                  className="mx-auto max-w-2xl"
+                  onSetup={() => { setHistoryRecoverySetup(true); setPanel('settings'); }}
+                  onDismiss={session.historyEncryption.dismissRecoveryNotice}
+                />
+              </div>
               <div className="min-h-0 flex-1"><ChatPanel session={session} /></div>
             </div>
           ) : <ChatPanel session={session} />}
