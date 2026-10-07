@@ -61,6 +61,7 @@ Built with **Electron 44**, **React 19**, **Vite 7**, **Tailwind CSS v4**, and *
   - **X25519** or **ML-KEM-768** (post-quantum) key agreement against the backend key pinned at pairing, via the `@noble` cryptography suite; every session key mixes in fresh server randomness.
   - With a pinned key every call is encrypted, loopback included: the WebSocket uses `tv=2` binary frames and every REST request goes through the `POST /v2/sealed` tunnel. Only `/health`, `/v2/transport-policy` and device verification are called directly.
   - Without a pinned key only a loopback backend can be reached (in plaintext); a remote address is refused with a prompt to pair with encryption. A changed backend protocol asks for re-pairing instead of downgrading.
+- **End-to-end encrypted history** ([history encryption](docs/device-verification.md#历史记录加密)): conversation history is always encrypted; there is no switch. Each device registers its own history key on first connect, and Settings warns until a recovery key is set. Conversations stored before encryption are read-only (view, export, archive, delete).
 
 ---
 
