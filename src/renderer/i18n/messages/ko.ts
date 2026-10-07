@@ -218,7 +218,6 @@ export const ko: Messages = {
 
   // storage
   'storage.insecureBackend': '공개 HTTPS 페이지는 HTTPS/WSS를 사용하는 원격 Backend에만 연결할 수 있습니다',
-  'storage.browserReadFile': '브라우저 미리보기에서는 로컬 파일을 읽을 수 없습니다',
   'storage.browserGit': '브라우저 미리보기에서는 Git 작업을 지원하지 않습니다',
   'storage.browserShell': '브라우저 미리보기에서는 로컬 파일을 열 수 없습니다',
 

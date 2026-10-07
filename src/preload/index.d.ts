@@ -1,11 +1,3 @@
-export type DesktopFilePayload = {
-  name: string;
-  mimeType: string;
-  sizeBytes: number;
-  base64: string;
-  text?: string;
-};
-
 export type TodeXDesktopApi = {
   store: {
     get: (key: string) => Promise<unknown>;
@@ -17,10 +9,6 @@ export type TodeXDesktopApi = {
   };
   dialog: {
     openDirectory: () => Promise<string | null>;
-    openFiles: (options?: { images?: boolean }) => Promise<string[]>;
-  };
-  fs: {
-    readFile: (filePath: string) => Promise<DesktopFilePayload>;
   };
   shell: {
     platform: string;

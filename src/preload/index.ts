@@ -1,12 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
 
-export type DesktopFilePayload = {
-  name: string;
-  mimeType: string;
-  sizeBytes: number;
-  base64: string;
-  text?: string;
-};
 export type GitRepositorySummary = {
   path: string;
   name: string;
@@ -43,11 +36,6 @@ const api = {
   },
   dialog: {
     openDirectory: () => ipcRenderer.invoke('dialog:openDirectory') as Promise<string | null>,
-    openFiles: (options?: { images?: boolean }) =>
-      ipcRenderer.invoke('dialog:openFiles', options) as Promise<string[]>,
-  },
-  fs: {
-    readFile: (filePath: string) => ipcRenderer.invoke('fs:readFile', filePath) as Promise<DesktopFilePayload>,
   },
   shell: {
     platform: process.platform,

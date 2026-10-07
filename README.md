@@ -222,7 +222,9 @@ The Settings screen in TodeX Desktop provides clear diagnostic feedback:
 ## Security
 
 - **Process Isolation**: The renderer process runs with `nodeIntegration: false` and `contextIsolation: true`.
-- **Preload IPC**: Filesystem access, dialog popups, and secure storage operations are routed through guarded IPC channels.
+- **Preload IPC**: Dialogs, secure storage and the workspace file actions (open, open with, reveal) are routed through guarded IPC channels. The renderer cannot read local files through IPC; the file actions accept absolute paths only, and a plain open refuses executables and app bundles.
+- **App window**: Navigation, redirects and subframe navigation are limited to the app's own entry; web permissions other than notifications and the clipboard are denied.
+- **Backend origin**: The bundled renderer's WebSockets send `Origin: todex-desktop://app` instead of `file://` (or `null`); anonymous loopback backends accept that value and refuse `null` / `file://`. This needs a backend with the matching origin rule.
 - **Strict Scope**: Only connects to explicitly configured agent daemon endpoints.
 - **Browser views**: Workbench pages run in sandboxed `WebContentsView`s with their own partition, never the app's storage; their top-level navigation is checked in the main process.
 

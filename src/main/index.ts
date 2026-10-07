@@ -1,5 +1,5 @@
-import { app, BrowserWindow, dialog, ipcMain, nativeTheme, safeStorage, shell } from 'electron';
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { app, BrowserWindow, dialog, ipcMain, nativeTheme, safeStorage, session, shell } from 'electron';
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -9,6 +9,7 @@ import { startAutoUpdates, refreshUpdateMenu } from './autoUpdates';
 import { syncDesktopEntry } from './desktopEntry';
 import { PreviewViews, type InspectColors, type PreviewTarget } from './previewViews';
 import { isMainLocale, mainT, setMainLocale } from './i18n';
+import { openPathRefusal, shellPathRefusal, type PathInfo, type ShellPathRefusal } from './shellPolicy';
 import {
   DEBUG_BUILD_VERSION,
   DEBUG_LOG_PATH_KEY,
@@ -22,11 +23,17 @@ import {
 
 const execFileAsync = promisify(execFile);
 
-const MAX_IMAGE_ATTACHMENT_BYTES = 8 * 1024 * 1024;
-const MAX_FILE_ATTACHMENT_BYTES = 512 * 1024;
 const MAX_RENDERER_CRASH_RELOADS = 5;
 const APP_IDENTITY = 'todex-desktop';
 const PROTOCOL_VERSION = 'v2';
+/** The `Origin` the bundled renderer presents to backends. A `loadFile` page
+ * has none of its own (WebSockets send `file://`, opaque contexts `null`), and
+ * anonymous loopback backends refuse those because any web page can produce
+ * `null`; they accept this fixed value instead. */
+const DESKTOP_APP_ORIGIN = 'todex-desktop://app';
+/** Web permissions the renderer uses: completion notifications and the
+ * clipboard (copy buttons, pasting a pairing payload). */
+const RENDERER_PERMISSIONS = new Set(['notifications', 'clipboard-read', 'clipboard-sanitized-write']);
 const DEFAULT_BACKEND_URL = process.env.TODEX_BACKEND_URL?.trim() || 'http://127.0.0.1:7345';
 /** Store keys of the desktop-run agent browser (before it moved to the backend). */
 const LEGACY_AGENT_BROWSER_KEYS = ['todex.desktop.agentBrowserPartitions.v1', 'todex.desktop.agentDesktopExecutor.v1', 'todex.desktop.computerUse.v1'];
@@ -354,9 +361,58 @@ function isRendererEntryUrl(target: string): boolean {
   }
 }
 
-/** Paths the user picked in `dialog:openFiles` this session; `fs:readFile`
- * reads nothing else, so a compromised renderer cannot read arbitrary files. */
-const pickedFilePaths = new Set<string>();
+/** Subframes may only hold blank documents; the app embeds no other pages. */
+function isAllowedSubframeUrl(target: string): boolean {
+  return target === 'about:blank' || target === 'about:srcdoc' || isRendererEntryUrl(target);
+}
+
+function pathInfo(target: unknown): PathInfo | null {
+  if (typeof target !== 'string') return null;
+  try {
+    const stats = statSync(target);
+    return { isDirectory: stats.isDirectory(), mode: stats.mode };
+  } catch {
+    return null;
+  }
+}
+
+function assertShellPath(refusal: ShellPathRefusal | null): void {
+  if (refusal === 'relative') throw new Error(mainT('main.pathNotAbsolute'));
+  if (refusal === 'missing') throw new Error(mainT('main.fileNotFound'));
+  if (refusal === 'launchable') throw new Error(mainT('main.openLaunchable'));
+}
+
+/** Rewrites the bundled renderer's `file://` / `null` `Origin` to
+ * `DESKTOP_APP_ORIGIN`. Only the main frame of the app's own entry page
+ * qualifies, so an opaque (sandboxed) frame cannot borrow the app's origin. */
+function desktopRequestHeaders(details: Electron.OnBeforeSendHeadersListenerDetails): Record<string, string> {
+  const headers = details.requestHeaders;
+  const name = Object.keys(headers).find(key => key.toLowerCase() === 'origin');
+  if (!name) return headers;
+  const origin = headers[name];
+  if (origin !== 'null' && !origin.startsWith('file:')) return headers;
+  const { frame, webContents } = details;
+  if (!frame || !webContents || frame !== webContents.mainFrame || !isRendererEntryUrl(frame.url)) return headers;
+  const next = { ...headers };
+  delete next[name];
+  next.Origin = DESKTOP_APP_ORIGIN;
+  return next;
+}
+
+/** Default-session policy for the app window (preview tabs use their own
+ * partition with everything denied). */
+function installSessionPolicy(): void {
+  const defaultSession = session.defaultSession;
+  defaultSession.setPermissionRequestHandler((_contents, permission, callback, details) => {
+    const granted = details.isMainFrame && isRendererEntryUrl(details.requestingUrl) && RENDERER_PERMISSIONS.has(permission);
+    if (!granted) debugLog('warn', 'permission.denied', { permission, url: details.requestingUrl });
+    callback(granted);
+  });
+  defaultSession.webRequest.onBeforeSendHeaders(
+    { urls: ['http://*/*', 'https://*/*', 'ws://*/*', 'wss://*/*'] },
+    (details, callback) => callback({ requestHeaders: desktopRequestHeaders(details) }),
+  );
+}
 
 function createWindow(): BrowserWindow {
   const window = new BrowserWindow({
@@ -409,6 +465,18 @@ function createWindow(): BrowserWindow {
     if (external) {
       shell.openExternal(details.url).catch((error: unknown) => debugLog('error', 'window.open.external.error', { url: details.url, error }));
     }
+  });
+  // Same rule for subframes (`will-navigate` covers the main frame only).
+  window.webContents.on('will-frame-navigate', (details) => {
+    if (details.isMainFrame || isAllowedSubframeUrl(details.url)) return;
+    details.preventDefault();
+    debugLog('warn', 'window.frame-navigate.blocked', { url: details.url });
+  });
+  // A server redirect lands on its target without `will-navigate`.
+  window.webContents.on('will-redirect', (details) => {
+    if (details.isMainFrame ? isRendererEntryUrl(details.url) : isAllowedSubframeUrl(details.url)) return;
+    details.preventDefault();
+    debugLog('warn', 'window.redirect.blocked', { url: details.url, mainFrame: details.isMainFrame });
   });
 
   window.webContents.on('console-message', (_event, level, message, line, sourceId) => {
@@ -480,22 +548,6 @@ function createWindow(): BrowserWindow {
   });
 
   return window;
-}
-
-function mimeFromName(name: string): string {
-  const lower = name.toLowerCase();
-  if (lower.endsWith('.png')) return 'image/png';
-  if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg';
-  if (lower.endsWith('.gif')) return 'image/gif';
-  if (lower.endsWith('.webp')) return 'image/webp';
-  if (lower.endsWith('.svg')) return 'image/svg+xml';
-  if (lower.endsWith('.json')) return 'application/json';
-  if (lower.endsWith('.md')) return 'text/markdown';
-  if (lower.endsWith('.txt')) return 'text/plain';
-  if (lower.endsWith('.ts') || lower.endsWith('.tsx') || lower.endsWith('.js') || lower.endsWith('.css')) {
-    return 'text/plain';
-  }
-  return 'application/octet-stream';
 }
 
 async function gitText(cwd: string, args: string[]): Promise<string> {
@@ -593,6 +645,7 @@ app.whenReady().then(() => {
   } catch (error) {
     console.error(`[${APP_IDENTITY}] ${error instanceof Error ? error.message : error}`);
   }
+  installSessionPolicy();
   void probeDefaultBackend();
   ipcMain.on('debug:log', (event, payload: { level?: unknown; event?: unknown; data?: unknown }) => {
     if (!DEBUG_BUILD) return;
@@ -666,46 +719,6 @@ app.whenReady().then(() => {
     return result.canceled ? null : result.filePaths[0] ?? null;
   });
 
-  handleIpc('dialog:openFiles', async (_event, options?: { images?: boolean }) => {
-    const result = await dialog.showOpenDialog({
-      properties: ['openFile', 'multiSelections'],
-      filters: options?.images
-        ? [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp'] }]
-        : undefined,
-    });
-    if (result.canceled) return [];
-    for (const filePath of result.filePaths) pickedFilePaths.add(resolve(filePath));
-    return result.filePaths;
-  });
-
-  handleIpc('fs:readFile', async (_event, requestedPath: string) => {
-    if (typeof requestedPath !== 'string' || !pickedFilePaths.has(resolve(requestedPath))) {
-      throw new Error(mainT('main.fileNotPicked'));
-    }
-    const filePath = resolve(requestedPath);
-    if (!existsSync(filePath)) {
-      throw new Error(mainT('main.fileNotFound'));
-    }
-    const buffer = readFileSync(filePath);
-    const name = filePath.split(/[/\\]/).pop() || 'file';
-    const mimeType = mimeFromName(name);
-    const isImage = mimeType.startsWith('image/');
-    const limit = isImage ? MAX_IMAGE_ATTACHMENT_BYTES : MAX_FILE_ATTACHMENT_BYTES;
-    if (buffer.byteLength > limit) {
-      throw new Error(mainT('main.fileTooLarge', { kb: Math.round(limit / 1024) }));
-    }
-    const text = !isImage && buffer.byteLength <= MAX_FILE_ATTACHMENT_BYTES
-      ? buffer.toString('utf8')
-      : undefined;
-    return {
-      name,
-      mimeType,
-      sizeBytes: buffer.byteLength,
-      base64: buffer.toString('base64'),
-      text,
-    };
-  });
-
   const spawnDetached = (command: string, args: string[]) => new Promise<void>((resolve, reject) => {
     const child = spawn(command, args, { detached: true, stdio: 'ignore' });
     child.once('error', reject);
@@ -716,9 +729,12 @@ app.whenReady().then(() => {
   });
 
   handleIpc('shell:openPath', async (_event, targetPath: string) => {
-    if (!existsSync(targetPath)) {
-      throw new Error(mainT('main.fileNotFound'));
-    }
+    const info = pathInfo(targetPath);
+    // A symlink is opened as its target ("notes.txt" -> some.app launches it).
+    let real = '';
+    try { real = info ? realpathSync(targetPath) : ''; } catch { /* checked as missing below */ }
+    assertShellPath(openPathRefusal(targetPath, info, process.platform)
+      ?? (real && real !== targetPath ? openPathRefusal(real, info, process.platform) : null));
     const failure = await shell.openPath(targetPath);
     if (failure) {
       throw new Error(failure);
@@ -726,16 +742,14 @@ app.whenReady().then(() => {
   });
 
   handleIpc('shell:showItemInFolder', (_event, targetPath: string) => {
-    if (!existsSync(targetPath)) {
-      throw new Error(mainT('main.fileNotFound'));
-    }
+    assertShellPath(shellPathRefusal(targetPath, pathInfo(targetPath), process.platform));
     shell.showItemInFolder(targetPath);
   });
 
+  // The user picks the application here, so any existing absolute path may
+  // be handed to it.
   handleIpc('shell:openWith', async (_event, targetPath: string) => {
-    if (!existsSync(targetPath)) {
-      throw new Error(mainT('main.fileNotFound'));
-    }
+    assertShellPath(shellPathRefusal(targetPath, pathInfo(targetPath), process.platform));
     if (process.platform === 'win32') {
       await spawnDetached('rundll32.exe', ['shell32.dll,OpenAs_RunDLL', targetPath]);
       return;

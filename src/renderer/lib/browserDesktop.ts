@@ -43,12 +43,6 @@ export function installBrowserDesktopBridge(): void {
     },
     dialog: {
       openDirectory: async () => null,
-      openFiles: async () => [],
-    },
-    fs: {
-      readFile: async () => {
-        throw new Error(t('storage.browserReadFile'));
-      },
     },
     shell: {
       platform: navigator.userAgent.includes('Mac') ? 'darwin' : navigator.userAgent.includes('Win') ? 'win32' : 'linux',

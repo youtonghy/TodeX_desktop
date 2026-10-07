@@ -96,18 +96,6 @@ import {
   type ConversationBlockPhase,
 } from '@todex/protocol/mobileParity';
 
-async function readDesktopFile(uri: string): Promise<{ sizeBytes: number | null; text?: string; base64?: string }> {
-  if (uri.startsWith('data:')) {
-    return { sizeBytes: null };
-  }
-  return window.todexDesktop.fs.readFile(uri);
-}
-
-async function readDesktopFileBase64(uri: string): Promise<string> {
-  const file = await window.todexDesktop.fs.readFile(uri);
-  return file.base64;
-}
-
 export type ServerVersion = {
   name: string;
   version: string;
@@ -871,54 +859,6 @@ export function estimatedBytesFromBase64(base64: string): number {
   const normalized = base64.replace(/\s/g, '');
   const padding = normalized.endsWith('==') ? 2 : normalized.endsWith('=') ? 1 : 0;
   return Math.max(0, Math.floor((normalized.length * 3) / 4) - padding);
-}
-
-export async function readBase64DataUrl(uri: string, mimeType: string, base64?: string | null): Promise<{ dataUrl: string; sizeBytes: number | null }> {
-  if (base64) {
-    const dataUrl = dataUrlFromBase64(base64, mimeType);
-    return {
-      dataUrl,
-      sizeBytes: estimatedBytesFromBase64(base64FromDataUrl(dataUrl) || base64),
-    };
-  }
-  if (uri.startsWith('data:')) {
-    return {
-      dataUrl: uri,
-      sizeBytes: estimatedBytesFromBase64(base64FromDataUrl(uri)),
-    };
-  }
-  const encoded = await readDesktopFileBase64(uri);
-  return {
-    dataUrl: dataUrlFromBase64(encoded, mimeType),
-    sizeBytes: estimatedBytesFromBase64(encoded),
-  };
-}
-
-export async function resolveFileSizeBytes(uri: string, fallbackSizeBytes: number | null | undefined): Promise<number | null> {
-  if (typeof fallbackSizeBytes === 'number') {
-    return fallbackSizeBytes;
-  }
-  try {
-    const info = await readDesktopFile(uri);
-    return info.sizeBytes;
-  } catch {
-    return null;
-  }
-}
-
-export async function readTextAttachmentContent(uri: string, name: string, mimeType: string, sizeBytes: number | null): Promise<string | undefined> {
-  if (!isTextAttachment(name, mimeType) || (sizeBytes ?? 0) > MAX_FILE_ATTACHMENT_BYTES) {
-    return undefined;
-  }
-  if (uri.startsWith('data:')) {
-    return undefined;
-  }
-  try {
-    const info = await readDesktopFile(uri);
-    return info.text;
-  } catch {
-    return undefined;
-  }
 }
 
 export function attachmentPrompt(attachments: ComposerAttachmentDraft[]): string {

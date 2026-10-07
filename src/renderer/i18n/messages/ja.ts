@@ -218,7 +218,6 @@ export const ja: Messages = {
 
   // storage
   'storage.insecureBackend': '公開 HTTPS ページは HTTPS/WSS のリモート Backend にのみ接続できます',
-  'storage.browserReadFile': 'ブラウザプレビューではローカルファイルを読み取れません',
   'storage.browserGit': 'ブラウザプレビューでは Git 操作をサポートしていません',
   'storage.browserShell': 'ブラウザプレビューではローカルファイルを開けません',
 
