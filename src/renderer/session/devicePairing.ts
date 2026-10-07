@@ -5,18 +5,26 @@ import { buildHttpUrl } from '@todex/protocol/todex';
 import { decodeBase64Url, type DeviceIdentity } from '@todex/protocol/deviceAuth';
 import {
   DEVICE_PAIRING_V3_NONCE_LENGTH,
+  DevicePairingTransportError,
   deriveDevicePairingV3Material,
   devicePairingV3Commitment,
+  parseDevicePairingTransport,
+  transportFingerprint,
+  verifyDevicePairingCredential,
+  type DevicePairingPin,
+  type DevicePairingTransport,
   type DevicePairingV3Material,
 } from '@todex/protocol/secureChannel';
 import { t } from '../i18n';
 
 export type DevicePairingResult =
   | { status: 'pending' | 'rejected' | 'expired' }
-  | { status: 'approved'; deviceId: string };
+  | { status: 'approved'; deviceId: string; pin: DevicePairingPin };
 
 export type DevicePairingRequest = {
   verificationCode: string;
+  /** Fingerprint of the transport key the code authenticates (`'none'` for loopback plaintext). */
+  transportFingerprint: string;
   expiresAt: number;
   poll: (signal?: AbortSignal) => Promise<DevicePairingResult>;
   cancel: (signal?: AbortSignal) => Promise<void>;
@@ -45,6 +53,18 @@ function decode(value: unknown, length?: number): Uint8Array {
     throw new Error(t('pair.errInvalidResponse'));
   }
   return bytes;
+}
+
+/** The create response's transport key, validated before anything is derived from it. */
+function pairingTransport(response: Record<string, unknown>, serverUrl: string): DevicePairingTransport {
+  try {
+    return parseDevicePairingTransport(response, serverUrl);
+  } catch (error) {
+    if (error instanceof DevicePairingTransportError && error.reason === 'encryption_required') {
+      throw new Error(t('pair.errEncryptionRequired'));
+    }
+    throw new Error(t('pair.errInvalidTransport'));
+  }
 }
 
 function object(value: unknown): Record<string, unknown> {
@@ -119,11 +139,13 @@ async function post(serverUrl: string, action: string, body: unknown, signal?: A
 
 /** Device pairing v3 (commit, then reveal): `create` sends only a commitment
  * to the ephemeral key and nonce, the server answers with its per-request
- * key, and only then `reveal` discloses them, so a man in the middle cannot
- * grind its own key against the short code. The code authenticates only this
- * enrollment; it never replaces the separately imported, long-lived transport
- * public key. The device key is enrolled on approval; approval returns the
- * matching `deviceId`. */
+ * key and its transport key, and only then `reveal` discloses them, so a man
+ * in the middle cannot grind its own key against the short code. The
+ * transcript binds the transport protocol and key, so the code the user
+ * compares also authenticates the key that gets pinned. The device key is
+ * enrolled on approval; approval returns the matching `deviceId` and the
+ * verified pin (`verifyDevicePairingCredential`), which the caller writes in
+ * one profile update with `transportVerified = true`. */
 export async function beginDevicePairing(serverUrl: string, deviceName: string, device: DeviceIdentity, signal?: AbortSignal): Promise<DevicePairingRequest> {
   const keys = x25519.keygen();
   const clientNonce = globalThis.crypto.getRandomValues(new Uint8Array(DEVICE_PAIRING_V3_NONCE_LENGTH));
@@ -136,6 +158,7 @@ export async function beginDevicePairing(serverUrl: string, deviceName: string, 
   const devicePublicKey = decodeBase64Url(device.publicKey);
   try {
     const response = await post(serverUrl, 'create', {
+      transportBinding: 1,
       clientCommitment: encode(devicePairingV3Commitment(keys.publicKey, clientNonce)),
       devicePublicKey: device.publicKey,
       deviceName: Array.from(deviceName.replace(/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g, '').trim()).slice(0, 80).join('') || 'TodeX',
@@ -146,6 +169,7 @@ export async function beginDevicePairing(serverUrl: string, deviceName: string, 
       throw new Error(t('pair.errInvalidRequest'));
     }
     const serverKey = decode(response.serverPublicKey, 32);
+    const transport = pairingTransport(response, serverUrl);
     try {
       material = deriveDevicePairingV3Material({
         requestId,
@@ -153,6 +177,8 @@ export async function beginDevicePairing(serverUrl: string, deviceName: string, 
         serverPublic: serverKey,
         devicePublic: devicePublicKey,
         clientNonce,
+        transportProtocol: transport.protocol,
+        transportPublicKey: transport.publicKeyRaw,
       });
     } catch {
       throw new Error(t('pair.errInvalidResponse'));
@@ -174,6 +200,7 @@ export async function beginDevicePairing(serverUrl: string, deviceName: string, 
     };
     return {
       verificationCode: material.verificationCode,
+      transportFingerprint: transportFingerprint(transport.protocol, transport.publicKeyRaw),
       expiresAt,
       async poll(pollSignal) {
         if (finished || Date.now() >= expiresAt) { dispose(); return { status: 'expired' }; }
@@ -197,14 +224,15 @@ export async function beginDevicePairing(serverUrl: string, deviceName: string, 
               if (typeof payload.deviceId !== 'string' || !DEVICE_ID_PATTERN.test(payload.deviceId)) {
                 throw new Error('Invalid device id');
               }
-              if (payload.deviceId !== device.deviceId) {
-                throw new Error('Enrolled device id does not match this key');
-              }
-              return { status: 'approved', deviceId: payload.deviceId };
+              // The device id and the transport key must equal this device
+              // and the create response byte for byte; otherwise pin nothing.
+              const pin = verifyDevicePairingCredential(payload, { deviceId: device.deviceId, transport });
+              return { status: 'approved', deviceId: payload.deviceId, pin };
             } finally {
               plaintext.fill(0);
             }
-          } catch {
+          } catch (error) {
+            if (error instanceof DevicePairingTransportError) throw new Error(t('pair.errTransportMismatch'));
             throw new Error(t('pair.errChecksum'));
           } finally {
             dispose();

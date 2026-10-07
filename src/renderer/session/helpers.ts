@@ -64,7 +64,6 @@ import {
   utf8ByteLength,
   type CodexThreadHistoryEntry,
 } from '@todex/protocol/todex';
-import type { PairingQrChunk } from '@todex/protocol/transportCrypto';
 import { deviceIdentityFromSecret, type DeviceIdentity } from '@todex/protocol/deviceAuth';
 import {
   EncryptionRequiredError,
@@ -386,12 +385,6 @@ export type PendingThreadAction = {
 export type ComposerSelection = { start: number; end: number };
 
 export const DEFAULT_COMPOSER_SELECTION: ComposerSelection = { start: 0, end: 0 };
-
-export type PairingChunkCollector = {
-  checksum: string;
-  total: number;
-  chunks: Map<number, PairingQrChunk>;
-};
 
 export type ComposerAttachmentDraft = {
   id: string;
@@ -1769,6 +1762,7 @@ export const defaultSettings: ConnectionSettings = {
   tenantId: 'local',
   encryptionProtocol: 'none',
   encryptionPublicKey: '',
+  transportVerified: false,
   defaultWorkspacePath: '/home/dev/projects',
   defaultModel: 'gpt-5.5',
   defaultReasoningEffort: 'medium',
@@ -1872,17 +1866,31 @@ export function fromPersistedSettings(raw: Partial<PersistedSettings> | null | u
     ...defaultSettings,
     ...safeRaw,
     defaultReasoningEffort: normalizeReasoningEffort(safeRaw.defaultReasoningEffort) ?? defaultSettings.defaultReasoningEffort,
+    // Settings saved before pairing bound the transport key decode unverified.
+    transportVerified: safeRaw.transportVerified === true,
     deviceSecret,
   };
 }
 
+/**
+ * The credentials only device pairing may set. A changed server URL and a
+ * newly added backend start from these: the device key and the transport pin
+ * belong to one backend origin.
+ */
+export const UNPAIRED_TRANSPORT = {
+  deviceSecret: '',
+  encryptionProtocol: 'none',
+  encryptionPublicKey: '',
+  transportVerified: false,
+} as const satisfies Pick<ConnectionSettings, 'deviceSecret' | 'encryptionProtocol' | 'encryptionPublicKey' | 'transportVerified'>;
+
 export function profileFromSettings(settings: ConnectionSettings, name = t('session.defaultBackend'), id = 'default-backend'): BackendConnectionProfile {
   const now = Date.now();
-  return { id, name, serverUrl: normalizeServerUrl(settings.serverUrl), deviceSecret: settings.deviceSecret, tenantId: settings.tenantId, encryptionProtocol: settings.encryptionProtocol, encryptionPublicKey: settings.encryptionPublicKey, createdAt: now, updatedAt: now };
+  return { id, name, serverUrl: normalizeServerUrl(settings.serverUrl), deviceSecret: settings.deviceSecret, tenantId: settings.tenantId, encryptionProtocol: settings.encryptionProtocol, encryptionPublicKey: settings.encryptionPublicKey, transportVerified: settings.transportVerified === true, createdAt: now, updatedAt: now };
 }
 
 export function settingsFromProfile(profile: BackendConnectionProfile, current: ConnectionSettings): ConnectionSettings {
-  return { ...current, serverUrl: normalizeServerUrl(profile.serverUrl), deviceSecret: profile.deviceSecret, tenantId: profile.tenantId, encryptionProtocol: profile.encryptionProtocol, encryptionPublicKey: profile.encryptionPublicKey };
+  return { ...current, serverUrl: normalizeServerUrl(profile.serverUrl), deviceSecret: profile.deviceSecret, tenantId: profile.tenantId, encryptionProtocol: profile.encryptionProtocol, encryptionPublicKey: profile.encryptionPublicKey, transportVerified: profile.transportVerified === true };
 }
 
 export function normalizeBackendConnectionProfile(value: unknown): BackendConnectionProfile | null {
@@ -1892,7 +1900,7 @@ export function normalizeBackendConnectionProfile(value: unknown): BackendConnec
   const serverUrl = typeof raw.serverUrl === 'string' ? raw.serverUrl.trim() : '';
   if (!id || !serverUrl) return null;
   const now = Date.now();
-  return { id, labelColor: normalizeBackendLabelColor(raw.labelColor), name: typeof raw.name === 'string' && raw.name.trim() ? raw.name.trim() : t('session.backend'), serverUrl: normalizeServerUrl(serverUrl), deviceSecret: typeof raw.deviceSecret === 'string' ? raw.deviceSecret : '', tenantId: typeof raw.tenantId === 'string' && raw.tenantId.trim() ? raw.tenantId.trim() : 'local', encryptionProtocol: raw.encryptionProtocol === 'x25519' || raw.encryptionProtocol === 'ml-kem-768' ? raw.encryptionProtocol : 'none', encryptionPublicKey: typeof raw.encryptionPublicKey === 'string' ? raw.encryptionPublicKey : '', createdAt: typeof raw.createdAt === 'number' ? raw.createdAt : now, updatedAt: typeof raw.updatedAt === 'number' ? raw.updatedAt : now };
+  return { id, labelColor: normalizeBackendLabelColor(raw.labelColor), name: typeof raw.name === 'string' && raw.name.trim() ? raw.name.trim() : t('session.backend'), serverUrl: normalizeServerUrl(serverUrl), deviceSecret: typeof raw.deviceSecret === 'string' ? raw.deviceSecret : '', tenantId: typeof raw.tenantId === 'string' && raw.tenantId.trim() ? raw.tenantId.trim() : 'local', encryptionProtocol: raw.encryptionProtocol === 'x25519' || raw.encryptionProtocol === 'ml-kem-768' ? raw.encryptionProtocol : 'none', encryptionPublicKey: typeof raw.encryptionPublicKey === 'string' ? raw.encryptionPublicKey : '', transportVerified: raw.transportVerified === true, createdAt: typeof raw.createdAt === 'number' ? raw.createdAt : now, updatedAt: typeof raw.updatedAt === 'number' ? raw.updatedAt : now };
 }
 
 const DEVICE_IDENTITY_CACHE_LIMIT = 16;
@@ -1909,12 +1917,13 @@ export function cachedDeviceIdentity(secret: string): DeviceIdentity | null {
 }
 
 /** The parts of a backend profile the transport depends on. */
-export type BackendTransportProfile = Pick<ConnectionSettings, 'serverUrl' | 'deviceSecret' | 'encryptionProtocol' | 'encryptionPublicKey'>;
+export type BackendTransportProfile = Pick<ConnectionSettings, 'serverUrl' | 'deviceSecret' | 'encryptionProtocol' | 'encryptionPublicKey' | 'transportVerified'>;
 
 /**
- * The profile's transport v2 entry point (cached per profile): a pinned key
- * sends every REST call through `POST /v2/sealed` and opens `tv=2` sockets,
- * an unpaired remote host is refused, an unpaired loopback host is plaintext.
+ * The profile's transport v2 entry point (cached per profile): a key pinned
+ * by device pairing sends every REST call through `POST /v2/sealed` and opens
+ * `tv=2` sockets, an unverified pin or an unpaired remote host is refused, an
+ * unpaired loopback host is plaintext.
  */
 export function backendTransport(settings: BackendTransportProfile): SecureTransport {
   return withLocalizedRequestLimits(cachedSecureTransport(settings, cachedDeviceIdentity(settings.deviceSecret)));
@@ -1985,7 +1994,11 @@ export function describeTransportFailure(error: unknown): TransportFailure | nul
     return { message: t('transport.invalidKey'), retryable: false, code: 'encryption_required' };
   }
   if (error instanceof TransportRepairRequiredError) {
-    return { message: t('transport.repairRequired', { protocol: error.required }), retryable: false, code: 'encryption_required' };
+    return {
+      message: error.required === null ? t('transport.unverifiedPin') : t('transport.repairRequired', { protocol: error.required }),
+      retryable: false,
+      code: 'encryption_required',
+    };
   }
   if (error instanceof TransportPolicyError) {
     switch (error.reason) {

@@ -284,6 +284,9 @@ export function App() {
   // The "no recovery key" notice opened settings to set one up.
   const [historyRecoverySetup, setHistoryRecoverySetup] = useState(false);
   useEffect(() => { if (!settingsOpen) setHistoryRecoverySetup(false); }, [settingsOpen]);
+  // A refused connection's re-pair action opened settings to pair again.
+  const [repairPairing, setRepairPairing] = useState(false);
+  useEffect(() => { if (!settingsOpen) setRepairPairing(false); }, [settingsOpen]);
   const usageOpen = panel === 'usage';
   const quotaOpen = panel === 'quota';
   const aboutOpen = panel === 'about';
@@ -302,7 +305,8 @@ export function App() {
     <div className="bg-background text-foreground h-full" data-panel-motion={panelMotion || undefined}>
       <Toast.Provider placement="top" />
       <SessionNoticeToasts lastError={session.lastError} health={session.connectionHealth}
-        scope={`${session.activeBackendConnectionId}:${session.settings.serverUrl}`} />
+        scope={`${session.activeBackendConnectionId}:${session.settings.serverUrl}`}
+        onRepair={() => { setRepairPairing(true); setPanel('settings'); }} />
       <DesktopAlertHost />
       {session.hydrated ? (
         panel === 'kanban' ? (
@@ -453,7 +457,7 @@ export function App() {
                 <Modal.Heading>{t('app.settings')}</Modal.Heading>
               </Modal.Header>
               <Modal.Body className="max-h-[70vh] overflow-y-auto">
-                <Suspense fallback={panelFallback}><SettingsPanel session={session} historyRecoverySetup={historyRecoverySetup} /></Suspense>
+                <Suspense fallback={panelFallback}><SettingsPanel session={session} historyRecoverySetup={historyRecoverySetup} repairPairing={repairPairing} /></Suspense>
               </Modal.Body>
             </Modal.Dialog>
           </Modal.Container>
@@ -548,7 +552,7 @@ function CreateWorkspaceModal({
   const [roots, setRoots] = useState<string[]>([]);
   const [activeRoot, setActiveRoot] = useState('');
   const selectedBackend = session.backendConnections.find((profile) => profile.id === backendId);
-  const directorySettings = selectedBackend ? { ...session.settings, serverUrl: selectedBackend.serverUrl, deviceSecret: selectedBackend.deviceSecret, tenantId: selectedBackend.tenantId, encryptionProtocol: selectedBackend.encryptionProtocol, encryptionPublicKey: selectedBackend.encryptionPublicKey } : session.settings;
+  const directorySettings = selectedBackend ? { ...session.settings, serverUrl: selectedBackend.serverUrl, deviceSecret: selectedBackend.deviceSecret, tenantId: selectedBackend.tenantId, encryptionProtocol: selectedBackend.encryptionProtocol, encryptionPublicKey: selectedBackend.encryptionPublicKey, transportVerified: selectedBackend.transportVerified } : session.settings;
 
   const applySnapshot = (snapshot: Awaited<ReturnType<typeof fetchWorkspaceDirectorySnapshot>>) => {
     setPath(snapshot.current);

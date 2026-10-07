@@ -32,7 +32,7 @@ export function CliManagerPanel({ session }: { session: TodeXSession }) {
   const [submittingProvider, setSubmittingProvider] = useState<ManagedCliProvider>();
   const requestGeneration = useRef(0);
   const backendGeneration = useRef(0);
-  const api = useCallback(() => backendApi(session.settings), [session.settings.deviceSecret, session.settings.encryptionProtocol, session.settings.encryptionPublicKey, session.settings.serverUrl]);
+  const api = useCallback(() => backendApi(session.settings), [session.settings.deviceSecret, session.settings.encryptionProtocol, session.settings.encryptionPublicKey, session.settings.transportVerified, session.settings.serverUrl]);
 
   const refresh = useCallback(async (quiet = false) => {
     const generation = ++requestGeneration.current;

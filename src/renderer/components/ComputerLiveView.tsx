@@ -29,7 +29,7 @@ export function ComputerLiveView({ session, conversationId, state }: {
   const [shot, setShot] = useState<{ shotId: string; dataUrl: string } | null>(null);
   const api = useMemo(
     () => backendApi(session.settings),
-    [session.settings.deviceSecret, session.settings.encryptionProtocol, session.settings.encryptionPublicKey, session.settings.serverUrl],
+    [session.settings.deviceSecret, session.settings.encryptionProtocol, session.settings.encryptionPublicKey, session.settings.transportVerified, session.settings.serverUrl],
   );
   const active = Boolean(state?.active);
   const awaiting = Boolean(state?.awaitingHost) && !active;

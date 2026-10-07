@@ -41,7 +41,7 @@ export function AgentBrowserLiveView({ session, conversationId, isActive }: {
   const [visible, setVisible] = useState(() => document.visibilityState === 'visible');
   const api = useMemo(
     () => backendApi(session.settings),
-    [session.settings.deviceSecret, session.settings.encryptionProtocol, session.settings.encryptionPublicKey, session.settings.serverUrl],
+    [session.settings.deviceSecret, session.settings.encryptionProtocol, session.settings.encryptionPublicKey, session.settings.transportVerified, session.settings.serverUrl],
   );
   const state = session.conversationRuntimeById[conversationId]?.desktopBrowser;
   // One backward pass per actions change, not three array copies per render.

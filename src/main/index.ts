@@ -32,10 +32,9 @@ const PROTOCOL_VERSION = 'v2';
  * `null`; they accept this fixed value instead. */
 const DESKTOP_APP_ORIGIN = 'todex-desktop://app';
 /** Web permissions the renderer uses: completion notifications and the
- * clipboard (copy buttons, pasting a pairing payload). */
+ * clipboard (copy buttons write only; nothing reads the clipboard). */
 const RENDERER_PERMISSIONS = new Set([
   'notifications',
-  'clipboard-read',
   'clipboard-sanitized-write',
   // Local Network Access: the renderer talks to user-configured backends on
   // loopback and the LAN.

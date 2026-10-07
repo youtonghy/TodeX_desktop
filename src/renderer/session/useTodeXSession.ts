@@ -91,13 +91,6 @@ import {
   type CodexThreadHistoryEntry,
 } from '@todex/protocol/todex';
 import { loadJson, loadSecret, removeSecret, saveJson, saveSecret } from '../lib/storage';
-import {
-  applyPairingToSettings,
-  assemblePairingQrChunkPayload,
-  parsePairingQrFrame,
-  resolvePairingPayload,
-  type PairingQrChunk,
-} from '@todex/protocol/transportCrypto';
 import { ConnectionError } from '@todex/protocol/connectionError';
 import { desktopAlert } from '../lib/desktopAlert';
 import { createConcurrencyLimit } from '../lib/concurrencyLimit';
@@ -154,6 +147,7 @@ import {
   normalizeBackendConnectionProfile,
   profileFromSettings,
   settingsFromProfile,
+  UNPAIRED_TRANSPORT,
   PERMISSION_PRESETS,
   type ServerVersion,
   type ConversationRecord,
@@ -740,7 +734,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       active = false;
       clearInterval(refreshTimer);
     };
-  }, [activeBackendConnectionId, hydrated, setBackendProviders, settings.deviceSecret, settings.encryptionProtocol, settings.encryptionPublicKey, settings.serverUrl]);
+  }, [activeBackendConnectionId, hydrated, setBackendProviders, settings.deviceSecret, settings.encryptionProtocol, settings.encryptionPublicKey, settings.transportVerified, settings.serverUrl]);
 
   // Each manifest refresh re-checks running conversations: a lazily loaded
   // runtime whose turn started below its window (or whose earlier search
@@ -1717,6 +1711,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       deviceSecret: settings.deviceSecret,
       encryptionProtocol: settings.encryptionProtocol,
       encryptionPublicKey: settings.encryptionPublicKey,
+      transportVerified: settings.transportVerified,
       backendConnectionId: activeBackendConnectionId,
     });
     const timer = setInterval(() => {
@@ -1724,7 +1719,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       void syncKanbanTasksFromBackend();
     }, 15000);
     return () => clearInterval(timer);
-  }, [activeBackendConnectionId, connectionState, hydrated, settings.deviceSecret, settings.encryptionProtocol, settings.encryptionPublicKey, settings.serverUrl, syncWorkspacesFromBackend]);
+  }, [activeBackendConnectionId, connectionState, hydrated, settings.deviceSecret, settings.encryptionProtocol, settings.encryptionPublicKey, settings.transportVerified, settings.serverUrl, syncWorkspacesFromBackend]);
 
   useEffect(() => {
     if (!hydrated) {
@@ -1817,7 +1812,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         [provider]: { ...(current[provider] ?? {}), status: 'error', error: error instanceof Error ? error.message : t('sess.catalogReadFailed') },
       }));
     }
-  }, [activeWorkspace?.path, settings.deviceSecret, settings.defaultWorkspacePath, settings.encryptionProtocol, settings.encryptionPublicKey, settings.serverUrl]);
+  }, [activeWorkspace?.path, settings.deviceSecret, settings.defaultWorkspacePath, settings.encryptionProtocol, settings.encryptionPublicKey, settings.transportVerified, settings.serverUrl]);
 
   useEffect(() => {
     if (!hydrated || !activeWorkspace?.path || v2Providers.length === 0) return;
@@ -1890,7 +1885,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         }
       }
     }));
-  }, [activeBackendConnectionId, activeWorkspace?.path, connectionEpoch, hydrated, rememberProviderModelSelection, resolveRememberedProviderSelection, settings.deviceSecret, settings.encryptionProtocol, settings.encryptionPublicKey, settings.serverUrl, v2Providers]);
+  }, [activeBackendConnectionId, activeWorkspace?.path, connectionEpoch, hydrated, rememberProviderModelSelection, resolveRememberedProviderSelection, settings.deviceSecret, settings.encryptionProtocol, settings.encryptionPublicKey, settings.transportVerified, settings.serverUrl, v2Providers]);
 
   useEffect(() => {
     if (!hydrated || !activeWorkspace?.path || v2Providers.length === 0) return;
@@ -1919,7 +1914,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         progress.pending.delete(provider.id);
       }
     }));
-  }, [activeBackendConnectionId, activeWorkspace?.path, connectionEpoch, hydrated, settings.deviceSecret, settings.encryptionProtocol, settings.encryptionPublicKey, settings.serverUrl, v2Providers]);
+  }, [activeBackendConnectionId, activeWorkspace?.path, connectionEpoch, hydrated, settings.deviceSecret, settings.encryptionProtocol, settings.encryptionPublicKey, settings.transportVerified, settings.serverUrl, v2Providers]);
 
   const activeConversation = useMemo(
     () => conversations.find((item) => item.id === activeConversationId) ?? null,
@@ -1963,7 +1958,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       }));
     });
     return () => { cancelled = true; };
-  }, [activeConversation, activeWorkspace?.path, hydrated, settings.deviceSecret, settings.encryptionProtocol, settings.encryptionPublicKey, settings.serverUrl, v2Providers]);
+  }, [activeConversation, activeWorkspace?.path, hydrated, settings.deviceSecret, settings.encryptionProtocol, settings.encryptionPublicKey, settings.transportVerified, settings.serverUrl, v2Providers]);
 
   const restorePendingSubmission = useCallback((conversationId: string) => {
     const submission = pendingV2SubmissionsRef.current.get(conversationId);
@@ -2243,7 +2238,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     setEarlierHistory({});
     projectedRuntimeListsRef.current.clear();
     settledV2TurnsRef.current.clear();
-  }, [activeBackendConnectionId, settings.serverUrl, settings.deviceSecret, settings.encryptionProtocol, settings.encryptionPublicKey]);
+  }, [activeBackendConnectionId, settings.serverUrl, settings.deviceSecret, settings.encryptionProtocol, settings.encryptionPublicKey, settings.transportVerified]);
 
   useEffect(() => {
     if (!hydrated || !activeConversation?.v2ConversationId || !settings.serverUrl.trim()) return;
@@ -2260,7 +2255,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         limit: 200,
       });
     }
-  }, [activeConversation?.id, activeConversation?.v2ConversationId, hydrated, openConversation, settings.serverUrl, settings.deviceSecret, settings.encryptionProtocol, settings.encryptionPublicKey]);
+  }, [activeConversation?.id, activeConversation?.v2ConversationId, hydrated, openConversation, settings.serverUrl, settings.deviceSecret, settings.encryptionProtocol, settings.encryptionPublicKey, settings.transportVerified]);
 
   // Only recently viewed conversations keep their projected history in
   // memory. Older ones, and runtimes live frames created for conversations
@@ -4306,6 +4301,12 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     connect();
   }, [autoConnectEnabled, connect, hydrated]);
 
+  useEffect(() => {
+    if (!pairingConnectPendingRef.current) return;
+    pairingConnectPendingRef.current = false;
+    connect();
+  }, [connect]);
+
   // Selecting a workspace or conversation on another backend switches the
   // active profile; move the socket there. Editing the active profile's URL
   // does not reconnect by itself — that still goes through Settings.
@@ -4657,12 +4658,40 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   );
 
   const updateBackendConnection = useCallback((id: string, patch: Partial<BackendConnectionProfile>) => {
-    setBackendConnections((current) => current.map((profile) => profile.id === id ? { ...profile, ...patch, updatedAt: Date.now() } : profile));
+    setBackendConnections((current) => current.map((profile) => {
+      if (profile.id !== id) return profile;
+      const originChanged = patch.serverUrl !== undefined
+        && normalizeServerUrl(profile.serverUrl) !== normalizeServerUrl(patch.serverUrl);
+      // A new origin drops the device key and the transport pin unless the
+      // patch sets them itself.
+      return {
+        ...profile,
+        ...(originChanged ? UNPAIRED_TRANSPORT : {}),
+        ...patch,
+        updatedAt: Date.now(),
+      };
+    }));
   }, []);
+
+  // Device pairing approved the device and the transport key it verified:
+  // one profile update pins both, then the connection starts once the
+  // settings carrying them have been committed (see the effect after the
+  // auto-connect effect).
+  const pairingConnectPendingRef = useRef(false);
+  const onDevicePairingApproved = useCallback((
+    profileId: string,
+    credentials: Pick<BackendConnectionProfile, 'deviceSecret' | 'encryptionProtocol' | 'encryptionPublicKey' | 'transportVerified'>,
+  ) => {
+    updateBackendConnection(profileId, credentials);
+    if (activeBackendConnectionIdRef.current !== profileId) return;
+    setSettings((current) => ({ ...current, ...credentials }));
+    pairingConnectPendingRef.current = true;
+  }, [updateBackendConnection]);
 
   const addBackendConnection = useCallback((profile?: Partial<BackendConnectionProfile>) => {
     const id = createRequestId('backend');
-    const next: BackendConnectionProfile = { ...profileFromSettings(settings, t('session.newBackend'), id), ...profile, id, createdAt: Date.now(), updatedAt: Date.now() };
+    // A new backend never inherits the current device key or transport pin.
+    const next: BackendConnectionProfile = { ...profileFromSettings(settings, t('session.newBackend'), id), ...UNPAIRED_TRANSPORT, ...profile, id, createdAt: Date.now(), updatedAt: Date.now() };
     setBackendConnections((current) => [...current, next]);
     setActiveBackendConnectionId(id);
     setSettings((current) => settingsFromProfile(next, current));
@@ -6441,7 +6470,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       { selectResult: true, resultConversationId: nextConversation.id },
     );
     return nextConversation;
-  }, [getConversationContext, recoverConversation, sendProtocolCommand, settings.serverUrl, settings.deviceSecret, settings.encryptionProtocol, settings.encryptionPublicKey, sendNativeThreadAction, settings.approvalPolicy, settings.approvalsReviewer, settings.defaultModel, settings.sandboxMode, subscribeV2Conversation]);
+  }, [getConversationContext, recoverConversation, sendProtocolCommand, settings.serverUrl, settings.deviceSecret, settings.encryptionProtocol, settings.encryptionPublicKey, settings.transportVerified, sendNativeThreadAction, settings.approvalPolicy, settings.approvalsReviewer, settings.defaultModel, settings.sandboxMode, subscribeV2Conversation]);
 
   const removeConversation = useCallback((conversationId: string) => {
     const context = getConversationContext(conversationId);
@@ -6644,7 +6673,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         pendingV2ConversationCreatesRef.current.delete(conversationId);
       }
     }
-  }, [backendConnections, getConversationContext, recoverConversation, settings.deviceSecret, settings.encryptionProtocol, settings.encryptionPublicKey, settings.serverUrl, subscribeV2Conversation]);
+  }, [backendConnections, getConversationContext, recoverConversation, settings.deviceSecret, settings.encryptionProtocol, settings.encryptionPublicKey, settings.transportVerified, settings.serverUrl, subscribeV2Conversation]);
 
   const sendV2Prompt = useCallback(
     async (
@@ -7147,7 +7176,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     const api = backendApi(settings);
     const result = await api.getSkillResource(provider, workspacePath, resourceId);
     return result.content;
-  }, [activeWorkspace?.path, settings.deviceSecret, settings.defaultWorkspacePath, settings.encryptionProtocol, settings.encryptionPublicKey, settings.serverUrl]);
+  }, [activeWorkspace?.path, settings.deviceSecret, settings.defaultWorkspacePath, settings.encryptionProtocol, settings.encryptionPublicKey, settings.transportVerified, settings.serverUrl]);
 
   const refreshMcpServer = useCallback((conversationId: string, resourceId: string) => {
     const conversation = conversationsRef.current.find((item) => item.id === conversationId) ?? null;
@@ -8649,14 +8678,14 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const fetchWorkspaceEntries = useCallback(async (cwd: string, query: string, limit?: number) => {
     const api = backendApi(settings);
     return api.listWorkspaceEntries(cwd, query, limit);
-  }, [settings.serverUrl, settings.deviceSecret, settings.encryptionProtocol, settings.encryptionPublicKey]);
+  }, [settings.serverUrl, settings.deviceSecret, settings.encryptionProtocol, settings.encryptionPublicKey, settings.transportVerified]);
 
   // Stable for the same reason as fetchWorkspaceEntries: the composer @ssh:
   // effect depends on it.
   const fetchSshHosts = useCallback(async () => {
     const api = backendApi(settings);
     return api.listSshHosts();
-  }, [settings.serverUrl, settings.deviceSecret, settings.encryptionProtocol, settings.encryptionPublicKey]);
+  }, [settings.serverUrl, settings.deviceSecret, settings.encryptionProtocol, settings.encryptionPublicKey, settings.transportVerified]);
 
   return {
     watchAgentBrowser,
@@ -8758,7 +8787,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     activeConversation,
     connect,
     closeSocket,
-    onDevicePairingApproved: () => connect(),
+    onDevicePairingApproved,
     createWorkspace,
     openGitWorktree,
     selectWorkspace,

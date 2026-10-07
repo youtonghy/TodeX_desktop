@@ -1,64 +1,41 @@
-import { useLayoutEffect, useRef, useState } from 'react';
-import { Button, Chip, ColorSwatchPicker, Description, Label, ListBox, Select, Surface, Switch, TextArea, TextField, toast } from '@heroui/react';
+import { useEffect, useState } from 'react';
+import { Button, Chip, ColorSwatchPicker, Description, Label, ListBox, Select, Surface, Switch, toast } from '@heroui/react';
 import { RadioButtonGroup } from '@heroui-pro/react';
-import { RiAttachment2 } from '@remixicon/react';
-import jsQR from 'jsqr';
-import { assemblePairingQrChunkPayload, parsePairingQrFrame, resolvePairingPayload, type PairingQrChunk, type ParsedPairing } from '@todex/protocol/transportCrypto';
 import { normalizeServerUrl } from '@todex/protocol/todex';
 import { BACKEND_LABEL_COLORS, backendLabelColor } from '../session/backendColors';
 import { Field } from '../components/Field';
 import { DevicePairingPanel } from '../components/DevicePairingPanel';
 import { HistoryEncryptionPanel } from '../components/HistoryEncryptionPanel';
 import { AgentDesktopSettings } from '../components/AgentDesktopSettings';
-import { pairingConnectionPatch } from '../session/pairingImport';
 import type { TodeXSession } from '../session/useTodeXSession';
-import { connectionStateLabel, healthLabelOf, settingsFromProfile } from '../session/helpers';
+import { UNPAIRED_TRANSPORT, connectionStateLabel, healthLabelOf, settingsFromProfile } from '../session/helpers';
 import { LOCALE_LABELS, SUPPORTED_LOCALES, getLocalePreference, isLocale, setLocalePreference, useT, type LocalePreference } from '../i18n';
 
 type Props = {
   session: TodeXSession;
   /** Start setting up a history recovery key (from the global notice). */
   historyRecoverySetup?: boolean;
+  /** Start device pairing again (from a refused connection's re-pair action). */
+  repairPairing?: boolean;
 };
 
-async function decodeQrFromFile(file: File): Promise<string | null> {
-  const bitmap = await createImageBitmap(file);
-  const canvas = document.createElement('canvas');
-  canvas.width = bitmap.width;
-  canvas.height = bitmap.height;
-  const context = canvas.getContext('2d');
-  if (!context) {
-    return null;
-  }
-  context.drawImage(bitmap, 0, 0);
-  const image = context.getImageData(0, 0, canvas.width, canvas.height);
-  const result = jsQR(image.data, image.width, image.height);
-  return result?.data ?? null;
-}
-
-export function SettingsPanel({ session, historyRecoverySetup = false }: Props) {
+export function SettingsPanel({ session, historyRecoverySetup = false, repairPairing = false }: Props) {
   const t = useT();
   const [languagePreference, setLanguagePreference] = useState<LocalePreference>(() => getLocalePreference());
   const { settings, setSettings, backendConnections, activeBackendConnectionId, setActiveBackendConnectionId, updateBackendConnection, addBackendConnection, removeBackendConnection, connectionState, connectionHealth, serverVersion, versionMismatch, connect, closeSocket } = session;
-  const [pairingText, setPairingText] = useState('');
   const [pairingAutoStart, setPairingAutoStart] = useState(0);
-  const [chunks, setChunks] = useState<Map<number, PairingQrChunk>>(new Map());
   const connected = connectionState === 'open' || connectionState === 'connecting';
   const activeProfile = backendConnections.find((item) => item.id === activeBackendConnectionId);
-  const latestSession = useRef(session);
-  latestSession.current = session;
-  const pairingGeneration = useRef(0);
-  useLayoutEffect(() => {
-    setChunks(new Map());
-    return () => { pairingGeneration.current += 1; };
-  }, [activeProfile?.id, activeProfile?.serverUrl, settings.serverUrl]);
+  useEffect(() => {
+    if (repairPairing) setPairingAutoStart((value) => value + 1);
+  }, [repairPairing]);
 
-
+  // A different backend never keeps the old device key or transport pin.
   const updateServerUrl = (serverUrl: string) => {
     if (!activeProfile) return;
     const changed = normalizeServerUrl(activeProfile.serverUrl) !== normalizeServerUrl(serverUrl);
-    updateBackendConnection(activeProfile.id, { serverUrl, ...(changed ? { deviceSecret: '' } : {}) });
-    setSettings((current) => ({ ...current, serverUrl, ...(changed ? { deviceSecret: '' } : {}) }));
+    updateBackendConnection(activeProfile.id, { serverUrl, ...(changed ? UNPAIRED_TRANSPORT : {}) });
+    setSettings((current) => ({ ...current, serverUrl, ...(changed ? UNPAIRED_TRANSPORT : {}) }));
   };
 
   const selectBackend = (id: string) => {
@@ -66,48 +43,6 @@ export function SettingsPanel({ session, historyRecoverySetup = false }: Props) 
     if (!profile) return;
     setActiveBackendConnectionId(profile.id);
     setSettings((current) => settingsFromProfile(profile, current));
-  };
-
-  const applyRawPairing = async (raw: string) => {
-    if (!activeProfile) return;
-    const sourceId = activeProfile.id;
-    const sourceUrl = activeProfile.serverUrl;
-    const sourceSettingsUrl = settings.serverUrl;
-    const generation = ++pairingGeneration.current;
-    const applyResolvedPairing = (pairing: ParsedPairing) => {
-      const current = latestSession.current;
-      const target = current.backendConnections.find(item => item.id === sourceId);
-      if (generation !== pairingGeneration.current || current.activeBackendConnectionId !== sourceId
-        || target?.serverUrl !== sourceUrl || current.settings.serverUrl !== sourceSettingsUrl) return;
-      const patch = pairingConnectionPatch(target, pairing);
-      current.updateBackendConnection(sourceId, patch);
-      current.setSettings(value => value.serverUrl === sourceSettingsUrl
-        && latestSession.current.activeBackendConnectionId === sourceId ? { ...value, ...patch } : value);
-      setChunks(new Map());
-      toast.success(t('settings.pairingImported'));
-      if (!patch.deviceSecret) setPairingAutoStart((value) => value + 1);
-    };
-    try {
-      const frame = parsePairingQrFrame(raw);
-      if (frame.kind === 'chunk') {
-        const next = new Map(chunks);
-        next.set(frame.chunk.index, frame.chunk);
-        setChunks(next);
-        if (next.size < frame.chunk.total) {
-          toast(t('settings.pairingChunk', { received: next.size, total: frame.chunk.total }));
-          return;
-        }
-        const assembled = assemblePairingQrChunkPayload([...next.values()]);
-        const pairing = await resolvePairingPayload(assembled);
-        applyResolvedPairing(pairing);
-        return;
-      }
-      const pairing = await resolvePairingPayload(frame.raw);
-      applyResolvedPairing(pairing);
-    } catch (error) {
-      if (generation !== pairingGeneration.current) return;
-      toast.danger(error instanceof Error ? error.message : t('settings.pairingFailed'));
-    }
   };
 
   return (
@@ -165,11 +100,6 @@ export function SettingsPanel({ session, historyRecoverySetup = false }: Props) 
             <Field label={t('settings.serverUrl')} value={activeProfile.serverUrl} onChange={updateServerUrl} />
             <p className="text-warning text-xs">{t('settings.credentialWarning')}</p>
             <Field label="Tenant" value={activeProfile.tenantId} onChange={(tenantId) => { updateBackendConnection(activeProfile.id, { tenantId }); setSettings((current) => ({ ...current, tenantId })); }} />
-            <Select selectedKey={activeProfile.encryptionProtocol} onSelectionChange={(key) => { if (typeof key === 'string') { const encryptionProtocol = key as typeof activeProfile.encryptionProtocol; updateBackendConnection(activeProfile.id, { encryptionProtocol }); setSettings((current) => ({ ...current, encryptionProtocol })); } }}>
-              <Label>{t('settings.encryption')}</Label><Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
-              <Select.Popover><ListBox><ListBox.Item id="none" textValue="none">none</ListBox.Item><ListBox.Item id="x25519" textValue="x25519">x25519</ListBox.Item><ListBox.Item id="ml-kem-768" textValue="ml-kem-768">ml-kem-768</ListBox.Item></ListBox></Select.Popover>
-            </Select>
-            {activeProfile.encryptionProtocol !== 'none' ? <Field label={t('settings.encryptionKey')} value={activeProfile.encryptionPublicKey} onChange={(encryptionPublicKey) => { updateBackendConnection(activeProfile.id, { encryptionPublicKey }); setSettings((current) => ({ ...current, encryptionPublicKey })); }} /> : null}
             <DevicePairingPanel session={session} deviceName="TodeX Desktop" autoStartNonce={pairingAutoStart} />
             <HistoryEncryptionPanel history={session.historyEncryption} autoStartRecovery={historyRecoverySetup} />
             <div className="flex gap-2"><Button onPress={() => (connected ? closeSocket(true) : connect())}>{connected ? t('settings.disconnect') : connectionState === 'error' ? t('settings.retry') : t('settings.connect')}</Button>{backendConnections.length > 1 ? <Button variant="danger-soft" onPress={() => removeBackendConnection(activeProfile.id)}>{t('settings.removeBackend')}</Button> : null}</div>
@@ -264,71 +194,6 @@ export function SettingsPanel({ session, historyRecoverySetup = false }: Props) 
             </div>
           </Switch.Content>
         </Switch>
-      </Surface>
-      <Surface className="flex flex-col gap-4 rounded-2xl p-5">
-        <h3 className="font-semibold">{t('settings.pairing')}</h3>
-        <p className="text-muted text-sm">{t('settings.pairingHint')}</p>
-        <TextField className="w-full" value={pairingText} onChange={setPairingText}>
-          <Label>{t('settings.pairingContent')}</Label>
-          <TextArea className="w-full" rows={4} />
-        </TextField>
-        <div className="flex gap-2">
-          <Button
-            variant="secondary"
-            onPress={() => {
-              if (pairingText.trim()) {
-                void applyRawPairing(pairingText.trim());
-              }
-            }}
-          >
-            {t('settings.pairingImport')}
-          </Button>
-          <Button
-            variant="tertiary"
-            onPress={async () => {
-              const text = (await navigator.clipboard.readText()).trim();
-              if (text) {
-                setPairingText(text);
-                void applyRawPairing(text);
-              }
-            }}
-          >
-            {t('settings.pairingClipboard')}
-          </Button>
-        </div>
-        <label
-          className="border-separator text-muted flex cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed px-4 py-8 text-sm"
-          onDragOver={(event) => event.preventDefault()}
-          onDrop={async (event) => {
-            event.preventDefault();
-            const file = event.dataTransfer.files[0];
-            if (!file) return;
-            const decoded = await decodeQrFromFile(file);
-            if (!decoded) {
-              toast.danger(t('settings.pairingQrFailed'));
-              return;
-            }
-            void applyRawPairing(decoded);
-          }}
-        >
-          <RiAttachment2 className="mb-2 size-5" />
-          {t('settings.pairingDropQr')}
-          <input
-            className="hidden"
-            type="file"
-            accept="image/*"
-            onChange={async (event) => {
-              const file = event.target.files?.[0];
-              if (!file) return;
-              const decoded = await decodeQrFromFile(file);
-              if (!decoded) {
-                toast.danger(t('settings.pairingQrFailed'));
-                return;
-              }
-              void applyRawPairing(decoded);
-            }}
-          />
-        </label>
       </Surface>
     </div>
   );

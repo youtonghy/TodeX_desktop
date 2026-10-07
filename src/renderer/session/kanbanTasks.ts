@@ -101,6 +101,7 @@ export function configureKanbanSync(config: KanbanSyncConfig | null): void {
     || previous.deviceSecret !== config.deviceSecret
     || previous.encryptionProtocol !== config.encryptionProtocol
     || previous.encryptionPublicKey !== config.encryptionPublicKey
+    || previous.transportVerified !== config.transportVerified
     || previous.backendConnectionId !== config.backendConnectionId;
   if (changed) {
     syncSupported = true;

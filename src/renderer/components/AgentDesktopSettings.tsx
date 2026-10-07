@@ -17,7 +17,7 @@ export function AgentDesktopSettings({ session }: { session: TodeXSession }) {
   const t = useT();
   const api = useMemo(
     () => backendApi(session.settings),
-    [session.settings.deviceSecret, session.settings.encryptionProtocol, session.settings.encryptionPublicKey, session.settings.serverUrl],
+    [session.settings.deviceSecret, session.settings.encryptionProtocol, session.settings.encryptionPublicKey, session.settings.transportVerified, session.settings.serverUrl],
   );
   // `null`: the backend predates desktop tools.
   const [settings, setSettings] = useState<Settings | null | undefined>(undefined);

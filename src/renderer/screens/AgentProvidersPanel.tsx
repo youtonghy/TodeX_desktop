@@ -64,7 +64,7 @@ export function AgentProvidersPanel({ session }: { session: TodeXSession }) {
   const [editor, setEditor] = useState<EditorState>(null);
   const requestGeneration = useRef(0);
   const importInput = useRef<HTMLInputElement>(null);
-  const api = useCallback(() => backendApi(session.settings), [session.settings.deviceSecret, session.settings.encryptionProtocol, session.settings.encryptionPublicKey, session.settings.serverUrl]);
+  const api = useCallback(() => backendApi(session.settings), [session.settings.deviceSecret, session.settings.encryptionProtocol, session.settings.encryptionPublicKey, session.settings.transportVerified, session.settings.serverUrl]);
 
   const refresh = useCallback(async (quiet = false) => {
     const generation = ++requestGeneration.current;

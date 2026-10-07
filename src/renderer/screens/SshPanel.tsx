@@ -34,8 +34,8 @@ type Props = {
  */
 export function SshPanel({ session, scopeKey, workbenchItems, onOpenSshTerminal, onOpenRemoteFiles, onCloseWorkbenchItem }: Props) {
   const t = useT();
-  const { serverUrl, deviceSecret, encryptionProtocol, encryptionPublicKey } = session.settings;
-  const api = useCallback(() => backendApi({ serverUrl, deviceSecret, encryptionProtocol, encryptionPublicKey }), [deviceSecret, encryptionProtocol, encryptionPublicKey, serverUrl]);
+  const { serverUrl, deviceSecret, encryptionProtocol, encryptionPublicKey, transportVerified } = session.settings;
+  const api = useCallback(() => backendApi({ serverUrl, deviceSecret, encryptionProtocol, encryptionPublicKey, transportVerified }), [deviceSecret, encryptionProtocol, encryptionPublicKey, serverUrl, transportVerified]);
   const remoteConnector = useRemoteConnector(api);
   const [tab, setTab] = useState<SshTab>('hosts');
   const [hosts, setHosts] = useState<SshHostsResponse | null>(null);

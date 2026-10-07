@@ -1057,8 +1057,8 @@ function FilesPane({ session, target, onTargetChange, remote, onRemoteRebind }: 
   const t = useT();
   const targetChangeRef = useRef(onTargetChange);
   targetChangeRef.current = onTargetChange;
-  const { serverUrl, deviceSecret, encryptionProtocol, encryptionPublicKey } = session.settings;
-  const api = useCallback(() => backendApi({ serverUrl, deviceSecret, encryptionProtocol, encryptionPublicKey }), [deviceSecret, encryptionProtocol, encryptionPublicKey, serverUrl]);
+  const { serverUrl, deviceSecret, encryptionProtocol, encryptionPublicKey, transportVerified } = session.settings;
+  const api = useCallback(() => backendApi({ serverUrl, deviceSecret, encryptionProtocol, encryptionPublicKey, transportVerified }), [deviceSecret, encryptionProtocol, encryptionPublicKey, serverUrl, transportVerified]);
   const workspacePath = session.activeWorkspace?.path || '';
   // shell.openPath/showItemInFolder act on the desktop's own filesystem, so
   // the menu only makes sense when the backend runs on this machine.
