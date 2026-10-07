@@ -1,4 +1,4 @@
-import { RiPushpin2Fill, RiAddLine, RiPencilLine, RiEdit2Line, RiErrorWarningLine, RiFolder3Line, RiGitBranchLine, RiDeleteBinLine, RiArrowDownSLine, RiBarChartBoxLine, RiInformationLine, RiKanbanView2, RiPaletteLine, RiPriceTag3Line, RiPuzzle2Line, RiSettings3Line, RiTerminalBoxLine, RiTerminalLine, RiTimeLine, RiUserSettingsLine, RiVipCrownLine } from '@remixicon/react';
+import { RiPushpin2Fill, RiLockLine, RiAddLine, RiPencilLine, RiEdit2Line, RiErrorWarningLine, RiFolder3Line, RiGitBranchLine, RiDeleteBinLine, RiArrowDownSLine, RiBarChartBoxLine, RiInformationLine, RiKanbanView2, RiPaletteLine, RiPriceTag3Line, RiPuzzle2Line, RiSettings3Line, RiTerminalBoxLine, RiTerminalLine, RiTimeLine, RiUserSettingsLine, RiVipCrownLine } from '@remixicon/react';
 import { Badge, Button, Chip, ColorSwatchPicker, Dropdown, Label, Tooltip } from '@heroui/react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { DragEvent, FocusEvent, MouseEvent } from 'react';
@@ -312,6 +312,9 @@ export function AppSidebar({
     setContextMenu({ kind, id, x: event.clientX, y: event.clientY });
   };
 
+  // Legacy plaintext history is read-only: no rename or fork.
+  const contextReadOnly = contextMenu?.kind === 'conversation'
+    && session.conversations.find((item) => item.id === contextMenu.id)?.legacyPlaintext === true;
   const runContextAction = (action: 'rename' | 'edit' | 'fork' | 'pin' | 'delete') => {
     if (!contextMenu) return;
     if (action === 'pin') {
@@ -719,7 +722,7 @@ export function AppSidebar({
                           </ChatListView.Icon>
                           <ChatListView.Text>
                             <ChatListView.Title className={isSelected ? 'text-accent font-semibold' : tasksDone ? 'text-muted' : ''}>
-                              {conversationDisplayTitle(conversation, session.timeline)}{pins.conversation.includes(conversation.id) ? <RiPushpin2Fill className="ml-1 inline size-3 text-muted" aria-label={t('sidebar.pinned')} /> : null}{taskMeta ? <Chip className="ml-1 inline-flex h-4 align-middle px-1.5 text-[10px]" color={tasksDone ? 'default' : 'accent'} size="sm" variant="soft" aria-label={t('sidebar.taskCount', { count: taskMeta.count })}>{tasksDone ? t('sidebar.tasksDone') : t('sidebar.tasksPlanning')}</Chip> : null}
+                              {conversationDisplayTitle(conversation, session.timeline)}{conversation.legacyPlaintext ? <span className="ml-1 inline-flex align-middle text-muted" role="img" title={t('history.readOnlyBadge')} aria-label={t('history.readOnlyBadge')}><RiLockLine className="size-3" aria-hidden="true" /></span> : null}{pins.conversation.includes(conversation.id) ? <RiPushpin2Fill className="ml-1 inline size-3 text-muted" aria-label={t('sidebar.pinned')} /> : null}{taskMeta ? <Chip className="ml-1 inline-flex h-4 align-middle px-1.5 text-[10px]" color={tasksDone ? 'default' : 'accent'} size="sm" variant="soft" aria-label={t('sidebar.taskCount', { count: taskMeta.count })}>{tasksDone ? t('sidebar.tasksDone') : t('sidebar.tasksPlanning')}</Chip> : null}
                             </ChatListView.Title>
                             <ChatListView.Preview>{conversation.preview || t('sidebar.noMessages')}</ChatListView.Preview>
                           </ChatListView.Text>
@@ -793,8 +796,8 @@ export function AppSidebar({
             onClick={(event) => event.stopPropagation()}
           >
             <HeroContextMenu.Menu aria-label={contextMenu.kind === 'workspace' ? t('sidebar.workspaceMenu') : t('sidebar.conversationMenu')} autoFocus="first" onClose={() => setContextMenu(null)}>
-              {contextMenu.kind === 'conversation' ? <HeroContextMenu.Item id="fork" textValue="Fork" onAction={() => runContextAction('fork')}><RiGitBranchLine className="size-4 text-muted" /><Label>Fork</Label></HeroContextMenu.Item> : null}
-              <HeroContextMenu.Item id="rename" textValue={t('sidebar.rename')} onAction={() => runContextAction('rename')}><RiPencilLine className="size-4 text-muted" /><Label>{t('sidebar.rename')}</Label></HeroContextMenu.Item>
+              {contextMenu.kind === 'conversation' && !contextReadOnly ? <HeroContextMenu.Item id="fork" textValue="Fork" onAction={() => runContextAction('fork')}><RiGitBranchLine className="size-4 text-muted" /><Label>Fork</Label></HeroContextMenu.Item> : null}
+              {contextReadOnly ? null : <HeroContextMenu.Item id="rename" textValue={t('sidebar.rename')} onAction={() => runContextAction('rename')}><RiPencilLine className="size-4 text-muted" /><Label>{t('sidebar.rename')}</Label></HeroContextMenu.Item>}
               {contextMenu.kind === 'workspace' ? <HeroContextMenu.Item id="edit" textValue={t('sidebar.edit')} onAction={() => runContextAction('edit')}><RiEdit2Line className="size-4 text-muted" /><Label>{t('sidebar.edit')}</Label></HeroContextMenu.Item> : null}
               <HeroContextMenu.Item id="pin" textValue={pins[contextMenu.kind].includes(contextMenu.id) ? t('sidebar.unpin') : t('sidebar.pin')} onAction={() => runContextAction('pin')}><RiPushpin2Fill className="size-4 text-muted" /><Label>{pins[contextMenu.kind].includes(contextMenu.id) ? t('sidebar.unpin') : t('sidebar.pin')}</Label></HeroContextMenu.Item>
               {contextMenu.kind === 'workspace' ? (

@@ -36,6 +36,7 @@ import { TRANSPORT_V2_WS_CLOSE_CODE, TransportCryptoError } from '@todex/protoco
 import { startSocketVerification, type SocketVerification } from '@todex/protocol/socketVerification';
 import { HISTORY_ENCRYPTION_UPDATED, historyRetryPrompt, historyRetryRequest, historyRetrySequence } from '@todex/protocol/historyEncryption';
 import { historyErrorMessage, useHistoryEncryption, type HistoryEncryptionSession } from './useHistoryEncryption';
+import { HISTORY_KEY_REQUIRED } from '@todex/protocol/historyEncryption';
 import { retryWithDelays } from '@todex/protocol/retry';
 import { probeBackendConnection, nextReconnectDelayMs, inspectServerUrl, credentialMatchesOrigin } from '@todex/protocol/connectionProbe';
 import {
@@ -554,6 +555,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const [modelCatalogStatus, setModelCatalogStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
   const [modelCatalogError, setModelCatalogError] = useState('');
   const [lastError, setLastError] = useState('');
+  /** Legacy plaintext conversations are read-only: writes are refused here
+   * (the backend would answer HISTORY_READ_ONLY). */
+  const refuseReadOnlyWrite = (conversation: ConversationRecord | null | undefined): boolean => {
+    if (!conversation?.legacyPlaintext) return false;
+    setLastError(t('history.readOnlyError'));
+    return true;
+  };
   const [serverVersion, setServerVersion] = useState<ServerVersion | null>(null);
   const [events, setEvents] = useState<ServerEvent[]>([]);
   const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
@@ -3538,6 +3546,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         // A busy conversation's prompt may still join the backend queue;
         // sendV2Prompt reports the conflict itself when it cannot.
         const callerReports = code === 'CONFLICT' && protocolCommandsRef.current?.typeOf(requestId) === 'conversation.prompt';
+        // No recipient to encrypt the write for: register this device again.
+        if (code === HISTORY_KEY_REQUIRED) void historyEncryptionRef.current?.keyRequired();
         protocolCommandsRef.current?.reject(requestId, message, code);
         if (!callerReports) setLastError(message);
         return;
@@ -3771,6 +3781,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
 
   const controlConversation = useCallback(async (conversationId: string, control: LiveConversationControl): Promise<boolean> => {
     const conversation = conversationsRef.current.find(item => item.id === conversationId);
+    if (refuseReadOnlyWrite(conversation)) return false;
     const turnId = turnIdsRef.current[conversationId];
     if (!conversation?.v2ConversationId || !turnId || controlRequestsRef.current.has(conversationId)) {
       setLastError(t('sess.turnEndedUnconfirmed'));
@@ -6347,6 +6358,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       desktopAlert(t('alert.noConversation'), t('alert.pickThread'));
       return;
     }
+    if (refuseReadOnlyWrite(context.conversation)) return;
     updateConversation(conversationId, { title: nextTitle });
     void sendNativeThreadAction(
       conversationId,
@@ -6364,6 +6376,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       return null;
     }
     const { workspace, conversation } = context;
+    if (refuseReadOnlyWrite(conversation)) return null;
     if (conversation.v2ConversationId) {
       const provider = v2ProvidersRef.current.find((item) => item.id === conversation.provider);
       if (!provider?.capabilities.controlActions?.includes('fork')) {
@@ -6647,6 +6660,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         return false;
       }
       const { workspace, conversation } = context;
+      if (refuseReadOnlyWrite(conversation)) return false;
       // Reference attachments only send while their [引用:name] token is in the text.
       const attachments = liveComposerAttachments(text, rawAttachments);
       if (!isV2Conversation(conversation) || !conversation.provider) {
@@ -6854,6 +6868,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     const v2Id = context?.conversation.v2ConversationId;
     if (!context || !v2Id) return false;
     const { workspace, conversation } = context;
+    if (refuseReadOnlyWrite(conversation)) return false;
     const permissionMode = conversationPermissionMode(conversation, workspace, v2ProvidersRef.current);
     if (!permissionMode) {
       setLastError(t('sess.permissionSelectRequired'));
@@ -7177,6 +7192,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       if (request.requestType === 'conversation.permission.request') {
         const conversationId = typeof data.conversationId === 'string' ? data.conversationId : '';
         const conversation = conversationsRef.current.find((item) => item.id === conversationId || item.v2ConversationId === conversationId) ?? null;
+        if (refuseReadOnlyWrite(conversation)) return false;
         const v2Id = conversation?.v2ConversationId || conversation?.id || conversationId;
         const permissionId = typeof data.permissionId === 'string' ? data.permissionId : request.requestId;
         if (!v2Id || !permissionId) {

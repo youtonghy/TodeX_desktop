@@ -140,6 +140,9 @@ export type ConversationRecord = {
   preview?: string;
   nativeStatus?: string;
   archived?: boolean;
+  /** Stored before history became end-to-end encrypted: read-only (the
+   * backend rejects writes with HISTORY_READ_ONLY). */
+  legacyPlaintext?: boolean;
   sessionId: string;
   threadId: string;
   localAdapterState?: LocalAdapterState;
@@ -2317,6 +2320,7 @@ export function conversationFromManifest(
     preview: '',
     nativeStatus: manifest.status,
     archived: Boolean(manifest.archivedAt),
+    ...(manifest.legacyPlaintext ? { legacyPlaintext: true } : {}),
     sessionId: `v2_${manifest.id}`,
     threadId: '',
     localAdapterState: 'idle',
@@ -2380,8 +2384,10 @@ export function mergeManifestConversations(
       const lastSequence = Math.max(existing.lastSequence ?? 0, manifest.lastSequence ?? 0);
       const title = manifest.title || providerDisplayName(manifest.provider);
       const archived = Boolean(manifest.archivedAt);
+      const legacyPlaintext = manifest.legacyPlaintext === true;
       const same = existing.title === title
         && existing.archived === archived
+        && Boolean(existing.legacyPlaintext) === legacyPlaintext
         && existing.nativeStatus === manifest.status
         && existing.provider === manifest.provider
         && existing.providerProfile === manifest.providerProfile
@@ -2395,6 +2401,7 @@ export function mergeManifestConversations(
           ...existing,
           title,
           archived,
+          legacyPlaintext: legacyPlaintext || undefined,
           nativeStatus: manifest.status,
           provider: manifest.provider,
           providerProfile: manifest.providerProfile,
