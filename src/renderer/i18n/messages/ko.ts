@@ -1417,6 +1417,7 @@ export const ko: Messages = {
   'transport.cryptoFailed': '암호화 전송 검증에 실패하여 연결이 닫혔습니다. 자동으로 다시 연결합니다. 계속 발생하면 설정 → 페어링에서 Backend 페어링 QR 코드를 다시 가져오세요.',
   'transport.upgradeRequired': 'Backend가 암호화되지 않은 요청을 거부했습니다. 설정 → 페어링에서 Backend 페어링 QR 코드를 가져와 암호화 페어링을 완료하세요.',
   'transport.invalidKey': '저장된 암호화 공개 키가 유효하지 않습니다. 설정 → 페어링에서 Backend 페어링 QR 코드를 다시 가져오세요.',
+  'transport.requestTooLarge': '요청이 너무 커서 보내지 않았습니다({size} MiB, 한도 {limit} MiB).',
 
   // workspace
   'workspace.dirReadFailed': '디렉터리 읽기 실패: {status}',

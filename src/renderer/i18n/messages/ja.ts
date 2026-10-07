@@ -1417,6 +1417,7 @@ export const ja: Messages = {
   'transport.cryptoFailed': '暗号化転送の検証に失敗したため接続が閉じられました。自動で再接続します。繰り返し発生する場合は、設定 → ペアリング で Backend のペアリング QR コードを再インポートしてください。',
   'transport.upgradeRequired': 'Backend が暗号化されていないリクエストを拒否しました。設定 → ペアリング で Backend のペアリング QR コードをインポートして暗号化ペアリングを行ってください。',
   'transport.invalidKey': '保存されている暗号化公開鍵が無効です。設定 → ペアリング で Backend のペアリング QR コードを再インポートしてください。',
+  'transport.requestTooLarge': 'リクエストが大きすぎるため送信しませんでした（{size} MiB、上限 {limit} MiB）。',
 
   // workspace
   'workspace.dirReadFailed': 'ディレクトリの読み取りに失敗: {status}',

@@ -1417,6 +1417,7 @@ export const zhCN = {
   'transport.cryptoFailed': '加密传输校验失败，连接已关闭，正在自动重连。若反复出现，请在 设置 → 配对 中重新导入后端配对二维码。',
   'transport.upgradeRequired': '后端拒绝了未加密的请求。请在 设置 → 配对 中导入后端配对二维码完成加密配对。',
   'transport.invalidKey': '已保存的加密公钥无效。请在 设置 → 配对 中重新导入后端配对二维码。',
+  'transport.requestTooLarge': '请求过大（{size} MiB，上限 {limit} MiB），未发送。',
 
   // workspace
   'workspace.dirReadFailed': '目录读取失败: {status}',

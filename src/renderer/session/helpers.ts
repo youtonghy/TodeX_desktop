@@ -37,7 +37,7 @@ export function buildConversationControlMessage(
   };
 }
 import { providerDisplayName } from '@todex/protocol/v2';
-import { ConnectionError, type ConnectionFailureCode } from '@todex/protocol/connectionError';
+import { ConnectionError, ConnectionErrorType, type ConnectionFailureCode } from '@todex/protocol/connectionError';
 import { matchesMessage, t, type MessageKey } from '../i18n';
 
 // Sentinel produced while an assistant reply is streaming. The shared
@@ -1914,7 +1914,36 @@ export type BackendTransportProfile = Pick<ConnectionSettings, 'serverUrl' | 'de
  * an unpaired remote host is refused, an unpaired loopback host is plaintext.
  */
 export function backendTransport(settings: BackendTransportProfile): SecureTransport {
-  return cachedSecureTransport(settings, cachedDeviceIdentity(settings.deviceSecret));
+  return withLocalizedRequestLimits(cachedSecureTransport(settings, cachedDeviceIdentity(settings.deviceSecret)));
+}
+
+const localizedTransports = new WeakMap<SecureTransport, SecureTransport>();
+const MIB = 1024 * 1024;
+
+/** Turns the transport's body-limit pre-check (nothing was sent) into a
+ * localized, non-retryable `ConnectionError` for every REST caller. */
+function withLocalizedRequestLimits(transport: SecureTransport): SecureTransport {
+  const cached = localizedTransports.get(transport);
+  if (cached) return cached;
+  const localize = (error: unknown): never => {
+    if (error instanceof TransportPayloadTooLargeError) {
+      throw new ConnectionError(
+        ConnectionErrorType.MESSAGE_TOO_LARGE,
+        t('transport.requestTooLarge', { size: (Math.ceil((error.size / MIB) * 10) / 10).toFixed(1), limit: Math.round(error.limit / MIB) }),
+        error.message,
+        false,
+        'request_failed',
+      );
+    }
+    throw error;
+  };
+  const wrapped: SecureTransport = {
+    ...transport,
+    fetch: (request) => transport.fetch(request).catch(localize),
+    fetchStream: (request) => transport.fetchStream(request).catch(localize),
+  };
+  localizedTransports.set(transport, wrapped);
+  return wrapped;
 }
 
 /** A signed backend request through the profile's transport, answered as a standard `Response`. */

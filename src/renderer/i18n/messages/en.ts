@@ -1417,6 +1417,7 @@ export const en: Messages = {
   'transport.cryptoFailed': 'Encrypted transport check failed and the connection was closed; reconnecting automatically. If this keeps happening, re-import the backend pairing QR code in Settings → Pairing.',
   'transport.upgradeRequired': 'The backend rejected an unencrypted request. Import the backend pairing QR code in Settings → Pairing to pair with encryption.',
   'transport.invalidKey': 'The saved encryption public key is invalid. Re-import the backend pairing QR code in Settings → Pairing.',
+  'transport.requestTooLarge': 'The request is too large ({size} MiB; the limit is {limit} MiB) and was not sent.',
 
   // workspace
   'workspace.dirReadFailed': 'Failed to read directory: {status}',
