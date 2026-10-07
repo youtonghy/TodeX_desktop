@@ -1276,6 +1276,22 @@ body {
 .sidebar-chat-list .list-view__item.drop-before::after { top: -3px; }
 .sidebar-chat-list .list-view__item.drop-after::after { bottom: -3px; }
 
+/* Workspace groups: dropping onto the middle of a row groups it with the
+   dragged workspace (or adds it to the group), shown as an outlined row. */
+.sidebar-chat-list .list-view__item.drop-merge {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+}
+.sidebar-chat-list .list-view__item.is-dragging {
+  opacity: 0.4;
+}
+.sidebar-chat-list .list-view__item.is-group-child {
+  padding-inline-start: 1.75rem;
+}
+.sidebar-group-rail-glyph {
+  display: none;
+}
+
 /* Collapsed icon rail + hover peek: AppSidebar sets data-peek while the
    sidebar is logically collapsed, and flips data-state back to expanded while
    the pointer/focus is inside. The negative margin keeps the rail's 48px
@@ -1333,6 +1349,14 @@ body {
 .sidebar[data-peek='true'][data-state='collapsed'] .sidebar-chat-list .list-view__item {
   padding-inline: 0;
   gap: 0;
+}
+
+/* A group header has no chevron form in the rail; it shows a folders glyph. */
+.sidebar[data-peek='true'][data-state='collapsed'] .sidebar-group-chevron {
+  display: none;
+}
+.sidebar[data-peek='true'][data-state='collapsed'] .sidebar-group-rail-glyph {
+  display: block;
 }
 
 .sidebar[data-peek='true'][data-state='collapsed'] .sidebar-chat-list .list-view__item-content {

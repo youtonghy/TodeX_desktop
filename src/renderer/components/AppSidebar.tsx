@@ -1,14 +1,17 @@
-import { RiPushpin2Fill, RiLockLine, RiAddLine, RiPencilLine, RiEdit2Line, RiErrorWarningLine, RiFolder3Line, RiGitBranchLine, RiDeleteBinLine, RiArrowDownSLine, RiBarChartBoxLine, RiInformationLine, RiKanbanView2, RiPaletteLine, RiPriceTag3Line, RiPuzzle2Line, RiSettings3Line, RiTerminalBoxLine, RiTerminalLine, RiTimeLine, RiUserSettingsLine, RiVipCrownLine } from '@remixicon/react';
+import { RiPushpin2Fill, RiLockLine, RiAddLine, RiFolderReduceLine, RiFoldersLine, RiFolderTransferLine, RiPencilLine, RiEdit2Line, RiErrorWarningLine, RiFolder3Line, RiGitBranchLine, RiDeleteBinLine, RiArrowDownSLine, RiBarChartBoxLine, RiInformationLine, RiKanbanView2, RiPaletteLine, RiPriceTag3Line, RiPuzzle2Line, RiSettings3Line, RiTerminalBoxLine, RiTerminalLine, RiTimeLine, RiUserSettingsLine, RiVipCrownLine } from '@remixicon/react';
 import { Badge, Button, Chip, ColorSwatchPicker, Dropdown, Label, Tooltip } from '@heroui/react';
-import { useEffect, useMemo, useRef, useState } from 'react';
-import type { DragEvent, FocusEvent, MouseEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { FocusEvent, MouseEvent } from 'react';
 import { ContextMenu as HeroContextMenu, ChatListView, Sidebar, useSidebar } from '@heroui-pro/react';
 import { useSidebarPins } from '../session/useSidebarPins';
+import { useSidebarGroupCollapse } from '../session/useSidebarGroupCollapse';
 import { useKanbanTasks } from '../session/kanbanTasks';
 import { BACKEND_LABEL_COLORS, backendLabelColor } from '../session/backendColors';
 import type { BackendConnectionProfile } from '../session/backendColors';
-import type { WorkspaceRecord } from '@todex/protocol/todex';
+import { groupWorkspaceEntries, moveWorkspaceEntry, moveWorkspaceToGroup, newWorkspaceGroupId, removeWorkspaceFromGroup, renameWorkspaceGroup, ungroupWorkspaceGroup, workspaceLayoutPatches } from '@todex/protocol/todex';
+import type { WorkspaceDragSource, WorkspaceDropTarget, WorkspaceRecord, WorkspaceSidebarEntry } from '@todex/protocol/todex';
 import { ProviderIcon } from './ProviderIcon';
+import { WorkspaceGroupRenameDialog } from './WorkspaceGroupRenameDialog';
 import { AppIcon } from './AppIcon';
 import { WORKSPACE_ICON_CHOICES, WORKSPACE_RING_STYLES, WorkspaceStatusRing, ringStyleKey, workspaceIconComponent } from './WorkspaceIcon';
 import type { TodeXSession } from '../session/useTodeXSession';
@@ -36,7 +39,34 @@ type Props = {
   onSelectConversation?: () => void;
 };
 
-type ContextMenu = { kind: 'workspace' | 'conversation'; id: string; x: number; y: number } | null;
+type ContextMenu = { kind: 'workspace' | 'conversation' | 'group'; id: string; x: number; y: number } | null;
+
+type WorkspaceGroupEntry = Extract<WorkspaceSidebarEntry, { kind: 'group' }>;
+
+const STATUS_DOT_CLASS = { working: 'bg-green-500', issue: 'bg-amber-500', unread: 'bg-blue-500' } as const;
+
+/** Maps the pointer's vertical position within a row (0..1) to a drop: row
+ * edges reorder, the middle of a workspace groups, a group header absorbs.
+ * Groups never nest, so a dragged group only reorders among top-level rows. */
+function workspaceDropTargetAt(
+  source: WorkspaceDragSource,
+  kind: 'workspace' | 'group',
+  id: string,
+  inGroup: boolean,
+  fraction: number,
+): WorkspaceDropTarget | null {
+  if (source.kind === kind && source.id === id) return null;
+  if (kind === 'group') {
+    if (source.kind === 'group') return { kind, id, position: fraction < 0.5 ? 'before' : 'after' };
+    return { kind, id, position: fraction < 0.3 ? 'before' : 'into' };
+  }
+  if (source.kind === 'group') return inGroup ? null : { kind, id, position: fraction < 0.5 ? 'before' : 'after' };
+  return { kind, id, position: fraction < 0.25 ? 'before' : fraction > 0.75 ? 'after' : 'merge' };
+}
+
+function sameDropTarget(left: WorkspaceDropTarget | null, right: WorkspaceDropTarget | null): boolean {
+  return left?.kind === right?.kind && left?.id === right?.id && left?.position === right?.position;
+}
 
 export function AppSidebar({
   session,
@@ -101,9 +131,11 @@ export function AppSidebar({
     return [...groups.values()].sort((a, b) => (a.profile?.name ?? '').localeCompare(b.profile?.name ?? ''));
   }, [session.backendConnections, session.workspaces, session.activeBackendConnectionId]);
 
-  const orderedWorkspaces = [...ownWorkspaces].sort((a, b) => Number(pins.workspace.includes(b.id)) - Number(pins.workspace.includes(a.id)) || (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || (a.createdAt - b.createdAt) || a.id.localeCompare(b.id));
-  const [draggedWorkspaceId, setDraggedWorkspaceId] = useState<string | null>(null);
-  const [dragIndicator, setDragIndicator] = useState<{ id: string; position: 'before' | 'after' } | null>(null);
+  const { collapsedGroups, toggleGroupCollapsed } = useSidebarGroupCollapse();
+  const dragSourceRef = useRef<WorkspaceDragSource | null>(null);
+  const [draggingKey, setDraggingKey] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<WorkspaceDropTarget | null>(null);
+  const [renamingGroup, setRenamingGroup] = useState<{ id: string; name: string } | null>(null);
   const healthColor = session.connectionState !== 'open'
     ? 'danger'
     : session.connectionHealth.latencyMs !== null && session.connectionHealth.latencyMs <= 100
@@ -265,36 +297,86 @@ export function AppSidebar({
     });
   }, [workspaceConversations, pins.conversation]);
 
-  const displayedWorkspaces = useMemo(() => {
-    return sortedWorkspaces.slice(0, workspaceLimit);
-  }, [sortedWorkspaces, workspaceLimit]);
+  // Top-level rows: lone workspaces and groups. "Show more" pages by these,
+  // so a group counts as one row.
+  const workspaceEntries = useMemo(() => groupWorkspaceEntries(sortedWorkspaces), [sortedWorkspaces]);
+  const displayedEntries = useMemo(() => workspaceEntries.slice(0, workspaceLimit), [workspaceEntries, workspaceLimit]);
+  const workspaceEntriesRef = useRef(workspaceEntries);
+  workspaceEntriesRef.current = workspaceEntries;
+
+  // Persists a regrouped or reordered layout as per-workspace sortOrder/groupId/groupName.
+  const applyWorkspaceLayout = useCallback((next: WorkspaceSidebarEntry[]) => {
+    for (const { id, patch } of workspaceLayoutPatches(next)) session.updateWorkspace(id, patch);
+  }, [session]);
 
   const displayedConversations = useMemo(() => {
     return sortedConversations.slice(0, conversationLimit);
   }, [sortedConversations, conversationLimit]);
 
+  // Drag-and-drop uses native listeners on the rendered rows; each draggable
+  // row carries data-workspace-drag="<kind>:<id>".
+  const newGroupFallbackName = t('sidebar.newGroupName');
   useEffect(() => {
-    const rows = Array.from(document.querySelectorAll<HTMLElement>('[data-workspace-id]'));
+    const finish = () => {
+      dragSourceRef.current = null;
+      setDraggingKey(null);
+      setDropTarget(null);
+    };
+    const rows = Array.from(document.querySelectorAll<HTMLElement>('[data-workspace-drag]'));
     const cleanups = rows.map((row) => {
-      const id = row.dataset.workspaceId || '';
+      const key = row.dataset.workspaceDrag || '';
+      const separator = key.indexOf(':');
+      const kind = key.slice(0, separator);
+      const id = key.slice(separator + 1);
+      if ((kind !== 'workspace' && kind !== 'group') || !id) return () => {};
+      const inGroup = row.dataset.workspaceInGroup === 'true';
+      const targetAt = (event: globalThis.DragEvent) => {
+        const source = dragSourceRef.current;
+        if (!source) return null;
+        const rect = row.getBoundingClientRect();
+        return workspaceDropTargetAt(source, kind, id, inGroup, (event.clientY - rect.top) / Math.max(rect.height, 1));
+      };
       row.draggable = true;
-      const start = (event: globalThis.DragEvent) => { event.dataTransfer?.setData('text/plain', id); if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'; setDraggedWorkspaceId(id); };
-      const over = (event: globalThis.DragEvent) => { event.preventDefault(); if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'; const rect = row.getBoundingClientRect(); setDragIndicator({ id, position: event.clientY < rect.top + rect.height / 2 ? 'before' : 'after' }); };
+      const start = (event: globalThis.DragEvent) => {
+        dragSourceRef.current = { kind, id };
+        setDraggingKey(key);
+        event.dataTransfer?.setData('text/plain', id);
+        if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
+      };
+      const over = (event: globalThis.DragEvent) => {
+        if (!dragSourceRef.current) return;
+        event.preventDefault();
+        if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+        const target = targetAt(event);
+        setDropTarget((current) => (sameDropTarget(current, target) ? current : target));
+      };
       const drop = (event: globalThis.DragEvent) => {
         event.preventDefault();
-        const sourceId = draggedWorkspaceId || event.dataTransfer?.getData('text/plain');
-        if (!sourceId || sourceId === id) { setDraggedWorkspaceId(null); setDragIndicator(null); return; }
-        const from = orderedWorkspaces.findIndex((item) => item.id === sourceId);
-        const to = orderedWorkspaces.findIndex((item) => item.id === id);
-        if (from < 0 || to < 0) { setDraggedWorkspaceId(null); return; }
-        const next = [...orderedWorkspaces]; const [moved] = next.splice(from, 1); next.splice(to, 0, moved);
-        next.forEach((item, index) => session.updateWorkspace(item.id, { sortOrder: index })); setDraggedWorkspaceId(null); setDragIndicator(null);
+        const source = dragSourceRef.current;
+        const target = targetAt(event);
+        finish();
+        if (!source || !target) return;
+        const current = workspaceEntriesRef.current;
+        const groupId = newWorkspaceGroupId();
+        const next = moveWorkspaceEntry(current, source, target, { id: groupId, fallbackName: newGroupFallbackName });
+        if (next === current) return;
+        applyWorkspaceLayout(next);
+        const created = next.find((entry): entry is WorkspaceGroupEntry => entry.kind === 'group' && entry.id === groupId);
+        if (created) setRenamingGroup({ id: created.id, name: created.name });
       };
-      row.addEventListener('dragstart', start); row.addEventListener('dragover', over); row.addEventListener('drop', drop);
-      return () => { row.removeEventListener('dragstart', start); row.removeEventListener('dragover', over); row.removeEventListener('drop', drop); };
+      row.addEventListener('dragstart', start);
+      row.addEventListener('dragover', over);
+      row.addEventListener('drop', drop);
+      row.addEventListener('dragend', finish);
+      return () => {
+        row.removeEventListener('dragstart', start);
+        row.removeEventListener('dragover', over);
+        row.removeEventListener('drop', drop);
+        row.removeEventListener('dragend', finish);
+      };
     });
     return () => cleanups.forEach((cleanup) => cleanup());
-  }, [displayedWorkspaces, orderedWorkspaces, draggedWorkspaceId, session]);
+  }, [displayedEntries, collapsedGroups, applyWorkspaceLayout, newGroupFallbackName]);
 
   useEffect(() => {
     const close = () => setContextMenu(null);
@@ -306,17 +388,31 @@ export function AppSidebar({
     };
   }, []);
 
-  const openContextMenu = (event: MouseEvent, kind: 'workspace' | 'conversation', id: string) => {
+  const openContextMenu = (event: MouseEvent, kind: NonNullable<ContextMenu>['kind'], id: string) => {
     event.preventDefault();
     event.stopPropagation();
     setContextMenu({ kind, id, x: event.clientX, y: event.clientY });
+  };
+
+  const contextGroup = contextMenu?.kind === 'group'
+    ? workspaceEntries.find((entry): entry is WorkspaceGroupEntry => entry.kind === 'group' && entry.id === contextMenu.id)
+    : undefined;
+  const contextWorkspaceGroupId = contextMenu?.kind === 'workspace'
+    ? workspaceEntries.find((entry): entry is WorkspaceGroupEntry => entry.kind === 'group' && entry.workspaces.some((workspace) => workspace.id === contextMenu.id))?.id
+    : undefined;
+  const contextMoveTargets = contextMenu?.kind === 'workspace'
+    ? workspaceEntries.filter((entry): entry is WorkspaceGroupEntry => entry.kind === 'group' && entry.id !== contextWorkspaceGroupId)
+    : [];
+  const runGroupLayout = (next: WorkspaceSidebarEntry[]) => {
+    applyWorkspaceLayout(next);
+    setContextMenu(null);
   };
 
   // Legacy plaintext history is read-only: no rename or fork.
   const contextReadOnly = contextMenu?.kind === 'conversation'
     && session.conversations.find((item) => item.id === contextMenu.id)?.legacyPlaintext === true;
   const runContextAction = (action: 'rename' | 'edit' | 'fork' | 'pin' | 'delete') => {
-    if (!contextMenu) return;
+    if (!contextMenu || contextMenu.kind === 'group') return;
     if (action === 'pin') {
       togglePin(contextMenu.kind, contextMenu.id);
       setContextMenu(null);
@@ -340,6 +436,117 @@ export function AppSidebar({
       else if (action === 'delete') session.removeConversation(conversation.id);
     }
     setContextMenu(null);
+  };
+
+  const renderWorkspaceItem = (workspace: WorkspaceRecord, group: { entry: WorkspaceGroupEntry; last: boolean } | null) => {
+    const isSelected = workspace.id === session.activeWorkspaceId;
+    // A group-after drop on an expanded group marks the group's last row.
+    const dropClass = dropTarget?.kind === 'workspace' && dropTarget.id === workspace.id
+      ? `drop-${dropTarget.position}`
+      : group?.last && dropTarget?.kind === 'group' && dropTarget.id === group.entry.id && dropTarget.position === 'after'
+        ? 'drop-after'
+        : '';
+    const isMissing = Boolean(workspace.pathMissing);
+    const backend = session.backendConnections.find((profile) => profile.id === (workspace.backendConnectionId || session.activeBackendConnectionId));
+    const backendLabel = backend ? t('sidebar.backendLabel', { name: backend.name, url: backend.serverUrl }) : t('sidebar.backendRemoved');
+    const workspaceStatus = workspaceStatusMap[workspace.id];
+    const workspaceStatusLabel = workspaceStatus === 'working'
+      ? t('sidebar.statusWorking')
+      : workspaceStatus === 'issue'
+        ? t('sidebar.statusIssue')
+        : t('sidebar.statusUnread');
+    const WorkspaceGlyph = workspaceIconComponent(workspace.icon);
+    return (
+      <ChatListView.Item
+        key={workspace.id}
+        id={workspace.id}
+        className={`sidebar-item ${group ? 'is-group-child' : ''} ${isSelected ? 'is-selected' : ''} ${isMissing ? 'opacity-50 cursor-not-allowed' : ''} ${draggingKey === `workspace:${workspace.id}` ? 'is-dragging' : ''} ${dropClass}`}
+        textValue={workspaceDisplayName(workspace)}
+        {...({ title: isMissing ? t('sidebar.workspaceMissingPath') : undefined } as object)}
+        data-workspace-id={workspace.id}
+        data-workspace-drag={`workspace:${workspace.id}`}
+        data-workspace-in-group={group ? 'true' : undefined}
+        onContextMenu={(event) => openContextMenu(event, 'workspace', workspace.id)}
+      >
+        <ChatListView.ItemContent>
+          <ChatListView.Icon>
+            <span className="relative flex size-5 items-center justify-center">
+              {workspaceStatus ? (
+                <WorkspaceStatusRing kind={workspaceStatus} style={workspace.ringStyle} label={workspaceStatusLabel} />
+              ) : null}
+              <WorkspaceGlyph
+                className={`size-4 ${!workspace.iconColor && isSelected ? 'text-accent' : ''}`}
+                color={workspace.iconColor}
+              />
+            </span>
+          </ChatListView.Icon>
+          <ChatListView.Text className="flex-1">
+            <ChatListView.Title className={isSelected ? 'text-accent font-semibold' : isMissing ? 'text-muted' : ''}>
+              {workspaceDisplayName(workspace)}{pins.workspace.includes(workspace.id) ? <RiPushpin2Fill className="ml-1 inline size-3 text-muted" aria-label={t('sidebar.pinned')} /> : null}{isMissing ? <RiErrorWarningLine className="ml-1 inline size-3 text-warning" aria-label={t('sidebar.workspaceMissingPath')} /> : null}
+            </ChatListView.Title>
+            <ChatListView.Preview>{workspace.path}</ChatListView.Preview>
+          </ChatListView.Text>
+          <Tooltip delay={300}>
+            <Tooltip.Trigger
+              aria-label={backendLabel}
+              className="ml-auto flex size-6 shrink-0 items-center justify-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            >
+              <span aria-hidden="true" className="size-2.5 rounded-full ring-1 ring-foreground/10" style={{ backgroundColor: backendLabelColor(backend) }} />
+            </Tooltip.Trigger>
+            <Tooltip.Content placement="right" className="max-w-xs break-all">
+              {backendLabel}
+            </Tooltip.Content>
+          </Tooltip>
+        </ChatListView.ItemContent>
+      </ChatListView.Item>
+    );
+  };
+
+  const renderGroupItems = (entry: WorkspaceGroupEntry) => {
+    const collapsed = collapsedGroups.includes(entry.id);
+    const name = entry.name || t('sidebar.newGroupName');
+    const containsSelected = entry.workspaces.some((workspace) => workspace.id === session.activeWorkspaceId);
+    const statuses = entry.workspaces
+      .map((workspace) => workspaceStatusMap[workspace.id])
+      .filter((status): status is NonNullable<typeof status> => Boolean(status))
+      .slice(0, 3);
+    const dropClass = dropTarget?.kind === 'group' && dropTarget.id === entry.id
+      ? dropTarget.position === 'into'
+        ? 'drop-merge'
+        : dropTarget.position === 'after' && !collapsed ? '' : `drop-${dropTarget.position}`
+      : '';
+    const header = (
+      <ChatListView.Item
+        key={`group:${entry.id}`}
+        id={`group:${entry.id}`}
+        className={`sidebar-item sidebar-group-head ${draggingKey === `group:${entry.id}` ? 'is-dragging' : ''} ${dropClass}`}
+        textValue={name}
+        aria-label={collapsed ? t('sidebar.expandGroup', { name }) : t('sidebar.collapseGroup', { name })}
+        data-workspace-drag={`group:${entry.id}`}
+        onContextMenu={(event) => openContextMenu(event, 'group', entry.id)}
+      >
+        <ChatListView.ItemContent>
+          <ChatListView.Icon>
+            <span className="relative flex size-5 items-center justify-center">
+              <RiArrowDownSLine className={`sidebar-group-chevron size-4 text-muted transition-transform duration-200 ${collapsed ? '-rotate-90' : ''}`} />
+              <RiFoldersLine className={`sidebar-group-rail-glyph size-4 ${containsSelected ? 'text-accent' : 'text-muted'}`} />
+            </span>
+          </ChatListView.Icon>
+          <ChatListView.Text className="flex-1">
+            <ChatListView.Title className={`font-semibold ${collapsed && containsSelected ? 'text-accent' : ''}`}>
+              {name}<span className="ml-1 text-[11px] font-normal text-muted">{entry.workspaces.length}</span>
+            </ChatListView.Title>
+          </ChatListView.Text>
+          {collapsed && statuses.length > 0 ? (
+            <span className="ml-auto flex shrink-0 items-center gap-1 pr-2" aria-hidden="true">
+              {statuses.map((status, index) => <span key={index} className={`size-1.5 rounded-full ${STATUS_DOT_CLASS[status]}`} />)}
+            </span>
+          ) : null}
+        </ChatListView.ItemContent>
+      </ChatListView.Item>
+    );
+    if (collapsed) return [header];
+    return [header, ...entry.workspaces.map((workspace, index) => renderWorkspaceItem(workspace, { entry, last: index === entry.workspaces.length - 1 }))];
   };
 
   // Cached data renders immediately; the directory sync only blocks an
@@ -482,6 +689,10 @@ export function AppSidebar({
                   density="compact"
                   className="sidebar-chat-list"
                   onAction={(key) => {
+                    if (String(key).startsWith('group:')) {
+                      toggleGroupCollapsed(String(key).slice('group:'.length));
+                      return;
+                    }
                     const target = session.workspaces.find((item) => item.id === String(key));
                     if (target?.pathMissing) {
                       return;
@@ -489,66 +700,14 @@ export function AppSidebar({
                     session.selectWorkspace(String(key));
                   }}
                 >
-                  {displayedWorkspaces.map((workspace) => {
-                    const isSelected = workspace.id === session.activeWorkspaceId;
-                    const isMissing = Boolean(workspace.pathMissing);
-                    const backend = session.backendConnections.find((profile) => profile.id === (workspace.backendConnectionId || session.activeBackendConnectionId));
-                    const backendLabel = backend ? t('sidebar.backendLabel', { name: backend.name, url: backend.serverUrl }) : t('sidebar.backendRemoved');
-                    const workspaceStatus = workspaceStatusMap[workspace.id];
-                    const workspaceStatusLabel = workspaceStatus === 'working'
-                      ? t('sidebar.statusWorking')
-                      : workspaceStatus === 'issue'
-                        ? t('sidebar.statusIssue')
-                        : t('sidebar.statusUnread');
-                    const WorkspaceGlyph = workspaceIconComponent(workspace.icon);
-                    return (
-                      <ChatListView.Item
-                        key={workspace.id}
-                        id={workspace.id}
-                        className={`sidebar-item ${isSelected ? 'is-selected' : ''} ${isMissing ? 'opacity-50 cursor-not-allowed' : ''} ${dragIndicator?.id === workspace.id ? `drop-${dragIndicator.position}` : ''}`}
-                        textValue={workspaceDisplayName(workspace)}
-                        title={isMissing ? t('sidebar.workspaceMissingPath') : undefined}
-                        data-workspace-id={workspace.id}
-                        {...({ draggable: true, onDragStart: (event: globalThis.DragEvent) => { event.dataTransfer?.setData('text/plain', workspace.id); if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'; setDraggedWorkspaceId(workspace.id); }, onDragOver: (event: globalThis.DragEvent) => { event.preventDefault(); if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'; }, onDrop: (event: globalThis.DragEvent) => { event.preventDefault(); const sourceId = draggedWorkspaceId || event.dataTransfer?.getData('text/plain'); if (!sourceId || sourceId === workspace.id) { setDraggedWorkspaceId(null); return; } const from = orderedWorkspaces.findIndex((item) => item.id === sourceId); const to = orderedWorkspaces.findIndex((item) => item.id === workspace.id); if (from < 0 || to < 0) { setDraggedWorkspaceId(null); return; } const next = [...orderedWorkspaces]; const [moved] = next.splice(from, 1); next.splice(to, 0, moved); next.forEach((item, index) => session.updateWorkspace(item.id, { sortOrder: index })); setDraggedWorkspaceId(null); setDragIndicator(null); }, onDragEnd: () => { setDraggedWorkspaceId(null); setDragIndicator(null); } } as any)} onContextMenu={(event) => openContextMenu(event, 'workspace', workspace.id)}
-                      >
-                        <ChatListView.ItemContent>
-                          <ChatListView.Icon>
-                            <span className="relative flex size-5 items-center justify-center">
-                              {workspaceStatus ? (
-                                <WorkspaceStatusRing kind={workspaceStatus} style={workspace.ringStyle} label={workspaceStatusLabel} />
-                              ) : null}
-                              <WorkspaceGlyph
-                                className={`size-4 ${!workspace.iconColor && isSelected ? 'text-accent' : ''}`}
-                                color={workspace.iconColor}
-                              />
-                            </span>
-                          </ChatListView.Icon>
-                          <ChatListView.Text className="flex-1">
-                            <ChatListView.Title className={isSelected ? 'text-accent font-semibold' : isMissing ? 'text-muted' : ''}>
-                              {workspaceDisplayName(workspace)}{pins.workspace.includes(workspace.id) ? <RiPushpin2Fill className="ml-1 inline size-3 text-muted" aria-label={t('sidebar.pinned')} /> : null}{isMissing ? <RiErrorWarningLine className="ml-1 inline size-3 text-warning" aria-label={t('sidebar.workspaceMissingPath')} /> : null}
-                            </ChatListView.Title>
-                            <ChatListView.Preview>{workspace.path}</ChatListView.Preview>
-                          </ChatListView.Text>
-                          <Tooltip delay={300}>
-                            <Tooltip.Trigger
-                              aria-label={backendLabel}
-                              className="ml-auto flex size-6 shrink-0 items-center justify-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-accent"
-                            >
-                              <span aria-hidden="true" className="size-2.5 rounded-full ring-1 ring-foreground/10" style={{ backgroundColor: backendLabelColor(backend) }} />
-                            </Tooltip.Trigger>
-                            <Tooltip.Content placement="right" className="max-w-xs break-all">
-                              {backendLabel}
-                            </Tooltip.Content>
-                          </Tooltip>
-                        </ChatListView.ItemContent>
-                      </ChatListView.Item>
-                    );
-                  })}
+                  {displayedEntries.flatMap((entry) => (entry.kind === 'group'
+                    ? renderGroupItems(entry)
+                    : [renderWorkspaceItem(entry.workspace, null)]))}
                 </ChatListView>
 
-                {sortedWorkspaces.length > 5 && (
+                {workspaceEntries.length > 5 && (
                   <div className="sidebar-list-more flex items-center justify-between px-2 pt-1">
-                    {sortedWorkspaces.length > workspaceLimit ? (
+                    {workspaceEntries.length > workspaceLimit ? (
                       <Button
                         size="sm"
                         variant="ghost"
@@ -795,6 +954,14 @@ export function AppSidebar({
             style={{ left: Math.max(8, Math.min(contextMenu.x, window.innerWidth - 184)), top: Math.max(8, Math.min(contextMenu.y, window.innerHeight - 200)) }}
             onClick={(event) => event.stopPropagation()}
           >
+            {contextMenu.kind === 'group' ? (
+              <HeroContextMenu.Menu aria-label={t('sidebar.groupMenu')} autoFocus="first" onClose={() => setContextMenu(null)}>
+                <HeroContextMenu.Item id="rename-group" textValue={t('sidebar.renameGroup')} onAction={() => { if (contextGroup) setRenamingGroup({ id: contextGroup.id, name: contextGroup.name }); setContextMenu(null); }}><RiPencilLine className="size-4 text-muted" /><Label>{t('sidebar.renameGroup')}</Label></HeroContextMenu.Item>
+                <HeroContextMenu.Item id="toggle-group" textValue={collapsedGroups.includes(contextMenu.id) ? t('sidebar.unfoldGroup') : t('sidebar.foldGroup')} onAction={() => { toggleGroupCollapsed(contextMenu.id); setContextMenu(null); }}><RiArrowDownSLine className="size-4 text-muted" /><Label>{collapsedGroups.includes(contextMenu.id) ? t('sidebar.unfoldGroup') : t('sidebar.foldGroup')}</Label></HeroContextMenu.Item>
+                <HeroContextMenu.Separator />
+                <HeroContextMenu.Item id="ungroup" textValue={t('sidebar.ungroup')} variant="danger" onAction={() => runGroupLayout(ungroupWorkspaceGroup(workspaceEntries, contextMenu.id))}><RiFoldersLine className="size-4 text-danger" /><Label>{t('sidebar.ungroup')}</Label></HeroContextMenu.Item>
+              </HeroContextMenu.Menu>
+            ) : (
             <HeroContextMenu.Menu aria-label={contextMenu.kind === 'workspace' ? t('sidebar.workspaceMenu') : t('sidebar.conversationMenu')} autoFocus="first" onClose={() => setContextMenu(null)}>
               {contextMenu.kind === 'conversation' && !contextReadOnly ? <HeroContextMenu.Item id="fork" textValue="Fork" onAction={() => runContextAction('fork')}><RiGitBranchLine className="size-4 text-muted" /><Label>Fork</Label></HeroContextMenu.Item> : null}
               {contextReadOnly ? null : <HeroContextMenu.Item id="rename" textValue={t('sidebar.rename')} onAction={() => runContextAction('rename')}><RiPencilLine className="size-4 text-muted" /><Label>{t('sidebar.rename')}</Label></HeroContextMenu.Item>}
@@ -888,6 +1055,32 @@ export function AppSidebar({
                   </HeroContextMenu.Popover>
                 </HeroContextMenu.SubmenuTrigger>
               ) : null}
+              {contextMoveTargets.length > 0 ? (
+                <HeroContextMenu.SubmenuTrigger>
+                  <HeroContextMenu.Item id="move-to-group" textValue={t('sidebar.moveToGroup')}>
+                    <RiFolderTransferLine className="size-4 text-muted" />
+                    <Label>{t('sidebar.moveToGroup')}</Label>
+                    <HeroContextMenu.SubmenuIndicator />
+                  </HeroContextMenu.Item>
+                  <HeroContextMenu.Popover className="rounded-xl">
+                    <div className="flex w-44 flex-col gap-0.5 p-1">
+                      {contextMoveTargets.map((group) => (
+                        <Button
+                          key={group.id}
+                          size="sm"
+                          variant="ghost"
+                          className="justify-start rounded-lg"
+                          onPress={() => runGroupLayout(moveWorkspaceToGroup(workspaceEntries, contextMenu.id, group.id))}
+                        >
+                          <RiFoldersLine className="size-4 text-muted" />
+                          <span className="truncate">{group.name || t('sidebar.newGroupName')}</span>
+                        </Button>
+                      ))}
+                    </div>
+                  </HeroContextMenu.Popover>
+                </HeroContextMenu.SubmenuTrigger>
+              ) : null}
+              {contextWorkspaceGroupId ? <HeroContextMenu.Item id="remove-from-group" textValue={t('sidebar.removeFromGroup')} onAction={() => runGroupLayout(removeWorkspaceFromGroup(workspaceEntries, contextMenu.id))}><RiFolderReduceLine className="size-4 text-muted" /><Label>{t('sidebar.removeFromGroup')}</Label></HeroContextMenu.Item> : null}
               {contextMenu.kind === 'conversation' ? (
                 <HeroContextMenu.SubmenuTrigger>
                   <HeroContextMenu.Item id="label-color" textValue={t('sidebar.labelColor')}>
@@ -930,8 +1123,17 @@ export function AppSidebar({
               <HeroContextMenu.Separator />
               <HeroContextMenu.Item id="delete" textValue={t('common.delete')} variant="danger" onAction={() => runContextAction('delete')}><RiDeleteBinLine className="size-4 text-danger" /><Label>{t('common.delete')}</Label></HeroContextMenu.Item>
             </HeroContextMenu.Menu>
+            )}
           </div>
         </HeroContextMenu>
+      ) : null}
+
+      {renamingGroup ? (
+        <WorkspaceGroupRenameDialog
+          initialName={renamingGroup.name}
+          onSubmit={(name) => applyWorkspaceLayout(renameWorkspaceGroup(workspaceEntriesRef.current, renamingGroup.id, name))}
+          onClose={() => setRenamingGroup(null)}
+        />
       ) : null}
 
       <Sidebar.Footer>
