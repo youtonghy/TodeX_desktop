@@ -1523,6 +1523,21 @@ export const SOCKET_FRAME_DECODE_BUDGET_MS = 10;
  * conversation from its cursor, so memory stays bounded without losing
  * events. */
 export const MAX_PENDING_SOCKET_FRAMES = 5000;
+/** A backlog drop this soon after the previous one belongs to the same storm.
+ * Every verified reconnect resets the normal attempt counter, so without this
+ * a renderer that keeps falling behind would reconnect at the base delay
+ * forever. */
+export const SOCKET_BACKLOG_STREAK_RESET_MS = 5 * 60_000;
+
+export type SocketBacklogStreak = { count: number; lastDropAt: number };
+
+/** Records a backlog drop at `now`: consecutive drops grow the streak, one
+ * after a quiet `SOCKET_BACKLOG_STREAK_RESET_MS` starts over. The reconnect
+ * backs off by `count - 1` attempts. */
+export function nextSocketBacklogStreak(previous: SocketBacklogStreak | null, now: number): SocketBacklogStreak {
+  const continues = previous !== null && now - previous.lastDropAt < SOCKET_BACKLOG_STREAK_RESET_MS;
+  return { count: continues ? previous.count + 1 : 1, lastDropAt: now };
+}
 export const MAX_TRANSPORT_HELLO_SESSION_CURSORS = 12;
 // Keep enough local history for completed execution traces to remain
 // inspectable after a long Claude Code turn. The backend remains the source

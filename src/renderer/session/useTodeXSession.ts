@@ -126,6 +126,8 @@ import {
   SOCKET_FRAME_DECODE_BATCH_SIZE,
   SOCKET_FRAME_DECODE_BUDGET_MS,
   MAX_PENDING_SOCKET_FRAMES,
+  nextSocketBacklogStreak,
+  type SocketBacklogStreak,
   MAX_TRANSPORT_HELLO_SESSION_CURSORS,
   MAX_TIMELINE_ITEMS,
   capTimelinePerConversation,
@@ -486,6 +488,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const legacyRecoveryRef = useRef(new LegacyEventRecovery<ServerEvent>());
   const sessionCursorsRef = useRef(new Map<string, number>());
   const reconnectAttemptRef = useRef(0);
+  const socketBacklogStreakRef = useRef<SocketBacklogStreak | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const socketWatchdogFailuresRef = useRef(0);
   const manualDisconnectRef = useRef(false);
@@ -3613,6 +3616,11 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       // reconnect like any transient drop: resubscribing replays each
       // conversation from its cursor, and gaps recover over REST.
       closeSocket(false);
+      // Back off across repeated drops: markVerified zeroes the attempt
+      // counter on every successful reconnect.
+      const streak = nextSocketBacklogStreak(socketBacklogStreakRef.current, Date.now());
+      socketBacklogStreakRef.current = streak;
+      reconnectAttemptRef.current = Math.max(reconnectAttemptRef.current, streak.count - 1);
       lastFailureRetryableRef.current = true;
       setConnectionState('closed');
       setLastError(t('sess.socketBacklog'));
