@@ -14,6 +14,7 @@ import { useNoticeToast } from './components/NoticeToast';
 import { AppSidebar } from './components/AppSidebar';
 import { AppIcon } from './components/AppIcon';
 import { ChatPanel } from './screens/ChatPanel';
+import { HistoryRecoveryNotice } from './components/HistoryRecoveryNotice';
 import { Field } from './components/Field';
 import { connectionStateLabel, fetchWorkspaceDirectorySnapshot } from './session/helpers';
 import { isWorkbenchTab, panelFromRoute, type DesktopPanel, type OpenPanelOptions, type WorkbenchItem, type WorkbenchRequest, type WorkbenchTab } from './lib/panels';
@@ -280,6 +281,9 @@ export function App() {
 
   const insetChrome = window.todexDesktop.app.windowChrome === 'hidden-inset';
   const settingsOpen = panel === 'settings';
+  // The "no recovery key" notice opened settings to set one up.
+  const [historyRecoverySetup, setHistoryRecoverySetup] = useState(false);
+  useEffect(() => { if (!settingsOpen) setHistoryRecoverySetup(false); }, [settingsOpen]);
   const usageOpen = panel === 'usage';
   const quotaOpen = panel === 'quota';
   const aboutOpen = panel === 'about';
@@ -419,6 +423,15 @@ export function App() {
                 onCloseWorkbenchItem={closeWorkbenchItem}
               />
             </Suspense>
+          ) : session.historyEncryption.recoveryNoticeVisible ? (
+            <div className="flex h-full min-h-0 flex-col">
+              <HistoryRecoveryNotice
+                className="mx-5 mt-3 shrink-0"
+                onSetup={() => { setHistoryRecoverySetup(true); setPanel('settings'); }}
+                onDismiss={session.historyEncryption.dismissRecoveryNotice}
+              />
+              <div className="min-h-0 flex-1"><ChatPanel session={session} /></div>
+            </div>
           ) : <ChatPanel session={session} />}
         </AppLayout>
         )
@@ -438,7 +451,7 @@ export function App() {
                 <Modal.Heading>{t('app.settings')}</Modal.Heading>
               </Modal.Header>
               <Modal.Body className="max-h-[70vh] overflow-y-auto">
-                <Suspense fallback={panelFallback}><SettingsPanel session={session} /></Suspense>
+                <Suspense fallback={panelFallback}><SettingsPanel session={session} historyRecoverySetup={historyRecoverySetup} /></Suspense>
               </Modal.Body>
             </Modal.Dialog>
           </Modal.Container>

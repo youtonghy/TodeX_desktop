@@ -17,6 +17,8 @@ import { LOCALE_LABELS, SUPPORTED_LOCALES, getLocalePreference, isLocale, setLoc
 
 type Props = {
   session: TodeXSession;
+  /** Start setting up a history recovery key (from the global notice). */
+  historyRecoverySetup?: boolean;
 };
 
 async function decodeQrFromFile(file: File): Promise<string | null> {
@@ -34,7 +36,7 @@ async function decodeQrFromFile(file: File): Promise<string | null> {
   return result?.data ?? null;
 }
 
-export function SettingsPanel({ session }: Props) {
+export function SettingsPanel({ session, historyRecoverySetup = false }: Props) {
   const t = useT();
   const [languagePreference, setLanguagePreference] = useState<LocalePreference>(() => getLocalePreference());
   const { settings, setSettings, backendConnections, activeBackendConnectionId, setActiveBackendConnectionId, updateBackendConnection, addBackendConnection, removeBackendConnection, connectionState, connectionHealth, serverVersion, versionMismatch, connect, closeSocket } = session;
@@ -169,7 +171,7 @@ export function SettingsPanel({ session }: Props) {
             </Select>
             {activeProfile.encryptionProtocol !== 'none' ? <Field label={t('settings.encryptionKey')} value={activeProfile.encryptionPublicKey} onChange={(encryptionPublicKey) => { updateBackendConnection(activeProfile.id, { encryptionPublicKey }); setSettings((current) => ({ ...current, encryptionPublicKey })); }} /> : null}
             <DevicePairingPanel session={session} deviceName="TodeX Desktop" autoStartNonce={pairingAutoStart} />
-            <HistoryEncryptionPanel history={session.historyEncryption} />
+            <HistoryEncryptionPanel history={session.historyEncryption} autoStartRecovery={historyRecoverySetup} />
             <div className="flex gap-2"><Button onPress={() => (connected ? closeSocket(true) : connect())}>{connected ? t('settings.disconnect') : connectionState === 'error' ? t('settings.retry') : t('settings.connect')}</Button>{backendConnections.length > 1 ? <Button variant="danger-soft" onPress={() => removeBackendConnection(activeProfile.id)}>{t('settings.removeBackend')}</Button> : null}</div>
           </>
         ) : null}

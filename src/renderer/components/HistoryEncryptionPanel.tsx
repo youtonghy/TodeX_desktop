@@ -1,11 +1,16 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertDialog, Button, Checkbox, Chip, Label, ProgressBar, Spinner, TextArea, TextField, toast } from '@heroui/react';
 import { encodeQrCode } from '@todex/protocol/qrCode';
 import type { HistoryRecipient, HistoryRevokedDevice, HistoryRewrapProgress } from '@todex/protocol/historyEncryption';
 import type { HistoryEncryptionSession, RecoveryKeyDraft } from '../session/useHistoryEncryption';
 import { useT } from '../i18n';
 
-type Props = { history: HistoryEncryptionSession };
+type Props = {
+  history: HistoryEncryptionSession;
+  /** Opened from the "no recovery key" notice: scroll here and start
+   * setting one up as soon as the state allows it. */
+  autoStartRecovery?: boolean;
+};
 /** Showing a new recovery key before it is uploaded (docs/history-encryption.md §3.3). */
 type RecoveryStep = { draft: RecoveryKeyDraft } | null;
 type Confirm = { kind: 'revoke'; recipient: HistoryRecipient } | { kind: 'restore'; device: HistoryRevokedDevice } | { kind: 'resetKey' } | null;
@@ -29,7 +34,7 @@ function progressText(t: ReturnType<typeof useT>, progress: HistoryRewrapProgres
 /** History encryption for the active backend (always end-to-end): recipients,
  * recovery key, access requests from new devices, revoked devices and
  * recovery import. */
-export function HistoryEncryptionPanel({ history }: Props) {
+export function HistoryEncryptionPanel({ history, autoStartRecovery = false }: Props) {
   const t = useT();
   const { view, grantRuns } = history;
   const state = view.state;
@@ -40,6 +45,8 @@ export function HistoryEncryptionPanel({ history }: Props) {
   const [importText, setImportText] = useState('');
   const [importProgress, setImportProgress] = useState<HistoryRewrapProgress | null>(null);
   const [requestedGrant, setRequestedGrant] = useState('');
+  const sectionRef = useRef<HTMLElement>(null);
+  const autoStarted = useRef(false);
 
   // A recovery key never outlives the dialog that shows it.
   useEffect(() => () => { step?.draft.seed.fill(0); }, [step]);
@@ -48,6 +55,19 @@ export function HistoryEncryptionPanel({ history }: Props) {
   // state in case one was missed.
   const { refresh } = history;
   useEffect(() => { void refresh(); }, [refresh, view.backendId]);
+
+  // Opened from the notice: once per mount, as soon as the state shows a
+  // recovery key is missing and this device may set one.
+  const recoveryKnownMissing = view.status === 'ready' && Boolean(state) && !view.accessRevoked
+    && !state?.recipients.some((item) => item.kind === 'recovery' && !item.revokedAt);
+  const { createRecoveryDraft } = history;
+  useEffect(() => {
+    if (!autoStartRecovery || !recoveryKnownMissing || autoStarted.current) return;
+    autoStarted.current = true;
+    sectionRef.current?.scrollIntoView?.({ block: 'start' });
+    setSavedConfirmed(false);
+    setStep({ draft: createRecoveryDraft() });
+  }, [autoStartRecovery, createRecoveryDraft, recoveryKnownMissing]);
 
   const run = async (name: string, action: () => Promise<unknown>, success?: string) => {
     setBusy(name);
@@ -108,7 +128,7 @@ export function HistoryEncryptionPanel({ history }: Props) {
   };
 
   return (
-    <section aria-label={t('history.title')} className="border-separator flex flex-col gap-3 rounded-xl border p-4">
+    <section ref={sectionRef} aria-label={t('history.title')} className="border-separator flex flex-col gap-3 rounded-xl border p-4">
       <div className="flex items-start justify-between gap-3">
         <div>
           <h4 className="text-sm font-semibold">{t('history.title')}</h4>
