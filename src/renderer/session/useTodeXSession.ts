@@ -16,7 +16,7 @@ import { ConversationRecovery, isConversationRuntimeBusy, type ConversationOpenS
 import type { AgentBrowserFrame } from '@todex/protocol/agentDesktop';
 import { parseFollowUpQueue, type ConversationRuntime, type FollowUpQueueState } from '@todex/protocol/conversationRuntime';
 import { followUpQueueFrame } from '@todex/protocol/conversationCommands';
-import { conversationTranscriptMarkdown, fetchConversationTranscript, transcriptEntries } from '@todex/protocol/conversationExport';
+import { conversationTranscriptMarkdown, fetchConversationTranscriptTail, transcriptEntries } from '@todex/protocol/conversationExport';
 import { canonicalConversationEventType, type ConversationEvent } from '@todex/protocol/v2';
 import { ConversationEventBatcher } from '@todex/protocol/frameBatch';
 import { ProtocolCommands, ProtocolCommandError, type ProtocolCommand } from './protocolCommands';
@@ -7660,16 +7660,18 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   }, [appendTimeline, getConversationContext]);
 
   /** Export a conversation's user and assistant messages as Markdown, for
-   * referencing it from another conversation (`@chat:`). Replays the whole
-   * journal because the conversation may never have been opened here. */
+   * referencing it from another conversation (`@chat:`). Reads the journal
+   * from its tail — the conversation may never have been opened here — and
+   * stops once the newest messages fill `maxBytes`. */
   const exportConversationMarkdown = useCallback(async (conversationId: string, maxBytes?: number) => {
     const conversation = conversationsRef.current.find((item) => item.id === conversationId);
     if (!conversation) throw new Error(t('alert.noConversation'));
     const v2Id = conversation.v2ConversationId;
-    const entries = v2Id
-      ? await fetchConversationTranscript((id, after, limit) => decryptedHistoryReplay(id, v2ApiForConversation(id).replayEvents(id, after, limit, 'summary'), 'summary'), v2Id, conversation.workspaceId)
-      : transcriptEntries(timelineRef.current.filter((entry) => entry.conversationId === conversationId));
-    return conversationTranscriptMarkdown(entries, { title: conversation.title, maxBytes });
+    const transcript = v2Id
+      ? await fetchConversationTranscriptTail((id, before, limit) => decryptedHistoryReplay(id, v2ApiForConversation(id).replayEventsBefore(id, before, limit, 'summary'), 'summary'),
+        v2Id, conversation.workspaceId, { title: conversation.title, maxBytes })
+      : { entries: transcriptEntries(timelineRef.current.filter((entry) => entry.conversationId === conversationId)), olderUnread: false };
+    return conversationTranscriptMarkdown(transcript.entries, { title: conversation.title, maxBytes, olderUnread: transcript.olderUnread });
   }, [decryptedHistoryReplay, v2ApiForConversation]);
 
   const sendSlashCommand = useCallback(
