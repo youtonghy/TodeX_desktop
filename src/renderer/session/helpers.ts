@@ -66,6 +66,7 @@ import {
 } from '@todex/protocol/todex';
 import { deviceIdentityFromSecret, type DeviceIdentity } from '@todex/protocol/deviceAuth';
 import {
+  BackendUpgradeRequiredError,
   EncryptionRequiredError,
   InvalidPinnedKeyError,
   TransportPolicyError,
@@ -1982,9 +1983,10 @@ export type TransportFailure = { message: string; retryable: boolean; code: Conn
 /**
  * Localized message, retry policy and health code for a transport v2
  * failure, or null when `error` is not one. Pairing problems (no key for a
- * remote host, a changed or invalid key, an outdated backend) stop the
- * automatic reconnect; crypto failures (`4400`, `TRANSPORT_CRYPTO_FAILED`)
- * and an unreachable policy check keep retrying.
+ * remote host, a changed or invalid key) and an outdated backend (no
+ * transport v2 or no sealed REST revision 2) stop the automatic reconnect;
+ * crypto failures (`4400`, `TRANSPORT_CRYPTO_FAILED`) and an unreachable
+ * policy check keep retrying.
  */
 export function describeTransportFailure(error: unknown): TransportFailure | null {
   if (error instanceof EncryptionRequiredError) {
@@ -1999,6 +2001,9 @@ export function describeTransportFailure(error: unknown): TransportFailure | nul
       retryable: false,
       code: 'encryption_required',
     };
+  }
+  if (error instanceof BackendUpgradeRequiredError) {
+    return { message: t('transport.backendUpgradeRequired'), retryable: false, code: 'protocol_mismatch' };
   }
   if (error instanceof TransportPolicyError) {
     switch (error.reason) {

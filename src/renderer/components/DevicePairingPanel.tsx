@@ -1,6 +1,12 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Button, Chip, Spinner } from '@heroui/react';
-import { beginDevicePairing, type DevicePairingRequest } from '../session/devicePairing';
+import {
+  DevicePairingRetryableError,
+  PAIRING_POLL_INTERVAL_MS,
+  beginDevicePairing,
+  nextPairingPollDelayMs,
+  type DevicePairingRequest,
+} from '../session/devicePairing';
 import { deviceIdentityFromSecret, generateDeviceIdentity } from '@todex/protocol/deviceAuth';
 import { transportFingerprint } from '@todex/protocol/secureChannel';
 import { normalizeServerUrl, type BackendConnectionProfile } from '@todex/protocol/todex';
@@ -130,6 +136,10 @@ export function DevicePairingPanel({ session, deviceName, autoStartNonce = 0 }: 
         if (isCurrent(attempt)) setRemaining(Math.max(0, Math.ceil((request.expiresAt - Date.now()) / 1000)));
       }, 1000);
       attempt.expiryTimer = setTimeout(expire, request.expiresAt - Date.now());
+      // Transient failures (429, 5xx, network) back off and keep polling
+      // until the request expires; anything else ends the attempt.
+      let pollDelay = PAIRING_POLL_INTERVAL_MS;
+      const schedulePoll = () => { attempt.pollTimer = setTimeout(() => { void poll(); }, pollDelay); };
       const poll = async () => {
         if (!isCurrent(attempt)) return;
         try {
@@ -138,7 +148,8 @@ export function DevicePairingPanel({ session, deviceName, autoStartNonce = 0 }: 
           if (request.expiresAt <= Date.now()) { expire(); return; }
           if (result.status === 'pending') {
             // Schedule only after the previous request settles; never overlap polls.
-            attempt.pollTimer = setTimeout(() => { void poll(); }, 2000);
+            pollDelay = PAIRING_POLL_INTERVAL_MS;
+            schedulePoll();
             return;
           }
           if (result.status === 'approved') {
@@ -162,12 +173,17 @@ export function DevicePairingPanel({ session, deviceName, autoStartNonce = 0 }: 
           setPhase(result.status);
         } catch (cause) {
           if (!isCurrent(attempt)) return;
+          if (cause instanceof DevicePairingRetryableError && request.expiresAt > Date.now()) {
+            pollDelay = nextPairingPollDelayMs(pollDelay, cause);
+            schedulePoll();
+            return;
+          }
           dispose(attempt, true);
           setError(cause instanceof Error ? cause.message : t('pair.verifyFailed'));
           setPhase('error');
         }
       };
-      attempt.pollTimer = setTimeout(() => { void poll(); }, 2000);
+      schedulePoll();
     } catch (cause) {
       if (!isCurrent(attempt)) return;
       dispose(attempt, true);

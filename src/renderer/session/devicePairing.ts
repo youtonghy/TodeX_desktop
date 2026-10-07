@@ -1,4 +1,3 @@
-/* eslint-disable no-control-regex -- display-name sanitizer intentionally matches control/format chars */
 import { xchacha20poly1305 } from '@noble/ciphers/chacha.js';
 import { x25519 } from '@noble/curves/ed25519.js';
 import { buildHttpUrl } from '@todex/protocol/todex';
@@ -8,6 +7,7 @@ import {
   DevicePairingTransportError,
   deriveDevicePairingV3Material,
   devicePairingV3Commitment,
+  normalizeDevicePairingName,
   parseDevicePairingTransport,
   transportFingerprint,
   verifyDevicePairingCredential,
@@ -32,6 +32,34 @@ export type DevicePairingRequest = {
 
 const MAX_RESPONSE_BYTES = 16_384;
 const REQUEST_TIMEOUT_MS = 10_000;
+/** Normal poll interval while a request waits for approval. */
+export const PAIRING_POLL_INTERVAL_MS = 2000;
+/** Longest wait between polls after transient failures. */
+export const PAIRING_POLL_MAX_BACKOFF_MS = 5000;
+
+/**
+ * A pairing call that failed transiently (`429`, `5xx`, network error or
+ * timeout). Polling backs off and continues until the request expires; it
+ * ends only on `404`, `401`/`403`, a rejected or expired request, or when the
+ * user cancels.
+ */
+export class DevicePairingRetryableError extends Error {
+  constructor(message: string, readonly retryAfterMs?: number) {
+    super(message);
+    this.name = 'DevicePairingRetryableError';
+  }
+}
+
+/** Next poll delay after a transient failure: doubled, at least `Retry-After`, at most 5 s. */
+export function nextPairingPollDelayMs(previousMs: number, error: DevicePairingRetryableError): number {
+  return Math.min(Math.max(previousMs * 2, error.retryAfterMs ?? 0), PAIRING_POLL_MAX_BACKOFF_MS);
+}
+
+function retryAfterMs(value: string | null): number | undefined {
+  const trimmed = (value ?? '').trim();
+  return /^\d{1,6}$/.test(trimmed) ? Number(trimmed) * 1000 : undefined;
+}
+
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const DEVICE_ID_PATTERN = /^dev_[A-Za-z0-9_-]{16}$/;
 
@@ -85,20 +113,32 @@ async function post(serverUrl: string, action: string, body: unknown, signal?: A
   signal?.addEventListener('abort', abort, { once: true });
   if (signal?.aborted) controller.abort();
   const timeout = setTimeout(abort, REQUEST_TIMEOUT_MS);
+  // A failed connection or body read is transient; the caller's abort is not.
+  const networkFailure = (error: unknown): unknown => (signal?.aborted || controller.signal.aborted
+    ? error
+    : new DevicePairingRetryableError(t('pair.errNetwork')));
   try {
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-      credentials: 'omit',
-      cache: 'no-store',
-      redirect: 'error',
-    });
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+        credentials: 'omit',
+        cache: 'no-store',
+        redirect: 'error',
+      });
+    } catch (error) {
+      throw networkFailure(error);
+    }
     if (!response.ok) {
       if (response.status === 404) throw new Error(t('pair.errUnsupported'));
-      if (response.status === 429) throw new Error(t('pair.errTooMany'));
+      if (response.status === 429) {
+        throw new DevicePairingRetryableError(t('pair.errTooMany'), retryAfterMs(response.headers.get('Retry-After')));
+      }
       if (response.status === 401 || response.status === 403) throw new Error(t('pair.errRejectedRequest'));
+      if (response.status >= 500) throw new DevicePairingRetryableError(t('pair.errHttp', { status: response.status }));
       throw new Error(t('pair.errHttp', { status: response.status }));
     }
     const reader = response.body?.getReader();
@@ -107,7 +147,13 @@ async function post(serverUrl: string, action: string, body: unknown, signal?: A
     let size = 0;
     try {
       while (true) {
-        const { done, value } = await reader.read();
+        let next: ReadableStreamReadResult<Uint8Array>;
+        try {
+          next = await reader.read();
+        } catch (error) {
+          throw networkFailure(error);
+        }
+        const { done, value } = next;
         if (done) break;
         size += value.length;
         if (size > MAX_RESPONSE_BYTES) {
@@ -129,7 +175,7 @@ async function post(serverUrl: string, action: string, body: unknown, signal?: A
       throw new Error(t('pair.errInvalidResponse'));
     }
   } catch (error) {
-    if (controller.signal.aborted && !signal?.aborted) throw new Error(t('pair.errTimeout'));
+    if (controller.signal.aborted && !signal?.aborted) throw new DevicePairingRetryableError(t('pair.errTimeout'));
     throw error;
   } finally {
     clearTimeout(timeout);
@@ -141,8 +187,11 @@ async function post(serverUrl: string, action: string, body: unknown, signal?: A
  * to the ephemeral key and nonce, the server answers with its per-request
  * key and its transport key, and only then `reveal` discloses them, so a man
  * in the middle cannot grind its own key against the short code. The
- * transcript binds the transport protocol and key, so the code the user
- * compares also authenticates the key that gets pinned. The device key is
+ * transcript binds the transport protocol and key and the device name, so the
+ * code the user compares also authenticates the key that gets pinned and the
+ * name the backend shows. `deviceName` is normalized first
+ * (`normalizeDevicePairingName`, `'TodeX'` when nothing is left) and sent
+ * exactly as bound. The device key is
  * enrolled on approval; approval returns the matching `deviceId` and the
  * verified pin (`verifyDevicePairingCredential`), which the caller writes in
  * one profile update with `transportVerified = true`. */
@@ -156,12 +205,14 @@ export async function beginDevicePairing(serverUrl: string, deviceName: string, 
     material?.cancelProof.fill(0);
   };
   const devicePublicKey = decodeBase64Url(device.publicKey);
+  const boundName = normalizeDevicePairingName(deviceName, 'TodeX');
   try {
     const response = await post(serverUrl, 'create', {
       transportBinding: 1,
+      deviceNameBinding: 1,
       clientCommitment: encode(devicePairingV3Commitment(keys.publicKey, clientNonce)),
       devicePublicKey: device.publicKey,
-      deviceName: Array.from(deviceName.replace(/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g, '').trim()).slice(0, 80).join('') || 'TodeX',
+      deviceName: boundName,
     }, signal);
     const { requestId, expiresAt } = response;
     if (typeof requestId !== 'string' || !uuidPattern.test(requestId)
@@ -179,6 +230,7 @@ export async function beginDevicePairing(serverUrl: string, deviceName: string, 
         clientNonce,
         transportProtocol: transport.protocol,
         transportPublicKey: transport.publicKeyRaw,
+        deviceName: boundName,
       });
     } catch {
       throw new Error(t('pair.errInvalidResponse'));
