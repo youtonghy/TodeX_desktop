@@ -9,6 +9,19 @@ import { backendApi } from '../session/helpers';
 /** A frame decoded into a bitmap, or the latest screenshot as a data URL. */
 type Still = { shotId: string; dataUrl: string };
 
+type Base64Decoding = { fromBase64?: (this: Uint8ArrayConstructor, value: string) => Uint8Array<ArrayBuffer> };
+
+/** Frame bytes from base64: the native decoder where the runtime has one,
+ * otherwise atob into a preallocated buffer. */
+function decodeFrameBytes(data: string): Uint8Array<ArrayBuffer> {
+  const fromBase64 = (Uint8Array as Uint8ArrayConstructor & Base64Decoding).fromBase64;
+  if (typeof fromBase64 === 'function') return fromBase64.call(Uint8Array, data);
+  const binary = atob(data);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);
+  return bytes;
+}
+
 /**
  * The agent's browser tab for one conversation, live: it runs on the
  * backend's computer and streams here over the session socket while this
@@ -31,9 +44,18 @@ export function AgentBrowserLiveView({ session, conversationId, isActive }: {
     [session.settings.deviceSecret, session.settings.encryptionProtocol, session.settings.encryptionPublicKey, session.settings.serverUrl],
   );
   const state = session.conversationRuntimeById[conversationId]?.desktopBrowser;
-  const latest = state?.actions.at(-1);
-  const page = state ? [...state.actions].reverse().find(action => action.ok && (action.url || action.title)) : undefined;
-  const latestShotId = state ? [...state.actions].reverse().find(action => action.shotId)?.shotId : undefined;
+  // One backward pass per actions change, not three array copies per render.
+  const { latest, page, latestShotId } = useMemo(() => {
+    const actions = state?.actions ?? [];
+    let pageAction: (typeof actions)[number] | undefined;
+    let shotId: string | undefined;
+    for (let index = actions.length - 1; index >= 0 && (!pageAction || !shotId); index--) {
+      const action = actions[index];
+      if (!pageAction && action.ok && (action.url || action.title)) pageAction = action;
+      if (!shotId && action.shotId) shotId = action.shotId;
+    }
+    return { latest: actions.at(-1), page: pageAction, latestShotId: shotId };
+  }, [state?.actions]);
   const { watchAgentBrowser } = session;
 
   useEffect(() => {
@@ -59,12 +81,14 @@ export function AgentBrowserLiveView({ session, conversationId, isActive }: {
       }
       decoding = true;
       try {
-        const bytes = Uint8Array.from(atob(frame.data), char => char.charCodeAt(0));
+        const bytes = decodeFrameBytes(frame.data);
         const bitmap = await createImageBitmap(new Blob([bytes], { type: frame.mimeType }));
         const canvas = canvasRef.current;
         if (alive && canvas) {
-          canvas.width = bitmap.width;
-          canvas.height = bitmap.height;
+          // Assigning a size reallocates and clears the canvas, even when it
+          // is unchanged; frames of a steady viewport only draw.
+          if (canvas.width !== bitmap.width) canvas.width = bitmap.width;
+          if (canvas.height !== bitmap.height) canvas.height = bitmap.height;
           canvas.getContext('2d')?.drawImage(bitmap, 0, 0);
           setLive(true);
           setClosed(false);
