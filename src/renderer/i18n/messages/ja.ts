@@ -903,6 +903,15 @@ export const ja: Messages = {
   'kanban.draftTask': 'タスク：{title}',
   'kanban.draftDesc': '説明：{description}',
   'kanban.draftDue': '期限：{dueDate}',
+  'kanban.workspace': 'ワークスペース',
+  'kanban.descLabel': '説明',
+  'kanban.attachSection': '関連する会話',
+  'kanban.openConversation': '会話を開く',
+  'kanban.clearStale': '無効な関連付けを削除',
+  'kanban.groupPlain': 'その他の会話',
+  'kanban.reorderTask': 'ドラッグでタスクを並べ替え',
+  'kanban.noTasksYet': 'タスクはまだありません',
+  'kanban.noTasksHint': 'タスクを作成してワークスペースを選ぶと始められます。',
 
   // cap
   'cap.title': 'Skills と MCPs',

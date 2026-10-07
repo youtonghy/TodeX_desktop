@@ -903,6 +903,15 @@ export const zhCN = {
   'kanban.draftTask': '任务：{title}',
   'kanban.draftDesc': '描述：{description}',
   'kanban.draftDue': '截止日期：{dueDate}',
+  'kanban.workspace': '工作区',
+  'kanban.descLabel': '描述',
+  'kanban.attachSection': '关联对话',
+  'kanban.openConversation': '打开对话',
+  'kanban.clearStale': '清除失效关联',
+  'kanban.groupPlain': '其他对话',
+  'kanban.reorderTask': '拖拽调整任务顺序',
+  'kanban.noTasksYet': '还没有任务',
+  'kanban.noTasksHint': '点击新建任务，选择工作区后即可创建。',
 
   // cap
   'cap.title': 'Skills 和 MCPs',

@@ -903,6 +903,15 @@ export const en: Messages = {
   'kanban.draftTask': 'Task: {title}',
   'kanban.draftDesc': 'Description: {description}',
   'kanban.draftDue': 'Due date: {dueDate}',
+  'kanban.workspace': 'Workspace',
+  'kanban.descLabel': 'Description',
+  'kanban.attachSection': 'Linked conversations',
+  'kanban.openConversation': 'Open conversation',
+  'kanban.clearStale': 'Remove stale links',
+  'kanban.groupPlain': 'Other conversations',
+  'kanban.reorderTask': 'Drag to reorder task',
+  'kanban.noTasksYet': 'No tasks yet',
+  'kanban.noTasksHint': 'Create a task and pick a workspace to get started.',
 
   // cap
   'cap.title': 'Skills and MCPs',

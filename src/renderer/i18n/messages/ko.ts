@@ -903,6 +903,15 @@ export const ko: Messages = {
   'kanban.draftTask': '작업: {title}',
   'kanban.draftDesc': '설명: {description}',
   'kanban.draftDue': '마감일: {dueDate}',
+  'kanban.workspace': '워크스페이스',
+  'kanban.descLabel': '설명',
+  'kanban.attachSection': '연결된 대화',
+  'kanban.openConversation': '대화 열기',
+  'kanban.clearStale': '끊어진 연결 제거',
+  'kanban.groupPlain': '기타 대화',
+  'kanban.reorderTask': '드래그하여 작업 순서 변경',
+  'kanban.noTasksYet': '아직 작업이 없습니다',
+  'kanban.noTasksHint': '새 작업을 만들고 워크스페이스를 선택하세요.',
 
   // cap
   'cap.title': 'Skills 및 MCPs',

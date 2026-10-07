@@ -210,6 +210,12 @@ export function addKanbanTask(
     ? details.dueDate
     : undefined;
   const now = Date.now();
+  // Append after manually ordered siblings; untouched groups stay unordered so
+  // they keep their createdAt order.
+  const groupOrders = tasks
+    .filter((item) => item.workspaceId === workspaceId && item.status === 'planned' && !item.deletedAt)
+    .map((item) => item.sortOrder)
+    .filter((order): order is number => order !== undefined);
   const task: KanbanTask = {
     id: `task-${now.toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
     workspaceId,
@@ -218,6 +224,7 @@ export function addKanbanTask(
     description,
     dueDate,
     status: 'planned',
+    ...(groupOrders.length ? { sortOrder: Math.max(...groupOrders) + 1 } : {}),
     createdAt: now,
     updatedAt: now,
   };
@@ -235,21 +242,109 @@ export function renameKanbanTask(id: string, title: string): void {
 
 export function setKanbanTaskStatus(id: string, status: KanbanTaskStatus): void {
   if (!kanbanTaskStatuses.includes(status)) return;
-  commit(tasks.map((task) => (
-    task.id === id && !task.deletedAt && task.status !== status ? { ...task, status, updatedAt: Date.now() } : task
-  )));
+  const task = tasks.find((item) => item.id === id && !item.deletedAt);
+  if (!task || task.status === status) return;
+  // A status change appends the task at the end of the target group.
+  moveKanbanTasks([id], { workspaceId: task.workspaceId, status, index: Number.MAX_SAFE_INTEGER });
 }
 
-export function attachKanbanTask(id: string, conversationId?: string): void {
+/** Attached conversation ids; tolerates the legacy single `conversationId`. */
+export function kanbanTaskConversationIds(task: KanbanTask): string[] {
+  return task.conversationIds ?? (task.conversationId ? [task.conversationId] : []);
+}
+
+function withConversations(task: KanbanTask, conversationIds: string[]): KanbanTask {
+  const next: KanbanTask = { ...task, updatedAt: Date.now() };
+  if (conversationIds.length) {
+    next.conversationIds = conversationIds;
+    // Mirror the first id for older clients that only read `conversationId`.
+    next.conversationId = conversationIds[0];
+  } else {
+    delete next.conversationIds;
+    delete next.conversationId;
+  }
+  return next;
+}
+
+export function attachKanbanTask(id: string, conversationId: string): void {
+  if (!conversationId) return;
   commit(tasks.map((task) => {
-    if (task.id !== id || task.deletedAt || task.conversationId === conversationId) return task;
-    if (!conversationId) {
-      const next: KanbanTask = { ...task, updatedAt: Date.now() };
-      delete next.conversationId;
-      return next;
-    }
-    return { ...task, conversationId, updatedAt: Date.now() };
+    if (task.id !== id || task.deletedAt) return task;
+    const ids = kanbanTaskConversationIds(task);
+    return ids.includes(conversationId) ? task : withConversations(task, [...ids, conversationId]);
   }));
+}
+
+export function detachKanbanTask(id: string, conversationId: string): void {
+  commit(tasks.map((task) => {
+    if (task.id !== id || task.deletedAt) return task;
+    const ids = kanbanTaskConversationIds(task);
+    return ids.includes(conversationId)
+      ? withConversations(task, ids.filter((item) => item !== conversationId))
+      : task;
+  }));
+}
+
+export function setKanbanTaskConversations(id: string, conversationIds: string[]): void {
+  const unique = [...new Set(conversationIds.filter(Boolean))];
+  commit(tasks.map((task) => {
+    if (task.id !== id || task.deletedAt) return task;
+    const current = kanbanTaskConversationIds(task);
+    if (current.length === unique.length && current.every((item, index) => item === unique[index])) return task;
+    return withConversations(task, unique);
+  }));
+}
+
+function compareKanbanTasks(a: KanbanTask, b: KanbanTask): number {
+  return (a.sortOrder ?? Number.MAX_SAFE_INTEGER) - (b.sortOrder ?? Number.MAX_SAFE_INTEGER)
+    || a.createdAt - b.createdAt
+    || a.id.localeCompare(b.id);
+}
+
+function orderedGroup(workspaceId: string, status: KanbanTaskStatus, excludeIds?: Set<string>): KanbanTask[] {
+  return tasks
+    .filter((task) => task.workspaceId === workspaceId && task.status === status && !task.deletedAt && !excludeIds?.has(task.id))
+    .sort(compareKanbanTasks);
+}
+
+/** Moves tasks into the target workspace status group at `index`, compacting
+ * sortOrder for every touched group so the manual order survives sync. */
+export function moveKanbanTasks(
+  ids: string[],
+  target: { workspaceId: string; status: KanbanTaskStatus; index: number },
+): void {
+  const movingIds = new Set(ids);
+  const moving = ids
+    .map((id) => tasks.find((task) => task.id === id && !task.deletedAt))
+    .filter((task): task is KanbanTask => Boolean(task));
+  if (!moving.length || !target.workspaceId || !kanbanTaskStatuses.includes(target.status)) return;
+  const now = Date.now();
+  const moved = moving.map((task) => ({ ...task, workspaceId: target.workspaceId, status: target.status, updatedAt: now }));
+
+  const patches = new Map<string, KanbanTask>();
+  const groups = new Map<string, KanbanTask[]>();
+  const groupKey = (workspaceId: string, status: KanbanTaskStatus) => `${workspaceId}\n${status}`;
+  const group = (workspaceId: string, status: KanbanTaskStatus) => {
+    const key = groupKey(workspaceId, status);
+    let items = groups.get(key);
+    if (!items) {
+      items = orderedGroup(workspaceId, status, movingIds);
+      groups.set(key, items);
+    }
+    return items;
+  };
+
+  const targetKey = groupKey(target.workspaceId, target.status);
+  for (const task of moving) {
+    const key = groupKey(task.workspaceId, task.status);
+    if (key !== targetKey) group(task.workspaceId, task.status);
+  }
+  const targetItems = group(target.workspaceId, target.status);
+  targetItems.splice(Math.max(0, Math.min(target.index, targetItems.length)), 0, ...moved);
+  for (const items of groups.values()) {
+    items.forEach((task, index) => patches.set(task.id, { ...task, sortOrder: index }));
+  }
+  commit(tasks.map((task) => patches.get(task.id) ?? task));
 }
 
 export function removeKanbanTask(id: string): void {
@@ -269,7 +364,7 @@ export function kanbanTasksForWorkspace(
     .filter((task) => connectionId === undefined
       || !task.backendConnectionId
       || task.backendConnectionId === connectionId)
-    .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
+    .sort(compareKanbanTasks);
 }
 
 export function isKanbanTaskOverdue(task: KanbanTask, now = new Date()): boolean {
