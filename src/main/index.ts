@@ -158,6 +158,20 @@ async function requireSecureStorage(): Promise<void> {
   }
 }
 
+/** `secureStore:*` calls per key, in order: encryption is asynchronous, so a
+ * delete issued after a set must not finish first and be overwritten. */
+const secureStoreQueues = new Map<string, Promise<unknown>>();
+
+function enqueueSecureStore<T>(key: string, task: () => Promise<T>): Promise<T> {
+  const run = (secureStoreQueues.get(key) ?? Promise.resolve()).then(task);
+  const tail = run.catch(() => undefined);
+  secureStoreQueues.set(key, tail);
+  void tail.then(() => {
+    if (secureStoreQueues.get(key) === tail) secureStoreQueues.delete(key);
+  });
+  return run;
+}
+
 function storePath(): string {
   return join(app.getPath('userData'), 'todex-desktop-store.json');
 }
@@ -613,24 +627,36 @@ app.whenReady().then(() => {
 
   // Secrets (history device keys) are sealed by the OS keychain and kept in the
   // store as base64 under a `secure:` prefix; the plaintext never touches disk.
-  handleIpc('secureStore:get', async (_event, key: string) => {
-    const sealed = readStore()[secureStoreKey(key)];
-    if (typeof sealed !== 'string') return null;
-    await requireSecureStorage();
-    const { result } = await safeStorage.decryptStringAsync(Buffer.from(sealed, 'base64'));
-    return result;
+  handleIpc('secureStore:get', (_event, key: string) => {
+    const storeKey = secureStoreKey(key);
+    // Queued behind pending writes so a read sees the latest set.
+    return enqueueSecureStore(storeKey, async () => {
+      const sealed = readStore()[storeKey];
+      if (typeof sealed !== 'string') return null;
+      await requireSecureStorage();
+      const { result } = await safeStorage.decryptStringAsync(Buffer.from(sealed, 'base64'));
+      return result;
+    });
   });
 
-  handleIpc('secureStore:set', async (_event, key: string, value: string | null) => {
-    const next = readStore();
-    if (value === null || value === undefined) {
-      delete next[secureStoreKey(key)];
-    } else {
-      if (typeof value !== 'string') throw new Error('secureStore values must be strings');
-      await requireSecureStorage();
-      next[secureStoreKey(key)] = (await safeStorage.encryptStringAsync(value)).toString('base64');
+  handleIpc('secureStore:set', (_event, key: string, value: string | null) => {
+    const storeKey = secureStoreKey(key);
+    if (value !== null && value !== undefined && typeof value !== 'string') {
+      throw new Error('secureStore values must be strings');
     }
-    writeStore(next);
+    return enqueueSecureStore(storeKey, async () => {
+      if (value === null || value === undefined) {
+        const next = readStore();
+        delete next[storeKey];
+        writeStore(next);
+        return;
+      }
+      await requireSecureStorage();
+      const sealed = (await safeStorage.encryptStringAsync(value)).toString('base64');
+      const next = readStore();
+      next[storeKey] = sealed;
+      writeStore(next);
+    });
   });
 
   handleIpc('dialog:openDirectory', async () => {
