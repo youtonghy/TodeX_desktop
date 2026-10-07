@@ -3779,7 +3779,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
 
   const refreshServerVersion = useCallback(async () => {
     try {
-      const response = await fetch(buildHttpUrl(settings.serverUrl, '/v2/version'));
+      // Signed so the daemon also returns its data and workspace paths.
+      const response = await fetch(buildHttpUrl(settings.serverUrl, '/v2/version'), {
+        headers: authHeaders(settings, 'GET', '/v2/version'),
+      });
       if (!response.ok) {
         throw new Error(`version endpoint returned ${response.status}`);
       }
@@ -3789,7 +3792,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       setServerVersion(null);
       setLastError(error instanceof Error ? error.message : 'failed to fetch /v2/version');
     }
-  }, [settings.serverUrl]);
+  }, [settings]);
 
   const checkConnectionHealth = useCallback(async () => {
     if (transportFailureRef.current) return;
