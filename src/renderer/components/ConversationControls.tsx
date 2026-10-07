@@ -4,7 +4,7 @@ import { ChatAttachment, ChatAttachmentGroup } from '@heroui-pro/react';
 import { useNoticeToast } from './NoticeToast';
 import { WorkspaceFilePreview, type PreviewFile } from './WorkspaceFilePreview';
 import type { ConversationRuntime } from '@todex/protocol/conversationRuntime';
-import { attachmentPrompt, type ComposerAttachmentDraft, type QueuedChatSubmission } from '../session/helpers';
+import { attachmentPrompt, formatResetInstant, type ComposerAttachmentDraft, type QueuedChatSubmission } from '../session/helpers';
 import { useT } from '../i18n';
 
 type Props = {
@@ -34,12 +34,6 @@ type Props = {
 type AttachmentPreview = { name: string; order: number; path?: string; file: PreviewFile };
 
 const BACKEND_PAUSE_REASONS = ['turn_failed', 'turn_cancelled', 'turn_interrupted', 'start_failed', 'daemon_restarted', 'rate_limited'] as const;
-
-function formatResetInstant(until: number): string {
-  return new Intl.DateTimeFormat(undefined, {
-    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
-  }).format(new Date(until));
-}
 
 function previewFile(attachment: ComposerAttachmentDraft): PreviewFile {
   return {

@@ -1,4 +1,4 @@
-import { RiPushpin2Fill, RiAddLine, RiPencilLine, RiEdit2Line, RiErrorWarningLine, RiFolder3Line, RiGitBranchLine, RiDeleteBinLine, RiArrowDownSLine, RiBarChartBoxLine, RiInformationLine, RiKanbanView2, RiPaletteLine, RiPriceTag3Line, RiPuzzle2Line, RiSettings3Line, RiTerminalBoxLine, RiTerminalLine, RiUserSettingsLine, RiVipCrownLine } from '@remixicon/react';
+import { RiPushpin2Fill, RiAddLine, RiPencilLine, RiEdit2Line, RiErrorWarningLine, RiFolder3Line, RiGitBranchLine, RiDeleteBinLine, RiArrowDownSLine, RiBarChartBoxLine, RiInformationLine, RiKanbanView2, RiPaletteLine, RiPriceTag3Line, RiPuzzle2Line, RiSettings3Line, RiTerminalBoxLine, RiTerminalLine, RiTimeLine, RiUserSettingsLine, RiVipCrownLine } from '@remixicon/react';
 import { Badge, Button, Chip, ColorSwatchPicker, Dropdown, Label, Tooltip } from '@heroui/react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { DragEvent, FocusEvent, MouseEvent } from 'react';
@@ -12,7 +12,7 @@ import { ProviderIcon } from './ProviderIcon';
 import { AppIcon } from './AppIcon';
 import { WORKSPACE_ICON_CHOICES, WORKSPACE_RING_STYLES, WorkspaceStatusRing, ringStyleKey, workspaceIconComponent } from './WorkspaceIcon';
 import type { TodeXSession } from '../session/useTodeXSession';
-import { conversationDisplayTitle, getConversationStatus, isConversationHighlighted, workspaceDisplayName } from '../session/helpers';
+import { conversationDisplayTitle, formatResetInstant, getConversationStatus, isConversationHighlighted, workspaceDisplayName } from '../session/helpers';
 import { ShortcutHint } from '../lib/shortcuts';
 import { t, useT } from '../i18n';
 
@@ -689,6 +689,15 @@ export function AppSidebar({
                     const isSelected = conversation.id === session.activeConversationId;
                     const status = getConversationStatus(session, conversation, timelineInfoMap[conversation.id]?.latestEntry, timelineInfoMap[conversation.id]?.latestIncomingAt);
                     const taskMeta = conversationTaskMetaMap[conversation.id];
+                    // Queued sends waiting out a provider rate limit get a
+                    // clock badge: local waits come from the draft queue, and a
+                    // daemon-paused follow-up queue reports its own resumeAt.
+                    const localWait = (session.queuedChatDrafts[conversation.id]?.length ?? 0) > 0
+                      ? session.rateLimitedUntilByConversation[conversation.id]?.until : undefined;
+                    const followUps = session.conversationRuntimeById[conversation.id]?.followUps;
+                    const backendWait = followUps?.paused && followUps.pauseReason === 'rate_limited' && followUps.items.length > 0
+                      ? Date.parse(followUps.resumeAt) : NaN;
+                    const resetAt = [localWait, backendWait].filter((value): value is number => typeof value === 'number' && Number.isFinite(value) && value > Date.now()).sort((a, b) => a - b)[0];
                     const tasksDone = Boolean(taskMeta && taskMeta.pending === 0);
                     return (
                       <ChatListView.Item
@@ -715,6 +724,19 @@ export function AppSidebar({
                             <ChatListView.Preview>{conversation.preview || t('sidebar.noMessages')}</ChatListView.Preview>
                           </ChatListView.Text>
                           <ChatListView.Meta>
+                            {resetAt ? (
+                              <Tooltip delay={300}>
+                                <Tooltip.Trigger
+                                  aria-label={t('controls.waitingReset', { time: formatResetInstant(resetAt) })}
+                                  className="mr-1 inline-flex align-middle"
+                                >
+                                  <RiTimeLine className="size-3.5 text-warning" aria-hidden="true" />
+                                </Tooltip.Trigger>
+                                <Tooltip.Content placement="top" className="max-w-xs">
+                                  {t('controls.waitingReset', { time: formatResetInstant(resetAt) })}
+                                </Tooltip.Content>
+                              </Tooltip>
+                            ) : null}
                             {conversation.labelColor ? (
                               <span
                                 aria-label={t('sidebar.labelColor')}

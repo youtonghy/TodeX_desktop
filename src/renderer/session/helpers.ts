@@ -682,6 +682,12 @@ export function attachmentId(): string {
   return createRequestId('att');
 }
 
+export function formatResetInstant(until: number): string {
+  return new Intl.DateTimeFormat(undefined, {
+    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+  }).format(new Date(until));
+}
+
 export function formatBytes(bytes: number | null | undefined): string {
   if (!bytes || bytes <= 0) {
     return 'unknown';
