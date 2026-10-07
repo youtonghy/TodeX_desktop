@@ -33,7 +33,16 @@ const PROTOCOL_VERSION = 'v2';
 const DESKTOP_APP_ORIGIN = 'todex-desktop://app';
 /** Web permissions the renderer uses: completion notifications and the
  * clipboard (copy buttons, pasting a pairing payload). */
-const RENDERER_PERMISSIONS = new Set(['notifications', 'clipboard-read', 'clipboard-sanitized-write']);
+const RENDERER_PERMISSIONS = new Set([
+  'notifications',
+  'clipboard-read',
+  'clipboard-sanitized-write',
+  // Local Network Access: the renderer talks to user-configured backends on
+  // loopback and the LAN.
+  'local-network',
+  'local-network-access',
+  'loopback-network',
+]);
 const DEFAULT_BACKEND_URL = process.env.TODEX_BACKEND_URL?.trim() || 'http://127.0.0.1:7345';
 /** Store keys of the desktop-run agent browser (before it moved to the backend). */
 const LEGACY_AGENT_BROWSER_KEYS = ['todex.desktop.agentBrowserPartitions.v1', 'todex.desktop.agentDesktopExecutor.v1', 'todex.desktop.computerUse.v1'];
@@ -350,6 +359,13 @@ function rendererHtmlPath(): string {
 
 /** The renderer may only (re)load its own entry: the dev server origin in
  * development, the bundled index.html otherwise. */
+/** The renderer entry page's origin: the dev server, or `file://` when packaged. */
+function isRendererEntryOrigin(origin: string): boolean {
+  const devUrl = process.env.ELECTRON_RENDERER_URL;
+  if (devUrl) return origin === new URL(devUrl).origin;
+  return origin === 'file://' || origin === 'file:///';
+}
+
 function isRendererEntryUrl(target: string): boolean {
   try {
     const url = new URL(target);
@@ -407,6 +423,15 @@ function installSessionPolicy(): void {
     const granted = details.isMainFrame && isRendererEntryUrl(details.requestingUrl) && RENDERER_PERMISSIONS.has(permission);
     if (!granted) debugLog('warn', 'permission.denied', { permission, url: details.requestingUrl });
     callback(granted);
+  });
+  // Checks (as opposed to requests) default to allowed; deny everything the
+  // renderer entry page does not need. Origin-only checks (no requesting URL,
+  // e.g. notifications) carry `file://` in a packaged build.
+  defaultSession.setPermissionCheckHandler((_contents, permission, requestingOrigin, details) => {
+    const fromEntry = details.requestingUrl
+      ? isRendererEntryUrl(details.requestingUrl)
+      : isRendererEntryOrigin(requestingOrigin);
+    return fromEntry && RENDERER_PERMISSIONS.has(permission);
   });
   defaultSession.webRequest.onBeforeSendHeaders(
     { urls: ['http://*/*', 'https://*/*', 'ws://*/*', 'wss://*/*'] },
