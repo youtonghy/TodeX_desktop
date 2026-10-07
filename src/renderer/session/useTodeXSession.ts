@@ -9,12 +9,12 @@ import {
 import { bindSentAttachmentEvents, prepareSentAttachments, projectSentAttachments, pruneSentAttachmentRecords, type SentAttachmentRecord } from './sentAttachments';
 import { configureKanbanSync, syncKanbanTasksFromBackend } from './kanbanTasks';
 import { t } from '../i18n';
-import { QueuedFollowUps, restoreQueuedFollowUps } from './queuedFollowUps';
-import { parseSessionLimitReset, rateLimitContinuationText, restoreRateLimitWaits, type SessionLimitReset } from './sessionRateLimit';
+import { QueuedFollowUps, restoreQueuedFollowUps, serializeQueuedFollowUps } from './queuedFollowUps';
+import { backendRateLimitState, parseSessionLimitReset, rateLimitContinuationText, restoreRateLimitWaits, type SessionLimitReset } from './sessionRateLimit';
 import { LegacyEventRecovery } from './legacyEventRecovery';
 import { ConversationRecovery, isConversationRuntimeBusy, type ConversationOpenStatus, type EarlierHistoryResult } from './conversationRecovery';
 import type { AgentBrowserFrame } from '@todex/protocol/agentDesktop';
-import { parseFollowUpQueue, type ConversationRuntime } from '@todex/protocol/conversationRuntime';
+import { parseFollowUpQueue, type ConversationRuntime, type FollowUpQueueState } from '@todex/protocol/conversationRuntime';
 import { followUpQueueFrame } from '@todex/protocol/conversationCommands';
 import { conversationTranscriptMarkdown, fetchConversationTranscript, transcriptEntries } from '@todex/protocol/conversationExport';
 import { canonicalConversationEventType, type ConversationEvent } from '@todex/protocol/v2';
@@ -255,6 +255,7 @@ import {
   parseModelCommandArgs,
   attachmentId,
   formatBytes,
+  formatResetInstant,
   fileNameFromUri,
   inferMimeType,
   isImageMimeType,
@@ -384,6 +385,18 @@ const V2_SUBSCRIBE_BACKFILL_LIMIT = 500;
 // Conversations whose projected history stays in memory after the user moves
 // on; older ones are released and reopen lazily from the journal tail.
 const RETAINED_CONVERSATION_RUNTIMES = 8;
+// How long a failed prompt waits for the daemon's queue snapshot before the
+// client asks for it (`conversation.queue.list`).
+const BACKEND_CONTINUATION_SETTLE_MS = 1_000;
+
+type SubmissionDraft = { text: string; skills: SelectedSkillAttachment[]; attachments: ComposerAttachmentDraft[] };
+type BackendContinuation = {
+  conversationId: string;
+  decided: Promise<boolean>;
+  decide: (queue: FollowUpQueueState | undefined) => void;
+  done: boolean;
+  timer?: ReturnType<typeof setTimeout>;
+};
 
 type ProviderModelCatalog = Partial<Record<ProviderKind, ProviderModelDescriptor[]>>;
 // Stable fallbacks for a backend whose catalogs have not loaded yet, so the
@@ -438,15 +451,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const pendingThreadActionsRef = useRef(new Map<string, PendingThreadAction>());
   const pendingV2ConversationCreatesRef = useRef(new Map<string, Promise<ConversationRecord | null>>());
   const pendingV2FirstPromptsRef = useRef(new Set<string>());
-  const pendingV2SubmissionsRef = useRef(new Map<string, {
-    text: string;
-    skills: SelectedSkillAttachment[];
-    attachments: ComposerAttachmentDraft[];
+  const pendingV2SubmissionsRef = useRef(new Map<string, SubmissionDraft & {
     requestId: string;
     turnId?: string;
     phase: 'sending' | 'running' | 'unknown';
   }>());
   const queuedChatDraftsRef = useRef<Record<string, QueuedChatSubmission[]>>({});
+  const backendContinuationsRef = useRef(new Map<string, BackendContinuation>());
   /** Work the session still owes a conversation: a turn shown as running, a
    * prompt awaiting its turn, or queued follow-ups. */
   const conversationHasPendingWork = (localId: string) => thinkingConversationsRef.current[localId] === true
@@ -909,7 +920,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     let disposed = false;
     void loadJson<unknown>('todex.queued-follow-ups.v1', {}).then((value) => {
       if (disposed) return;
-      const queues = restoreQueuedFollowUps<QueuedChatSubmission>(value);
+      const { queues, paused } = restoreQueuedFollowUps<QueuedChatSubmission>(value);
+      // A queue paused before the reload stays paused until the user resumes it.
+      for (const id of paused) followUpsRef.current.pause(id);
+      if (paused.length) setQueuePausedByConversation((current) => ({ ...current, ...Object.fromEntries(paused.map((id) => [id, true])) }));
       queuedChatDraftsRef.current = { ...queues, ...queuedChatDraftsRef.current };
       setQueuedChatDrafts(queuedChatDraftsRef.current);
       setQueueHydrated(true);
@@ -919,9 +933,11 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     return () => { disposed = true; };
   }, []);
   useEffect(() => {
-    if (queueHydrated) void saveJson('todex.queued-follow-ups.v1', queuedChatDrafts)
+    // Every pause is mirrored into queuePausedByConversation, so this re-runs
+    // whenever the paused set changes.
+    if (queueHydrated) void saveJson('todex.queued-follow-ups.v1', serializeQueuedFollowUps(queuedChatDrafts, followUpsRef.current.pausedIds()))
       .catch(() => setLastError(t('sess.candidateSaveFailed')));
-  }, [queueHydrated, queuedChatDrafts]);
+  }, [queueHydrated, queuedChatDrafts, queuePausedByConversation]);
 
   useEffect(() => {
     let disposed = false;
@@ -963,11 +979,17 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     setQueuedChatDrafts(rest);
   }, []);
 
-  const resumeQueuedFollowUps = useCallback(async (conversationId: string, options: { rateLimitEnded?: boolean } = {}) => {
-    // A conversation still inside a provider rate-limit window holds its queue
-    // until the recorded reset instant; the timer below resumes it then.
-    const wait = rateLimitedUntilRef.current[conversationId];
-    if (wait && wait.until > Date.now()) return;
+  /** Moves local candidates on. Only `user` (the explicit "continue") lifts a
+   * pause; `auto` (reconnect, reload, provider refresh) leaves a paused queue
+   * where it is; `rateLimitEnded` lifts the pause a local rate-limit wait
+   * caused once its reset passed. */
+  const advanceQueuedFollowUps = useCallback(async (conversationId: string, trigger: 'user' | 'auto' | 'rateLimitEnded') => {
+    const liftPause = () => {
+      if (!followUpsRef.current.isPaused(conversationId)) return;
+      followUpsRef.current.unpause(conversationId);
+      setQueuePausedByConversation(current => ({ ...current, [conversationId]: false }));
+    };
+    if (trigger === 'user') liftPause();
     const conversation = conversationsRef.current.find((item) => item.id === conversationId);
     // Whether the backend holds the queue is unknown until its providers
     // load (right after a reload or reconnect); decide then.
@@ -976,6 +998,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       return;
     }
     if (hasBackendQueue(v2ProvidersRef.current, conversation)) {
+      // Paused candidates stay here until the user continues them. A daemon
+      // rate-limit wait is no reason to hold back: handed-over candidates
+      // queue behind its continuation.
+      if (followUpsRef.current.isPaused(conversationId)) return;
       // The backend decides when queued prompts run, busy or not: hand the
       // candidates over in order instead of dispatching them from here.
       if (followUpHandoverRef.current.has(conversationId)) return;
@@ -989,24 +1015,27 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       } finally {
         followUpHandoverRef.current.delete(conversationId);
       }
-      // A queue paused by the rate-limited turn continues once the window ends.
-      const followUps = conversation?.v2ConversationId
-        ? conversationRecoveryRef.current?.get(conversation.v2ConversationId)?.followUps : undefined;
-      if (options.rateLimitEnded && followUps?.paused && followUps.pauseReason === 'turn_failed') {
-        await editFollowUpQueueRef.current(conversationId, 'resume');
-      }
       return;
     }
+    // A conversation still inside a provider rate-limit window holds its queue
+    // until the recorded reset instant; the timer below resumes it then.
+    const wait = rateLimitedUntilRef.current[conversationId];
+    if (wait && wait.until > Date.now()) return;
+    if (trigger === 'rateLimitEnded') liftPause();
     if (thinkingConversationsRef.current[conversationId] || pendingV2SubmissionsRef.current.has(conversationId)) return;
     // A backend without its own queue: its manifest still reports a turn the
     // lazily loaded window has not adopted yet.
     if (conversation?.nativeStatus === 'running' || conversation?.nativeStatus === 'waiting_permission') return;
-    await followUpsRef.current.resume(conversationId,
+    await followUpsRef.current.drain(conversationId,
       () => queuedChatDraftsRef.current[conversationId]?.[0],
       (item) => sendQueuedChatDraftRef.current(item, conversationId),
       (itemId) => removeQueuedFollowUp(conversationId, itemId));
     setQueuePausedByConversation(current => ({ ...current, [conversationId]: followUpsRef.current.isPaused(conversationId) }));
   }, [removeQueuedFollowUp]);
+
+  /** The user's "continue" for paused or waiting local candidates. */
+  const resumeQueuedFollowUps = useCallback((conversationId: string) =>
+    advanceQueuedFollowUps(conversationId, 'user'), [advanceQueuedFollowUps]);
 
   // Provider rate-limit windows (e.g. Claude Code's five-hour limit) end at
   // the parsed reset instant; the queued follow-ups then drain normally.
@@ -1022,7 +1051,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       rateLimitedUntilRef.current = { ...rateLimitedUntilRef.current };
       for (const id of expired) delete rateLimitedUntilRef.current[id];
       setRateLimitedUntilByConversation(rateLimitedUntilRef.current);
-      for (const id of expired) void resumeQueuedFollowUps(id, { rateLimitEnded: true });
+      for (const id of expired) void advanceQueuedFollowUps(id, 'rateLimitEnded');
     };
     const waits = Object.values(rateLimitedUntilByConversation).map((wait) => wait.until);
     if (waits.length === 0) return;
@@ -1037,7 +1066,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       document.removeEventListener('visibilitychange', onWake);
       window.removeEventListener('focus', onWake);
     };
-  }, [rateLimitedUntilByConversation, resumeQueuedFollowUps]);
+  }, [advanceQueuedFollowUps, rateLimitedUntilByConversation]);
 
   const setConversationComposerSelection = useCallback((conversationId: string, value: SetStateAction<ComposerSelection>) => {
     if (!conversationId) {
@@ -1442,10 +1471,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     for (const id of new Set([...deferred, ...Object.keys(queuedChatDraftsRef.current)])) {
       const conversation = conversationsRef.current.find((item) => item.id === id);
       if (deferred.includes(id) || (queuedChatDraftsRef.current[id]?.length && hasBackendQueue(v2Providers, conversation))) {
-        void resumeQueuedFollowUps(id);
+        void advanceQueuedFollowUps(id, 'auto');
       }
     }
-  }, [connectionState, queueHydrated, resumeQueuedFollowUps, v2Providers]);
+  }, [advanceQueuedFollowUps, connectionState, queueHydrated, v2Providers]);
 
   useEffect(() => {
     turnIdsRef.current = turnIds;
@@ -1961,13 +1990,66 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     return () => { cancelled = true; };
   }, [activeConversation, activeWorkspace?.path, hydrated, settings.deviceSecret, settings.encryptionProtocol, settings.encryptionPublicKey, settings.transportVerified, settings.serverUrl, v2Providers]);
 
-  const restorePendingSubmission = useCallback((conversationId: string) => {
-    const submission = pendingV2SubmissionsRef.current.get(conversationId);
-    if (!submission) return;
+  const restoreSubmissionDraft = useCallback((conversationId: string, submission: SubmissionDraft) => {
     setConversationChatDraft(conversationId, (current) => current || submission.text);
     setConversationAttachments(conversationId, (current) => current.length ? current : submission.attachments);
     setConversationSelectedSkills(conversationId, (current) => current.length ? current : submission.skills);
   }, [setConversationChatDraft, setConversationAttachments, setConversationSelectedSkills]);
+
+  const restorePendingSubmission = useCallback((conversationId: string) => {
+    const submission = pendingV2SubmissionsRef.current.get(conversationId);
+    if (submission) restoreSubmissionDraft(conversationId, submission);
+  }, [restoreSubmissionDraft]);
+
+  /** A prompt failed in a conversation whose daemon holds the queue. Whether
+   * the daemon continues it after a rate limit shows only in the queue
+   * snapshot it publishes right after the failure (§6.7); error text is not
+   * consulted. Resolves true when the daemon queued a continuation — the
+   * prompt stays out of the composer — and false after the prompt went back
+   * to the composer with the failure reported. One decision per turn. */
+  const awaitBackendContinuation = useCallback((conversationId: string, turnId: string, submission: SubmissionDraft, message: string) => {
+    const key = `${conversationId}:${turnId}`;
+    const existing = backendContinuationsRef.current.get(key);
+    if (existing) return existing.decided;
+    let resolve!: (continued: boolean) => void;
+    const entry: BackendContinuation = {
+      conversationId,
+      done: false,
+      decided: new Promise<boolean>((settle) => { resolve = settle; }),
+      decide: (queue) => {
+        if (entry.done) return;
+        entry.done = true;
+        clearTimeout(entry.timer);
+        const rateLimit = backendRateLimitState(queue);
+        if (rateLimit.continues) {
+          setLastError(t('sess.sessionLimitReached', {
+            reset: Number.isFinite(rateLimit.resumeAt) ? formatResetInstant(rateLimit.resumeAt) : '—' }));
+          resolve(true);
+          return;
+        }
+        restoreSubmissionDraft(conversationId, submission);
+        setLastError(message || t('sess.taskExecFailed'));
+        resolve(false);
+      },
+    };
+    // An empty queue publishes nothing after an ordinary failure: ask for the
+    // snapshot once the daemon has had time to settle the turn.
+    entry.timer = setTimeout(() => {
+      void refreshFollowUpQueueRef.current(conversationId).finally(() => {
+        const v2Id = conversationsRef.current.find((item) => item.id === conversationId)?.v2ConversationId;
+        entry.decide(v2Id ? conversationRecoveryRef.current?.get(v2Id)?.followUps : undefined);
+      });
+    }, BACKEND_CONTINUATION_SETTLE_MS);
+    backendContinuationsRef.current.set(key, entry);
+    // Settled decisions stay so a late prompt ACK reuses them; keep a few.
+    if (backendContinuationsRef.current.size > 64) {
+      backendContinuationsRef.current.delete(backendContinuationsRef.current.keys().next().value!);
+    }
+    return entry.decided;
+  }, [restoreSubmissionDraft, setLastError]);
+  useEffect(() => () => {
+    for (const entry of backendContinuationsRef.current.values()) clearTimeout(entry.timer);
+  }, []);
 
   runtimeUpdateRef.current = (state, appliedEvents, recovering, live) => {
     const conversation = conversationsRef.current.find((item) => item.v2ConversationId === state.conversationId || item.id === state.conversationId);
@@ -2024,6 +2106,16 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         submission.phase = 'running';
         setSubmissionStatusByConversation((current) => ({ ...current, [localId]: 'running' }));
       }
+      if (type === 'followups.updated') {
+        // The daemon's queue after a failure tells whether it continues the
+        // prompt. A snapshot that neither continues nor pauses predates it.
+        const queue = parseFollowUpQueue(data);
+        if (queue.paused || backendRateLimitState(queue).continues) {
+          for (const entry of backendContinuationsRef.current.values()) {
+            if (entry.conversationId === localId && !entry.done) entry.decide(queue);
+          }
+        }
+      }
       if (type === 'control.completed' || type === 'control.rejected') {
         const id = typeof data.requestId === 'string' ? data.requestId : '';
         const draft = controlDraftsRef.current.get(id);
@@ -2054,16 +2146,19 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         if (type === 'turn.completed' && firstSettle && !replayed) {
           notifyTurnCompletedRef.current(localId, state, turnId);
         }
-        // Claude Code reports its five-hour window as provider_unavailable with
-        // "session limit · resets <time> (<tz>)". Recording the reset arms the
-        // wait: sends join the candidate queue until it passes, and the failed
-        // prompt is re-queued at the head so everything replays in order. A
-        // backend with its own queue inserts that continuation itself — for
-        // every client and with no window open — so it is not queued here.
-        // Replayed journal entries are skipped — their wall-time report would
-        // resolve against now, while the persisted wait already holds the
-        // instant computed when the failure was live.
-        const rateLimited = !replayed && type === 'turn.failed' && typeof data.message === 'string'
+        // A daemon that holds the queue handles rate limits itself — for every
+        // client and with no window open — and reports them only through its
+        // queue snapshot, so its error text is not parsed.
+        const backendQueued = hasBackendQueue(v2ProvidersRef.current, conversationsRef.current.find((item) => item.id === localId));
+        // Without one, Claude Code reports its five-hour window as
+        // provider_unavailable with "session limit · resets <time> (<tz>)".
+        // Recording the reset arms the wait: sends join the candidate queue
+        // until it passes, and the failed prompt is re-queued at the head so
+        // everything replays in order. Replayed journal entries are skipped —
+        // their wall-time report would resolve against now, while the
+        // persisted wait already holds the instant computed when the failure
+        // was live.
+        const rateLimited = !backendQueued && !replayed && type === 'turn.failed' && typeof data.message === 'string'
           ? parseSessionLimitReset(data.message) : null;
         if (type === 'turn.completed') setConversationRateLimit(localId, null);
         if (rateLimited) {
@@ -2072,9 +2167,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         }
         if (submission && turnId && submission.turnId === turnId) {
           if (type === 'turn.completed') removeQueuedFollowUp(localId, submission.requestId);
-          const backendContinues = Boolean(rateLimited)
-            && hasBackendQueue(v2ProvidersRef.current, conversationsRef.current.find((item) => item.id === localId));
-          if (type === 'turn.failed' && !backendContinues) {
+          if (type === 'turn.failed' && backendQueued) {
+            void awaitBackendContinuation(localId, turnId, submission,
+              typeof data.message === 'string' ? data.message : '');
+          } else if (type === 'turn.failed') {
             const queued = queuedChatDraftsRef.current[localId] ?? [];
             if (rateLimited && queued.length < 32) {
               queuedChatDraftsRef.current = { ...queuedChatDraftsRef.current,
@@ -4110,7 +4206,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         })();
         flushQueuedProtocolCommands();
         for (const queuedConversationId of Object.keys(queuedChatDraftsRef.current)) {
-          void resumeQueuedFollowUps(queuedConversationId);
+          void advanceQueuedFollowUps(queuedConversationId, 'auto');
         }
       };
       const failVerification = (error: unknown) => {
@@ -4223,7 +4319,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       setLastError(message);
       setConnectionHealth({ status: 'offline', latencyMs: null, lastCheckedAt: Date.now(), error: message, code: 'backend_unreachable' });
     });
-  }, [checkConnectionHealth, closeSocket, enqueueSocketFrame, flushQueuedProtocolCommands, getSessionCursorSnapshot, openConversation, reconcilePendingSubmission, refreshServerVersion, resumeQueuedFollowUps, sendSessionResume, setBackendProviders, settings, subscribeV2Conversation, syncWorkspacesFromBackend]);
+  }, [advanceQueuedFollowUps, checkConnectionHealth, closeSocket, enqueueSocketFrame, flushQueuedProtocolCommands, getSessionCursorSnapshot, openConversation, reconcilePendingSubmission, refreshServerVersion, sendSessionResume, setBackendProviders, settings, subscribeV2Conversation, syncWorkspacesFromBackend]);
 
   useEffect(() => {
     if (!hydrated || !autoConnectEnabled || manualDisconnectRef.current) {
@@ -6727,9 +6823,26 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         }
       };
       // Inside a provider rate-limit window every send route lands here, so a
-      // single gate moves it to the candidate queue until the reset passes.
-      // Queue dispatches report false instead so their entry stays at the head.
-      const rateLimitWait = rateLimitedUntilRef.current[conversation.id];
+      // single gate holds it until the reset passes. A daemon that holds the
+      // queue reports its wait in the queue snapshot and takes the prompt into
+      // its queue, behind the continuation it starts at `resumeAt`.
+      const backendQueued = hasBackendQueue(v2ProvidersRef.current, conversation);
+      const backendWait = backendQueued && conversation.v2ConversationId
+        ? backendRateLimitState(conversationRecoveryRef.current?.get(conversation.v2ConversationId)?.followUps) : null;
+      if (backendWait?.waiting) {
+        const queued = await queueV2FollowUpRef.current(conversation.id,
+          { id: queuedRequestId ?? createRequestId('queued'), text, attachments, skills });
+        if (!queued) {
+          if (!queuedRequestId) restoreSubmission();
+          return false;
+        }
+        appendTimeline(makeSystemEntry(t('sess.sessionLimitQueued'), t('sess.sessionLimitQueuedHint', {
+          reset: Number.isFinite(backendWait.resumeAt) ? formatResetInstant(backendWait.resumeAt) : '—' }), workspace.id, conversation.id));
+        return true;
+      }
+      // Without a daemon queue the wait was parsed from the provider's error;
+      // queue dispatches report false so their entry stays at the head.
+      const rateLimitWait = backendQueued ? undefined : rateLimitedUntilRef.current[conversation.id];
       if (rateLimitWait && rateLimitWait.until > Date.now()) {
         if (queuedRequestId) return false;
         const queued = queuedChatDraftsRef.current[conversation.id] ?? [];
@@ -6817,12 +6930,17 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         if (typeof result.turnId === 'string') submission.turnId = result.turnId;
         const terminal = submission.turnId ? settledV2TurnsRef.current.get(`${v2Id}:${submission.turnId}`) : undefined;
         if (terminal) {
+          pendingV2SubmissionsRef.current.delete(conversation.id);
+          setSubmissionStatusByConversation((current) => ({ ...current, [conversation.id]: undefined }));
+          if (terminal === 'turn.failed' && backendQueued) {
+            // The turn failed before its ACK: the daemon's queue snapshot
+            // tells whether it continues the prompt (then the composer clears).
+            return awaitBackendContinuation(conversation.id, submission.turnId!, submission, '');
+          }
           // A rate-limited failure already re-queued the prompt at the head —
           // treat it as accepted so the composer clears instead of restoring.
           const waitActive = (rateLimitedUntilRef.current[conversation.id]?.until ?? 0) > Date.now();
           if (terminal === 'turn.failed' && !waitActive) restoreSubmission();
-          pendingV2SubmissionsRef.current.delete(conversation.id);
-          setSubmissionStatusByConversation((current) => ({ ...current, [conversation.id]: undefined }));
           if (terminal === 'turn.failed') return waitActive;
         } else if (pendingV2SubmissionsRef.current.get(conversation.id) === submission) {
           submission.phase = 'running';
@@ -6848,6 +6966,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           const v2Id = conversationsRef.current.find((item) => item.id === conversation.id)?.v2ConversationId;
           const terminal = v2Id && submission.turnId ? settledV2TurnsRef.current.get(`${v2Id}:${submission.turnId}`) : undefined;
           if (terminal) {
+            if (terminal === 'turn.failed' && backendQueued) {
+              return awaitBackendContinuation(conversation.id, submission.turnId!, submission, '');
+            }
             const waitActive = (rateLimitedUntilRef.current[conversation.id]?.until ?? 0) > Date.now();
             return terminal !== 'turn.failed' || waitActive;
           }
@@ -6882,7 +7003,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         }
       }
     },
-    [updateSentAttachmentRecords, appendTimeline, getConversationContext, materializeV2Conversation, reconcilePendingSubmission, v2PromptFields, sendProtocolCommand, setConversationAttachments, setConversationChatDraft, setConversationRateLimit, setConversationSelectedSkills, setConversationThinking, updateConversation, autoConnectEnabled, connect],
+    [updateSentAttachmentRecords, appendTimeline, awaitBackendContinuation, getConversationContext, materializeV2Conversation, reconcilePendingSubmission, v2PromptFields, sendProtocolCommand, setConversationAttachments, setConversationChatDraft, setConversationRateLimit, setConversationSelectedSkills, setConversationThinking, updateConversation, autoConnectEnabled, connect],
   );
 
   /** Hands a follow-up to the backend queue (`conversation.queue.add`). The
@@ -8364,9 +8485,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       setConversationSelectedSkills(conversationId, (current) => current === skills ? [] : current);
       setConversationComposerSelection(conversationId, DEFAULT_COMPOSER_SELECTION);
     };
-    const rateLimitWait = rateLimitedUntilRef.current[conversationId];
-    if (isThinking && hasBackendQueue(v2ProvidersRef.current, conversation)
-      && !(rateLimitWait && rateLimitWait.until > Date.now())) {
+    // An idle conversation whose daemon waits out a rate limit also queues
+    // there; sendV2Prompt routes it.
+    if (isThinking && hasBackendQueue(v2ProvidersRef.current, conversation)) {
       void queueV2FollowUp(conversationId, { id: createRequestId('queued'), text, attachments: liveAttachments, skills })
         .then((queued) => { if (queued) clearSubmittedComposer(); });
       return;
