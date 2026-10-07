@@ -23,7 +23,7 @@
 
 **TodeX Desktop** is a desktop client for [`todex-agentd`](../TodeX_backend), delivering a coding workspace environment on macOS.
 
-Built with **Electron 44**, **React 19**, **Vite 7**, **Tailwind CSS v4**, and **HeroUI Pro**, TodeX Desktop features a 3-pane layout optimized for wide screens. It shares the transport and protocol library (`@todex/protocol`, from [`TodeX_protocol`](../TodeX_protocol)) with the web client, while leveraging native desktop capabilities like local file pickers, Drag & Drop QR decoding, and multi-tab developer workbenches.
+Built with **Electron 44**, **React 19**, **Vite 7**, **Tailwind CSS v4**, and **HeroUI Pro**, TodeX Desktop features a 3-pane layout optimized for wide screens. It shares the transport and protocol library (`@todex/protocol`, from [`TodeX_protocol`](../TodeX_protocol)) with the web client, while leveraging native desktop capabilities like local file pickers and multi-tab developer workbenches.
 
 ---
 
@@ -45,9 +45,8 @@ Built with **Electron 44**, **React 19**, **Vite 7**, **Tailwind CSS v4**, and *
   - Inspect the active Backend's Codex, Pi, Claude Code, Grok Build, and ACP CLI inventory, compare installed and latest versions, install missing CLIs in one click, and start managed CLI upgrades.
   - Export and import one agent's provider accounts as a JSON file to sync them between hosts (the file holds keys in plain text).
   - Connect via direct host/port URL; requests are signed with the per-device key enrolled through device verification.
-  - [Device verification](docs/device-verification.md) (pairing v3, commit then reveal): import the backend's pairing QR code (it pins the transport public key), then compare a random code with the backend TUI and approve once to enroll this device's signing key.
-  - Paste pairing JSON or multi-frame segmented QR payloads.
-  - **Drag & Drop QR pairing**: Drop QR screenshot/image files directly into the window (parsed locally via `jsqr`).
+  - [Device verification](docs/device-verification.md) (pairing v3, commit then reveal): enter only the backend address, compare the random code (and the transport key fingerprint) with the backend TUI and approve once. The code also authenticates the backend's transport public key, so approval enrolls this device's signing key and pins that key in one step, then connects.
+  - No manual key entry, paste or QR import: Settings shows the pinned protocol, key fingerprint and verified state read-only, with a **Re-pair** action. Changing the address clears the device key and the pin; re-pairing the same backend keeps the device key.
   - Clear connection diagnostic states (categorizes connection errors such as unstarted backend, port mismatch, token error, deprecated `/v1` endpoints, or handshake issues).
 - **Native OS Integration**:
   - Secure Electron architecture: Preload bridge with isolated context (`contextBridge`) and `nodeIntegration: false`.
@@ -60,7 +59,7 @@ Built with **Electron 44**, **React 19**, **Vite 7**, **Tailwind CSS v4**, and *
 - **Transport Encryption** ([transport v2](docs/device-verification.md#传输加密transport-v2)):
   - **X25519** or **ML-KEM-768** (post-quantum) key agreement against the backend key pinned at pairing, via the `@noble` cryptography suite; every session key mixes in fresh server randomness.
   - With a pinned key every call is encrypted, loopback included: the WebSocket uses `tv=2` binary frames and every REST request goes through the `POST /v2/sealed` tunnel. Only `/health`, `/v2/transport-policy` and device verification are called directly.
-  - Without a pinned key only a loopback backend can be reached (in plaintext); a remote address is refused with a prompt to pair with encryption. A changed backend protocol asks for re-pairing instead of downgrading.
+  - Without a pinned key only a loopback backend can be reached (in plaintext); a remote address is refused with a prompt to pair with encryption. A changed backend protocol asks for re-pairing instead of downgrading, and a key saved without device-pairing verification (older manual imports) is refused on every host, loopback included, until the backend is paired again.
 - **End-to-end encrypted history** ([history encryption](docs/device-verification.md#历史记录加密)): conversation history is always encrypted; there is no switch. Each device registers its own history key on first connect, and Settings warns until a recovery key is set. Conversations stored before encryption are read-only (view, export, archive, delete).
 
 ---
@@ -110,7 +109,7 @@ Built with **Electron 44**, **React 19**, **Vite 7**, **Tailwind CSS v4**, and *
 | **Layout** | Mobile Stack Navigation | 3-Pane Resizable Desktop Layout |
 | **Protocol Layer** | Swift port (`TodexCore`) | `@todex/protocol` alias mapped to `../TodeX_protocol/src` |
 | **Local Storage** | iOS Keychain / local persistence | Electron `userData` JSON (`todex.desktop.*`); device and history keys sealed with the OS keychain (safeStorage) |
-| **Pairing Input** | Live Device Camera Scanner | Text Paste / Image File Drag & Drop QR Decoding |
+| **Pairing Input** | Camera scan of the address QR, then device verification | Backend address, then device verification |
 
 ---
 
@@ -214,8 +213,8 @@ The Settings screen in TodeX Desktop provides clear diagnostic feedback:
 | **Invalid Backend URL** | The provided URL cannot be parsed. | Use a standard origin format such as `http://127.0.0.1:7345`. |
 | **Authentication Failed** | HTTP 401/403 returned by backend. | Enter the correct `Auth Token` matching the backend configuration. |
 | **Deprecated Protocol** | The URL path contains `/v1`. | Update the connection URL to use `/v2`. |
-| **WebSocket Failure** | HTTP probes succeed but `/v2/ws` fails. | Check network firewall rules. A `4400` close means the pinned key does not match: re-import the backend pairing QR code. |
-| **Encrypted pairing required** | A remote backend without a pinned transport key, or the backend now requires another protocol. | Import the backend pairing QR code in Settings → Pairing, then run device verification. |
+| **WebSocket Failure** | HTTP probes succeed but `/v2/ws` fails. | Check network firewall rules. A `4400` close means the pinned key does not match: re-pair in Settings → Device verification. |
+| **Encrypted pairing required** | A remote backend without a pinned transport key, or the backend now requires another protocol. | Run device verification (or **Re-pair**) in Settings; approval pins the key. |
 | **Agent Unavailable** | Provider shows `available = false`. | Verify that the underlying agent CLI (`codex`, `pi`, `claude`) is installed and authenticated. |
 
 ---
@@ -224,7 +223,7 @@ The Settings screen in TodeX Desktop provides clear diagnostic feedback:
 
 - **Process Isolation**: The renderer process runs with `nodeIntegration: false` and `contextIsolation: true`.
 - **Preload IPC**: Dialogs, secure storage and the workspace file actions (open, open with, reveal) are routed through guarded IPC channels. The renderer cannot read local files through IPC; the file actions accept absolute paths only, and a plain open refuses executables and app bundles.
-- **App window**: Navigation, redirects and subframe navigation are limited to the app's own entry; web permissions other than notifications and the clipboard are denied.
+- **App window**: Navigation, redirects and subframe navigation are limited to the app's own entry; web permissions other than notifications and clipboard writes are denied.
 - **Backend origin**: The bundled renderer's WebSockets send `Origin: todex-desktop://app` instead of `file://` (or `null`); anonymous loopback backends accept that value and refuse `null` / `file://`. This needs a backend with the matching origin rule.
 - **Strict Scope**: Only connects to explicitly configured agent daemon endpoints.
 - **Browser views**: Workbench pages run in sandboxed `WebContentsView`s with their own partition, never the app's storage; their top-level navigation is checked in the main process.
