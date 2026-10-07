@@ -36,6 +36,20 @@ export function buildConversationControlMessage(
     payload: { conversationId, ...payload },
   };
 }
+
+/** `conversation.cancel` for the turn the client saw running. Naming the turn
+ * keeps a late click from stopping a newer turn the user has not seen; the
+ * backend then answers `{ cancelled: false, activeTurnId }` instead. */
+export function buildConversationCancelMessage(conversationId: string, turnId: string | undefined) {
+  return buildConversationControlMessage(conversationId, 'cancel', turnId ? { turnId } : {});
+}
+
+/** True when the backend skipped a cancel because the named turn was no longer
+ * running (`{ cancelled: false }`). That is a no-op, not an error. Results
+ * without the field come from cancels sent without a turn id. */
+export function isStaleCancelResult(result: Record<string, unknown>): boolean {
+  return result.cancelled === false;
+}
 import { providerDisplayName } from '@todex/protocol/v2';
 import { ConnectionError, ConnectionErrorType, type ConnectionFailureCode } from '@todex/protocol/connectionError';
 import { matchesMessage, t, type MessageKey } from '../i18n';

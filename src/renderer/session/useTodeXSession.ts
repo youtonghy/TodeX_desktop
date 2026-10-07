@@ -316,7 +316,8 @@ import {
   isCollapsibleProgressEntry,
   executionGroupId,
   buildConversationRenderItems,
-  buildConversationControlMessage,
+  buildConversationCancelMessage,
+  isStaleCancelResult,
   type ConversationContextUsage,
   type UsageRecord,
   normalizeUsageRecords,
@@ -8280,8 +8281,16 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         setLastError(t('sess.firstMessageCreating'));
         return;
       }
-      void sendProtocolCommand(buildConversationControlMessage(v2Id, 'cancel')).then(() => {
-        appendTimeline(makeSystemEntry(t('sess.stopConfirmed'), t('sess.syncingTurn'), workspace.id, conversation.id));
+      // Name the turn on screen: if it already ended, the backend leaves a
+      // newer turn running and answers `cancelled: false`.
+      const turnId = conversationRecoveryRef.current?.get(v2Id)?.activeTurnId
+        || pendingV2SubmissionsRef.current.get(conversation.id)?.turnId;
+      void sendProtocolCommand(buildConversationCancelMessage(v2Id, turnId)).then((result) => {
+        if (!isStaleCancelResult(result)) {
+          appendTimeline(makeSystemEntry(t('sess.stopConfirmed'), t('sess.syncingTurn'), workspace.id, conversation.id));
+        }
+        // Either way the runtime resyncs, so a stale view picks up the turn
+        // that is actually running.
         return recoverConversation(conversation.id);
       }).catch((error: unknown) => {
         setLastError(error instanceof Error ? error.message : t('sess.stopUnconfirmed'));
