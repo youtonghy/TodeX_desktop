@@ -14,6 +14,61 @@ export function isChatToolEntry(entry: TimelineEntry): boolean {
   return entry.category ? entry.category === 'tool' : entry.kind === 'system' && matchesMessage('chat.toolCall', entry.title);
 }
 
+/** Display order of chat rows: journal sequence when both rows carry one,
+ * then time, then id. */
+export function compareChatEntries(left: TimelineEntry, right: TimelineEntry): number {
+  if (left.sequence !== undefined && right.sequence !== undefined && left.sequence !== right.sequence) {
+    return left.sequence - right.sequence;
+  }
+  if (left.at !== right.at) return left.at - right.at;
+  return left.id.localeCompare(right.id);
+}
+
+/** `entries` in display order. A runtime projection already arrives in that
+ * order, so it is returned as is unless an adjacent pair is out of order —
+ * the stable sort would leave such an input unchanged anyway. */
+export function sortChatEntries(entries: TimelineEntry[]): TimelineEntry[] {
+  for (let index = 1; index < entries.length; index += 1) {
+    if (compareChatEntries(entries[index - 1], entries[index]) > 0) return entries.slice().sort(compareChatEntries);
+  }
+  return entries;
+}
+
+/** True when both lists hold the same row objects in the same order, so a
+ * frame for another conversation keeps this one's derived rows. */
+export function sameTimelineEntries(left: readonly TimelineEntry[], right: readonly TimelineEntry[]): boolean {
+  if (left === right) return true;
+  if (left.length !== right.length) return false;
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] !== right[index]) return false;
+  }
+  return true;
+}
+
+// Rows are immutable (an update replaces the object), so their grouping keys
+// are computed once per row instead of once per rebuild.
+const turnKeyCache = new WeakMap<TimelineEntry, string>();
+const userKeyCache = new WeakMap<TimelineEntry, string>();
+
+function chatTurnKey(entry: TimelineEntry): string {
+  let key = turnKeyCache.get(entry);
+  if (key === undefined) {
+    key = JSON.stringify([entry.conversationId ?? '', 'turn', entry.turnId]);
+    turnKeyCache.set(entry, key);
+  }
+  return key;
+}
+
+function chatUserKey(entry: TimelineEntry): string {
+  if (entry.turnId) return chatTurnKey(entry);
+  let key = userKeyCache.get(entry);
+  if (key === undefined) {
+    key = JSON.stringify([entry.conversationId ?? '', 'user', entry.id]);
+    userKeyCache.set(entry, key);
+  }
+  return key;
+}
+
 export type ChatRenderItem =
   | { type: 'entry'; entry: TimelineEntry }
   | { type: 'executionGroup'; id: string; entries: TimelineEntry[]; turnId?: string; userMessageId?: string };
@@ -29,8 +84,8 @@ function isFoldedStepEntry(entry: TimelineEntry): boolean {
  * trace so the working notes stay interleaved with the narration they belong
  * to. Unattributed startup statuses are not conversation content. */
 export function buildChatRenderItems(entries: readonly TimelineEntry[]): ChatRenderItem[] {
-  const turnKey = (entry: TimelineEntry) => JSON.stringify([entry.conversationId ?? '', 'turn', entry.turnId]);
-  const userKey = (entry: TimelineEntry) => entry.turnId ? turnKey(entry) : JSON.stringify([entry.conversationId ?? '', 'user', entry.id]);
+  const turnKey = chatTurnKey;
+  const userKey = chatUserKey;
   const anchors = new Map<string, TimelineEntry>();
   for (const entry of entries) {
     if (entry.kind === 'outgoing' && !anchors.has(userKey(entry))) anchors.set(userKey(entry), entry);
@@ -117,14 +172,25 @@ export function buildChatRenderItems(entries: readonly TimelineEntry[]): ChatRen
 /// agent has already replied after is finished — its tools may still run in
 /// the background, but the live status belongs below the newest reply.
 export function activeChatProcessId(items: readonly ChatRenderItem[], activeTurnId?: string): string {
-  const latestUser = [...items].reverse().find(item => item.type === 'entry' && item.entry.kind === 'outgoing');
-  const user = latestUser?.type === 'entry' ? latestUser.entry : undefined;
-  const group = [...items].reverse().find(item => item.type === 'executionGroup' && (
-    activeTurnId ? item.turnId === activeTurnId : !item.turnId && Boolean(user) && item.userMessageId === user?.id
-  ));
+  // Runs on every render: scan from the end without copying the rows.
+  let user: TimelineEntry | undefined;
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const item = items[index];
+    if (item.type === 'entry' && item.entry.kind === 'outgoing') { user = item.entry; break; }
+  }
+  let groupIndex = -1;
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const item = items[index];
+    if (item.type === 'executionGroup' && (
+      activeTurnId ? item.turnId === activeTurnId : !item.turnId && Boolean(user) && item.userMessageId === user?.id
+    )) { groupIndex = index; break; }
+  }
+  const group = items[groupIndex];
   if (group?.type !== 'executionGroup') return '';
   if (user && group.userMessageId !== user.id && user.turnId !== group.turnId) return '';
-  const after = items.slice(items.indexOf(group) + 1);
-  if (after.some(item => item.type === 'entry' && item.entry.kind === 'incoming')) return '';
+  for (let index = groupIndex + 1; index < items.length; index += 1) {
+    const item = items[index];
+    if (item.type === 'entry' && item.entry.kind === 'incoming') return '';
+  }
   return group.id;
 }

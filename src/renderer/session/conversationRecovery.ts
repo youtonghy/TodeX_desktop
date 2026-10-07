@@ -1,4 +1,4 @@
-import { adoptConversationRuntimeTurn, applyConversationRuntimeEvents, createConversationRuntime, hydrateConversationRuntimeEvents, prependConversationRuntimeEvents, type ConversationRuntime, type FollowUpQueueState } from '@todex/protocol/conversationRuntime';
+import { adoptConversationRuntimeTurn, applyConversationRuntimeEvents, capConversationRuntimeTimeline, createConversationRuntime, hydrateConversationRuntimeEvents, prependConversationRuntimeEvents, type ConversationRuntime, type FollowUpQueueState } from '@todex/protocol/conversationRuntime';
 import { t } from '../i18n';
 import { MAX_CONVERSATION_TIMELINE_ITEMS } from './helpers';
 import { canonicalConversationEventType } from '@todex/protocol/v2';
@@ -316,11 +316,13 @@ export class ConversationRecovery {
     }
     const result = applyConversationRuntimeEvents(previous, events);
     if (result.state === previous && committed) return;
-    const liveApplied = this.takeLive(conversationId, result.appliedEvents, result.state.appliedSequence);
+    const floorBefore = this.historyFloors.get(conversationId);
+    const state = this.capTimeline(conversationId, result.state);
+    const liveApplied = this.takeLive(conversationId, result.appliedEvents, state.appliedSequence);
     const recovering = this.isRecovering(conversationId) || result.missingSequences.length > 0;
     // The state commits before the consumer runs so callbacks observing
     // get() see the latest projection.
-    this.states.set(conversationId, result.state);
+    this.states.set(conversationId, state);
     if (result.appliedEvents.some(isTurnLifecycle)) this.turnResolved.add(conversationId);
     if (this.recovering.has(conversationId)) {
       // Inside a recovery pass the consumer is only notified once per
@@ -330,11 +332,13 @@ export class ConversationRecovery {
       // Live frames keep the synchronous contract: a throwing consumer
       // rolls the commit back.
       try {
-        this.update(result.state, result.appliedEvents, recovering, liveApplied);
+        this.update(state, result.appliedEvents, recovering, liveApplied);
       } catch (error) {
-        if (this.states.get(conversationId) === result.state) {
+        if (this.states.get(conversationId) === state) {
           if (committed) this.states.set(conversationId, committed);
           else this.states.delete(conversationId);
+          if (floorBefore === undefined) this.historyFloors.delete(conversationId);
+          else this.historyFloors.set(conversationId, floorBefore);
         }
         throw error;
       }
@@ -343,6 +347,21 @@ export class ConversationRecovery {
     if (result.missingSequences.length && !this.recovering.has(conversationId) && !this.gapRetries.get(conversationId)?.timer) {
       void this.recover(conversationId, workspaceId);
     }
+  }
+
+  /** Keep a runtime at MAX_CONVERSATION_TIMELINE_ITEMS rows, the newest —
+   * as many as the chat renders — so a long-running conversation stops
+   * growing (and copying) its timeline. With reverse paging the dropped rows
+   * become unloaded history below a raised floor; `loadEarlier` reports the
+   * conversation as capped while it is full and pages them back in once
+   * there is room. */
+  private capTimeline(conversationId: string, state: ConversationRuntime): ConversationRuntime {
+    const floor = this.historyFloors.get(conversationId) ?? 0;
+    const capped = capConversationRuntimeTimeline(state, MAX_CONVERSATION_TIMELINE_ITEMS, floor);
+    // Without reverse paging nothing could page the rows back in; a floor
+    // would only advertise history that `loadEarlier` cannot fetch.
+    if (this.replayBefore && capped.floor > floor) this.historyFloors.set(conversationId, capped.floor);
+    return capped.state;
   }
 
   /** Split the applied realtime frames off the live marks; marks at or below
