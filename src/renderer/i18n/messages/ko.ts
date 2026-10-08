@@ -257,6 +257,7 @@ export const ko: Messages = {
   'chat.attachmentReadFailed': '첨부 파일을 읽을 수 없습니다',
   'chat.imageSendBlocked': '지금은 이미지를 보낼 수 없습니다',
   'chat.working': '작업 중',
+  'chat.waitingBackground': '백그라운드 작업 대기 중({count}개)',
   'chat.recovering': '대화 기록을 복원하는 중…',
   'chat.emptyHint': '아직 메시지가 없습니다. 입력 후 전송하세요.',
   'chat.execSteps': '실행 단계',

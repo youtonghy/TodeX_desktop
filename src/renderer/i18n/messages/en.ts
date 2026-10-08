@@ -257,6 +257,7 @@ export const en: Messages = {
   'chat.attachmentReadFailed': 'Could not read the attachment',
   'chat.imageSendBlocked': 'Images cannot be sent right now',
   'chat.working': 'Working',
+  'chat.waitingBackground': 'Waiting for background tasks ({count})',
   'chat.recovering': 'Recovering conversation history…',
   'chat.emptyHint': 'No messages yet. Type something and send.',
   'chat.execSteps': 'Execution steps',

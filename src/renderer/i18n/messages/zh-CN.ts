@@ -257,6 +257,7 @@ export const zhCN = {
   'chat.attachmentReadFailed': '无法读取附件',
   'chat.imageSendBlocked': '当前无法发送图片',
   'chat.working': '正在工作',
+  'chat.waitingBackground': '等待后台任务（{count} 个）',
   'chat.recovering': '正在恢复对话记录…',
   'chat.emptyHint': '还没有消息。输入内容后发送。',
   'chat.execSteps': '执行步骤',

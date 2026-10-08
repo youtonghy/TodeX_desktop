@@ -257,6 +257,7 @@ export const ja: Messages = {
   'chat.attachmentReadFailed': '添付ファイルを読み取れませんでした',
   'chat.imageSendBlocked': '現在画像を送信できません',
   'chat.working': '作業中',
+  'chat.waitingBackground': 'バックグラウンドタスクを待機中（{count} 件）',
   'chat.recovering': '会話履歴を復元中…',
   'chat.emptyHint': 'メッセージはまだありません。入力して送信してください。',
   'chat.execSteps': '実行ステップ',
