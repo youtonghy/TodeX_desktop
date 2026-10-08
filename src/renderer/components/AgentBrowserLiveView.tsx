@@ -44,6 +44,8 @@ export function AgentBrowserLiveView({ session, conversationId, isActive }: {
     [session.settings.deviceSecret, session.settings.encryptionProtocol, session.settings.encryptionPublicKey, session.settings.transportVerified, session.settings.serverUrl],
   );
   const state = session.conversationRuntimeById[conversationId]?.desktopBrowser;
+  // The backend knows the conversation by its v2 id, not the local one.
+  const backendConversationId = session.conversations.find(item => item.id === conversationId)?.v2ConversationId ?? conversationId;
   // One backward pass per actions change, not three array copies per render.
   const { latest, page, latestShotId } = useMemo(() => {
     const actions = state?.actions ?? [];
@@ -103,7 +105,7 @@ export function AgentBrowserLiveView({ session, conversationId, isActive }: {
         if (alive && next) void draw(next);
       }
     };
-    const unwatch = watchAgentBrowser(conversationId, (frame) => {
+    const unwatch = watchAgentBrowser(backendConversationId, (frame) => {
       if (decoding) pending = frame;
       else void draw(frame);
     });
@@ -111,22 +113,22 @@ export function AgentBrowserLiveView({ session, conversationId, isActive }: {
       alive = false;
       unwatch();
     };
-  }, [conversationId, isActive, visible, watchAgentBrowser]);
+  }, [backendConversationId, isActive, visible, watchAgentBrowser]);
 
   // Without live frames: the latest screenshot the agent took.
   useEffect(() => {
     if (live || !latestShotId || still?.shotId === latestShotId) return;
     let alive = true;
-    void api.getAgentShot(conversationId, latestShotId)
+    void api.getAgentShot(backendConversationId, latestShotId)
       .then(shot => { if (alive) setStill({ shotId: latestShotId, dataUrl: shot.dataUrl }); })
       .catch(() => undefined);
     return () => { alive = false; };
-  }, [api, conversationId, latestShotId, live, still?.shotId]);
+  }, [api, backendConversationId, latestShotId, live, still?.shotId]);
 
   const stop = async () => {
     setStopping(true);
     try {
-      await api.revokeAgentDesktop(conversationId, 'browser');
+      await api.revokeAgentDesktop(backendConversationId, 'browser');
     } catch (error) {
       toast.danger(error instanceof Error ? error.message : t('agentBrowser.stopFailed'));
     } finally {

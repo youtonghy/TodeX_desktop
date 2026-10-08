@@ -1319,7 +1319,7 @@ export function ChatPanel({ session }: Props) {
       />
       <div className="border-separator border-t px-5 py-4">
         <div className="composer-container mx-auto max-w-2xl">
-          <ComputerLiveView session={session} conversationId={conversation.id} state={session.conversationRuntimeById[conversation.id]?.desktopComputer} />
+          <ComputerLiveView session={session} conversationId={conversation.v2ConversationId ?? conversation.id} state={session.conversationRuntimeById[conversation.id]?.desktopComputer} />
           {readOnly ? null : permissionRequests.map(request => <PermissionRequestCard
             key={request.requestId}
             request={request}
