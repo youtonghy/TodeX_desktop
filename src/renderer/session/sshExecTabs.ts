@@ -50,8 +50,9 @@ export function takeNewSshExecs(
   return fresh;
 }
 
-/** The Agent SSH tab is session-only; it survives a workbench remount
- * (switching conversations and back) but is never written to the tab store. */
+/** The Agent SSH and agent-browser tabs are session-only; they survive a
+ * workbench remount (switching conversations and back, or the aside toggling
+ * the scope) but are never written to the tab store. */
 const sessionSshExecTabs = new Map<string, WorkbenchItem[]>();
 
 export function sessionSshExecTabsFor(storageKey: string): WorkbenchItem[] {
@@ -59,7 +60,7 @@ export function sessionSshExecTabsFor(storageKey: string): WorkbenchItem[] {
 }
 
 export function rememberSessionSshExecTabs(storageKey: string, items: WorkbenchItem[]): void {
-  const execItems = items.filter(item => item.type === 'ssh-exec');
+  const execItems = items.filter(item => item.type === 'ssh-exec' || item.type === 'agent-browser');
   if (execItems.length) sessionSshExecTabs.set(storageKey, execItems);
   else sessionSshExecTabs.delete(storageKey);
 }

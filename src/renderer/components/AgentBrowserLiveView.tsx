@@ -60,6 +60,11 @@ export function AgentBrowserLiveView({ session, conversationId, isActive }: {
   }, [state?.actions]);
   const { watchAgentBrowser } = session;
 
+  // A new tab lifetime (the agent opened a page again) is not the closed tab
+  // an earlier `closed` frame reported.
+  const tabSince = state?.tabSince;
+  useEffect(() => { setClosed(false); }, [tabSince]);
+
   useEffect(() => {
     const update = () => setVisible(document.visibilityState === 'visible');
     document.addEventListener('visibilitychange', update);

@@ -28,14 +28,20 @@ export function AgentDesktopSettings({ session }: { session: TodeXSession }) {
     try {
       setSettings(await api.getAgentDesktop());
     } catch (error) {
-      setSettings(error instanceof ConnectionError && error.httpStatus === 404 ? null : undefined);
+      // A transient failure keeps the last known settings (the switch and
+      // sections stay put); only a backend without desktop tools clears them.
+      setSettings(current => error instanceof ConnectionError && error.httpStatus === 404 ? null : current);
     }
   }, [api]);
   useEffect(() => {
+    // Settings of another backend must not stand in while this one loads.
+    setSettings(undefined);
     void refresh();
     void window.todexDesktop.legacyAgentBrowser.hasData().then(setLegacyData);
     // Chromium downloads and host permissions change outside this screen.
-    const timer = setInterval(() => { void refresh(); }, 5000);
+    const timer = setInterval(() => {
+      if (document.visibilityState === 'visible') void refresh();
+    }, 5000);
     return () => clearInterval(timer);
   }, [refresh]);
 

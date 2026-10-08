@@ -7,6 +7,7 @@ import { AnimatePresence, motion, useReducedMotion, type Variants } from 'motion
 import { usageTotalTokens, type ConversationRuntime } from '@todex/protocol/conversationRuntime';
 import type { ContextCompactionState } from '@todex/protocol/v2';
 import { permissionActions, permissionDeviceGate, permissionRequestSummary, type PendingRequest, type PermissionOption } from '@todex/protocol/todex';
+import { DESKTOP_BROWSER_ACTION_KIND, DESKTOP_BROWSER_GRANT_KIND } from '@todex/protocol/agentDesktop';
 import { deviceIdentityFromSecret } from '@todex/protocol/deviceAuth';
 import type { UsageRecord } from '@todex/protocol/mobileParity';
 import { hasActiveConversationWork } from './conversationProgress';
@@ -558,10 +559,24 @@ function permissionOptionLabel(option: boolean | PermissionOption, t: ReturnType
   switch (option.name) {
     case 'Allow once': return t('runStatus.allowOnce');
     case 'Allow for session': return t('runStatus.allowSession');
+    // The agent tools' own approvals (MCP tool, desktop browser grant).
+    case 'Always allow in this conversation':
+    case 'Allow for this conversation': return t('runStatus.allowConversation');
     case 'Reject':
+    case 'Deny':
     case 'Decline': return t('runStatus.reject');
     default: return option.name;
   }
+}
+
+/// The backend titles its desktop browser approvals in English; build them
+/// from the structured details instead.
+function desktopBrowserTitle(request: PendingRequest, t: ReturnType<typeof useT>): string | undefined {
+  const kind = permissionString(request.data.kind);
+  const details = permissionObject(request.data.details);
+  if (kind === DESKTOP_BROWSER_GRANT_KIND && permissionString(details.host)) return t('agentBrowser.grantTitle', { host: permissionString(details.host) });
+  if (kind === DESKTOP_BROWSER_ACTION_KIND && permissionString(details.action)) return t('agentBrowser.actionTitle', { action: permissionString(details.action) });
+  return undefined;
 }
 
 /// Composer-side approval card: says what will run (the full command, never
@@ -576,7 +591,7 @@ export function PermissionRequestCard({ request, fallbackTitle, deviceSecret, on
   const summary = useMemo(() => permissionRequestSummary(request), [request]);
   const heading = summary.command ? t('runStatus.runCommand')
     : summary.tool ? t('runStatus.useTool', { tool: summary.tool })
-      : fallbackTitle;
+      : desktopBrowserTitle(request, t) ?? fallbackTitle;
   return <div className="mb-3 rounded-xl border border-separator p-3">
     <div className="mb-2 flex items-start gap-2">
       {summary.command ? <Terminal className="mt-0.5 size-4 shrink-0 text-muted" aria-hidden /> : null}

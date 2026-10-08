@@ -34,7 +34,14 @@ export function ComputerLiveView({ session, conversationId, state }: {
   const active = Boolean(state?.active);
   const awaiting = Boolean(state?.awaitingHost) && !active;
   const latest = state?.actions.at(-1);
-  const latestShotId = state ? [...state.actions].reverse().find(action => action.shotId)?.shotId : undefined;
+  // One backward scan per actions change, not an array copy per render.
+  const latestShotId = useMemo(() => {
+    const actions = state?.actions ?? [];
+    for (let index = actions.length - 1; index >= 0; index--) {
+      if (actions[index].shotId) return actions[index].shotId;
+    }
+    return undefined;
+  }, [state?.actions]);
   const device = state?.deviceName || t('computerLive.host');
 
   // Live: the host's screen, only while shown and the page is visible.

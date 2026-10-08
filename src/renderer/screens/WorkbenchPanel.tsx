@@ -34,6 +34,8 @@ import { t, useT, type MessageKey } from '../i18n';
 
 type Props = {
   scopeKey?: string;
+  /** The panel is on screen (the aside is open); live views pause while it is not. */
+  shown?: boolean;
   onTargetConsumed?: () => void;
   session: TodeXSession;
   tab: WorkbenchTab;
@@ -146,7 +148,7 @@ function placeholderFiles(): Record<string, { title: string; language: string; b
   };
 }
 
-export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = session.activeConversation?.id || '', onTargetConsumed, closeRequestRef, sshMode = false, requests, onRequestsHandled, onItemsChange }: Props) {
+export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = session.activeConversation?.id || '', shown = true, onTargetConsumed, closeRequestRef, sshMode = false, requests, onRequestsHandled, onItemsChange }: Props) {
   const t = useT();
   const storageKey = `${SETTINGS_STORAGE_KEY}.workbenchTabs.v1:${scopeKey}`;
   const [items, setItems] = useState<WorkbenchItem[]>([]);
@@ -493,7 +495,7 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
             {item.type === 'files' ? <FilesPane session={session} remote={item.remote} onRemoteRebind={next => updateRemoteBinding(item.id, next)} target={item.type === tab && item.id === active?.id && (target?.filePath || target?.url) ? target : item.target} onTargetChange={next => updateTabTarget(item.id, next)} /> : null}
             {item.type === 'git-diff' ? <GitDiffPane session={session} /> : null}
             {item.type === 'ssh-exec' && item.sshExec ? <SshExecPane conversationId={item.sshExec.conversationId} runs={session.conversationRuntimeById[item.sshExec.conversationId]?.sshExecs ?? NO_SSH_EXECS} isActive={item.id === active?.id} /> : null}
-            {item.type === 'agent-browser' && item.agentBrowser ? <AgentBrowserLiveView session={session} isActive={item.id === active?.id} conversationId={item.agentBrowser.conversationId} /> : null}
+            {item.type === 'agent-browser' && item.agentBrowser ? <AgentBrowserLiveView session={session} isActive={shown && item.id === active?.id} conversationId={item.agentBrowser.conversationId} /> : null}
           </div>
         ))}
       </div>
