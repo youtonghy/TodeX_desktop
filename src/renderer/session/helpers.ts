@@ -416,14 +416,13 @@ export type ComposerAttachmentDraft = {
   messageId?: string;
 };
 
+/** A message headed for the backend follow-up queue (`conversation.queue.add`).
+ * The id is the queue item id and the prompt's clientRequestId. */
 export type QueuedChatSubmission = {
   id: string;
   text: string;
   attachments: ComposerAttachmentDraft[];
   skills: SelectedSkillAttachment[];
-  /** Goes ahead of the backend queue's items when handed over (the
-   * rate-limit continuation of an interrupted turn). */
-  front?: boolean;
 };
 
 export type PendingLocalStart = {
@@ -2199,11 +2198,21 @@ export function isV2Conversation(conversation: ConversationRecord | null | undef
   return Boolean(conversation?.v2ConversationId || (conversation?.provider && conversation.provider !== ''));
 }
 
-/** The connected backend holds this conversation's follow-ups
- * (`conversation.queue.*`) instead of the client-side candidate queue. */
+/** The connected backend holds queued follow-ups for this provider
+ * (`conversation.queue.*`). It is the only place queued messages live. */
+export function providerHasBackendQueue(providers: readonly ProviderDescriptor[], providerId: string | undefined): boolean {
+  return Boolean(providerId && providers.find((provider) => provider.id === providerId)?.capabilities.backendQueue === true);
+}
+
+/** The backend can also pause the queue by user request, hand an item back
+ * (`conversation.queue.pause|take`) and add one already paused. */
+export function providerHasBackendQueueControl(providers: readonly ProviderDescriptor[], providerId: string | undefined): boolean {
+  return providerHasBackendQueue(providers, providerId)
+    && providers.find((provider) => provider.id === providerId)?.capabilities.backendQueueControl === true;
+}
+
 export function hasBackendQueue(providers: readonly ProviderDescriptor[], conversation: ConversationRecord | null | undefined): boolean {
-  return Boolean(conversation?.v2ConversationId && conversation.provider
-    && providers.find((provider) => provider.id === conversation.provider)?.capabilities.backendQueue === true);
+  return Boolean(conversation?.v2ConversationId && providerHasBackendQueue(providers, conversation.provider));
 }
 
 export function conversationImageInputSupport(

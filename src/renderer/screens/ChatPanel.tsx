@@ -1423,19 +1423,14 @@ export function ChatPanel({ session }: Props) {
             canUseNativeQueue={providerDescriptor?.capabilities.followUpQueue === true}
             piQueue={currentProvider === 'pi'}
             controlStatus={session.controlStatusByConversation[conversation.id]}
-            localQueue={session.queuedChatDrafts[conversation.id] ?? []}
-            localPaused={session.queuePausedByConversation[conversation.id] === true}
-            rateLimited={session.rateLimitedUntilByConversation[conversation.id]}
+            canPauseBackend={providerDescriptor?.capabilities.backendQueue === true && providerDescriptor.capabilities.backendQueueControl === true}
             onRecover={() => { void session.recoverConversation(conversation.id); }}
             onRemoveNative={itemId => { void session.controlConversation(conversation.id, { action: 'queueRemove', itemId }); }}
             onClearNative={() => { void session.controlConversation(conversation.id, { action: 'queueClear' }); }}
-            onRemoveLocal={itemId => session.removeQueuedFollowUp(conversation.id, itemId)}
-            onResumeLocal={() => { void session.resumeQueuedFollowUps(conversation.id); }}
-            onClearLocal={() => session.clearQueuedFollowUps(conversation.id)}
             onRemoveBackend={itemId => { void session.editFollowUpQueue(conversation.id, 'remove', itemId); }}
             onClearBackend={() => { void session.editFollowUpQueue(conversation.id, 'clear'); }}
             onResumeBackend={() => { void session.editFollowUpQueue(conversation.id, 'resume'); }}
-            onRevealPath={filePath => session.openPanel('Files', { filePath })}
+            onPauseBackend={() => { void session.editFollowUpQueue(conversation.id, 'pause'); }}
           /> : null}
           <NoticeToast message={hasBlockedImageAttachment ? t('chat.imageSendBlocked') : null}
             description={imageInputSupport.reason} scope={conversation.id} />
