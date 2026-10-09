@@ -1002,6 +1002,10 @@ export const en: Messages = {
   'usage.quotaWindow.secondary': 'Secondary window',
   'usage.quotaWindow.five_hour': '5-hour window',
   'usage.quotaWindow.seven_day': '7-day window',
+  'usage.quotaWindow.gemini_weekly': 'Gemini · weekly',
+  'usage.quotaWindow.gemini_5h': 'Gemini · 5-hour',
+  'usage.quotaWindow.third_party_weekly': 'Claude & GPT · weekly',
+  'usage.quotaWindow.third_party_5h': 'Claude & GPT · 5-hour',
 
   // cli
   'cli.statusUpToDate': 'Up to date',

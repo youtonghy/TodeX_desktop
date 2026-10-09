@@ -14,16 +14,22 @@ type Props = {
 
 // Account-level plan quota (GET /v2/providers/quota), refreshed while the
 // panel is open. Claude Code only reports during a turn, so its card may sit
-// in the idle state until a session runs. Devin's ACP exposes no plan-quota
-// surface today, so it is filtered out of the display order.
+// in the idle state until a session runs. Antigravity's windows come from
+// `agy /usage`, one weekly and one 5-hour window per model group. Devin's ACP
+// exposes no plan-quota surface today, so it is filtered out of the display
+// order.
 const QUOTA_REFRESH_MS = 60_000;
-const QUOTA_PROVIDER_ORDER = ['codex', 'claude-code'];
+const QUOTA_PROVIDER_ORDER = ['codex', 'claude-code', 'antigravity'];
 const QUOTA_HIDDEN_PROVIDERS = new Set(['devin']);
 const QUOTA_WINDOW_KEYS: Record<string, MessageKey> = {
   primary: 'usage.quotaWindow.primary',
   secondary: 'usage.quotaWindow.secondary',
   five_hour: 'usage.quotaWindow.five_hour',
   seven_day: 'usage.quotaWindow.seven_day',
+  'gemini-weekly': 'usage.quotaWindow.gemini_weekly',
+  'gemini-5h': 'usage.quotaWindow.gemini_5h',
+  '3p-weekly': 'usage.quotaWindow.third_party_weekly',
+  '3p-5h': 'usage.quotaWindow.third_party_5h',
 };
 
 function quotaWindowLabel(window: QuotaWindow): string {

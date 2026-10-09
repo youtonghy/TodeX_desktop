@@ -1221,6 +1221,7 @@ export function conversationDisplayTitle(
     'claude code',
     'devin',
     'opencode',
+    'antigravity',
     conversation.provider ? providerDisplayName(conversation.provider).toLowerCase() : '',
   ]);
   if (!genericTitles.has(title.toLowerCase()) && !isDefaultConversationTitle(title)) {

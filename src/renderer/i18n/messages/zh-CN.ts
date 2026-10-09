@@ -1002,6 +1002,10 @@ export const zhCN = {
   'usage.quotaWindow.secondary': '次级窗口',
   'usage.quotaWindow.five_hour': '5 小时窗口',
   'usage.quotaWindow.seven_day': '7 天窗口',
+  'usage.quotaWindow.gemini_weekly': 'Gemini · 每周',
+  'usage.quotaWindow.gemini_5h': 'Gemini · 5 小时',
+  'usage.quotaWindow.third_party_weekly': 'Claude 与 GPT · 每周',
+  'usage.quotaWindow.third_party_5h': 'Claude 与 GPT · 5 小时',
 
   // cli
   'cli.statusUpToDate': '已是最新',

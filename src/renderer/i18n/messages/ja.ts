@@ -1002,6 +1002,10 @@ export const ja: Messages = {
   'usage.quotaWindow.secondary': 'セカンダリウィンドウ',
   'usage.quotaWindow.five_hour': '5 時間ウィンドウ',
   'usage.quotaWindow.seven_day': '7 日間ウィンドウ',
+  'usage.quotaWindow.gemini_weekly': 'Gemini · 週間',
+  'usage.quotaWindow.gemini_5h': 'Gemini · 5 時間',
+  'usage.quotaWindow.third_party_weekly': 'Claude と GPT · 週間',
+  'usage.quotaWindow.third_party_5h': 'Claude と GPT · 5 時間',
 
   // cli
   'cli.statusUpToDate': '最新です',

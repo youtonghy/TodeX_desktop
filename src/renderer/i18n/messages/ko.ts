@@ -1002,6 +1002,10 @@ export const ko: Messages = {
   'usage.quotaWindow.secondary': '보조 창',
   'usage.quotaWindow.five_hour': '5시간 창',
   'usage.quotaWindow.seven_day': '7일 창',
+  'usage.quotaWindow.gemini_weekly': 'Gemini · 주간',
+  'usage.quotaWindow.gemini_5h': 'Gemini · 5시간',
+  'usage.quotaWindow.third_party_weekly': 'Claude 및 GPT · 주간',
+  'usage.quotaWindow.third_party_5h': 'Claude 및 GPT · 5시간',
 
   // cli
   'cli.statusUpToDate': '최신 상태',

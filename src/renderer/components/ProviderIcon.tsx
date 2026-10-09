@@ -1,3 +1,4 @@
+import antigravitySvg from '@lobehub/icons-static-svg/icons/antigravity.svg?raw';
 import claudeCodeSvg from '@lobehub/icons-static-svg/icons/claudecode.svg?raw';
 import codexSvg from '@lobehub/icons-static-svg/icons/codex.svg?raw';
 import devinSvg from '@lobehub/icons-static-svg/icons/devin.svg?raw';
@@ -29,6 +30,7 @@ function brandSvg(provider?: string | null): string | null {
   if (id === 'grok-build' || id === 'grok') return grokSvg;
   if (id === 'devin' || id === 'devin-cli' || id === 'devin_cli') return devinSvg;
   if (id === 'opencode' || id === 'open-code' || id === 'open_code') return opencodeSvg;
+  if (id === 'antigravity' || id === 'agy' || id === 'antigravity-cli') return antigravitySvg;
   return null;
 }
 
