@@ -685,7 +685,13 @@ export function ChatPanel({ session }: Props) {
   const [hostApps, setHostApps] = useState<{ apps: HostApp[]; empty?: 'off' | 'unsupported' | 'failed' } | null>(null);
   useEffect(() => {
     let active = true;
-    if (referenceType !== 'app' || hostApps !== null) {
+    if (referenceType !== 'app') {
+      // Off and failed are retried on the next @app:, so turning Computer
+      // Use on in Settings shows the list without reopening the panel.
+      if (hostApps?.empty === 'off' || hostApps?.empty === 'failed') setHostApps(null);
+      return () => { active = false; };
+    }
+    if (hostApps !== null) {
       return () => { active = false; };
     }
     void session.fetchHostApps()
