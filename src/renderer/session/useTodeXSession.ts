@@ -7,7 +7,7 @@ import {
   useCompletionNotifications,
 } from './completionNotifications';
 import { bindSentAttachmentEvents, prepareSentAttachments, projectSentAttachments, pruneSentAttachmentRecords, type SentAttachmentRecord } from './sentAttachments';
-import { configureKanbanSync, syncKanbanTasksFromBackend } from './kanbanTasks';
+import { configureKanbanSync, syncKanbanTasksFromBackend, type KanbanTaskSchedule } from './kanbanTasks';
 import { t } from '../i18n';
 import { migrateLegacyFollowUps, restoreQueuedFollowUps, type LegacyAddResult, type LegacyFollowUps, type LegacyQueueTarget } from './queuedFollowUps';
 import { backendRateLimitState } from './sessionRateLimit';
@@ -6069,7 +6069,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
 
   const createConversation = useCallback((
     workspaceId: string,
-    options?: { provider?: ProviderKind; providerProfile?: string; title?: string; backendConnectionId?: string },
+    // `fresh` never recycles an unused draft: a kanban task owns each
+    // conversation it starts, so two starts must not share one.
+    options?: { provider?: ProviderKind; providerProfile?: string; title?: string; backendConnectionId?: string; fresh?: boolean },
   ) => {
     const workspace = workspacesRef.current.find((item) => item.id === workspaceId);
     if (!workspace) {
@@ -6099,7 +6101,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       providerModelPreferencesRef.current[providerModelPreferenceKey(backendConnectionId, agent.provider)],
       v2ProvidersRef.current.find((item) => item.id === agent.provider)?.capabilities.permissionConfig,
     );
-    const existing = conversationsRef.current.find((item) =>
+    const existing = options?.fresh ? undefined : conversationsRef.current.find((item) =>
       item.workspaceId === workspaceId
       && item.backendConnectionId === backendConnectionId
       && isUnusedConversation(item));
@@ -6453,6 +6455,51 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       ...(content.length ? { content } : {}),
     };
   }, [promptContentFromAttachments, promptSkillsFromAttachments, settings.defaultModel]);
+
+  /** Send settings a kanban schedule snapshots: those of the target
+   * conversation, or the agent and run modes a new conversation in the
+   * workspace would get. Null when there is nothing to send with. */
+  const kanbanScheduleSettings = useCallback((
+    workspaceId: string,
+    conversationId?: string,
+  ): Pick<KanbanTaskSchedule, 'provider' | 'providerProfile' | 'model' | 'reasoningEffort' | 'permissionMode' | 'workMode'> | null => {
+    const workspace = workspacesRef.current.find((item) => item.id === workspaceId);
+    if (!workspace) return null;
+    const codexModel = (provider: string | undefined, model: string | undefined) => (
+      (provider === 'codex' ? model || workspace.model || settings.defaultModel : model) || undefined
+    );
+    if (conversationId) {
+      const conversation = conversationsRef.current.find((item) => item.id === conversationId);
+      if (!conversation?.v2ConversationId) return null;
+      return {
+        model: codexModel(conversation.provider, conversation.model),
+        reasoningEffort: conversation.reasoningEffort || undefined,
+        permissionMode: conversationPermissionMode(conversation, workspace, v2ProvidersRef.current) ?? undefined,
+        workMode: conversation.mode === 'plan' ? 'plan' : 'implement',
+      };
+    }
+    const agent = resolveCreateConversationAgent({
+      providers: v2ProvidersRef.current,
+      conversations: conversationsRef.current,
+      activeConversationId: activeConversationRef.current,
+      workspaceId,
+    });
+    if (!agent) return null;
+    const backendConnectionId = workspace.backendConnectionId ?? null;
+    const remembered = resolveRememberedProviderSelection(backendConnectionId, agent.provider);
+    const runModes = rememberedRunModes(
+      providerModelPreferencesRef.current[providerModelPreferenceKey(backendConnectionId, agent.provider)],
+      v2ProvidersRef.current.find((item) => item.id === agent.provider)?.capabilities.permissionConfig,
+    );
+    return {
+      provider: agent.provider,
+      providerProfile: agent.providerProfile,
+      model: codexModel(agent.provider, remembered.model),
+      reasoningEffort: remembered.reasoningEffort || undefined,
+      permissionMode: runModes.permissionMode,
+      workMode: runModes.mode,
+    };
+  }, [resolveRememberedProviderSelection, settings.defaultModel]);
 
   const materializeV2Conversation = useCallback(async (
     conversationId: string,
@@ -8766,6 +8813,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     forkWorkspace,
     removeWorkspace,
     createConversation,
+    kanbanScheduleSettings,
+    materializeConversation: materializeV2Conversation,
     switchConversationAgent,
     selectConversation,
     renameConversation,

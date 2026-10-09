@@ -4,15 +4,18 @@ import {
   mergeKanbanTasks,
   normalizeKanbanTask,
   parseKanbanSyncResponse,
+  parseKanbanTimeZone,
   prepareKanbanSyncPayload,
   type KanbanTask,
+  type KanbanTaskSchedule,
   type KanbanTaskStatus,
+  type KanbanTimeZone,
 } from '@todex/protocol/todex';
 import { loadJson, saveJson } from '../lib/storage';
 import { KANBAN_TASKS_STORAGE_KEY, WORKSPACE_SYNC_DEBOUNCE_MS, backendFetch, type BackendTransportProfile } from './helpers';
 import { t } from '../i18n';
 
-export type { KanbanTask, KanbanTaskStatus };
+export type { KanbanTask, KanbanTaskSchedule, KanbanTaskStatus, KanbanTimeZone };
 
 export const kanbanTaskStatuses: readonly KanbanTaskStatus[] = KANBAN_TASK_STATUSES;
 
@@ -39,6 +42,9 @@ export type KanbanSyncConfig = BackendTransportProfile & {
 let tasks: KanbanTask[] = [];
 let loading: Promise<void> | null = null;
 const listeners = new Set<() => void>();
+// Zone of the connected backend, which runs schedules in its own local time.
+let timeZone: KanbanTimeZone | null = null;
+const timeZoneListeners = new Set<() => void>();
 
 let syncConfig: KanbanSyncConfig | null = null;
 // A 404 marks a backend older than the sync endpoints; stay local-only until
@@ -92,10 +98,27 @@ export function useKanbanTasks(): KanbanTask[] {
   return useSyncExternalStore(subscribe, getKanbanTasks);
 }
 
+function setTimeZone(next: KanbanTimeZone | null) {
+  if (timeZone?.name === next?.name && timeZone?.offsetMinutes === next?.offsetMinutes) return;
+  timeZone = next;
+  for (const listener of timeZoneListeners) listener();
+}
+
+/** The connected backend's time zone, or null before the first sync. */
+export function useKanbanTimeZone(): KanbanTimeZone | null {
+  return useSyncExternalStore((listener) => {
+    timeZoneListeners.add(listener);
+    return () => { timeZoneListeners.delete(listener); };
+  }, () => timeZone);
+}
+
 export function configureKanbanSync(config: KanbanSyncConfig | null): void {
   const previous = syncConfig;
   syncConfig = config;
-  if (!config) return;
+  if (!config) {
+    setTimeZone(null);
+    return;
+  }
   const changed = !previous
     || previous.serverUrl !== config.serverUrl
     || previous.deviceSecret !== config.deviceSecret
@@ -105,6 +128,7 @@ export function configureKanbanSync(config: KanbanSyncConfig | null): void {
     || previous.backendConnectionId !== config.backendConnectionId;
   if (changed) {
     syncSupported = true;
+    setTimeZone(null);
     void syncKanbanTasksFromBackend();
   }
 }
@@ -125,12 +149,19 @@ export async function syncKanbanTasksFromBackend(): Promise<void> {
     if (!response.ok) {
       throw new Error(`kanban task sync returned ${response.status}`);
     }
-    applyRemoteTasks(parseKanbanSyncResponse(await response.json()), config.backendConnectionId);
+    applyRemoteResponse(await response.json(), config);
     // Upload local additions and tombstones the backend does not know yet.
     scheduleKanbanBackendPush();
   } catch (error) {
     console.warn('kanban task sync failed', error);
   }
+}
+
+function applyRemoteResponse(body: unknown, config: KanbanSyncConfig): void {
+  // A response for a connection switched away from meanwhile only merges
+  // its (connection-tagged) tasks; the zone belongs to the current one.
+  if (syncConfig === config) setTimeZone(parseKanbanTimeZone(body));
+  applyRemoteTasks(parseKanbanSyncResponse(body), config.backendConnectionId);
 }
 
 function applyRemoteTasks(remote: KanbanTask[], backendConnectionId: string): void {
@@ -172,7 +203,7 @@ async function pushKanbanTasksToBackend(): Promise<void> {
     if (!response.ok) {
       throw new Error(`kanban task sync returned ${response.status}`);
     }
-    applyRemoteTasks(parseKanbanSyncResponse(await response.json()), config.backendConnectionId);
+    applyRemoteResponse(await response.json(), config);
   } catch (error) {
     console.warn('kanban task sync failed', error);
   } finally {
@@ -279,6 +310,17 @@ export function detachKanbanTask(id: string, conversationId: string): void {
   }));
 }
 
+/** Swaps a linked id in place, e.g. a local draft id for its backend id. */
+export function replaceKanbanTaskConversation(id: string, from: string, to: string): void {
+  if (!to || from === to) return;
+  commit(tasks.map((task) => {
+    if (task.id !== id || task.deletedAt) return task;
+    const ids = kanbanTaskConversationIds(task);
+    if (!ids.includes(from)) return task;
+    return withConversations(task, [...new Set(ids.map((item) => (item === from ? to : item)))]);
+  }));
+}
+
 export function setKanbanTaskConversations(id: string, conversationIds: string[]): void {
   const unique = [...new Set(conversationIds.filter(Boolean))];
   commit(tasks.map((task) => {
@@ -287,6 +329,44 @@ export function setKanbanTaskConversations(id: string, conversationIds: string[]
     if (current.length === unique.length && current.every((item, index) => item === unique[index])) return task;
     return withConversations(task, unique);
   }));
+}
+
+/** Arms (or replaces) the task's schedule; the backend runs it at `at`. */
+export function setKanbanTaskSchedule(
+  id: string,
+  schedule: Omit<KanbanTaskSchedule, 'id' | 'status'>,
+): void {
+  const next: KanbanTaskSchedule = {
+    ...schedule,
+    id: `sched-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+    status: 'pending',
+  };
+  commit(tasks.map((task) => (
+    task.id === id && !task.deletedAt ? { ...task, schedule: next, updatedAt: Date.now() } : task
+  )));
+}
+
+/** Cancels a pending schedule. It stays on the task as `cancelled`: a
+ * dropped field would read as a client that does not know schedules. */
+export function cancelKanbanTaskSchedule(id: string): void {
+  commit(tasks.map((task) => (
+    task.id === id && !task.deletedAt && task.schedule?.status === 'pending'
+      ? { ...task, schedule: { ...task.schedule, status: 'cancelled' }, updatedAt: Date.now() }
+      : task
+  )));
+}
+
+/** Wall-clock `YYYY-MM-DDTHH:MM` in the backend's zone at `now`. */
+export function kanbanBackendLocalTime(zone: KanbanTimeZone, now = Date.now()): string {
+  return new Date(now + zone.offsetMinutes * 60_000).toISOString().slice(0, 16);
+}
+
+/** Display label of the backend zone, e.g. `Asia/Shanghai (UTC+08:00)`. */
+export function kanbanTimeZoneLabel(zone: KanbanTimeZone): string {
+  const sign = zone.offsetMinutes < 0 ? '-' : '+';
+  const minutes = Math.abs(zone.offsetMinutes);
+  const offset = `UTC${sign}${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
+  return zone.name ? `${zone.name} (${offset})` : offset;
 }
 
 function compareKanbanTasks(a: KanbanTask, b: KanbanTask): number {

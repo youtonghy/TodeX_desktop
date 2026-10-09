@@ -1,7 +1,7 @@
 import { useMemo, useState, type DragEvent, type Key, type ReactNode } from 'react';
 import { isTextDropItem, useDragAndDrop, type Selection } from 'react-aria-components';
 import { Plus } from '@gravity-ui/icons';
-import { RiArrowDownSLine, RiArrowRightLine, RiCalendarLine, RiChat3Line, RiCheckLine, RiDraggable, RiFolder3Line, RiMoreFill } from '@remixicon/react';
+import { RiArrowDownSLine, RiArrowRightLine, RiCalendarLine, RiChat3Line, RiCheckLine, RiDraggable, RiFolder3Line, RiMoreFill, RiTimerLine } from '@remixicon/react';
 import { Button, Chip, Dropdown, Header, Label, ListBox, Modal, Select, Separator, TextArea, TextField, Tooltip } from '@heroui/react';
 import { ContextMenu, EmptyState, Kanban } from '@heroui-pro/react';
 import type { WorkspaceRecord } from '@todex/protocol/todex';
@@ -11,19 +11,27 @@ import { Field } from '../components/Field';
 import { useT } from '../i18n';
 import {
   addKanbanTask,
+  attachKanbanTask,
+  cancelKanbanTaskSchedule,
   isKanbanTaskOverdue,
+  kanbanBackendLocalTime,
   kanbanTaskConversationIds,
   kanbanTaskDraftText,
   kanbanTaskStatusLabel,
   kanbanTaskStatuses,
   kanbanTasksForWorkspace,
+  kanbanTimeZoneLabel,
   moveKanbanTasks,
   removeKanbanTask,
   renameKanbanTask,
+  replaceKanbanTaskConversation,
   setKanbanTaskConversations,
+  setKanbanTaskSchedule,
   setKanbanTaskStatus,
   useKanbanTasks,
+  useKanbanTimeZone,
   type KanbanTask,
+  type KanbanTaskSchedule,
   type KanbanTaskStatus,
 } from '../session/kanbanTasks';
 
@@ -71,7 +79,6 @@ const STATUS_META: Record<KanbanTaskStatus, { chip: ChipColor }> = {
   done: { chip: 'default' },
 };
 
-const ATTACH_LIMIT = 12;
 // Custom mime so task drags never collide with the column drag (text/plain).
 const TASK_DRAG_TYPE = 'application/x-todex-kanban-task';
 
@@ -82,6 +89,20 @@ const CONVERSATION_GROUP_ORDER: ConversationGroupKind[] = ['working', 'issue', '
 type LatestEntries = Record<string, { latest: TimelineEntry | undefined; latestIncomingAt: number }>;
 
 type LinkedConversation = { conversation: ConversationRecord; status: ConversationGroupKind; label: string; dot: string };
+
+/** Task links hold the local id of a conversation started on this device, or
+ * the backend id of one started elsewhere (another device, a schedule). */
+function findTaskConversation(conversations: ConversationRecord[], id: string): ConversationRecord | undefined {
+  return conversations.find((item) => item.id === id || item.v2ConversationId === id);
+}
+
+/** Linked ids worth keeping when clearing stale links: a conversation a
+ * schedule just started may not be in the polled conversation list yet. */
+function keptTaskConversationIds(task: KanbanTask, conversations: ConversationRecord[]): string[] {
+  const pending = task.schedule?.resultConversationId;
+  return kanbanTaskConversationIds(task)
+    .filter((id) => id === pending || findTaskConversation(conversations, id));
+}
 
 function groupLinkedConversations(
   task: KanbanTask,
@@ -95,7 +116,7 @@ function groupLinkedConversations(
   const linked: LinkedConversation[] = [];
   let staleCount = 0;
   for (const id of kanbanTaskConversationIds(task)) {
-    const conversation = conversations.find((item) => item.id === id);
+    const conversation = findTaskConversation(conversations, id);
     if (!conversation) {
       staleCount += 1;
       continue;
@@ -123,28 +144,43 @@ function groupLinkedConversations(
   return { groups, staleCount, linked };
 }
 
-function TaskCard({ task, session, conversations, latestEntries, onOpen }: {
+function TaskScheduleLine({ schedule }: { schedule: KanbanTaskSchedule }) {
+  const t = useT();
+  const at = schedule.at.replace('T', ' ');
+  const action = schedule.action === 'start' ? t('kanban.scheduleStart') : t('kanban.scheduleSend');
+  if (schedule.status === 'cancelled') return null;
+  const text = schedule.status === 'pending'
+    ? t('kanban.schedulePending', { at, action })
+    : schedule.status === 'running'
+      ? t('kanban.scheduleRunning')
+      : schedule.status === 'done'
+        ? t(schedule.turnId || schedule.action === 'start' ? 'kanban.scheduleDone' : 'kanban.scheduleQueued', { at })
+        : t('kanban.scheduleFailed', { error: schedule.error ?? '' });
+  return (
+    <div
+      className={`flex min-w-0 items-center gap-1 text-xs ${schedule.status === 'failed' ? 'text-danger' : schedule.status === 'done' ? 'text-muted' : 'text-accent'}`}
+      title={schedule.status === 'failed' ? schedule.error : undefined}
+    >
+      <RiTimerLine className="size-3.5 shrink-0" />
+      <span className="truncate">{text}</span>
+    </div>
+  );
+}
+
+function TaskCard({ task, session, conversations, latestEntries, onOpen, onNewConversation, onSchedule }: {
   task: KanbanTask;
   session: TodeXSession;
   conversations: ConversationRecord[];
   latestEntries: LatestEntries;
   onOpen: (workspaceId: string, conversationId: string) => void;
+  onNewConversation: (task: KanbanTask) => void;
+  onSchedule: (task: KanbanTask) => void;
 }) {
   const t = useT();
   const done = task.status === 'done';
   const { groups, staleCount, linked } = groupLinkedConversations(
     task, session, conversations, latestEntries, t('kanban.groupPlain'), t('kanban.linkStale'),
   );
-
-  const applyConversationSelection = (selection: Selection) => {
-    const visible = new Set(conversations.map((conversation) => conversation.id));
-    const picked = selection === 'all'
-      ? conversations.map((conversation) => conversation.id)
-      : [...selection].map(String).filter((id) => visible.has(id));
-    // Keep ids that are stale or beyond the menu limit so toggles don't drop them.
-    const hidden = kanbanTaskConversationIds(task).filter((id) => !visible.has(id));
-    setKanbanTaskConversations(task.id, [...picked, ...hidden]);
-  };
 
   const applyStatusSelection = (selection: Selection) => {
     if (selection === 'all') return;
@@ -159,6 +195,12 @@ function TaskCard({ task, session, conversations, latestEntries, onOpen }: {
     const argument = separator < 0 ? '' : value.slice(separator + 1);
     if (action === 'open') {
       onOpen(task.workspaceId, linked[0]?.conversation.id ?? '');
+    } else if (action === 'new') {
+      onNewConversation(task);
+    } else if (action === 'schedule') {
+      onSchedule(task);
+    } else if (action === 'cancel-schedule') {
+      cancelKanbanTaskSchedule(task.id);
     } else if (action === 'draft' && argument) {
       const target = conversations.find((conversation) => conversation.id === argument);
       if (!target) return;
@@ -168,8 +210,7 @@ function TaskCard({ task, session, conversations, latestEntries, onOpen }: {
       ));
       onOpen(task.workspaceId, target.id);
     } else if (action === 'clear-stale') {
-      const visible = new Set(conversations.map((conversation) => conversation.id));
-      setKanbanTaskConversations(task.id, kanbanTaskConversationIds(task).filter((id) => visible.has(id)));
+      setKanbanTaskConversations(task.id, keptTaskConversationIds(task, conversations));
     } else if (action === 'rename') {
       const title = window.prompt(t('kanban.renamePrompt'), task.title);
       if (title) renameKanbanTask(task.id, title);
@@ -179,8 +220,10 @@ function TaskCard({ task, session, conversations, latestEntries, onOpen }: {
   };
 
   // ContextMenu.Item and friends re-export the Dropdown parts, so one JSX
-  // block can serve both the right-click menu and the "…" dropdown.
-  const menuItems: ReactNode = (
+  // block serves both the right-click menu and the "…" dropdown. A submenu
+  // must use its own root's popover and menu: a Dropdown popover nested in
+  // the context menu renders unstyled beside it.
+  const menuItems = (Popover: typeof Dropdown.Popover, Menu: typeof Dropdown.Menu): ReactNode => (
     <>
       <Dropdown.Section
         selectionMode="single"
@@ -195,39 +238,23 @@ function TaskCard({ task, session, conversations, latestEntries, onOpen }: {
           </Dropdown.Item>
         ))}
       </Dropdown.Section>
-      <Dropdown.Section
-        selectionMode="multiple"
-        selectedKeys={new Set(kanbanTaskConversationIds(task).filter((id) => conversations.some((conversation) => conversation.id === id)))}
-        onSelectionChange={applyConversationSelection}
-      >
-        <Header>{t('kanban.attachSection')}</Header>
-        {conversations.length === 0 ? (
-          <Dropdown.Item id="noop" textValue={t('kanban.noConversations')} isDisabled>
-            <Label>{t('kanban.noConversations')}</Label>
-          </Dropdown.Item>
-        ) : conversations.slice(0, ATTACH_LIMIT).map((conversation) => (
-          <Dropdown.Item
-            key={conversation.id}
-            id={conversation.id}
-            textValue={conversationDisplayTitle(conversation, session.timeline)}
-          >
-            <Dropdown.ItemIndicator />
-            <Label className="truncate">{conversationDisplayTitle(conversation, session.timeline)}</Label>
-          </Dropdown.Item>
-        ))}
-      </Dropdown.Section>
       <Separator />
-      <Dropdown.Item id="open" textValue={t('kanban.openConversation')}>
-        <Label>{t('kanban.openConversation')}</Label>
+      <Dropdown.Item id="new" textValue={t('kanban.newConversation')}>
+        <Label>{t('kanban.newConversation')}</Label>
       </Dropdown.Item>
+      {linked.length ? (
+        <Dropdown.Item id="open" textValue={t('kanban.openConversation')}>
+          <Label>{t('kanban.openConversation')}</Label>
+        </Dropdown.Item>
+      ) : null}
       {linked.length ? (
         <Dropdown.SubmenuTrigger>
           <Dropdown.Item id="draft" textValue={t('kanban.draftToChat')}>
             <Label>{t('kanban.draftToChat')}</Label>
             <Dropdown.SubmenuIndicator />
           </Dropdown.Item>
-          <Dropdown.Popover>
-            <Dropdown.Menu aria-label={t('kanban.draftToChat')} onAction={runTaskAction}>
+          <Popover>
+            <Menu aria-label={t('kanban.draftToChat')} onAction={runTaskAction}>
               {linked.map(({ conversation }) => (
                 <Dropdown.Item
                   key={conversation.id}
@@ -237,15 +264,24 @@ function TaskCard({ task, session, conversations, latestEntries, onOpen }: {
                   <Label className="truncate">{conversationDisplayTitle(conversation, session.timeline)}</Label>
                 </Dropdown.Item>
               ))}
-            </Dropdown.Menu>
-          </Dropdown.Popover>
+            </Menu>
+          </Popover>
         </Dropdown.SubmenuTrigger>
+      ) : null}
+      <Dropdown.Item id="schedule" textValue={t('kanban.schedule')}>
+        <Label>{t('kanban.schedule')}</Label>
+      </Dropdown.Item>
+      {task.schedule?.status === 'pending' ? (
+        <Dropdown.Item id="cancel-schedule" textValue={t('kanban.scheduleCancel')}>
+          <Label>{t('kanban.scheduleCancel')}</Label>
+        </Dropdown.Item>
       ) : null}
       {staleCount ? (
         <Dropdown.Item id="clear-stale" textValue={t('kanban.clearStale')}>
           <Label>{t('kanban.clearStale')}</Label>
         </Dropdown.Item>
       ) : null}
+      <Separator />
       <Dropdown.Item id="rename" textValue={t('kanban.renameAria')}>
         <Label>{t('kanban.rename')}</Label>
       </Dropdown.Item>
@@ -293,6 +329,8 @@ function TaskCard({ task, session, conversations, latestEntries, onOpen }: {
               </div>
             ) : null}
 
+            {task.schedule ? <TaskScheduleLine schedule={task.schedule} /> : null}
+
             {groups.map((group) => (
               <div key={group.kind} className="flex min-w-0 flex-col gap-0.5">
                 {groups.length > 1 || group.kind !== 'plain' ? (
@@ -336,7 +374,7 @@ function TaskCard({ task, session, conversations, latestEntries, onOpen }: {
                 </Dropdown.Trigger>
                 <Dropdown.Popover>
                   <Dropdown.Menu aria-label={t('kanban.taskActions')} onAction={runTaskAction}>
-                    {menuItems}
+                    {menuItems(Dropdown.Popover, Dropdown.Menu)}
                   </Dropdown.Menu>
                 </Dropdown.Popover>
               </Dropdown>
@@ -345,7 +383,7 @@ function TaskCard({ task, session, conversations, latestEntries, onOpen }: {
         </ContextMenu.Trigger>
         <ContextMenu.Popover>
           <ContextMenu.Menu aria-label={t('kanban.taskActions')} onAction={runTaskAction}>
-            {menuItems}
+            {menuItems(ContextMenu.Popover, ContextMenu.Menu)}
           </ContextMenu.Menu>
         </ContextMenu.Popover>
       </ContextMenu>
@@ -434,13 +472,14 @@ function StatusSection({ workspace, status, items, collapsed, onToggleCollapsed,
 
 type ColumnDropPosition = 'before' | 'after';
 
-function WorkspaceColumn({ workspace, meta, tasks, session, latestEntries, onOpenConversation, dragging, dropPosition, onHandleDragStart, onColumnDragOver, onColumnDrop, onColumnDragEnd }: {
+function WorkspaceColumn({ workspace, meta, tasks, session, latestEntries, onOpenConversation, onScheduleTask, dragging, dropPosition, onHandleDragStart, onColumnDragOver, onColumnDrop, onColumnDragEnd }: {
   workspace: WorkspaceRecord;
   meta: ColumnMeta;
   tasks: KanbanTask[];
   session: TodeXSession;
   latestEntries: LatestEntries;
   onOpenConversation: (workspaceId: string, conversationId: string) => void;
+  onScheduleTask: (task: KanbanTask) => void;
   dragging: boolean;
   dropPosition: ColumnDropPosition | null;
   onHandleDragStart: (event: DragEvent<HTMLElement>) => void;
@@ -454,21 +493,27 @@ function WorkspaceColumn({ workspace, meta, tasks, session, latestEntries, onOpe
     .filter((conversation) => conversation.workspaceId === workspace.id && !conversation.archived)
     .sort((a, b) => b.updatedAt - a.updatedAt);
 
-  const openTaskConversation = (task: KanbanTask) => {
-    const [firstId] = kanbanTaskConversationIds(task);
-    const linked = firstId
-      ? conversations.find((conversation) => conversation.id === firstId)
-      : undefined;
-    if (linked) {
-      onOpenConversation(task.workspaceId, linked.id);
-      return;
-    }
-    if (firstId) setKanbanTaskConversations(task.id, []);
-    const created = session.createConversation(task.workspaceId, { title: task.title });
+  /** Starts another conversation for the task, prefilled with its draft. It
+   * is created on the backend right away: an unsent local draft is dropped
+   * as soon as another one opens, and only the backend id resolves on other
+   * devices and for schedules. */
+  const startTaskConversation = (task: KanbanTask) => {
+    const created = session.createConversation(task.workspaceId, { title: task.title, fresh: true });
     if (!created) return;
-    setKanbanTaskConversations(task.id, [created.id]);
+    attachKanbanTask(task.id, created.id);
     session.setConversationChatDraft(created.id, kanbanTaskDraftText(task));
     onOpenConversation(task.workspaceId, created.id);
+    void session.materializeConversation(created.id, task.title).then((record) => {
+      if (record?.v2ConversationId) replaceKanbanTaskConversation(task.id, created.id, record.v2ConversationId);
+    });
+  };
+
+  const openTaskConversation = (task: KanbanTask) => {
+    const linked = kanbanTaskConversationIds(task)
+      .map((id) => findTaskConversation(conversations, id))
+      .find(Boolean);
+    if (linked) onOpenConversation(task.workspaceId, linked.id);
+    else startTaskConversation(task);
   };
 
   return (
@@ -547,6 +592,8 @@ function WorkspaceColumn({ workspace, meta, tasks, session, latestEntries, onOpe
                   conversations={conversations}
                   latestEntries={latestEntries}
                   onOpen={onOpenConversation}
+                  onNewConversation={startTaskConversation}
+                  onSchedule={onScheduleTask}
                 />
               )}
             </StatusSection>
@@ -554,6 +601,144 @@ function WorkspaceColumn({ workspace, meta, tasks, session, latestEntries, onOpe
         })}
       </Kanban.ColumnBody>
     </Kanban.Column>
+  );
+}
+
+/** Arms a task schedule. The time is wall-clock in the backend's zone, which
+ * is where it runs; the send settings are snapshotted now, as the backend
+ * cannot ask this device for them later. */
+function ScheduleTaskDialog({ session, task, onClose }: {
+  session: TodeXSession;
+  task: KanbanTask | null;
+  onClose: () => void;
+}) {
+  const t = useT();
+  const zone = useKanbanTimeZone();
+  const [action, setAction] = useState<KanbanTaskSchedule['action']>('start');
+  const [conversationId, setConversationId] = useState('');
+  const [at, setAt] = useState('');
+  const [text, setText] = useState('');
+  const [error, setError] = useState('');
+  const [openedFor, setOpenedFor] = useState<string | null>(null);
+
+  // Sendable targets: linked conversations that exist on the backend.
+  const targets = (task ? kanbanTaskConversationIds(task) : [])
+    .map((id) => findTaskConversation(session.conversations, id))
+    .filter((conversation): conversation is ConversationRecord => Boolean(conversation?.v2ConversationId && !conversation.archived));
+
+  // Reset the form whenever the dialog opens for a task.
+  if (task && openedFor !== task.id) {
+    const previous = task.schedule?.status === 'pending' ? task.schedule : undefined;
+    const target = previous?.action === 'send'
+      ? targets.find((conversation) => conversation.v2ConversationId === previous.conversationId)
+      : undefined;
+    setOpenedFor(task.id);
+    setAction(target ? 'send' : 'start');
+    setConversationId(target?.id ?? targets[0]?.id ?? '');
+    setAt(previous?.at ?? (zone ? kanbanBackendLocalTime(zone, Date.now() + 60 * 60_000).slice(0, 14) + '00' : ''));
+    setText(previous?.text ?? kanbanTaskDraftText(task));
+    setError('');
+  } else if (!task && openedFor !== null) {
+    setOpenedFor(null);
+  }
+
+  const submit = () => {
+    if (!task || !zone) return;
+    if (!at || at <= kanbanBackendLocalTime(zone)) {
+      setError(t('kanban.schedulePast'));
+      return;
+    }
+    const target = action === 'send' ? targets.find((conversation) => conversation.id === conversationId) : undefined;
+    if (action === 'send' && !target?.v2ConversationId) {
+      setError(t('kanban.scheduleNoConversations'));
+      return;
+    }
+    const settings = session.kanbanScheduleSettings(task.workspaceId, target?.id);
+    if (!settings) {
+      setError(t('kanban.scheduleNoAgent'));
+      return;
+    }
+    setKanbanTaskSchedule(task.id, {
+      ...settings,
+      at,
+      action,
+      text: text.trim(),
+      ...(target?.v2ConversationId ? { conversationId: target.v2ConversationId } : {}),
+    });
+    onClose();
+  };
+
+  return (
+    <Modal isOpen={Boolean(task)} onOpenChange={(open) => { if (!open) onClose(); }}>
+      <Modal.Backdrop>
+        <Modal.Container>
+          <Modal.Dialog className="sm:max-w-lg">
+            <Modal.CloseTrigger />
+            <Modal.Header>
+              <Modal.Heading>{t('kanban.scheduleTitle')}</Modal.Heading>
+            </Modal.Header>
+            <Modal.Body className="flex flex-col gap-4">
+              <Select
+                selectedKey={action}
+                disabledKeys={targets.length ? [] : ['send']}
+                onSelectionChange={(key) => setAction(String(key) === 'send' ? 'send' : 'start')}
+              >
+                <Label>{t('kanban.scheduleAction')}</Label>
+                <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
+                <Select.Popover>
+                  <ListBox>
+                    <ListBox.Item id="start" textValue={t('kanban.scheduleStart')}>
+                      {t('kanban.scheduleStart')}
+                      <ListBox.ItemIndicator />
+                    </ListBox.Item>
+                    <ListBox.Item id="send" textValue={t('kanban.scheduleSend')}>
+                      {t('kanban.scheduleSend')}
+                      <ListBox.ItemIndicator />
+                    </ListBox.Item>
+                  </ListBox>
+                </Select.Popover>
+              </Select>
+              {action === 'send' ? (
+                <Select selectedKey={conversationId} onSelectionChange={(key) => setConversationId(String(key))}>
+                  <Label>{t('kanban.scheduleConversation')}</Label>
+                  <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
+                  <Select.Popover>
+                    <ListBox>
+                      {targets.map((conversation) => (
+                        <ListBox.Item
+                          key={conversation.id}
+                          id={conversation.id}
+                          textValue={conversationDisplayTitle(conversation, session.timeline)}
+                        >
+                          {conversationDisplayTitle(conversation, session.timeline)}
+                          <ListBox.ItemIndicator />
+                        </ListBox.Item>
+                      ))}
+                    </ListBox>
+                  </Select.Popover>
+                </Select>
+              ) : null}
+              <Field
+                label={t('kanban.scheduleAt')}
+                value={at}
+                onChange={(value) => { setAt(value); setError(''); }}
+                type="datetime-local"
+                description={zone ? t('kanban.scheduleZone', { zone: kanbanTimeZoneLabel(zone) }) : t('kanban.scheduleZoneUnknown')}
+              />
+              <TextField value={text} onChange={setText}>
+                <Label>{t('kanban.scheduleText')}</Label>
+                <TextArea rows={4} maxLength={20000} />
+              </TextField>
+              {error ? <p className="text-danger text-sm">{error}</p> : null}
+            </Modal.Body>
+            <Modal.Footer>
+              <Button variant="tertiary" onPress={onClose}>{t('common.cancel')}</Button>
+              <Button onPress={submit} isDisabled={!zone || !at || !text.trim()}>{t('kanban.scheduleSave')}</Button>
+            </Modal.Footer>
+          </Modal.Dialog>
+        </Modal.Container>
+      </Modal.Backdrop>
+    </Modal>
   );
 }
 
@@ -632,6 +817,8 @@ export function KanbanPanel({ session, onOpenConversation }: Props) {
   const t = useT();
   const allTasks = useKanbanTasks();
   const [creating, setCreating] = useState(false);
+  const [schedulingTaskId, setSchedulingTaskId] = useState<string | null>(null);
+  const schedulingTask = allTasks.find((task) => task.id === schedulingTaskId && !task.deletedAt) ?? null;
   const [draggedColumnId, setDraggedColumnId] = useState<string | null>(null);
   const [columnDrop, setColumnDrop] = useState<{ id: string; position: ColumnDropPosition } | null>(null);
   // Columns follow the same manual order as the sidebar workspace list.
@@ -760,6 +947,7 @@ export function KanbanPanel({ session, onOpenConversation }: Props) {
                 session={session}
                 latestEntries={latestEntries}
                 onOpenConversation={openConversation}
+                onScheduleTask={(task) => setSchedulingTaskId(task.id)}
                 dragging={draggedColumnId === workspace.id}
                 dropPosition={columnDrop?.id === workspace.id ? columnDrop.position : null}
                 onHandleDragStart={(event) => {
@@ -798,6 +986,11 @@ export function KanbanPanel({ session, onOpenConversation }: Props) {
           </Kanban>
         </div>
       )}
+      <ScheduleTaskDialog
+        session={session}
+        task={schedulingTask}
+        onClose={() => setSchedulingTaskId(null)}
+      />
       <NewTaskDialog
         session={session}
         workspaces={orderedWorkspaces}
