@@ -1297,7 +1297,7 @@ export type PermissionPreset = {
 };
 
 export type MentionReference = {
-  kind: 'file' | 'workspace' | 'conversation' | 'request' | 'ssh';
+  kind: 'file' | 'workspace' | 'conversation' | 'request' | 'ssh' | 'app';
   value: string;
 };
 
@@ -2815,7 +2815,7 @@ export function parseMentionReferences(text: string): MentionReference[] {
     const [prefix, ...rest] = raw.split(':');
     const value = rest.join(':').trim();
     const kind =
-      prefix === 'workspace' || prefix === 'conversation' || prefix === 'request' || prefix === 'ssh'
+      prefix === 'workspace' || prefix === 'conversation' || prefix === 'request' || prefix === 'ssh' || prefix === 'app'
         ? prefix
         : 'file';
     const resolvedValue = kind === 'file' ? raw : value;

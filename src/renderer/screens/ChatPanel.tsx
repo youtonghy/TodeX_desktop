@@ -57,6 +57,7 @@ import { findCapabilityHashTrigger, insertCapabilityReference, normalizeReasonin
 import { buildCapabilitySuggestions, capabilityCatalogsPending, type CapabilitySuggestion } from '@todex/protocol/capabilityCatalog';
 import {
   buildCapabilityReferenceSuggestions,
+  buildAppReferenceSuggestions,
   buildChatReferenceSuggestions,
   buildEntryReferenceSuggestions,
   buildReferenceTypeSuggestions,
@@ -67,6 +68,8 @@ import {
   type ReferenceType,
 } from '@todex/protocol/referenceMenu';
 import type { SshHost } from '@todex/protocol/ssh';
+import type { HostApp } from '@todex/protocol/agentDesktop';
+import { ConnectionError } from '@todex/protocol/connectionError';
 import { describeToolCall, type ToolCallKind } from '@todex/protocol/toolPresentation';
 import { getLocale, t, useT } from '../i18n';
 
@@ -81,6 +84,7 @@ const REFERENCE_TYPE_KEYS = {
   skill: 'chat.referenceTypeSkill',
   mcp: 'chat.referenceTypeMcp',
   ssh: 'chat.referenceTypeSsh',
+  app: 'chat.referenceTypeApp',
 } as const satisfies Record<ReferenceType, string>;
 
 const MAX_COMPOSER_IMAGE_BYTES = 2_500_000;
@@ -675,6 +679,25 @@ export function ChatPanel({ session }: Props) {
       .catch(() => { if (active) setSshHosts([]); });
     return () => { active = false; };
   }, [referenceType, sshHosts, session.fetchSshHosts]);
+  // `@app:` lists apps on the backend host the same way. A 409 means
+  // Computer Use is off and a 404 a backend without the list; both show as
+  // the empty text instead of an error.
+  const [hostApps, setHostApps] = useState<{ apps: HostApp[]; empty?: 'off' | 'unsupported' | 'failed' } | null>(null);
+  useEffect(() => {
+    let active = true;
+    if (referenceType !== 'app' || hostApps !== null) {
+      return () => { active = false; };
+    }
+    void session.fetchHostApps()
+      .then((result) => { if (active) setHostApps({ apps: result.apps }); })
+      .catch((error: unknown) => {
+        if (!active) return;
+        const status = error instanceof ConnectionError ? error.httpStatus : undefined;
+        if (status !== 409 && status !== 404) console.warn('Could not list backend apps', error);
+        setHostApps({ apps: [], empty: status === 409 ? 'off' : status === 404 ? 'unsupported' : 'failed' });
+      });
+    return () => { active = false; };
+  }, [referenceType, hostApps, session.fetchHostApps]);
   // Keyboard navigation keeps the active row centered inside the popover;
   // near the list edges scrollTop simply clamps at the boundary.
   useEffect(() => {
@@ -923,12 +946,20 @@ export function ChatPanel({ session }: Props) {
             referenceType)
           : referenceType === 'ssh'
             ? buildSshReferenceSuggestions(referenceQuery, sshHosts ?? [])
-            : entryRows;
+            : referenceType === 'app'
+              ? buildAppReferenceSuggestions(referenceQuery, hostApps?.apps ?? [],
+                (app) => (app.running ? `${app.id} · ${t('chat.appRunning')}` : app.id))
+              : entryRows;
   const referenceEmptyText = referenceType === 'chat' ? t('chat.noChatSuggestions')
     : referenceType === 'skill' || referenceType === 'mcp'
       ? (capabilityCatalogsPending(session.capabilityCatalogs, capabilityProviderOrder) ? t('chat.loadingCapabilities') : t('chat.noCapabilities'))
       : referenceType === 'ssh'
         ? (sshHosts === null ? t('chat.loadingSshHosts') : t('chat.noSshSuggestions'))
+        : referenceType === 'app'
+          ? (hostApps === null ? t('chat.loadingApps')
+            : hostApps.empty === 'off' ? t('chat.appsComputerUseOff')
+              : hostApps.empty === 'unsupported' ? t('chat.appsUnsupported')
+                : hostApps.empty === 'failed' ? t('chat.appsLoadFailed') : t('chat.noAppSuggestions'))
         : mentionSearchPending ? t('chat.searchingFiles')
         : referenceType === 'folder' ? t('chat.noFolderSuggestions') : t('chat.noFileSuggestions');
   /** Shared by the `#` list and `@skill:` / `@mcp:`; `trigger` is the text it replaces. */
