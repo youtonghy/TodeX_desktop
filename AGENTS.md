@@ -21,6 +21,15 @@
 - Install or update HeroUI through `hpsetup` from this project. The command must read its credential from the `HEROUI_KEY` system environment variable; never commit, log, or hard-code that key.
 - If `HEROUI_KEY` is unavailable, stop before running an authenticated `hpsetup` operation and report the missing environment variable. Do not substitute a value from source files, shell history, or local config.
 
+## Sibling repositories (cross-repo access)
+
+TodeX lives in sibling checkouts under the same parent directory:
+
+- `../TodeX_backend` — Rust backend/API server (`docs/API.md` holds the API contract)
+- `../TodeX_web` — Web client; the Dual-Client Synchronization rules below apply in both directions
+
+When a task requires it — the Dual-Client Synchronization rules, aligning client calls with the backend API contract, or a change that explicitly spans repos — read and edit those sibling repositories directly at their paths, even though they sit outside this repository. Follow each repo's own `AGENTS.md` while working inside it. Commit and push in each repository separately per its Git delivery rules; never mix another repo's changes into this repository's commits.
+
 ## Dual-Client Synchronization (Desktop & Web 双端同步)
 
 - `TodeX_desktop` and `TodeX_web` share a largely isomorphic frontend architecture, with corresponding components, screens, styles, and session logic under `src/renderer/components/`, `src/renderer/screens/`, `src/renderer/styles/`, and `src/renderer/session/`.
