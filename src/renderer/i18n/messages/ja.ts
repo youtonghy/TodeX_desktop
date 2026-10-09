@@ -437,7 +437,7 @@ export const ja: Messages = {
   'computerSettings.enable': 'エージェントに {host} の操作を許可',
   'computerSettings.enableHint': 'このバックエンドが動作しているコンピュータです。各会話はまずそのコンピュータの前にいる人が許可します。新しいアプリやパスワード欄への入力のたびに再確認します。TodeX、システム設定、資格情報ストア、パスワードマネージャーは操作されません。',
   'computerSettings.grant': '許可をリクエスト',
-  'computerSettings.grantHint': 'システムの確認は {host} に表示されます。そこで todex-agentd に許可してください。',
+  'computerSettings.grantHint': 'システムの確認は {host} に表示されます。そこで todex-agentd に許可してください。表示されない場合は、そのコンピュータで該当するシステム設定のページが開くので、todex-agentd をオンにしてください。',
   'computerSettings.legacyBackend': 'このバックエンドはまだデスクトップで Computer Use を実行しています。使うにはバックエンドを更新してください。',
   'computerSettings.permissions': 'システム権限',
   'computerSettings.permissionsHint': '{host} の todex-agentd に許可されています。',

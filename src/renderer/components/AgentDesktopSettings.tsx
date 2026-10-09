@@ -128,7 +128,7 @@ export function AgentDesktopSettings({ session, page = null, onPageChange = () =
           settings={settings}
           saving={saving}
           onEnable={selected => { void save(() => api.setAgentComputerEnabled(selected)); }}
-          onRequestPermissions={() => { void save(() => api.requestComputerPermissions()); }}
+          onRequestPermission={permission => { void save(() => api.requestComputerPermissions(permission)); }}
         />
       </SettingsSubpage>
     );

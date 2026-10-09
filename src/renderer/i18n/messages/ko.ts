@@ -437,7 +437,7 @@ export const ko: Messages = {
   'computerSettings.enable': '에이전트가 {host}을(를) 조작하도록 허용',
   'computerSettings.enableHint': '이 백엔드가 실행 중인 컴퓨터입니다. 각 대화는 먼저 그 컴퓨터 앞에 있는 사람이 허용해야 합니다. 새 앱과 암호 입력란마다 다시 묻습니다. TodeX, 시스템 설정, 자격 증명 저장소, 암호 관리자는 절대 조작하지 않습니다.',
   'computerSettings.grant': '권한 요청',
-  'computerSettings.grantHint': '시스템 권한 요청은 {host}에 표시됩니다. 그곳에서 todex-agentd에 권한을 주세요.',
+  'computerSettings.grantHint': '시스템 권한 요청은 {host}에 표시됩니다. 그곳에서 todex-agentd에 권한을 주세요. 요청이 나타나지 않으면 해당 컴퓨터에서 시스템 설정의 해당 페이지가 열리니 todex-agentd를 켜 주세요.',
   'computerSettings.legacyBackend': '이 백엔드는 아직 데스크톱에서 Computer Use를 실행합니다. 사용하려면 백엔드를 업데이트하세요.',
   'computerSettings.permissions': '시스템 권한',
   'computerSettings.permissionsHint': '{host}의 todex-agentd에 부여됩니다.',

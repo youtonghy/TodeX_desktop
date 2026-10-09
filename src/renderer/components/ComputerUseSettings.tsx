@@ -1,7 +1,8 @@
+import type { ReactNode } from 'react';
 import { Button, Chip, Separator, Switch } from '@heroui/react';
 import { ItemCard, ItemCardGroup } from '@heroui-pro/react';
 import { RiComputerLine, RiCursorLine, RiScreenshot2Line } from '@remixicon/react';
-import type { AgentDesktopSettings } from '@todex/protocol/agentDesktop';
+import type { AgentComputerPermission, AgentDesktopSettings } from '@todex/protocol/agentDesktop';
 import { useT } from '../i18n';
 
 /**
@@ -9,17 +10,18 @@ import { useT } from '../i18n';
  * computer the backend runs on, so the switch, the host's OS permissions and
  * why it may be unavailable all come from the backend.
  */
-export function ComputerUseSettings({ settings, saving, onEnable, onRequestPermissions }: {
+export function ComputerUseSettings({ settings, saving, onEnable, onRequestPermission }: {
   settings: AgentDesktopSettings;
   saving: boolean;
   onEnable: (enabled: boolean) => void;
-  onRequestPermissions: () => void;
+  /** Asks the person at the backend's computer for one permission. */
+  onRequestPermission: (permission: AgentComputerPermission) => void;
 }) {
   const t = useT();
   const status = settings.computer;
   if (!status) return <p className="text-muted text-sm">{t('computerSettings.legacyBackend')}</p>;
   const missing = !status.permissions.screen || !status.permissions.accessibility;
-  const permissions = [
+  const permissions: Array<{ key: AgentComputerPermission; icon: ReactNode; title: string; description: string; granted: boolean }> = [
     { key: 'screen', icon: <RiScreenshot2Line />, title: t('computerSettings.screen'), description: t('computerSettings.screenWhy'), granted: status.permissions.screen },
     { key: 'accessibility', icon: <RiCursorLine />, title: t('computerSettings.accessibility'), description: t('computerSettings.axWhy'), granted: status.permissions.accessibility },
   ];
@@ -52,18 +54,13 @@ export function ComputerUseSettings({ settings, saving, onEnable, onRequestPermi
 
       {status.supported ? (
         <ItemCardGroup variant="secondary">
-          <ItemCardGroup.Header className="flex items-start justify-between gap-3">
+          <ItemCardGroup.Header>
             <div className="min-w-0">
               <ItemCardGroup.Title>{t('computerSettings.permissions')}</ItemCardGroup.Title>
               <ItemCardGroup.Description>
                 {missing ? t('computerSettings.grantHint', { host: status.host }) : t('computerSettings.permissionsHint', { host: status.host })}
               </ItemCardGroup.Description>
             </div>
-            {missing ? (
-              <Button size="sm" variant="secondary" className="shrink-0" isDisabled={saving} onPress={onRequestPermissions}>
-                {t('computerSettings.grant')}
-              </Button>
-            ) : null}
           </ItemCardGroup.Header>
           {permissions.map((permission, index) => (
             <div key={permission.key}>
@@ -75,9 +72,16 @@ export function ComputerUseSettings({ settings, saving, onEnable, onRequestPermi
                   <ItemCard.Description>{permission.description}</ItemCard.Description>
                 </ItemCard.Content>
                 <ItemCard.Action>
-                  <Chip size="sm" variant="soft" color={permission.granted ? 'success' : 'warning'}>
-                    {t(permission.granted ? 'computerSettings.granted' : 'computerSettings.notGranted')}
-                  </Chip>
+                  {permission.granted ? (
+                    <Chip size="sm" variant="soft" color="success">{t('computerSettings.granted')}</Chip>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <Chip size="sm" variant="soft" color="warning">{t('computerSettings.notGranted')}</Chip>
+                      <Button size="sm" variant="secondary" isDisabled={saving} onPress={() => onRequestPermission(permission.key)}>
+                        {t('computerSettings.grant')}
+                      </Button>
+                    </div>
+                  )}
                 </ItemCard.Action>
               </ItemCard>
             </div>
