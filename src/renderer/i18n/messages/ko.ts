@@ -1037,6 +1037,10 @@ export const ko: Messages = {
   'cli.installed': 'CLI를 설치했습니다',
   'cli.installFailed': 'CLI 설치에 실패했습니다',
   'cli.installStartFailed': '설치를 시작할 수 없습니다',
+  'cli.antigravityRemoveIntegration': 'Antigravity에서 TodeX 훅 제거',
+  'cli.antigravityIntegrationRemoved': 'Antigravity 설정에서 TodeX 훅과 MCP 서버를 제거했습니다. 다음 Antigravity 대화에서 다시 추가됩니다.',
+  'cli.antigravityIntegrationAbsent': 'Antigravity 설정에 TodeX 항목이 없습니다.',
+  'cli.antigravityIntegrationRemoveFailed': 'Antigravity 설정을 업데이트할 수 없습니다',
 
   // pair
   'pair.verifyFailed': '기기 인증에 실패했습니다. 다시 신청하세요.',

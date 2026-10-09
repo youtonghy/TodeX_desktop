@@ -1037,6 +1037,10 @@ export const en: Messages = {
   'cli.installed': 'CLI installed',
   'cli.installFailed': 'CLI install failed',
   'cli.installStartFailed': 'Could not start the install',
+  'cli.antigravityRemoveIntegration': 'Remove TodeX\'s hook from Antigravity',
+  'cli.antigravityIntegrationRemoved': 'Removed TodeX\'s hook and MCP servers from the Antigravity config. The next Antigravity conversation adds them again.',
+  'cli.antigravityIntegrationAbsent': 'The Antigravity config has no TodeX entries.',
+  'cli.antigravityIntegrationRemoveFailed': 'Could not update the Antigravity config',
 
   // pair
   'pair.verifyFailed': 'Device verification failed; request again.',

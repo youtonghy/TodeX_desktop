@@ -1037,6 +1037,10 @@ export const ja: Messages = {
   'cli.installed': 'CLI をインストールしました',
   'cli.installFailed': 'CLI のインストールに失敗しました',
   'cli.installStartFailed': 'インストールを開始できません',
+  'cli.antigravityRemoveIntegration': 'Antigravity から TodeX のフックを削除',
+  'cli.antigravityIntegrationRemoved': 'Antigravity の設定から TodeX のフックと MCP サーバーを削除しました。次に Antigravity で会話すると再度追加されます。',
+  'cli.antigravityIntegrationAbsent': 'Antigravity の設定に TodeX の項目はありません。',
+  'cli.antigravityIntegrationRemoveFailed': 'Antigravity の設定を更新できませんでした',
 
   // pair
   'pair.verifyFailed': 'デバイス認証に失敗しました。再度申請してください。',

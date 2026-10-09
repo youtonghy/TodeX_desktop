@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button, Card, Chip, Spinner, toast } from '@heroui/react';
-import { RiDownload2Line, RiDownloadCloud2Line, RiRefreshLine, RiServerLine } from '@remixicon/react';
+import { RiDeleteBin6Line, RiDownload2Line, RiDownloadCloud2Line, RiRefreshLine, RiServerLine } from '@remixicon/react';
 import {
   type CliOperationAction,
   type CliUpgradeOperation,
@@ -109,6 +109,21 @@ export function CliManagerPanel({ session }: { session: TodeXSession }) {
     }
   };
 
+  const [removingIntegration, setRemovingIntegration] = useState(false);
+  // TodeX keeps a PreToolUse hook and its MCP servers in Antigravity's global
+  // config (shared with the Antigravity app); this takes them out again.
+  const removeAntigravityIntegration = async () => {
+    setRemovingIntegration(true);
+    try {
+      const { removed } = await api().removeAntigravityIntegration();
+      toast.success(t(removed ? 'cli.antigravityIntegrationRemoved' : 'cli.antigravityIntegrationAbsent'));
+    } catch (error) {
+      toast.danger(error instanceof Error ? error.message : t('cli.antigravityIntegrationRemoveFailed'));
+    } finally {
+      setRemovingIntegration(false);
+    }
+  };
+
   const activeBackend = session.backendConnections.find((item) => item.id === session.activeBackendConnectionId);
 
   return (
@@ -178,6 +193,18 @@ export function CliManagerPanel({ session }: { session: TodeXSession }) {
                   >
                     {running ? <Spinner size="sm" /> : <RiDownloadCloud2Line className="size-4" />}
                     {running ? t('cli.upgradingNow') : t('cli.upgradeToLatest')}
+                  </Button>
+                ) : null}
+                {cli.id === 'antigravity' && !notInstalled ? (
+                  <Button
+                    className="mt-2 w-full"
+                    size="sm"
+                    variant="ghost"
+                    isDisabled={removingIntegration}
+                    onPress={() => void removeAntigravityIntegration()}
+                  >
+                    {removingIntegration ? <Spinner size="sm" /> : <RiDeleteBin6Line className="size-4" />}
+                    {t('cli.antigravityRemoveIntegration')}
                   </Button>
                 ) : null}
               </Card>

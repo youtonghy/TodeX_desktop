@@ -1037,6 +1037,10 @@ export const zhCN = {
   'cli.installed': 'CLI 已安装',
   'cli.installFailed': 'CLI 安装失败',
   'cli.installStartFailed': '无法开始安装',
+  'cli.antigravityRemoveIntegration': '从 Antigravity 移除 TodeX 钩子',
+  'cli.antigravityIntegrationRemoved': '已从 Antigravity 配置移除 TodeX 的钩子与 MCP 服务器；下次使用 Antigravity 对话时会重新添加。',
+  'cli.antigravityIntegrationAbsent': 'Antigravity 配置中没有 TodeX 的条目。',
+  'cli.antigravityIntegrationRemoveFailed': '无法更新 Antigravity 配置',
 
   // pair
   'pair.verifyFailed': '设备验证失败，请重新申请。',
