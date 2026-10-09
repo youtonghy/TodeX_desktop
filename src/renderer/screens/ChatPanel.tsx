@@ -17,6 +17,7 @@ import { ComposerAttachmentPreview } from '../components/ComposerAttachmentPrevi
 import { SentAttachmentPreview } from '../components/SentAttachmentPreview';
 import { activeChatProcessId, buildChatRenderItems, isChatTimelineEntry, isChatToolEntry, latestIncomingEntryIds, sameTimelineEntries, sortChatEntries } from '../components/conversationTimeline';
 import type { ChatRenderItem } from '../components/conversationTimeline';
+import type { BackgroundTask } from '@todex/protocol/conversationRuntime';
 import { ModelReasoningCard } from '../components/ModelReasoningCard';
 import { ProviderIcon } from '../components/ProviderIcon';
 import type { TodeXSession } from '../session/useTodeXSession';
@@ -155,6 +156,58 @@ function toolCardPresentation(entry: TimelineEntry, active: boolean) {
     errorText: state === 'output-error' ? (tool.errorText ?? tool.outputText) : undefined,
     state,
   };
+}
+
+function backgroundTaskKind(taskType: string | undefined): string {
+  if (taskType === 'local_bash') return t('chat.backgroundTaskShell');
+  if (taskType?.includes('remote')) return t('chat.backgroundTaskRemoteAgent');
+  if (taskType?.includes('agent')) return t('chat.backgroundTaskAgent');
+  return '';
+}
+
+/** The trailing "waiting for background tasks" line, expandable into the
+ * tasks the provider still runs and, when loaded, the tool call that
+ * launched each (`toolUseId` is that call's block id). */
+function BackgroundTasksStatus({ tasks, items }: { tasks: readonly BackgroundTask[]; items: readonly ChatRenderItem[] }) {
+  const launchers = useMemo(() => {
+    const wanted = tasks.flatMap(task => task.toolUseId ? [task.toolUseId] : []);
+    const found = new Map<string, TimelineEntry>();
+    if (!wanted.length) return found;
+    for (const item of items) {
+      for (const entry of item.type === 'entry' ? [item.entry] : item.entries) {
+        if (!isChatToolEntry(entry) || entry.detailStub) continue;
+        const id = wanted.find(toolUseId => entry.blockId === toolUseId || entry.id.endsWith(`-${toolUseId}`));
+        if (id) found.set(id, entry);
+      }
+    }
+    return found;
+  }, [tasks, items]);
+  return (
+    <ChainOfThought isStreaming className="chat-process-trace min-w-0">
+      <ChainOfThought.Trigger className="min-h-7 py-1 text-xs">{t('chat.waitingBackground', { count: tasks.length })}</ChainOfThought.Trigger>
+      <ChainOfThought.Content>
+        <ChainOfThought.Steps>
+          {tasks.map((task) => {
+            const launcher = task.toolUseId ? launchers.get(task.toolUseId) : undefined;
+            const tool = launcher ? toolCardPresentation(launcher, true) : undefined;
+            const startedAt = task.startedAt ? new Date(task.startedAt) : null;
+            const meta = [
+              backgroundTaskKind(task.taskType),
+              startedAt && !Number.isNaN(startedAt.getTime())
+                ? t('chat.backgroundTaskStartedAt', { time: startedAt.toLocaleTimeString(getLocale(), { hour: '2-digit', minute: '2-digit' }) })
+                : '',
+            ].filter(Boolean).join(' · ');
+            return (
+              <ChainOfThought.Step key={task.taskId} label={task.description || tool?.summary || task.taskId}>
+                {meta ? <p className="text-muted text-xs">{meta}</p> : null}
+                {tool ? <ChatTool defaultExpanded={false} state={tool.state} toolName={tool.summary || tool.label} argsText={tool.argsText} output={tool.output} errorText={tool.errorText} /> : null}
+              </ChainOfThought.Step>
+            );
+          })}
+        </ChainOfThought.Steps>
+      </ChainOfThought.Content>
+    </ChainOfThought>
+  );
 }
 
 /// Sent attachments open a read-only preview on click/Enter; content comes
@@ -939,7 +992,8 @@ export function ChatPanel({ session }: Props) {
   const compaction = session.compactionByConversation[conversation.id];
   const latestProcessGroupId = activeChatProcessId(items, runtime?.activeTurnId || session.turnIds[conversation.id]);
   // The agent has stopped answering and only waits on provider background tasks (e.g. a CI watcher).
-  const backgroundTaskCount = thinking ? runtime?.backgroundTaskIds.length ?? 0 : 0;
+  const backgroundTasks = thinking ? runtime?.backgroundTasks ?? [] : [];
+  const backgroundTaskCount = backgroundTasks.length;
   // Once the agent has replied after its last steps, the live status moves
   // below that reply instead of staying on the finished group above it.
   const lastItem = items[items.length - 1];
@@ -1270,9 +1324,11 @@ export function ChatPanel({ session }: Props) {
             />
           ))}
           {showTrailingStatus ? (
-            <p className="text-muted min-h-7 py-1 text-xs" role="status">
-              <TextShimmer>{backgroundTaskCount > 0 ? t('chat.waitingBackground', { count: backgroundTaskCount }) : t('chat.working')}</TextShimmer>
-            </p>
+            backgroundTaskCount > 0 ? <BackgroundTasksStatus tasks={backgroundTasks} items={items} /> : (
+              <p className="text-muted min-h-7 py-1 text-xs" role="status">
+                <TextShimmer>{t('chat.working')}</TextShimmer>
+              </p>
+            )
           ) : null}
         </div>
         </ScrollShadow>
