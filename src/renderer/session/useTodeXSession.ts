@@ -7559,16 +7559,17 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     return true;
   }, [appendTimeline, getConversationContext]);
 
-  /** Export a conversation's user and assistant messages as Markdown, for
-   * referencing it from another conversation (`@chat:`). Reads the journal
-   * from its tail — the conversation may never have been opened here — and
-   * stops once the newest messages fill `maxBytes`. */
+  /** Export a conversation's messages and work steps (tool calls, reasoning)
+   * as Markdown, for referencing it from another conversation (`@chat:`).
+   * Reads the journal from its tail — the conversation may never have been
+   * opened here — in full detail, since summary pages leave the steps empty,
+   * and stops once the newest entries fill `maxBytes`. */
   const exportConversationMarkdown = useCallback(async (conversationId: string, maxBytes?: number) => {
     const conversation = conversationsRef.current.find((item) => item.id === conversationId);
     if (!conversation) throw new Error(t('alert.noConversation'));
     const v2Id = conversation.v2ConversationId;
     const transcript = v2Id
-      ? await fetchConversationTranscriptTail((id, before, limit) => decryptedHistoryReplay(id, v2ApiForConversation(id).replayEventsBefore(id, before, limit, 'summary'), 'summary'),
+      ? await fetchConversationTranscriptTail((id, before, limit) => decryptedHistoryReplay(id, v2ApiForConversation(id).replayEventsBefore(id, before, limit, 'full'), 'full'),
         v2Id, conversation.workspaceId, { title: conversation.title, maxBytes })
       : { entries: transcriptEntries(timelineRef.current.filter((entry) => entry.conversationId === conversationId)), olderUnread: false };
     return conversationTranscriptMarkdown(transcript.entries, { title: conversation.title, maxBytes, olderUnread: transcript.olderUnread });
