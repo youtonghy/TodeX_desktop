@@ -18,8 +18,11 @@
 - All user-facing UI must use the official HeroUI React components, and use HeroUI Pro components from `@heroui-pro/react` when the required pattern is provided there. Prefer the existing component APIs over raw HTML controls or ad-hoc replacements.
 - Before adding or changing a component, query the current HeroUI and HeroUI Pro documentation through the Context7 MCP (`resolve-library-id` followed by `query-docs`). Use the documented API and verify the installed versions in `package.json`.
 - Use HeroUI/Pro for controls such as buttons, inputs, dialogs, menus, tables, tabs, forms, and feedback states. Native HTML elements remain appropriate for semantic structure, layout, and cases where the libraries have no equivalent.
-- Install or update HeroUI through `hpsetup` from this project. The command must read its credential from the `HEROUI_KEY` system environment variable; never commit, log, or hard-code that key.
-- If `HEROUI_KEY` is unavailable, stop before running an authenticated `hpsetup` operation and report the missing environment variable. Do not substitute a value from source files, shell history, or local config.
+- Every time you build or change frontend UI, invoke the relevant skills (`heroui-react`, and `heroui-react-pro` when Pro components are involved) and query the HeroUI / HeroUI Pro MCP servers (`heroui-pro`, Context7) before writing code. Do not rely on memory of the component APIs.
+- Install or update HeroUI Pro through `hpsetup`, run from this project's root with pnpm: `pnpm dlx hpsetup@latest "$HEROUI_PRO_HPSETUP"`. The key must come from the `HEROUI_PRO_HPSETUP` system environment variable; never commit, log, echo, or hard-code it, and never paste its value into commands, files, or messages.
+- If `pnpm install` fails with `ERR_PNPM_IGNORED_BUILDS`, run `pnpm approve-builds` and approve the build scripts, then continue.
+- After `hpsetup`, make sure the global CSS imports the styles in this order: `@import "tailwindcss";`, `@import "@heroui/styles";`, `@import "@heroui-pro/react/css";`. Import Pro components from their subpaths, e.g. `import {AreaChart} from "@heroui-pro/react/area-chart";`.
+- If `HEROUI_PRO_HPSETUP` is unavailable, stop before running an authenticated `hpsetup` operation and report the missing environment variable. Do not substitute a value from source files, shell history, or local config.
 
 ## Sibling repositories (cross-repo access)
 
