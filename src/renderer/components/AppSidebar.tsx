@@ -634,21 +634,22 @@ export function AppSidebar({
       <Sidebar.Content>
         {/* Workspace Section */}
         <Sidebar.Group>
-          <div
-            role="button"
-            tabIndex={0}
-            onClick={() => setWorkspacesCollapsed((prev) => !prev)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
-                setWorkspacesCollapsed((prev) => !prev);
-              }
-            }}
-            className="sidebar-section-head group flex items-center justify-between px-3 py-1.5 rounded-lg cursor-pointer hover:bg-surface-secondary transition-colors select-none"
-            aria-expanded={!workspacesCollapsed}
-            aria-label={workspacesCollapsed ? t('sidebar.expandWorkspaces') : t('sidebar.collapseWorkspaces')}
-          >
-            <div className="flex items-center gap-1.5 min-w-0">
+          {/* The add button sits beside the collapse toggle, not inside it. */}
+          <div className="sidebar-section-head group flex items-center justify-between gap-1">
+            <div
+              role="button"
+              tabIndex={0}
+              onClick={() => setWorkspacesCollapsed((prev) => !prev)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  setWorkspacesCollapsed((prev) => !prev);
+                }
+              }}
+              className="flex min-w-0 flex-1 cursor-pointer select-none items-center gap-1.5 rounded-lg px-3 py-1.5 outline-none transition-colors hover:bg-surface-secondary focus-visible:ring-2 focus-visible:ring-accent/40"
+              aria-expanded={!workspacesCollapsed}
+              aria-label={workspacesCollapsed ? t('sidebar.expandWorkspaces') : t('sidebar.collapseWorkspaces')}
+            >
               <RiArrowDownSLine
                 className={`size-4 text-muted transition-transform duration-200 ${
                   workspacesCollapsed ? '-rotate-90' : ''
@@ -661,7 +662,7 @@ export function AppSidebar({
                 ({ownWorkspaces.length})
               </span>
             </div>
-            <span className="relative inline-flex shrink-0">
+            <span className="relative inline-flex shrink-0 pe-3">
               <Button
                 isIconOnly
                 size="sm"
@@ -669,7 +670,6 @@ export function AppSidebar({
                 aria-label={t('sidebar.newWorkspace')}
                 className="size-6 text-muted hover:text-foreground"
                 onPress={() => onCreateWorkspace()}
-                onClick={(e) => e.stopPropagation()}
               >
                 <RiAddLine className="size-4" />
               </Button>
@@ -783,21 +783,22 @@ export function AppSidebar({
 
         {/* Conversation Section */}
         <Sidebar.Group>
-          <div
-            role="button"
-            tabIndex={0}
-            onClick={() => setConversationsCollapsed((prev) => !prev)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
-                setConversationsCollapsed((prev) => !prev);
-              }
-            }}
-            className="sidebar-section-head group flex items-center justify-between px-3 py-1.5 rounded-lg cursor-pointer hover:bg-surface-secondary transition-colors select-none"
-            aria-expanded={!conversationsCollapsed}
-            aria-label={conversationsCollapsed ? t('sidebar.expandConversations') : t('sidebar.collapseConversations')}
-          >
-            <div className="flex items-center gap-1.5 min-w-0">
+          {/* The add button sits beside the collapse toggle, not inside it. */}
+          <div className="sidebar-section-head group flex items-center justify-between gap-1">
+            <div
+              role="button"
+              tabIndex={0}
+              onClick={() => setConversationsCollapsed((prev) => !prev)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  setConversationsCollapsed((prev) => !prev);
+                }
+              }}
+              className="flex min-w-0 flex-1 cursor-pointer select-none items-center gap-1.5 rounded-lg px-3 py-1.5 outline-none transition-colors hover:bg-surface-secondary focus-visible:ring-2 focus-visible:ring-accent/40"
+              aria-expanded={!conversationsCollapsed}
+              aria-label={conversationsCollapsed ? t('sidebar.expandConversations') : t('sidebar.collapseConversations')}
+            >
               <RiArrowDownSLine
                 className={`size-4 text-muted transition-transform duration-200 ${
                   conversationsCollapsed ? '-rotate-90' : ''
@@ -810,7 +811,7 @@ export function AppSidebar({
                 ({workspaceConversations.length})
               </span>
             </div>
-            <span className="relative inline-flex shrink-0">
+            <span className="relative inline-flex shrink-0 pe-3">
               <Button
                 isIconOnly
                 size="sm"
@@ -819,7 +820,6 @@ export function AppSidebar({
                 className="size-6 text-muted hover:text-foreground"
                 isDisabled={!session.activeWorkspaceId}
                 onPress={() => onCreateConversation()}
-                onClick={(e) => e.stopPropagation()}
               >
                 <RiAddLine className="size-4" />
               </Button>

@@ -217,98 +217,96 @@ export function GitActionsModal({ session, isOpen, onOpenChange }: Props) {
         </div>
       </div>
     : <Button size="sm" variant="secondary" isDisabled={writingBlocked || Boolean(sending) || Boolean(failure?.unknown)} onPress={() => setConfirming(id)}>{label}</Button>;
-  if (view) return <Modal>
-    <Modal.Backdrop isOpen={isOpen} onOpenChange={onOpenChange}>
-      <Modal.Container><Modal.Dialog className="w-[calc(100vw-2rem)] max-w-xl max-h-[88dvh]">
-        <Modal.Header><Modal.Heading>{title}</Modal.Heading><p className="text-muted break-all text-xs">{repoPath}</p></Modal.Header>
-        <Modal.Body className="space-y-4 overflow-y-auto">
-          <p className="text-muted text-xs">{isPrView
-            ? t('git.execViaGithubApi', { detail: pr ? ` · ${pr.branch || t('git.noCommitDetached')}` : '' })
-            : t('git.execDirectGit', { detail: snapshot ? ` · ${snapshot.currentBranch || t('git.noCommitDetached')}${snapshot.dirty ? ` · ${t('git.dirtyChanges')}` : ''}` : '' })}</p>
-          {failure ? <Button size="sm" variant="secondary" isDisabled={unavailable || Boolean(sending)} onPress={() => void send(failure.id, true)}>{t('git.handToAgent')}</Button> : null}
-          {sending ? <div role="status" className="flex items-center gap-2"><Spinner size="sm" />{t('git.processing')}</div> : null}
-          {output ? <pre role="status" className="whitespace-pre-wrap break-all rounded-xl bg-default p-3 text-xs">{output}</pre> : null}
-          {isPrView ? <div className="space-y-3">
-            {pr?.initialized && !prItem ? <div className="space-y-2">
-              <p className="text-sm">{pr.branch ? t('git.noPrOnBranch', { branch: pr.branch }) : t('git.noPrDetached')}</p>
-              <Button size="sm" variant="secondary" isDisabled={writingBlocked || Boolean(sending)} onPress={() => choose('create-pr')}>{t('git.createPrTitle')}</Button>
-            </div> : null}
-            {prItem ? <div className="space-y-2 rounded-xl border border-default p-3">
-              <div className="flex items-start justify-between gap-3">
-                <p className="min-w-0 break-all text-sm font-medium">#{prItem.number} {prItem.title}</p>
-                <Link href={prUrl || undefined} target="_blank" rel="noopener noreferrer" isDisabled={!prUrl}
-                  className={buttonVariants({ variant: 'ghost', size: 'sm' })}>{t('git.open')}<Link.Icon /></Link>
-              </div>
-              <p className="text-muted break-all text-xs">{prItem.headRef} → {prItem.baseRef}{prItem.draft ? ` · ${t('git.draft')}` : ''}</p>
-              <p className="text-muted text-xs">{prItem.state === 'merged' ? t('git.prStateMerged') : prItem.state === 'closed' ? t('git.prStateClosed') : t('git.prStateOpen')}
-                {' · '}{t('git.prChecksLine', { passing: prItem.checks.passing, failing: prItem.checks.failing, pending: prItem.checks.pending, approved: prItem.reviews.approved, changes: prItem.reviews.changesRequested, comments: prItem.reviews.commented })}</p>
-              <p className="text-muted text-xs">{t('git.mergeStatus', { status: prItem.mergeable === 'unknown' ? t('git.mergeStateUnknown') : prItem.mergeable === 'mergeable' ? t('git.mergeable') : t('git.unmergeable', { detail: prMergeStateLabelKeys[prItem.mergeState] ? `(${t(prMergeStateLabelKeys[prItem.mergeState])})` : '' }) })}
-                {prItem.autoMergeMethod ? ` · ${t('git.autoMergeOn', { method: prMethodLabelKeys[prItem.autoMergeMethod as GitPullRequestMethod] ? t(prMethodLabelKeys[prItem.autoMergeMethod as GitPullRequestMethod]) : prItem.autoMergeMethod })}` : ''}</p>
-            </div> : null}
-            {prItem?.state === 'open' ? <div className="flex flex-wrap gap-2">
-              {prItem.draft
-                ? prConfirm('ready-pr', t('git.readyPrTitle'), { action: 'ready-pr' }, { hint: t('git.readyPrHint', { number: prItem.number }) })
-                : prConfirm('draft-pr', t('git.draftPrTitle'), { action: 'draft-pr' }, { hint: t('git.draftPrHint', { number: prItem.number }) })}
-              {prConfirm('close-pr', t('git.closePrTitle'), { action: 'close-pr' }, { danger: true, hint: t('git.closePrHint', { number: prItem.number }) })}
-            </div> : null}
-            {prItem?.state === 'closed' ? prConfirm('reopen-pr', t('git.reopenPr'), { action: 'reopen-pr' }, { hint: t('git.reopenPrHint', { number: prItem.number }) }) : null}
-            {prItem?.state === 'open' ? <div className="space-y-2 rounded-xl border border-default p-3">
-              <p className="text-sm font-medium">{t('git.merge')}</p>
-              {prItem.autoMergeMethod
-                ? prConfirm('disable-pr-auto-merge', t('git.disablePrAutoMergeTitle'), { action: 'disable-pr-auto-merge' }, { hint: t('git.disableAutoMergeHint') })
-                : prConfirm('enable-pr-auto-merge', t('git.enablePrAutoMergeTitle'), { action: 'enable-pr-auto-merge', method: mergeMethod }, { hint: t('git.enableAutoMergeHint'), methodPicker: true })}
-              {prConfirm('merge-pr', t('git.mergePrTitle'), { action: 'merge-pr', method: mergeMethod, headSha: prItem.headSha }, { danger: true, hint: t('git.mergePrHint', { number: prItem.number }), methodPicker: true })}
-            </div> : null}
+  if (view) return <Modal.Backdrop isOpen={isOpen} onOpenChange={onOpenChange}>
+    <Modal.Container><Modal.Dialog className="w-[calc(100vw-2rem)] max-w-xl max-h-[88dvh]">
+      <Modal.Header><Modal.Heading>{title}</Modal.Heading><p className="text-muted break-all text-xs">{repoPath}</p></Modal.Header>
+      <Modal.Body className="space-y-4 overflow-y-auto">
+        <p className="text-muted text-xs">{isPrView
+          ? t('git.execViaGithubApi', { detail: pr ? ` · ${pr.branch || t('git.noCommitDetached')}` : '' })
+          : t('git.execDirectGit', { detail: snapshot ? ` · ${snapshot.currentBranch || t('git.noCommitDetached')}${snapshot.dirty ? ` · ${t('git.dirtyChanges')}` : ''}` : '' })}</p>
+        {failure ? <Button size="sm" variant="secondary" isDisabled={unavailable || Boolean(sending)} onPress={() => void send(failure.id, true)}>{t('git.handToAgent')}</Button> : null}
+        {sending ? <div role="status" className="flex items-center gap-2"><Spinner size="sm" />{t('git.processing')}</div> : null}
+        {output ? <pre role="status" className="whitespace-pre-wrap break-all rounded-xl bg-default p-3 text-xs">{output}</pre> : null}
+        {isPrView ? <div className="space-y-3">
+          {pr?.initialized && !prItem ? <div className="space-y-2">
+            <p className="text-sm">{pr.branch ? t('git.noPrOnBranch', { branch: pr.branch }) : t('git.noPrDetached')}</p>
+            <Button size="sm" variant="secondary" isDisabled={writingBlocked || Boolean(sending)} onPress={() => choose('create-pr')}>{t('git.createPrTitle')}</Button>
           </div> : null}
-          {view === 'create-pr' ? <form className="space-y-3" onSubmit={event => {
-            event.preventDefault();
-            if (!prTitle.trim() || !prBase.trim() || !prRepository.trim() || output) return;
-            void direct('create-pr', { action: 'create-pr', title: prTitle.trim(), body: prBody,
-              baseBranch: prBase.trim(), repository: prRepository.trim(), draft: prDraft });
-          }}>
-            <p className="text-muted text-sm">{t('git.createPrHint')}</p>
-            <TextField isRequired value={prRepository} onChange={setPrRepository}><Label>{t('git.repoLabel')}</Label><Input placeholder={t('git.repoPlaceholder')} /></TextField>
-            <TextField isRequired value={prBase} onChange={setPrBase}><Label>{t('git.baseBranch')}</Label><Input placeholder={t('git.baseBranchPlaceholder')} /></TextField>
-            <TextField isRequired value={prTitle} onChange={setPrTitle}><Label>{t('git.prTitleLabel')}</Label><Input placeholder={t('git.prTitlePlaceholder')} maxLength={256} /></TextField>
-            <TextField value={prBody} onChange={setPrBody}><Label>{t('git.prBodyLabel')}</Label><TextArea rows={5} placeholder={t('git.prBodyPlaceholder')} /></TextField>
-            <Checkbox isSelected={prDraft} onChange={setPrDraft}><Checkbox.Content><Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>{t('git.createAsDraft')}</Checkbox.Content></Checkbox>
-            <Button type="submit" isDisabled={writingBlocked || Boolean(sending) || outcomeUnknown.current || Boolean(output) || !snapshot?.initialized || !snapshot.currentBranch || !prTitle.trim() || !prBase.trim() || !prRepository.trim()}>{t('git.createPrTitle')}</Button>
-            {output ? <Button variant="secondary" isDisabled={unavailable || Boolean(sending)} onPress={() => void send('view-pr')}>{t('git.letAgentViewPr')}</Button> : null}
-          </form> : null}
-          {isBranchForm ? <form className="space-y-3" onSubmit={event => {
-            event.preventDefault();
-            if (!branchName.trim() || (view === 'create-worktree' && !worktreePath)) return;
-            void direct(view, view === 'create-worktree'
-              ? { action: 'create-worktree', path: worktreePath, branchName: worktreeBranch, ...(startPoint.trim() ? { startPoint: startPoint.trim() } : {}) }
-              : { action: 'create-branch', branchName: branchName.trim(), ...(startPoint.trim() ? { startPoint: startPoint.trim() } : {}) });
-          }}>
-            <TextField isRequired value={branchName} onChange={setBranchName}><Label>{view === 'create-worktree' ? t('git.worktreeName') : t('git.newBranchName')}</Label><Input placeholder={view === 'create-worktree' ? t('git.worktreeNamePlaceholder') : 'codex/my-task'} /></TextField>
-            <TextField value={startPoint} onChange={setStartPoint}><Label>{t('git.startPoint')}</Label><Input placeholder={t('git.startPointPlaceholder')} /></TextField>
-            {view === 'create-worktree' ? <p className="text-muted break-all text-xs">{t('git.worktreeDerived', { branch: worktreeBranch || 'todex/…', path: worktreePath || `${worktreeBase}/todex/…` })}</p> : <p className="text-muted text-xs">{t('git.branchStays')}</p>}
-            <Button type="submit" isDisabled={writingBlocked || Boolean(sending) || Boolean(failure?.unknown) || !snapshot?.initialized || (view === 'create-worktree' && !worktreePath)}>{title}</Button>
-          </form> : null}
-          {(view === 'list-branches' || view === 'switch-branch') && snapshot ? <div className="space-y-2">
-            {snapshot.branches.length === 0 ? <p>{t('git.noBranches')}</p> : snapshot.branches.map(branch => <div key={branch.name} className="flex items-center justify-between gap-3 rounded-xl border border-default p-3">
-              <div className="min-w-0"><p className="break-all text-sm">{branch.name}{branch.current ? ` · ${t('git.currentBranch')}` : ''}{branch.remote ? ` · ${t('git.remoteBranch')}` : ''}</p>{branch.worktreePath ? <p className="text-muted break-all text-xs">{branch.worktreePath}</p> : null}</div>
-              {view === 'switch-branch' && !branch.remote ? <Button size="sm" variant="secondary" isDisabled={writingBlocked || Boolean(sending) || Boolean(failure?.unknown) || snapshot.dirty || branch.current || Boolean(branch.worktreePath)} onPress={() => void direct(view, { action: 'switch-branch', branchName: branch.name })}>{t('git.switch')}</Button> : null}
-            </div>)}
+          {prItem ? <div className="space-y-2 rounded-xl border border-default p-3">
+            <div className="flex items-start justify-between gap-3">
+              <p className="min-w-0 break-all text-sm font-medium">#{prItem.number} {prItem.title}</p>
+              <Link href={prUrl || undefined} target="_blank" rel="noopener noreferrer" isDisabled={!prUrl}
+                className={buttonVariants({ variant: 'ghost', size: 'sm' })}>{t('git.open')}<Link.Icon /></Link>
+            </div>
+            <p className="text-muted break-all text-xs">{prItem.headRef} → {prItem.baseRef}{prItem.draft ? ` · ${t('git.draft')}` : ''}</p>
+            <p className="text-muted text-xs">{prItem.state === 'merged' ? t('git.prStateMerged') : prItem.state === 'closed' ? t('git.prStateClosed') : t('git.prStateOpen')}
+              {' · '}{t('git.prChecksLine', { passing: prItem.checks.passing, failing: prItem.checks.failing, pending: prItem.checks.pending, approved: prItem.reviews.approved, changes: prItem.reviews.changesRequested, comments: prItem.reviews.commented })}</p>
+            <p className="text-muted text-xs">{t('git.mergeStatus', { status: prItem.mergeable === 'unknown' ? t('git.mergeStateUnknown') : prItem.mergeable === 'mergeable' ? t('git.mergeable') : t('git.unmergeable', { detail: prMergeStateLabelKeys[prItem.mergeState] ? `(${t(prMergeStateLabelKeys[prItem.mergeState])})` : '' }) })}
+              {prItem.autoMergeMethod ? ` · ${t('git.autoMergeOn', { method: prMethodLabelKeys[prItem.autoMergeMethod as GitPullRequestMethod] ? t(prMethodLabelKeys[prItem.autoMergeMethod as GitPullRequestMethod]) : prItem.autoMergeMethod })}` : ''}</p>
           </div> : null}
-          {(view === 'list-worktrees' || view === 'switch-worktree' || view === 'manage-worktrees') && snapshot ? <div className="space-y-3">
-            {view === 'switch-worktree' ? <p className="text-muted text-xs">{t('git.switchWorktreeHint')}</p> : null}
-            {snapshot.worktrees.map(tree => <div key={tree.path} className="space-y-2 rounded-xl border border-default p-3">
-              <p className="break-all text-sm">{tree.branch || t('git.detachedHead')}{tree.current ? ` · ${t('git.currentBranch')}` : ''}{tree.main ? ` · ${t('git.mainWorktree')}` : ''}</p><p className="text-muted break-all text-xs">{tree.path}</p>
-              <p className="text-muted text-xs">{!tree.accessible ? t('git.worktreeInaccessible') : tree.dirty ? t('git.dirtyChanges') : t('git.mergeStateClean')}{tree.locked ? ` · ${t('git.locked')}` : ''}</p>
-              {view === 'switch-worktree' ? <Button size="sm" variant="secondary" isDisabled={Boolean(sending) || tree.current || !tree.accessible} onPress={() => {
-                if (conversation && session.openGitWorktree(tree.path, conversation.id)) onOpenChange(false);
-              }}>{t('git.openWorktree')}</Button> : null}
-              {view === 'manage-worktrees' ? removePath === tree.path ? <div className="space-y-2"><p className="text-sm">{t('git.removeWorktreeConfirm')}</p><Button size="sm" variant="danger" isDisabled={writingBlocked || Boolean(sending) || Boolean(failure?.unknown)} onPress={() => void direct(view, { action: 'remove-worktree', path: tree.path })}>{t('git.confirmRemove')}</Button><Button size="sm" variant="ghost" onPress={() => setRemovePath('')}>{t('common.cancel')}</Button></div> : <Button size="sm" variant="secondary" isDisabled={writingBlocked || Boolean(sending) || Boolean(failure?.unknown) || tree.main || tree.current || tree.dirty || tree.locked || !tree.accessible} onPress={() => setRemovePath(tree.path)}>{t('git.removeWorktree')}</Button> : null}
-            </div>)}
+          {prItem?.state === 'open' ? <div className="flex flex-wrap gap-2">
+            {prItem.draft
+              ? prConfirm('ready-pr', t('git.readyPrTitle'), { action: 'ready-pr' }, { hint: t('git.readyPrHint', { number: prItem.number }) })
+              : prConfirm('draft-pr', t('git.draftPrTitle'), { action: 'draft-pr' }, { hint: t('git.draftPrHint', { number: prItem.number }) })}
+            {prConfirm('close-pr', t('git.closePrTitle'), { action: 'close-pr' }, { danger: true, hint: t('git.closePrHint', { number: prItem.number }) })}
           </div> : null}
-        </Modal.Body>
-        <Modal.Footer><Button variant="ghost" isDisabled={Boolean(sending)} onPress={() => { setView(null); setError(''); setFailure(null); }}>{t('git.backToMenu')}</Button><Button variant="secondary" isDisabled={Boolean(sending)} onPress={() => void (isPrView ? prDirect(view) : direct(view))}>{t('git.refreshStatus')}</Button><Button onPress={() => onOpenChange(false)}>{t('controls.close')}</Button></Modal.Footer>
-      </Modal.Dialog></Modal.Container>
-    </Modal.Backdrop>
-  </Modal>;
+          {prItem?.state === 'closed' ? prConfirm('reopen-pr', t('git.reopenPr'), { action: 'reopen-pr' }, { hint: t('git.reopenPrHint', { number: prItem.number }) }) : null}
+          {prItem?.state === 'open' ? <div className="space-y-2 rounded-xl border border-default p-3">
+            <p className="text-sm font-medium">{t('git.merge')}</p>
+            {prItem.autoMergeMethod
+              ? prConfirm('disable-pr-auto-merge', t('git.disablePrAutoMergeTitle'), { action: 'disable-pr-auto-merge' }, { hint: t('git.disableAutoMergeHint') })
+              : prConfirm('enable-pr-auto-merge', t('git.enablePrAutoMergeTitle'), { action: 'enable-pr-auto-merge', method: mergeMethod }, { hint: t('git.enableAutoMergeHint'), methodPicker: true })}
+            {prConfirm('merge-pr', t('git.mergePrTitle'), { action: 'merge-pr', method: mergeMethod, headSha: prItem.headSha }, { danger: true, hint: t('git.mergePrHint', { number: prItem.number }), methodPicker: true })}
+          </div> : null}
+        </div> : null}
+        {view === 'create-pr' ? <form className="space-y-3" onSubmit={event => {
+          event.preventDefault();
+          if (!prTitle.trim() || !prBase.trim() || !prRepository.trim() || output) return;
+          void direct('create-pr', { action: 'create-pr', title: prTitle.trim(), body: prBody,
+            baseBranch: prBase.trim(), repository: prRepository.trim(), draft: prDraft });
+        }}>
+          <p className="text-muted text-sm">{t('git.createPrHint')}</p>
+          <TextField isRequired value={prRepository} onChange={setPrRepository}><Label>{t('git.repoLabel')}</Label><Input placeholder={t('git.repoPlaceholder')} /></TextField>
+          <TextField isRequired value={prBase} onChange={setPrBase}><Label>{t('git.baseBranch')}</Label><Input placeholder={t('git.baseBranchPlaceholder')} /></TextField>
+          <TextField isRequired value={prTitle} onChange={setPrTitle}><Label>{t('git.prTitleLabel')}</Label><Input placeholder={t('git.prTitlePlaceholder')} maxLength={256} /></TextField>
+          <TextField value={prBody} onChange={setPrBody}><Label>{t('git.prBodyLabel')}</Label><TextArea rows={5} placeholder={t('git.prBodyPlaceholder')} /></TextField>
+          <Checkbox isSelected={prDraft} onChange={setPrDraft}><Checkbox.Content><Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>{t('git.createAsDraft')}</Checkbox.Content></Checkbox>
+          <Button type="submit" isDisabled={writingBlocked || Boolean(sending) || outcomeUnknown.current || Boolean(output) || !snapshot?.initialized || !snapshot.currentBranch || !prTitle.trim() || !prBase.trim() || !prRepository.trim()}>{t('git.createPrTitle')}</Button>
+          {output ? <Button variant="secondary" isDisabled={unavailable || Boolean(sending)} onPress={() => void send('view-pr')}>{t('git.letAgentViewPr')}</Button> : null}
+        </form> : null}
+        {isBranchForm ? <form className="space-y-3" onSubmit={event => {
+          event.preventDefault();
+          if (!branchName.trim() || (view === 'create-worktree' && !worktreePath)) return;
+          void direct(view, view === 'create-worktree'
+            ? { action: 'create-worktree', path: worktreePath, branchName: worktreeBranch, ...(startPoint.trim() ? { startPoint: startPoint.trim() } : {}) }
+            : { action: 'create-branch', branchName: branchName.trim(), ...(startPoint.trim() ? { startPoint: startPoint.trim() } : {}) });
+        }}>
+          <TextField isRequired value={branchName} onChange={setBranchName}><Label>{view === 'create-worktree' ? t('git.worktreeName') : t('git.newBranchName')}</Label><Input placeholder={view === 'create-worktree' ? t('git.worktreeNamePlaceholder') : 'codex/my-task'} /></TextField>
+          <TextField value={startPoint} onChange={setStartPoint}><Label>{t('git.startPoint')}</Label><Input placeholder={t('git.startPointPlaceholder')} /></TextField>
+          {view === 'create-worktree' ? <p className="text-muted break-all text-xs">{t('git.worktreeDerived', { branch: worktreeBranch || 'todex/…', path: worktreePath || `${worktreeBase}/todex/…` })}</p> : <p className="text-muted text-xs">{t('git.branchStays')}</p>}
+          <Button type="submit" isDisabled={writingBlocked || Boolean(sending) || Boolean(failure?.unknown) || !snapshot?.initialized || (view === 'create-worktree' && !worktreePath)}>{title}</Button>
+        </form> : null}
+        {(view === 'list-branches' || view === 'switch-branch') && snapshot ? <div className="space-y-2">
+          {snapshot.branches.length === 0 ? <p>{t('git.noBranches')}</p> : snapshot.branches.map(branch => <div key={branch.name} className="flex items-center justify-between gap-3 rounded-xl border border-default p-3">
+            <div className="min-w-0"><p className="break-all text-sm">{branch.name}{branch.current ? ` · ${t('git.currentBranch')}` : ''}{branch.remote ? ` · ${t('git.remoteBranch')}` : ''}</p>{branch.worktreePath ? <p className="text-muted break-all text-xs">{branch.worktreePath}</p> : null}</div>
+            {view === 'switch-branch' && !branch.remote ? <Button size="sm" variant="secondary" isDisabled={writingBlocked || Boolean(sending) || Boolean(failure?.unknown) || snapshot.dirty || branch.current || Boolean(branch.worktreePath)} onPress={() => void direct(view, { action: 'switch-branch', branchName: branch.name })}>{t('git.switch')}</Button> : null}
+          </div>)}
+        </div> : null}
+        {(view === 'list-worktrees' || view === 'switch-worktree' || view === 'manage-worktrees') && snapshot ? <div className="space-y-3">
+          {view === 'switch-worktree' ? <p className="text-muted text-xs">{t('git.switchWorktreeHint')}</p> : null}
+          {snapshot.worktrees.map(tree => <div key={tree.path} className="space-y-2 rounded-xl border border-default p-3">
+            <p className="break-all text-sm">{tree.branch || t('git.detachedHead')}{tree.current ? ` · ${t('git.currentBranch')}` : ''}{tree.main ? ` · ${t('git.mainWorktree')}` : ''}</p><p className="text-muted break-all text-xs">{tree.path}</p>
+            <p className="text-muted text-xs">{!tree.accessible ? t('git.worktreeInaccessible') : tree.dirty ? t('git.dirtyChanges') : t('git.mergeStateClean')}{tree.locked ? ` · ${t('git.locked')}` : ''}</p>
+            {view === 'switch-worktree' ? <Button size="sm" variant="secondary" isDisabled={Boolean(sending) || tree.current || !tree.accessible} onPress={() => {
+              if (conversation && session.openGitWorktree(tree.path, conversation.id)) onOpenChange(false);
+            }}>{t('git.openWorktree')}</Button> : null}
+            {view === 'manage-worktrees' ? removePath === tree.path ? <div className="space-y-2"><p className="text-sm">{t('git.removeWorktreeConfirm')}</p><Button size="sm" variant="danger" isDisabled={writingBlocked || Boolean(sending) || Boolean(failure?.unknown)} onPress={() => void direct(view, { action: 'remove-worktree', path: tree.path })}>{t('git.confirmRemove')}</Button><Button size="sm" variant="ghost" onPress={() => setRemovePath('')}>{t('common.cancel')}</Button></div> : <Button size="sm" variant="secondary" isDisabled={writingBlocked || Boolean(sending) || Boolean(failure?.unknown) || tree.main || tree.current || tree.dirty || tree.locked || !tree.accessible} onPress={() => setRemovePath(tree.path)}>{t('git.removeWorktree')}</Button> : null}
+          </div>)}
+        </div> : null}
+      </Modal.Body>
+      <Modal.Footer><Button variant="ghost" isDisabled={Boolean(sending)} onPress={() => { setView(null); setError(''); setFailure(null); }}>{t('git.backToMenu')}</Button><Button variant="secondary" isDisabled={Boolean(sending)} onPress={() => void (isPrView ? prDirect(view) : direct(view))}>{t('git.refreshStatus')}</Button><Button onPress={() => onOpenChange(false)}>{t('controls.close')}</Button></Modal.Footer>
+    </Modal.Dialog></Modal.Container>
+  </Modal.Backdrop>;
 
   return <Command>
     <Command.Backdrop isOpen={isOpen} onOpenChange={onOpenChange}>

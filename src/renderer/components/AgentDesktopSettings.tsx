@@ -103,7 +103,6 @@ export function AgentDesktopSettings({ session, page = null, onPageChange = () =
   if (settings === null) {
     return (
       <Surface className="flex flex-col gap-2 rounded-2xl p-5">
-        <h3 className="font-semibold">{t('agentDesktop.title')}</h3>
         <p className="text-muted text-sm">{t('agentDesktop.unsupported')}</p>
       </Surface>
     );
@@ -136,9 +135,9 @@ export function AgentDesktopSettings({ session, page = null, onPageChange = () =
 
   const browser = settings ? browserSummary(settings, t) : undefined;
   const computer = settings ? computerSummary(settings, t) : undefined;
+  // The settings section tab already names this card, so it has no heading.
   return (
     <Surface ref={overview} className="flex flex-col gap-4 rounded-2xl p-5">
-      <h3 className="font-semibold">{t('agentDesktop.title')}</h3>
       <Switch isSelected={enabled} isDisabled={settings === undefined || saving} onChange={selected => { void save(() => api.setAgentDesktopEnabled(selected)); }}>
         <Switch.Content>
           <Switch.Control>

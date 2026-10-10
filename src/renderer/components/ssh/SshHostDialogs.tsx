@@ -14,18 +14,16 @@ function DialogShell({ title, onClose, footer, children, wide = false }: {
   wide?: boolean;
 }) {
   return (
-    <Modal isOpen onOpenChange={(open) => { if (!open) onClose(); }}>
-      <Modal.Backdrop>
-        <Modal.Container>
-          <Modal.Dialog className={`max-h-[90vh] ${wide ? 'sm:max-w-2xl' : 'sm:max-w-lg'}`}>
-            <Modal.CloseTrigger />
-            <Modal.Header><Modal.Heading>{title}</Modal.Heading></Modal.Header>
-            <Modal.Body className="flex max-h-[70vh] flex-col gap-4 overflow-y-auto">{children}</Modal.Body>
-            <Modal.Footer>{footer}</Modal.Footer>
-          </Modal.Dialog>
-        </Modal.Container>
-      </Modal.Backdrop>
-    </Modal>
+    <Modal.Backdrop isOpen onOpenChange={(open) => { if (!open) onClose(); }}>
+      <Modal.Container>
+        <Modal.Dialog className={`max-h-[90vh] ${wide ? 'sm:max-w-2xl' : 'sm:max-w-lg'}`}>
+          <Modal.CloseTrigger />
+          <Modal.Header><Modal.Heading>{title}</Modal.Heading></Modal.Header>
+          <Modal.Body className="flex max-h-[70vh] flex-col gap-4 overflow-y-auto">{children}</Modal.Body>
+          <Modal.Footer>{footer}</Modal.Footer>
+        </Modal.Dialog>
+      </Modal.Container>
+    </Modal.Backdrop>
   );
 }
 

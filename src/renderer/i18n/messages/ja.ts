@@ -118,6 +118,7 @@ export const ja: Messages = {
 
   // settings
   'settings.connection': '接続',
+  'settings.general': '一般',
   'settings.back': '設定に戻る',
   'settings.backendConnections': 'Backend 接続',
   'settings.addBackend': 'Backend を追加',
@@ -1288,6 +1289,7 @@ export const ja: Messages = {
   'progress.stepRunning': 'ステップ実行',
   'progress.stopped': '停止しました',
   'progress.thinking': '思考中',
+  'progress.thought': '思考過程',
 
   // proto
   'proto.connectionClosed': '接続が閉じられました。',

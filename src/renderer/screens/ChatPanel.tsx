@@ -5,6 +5,7 @@ import { RiArrowDownDoubleLine, RiAttachment2, RiBarChartBoxLine, RiClipboardLin
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { Dispatch, KeyboardEvent, SetStateAction } from 'react';
 import { Alert, Button, Label, ListBox, Popover, ScrollShadow, Select, Spinner, Tooltip, toast } from '@heroui/react';
+import { buttonVariants } from '@heroui/styles';
 import { ChainOfThought, ChatAttachment, ChatAttachmentGroup, ChatAttachmentInput, ChatMessage, HoverCard, PromptInput, TextShimmer } from '@heroui-pro/react';
 import { ChatMessageActions } from '@heroui-pro/react/chat-message-actions';
 import { ChatTool, type ToolPartState } from '@heroui-pro/react/chat-tool';
@@ -71,6 +72,7 @@ import type { SshHost } from '@todex/protocol/ssh';
 import type { HostApp } from '@todex/protocol/agentDesktop';
 import { ConnectionError } from '@todex/protocol/connectionError';
 import { describeToolCall, type ToolCallKind } from '@todex/protocol/toolPresentation';
+import { isThinkingProgressEntry } from '@todex/protocol/mobileParity';
 import { getLocale, t, useT } from '../i18n';
 
 type Props = {
@@ -351,27 +353,44 @@ function AgentMessageActions({
 
   return (
     <ChatMessageActions className="mt-1">
-      <ChatMessageActions.Copy
-        aria-label={t('chat.copyReply')}
-        tooltip={t('chat.copyReply')}
-        onPress={() => void navigator.clipboard.writeText(entry.subtitle)
-          .then(() => toast.success(t('chat.replyCopied')))
-          .catch(() => toast.danger(t('chat.copyFailed')))}
-      >
-        <RiClipboardLine aria-hidden="true" />
-      </ChatMessageActions.Copy>
-      {readOnly ? null : (
-        <ChatMessage.Action
-          isIconOnly
-          size="sm"
-          variant="ghost"
-          aria-label={t('chat.forkConversation')}
-          tooltip={canFork ? t('chat.forkConversation') : t('chat.forkUnsupported')}
-          isDisabled={!canFork}
-          onPress={() => session.forkConversation(conversationId)}
+      {/* The actions' `tooltip` prop wraps each button in a focusable
+          role="button" trigger, nesting two controls; a button placed
+          directly in a Tooltip is its own trigger. */}
+      <Tooltip>
+        <ChatMessageActions.Copy
+          aria-label={t('chat.copyReply')}
+          onPress={() => void navigator.clipboard.writeText(entry.subtitle)
+            .then(() => toast.success(t('chat.replyCopied')))
+            .catch(() => toast.danger(t('chat.copyFailed')))}
         >
-          <RiGitBranchLine aria-hidden="true" />
-        </ChatMessage.Action>
+          <RiClipboardLine aria-hidden="true" />
+        </ChatMessageActions.Copy>
+        <Tooltip.Content>{t('chat.copyReply')}</Tooltip.Content>
+      </Tooltip>
+      {readOnly ? null : canFork ? (
+        <Tooltip>
+          <ChatMessage.Action
+            isIconOnly
+            size="sm"
+            variant="ghost"
+            aria-label={t('chat.forkConversation')}
+            onPress={() => session.forkConversation(conversationId)}
+          >
+            <RiGitBranchLine aria-hidden="true" />
+          </ChatMessage.Action>
+          <Tooltip.Content>{t('chat.forkConversation')}</Tooltip.Content>
+        </Tooltip>
+      ) : (
+        // A disabled button gets no hover, so the trigger is the single
+        // focusable element and only borrows the disabled action's look.
+        <Tooltip>
+          <Tooltip.Trigger aria-label={t('chat.forkConversation')} aria-disabled="true" className="rounded-full">
+            <span aria-hidden="true" aria-disabled="true" className={buttonVariants({ variant: 'ghost', size: 'sm', isIconOnly: true, className: 'chat-message__action' })}>
+              <RiGitBranchLine />
+            </span>
+          </Tooltip.Trigger>
+          <Tooltip.Content>{t('chat.forkUnsupported')}</Tooltip.Content>
+        </Tooltip>
       )}
       <HoverCard>
         <HoverCard.Trigger>
@@ -524,10 +543,15 @@ const ChatTimelineItem = memo(function ChatTimelineItem({
             )
           ) : (
             <ChainOfThought.Steps>
-              {item.entries.map((entry) => {
+              {item.entries.map((entry, index) => {
                 if (!isChatToolEntry(entry)) {
+                  // The protocol titles every reasoning row "思考中", even after
+                  // the turn ends; only the step still streaming is thinking.
+                  const label = isThinkingProgressEntry(entry)
+                    ? t(isStreamingGroup && index === item.entries.length - 1 ? 'progress.thinking' : 'progress.thought')
+                    : entry.title;
                   return (
-                    <ChainOfThought.Step key={entry.id} label={entry.title}>
+                    <ChainOfThought.Step key={entry.id} label={label}>
                       <p className="max-w-full overflow-x-auto whitespace-pre-wrap wrap-anywhere text-xs">{entry.subtitle || entry.title}</p>
                     </ChainOfThought.Step>
                   );

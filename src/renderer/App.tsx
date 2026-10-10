@@ -447,79 +447,66 @@ export function App() {
           <p className="text-muted text-sm">{t('app.loadingSettings')}</p>
         </div>
       )}
-      <Modal isOpen={settingsOpen} onOpenChange={(open) => { if (!open) setPanel((current) => current === 'settings' ? null : current); }}>
-        <Modal.Backdrop>
-          <Modal.Container>
-            <Modal.Dialog className="max-h-[90vh] sm:max-w-2xl">
-              <Modal.CloseTrigger />
-              <Modal.Header>
-                <Modal.Heading className="text-lg font-semibold">{t('app.settings')}</Modal.Heading>
-              </Modal.Header>
-              <Modal.Body className="text-foreground max-h-[70vh] overflow-y-auto">
-                <Suspense fallback={panelFallback}><SettingsPanel session={session} historyRecoverySetup={historyRecoverySetup} repairPairing={repairPairing} /></Suspense>
-              </Modal.Body>
-            </Modal.Dialog>
-          </Modal.Container>
-        </Modal.Backdrop>
-      </Modal>
-      <Modal isOpen={usageOpen} onOpenChange={(open) => { if (!open) setPanel((current) => current === 'usage' ? null : current); }}>
-        <Modal.Backdrop>
-          <Modal.Container>
-            <Modal.Dialog className="max-h-[92vh] sm:max-w-5xl">
-              <Modal.CloseTrigger />
-              <Modal.Header><Modal.Heading className="text-lg font-semibold">{t('app.usage')}</Modal.Heading></Modal.Header>
-              <Modal.Body className="text-foreground max-h-[82vh] overflow-y-auto"><Suspense fallback={panelFallback}><UsagePanel session={session} /></Suspense></Modal.Body>
-            </Modal.Dialog>
-          </Modal.Container>
-        </Modal.Backdrop>
-      </Modal>
-      <Modal isOpen={quotaOpen} onOpenChange={(open) => { if (!open) setPanel((current) => current === 'quota' ? null : current); }}>
-        <Modal.Backdrop>
-          <Modal.Container>
-            <Modal.Dialog className="max-h-[90vh] sm:max-w-2xl">
-              <Modal.CloseTrigger />
-              <Modal.Header><Modal.Heading className="text-lg font-semibold">{t('usage.quotaTitle')}</Modal.Heading></Modal.Header>
-              <Modal.Body className="text-foreground max-h-[76vh] overflow-y-auto"><Suspense fallback={panelFallback}><QuotaPanel session={session} /></Suspense></Modal.Body>
-            </Modal.Dialog>
-          </Modal.Container>
-        </Modal.Backdrop>
-      </Modal>
-      <Modal isOpen={aboutOpen} onOpenChange={(open) => { if (!open) setPanel((current) => current === 'about' ? null : current); }}>
-        <Modal.Backdrop>
-          <Modal.Container>
-            <Modal.Dialog className="max-h-[90vh] sm:max-w-2xl">
-              <Modal.CloseTrigger />
-              <Modal.Header><Modal.Heading className="text-lg font-semibold">{t('app.about')}</Modal.Heading></Modal.Header>
-              <Modal.Body className="text-foreground max-h-[76vh] overflow-y-auto"><Suspense fallback={panelFallback}><AboutPanel session={session} /></Suspense></Modal.Body>
-            </Modal.Dialog>
-          </Modal.Container>
-        </Modal.Backdrop>
-      </Modal>
-      <Modal isOpen={cliManagerOpen} onOpenChange={(open) => { if (!open) setPanel((current) => current === 'cli-manager' ? null : current); }}>
-        <Modal.Backdrop>
-          <Modal.Container>
-            <Modal.Dialog className="max-h-[92vh] sm:max-w-3xl">
-              <Modal.CloseTrigger />
-              <Modal.Header><Modal.Heading className="text-lg font-semibold">{t('app.cliManager')}</Modal.Heading></Modal.Header>
-              <Modal.Body className="text-foreground max-h-[80vh] overflow-y-auto"><Suspense fallback={panelFallback}><CliManagerPanel session={session} /></Suspense></Modal.Body>
-            </Modal.Dialog>
-          </Modal.Container>
-        </Modal.Backdrop>
-      </Modal>
-      <Modal isOpen={agentProvidersOpen} onOpenChange={(open) => { if (!open) setPanel((current) => current === 'agent-providers' ? null : current); }}>
-        <Modal.Backdrop>
-          <Modal.Container>
-            <Modal.Dialog className="max-h-[92vh] sm:max-w-3xl">
-              <Modal.CloseTrigger />
-              <Modal.Header><Modal.Heading className="text-lg font-semibold">{t('app.agentProviders')}</Modal.Heading></Modal.Header>
-              <Modal.Body className="text-foreground max-h-[80vh] overflow-y-auto"><Suspense fallback={panelFallback}><AgentProvidersPanel session={session} /></Suspense></Modal.Body>
-            </Modal.Dialog>
-          </Modal.Container>
-        </Modal.Backdrop>
-      </Modal>
-      <Modal isOpen={capabilitiesOpen} onOpenChange={setCapabilitiesOpen}>
-        <Modal.Backdrop><Modal.Container><Modal.Dialog className="max-h-[90vh] sm:max-w-2xl"><Modal.CloseTrigger /><Modal.Header><Modal.Heading className="text-lg font-semibold">{t('app.mcpSkillManager')}</Modal.Heading></Modal.Header><Modal.Body className="text-foreground max-h-[75vh] overflow-y-auto"><Suspense fallback={panelFallback}><CapabilitiesPanel inDialog workspacePath={session.activeWorkspace?.path ?? session.settings.defaultWorkspacePath} providers={session.v2Providers} catalogs={session.capabilityCatalogs} onRefresh={(provider) => void session.refreshCapabilityCatalog(provider)} conversationId={session.activeConversation?.id} selectedSkills={session.activeConversation ? session.selectedSkills[session.activeConversation.id] ?? [] : []} canInvoke={Boolean(session.activeConversation?.v2ConversationId)} onToggleSkill={(skill, provider) => session.activeConversation && session.toggleCatalogSkill(session.activeConversation.id, skill, provider)} onPreviewSkill={(skill, provider) => session.previewSkillResource(provider, skill.resourceId)} onRefreshMcp={(resourceId) => session.activeConversation && session.refreshMcpServer(session.activeConversation.id, resourceId)} onCallMcp={(resourceId, toolName) => session.activeConversation && session.callMcpTool(session.activeConversation.id, resourceId, toolName)} /></Suspense></Modal.Body></Modal.Dialog></Modal.Container></Modal.Backdrop>
-      </Modal>
+      <Modal.Backdrop isOpen={settingsOpen} onOpenChange={(open) => { if (!open) setPanel((current) => current === 'settings' ? null : current); }}>
+        <Modal.Container>
+          {/* A fixed height keeps the dialog still when switching sections. */}
+          <Modal.Dialog className="h-[min(90vh,48rem)] sm:max-w-2xl">
+            <Modal.CloseTrigger />
+            <Modal.Header>
+              <Modal.Heading className="text-lg font-semibold">{t('app.settings')}</Modal.Heading>
+            </Modal.Header>
+            <Modal.Body className="text-foreground overflow-y-auto">
+              <Suspense fallback={panelFallback}><SettingsPanel session={session} historyRecoverySetup={historyRecoverySetup} repairPairing={repairPairing} /></Suspense>
+            </Modal.Body>
+          </Modal.Dialog>
+        </Modal.Container>
+      </Modal.Backdrop>
+      <Modal.Backdrop isOpen={usageOpen} onOpenChange={(open) => { if (!open) setPanel((current) => current === 'usage' ? null : current); }}>
+        <Modal.Container>
+          <Modal.Dialog className="max-h-[92vh] sm:max-w-5xl">
+            <Modal.CloseTrigger />
+            <Modal.Header><Modal.Heading className="text-lg font-semibold">{t('app.usage')}</Modal.Heading></Modal.Header>
+            <Modal.Body className="text-foreground max-h-[82vh] overflow-y-auto"><Suspense fallback={panelFallback}><UsagePanel session={session} /></Suspense></Modal.Body>
+          </Modal.Dialog>
+        </Modal.Container>
+      </Modal.Backdrop>
+      <Modal.Backdrop isOpen={quotaOpen} onOpenChange={(open) => { if (!open) setPanel((current) => current === 'quota' ? null : current); }}>
+        <Modal.Container>
+          <Modal.Dialog className="max-h-[90vh] sm:max-w-2xl">
+            <Modal.CloseTrigger />
+            <Modal.Header><Modal.Heading className="text-lg font-semibold">{t('usage.quotaTitle')}</Modal.Heading></Modal.Header>
+            <Modal.Body className="text-foreground max-h-[76vh] overflow-y-auto"><Suspense fallback={panelFallback}><QuotaPanel session={session} /></Suspense></Modal.Body>
+          </Modal.Dialog>
+        </Modal.Container>
+      </Modal.Backdrop>
+      <Modal.Backdrop isOpen={aboutOpen} onOpenChange={(open) => { if (!open) setPanel((current) => current === 'about' ? null : current); }}>
+        <Modal.Container>
+          <Modal.Dialog className="max-h-[90vh] sm:max-w-2xl">
+            <Modal.CloseTrigger />
+            <Modal.Header><Modal.Heading className="text-lg font-semibold">{t('app.about')}</Modal.Heading></Modal.Header>
+            <Modal.Body className="text-foreground max-h-[76vh] overflow-y-auto"><Suspense fallback={panelFallback}><AboutPanel session={session} /></Suspense></Modal.Body>
+          </Modal.Dialog>
+        </Modal.Container>
+      </Modal.Backdrop>
+      <Modal.Backdrop isOpen={cliManagerOpen} onOpenChange={(open) => { if (!open) setPanel((current) => current === 'cli-manager' ? null : current); }}>
+        <Modal.Container>
+          <Modal.Dialog className="max-h-[92vh] sm:max-w-3xl">
+            <Modal.CloseTrigger />
+            <Modal.Header><Modal.Heading className="text-lg font-semibold">{t('app.cliManager')}</Modal.Heading></Modal.Header>
+            <Modal.Body className="text-foreground max-h-[80vh] overflow-y-auto"><Suspense fallback={panelFallback}><CliManagerPanel session={session} /></Suspense></Modal.Body>
+          </Modal.Dialog>
+        </Modal.Container>
+      </Modal.Backdrop>
+      <Modal.Backdrop isOpen={agentProvidersOpen} onOpenChange={(open) => { if (!open) setPanel((current) => current === 'agent-providers' ? null : current); }}>
+        <Modal.Container>
+          <Modal.Dialog className="max-h-[92vh] sm:max-w-3xl">
+            <Modal.CloseTrigger />
+            <Modal.Header><Modal.Heading className="text-lg font-semibold">{t('app.agentProviders')}</Modal.Heading></Modal.Header>
+            <Modal.Body className="text-foreground max-h-[80vh] overflow-y-auto"><Suspense fallback={panelFallback}><AgentProvidersPanel session={session} /></Suspense></Modal.Body>
+          </Modal.Dialog>
+        </Modal.Container>
+      </Modal.Backdrop>
+      <Modal.Backdrop isOpen={capabilitiesOpen} onOpenChange={setCapabilitiesOpen}><Modal.Container><Modal.Dialog className="max-h-[90vh] sm:max-w-2xl"><Modal.CloseTrigger /><Modal.Header><Modal.Heading className="text-lg font-semibold">{t('app.mcpSkillManager')}</Modal.Heading></Modal.Header><Modal.Body className="text-foreground max-h-[75vh] overflow-y-auto"><Suspense fallback={panelFallback}><CapabilitiesPanel inDialog workspacePath={session.activeWorkspace?.path ?? session.settings.defaultWorkspacePath} providers={session.v2Providers} catalogs={session.capabilityCatalogs} onRefresh={(provider) => void session.refreshCapabilityCatalog(provider)} conversationId={session.activeConversation?.id} selectedSkills={session.activeConversation ? session.selectedSkills[session.activeConversation.id] ?? [] : []} canInvoke={Boolean(session.activeConversation?.v2ConversationId)} onToggleSkill={(skill, provider) => session.activeConversation && session.toggleCatalogSkill(session.activeConversation.id, skill, provider)} onPreviewSkill={(skill, provider) => session.previewSkillResource(provider, skill.resourceId)} onRefreshMcp={(resourceId) => session.activeConversation && session.refreshMcpServer(session.activeConversation.id, resourceId)} onCallMcp={(resourceId, toolName) => session.activeConversation && session.callMcpTool(session.activeConversation.id, resourceId, toolName)} /></Suspense></Modal.Body></Modal.Dialog></Modal.Container></Modal.Backdrop>
       <GitActionsModal key={session.activeConversation?.id} session={session} isOpen={gitOpen} onOpenChange={setGitOpen} />
       {createOpen ? <CreateWorkspaceModal
         key={editingWorkspaceId ?? 'create'}
@@ -586,97 +573,95 @@ function CreateWorkspaceModal({
   }, [isOpen, workspace, session.activeBackendConnectionId, session.serverVersion?.workspace_root, session.settings]);
 
   return (
-    <Modal isOpen={isOpen} onOpenChange={onOpenChange}>
-      <Modal.Backdrop>
-        <Modal.Container>
-          <Modal.Dialog className="sm:max-w-lg">
-            <Modal.CloseTrigger />
-            <Modal.Header>
-              <Modal.Heading>{workspace ? t('app.workspaceEditTitle') : t('app.workspaceCreateTitle')}</Modal.Heading>
-            </Modal.Header>
-            <Modal.Body className="flex flex-col gap-4">
-              <Field label={t('app.workspaceName')} value={name} onChange={setName} />
-              <Select isDisabled={Boolean(workspace)} selectedKey={backendId} onSelectionChange={(key) => { if (typeof key === 'string') setBackendId(key); }}>
-                <Label>{t('app.workspaceBackend')}</Label><Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
-                <Select.Popover><ListBox>{session.backendConnections.map((profile) => <ListBox.Item key={profile.id} id={profile.id} textValue={profile.name}>{profile.name} · {profile.serverUrl}</ListBox.Item>)}</ListBox></Select.Popover>
-              </Select>
-              <Field label={t('app.workspaceDirectory')} value={path} onChange={setPath} />
-              {roots.length > 1 ? (
-                <Select
-                  selectedKey={activeRoot}
-                  onSelectionChange={(key) => {
-                    if (typeof key !== 'string' || key === activeRoot) return;
-                    void fetchWorkspaceDirectorySnapshot(directorySettings, key)
-                      .then(applySnapshot)
-                      .catch((error) => toast.danger(error instanceof Error ? error.message : t('app.workspaceReadFailed')));
-                  }}
-                >
-                  <Label>{t('app.workspaceRoot')}</Label><Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
-                  <Select.Popover><ListBox>{roots.map((root) => <ListBox.Item key={root} id={root} textValue={root}>{root}</ListBox.Item>)}</ListBox></Select.Popover>
-                </Select>
-              ) : null}
-              <div className="flex gap-2">
-                <Button
-                  variant="secondary"
-                  onPress={async () => {
-                    const selected = await window.todexDesktop.dialog.openDirectory();
-                    if (selected) setPath(selected);
-                  }}
-                >
-                  {t('app.workspacePickLocal')}
-                </Button>
-                <Button
-                  variant="tertiary"
-                  onPress={async () => {
-                    try {
-                      applySnapshot(await fetchWorkspaceDirectorySnapshot(directorySettings, path));
-                    } catch (error) {
-                      toast.danger(error instanceof Error ? error.message : t('app.workspaceReadFailed'));
-                    }
-                  }}
-                >
-                  {t('app.workspaceBrowse')}
-                </Button>
-              </div>
-              {entries.length ? (
-                <div className="flex max-h-40 flex-col gap-1 overflow-y-auto">
-                  {entries.map((entry) => (
-                    <Button key={entry} variant="ghost" className="justify-start" onPress={() => setPath(entry)}>
-                      {entry}
-                    </Button>
-                  ))}
-                </div>
-              ) : null}
-            </Modal.Body>
-            <Modal.Footer>
-              <Button slot="close" variant="tertiary">{t('common.cancel')}</Button>
-              <Button
-                onPress={async () => {
-                  let validatedPath = path;
-                  if (session.connectionState === 'open') {
-                    try {
-                      validatedPath = (await fetchWorkspaceDirectorySnapshot(directorySettings, path)).current;
-                    } catch (error) {
-                      toast.danger(error instanceof Error ? error.message : t('app.workspaceReadFailed'));
-                      return;
-                    }
-                  }
-                  if (workspace) {
-                    session.updateWorkspace(workspace.id, { name: name.trim() || validatedPath, path: validatedPath });
-                  } else {
-                    session.setActiveBackendConnectionId(backendId);
-                    session.createWorkspace(name.trim() || validatedPath, validatedPath);
-                  }
-                  onOpenChange(false);
+    <Modal.Backdrop isOpen={isOpen} onOpenChange={onOpenChange}>
+      <Modal.Container>
+        <Modal.Dialog className="sm:max-w-lg">
+          <Modal.CloseTrigger />
+          <Modal.Header>
+            <Modal.Heading>{workspace ? t('app.workspaceEditTitle') : t('app.workspaceCreateTitle')}</Modal.Heading>
+          </Modal.Header>
+          <Modal.Body className="flex flex-col gap-4">
+            <Field label={t('app.workspaceName')} value={name} onChange={setName} />
+            <Select isDisabled={Boolean(workspace)} selectedKey={backendId} onSelectionChange={(key) => { if (typeof key === 'string') setBackendId(key); }}>
+              <Label>{t('app.workspaceBackend')}</Label><Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
+              <Select.Popover><ListBox>{session.backendConnections.map((profile) => <ListBox.Item key={profile.id} id={profile.id} textValue={profile.name}>{profile.name} · {profile.serverUrl}</ListBox.Item>)}</ListBox></Select.Popover>
+            </Select>
+            <Field label={t('app.workspaceDirectory')} value={path} onChange={setPath} />
+            {roots.length > 1 ? (
+              <Select
+                selectedKey={activeRoot}
+                onSelectionChange={(key) => {
+                  if (typeof key !== 'string' || key === activeRoot) return;
+                  void fetchWorkspaceDirectorySnapshot(directorySettings, key)
+                    .then(applySnapshot)
+                    .catch((error) => toast.danger(error instanceof Error ? error.message : t('app.workspaceReadFailed')));
                 }}
               >
-                {workspace ? null : <RiAddLine className="size-4" />}
-                {workspace ? t('common.save') : t('app.workspaceCreate')}
+                <Label>{t('app.workspaceRoot')}</Label><Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
+                <Select.Popover><ListBox>{roots.map((root) => <ListBox.Item key={root} id={root} textValue={root}>{root}</ListBox.Item>)}</ListBox></Select.Popover>
+              </Select>
+            ) : null}
+            <div className="flex gap-2">
+              <Button
+                variant="secondary"
+                onPress={async () => {
+                  const selected = await window.todexDesktop.dialog.openDirectory();
+                  if (selected) setPath(selected);
+                }}
+              >
+                {t('app.workspacePickLocal')}
               </Button>
-            </Modal.Footer>
-          </Modal.Dialog>
-        </Modal.Container>
-      </Modal.Backdrop>
-    </Modal>
+              <Button
+                variant="tertiary"
+                onPress={async () => {
+                  try {
+                    applySnapshot(await fetchWorkspaceDirectorySnapshot(directorySettings, path));
+                  } catch (error) {
+                    toast.danger(error instanceof Error ? error.message : t('app.workspaceReadFailed'));
+                  }
+                }}
+              >
+                {t('app.workspaceBrowse')}
+              </Button>
+            </div>
+            {entries.length ? (
+              <div className="flex max-h-40 flex-col gap-1 overflow-y-auto">
+                {entries.map((entry) => (
+                  <Button key={entry} variant="ghost" className="justify-start" onPress={() => setPath(entry)}>
+                    {entry}
+                  </Button>
+                ))}
+              </div>
+            ) : null}
+          </Modal.Body>
+          <Modal.Footer>
+            <Button slot="close" variant="tertiary">{t('common.cancel')}</Button>
+            <Button
+              onPress={async () => {
+                let validatedPath = path;
+                if (session.connectionState === 'open') {
+                  try {
+                    validatedPath = (await fetchWorkspaceDirectorySnapshot(directorySettings, path)).current;
+                  } catch (error) {
+                    toast.danger(error instanceof Error ? error.message : t('app.workspaceReadFailed'));
+                    return;
+                  }
+                }
+                if (workspace) {
+                  session.updateWorkspace(workspace.id, { name: name.trim() || validatedPath, path: validatedPath });
+                } else {
+                  session.setActiveBackendConnectionId(backendId);
+                  session.createWorkspace(name.trim() || validatedPath, validatedPath);
+                }
+                onOpenChange(false);
+              }}
+            >
+              {workspace ? null : <RiAddLine className="size-4" />}
+              {workspace ? t('common.save') : t('app.workspaceCreate')}
+            </Button>
+          </Modal.Footer>
+        </Modal.Dialog>
+      </Modal.Container>
+    </Modal.Backdrop>
   );
 }

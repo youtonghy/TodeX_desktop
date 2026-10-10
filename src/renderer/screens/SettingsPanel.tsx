@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Button, Chip, ColorSwatchPicker, Description, Label, ListBox, Select, Surface, Switch, toast } from '@heroui/react';
+import { Button, Chip, ColorSwatchPicker, Description, Label, ListBox, Select, Surface, Switch, Tabs, toast } from '@heroui/react';
 import { RadioButtonGroup } from '@heroui-pro/react';
 import { normalizeServerUrl } from '@todex/protocol/todex';
 import { BACKEND_LABEL_COLORS, backendLabelColor } from '../session/backendColors';
@@ -10,6 +10,8 @@ import { AgentDesktopSettings, type AgentDesktopPage } from '../components/Agent
 import type { TodeXSession } from '../session/useTodeXSession';
 import { UNPAIRED_TRANSPORT, connectionStateLabel, healthLabelOf, settingsFromProfile } from '../session/helpers';
 import { LOCALE_LABELS, SUPPORTED_LOCALES, getLocalePreference, isLocale, setLocalePreference, useT, type LocalePreference } from '../i18n';
+
+type SettingsSection = 'connection' | 'general' | 'agent';
 
 type Props = {
   session: TodeXSession;
@@ -26,12 +28,17 @@ export function SettingsPanel({ session, historyRecoverySetup = false, repairPai
   const [pairingAutoStart, setPairingAutoStart] = useState(0);
   // A tool's own settings page shown in place of everything else.
   const [agentPage, setAgentPage] = useState<AgentDesktopPage | null>(null);
+  const [section, setSection] = useState<SettingsSection>('connection');
   const root = useRef<HTMLDivElement>(null);
   const connected = connectionState === 'open' || connectionState === 'connecting';
   const activeProfile = backendConnections.find((item) => item.id === activeBackendConnectionId);
   useEffect(() => {
     if (repairPairing) setPairingAutoStart((value) => value + 1);
   }, [repairPairing]);
+  // Re-pairing and recovery-key setup both live in the connection section.
+  useEffect(() => {
+    if (repairPairing || historyRecoverySetup) setSection('connection');
+  }, [repairPairing, historyRecoverySetup]);
   // The settings body keeps its scroll offset across pages; a page starts at its top.
   useEffect(() => {
     if (agentPage) root.current?.scrollIntoView({ block: 'start' });
@@ -52,14 +59,21 @@ export function SettingsPanel({ session, historyRecoverySetup = false, repairPai
     setSettings((current) => settingsFromProfile(profile, current));
   };
 
-  // A tool page hides the other sections rather than unmounting them, so an
-  // in-progress pairing or recovery-key setup survives a visit to the page.
+  // Inactive sections stay mounted (hidden), so an in-progress pairing or
+  // recovery-key setup survives a visit to another section.
+  const panelClassName = 'flex flex-col gap-6 data-[inert=true]:hidden';
   return (
-    <div ref={root} className="flex flex-col gap-6 py-1">
-      <div className={agentPage ? 'hidden' : 'contents'}>
+    <Tabs ref={root} className="gap-5 py-1" selectedKey={section} onSelectionChange={(key) => setSection(key as SettingsSection)}>
+      <Tabs.ListContainer className="bg-overlay sticky top-0 z-10">
+        <Tabs.List aria-label={t('app.settings')}>
+          <Tabs.Tab id="connection">{t('settings.connection')}<Tabs.Indicator /></Tabs.Tab>
+          <Tabs.Tab id="general">{t('settings.general')}<Tabs.Indicator /></Tabs.Tab>
+          <Tabs.Tab id="agent">{t('agentDesktop.title')}<Tabs.Indicator /></Tabs.Tab>
+        </Tabs.List>
+      </Tabs.ListContainer>
+      <Tabs.Panel id="connection" shouldForceMount className={panelClassName}>
         <div>
-          <h3 className="text-base font-semibold">{t('settings.connection')}</h3>
-          <p className="text-muted mt-1 text-sm">{healthLabelOf(connectionHealth)} · {connectionStateLabel(connectionState)}</p>
+          <p className="text-muted text-sm">{healthLabelOf(connectionHealth)} · {connectionStateLabel(connectionState)}</p>
           {serverVersion ? (
             <Chip className="mt-2" variant="soft" color={versionMismatch ? 'warning' : 'default'}>{serverVersion.name} {serverVersion.version}{settings.tenantId ? ` · ${settings.tenantId}` : ''}{versionMismatch ? ` · ${t('conn.versionMismatchShort')}` : ''}</Chip>
           ) : null}
@@ -116,6 +130,8 @@ export function SettingsPanel({ session, historyRecoverySetup = false, repairPai
             </>
           ) : null}
         </Surface>
+      </Tabs.Panel>
+      <Tabs.Panel id="general" shouldForceMount className={panelClassName}>
         <Surface className="flex flex-col gap-4 rounded-2xl p-5">
           <h3 className="font-semibold">{t('settings.language')}</h3>
           <Select
@@ -177,9 +193,6 @@ export function SettingsPanel({ session, historyRecoverySetup = false, repairPai
             </Description>
           </Select>
         </Surface>
-      </div>
-      <AgentDesktopSettings session={session} page={agentPage} onPageChange={setAgentPage} />
-      <div className={agentPage ? 'hidden' : 'contents'}>
         <Surface className="flex flex-col gap-4 rounded-2xl p-5">
           <h3 className="font-semibold">{t('settings.notifications')}</h3>
           <Switch
@@ -207,7 +220,10 @@ export function SettingsPanel({ session, historyRecoverySetup = false, repairPai
             </Switch.Content>
           </Switch>
         </Surface>
-      </div>
-    </div>
+      </Tabs.Panel>
+      <Tabs.Panel id="agent" shouldForceMount className={panelClassName}>
+        <AgentDesktopSettings session={session} page={agentPage} onPageChange={setAgentPage} />
+      </Tabs.Panel>
+    </Tabs>
   );
 }

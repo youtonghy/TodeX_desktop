@@ -368,28 +368,26 @@ export function WorkspaceFilePreview({ file, onAddReference, onSaveFile, onReloa
           </AlertDialog.Container>
         </AlertDialog.Backdrop>
       </AlertDialog>
-      <Modal>
-        <Modal.Backdrop isOpen={mergeOpen} onOpenChange={(open) => { setMergeOpen(open); if (!open) setMergeError(''); }}>
-          <Modal.Container>
-            <Modal.Dialog className="w-[calc(100vw-2rem)] max-w-3xl">
-              <Modal.Header>
-                <Modal.Heading>{t('filePreview.mergeTitle')}</Modal.Heading>
-                <p className="text-muted text-xs">{t('filePreview.mergeHint')}</p>
-              </Modal.Header>
-              <Modal.Body className="overflow-y-auto">
-                <TextField value={mergeDraft} onChange={(value) => { setMergeDraft(value); setMergeError(''); }} className="w-full">
-                  <TextArea aria-label={t('filePreview.mergeEditorLabel')} rows={20} className="w-full font-mono text-xs" />
-                </TextField>
-                {mergeError ? <p className="text-danger text-xs">{mergeError}</p> : null}
-              </Modal.Body>
-              <Modal.Footer>
-                <Button variant="tertiary" onPress={() => setMergeOpen(false)}>{t('filePreview.mergeBack')}</Button>
-                <Button variant="secondary" onPress={adoptMerge}>{t('filePreview.mergeAdopt')}</Button>
-              </Modal.Footer>
-            </Modal.Dialog>
-          </Modal.Container>
-        </Modal.Backdrop>
-      </Modal>
+      <Modal.Backdrop isOpen={mergeOpen} onOpenChange={(open) => { setMergeOpen(open); if (!open) setMergeError(''); }}>
+        <Modal.Container>
+          <Modal.Dialog className="w-[calc(100vw-2rem)] max-w-3xl">
+            <Modal.Header>
+              <Modal.Heading>{t('filePreview.mergeTitle')}</Modal.Heading>
+              <p className="text-muted text-xs">{t('filePreview.mergeHint')}</p>
+            </Modal.Header>
+            <Modal.Body className="overflow-y-auto">
+              <TextField value={mergeDraft} onChange={(value) => { setMergeDraft(value); setMergeError(''); }} className="w-full">
+                <TextArea aria-label={t('filePreview.mergeEditorLabel')} rows={20} className="w-full font-mono text-xs" />
+              </TextField>
+              {mergeError ? <p className="text-danger text-xs">{mergeError}</p> : null}
+            </Modal.Body>
+            <Modal.Footer>
+              <Button variant="tertiary" onPress={() => setMergeOpen(false)}>{t('filePreview.mergeBack')}</Button>
+              <Button variant="secondary" onPress={adoptMerge}>{t('filePreview.mergeAdopt')}</Button>
+            </Modal.Footer>
+          </Modal.Dialog>
+        </Modal.Container>
+      </Modal.Backdrop>
     </div>
   );
 }

@@ -118,6 +118,7 @@ export const en: Messages = {
 
   // settings
   'settings.connection': 'Connection',
+  'settings.general': 'General',
   'settings.back': 'Back to settings',
   'settings.backendConnections': 'Backend connections',
   'settings.addBackend': 'Add backend',
@@ -1288,6 +1289,7 @@ export const en: Messages = {
   'progress.stepRunning': 'Running step',
   'progress.stopped': 'Stopped',
   'progress.thinking': 'Thinking',
+  'progress.thought': 'Reasoning',
 
   // proto
   'proto.connectionClosed': 'Connection closed.',

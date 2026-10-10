@@ -1524,30 +1524,28 @@ function FilesPane({ session, target, onTargetChange, remote, onRemoteRebind }: 
           </div>
         </HeroContextMenu>
       ) : null}
-      <Modal isOpen={operation?.kind === 'mkdir' || operation?.kind === 'rename'} onOpenChange={(open) => { if (!open) setOperation(null); }}>
-        <Modal.Backdrop>
-          <Modal.Container>
-            <Modal.Dialog className="sm:max-w-sm">
-              <Modal.CloseTrigger />
-              <Modal.Header>
-                <Modal.Heading>{operation?.kind === 'rename' ? t('ssh.files.rename') : t('ssh.files.newFolder')}</Modal.Heading>
-              </Modal.Header>
-              <Modal.Body>
-                <form id="file-operation-form" onSubmit={(event) => { event.preventDefault(); void submitOperation(); }}>
-                  <TextField className="w-full" value={operationName} onChange={setOperationName} autoFocus>
-                    <Label>{t('ssh.files.name')}</Label>
-                    <Input className="w-full" />
-                  </TextField>
-                </form>
-              </Modal.Body>
-              <Modal.Footer>
-                <Button slot="close" variant="tertiary">{t('common.cancel')}</Button>
-                <Button type="submit" form="file-operation-form">{t('common.save')}</Button>
-              </Modal.Footer>
-            </Modal.Dialog>
-          </Modal.Container>
-        </Modal.Backdrop>
-      </Modal>
+      <Modal.Backdrop isOpen={operation?.kind === 'mkdir' || operation?.kind === 'rename'} onOpenChange={(open) => { if (!open) setOperation(null); }}>
+        <Modal.Container>
+          <Modal.Dialog className="sm:max-w-sm">
+            <Modal.CloseTrigger />
+            <Modal.Header>
+              <Modal.Heading>{operation?.kind === 'rename' ? t('ssh.files.rename') : t('ssh.files.newFolder')}</Modal.Heading>
+            </Modal.Header>
+            <Modal.Body>
+              <form id="file-operation-form" onSubmit={(event) => { event.preventDefault(); void submitOperation(); }}>
+                <TextField className="w-full" value={operationName} onChange={setOperationName} autoFocus>
+                  <Label>{t('ssh.files.name')}</Label>
+                  <Input className="w-full" />
+                </TextField>
+              </form>
+            </Modal.Body>
+            <Modal.Footer>
+              <Button slot="close" variant="tertiary">{t('common.cancel')}</Button>
+              <Button type="submit" form="file-operation-form">{t('common.save')}</Button>
+            </Modal.Footer>
+          </Modal.Dialog>
+        </Modal.Container>
+      </Modal.Backdrop>
       <AlertDialog isOpen={operation?.kind === 'delete'} onOpenChange={(open) => { if (!open) setOperation(null); }}>
         <AlertDialog.Backdrop>
           <AlertDialog.Container>

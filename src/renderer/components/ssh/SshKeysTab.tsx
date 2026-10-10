@@ -101,21 +101,19 @@ function KeyDialogShell({ title, onClose, onSubmit, saving, children }: {
 }) {
   const t = useT();
   return (
-    <Modal isOpen onOpenChange={(open) => { if (!open) onClose(); }}>
-      <Modal.Backdrop>
-        <Modal.Container>
-          <Modal.Dialog className="max-h-[90vh] sm:max-w-lg">
-            <Modal.CloseTrigger />
-            <Modal.Header><Modal.Heading>{title}</Modal.Heading></Modal.Header>
-            <Modal.Body className="flex max-h-[70vh] flex-col gap-4 overflow-y-auto">{children}</Modal.Body>
-            <Modal.Footer>
-              <Button slot="close" variant="tertiary">{t('common.cancel')}</Button>
-              <Button isDisabled={saving} onPress={onSubmit}>{saving ? <Spinner size="sm" /> : null}{t('common.save')}</Button>
-            </Modal.Footer>
-          </Modal.Dialog>
-        </Modal.Container>
-      </Modal.Backdrop>
-    </Modal>
+    <Modal.Backdrop isOpen onOpenChange={(open) => { if (!open) onClose(); }}>
+      <Modal.Container>
+        <Modal.Dialog className="max-h-[90vh] sm:max-w-lg">
+          <Modal.CloseTrigger />
+          <Modal.Header><Modal.Heading>{title}</Modal.Heading></Modal.Header>
+          <Modal.Body className="flex max-h-[70vh] flex-col gap-4 overflow-y-auto">{children}</Modal.Body>
+          <Modal.Footer>
+            <Button slot="close" variant="tertiary">{t('common.cancel')}</Button>
+            <Button isDisabled={saving} onPress={onSubmit}>{saving ? <Spinner size="sm" /> : null}{t('common.save')}</Button>
+          </Modal.Footer>
+        </Modal.Dialog>
+      </Modal.Container>
+    </Modal.Backdrop>
   );
 }
 

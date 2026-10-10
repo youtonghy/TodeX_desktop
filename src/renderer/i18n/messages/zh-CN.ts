@@ -118,6 +118,7 @@ export const zhCN = {
 
   // settings
   'settings.connection': '连接',
+  'settings.general': '通用',
   'settings.back': '返回设置',
   'settings.backendConnections': '后端连接',
   'settings.addBackend': '添加后端',
@@ -1288,6 +1289,7 @@ export const zhCN = {
   'progress.stepRunning': '执行步骤',
   'progress.stopped': '已停止',
   'progress.thinking': '思考中',
+  'progress.thought': '思考过程',
 
   // proto
   'proto.connectionClosed': '连接已关闭。',

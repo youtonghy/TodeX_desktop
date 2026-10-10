@@ -118,6 +118,7 @@ export const ko: Messages = {
 
   // settings
   'settings.connection': '연결',
+  'settings.general': '일반',
   'settings.back': '설정으로 돌아가기',
   'settings.backendConnections': 'Backend 연결',
   'settings.addBackend': 'Backend 추가',
@@ -1288,6 +1289,7 @@ export const ko: Messages = {
   'progress.stepRunning': '단계 실행',
   'progress.stopped': '중지됨',
   'progress.thinking': '생각 중',
+  'progress.thought': '생각 과정',
 
   // proto
   'proto.connectionClosed': '연결이 닫혔습니다.',

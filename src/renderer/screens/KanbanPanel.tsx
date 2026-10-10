@@ -570,7 +570,7 @@ function WorkspaceColumn({ workspace, meta, tasks, session, latestEntries, onOpe
           </Kanban.ColumnActions>
         </Kanban.ColumnHeader>
       </div>
-      <Kanban.ColumnBody className={`rounded-t-none ${meta.bodyBg}`}>
+      <Kanban.ColumnBody className={`min-h-0 rounded-t-none pb-2 ${meta.bodyBg}`}>
         {kanbanTaskStatuses.map((status) => {
           const items = tasks.filter((task) => task.status === status);
           if (!items.length) return null;
@@ -669,76 +669,74 @@ function ScheduleTaskDialog({ session, task, onClose }: {
   };
 
   return (
-    <Modal isOpen={Boolean(task)} onOpenChange={(open) => { if (!open) onClose(); }}>
-      <Modal.Backdrop>
-        <Modal.Container>
-          <Modal.Dialog className="sm:max-w-lg">
-            <Modal.CloseTrigger />
-            <Modal.Header>
-              <Modal.Heading>{t('kanban.scheduleTitle')}</Modal.Heading>
-            </Modal.Header>
-            <Modal.Body className="flex flex-col gap-4">
-              <Select
-                selectedKey={action}
-                disabledKeys={targets.length ? [] : ['send']}
-                onSelectionChange={(key) => setAction(String(key) === 'send' ? 'send' : 'start')}
-              >
-                <Label>{t('kanban.scheduleAction')}</Label>
+    <Modal.Backdrop isOpen={Boolean(task)} onOpenChange={(open) => { if (!open) onClose(); }}>
+      <Modal.Container>
+        <Modal.Dialog className="sm:max-w-lg">
+          <Modal.CloseTrigger />
+          <Modal.Header>
+            <Modal.Heading>{t('kanban.scheduleTitle')}</Modal.Heading>
+          </Modal.Header>
+          <Modal.Body className="flex flex-col gap-4">
+            <Select
+              selectedKey={action}
+              disabledKeys={targets.length ? [] : ['send']}
+              onSelectionChange={(key) => setAction(String(key) === 'send' ? 'send' : 'start')}
+            >
+              <Label>{t('kanban.scheduleAction')}</Label>
+              <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
+              <Select.Popover>
+                <ListBox>
+                  <ListBox.Item id="start" textValue={t('kanban.scheduleStart')}>
+                    {t('kanban.scheduleStart')}
+                    <ListBox.ItemIndicator />
+                  </ListBox.Item>
+                  <ListBox.Item id="send" textValue={t('kanban.scheduleSend')}>
+                    {t('kanban.scheduleSend')}
+                    <ListBox.ItemIndicator />
+                  </ListBox.Item>
+                </ListBox>
+              </Select.Popover>
+            </Select>
+            {action === 'send' ? (
+              <Select selectedKey={conversationId} onSelectionChange={(key) => setConversationId(String(key))}>
+                <Label>{t('kanban.scheduleConversation')}</Label>
                 <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
                 <Select.Popover>
                   <ListBox>
-                    <ListBox.Item id="start" textValue={t('kanban.scheduleStart')}>
-                      {t('kanban.scheduleStart')}
-                      <ListBox.ItemIndicator />
-                    </ListBox.Item>
-                    <ListBox.Item id="send" textValue={t('kanban.scheduleSend')}>
-                      {t('kanban.scheduleSend')}
-                      <ListBox.ItemIndicator />
-                    </ListBox.Item>
+                    {targets.map((conversation) => (
+                      <ListBox.Item
+                        key={conversation.id}
+                        id={conversation.id}
+                        textValue={conversationDisplayTitle(conversation, session.timeline)}
+                      >
+                        {conversationDisplayTitle(conversation, session.timeline)}
+                        <ListBox.ItemIndicator />
+                      </ListBox.Item>
+                    ))}
                   </ListBox>
                 </Select.Popover>
               </Select>
-              {action === 'send' ? (
-                <Select selectedKey={conversationId} onSelectionChange={(key) => setConversationId(String(key))}>
-                  <Label>{t('kanban.scheduleConversation')}</Label>
-                  <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
-                  <Select.Popover>
-                    <ListBox>
-                      {targets.map((conversation) => (
-                        <ListBox.Item
-                          key={conversation.id}
-                          id={conversation.id}
-                          textValue={conversationDisplayTitle(conversation, session.timeline)}
-                        >
-                          {conversationDisplayTitle(conversation, session.timeline)}
-                          <ListBox.ItemIndicator />
-                        </ListBox.Item>
-                      ))}
-                    </ListBox>
-                  </Select.Popover>
-                </Select>
-              ) : null}
-              <Field
-                label={t('kanban.scheduleAt')}
-                value={at}
-                onChange={(value) => { setAt(value); setError(''); }}
-                type="datetime-local"
-                description={zone ? t('kanban.scheduleZone', { zone: kanbanTimeZoneLabel(zone) }) : t('kanban.scheduleZoneUnknown')}
-              />
-              <TextField value={text} onChange={setText}>
-                <Label>{t('kanban.scheduleText')}</Label>
-                <TextArea rows={4} maxLength={20000} />
-              </TextField>
-              {error ? <p className="text-danger text-sm">{error}</p> : null}
-            </Modal.Body>
-            <Modal.Footer>
-              <Button variant="tertiary" onPress={onClose}>{t('common.cancel')}</Button>
-              <Button onPress={submit} isDisabled={!zone || !at || !text.trim()}>{t('kanban.scheduleSave')}</Button>
-            </Modal.Footer>
-          </Modal.Dialog>
-        </Modal.Container>
-      </Modal.Backdrop>
-    </Modal>
+            ) : null}
+            <Field
+              label={t('kanban.scheduleAt')}
+              value={at}
+              onChange={(value) => { setAt(value); setError(''); }}
+              type="datetime-local"
+              description={zone ? t('kanban.scheduleZone', { zone: kanbanTimeZoneLabel(zone) }) : t('kanban.scheduleZoneUnknown')}
+            />
+            <TextField value={text} onChange={setText}>
+              <Label>{t('kanban.scheduleText')}</Label>
+              <TextArea rows={4} maxLength={20000} />
+            </TextField>
+            {error ? <p className="text-danger text-sm">{error}</p> : null}
+          </Modal.Body>
+          <Modal.Footer>
+            <Button variant="tertiary" onPress={onClose}>{t('common.cancel')}</Button>
+            <Button onPress={submit} isDisabled={!zone || !at || !text.trim()}>{t('kanban.scheduleSave')}</Button>
+          </Modal.Footer>
+        </Modal.Dialog>
+      </Modal.Container>
+    </Modal.Backdrop>
   );
 }
 
@@ -769,47 +767,45 @@ function NewTaskDialog({ session, workspaces, open, onOpenChange }: {
   };
 
   return (
-    <Modal isOpen={open} onOpenChange={(next) => (next ? onOpenChange(true) : close())}>
-      <Modal.Backdrop>
-        <Modal.Container>
-          <Modal.Dialog className="sm:max-w-lg">
-            <Modal.CloseTrigger />
-            <Modal.Header>
-              <Modal.Heading>{t('kanban.newTask')}</Modal.Heading>
-            </Modal.Header>
-            <Modal.Body className="flex flex-col gap-4">
-              <Select
-                selectedKey={effectiveWorkspaceId}
-                onSelectionChange={(key) => setWorkspaceId(String(key))}
-              >
-                <Label>{t('kanban.workspace')}</Label>
-                <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
-                <Select.Popover>
-                  <ListBox>
-                    {workspaces.map((workspace) => (
-                      <ListBox.Item key={workspace.id} id={workspace.id} textValue={workspaceDisplayName(workspace)}>
-                        {workspaceDisplayName(workspace)}
-                        <ListBox.ItemIndicator />
-                      </ListBox.Item>
-                    ))}
-                  </ListBox>
-                </Select.Popover>
-              </Select>
-              <Field label={t('kanban.titlePlaceholder')} value={title} onChange={setTitle} />
-              <TextField value={description} onChange={setDescription}>
-                <Label>{t('kanban.descLabel')}</Label>
-                <TextArea placeholder={t('kanban.descPlaceholder')} rows={3} maxLength={2000} />
-              </TextField>
-              <Field label={t('kanban.dueDateAria')} value={dueDate} onChange={setDueDate} type="date" />
-            </Modal.Body>
-            <Modal.Footer>
-              <Button variant="tertiary" onPress={close}>{t('common.cancel')}</Button>
-              <Button onPress={submit} isDisabled={!title.trim() || !effectiveWorkspaceId}>{t('kanban.add')}</Button>
-            </Modal.Footer>
-          </Modal.Dialog>
-        </Modal.Container>
-      </Modal.Backdrop>
-    </Modal>
+    <Modal.Backdrop isOpen={open} onOpenChange={(next) => (next ? onOpenChange(true) : close())}>
+      <Modal.Container>
+        <Modal.Dialog className="sm:max-w-lg">
+          <Modal.CloseTrigger />
+          <Modal.Header>
+            <Modal.Heading>{t('kanban.newTask')}</Modal.Heading>
+          </Modal.Header>
+          <Modal.Body className="flex flex-col gap-4">
+            <Select
+              selectedKey={effectiveWorkspaceId}
+              onSelectionChange={(key) => setWorkspaceId(String(key))}
+            >
+              <Label>{t('kanban.workspace')}</Label>
+              <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
+              <Select.Popover>
+                <ListBox>
+                  {workspaces.map((workspace) => (
+                    <ListBox.Item key={workspace.id} id={workspace.id} textValue={workspaceDisplayName(workspace)}>
+                      {workspaceDisplayName(workspace)}
+                      <ListBox.ItemIndicator />
+                    </ListBox.Item>
+                  ))}
+                </ListBox>
+              </Select.Popover>
+            </Select>
+            <Field label={t('kanban.titlePlaceholder')} value={title} onChange={setTitle} />
+            <TextField value={description} onChange={setDescription}>
+              <Label>{t('kanban.descLabel')}</Label>
+              <TextArea placeholder={t('kanban.descPlaceholder')} rows={3} maxLength={2000} />
+            </TextField>
+            <Field label={t('kanban.dueDateAria')} value={dueDate} onChange={setDueDate} type="date" />
+          </Modal.Body>
+          <Modal.Footer>
+            <Button variant="tertiary" onPress={close}>{t('common.cancel')}</Button>
+            <Button onPress={submit} isDisabled={!title.trim() || !effectiveWorkspaceId}>{t('kanban.add')}</Button>
+          </Modal.Footer>
+        </Modal.Dialog>
+      </Modal.Container>
+    </Modal.Backdrop>
   );
 }
 

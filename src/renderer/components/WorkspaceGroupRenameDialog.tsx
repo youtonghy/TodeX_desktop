@@ -16,27 +16,25 @@ export function WorkspaceGroupRenameDialog({ initialName, onSubmit, onClose }: {
     onClose();
   };
   return (
-    <Modal isOpen onOpenChange={(open) => { if (!open) onClose(); }}>
-      <Modal.Backdrop>
-        <Modal.Container>
-          <Modal.Dialog className="sm:max-w-sm">
-            <Modal.CloseTrigger />
-            <Modal.Header><Modal.Heading>{t('sidebar.renameGroup')}</Modal.Heading></Modal.Header>
-            <Modal.Body>
-              <form id="workspace-group-rename" onSubmit={(event) => { event.preventDefault(); submit(); }}>
-                <TextField className="w-full" value={name} onChange={setName} autoFocus>
-                  <Label>{t('sidebar.groupNameLabel')}</Label>
-                  <Input className="w-full" maxLength={WORKSPACE_GROUP_FIELD_MAX} onFocus={(event) => event.currentTarget.select()} />
-                </TextField>
-              </form>
-            </Modal.Body>
-            <Modal.Footer>
-              <Button slot="close" variant="tertiary">{t('common.cancel')}</Button>
-              <Button type="submit" form="workspace-group-rename" isDisabled={!name.trim()}>{t('common.save')}</Button>
-            </Modal.Footer>
-          </Modal.Dialog>
-        </Modal.Container>
-      </Modal.Backdrop>
-    </Modal>
+    <Modal.Backdrop isOpen onOpenChange={(open) => { if (!open) onClose(); }}>
+      <Modal.Container>
+        <Modal.Dialog className="sm:max-w-sm">
+          <Modal.CloseTrigger />
+          <Modal.Header><Modal.Heading>{t('sidebar.renameGroup')}</Modal.Heading></Modal.Header>
+          <Modal.Body>
+            <form id="workspace-group-rename" onSubmit={(event) => { event.preventDefault(); submit(); }}>
+              <TextField className="w-full" value={name} onChange={setName} autoFocus>
+                <Label>{t('sidebar.groupNameLabel')}</Label>
+                <Input className="w-full" maxLength={WORKSPACE_GROUP_FIELD_MAX} onFocus={(event) => event.currentTarget.select()} />
+              </TextField>
+            </form>
+          </Modal.Body>
+          <Modal.Footer>
+            <Button slot="close" variant="tertiary">{t('common.cancel')}</Button>
+            <Button type="submit" form="workspace-group-rename" isDisabled={!name.trim()}>{t('common.save')}</Button>
+          </Modal.Footer>
+        </Modal.Dialog>
+      </Modal.Container>
+    </Modal.Backdrop>
   );
 }
