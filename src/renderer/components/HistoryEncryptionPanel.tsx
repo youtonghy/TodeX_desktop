@@ -142,7 +142,7 @@ export function HistoryEncryptionPanel({ history, autoStartRecovery = false }: P
           <p className="text-danger text-xs">{view.keyError}</p>
           <div><Button size="sm" variant="secondary" isDisabled={locked} onPress={() => setConfirm({ kind: 'resetKey' })}>{t('history.resetKey')}</Button></div>
         </div>
-      ) : !registered ? <p className="text-warning text-xs">{t('history.notRegistered')}</p> : null}
+      ) : !registered ? <p className="text-warning-soft-foreground text-xs">{t('history.notRegistered')}</p> : null}
 
       <div className="flex flex-col gap-1.5">
         <p className="text-sm font-medium">{t('history.recipients')}</p>
@@ -178,7 +178,7 @@ export function HistoryEncryptionPanel({ history, autoStartRecovery = false }: P
         </div>
       ) : null}
 
-      {!recovery ? <p className="text-warning text-xs">{t('history.recoveryMissing')}</p> : null}
+      {!recovery ? <p className="text-warning-soft-foreground text-xs">{t('history.recoveryMissing')}</p> : null}
       <div className="flex flex-wrap gap-2">
         {!recovery ? (
           <Button size="sm" variant="secondary" isDisabled={locked} onPress={startRecovery}>{t('history.createRecovery')}</Button>

@@ -1003,7 +1003,6 @@ export const ja: Messages = {
   'usage.cacheReadLabel': 'キャッシュ読み取り',
   'usage.cacheSemanticsPending': 'キャッシュ計上方式は確認待ち',
   'usage.cacheHitRate': '判明済み方式の命中率 {rate}%',
-  'usage.cacheHitRateAria': 'キャッシュ命中率 {rate}%',
   'usage.cacheWriteLabel': 'キャッシュ書き込み',
   'usage.cacheWriteDetail': 'Cache write',
   'usage.byAgent': 'Agent 別使用量',

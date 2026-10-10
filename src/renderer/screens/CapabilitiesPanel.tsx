@@ -27,6 +27,8 @@ type Props = {
   onPreviewSkill?: (skill: SkillCatalogDescriptor, provider: ProviderKind) => Promise<string>;
   onRefreshMcp?: (resourceId: string) => void;
   onCallMcp?: (resourceId: string, toolName: string) => void;
+  /** Hosted in a dialog whose heading already names the panel. */
+  inDialog?: boolean;
 };
 
 type ViewMode = 'skills' | 'mcp';
@@ -48,6 +50,7 @@ export function CapabilitiesPanel({
   onPreviewSkill,
   onRefreshMcp,
   onCallMcp,
+  inDialog = false,
 }: Props) {
   const t = useT();
   const [viewMode, setViewMode] = useState<ViewMode>('skills');
@@ -66,10 +69,13 @@ export function CapabilitiesPanel({
       skill,
       provider: (item.skills?.provider ?? providerChoice) as ProviderKind,
     })));
-    return items.filter((item, index, list) => {
-      const key = `${item.skill.resourceId}:${item.skill.name}`;
-      return list.findIndex((candidate) => `${candidate.skill.resourceId}:${candidate.skill.name}` === key) === index;
-    }).filter((item) => providerChoice !== 'common' || isCommonSource(item.skill.source));
+    // Resource ids are provider-scoped, so the common view folds one shared
+    // skill across providers by name and source, like the MCP list below.
+    const keyOf = (item: (typeof items)[number]) => providerChoice === 'common'
+      ? `${item.skill.name}:${item.skill.source}`
+      : `${item.skill.resourceId}:${item.skill.name}`;
+    return items.filter((item, index, list) => list.findIndex((candidate) => keyOf(candidate) === keyOf(item)) === index)
+      .filter((item) => providerChoice !== 'common' || isCommonSource(item.skill.source));
   }, [providerChoice, selectedCatalogs]);
   const mcpServers = useMemo(() => {
     const items = selectedCatalogs.flatMap((item) => item.mcp?.servers ?? []);
@@ -81,11 +87,11 @@ export function CapabilitiesPanel({
   }, [providerChoice, selectedCatalogs]);
 
   return (
-    <div className="flex h-full min-h-0 flex-col p-5">
+    <div className={`flex h-full min-h-0 flex-col ${inDialog ? 'py-1' : 'p-5'}`}>
       <div className="mb-3 flex items-start justify-between gap-2">
         <div>
-          <h2 className="text-lg font-semibold">{t('cap.title')}</h2>
-          <p className="text-muted mt-1 text-xs">{provider ? `${providerDisplayName(provider.id, provider.displayName)} · ${workspacePath}` : t('cap.commonPath', { path: workspacePath })}</p>
+          {inDialog ? null : <h2 className="text-lg font-semibold">{t('cap.title')}</h2>}
+          <p className={`text-muted text-xs ${inDialog ? '' : 'mt-1'}`}>{provider ? `${providerDisplayName(provider.id, provider.displayName)} · ${workspacePath}` : t('cap.commonPath', { path: workspacePath })}</p>
           {conversationId && canInvoke ? (
             <p className="text-muted mt-1 text-xs">{t('cap.attachHint')}</p>
           ) : (

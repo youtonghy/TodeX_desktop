@@ -305,17 +305,15 @@ function ContextUsageIndicator({
   const progress = percent ?? 0;
   return (
     <Tooltip delay={100}>
-      <Tooltip.Trigger>
-        <Button
-          isIconOnly
-          variant="ghost"
-          className="context-usage-ring min-w-0 p-0"
-          aria-label={percent === null ? t('chat.contextPending') : t('chat.contextUsed', { percent: percent.toFixed(1) })}
-          style={{ background: `conic-gradient(var(--accent) ${progress}%, var(--separator) ${progress}% 100%)` }}
-        >
-          <span />
-        </Button>
-      </Tooltip.Trigger>
+      <Button
+        isIconOnly
+        variant="ghost"
+        className="context-usage-ring min-w-0 p-0"
+        aria-label={percent === null ? t('chat.contextPending') : t('chat.contextUsed', { percent: percent.toFixed(1) })}
+        style={{ background: `conic-gradient(var(--accent) ${progress}%, var(--separator) ${progress}% 100%)` }}
+      >
+        <span />
+      </Button>
       <Tooltip.Content>
         <div className="min-w-48 space-y-1 p-1 text-xs">
           <p className="font-medium">{t('chat.contextTitle')}</p>
@@ -563,8 +561,7 @@ const ChatTimelineItem = memo(function ChatTimelineItem({
   return (
     <div data-message-id={entry.id} className={`flex gap-3 py-1 ${isUser ? 'justify-end' : 'justify-start'}`}>
       <div className={`min-w-0 max-w-[85%] ${isUser ? 'text-right' : ''}`}>
-        {isUser ? <p className="text-muted text-xs font-medium">You</p> : null}
-        <div className={`${isUser ? 'mt-1' : ''} text-sm leading-6`}>
+        <div className="text-sm leading-6">
           {isUser ? <div className="flex flex-col items-end gap-2">
             {entry.sentAttachments?.length ? (
               <SentAttachmentList attachments={entry.sentAttachments} />
@@ -1762,11 +1759,9 @@ export function ChatPanel({ session }: Props) {
                       aria-label={t('chat.addAttachment')}
                       render={({ isDisabled, onPress }) => (
                         <Tooltip>
-                          <Tooltip.Trigger>
-                            <Button isIconOnly variant="ghost" aria-label={t('chat.addAttachment')} isDisabled={isDisabled} onPress={onPress}>
-                              <RiAttachment2 className="size-4" />
-                            </Button>
-                          </Tooltip.Trigger>
+                          <Button isIconOnly variant="ghost" aria-label={t('chat.addAttachment')} isDisabled={isDisabled} onPress={onPress}>
+                            <RiAttachment2 className="size-4" />
+                          </Button>
                           <Tooltip.Content>
                             {attachments.length >= MAX_COMPOSER_ATTACHMENTS
                               ? t('chat.maxAttachmentsTooltip', { max: MAX_COMPOSER_ATTACHMENTS })

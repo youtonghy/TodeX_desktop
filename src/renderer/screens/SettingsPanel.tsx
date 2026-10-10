@@ -55,10 +55,10 @@ export function SettingsPanel({ session, historyRecoverySetup = false, repairPai
   // A tool page hides the other sections rather than unmounting them, so an
   // in-progress pairing or recovery-key setup survives a visit to the page.
   return (
-    <div ref={root} className="flex flex-col gap-6 p-6">
+    <div ref={root} className="flex flex-col gap-6 py-1">
       <div className={agentPage ? 'hidden' : 'contents'}>
         <div>
-          <h2 className="text-xl font-semibold">{t('settings.connection')}</h2>
+          <h3 className="text-base font-semibold">{t('settings.connection')}</h3>
           <p className="text-muted mt-1 text-sm">{healthLabelOf(connectionHealth)} · {connectionStateLabel(connectionState)}</p>
           {serverVersion ? (
             <Chip className="mt-2" variant="soft" color={versionMismatch ? 'warning' : 'default'}>{serverVersion.name} {serverVersion.version}{settings.tenantId ? ` · ${settings.tenantId}` : ''}{versionMismatch ? ` · ${t('conn.versionMismatchShort')}` : ''}</Chip>
@@ -108,7 +108,7 @@ export function SettingsPanel({ session, historyRecoverySetup = false, repairPai
                 <p className="text-muted text-xs">{t('settings.labelColorHint')}</p>
               </div>
               <Field label={t('settings.serverUrl')} value={activeProfile.serverUrl} onChange={updateServerUrl} />
-              <p className="text-warning text-xs">{t('settings.credentialWarning')}</p>
+              <p className="text-warning-soft-foreground text-xs">{t('settings.credentialWarning')}</p>
               <Field label="Tenant" value={activeProfile.tenantId} onChange={(tenantId) => { updateBackendConnection(activeProfile.id, { tenantId }); setSettings((current) => ({ ...current, tenantId })); }} />
               <DevicePairingPanel session={session} deviceName="TodeX Desktop" autoStartNonce={pairingAutoStart} />
               <HistoryEncryptionPanel history={session.historyEncryption} autoStartRecovery={historyRecoverySetup} />

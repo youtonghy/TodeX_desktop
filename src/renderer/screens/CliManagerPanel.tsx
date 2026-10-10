@@ -127,7 +127,7 @@ export function CliManagerPanel({ session }: { session: TodeXSession }) {
   const activeBackend = session.backendConnections.find((item) => item.id === session.activeBackendConnectionId);
 
   return (
-    <div className="flex flex-col gap-4 p-6">
+    <div className="flex flex-col gap-4 py-1">
       <div className="flex min-w-0 items-center gap-3">
         <div className="bg-accent-soft text-accent flex size-10 shrink-0 items-center justify-center rounded-lg">
           <RiServerLine className="size-5" />
@@ -176,7 +176,7 @@ export function CliManagerPanel({ session }: { session: TodeXSession }) {
                   <Button
                     className="mt-4 w-full"
                     size="sm"
-                    variant={cli.installSupported ? 'primary' : 'secondary'}
+                    variant="secondary"
                     isDisabled={!cli.installSupported || Boolean(operation?.status === 'running') || Boolean(submittingProvider)}
                     onPress={() => void startOperation(cli.id, 'install')}
                   >
@@ -187,7 +187,7 @@ export function CliManagerPanel({ session }: { session: TodeXSession }) {
                   <Button
                     className="mt-4 w-full"
                     size="sm"
-                    variant={cli.status === 'updateAvailable' ? 'primary' : 'secondary'}
+                    variant="secondary"
                     isDisabled={!cli.upgradeSupported || Boolean(operation?.status === 'running') || Boolean(submittingProvider)}
                     onPress={() => void startOperation(cli.id, 'upgrade')}
                   >

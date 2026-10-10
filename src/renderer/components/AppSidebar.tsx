@@ -559,7 +559,7 @@ export function AppSidebar({
     <Dropdown onOpenChange={setHeaderMenuOpen}>
       <Dropdown.Trigger
         aria-label={t('sidebar.menu')}
-        className="flex min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2 py-2 text-left hover:bg-surface-secondary active:bg-surface-secondary/70 transition-colors cursor-pointer select-none outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+        className="flex min-w-0 flex-1 items-center gap-2.5 rounded-lg px-3 py-2 text-left hover:bg-surface-secondary active:bg-surface-secondary/70 transition-colors cursor-pointer select-none outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
       >
         <Badge.Anchor className="shrink-0">
           <AppIcon />
@@ -602,7 +602,7 @@ export function AppSidebar({
     <Sidebar {...railProps}>
       <Sidebar.Header>
         <Button
-          className="connection-create-button w-full justify-start"
+          className="connection-create-button w-full justify-start px-3"
           variant="secondary"
           isDisabled={!session.activeWorkspaceId}
           onPress={onCreateConversation}
@@ -612,7 +612,7 @@ export function AppSidebar({
           <ShortcutHint id="newConversation" className="ml-auto" />
         </Button>
         <Button
-          className="mt-1 w-full justify-start"
+          className="w-full justify-start px-3"
           variant={terminalActive ? 'secondary' : 'ghost'}
           aria-pressed={terminalActive}
           onPress={() => {
@@ -624,7 +624,7 @@ export function AppSidebar({
           <span data-sidebar="label">{t('sidebar.terminal')}</span>
           <ShortcutHint id="sshTerminal" className="ml-auto" />
         </Button>
-        <Button className="mt-1 w-full justify-start" variant="ghost" onPress={onOpenKanban}>
+        <Button className="w-full justify-start px-3" variant="ghost" onPress={onOpenKanban}>
           <RiKanbanView2 className="size-4" />
           <span data-sidebar="label">{t('sidebar.kanban')}</span>
           <ShortcutHint id="kanban" className="ml-auto" />
@@ -644,7 +644,7 @@ export function AppSidebar({
                 setWorkspacesCollapsed((prev) => !prev);
               }
             }}
-            className="sidebar-section-head group flex items-center justify-between px-2 py-1.5 rounded-lg cursor-pointer hover:bg-surface-secondary transition-colors select-none"
+            className="sidebar-section-head group flex items-center justify-between px-3 py-1.5 rounded-lg cursor-pointer hover:bg-surface-secondary transition-colors select-none"
             aria-expanded={!workspacesCollapsed}
             aria-label={workspacesCollapsed ? t('sidebar.expandWorkspaces') : t('sidebar.collapseWorkspaces')}
           >
@@ -793,7 +793,7 @@ export function AppSidebar({
                 setConversationsCollapsed((prev) => !prev);
               }
             }}
-            className="sidebar-section-head group flex items-center justify-between px-2 py-1.5 rounded-lg cursor-pointer hover:bg-surface-secondary transition-colors select-none"
+            className="sidebar-section-head group flex items-center justify-between px-3 py-1.5 rounded-lg cursor-pointer hover:bg-surface-secondary transition-colors select-none"
             aria-expanded={!conversationsCollapsed}
             aria-label={conversationsCollapsed ? t('sidebar.expandConversations') : t('sidebar.collapseConversations')}
           >

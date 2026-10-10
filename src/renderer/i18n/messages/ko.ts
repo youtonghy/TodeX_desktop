@@ -1003,7 +1003,6 @@ export const ko: Messages = {
   'usage.cacheReadLabel': '캐시 읽기',
   'usage.cacheSemanticsPending': '캐시 집계 방식 확인 대기',
   'usage.cacheHitRate': '확인된 방식 적중률 {rate}%',
-  'usage.cacheHitRateAria': '캐시 적중률 {rate}%',
   'usage.cacheWriteLabel': '캐시 쓰기',
   'usage.cacheWriteDetail': 'Cache write',
   'usage.byAgent': 'Agent별 사용량',

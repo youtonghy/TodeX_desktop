@@ -450,12 +450,12 @@ export function App() {
       <Modal isOpen={settingsOpen} onOpenChange={(open) => { if (!open) setPanel((current) => current === 'settings' ? null : current); }}>
         <Modal.Backdrop>
           <Modal.Container>
-            <Modal.Dialog className="max-h-[90vh] sm:max-w-xl">
+            <Modal.Dialog className="max-h-[90vh] sm:max-w-2xl">
               <Modal.CloseTrigger />
               <Modal.Header>
-                <Modal.Heading>{t('app.settings')}</Modal.Heading>
+                <Modal.Heading className="text-lg font-semibold">{t('app.settings')}</Modal.Heading>
               </Modal.Header>
-              <Modal.Body className="max-h-[70vh] overflow-y-auto">
+              <Modal.Body className="text-foreground max-h-[70vh] overflow-y-auto">
                 <Suspense fallback={panelFallback}><SettingsPanel session={session} historyRecoverySetup={historyRecoverySetup} repairPairing={repairPairing} /></Suspense>
               </Modal.Body>
             </Modal.Dialog>
@@ -467,8 +467,8 @@ export function App() {
           <Modal.Container>
             <Modal.Dialog className="max-h-[92vh] sm:max-w-5xl">
               <Modal.CloseTrigger />
-              <Modal.Header><Modal.Heading>{t('app.usage')}</Modal.Heading></Modal.Header>
-              <Modal.Body className="max-h-[82vh] overflow-y-auto p-0"><Suspense fallback={panelFallback}><UsagePanel session={session} /></Suspense></Modal.Body>
+              <Modal.Header><Modal.Heading className="text-lg font-semibold">{t('app.usage')}</Modal.Heading></Modal.Header>
+              <Modal.Body className="text-foreground max-h-[82vh] overflow-y-auto"><Suspense fallback={panelFallback}><UsagePanel session={session} /></Suspense></Modal.Body>
             </Modal.Dialog>
           </Modal.Container>
         </Modal.Backdrop>
@@ -478,8 +478,8 @@ export function App() {
           <Modal.Container>
             <Modal.Dialog className="max-h-[90vh] sm:max-w-2xl">
               <Modal.CloseTrigger />
-              <Modal.Header><Modal.Heading>{t('usage.quotaTitle')}</Modal.Heading></Modal.Header>
-              <Modal.Body className="max-h-[76vh] overflow-y-auto p-0"><Suspense fallback={panelFallback}><QuotaPanel session={session} /></Suspense></Modal.Body>
+              <Modal.Header><Modal.Heading className="text-lg font-semibold">{t('usage.quotaTitle')}</Modal.Heading></Modal.Header>
+              <Modal.Body className="text-foreground max-h-[76vh] overflow-y-auto"><Suspense fallback={panelFallback}><QuotaPanel session={session} /></Suspense></Modal.Body>
             </Modal.Dialog>
           </Modal.Container>
         </Modal.Backdrop>
@@ -489,8 +489,8 @@ export function App() {
           <Modal.Container>
             <Modal.Dialog className="max-h-[90vh] sm:max-w-2xl">
               <Modal.CloseTrigger />
-              <Modal.Header><Modal.Heading>{t('app.about')}</Modal.Heading></Modal.Header>
-              <Modal.Body className="max-h-[76vh] overflow-y-auto p-0"><Suspense fallback={panelFallback}><AboutPanel session={session} /></Suspense></Modal.Body>
+              <Modal.Header><Modal.Heading className="text-lg font-semibold">{t('app.about')}</Modal.Heading></Modal.Header>
+              <Modal.Body className="text-foreground max-h-[76vh] overflow-y-auto"><Suspense fallback={panelFallback}><AboutPanel session={session} /></Suspense></Modal.Body>
             </Modal.Dialog>
           </Modal.Container>
         </Modal.Backdrop>
@@ -500,8 +500,8 @@ export function App() {
           <Modal.Container>
             <Modal.Dialog className="max-h-[92vh] sm:max-w-3xl">
               <Modal.CloseTrigger />
-              <Modal.Header><Modal.Heading>{t('app.cliManager')}</Modal.Heading></Modal.Header>
-              <Modal.Body className="max-h-[80vh] overflow-y-auto p-0"><Suspense fallback={panelFallback}><CliManagerPanel session={session} /></Suspense></Modal.Body>
+              <Modal.Header><Modal.Heading className="text-lg font-semibold">{t('app.cliManager')}</Modal.Heading></Modal.Header>
+              <Modal.Body className="text-foreground max-h-[80vh] overflow-y-auto"><Suspense fallback={panelFallback}><CliManagerPanel session={session} /></Suspense></Modal.Body>
             </Modal.Dialog>
           </Modal.Container>
         </Modal.Backdrop>
@@ -511,14 +511,14 @@ export function App() {
           <Modal.Container>
             <Modal.Dialog className="max-h-[92vh] sm:max-w-3xl">
               <Modal.CloseTrigger />
-              <Modal.Header><Modal.Heading>{t('app.agentProviders')}</Modal.Heading></Modal.Header>
-              <Modal.Body className="max-h-[80vh] overflow-y-auto p-0"><Suspense fallback={panelFallback}><AgentProvidersPanel session={session} /></Suspense></Modal.Body>
+              <Modal.Header><Modal.Heading className="text-lg font-semibold">{t('app.agentProviders')}</Modal.Heading></Modal.Header>
+              <Modal.Body className="text-foreground max-h-[80vh] overflow-y-auto"><Suspense fallback={panelFallback}><AgentProvidersPanel session={session} /></Suspense></Modal.Body>
             </Modal.Dialog>
           </Modal.Container>
         </Modal.Backdrop>
       </Modal>
       <Modal isOpen={capabilitiesOpen} onOpenChange={setCapabilitiesOpen}>
-        <Modal.Backdrop><Modal.Container><Modal.Dialog className="max-h-[90vh] sm:max-w-2xl"><Modal.CloseTrigger /><Modal.Header><Modal.Heading>{t('app.mcpSkillManager')}</Modal.Heading></Modal.Header><Modal.Body className="max-h-[75vh] overflow-y-auto"><Suspense fallback={panelFallback}><CapabilitiesPanel workspacePath={session.activeWorkspace?.path ?? session.settings.defaultWorkspacePath} providers={session.v2Providers} catalogs={session.capabilityCatalogs} onRefresh={(provider) => void session.refreshCapabilityCatalog(provider)} conversationId={session.activeConversation?.id} selectedSkills={session.activeConversation ? session.selectedSkills[session.activeConversation.id] ?? [] : []} canInvoke={Boolean(session.activeConversation?.v2ConversationId)} onToggleSkill={(skill, provider) => session.activeConversation && session.toggleCatalogSkill(session.activeConversation.id, skill, provider)} onPreviewSkill={(skill, provider) => session.previewSkillResource(provider, skill.resourceId)} onRefreshMcp={(resourceId) => session.activeConversation && session.refreshMcpServer(session.activeConversation.id, resourceId)} onCallMcp={(resourceId, toolName) => session.activeConversation && session.callMcpTool(session.activeConversation.id, resourceId, toolName)} /></Suspense></Modal.Body></Modal.Dialog></Modal.Container></Modal.Backdrop>
+        <Modal.Backdrop><Modal.Container><Modal.Dialog className="max-h-[90vh] sm:max-w-2xl"><Modal.CloseTrigger /><Modal.Header><Modal.Heading className="text-lg font-semibold">{t('app.mcpSkillManager')}</Modal.Heading></Modal.Header><Modal.Body className="text-foreground max-h-[75vh] overflow-y-auto"><Suspense fallback={panelFallback}><CapabilitiesPanel inDialog workspacePath={session.activeWorkspace?.path ?? session.settings.defaultWorkspacePath} providers={session.v2Providers} catalogs={session.capabilityCatalogs} onRefresh={(provider) => void session.refreshCapabilityCatalog(provider)} conversationId={session.activeConversation?.id} selectedSkills={session.activeConversation ? session.selectedSkills[session.activeConversation.id] ?? [] : []} canInvoke={Boolean(session.activeConversation?.v2ConversationId)} onToggleSkill={(skill, provider) => session.activeConversation && session.toggleCatalogSkill(session.activeConversation.id, skill, provider)} onPreviewSkill={(skill, provider) => session.previewSkillResource(provider, skill.resourceId)} onRefreshMcp={(resourceId) => session.activeConversation && session.refreshMcpServer(session.activeConversation.id, resourceId)} onCallMcp={(resourceId, toolName) => session.activeConversation && session.callMcpTool(session.activeConversation.id, resourceId, toolName)} /></Suspense></Modal.Body></Modal.Dialog></Modal.Container></Modal.Backdrop>
       </Modal>
       <GitActionsModal key={session.activeConversation?.id} session={session} isOpen={gitOpen} onOpenChange={setGitOpen} />
       {createOpen ? <CreateWorkspaceModal

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Button, Card, Chip } from '@heroui/react';
+import { Button, Card, Chip, Meter } from '@heroui/react';
 import { RiRefreshLine, RiVipCrownLine } from '@remixicon/react';
 import type { ProviderQuotaSnapshot, QuotaWindow } from '@todex/protocol/v2';
 import type { TodeXSession } from '../session/useTodeXSession';
@@ -57,9 +57,17 @@ function QuotaWindowRow({ window }: { window: QuotaWindow }) {
           {percent === null ? '—' : t('usage.quotaUsed', { percent: Math.round(percent) })}
         </span>
       </div>
-      <div className="bg-surface-secondary h-1.5 w-full overflow-hidden rounded-full" aria-hidden={percent === null}>
-        <div className="bg-accent h-full" style={{ width: `${percent ?? 0}%` }} />
-      </div>
+      <Meter
+        aria-label={quotaWindowLabel(window)}
+        aria-hidden={percent === null}
+        size="sm"
+        color={percent !== null && percent >= 90 ? 'danger' : percent !== null && percent >= 75 ? 'warning' : 'accent'}
+        value={percent ?? 0}
+      >
+        <Meter.Track>
+          <Meter.Fill />
+        </Meter.Track>
+      </Meter>
       {window.resetsAt ? (
         <span className="text-muted text-[11px]">{t('usage.quotaResets', { time: formatQuotaTime(window.resetsAt) })}</span>
       ) : null}
@@ -140,12 +148,9 @@ export function QuotaPanel({ session }: Props) {
   };
 
   return (
-    <div className="flex flex-col gap-5 p-6">
+    <div className="flex flex-col gap-5 py-1">
       <div className="flex items-center justify-between gap-3">
-        <div>
-          <h2 className="text-xl font-semibold">{t('usage.quotaTitle')}</h2>
-          <p className="text-muted mt-1 text-sm">{t('usage.quotaHint')}</p>
-        </div>
+        <p className="text-muted text-sm">{t('usage.quotaHint')}</p>
         <Button size="sm" variant="ghost" isDisabled={loading} onPress={() => void refresh()}>
           <RiRefreshLine className={`size-4 ${loading ? 'animate-spin' : ''}`} />
           {t('usage.quotaRefresh')}

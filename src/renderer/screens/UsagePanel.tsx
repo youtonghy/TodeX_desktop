@@ -55,25 +55,22 @@ function titleCase(value: string): string {
   return value === 'unknown' ? t('usage.unknown') : value.charAt(0).toUpperCase() + value.slice(1);
 }
 
-function MetricCard({ label, value, detail, icon: Icon, tone }: {
+// The icon rides in the label row so the value gets the card's full width;
+// a side tile left five-up cards too narrow and truncated large totals.
+function MetricCard({ label, value, detail, icon: Icon }: {
   label: string;
   value: number;
   detail: string;
   icon: typeof RiBarChartBoxLine;
-  tone: string;
 }) {
   return (
     <Card className="min-w-0 p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-muted text-xs">{label}</p>
-          <p className="mt-1 truncate text-xl font-semibold tabular-nums">{formatTokens(value)}</p>
-          <p className="text-muted mt-1 text-xs">{detail}</p>
-        </div>
-        <div className={`flex size-9 shrink-0 items-center justify-center rounded-lg ${tone}`}>
-          <Icon className="size-4" aria-hidden="true" />
-        </div>
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-muted truncate text-xs">{label}</p>
+        <Icon className="text-muted size-4 shrink-0" aria-hidden="true" />
       </div>
+      <p className="mt-2 truncate text-xl font-semibold tabular-nums">{formatTokens(value)}</p>
+      <p className="text-muted mt-1 text-xs">{detail}</p>
     </Card>
   );
 }
@@ -126,20 +123,17 @@ export function UsagePanel({ session }: Props) {
   const chartMax = Math.max(0, ...chartRows.map((row) => row.totals.totalTokens));
 
   return (
-    <div className="flex flex-col gap-5 p-6">
-      <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
-        <div>
-          <h2 className="text-xl font-semibold">{t('usage.title')}</h2>
-          <p className="text-muted mt-1 text-sm">{t('usage.subtitle')}</p>
-        </div>
+    <div className="flex flex-col gap-5 py-1">
+      <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+        <p className="text-muted text-sm">{t('usage.subtitle')}</p>
         <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
           <Select selectedKey={provider} onSelectionChange={(key) => { if (typeof key === 'string') { setProvider(key); setModel('all'); } }}>
-            <Label>Agent</Label>
+            <Label className="sr-only">Agent</Label>
             <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
             <Select.Popover><ListBox><ListBox.Item id="all" textValue={t('usage.allAgents')}>{t('usage.allAgents')}</ListBox.Item>{providers.map((item) => <ListBox.Item key={item} id={item} textValue={titleCase(item)}>{titleCase(item)}</ListBox.Item>)}</ListBox></Select.Popover>
           </Select>
           <Select selectedKey={models.includes(model) ? model : 'all'} onSelectionChange={(key) => { if (typeof key === 'string') setModel(key); }}>
-            <Label>{t('usage.modelLabel')}</Label>
+            <Label className="sr-only">{t('usage.modelLabel')}</Label>
             <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
             <Select.Popover><ListBox><ListBox.Item id="all" textValue={t('usage.allModels')}>{t('usage.allModels')}</ListBox.Item>{models.map((item) => <ListBox.Item key={item} id={item} textValue={item}>{item}</ListBox.Item>)}</ListBox></Select.Popover>
           </Select>
@@ -147,14 +141,14 @@ export function UsagePanel({ session }: Props) {
       </div>
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
-        <MetricCard label={t('usage.totalLabel')} value={totalTokens} detail={t('usage.recordCount', { count: filtered.length })} icon={RiBarChartBoxLine} tone="bg-accent-soft text-accent" />
-        <MetricCard label={t('usage.inputLabel')} value={totals.inputTokens} detail={t('usage.inputDetail')} icon={RiDownloadCloud2Line} tone="bg-success-soft text-success" />
-        <MetricCard label={t('usage.outputLabel')} value={totals.outputTokens} detail={t('usage.outputDetail')} icon={RiUploadCloud2Line} tone="bg-primary-soft text-primary" />
-        <MetricCard label={t('usage.cacheReadLabel')} value={totals.cachedInputTokens} detail={cacheRate === null ? t('usage.cacheSemanticsPending') : t('usage.cacheHitRate', { rate: cacheRate })} icon={RiFlashlightLine} tone="bg-warning-soft text-warning" />
-        <MetricCard label={t('usage.cacheWriteLabel')} value={totals.cacheWriteTokens} detail={t('usage.cacheWriteDetail')} icon={RiDatabase2Line} tone="bg-surface-secondary text-muted" />
+        <MetricCard label={t('usage.totalLabel')} value={totalTokens} detail={t('usage.recordCount', { count: filtered.length })} icon={RiBarChartBoxLine} />
+        <MetricCard label={t('usage.inputLabel')} value={totals.inputTokens} detail={t('usage.inputDetail')} icon={RiDownloadCloud2Line} />
+        <MetricCard label={t('usage.outputLabel')} value={totals.outputTokens} detail={t('usage.outputDetail')} icon={RiUploadCloud2Line} />
+        <MetricCard label={t('usage.cacheReadLabel')} value={totals.cachedInputTokens} detail={cacheRate === null ? t('usage.cacheSemanticsPending') : t('usage.cacheHitRate', { rate: cacheRate })} icon={RiFlashlightLine} />
+        <MetricCard label={t('usage.cacheWriteLabel')} value={totals.cacheWriteTokens} detail={t('usage.cacheWriteDetail')} icon={RiDatabase2Line} />
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(16rem,1fr)]">
+      <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(16rem,1fr)]">
         <Card className="p-5">
           <div className="mb-5">
             <h3 className="font-semibold">{provider === 'all' ? t('usage.byAgent') : t('usage.byModel')}</h3>
@@ -175,14 +169,9 @@ export function UsagePanel({ session }: Props) {
         <Card className="p-5">
           <h3 className="font-semibold">{t('usage.cacheComposition')}</h3>
           <p className="text-muted mt-1 text-xs">{t('usage.cacheHint')}</p>
-          <div className="mt-6 flex items-end justify-between gap-4">
-            <div>
-              <p className="text-3xl font-semibold tabular-nums">{cacheRate === null ? '—' : `${cacheRate}%`}</p>
-              <p className="text-muted mt-1 text-xs">{t('usage.cacheHitRateLabel')}</p>
-            </div>
-            <div className="bg-surface-secondary flex h-24 w-16 items-end overflow-hidden rounded-sm" aria-label={cacheRate === null ? t('usage.cacheSemanticsPending') : t('usage.cacheHitRateAria', { rate: cacheRate })}>
-              <div className="bg-warning w-full" style={{ height: `${cacheRate ?? 0}%` }} />
-            </div>
+          <div className="mt-6">
+            <p className="text-3xl font-semibold tabular-nums">{cacheRate === null ? '—' : `${cacheRate}%`}</p>
+            <p className="text-muted mt-1 text-xs">{t('usage.cacheHitRateLabel')}</p>
           </div>
           <dl className="mt-6 grid grid-cols-2 gap-3 text-xs">
             <div><dt className="text-muted">{t('usage.lastUpdate')}</dt><dd className="mt-1 font-medium">{filtered[0] ? new Date(filtered[0].updatedAt).toLocaleString(getLocale()) : t('usage.none')}</dd></div>

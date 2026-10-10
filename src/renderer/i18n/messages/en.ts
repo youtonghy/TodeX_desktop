@@ -1003,7 +1003,6 @@ export const en: Messages = {
   'usage.cacheReadLabel': 'Cache read',
   'usage.cacheSemanticsPending': 'Cache semantics to be confirmed',
   'usage.cacheHitRate': 'Known-semantics hit rate {rate}%',
-  'usage.cacheHitRateAria': 'Cache hit rate {rate}%',
   'usage.cacheWriteLabel': 'Cache write',
   'usage.cacheWriteDetail': 'Cache write',
   'usage.byAgent': 'Usage by Agent',

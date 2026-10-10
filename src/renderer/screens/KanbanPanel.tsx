@@ -1,7 +1,7 @@
 import { useMemo, useState, type DragEvent, type Key, type ReactNode } from 'react';
 import { isTextDropItem, useDragAndDrop, type Selection } from 'react-aria-components';
 import { Plus } from '@gravity-ui/icons';
-import { RiArrowDownSLine, RiArrowRightLine, RiCalendarLine, RiChat3Line, RiCheckLine, RiDraggable, RiFolder3Line, RiMoreFill, RiTimerLine } from '@remixicon/react';
+import { RiArrowDownSLine, RiArrowRightLine, RiCalendarLine, RiChat3Line, RiCheckLine, RiDraggable, RiFolder3Line, RiKanbanView2, RiMoreFill, RiTimerLine } from '@remixicon/react';
 import { Button, Chip, Dropdown, Header, Label, ListBox, Modal, Select, Separator, TextArea, TextField, Tooltip } from '@heroui/react';
 import { ContextMenu, EmptyState, Kanban } from '@heroui-pro/react';
 import type { WorkspaceRecord } from '@todex/protocol/todex';
@@ -878,14 +878,14 @@ export function KanbanPanel({ session, onOpenConversation }: Props) {
       <div className="window-drag flex shrink-0 items-center justify-between gap-3 px-6 pt-8 pb-4">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <RiChat3Line className="text-accent size-5" />
+            <RiKanbanView2 className="text-accent size-5" />
             <h1 className="truncate text-lg font-semibold">{t('sidebar.kanban')}</h1>
             <Chip color="accent" size="sm" variant="soft">{t('kanban.taskCount', { count: total })}</Chip>
           </div>
           <p className="text-muted mt-1 text-sm">{t('kanban.subtitle')}</p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          {orderedWorkspaces.length ? (
+          {columns.length ? (
             <Button size="sm" onPress={() => setCreating(true)}>
               <Plus />
               {t('kanban.newTask')}
@@ -914,7 +914,7 @@ export function KanbanPanel({ session, onOpenConversation }: Props) {
           <EmptyState>
             <EmptyState.Header>
               <EmptyState.Media variant="icon">
-                <RiChat3Line />
+                <RiKanbanView2 />
               </EmptyState.Media>
               <EmptyState.Title>{t('kanban.noTasksYet')}</EmptyState.Title>
               <EmptyState.Description>{t('kanban.noTasksHint')}</EmptyState.Description>

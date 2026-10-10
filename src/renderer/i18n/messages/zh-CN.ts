@@ -1003,7 +1003,6 @@ export const zhCN = {
   'usage.cacheReadLabel': '缓存读取',
   'usage.cacheSemanticsPending': '缓存口径待确认',
   'usage.cacheHitRate': '已知口径命中率 {rate}%',
-  'usage.cacheHitRateAria': '缓存命中率 {rate}%',
   'usage.cacheWriteLabel': '缓存写入',
   'usage.cacheWriteDetail': 'Cache write',
   'usage.byAgent': 'Agent 用量',

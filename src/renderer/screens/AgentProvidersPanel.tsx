@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Button, Card, Chip, ComboBox, Input, Label, ListBox, Select, Spinner, Switch, TextArea, TextField, toast } from '@heroui/react';
+import { Alert, Button, Card, Chip, ComboBox, Input, Label, ListBox, Select, Spinner, Switch, TextArea, TextField, toast } from '@heroui/react';
 import { RiAddLine, RiArrowDownSLine, RiCheckLine, RiCloseLine, RiDeleteBinLine, RiDownload2Line, RiEdit2Line, RiRefreshLine, RiUpload2Line, RiUserSettingsLine } from '@remixicon/react';
 import {
   AGENT_PROVIDER_TRANSFER_FORMAT,
@@ -191,7 +191,7 @@ export function AgentProvidersPanel({ session }: { session: TodeXSession }) {
   ) : null;
 
   return (
-    <div className="flex flex-col gap-4 p-6">
+    <div className="flex flex-col gap-4 py-1">
       <div className="flex min-w-0 items-center gap-3">
         <div className="bg-accent-soft text-accent flex size-10 shrink-0 items-center justify-center rounded-lg">
           <RiUserSettingsLine className="size-5" />
@@ -223,15 +223,16 @@ export function AgentProvidersPanel({ session }: { session: TodeXSession }) {
       ) : (
         <>
           {liveMismatch ? (
-            <Card className="border-warning/40 rounded-lg p-3 text-xs">
-              <div className="flex items-center gap-2">
-                <span className="text-warning flex-1">{t('ap.liveMismatch')}</span>
-                <Button size="sm" variant="tertiary" isDisabled={Boolean(busy)}
-                  onPress={() => void run('import-live', () => api().importLiveAgentProvider(agent, 'imported', t('ap.importedName')), 'ap.imported')}>
-                  {t('ap.importLive')}
-                </Button>
-              </div>
-            </Card>
+            <Alert status="warning" className="items-center">
+              <Alert.Indicator />
+              <Alert.Content>
+                <Alert.Description>{t('ap.liveMismatch')}</Alert.Description>
+              </Alert.Content>
+              <Button size="sm" variant="secondary" isDisabled={Boolean(busy)}
+                onPress={() => void run('import-live', () => api().importLiveAgentProvider(agent, 'imported', t('ap.importedName')), 'ap.imported')}>
+                {t('ap.importLive')}
+              </Button>
+            </Alert>
           ) : null}
 
           <div className="grid gap-3">

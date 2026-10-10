@@ -19,7 +19,7 @@ function InfoRow({ label, value, copyable = false }: { label: string; value: str
       <dd className="flex min-w-0 items-center justify-end gap-2 text-right text-sm font-medium">
         <span className="truncate" title={value}>{value}</span>
         {copyable ? (
-          <Button isIconOnly size="sm" variant="ghost" aria-label={t('about.copyAria', { label })} onPress={() => void navigator.clipboard.writeText(value).then(() => toast.success(t('about.copied')))}>
+          <Button isIconOnly size="sm" variant="ghost" className="-my-1.5" aria-label={t('about.copyAria', { label })} onPress={() => void navigator.clipboard.writeText(value).then(() => toast.success(t('about.copied')))}>
             <RiFileCopyLine className="size-4" />
           </Button>
         ) : null}
@@ -36,7 +36,7 @@ export function AboutPanel({ session }: Props) {
     : t('about.notLoaded');
 
   return (
-    <div className="flex flex-col gap-5 p-6">
+    <div className="flex flex-col gap-5 py-1">
       <div className="flex items-center gap-4">
         <AppIcon className="size-16" />
         <div className="min-w-0">

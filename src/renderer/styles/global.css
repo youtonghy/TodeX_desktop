@@ -217,6 +217,17 @@ body {
   overflow-wrap: break-word;
 }
 
+/* Streamdown wraps every block in its own .markdown__block, so the Pro
+   markdown's sibling margins (p:last-child, h3:first-child) all collapse to
+   zero. Space the non-empty blocks instead, with more room above headings. */
+.markdown > .markdown__block:has(> *) ~ .markdown__block:has(> *) {
+  margin-top: calc(var(--spacing) * 3);
+}
+
+.markdown > .markdown__block:has(> *) ~ .markdown__block:has(> :is(h1, h2, h3, h4):first-child) {
+  margin-top: calc(var(--spacing) * 5);
+}
+
 /* Toasts carry raw provider errors with long unbroken tokens (request ids);
    the flex column must be allowed to shrink and wrap, and the shrink-to-fit
    region must stay inside the viewport. */
@@ -1025,12 +1036,26 @@ body {
   gap: 0.25rem !important;
 }
 
-/* Sidebar list item selection highlight */
+/* Sidebar rows match the nav buttons' height and share their leading edge.
+   ListView's content-list padding and row separators made rows taller than
+   the buttons, uneven (the backend dot inflated some), and hairline-divided. */
 .sidebar-chat-list .list-view__item {
   border-radius: 0.5rem;
   transition: background-color 0.15s ease, color 0.15s ease;
   margin-block: 1px;
   position: relative;
+  min-height: calc(var(--spacing) * 9);
+  padding-block: calc(var(--spacing) * 1.5);
+  padding-inline: calc(var(--spacing) * 3);
+  border-bottom-width: 0;
+}
+
+.sidebar-chat-list .list-view__item-content {
+  gap: calc(var(--spacing) * 2);
+}
+
+.sidebar:not([data-state='collapsed']) [data-slot='sidebar-header'] {
+  padding-inline: calc(var(--spacing) * 3);
 }
 
 .sidebar-chat-list .list-view__item[data-selected="true"],
@@ -1205,6 +1230,13 @@ body {
 
 [data-app-layout][data-resizable] [data-slot='sidebar'].sidebar[data-collapsible='icon']:not([data-state='collapsed']) {
   width: var(--sidebar-width);
+}
+
+/* That same resizable rule drops the sidebar's edge outline, but the left
+   sidebar sits outside the resizable group, so nothing separated it from the
+   conversation. Restore a separator-weight edge to match the right panel's. */
+[data-app-layout][data-resizable] .sidebar--default.sidebar--left:not([data-peek='true']) {
+  box-shadow: inset -1px 0 0 var(--separator);
 }
 
 /* Above the sticky app-layout header/toolbar (z 40/39) so the peek isn't
