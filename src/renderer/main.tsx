@@ -4,6 +4,7 @@ import { App } from './App';
 import { installBrowserDesktopBridge } from './lib/browserDesktop';
 import { installRendererDebugLogging } from './lib/debugLogger';
 import { getLocale, subscribeLocale } from './i18n';
+import { applyAppearance } from './lib/appearance';
 import '@fontsource-variable/inter';
 import './styles/global.css';
 
@@ -16,6 +17,7 @@ async function boot() {
 
   installBrowserDesktopBridge();
   installRendererDebugLogging();
+  applyAppearance();
 
   // Expose the window chrome so CSS can reserve space for overlaid window
   // controls (macOS traffic lights) and mark drag regions.

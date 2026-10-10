@@ -450,12 +450,13 @@ export function App() {
       <Modal.Backdrop isOpen={settingsOpen} onOpenChange={(open) => { if (!open) setPanel((current) => current === 'settings' ? null : current); }}>
         <Modal.Container>
           {/* A fixed height keeps the dialog still when switching sections. */}
-          <Modal.Dialog className="h-[min(90vh,48rem)] sm:max-w-2xl">
+          <Modal.Dialog className="h-[min(90vh,48rem)] sm:max-w-4xl">
             <Modal.CloseTrigger />
             <Modal.Header>
               <Modal.Heading className="text-lg font-semibold">{t('app.settings')}</Modal.Heading>
             </Modal.Header>
-            <Modal.Body className="text-foreground overflow-y-auto">
+            {/* Each category page scrolls on its own beside the category list. */}
+            <Modal.Body className="text-foreground min-h-0 overflow-hidden">
               <Suspense fallback={panelFallback}><SettingsPanel session={session} historyRecoverySetup={historyRecoverySetup} repairPairing={repairPairing} /></Suspense>
             </Modal.Body>
           </Modal.Dialog>

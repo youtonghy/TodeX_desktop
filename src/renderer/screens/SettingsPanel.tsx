@@ -1,17 +1,19 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ComponentType } from 'react';
 import { Button, Chip, ColorSwatchPicker, Description, Label, ListBox, Select, Surface, Switch, Tabs, toast } from '@heroui/react';
 import { RadioButtonGroup } from '@heroui-pro/react';
+import { RiComputerLine, RiNotification3Line, RiPaletteLine, RiServerLine, RiSettings3Line, RiShieldKeyholeLine } from '@remixicon/react';
 import { normalizeServerUrl } from '@todex/protocol/todex';
 import { BACKEND_LABEL_COLORS, backendLabelColor } from '../session/backendColors';
 import { Field } from '../components/Field';
 import { DevicePairingPanel } from '../components/DevicePairingPanel';
 import { HistoryEncryptionPanel } from '../components/HistoryEncryptionPanel';
 import { AgentDesktopSettings, type AgentDesktopPage } from '../components/AgentDesktopSettings';
+import { AppearanceSettings } from '../components/AppearanceSettings';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { UNPAIRED_TRANSPORT, connectionStateLabel, healthLabelOf, settingsFromProfile } from '../session/helpers';
 import { LOCALE_LABELS, SUPPORTED_LOCALES, getLocalePreference, isLocale, setLocalePreference, useT, type LocalePreference } from '../i18n';
 
-type SettingsSection = 'connection' | 'general' | 'agent';
+type SettingsSection = 'general' | 'appearance' | 'connection' | 'security' | 'notifications' | 'agent';
 
 type Props = {
   session: TodeXSession;
@@ -28,21 +30,30 @@ export function SettingsPanel({ session, historyRecoverySetup = false, repairPai
   const [pairingAutoStart, setPairingAutoStart] = useState(0);
   // A tool's own settings page shown in place of everything else.
   const [agentPage, setAgentPage] = useState<AgentDesktopPage | null>(null);
-  const [section, setSection] = useState<SettingsSection>('connection');
-  const root = useRef<HTMLDivElement>(null);
+  const [section, setSection] = useState<SettingsSection>('general');
+  const agentPanel = useRef<HTMLDivElement>(null);
   const connected = connectionState === 'open' || connectionState === 'connecting';
   const activeProfile = backendConnections.find((item) => item.id === activeBackendConnectionId);
   useEffect(() => {
     if (repairPairing) setPairingAutoStart((value) => value + 1);
   }, [repairPairing]);
-  // Re-pairing and recovery-key setup both live in the connection section.
+  // Re-pairing and recovery-key setup both live in the security section.
   useEffect(() => {
-    if (repairPairing || historyRecoverySetup) setSection('connection');
+    if (repairPairing || historyRecoverySetup) setSection('security');
   }, [repairPairing, historyRecoverySetup]);
-  // The settings body keeps its scroll offset across pages; a page starts at its top.
+  // A tool page opens at its top, not at the overview's scroll offset.
   useEffect(() => {
-    if (agentPage) root.current?.scrollIntoView({ block: 'start' });
+    if (agentPage) agentPanel.current?.scrollTo({ top: 0 });
   }, [agentPage]);
+
+  const sections: Array<{ id: SettingsSection; label: string; icon: ComponentType<{ className?: string }> }> = [
+    { id: 'general', label: t('settings.general'), icon: RiSettings3Line },
+    { id: 'appearance', label: t('settings.appearance'), icon: RiPaletteLine },
+    { id: 'connection', label: t('settings.connection'), icon: RiServerLine },
+    { id: 'security', label: t('settings.security'), icon: RiShieldKeyholeLine },
+    { id: 'notifications', label: t('settings.notifications'), icon: RiNotification3Line },
+    { id: 'agent', label: t('agentDesktop.title'), icon: RiComputerLine },
+  ];
 
   // A different backend never keeps the old device key or transport pin.
   const updateServerUrl = (serverUrl: string) => {
@@ -59,18 +70,26 @@ export function SettingsPanel({ session, historyRecoverySetup = false, repairPai
     setSettings((current) => settingsFromProfile(profile, current));
   };
 
-  // Inactive sections stay mounted (hidden), so an in-progress pairing or
-  // recovery-key setup survives a visit to another section.
-  const panelClassName = 'flex flex-col gap-6 data-[inert=true]:hidden';
+  // Categories on the left, each one's page on the right. Inactive pages stay
+  // mounted (hidden), so an in-progress pairing or recovery-key setup
+  // survives a visit to another category.
+  const panelClassName = 'flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto p-1 data-[inert=true]:hidden';
   return (
-    <Tabs ref={root} className="gap-5 py-1" selectedKey={section} onSelectionChange={(key) => setSection(key as SettingsSection)}>
-      <Tabs.ListContainer className="bg-overlay sticky top-0 z-10">
-        <Tabs.List aria-label={t('app.settings')}>
-          <Tabs.Tab id="connection">{t('settings.connection')}<Tabs.Indicator /></Tabs.Tab>
-          <Tabs.Tab id="general">{t('settings.general')}<Tabs.Indicator /></Tabs.Tab>
-          <Tabs.Tab id="agent">{t('agentDesktop.title')}<Tabs.Indicator /></Tabs.Tab>
+    <Tabs orientation="vertical" className="h-full min-h-0 gap-6" selectedKey={section} onSelectionChange={(key) => setSection(key as SettingsSection)}>
+      <Tabs.ListContainer className="w-48 shrink-0">
+        <Tabs.List aria-label={t('app.settings')} className="w-full">
+          {sections.map(({ id, label, icon: Icon }) => (
+            <Tabs.Tab key={id} id={id} className="justify-start gap-2">
+              <Icon className="size-4 shrink-0" />
+              <span className="truncate">{label}</span>
+              <Tabs.Indicator />
+            </Tabs.Tab>
+          ))}
         </Tabs.List>
       </Tabs.ListContainer>
+      <Tabs.Panel id="appearance" shouldForceMount className={panelClassName}>
+        <AppearanceSettings />
+      </Tabs.Panel>
       <Tabs.Panel id="connection" shouldForceMount className={panelClassName}>
         <div>
           <p className="text-muted text-sm">{healthLabelOf(connectionHealth)} · {connectionStateLabel(connectionState)}</p>
@@ -124,12 +143,18 @@ export function SettingsPanel({ session, historyRecoverySetup = false, repairPai
               <Field label={t('settings.serverUrl')} value={activeProfile.serverUrl} onChange={updateServerUrl} />
               <p className="text-warning-soft-foreground text-xs">{t('settings.credentialWarning')}</p>
               <Field label="Tenant" value={activeProfile.tenantId} onChange={(tenantId) => { updateBackendConnection(activeProfile.id, { tenantId }); setSettings((current) => ({ ...current, tenantId })); }} />
-              <DevicePairingPanel session={session} deviceName="TodeX Desktop" autoStartNonce={pairingAutoStart} />
-              <HistoryEncryptionPanel history={session.historyEncryption} autoStartRecovery={historyRecoverySetup} />
               <div className="flex gap-2"><Button onPress={() => (connected ? closeSocket(true) : connect())}>{connected ? t('settings.disconnect') : connectionState === 'error' ? t('settings.retry') : t('settings.connect')}</Button>{backendConnections.length > 1 ? <Button variant="danger-soft" onPress={() => removeBackendConnection(activeProfile.id)}>{t('settings.removeBackend')}</Button> : null}</div>
             </>
           ) : null}
         </Surface>
+      </Tabs.Panel>
+      <Tabs.Panel id="security" shouldForceMount className={panelClassName}>
+        {activeProfile ? (
+          <Surface className="flex flex-col gap-4 rounded-2xl p-5">
+            <DevicePairingPanel session={session} deviceName="TodeX Desktop" autoStartNonce={pairingAutoStart} />
+            <HistoryEncryptionPanel history={session.historyEncryption} autoStartRecovery={historyRecoverySetup} />
+          </Surface>
+        ) : null}
       </Tabs.Panel>
       <Tabs.Panel id="general" shouldForceMount className={panelClassName}>
         <Surface className="flex flex-col gap-4 rounded-2xl p-5">
@@ -193,8 +218,9 @@ export function SettingsPanel({ session, historyRecoverySetup = false, repairPai
             </Description>
           </Select>
         </Surface>
+      </Tabs.Panel>
+      <Tabs.Panel id="notifications" shouldForceMount className={panelClassName}>
         <Surface className="flex flex-col gap-4 rounded-2xl p-5">
-          <h3 className="font-semibold">{t('settings.notifications')}</h3>
           <Switch
             isSelected={session.completionNotifications}
             isDisabled={!session.completionNotificationsHydrated}
@@ -221,7 +247,7 @@ export function SettingsPanel({ session, historyRecoverySetup = false, repairPai
           </Switch>
         </Surface>
       </Tabs.Panel>
-      <Tabs.Panel id="agent" shouldForceMount className={panelClassName}>
+      <Tabs.Panel ref={agentPanel} id="agent" shouldForceMount className={panelClassName}>
         <AgentDesktopSettings session={session} page={agentPage} onPageChange={setAgentPage} />
       </Tabs.Panel>
     </Tabs>

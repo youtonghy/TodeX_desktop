@@ -36,6 +36,8 @@ const DESKTOP_APP_ORIGIN = 'todex-desktop://app';
 const RENDERER_PERMISSIONS = new Set([
   'notifications',
   'clipboard-sanitized-write',
+  // Settings lists installed fonts (window.queryLocalFonts).
+  'local-fonts',
   // Local Network Access: the renderer talks to user-configured backends on
   // loopback and the LAN.
   'local-network',
