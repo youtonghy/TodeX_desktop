@@ -1941,7 +1941,16 @@ export type BackendTransportProfile = Pick<ConnectionSettings, 'serverUrl' | 'de
  * unpaired loopback host is plaintext.
  */
 export function backendTransport(settings: BackendTransportProfile): SecureTransport {
+  if (transportOverride) return transportOverride;
   return withLocalizedRequestLimits(cachedSecureTransport(settings, cachedDeviceIdentity(settings.deviceSecret)));
+}
+
+let transportOverride: SecureTransport | null = null;
+
+/** Routes every backend call through `transport` instead of the network; the
+ * dev-only demo preview (`?demo`) uses it to serve fixtures. */
+export function overrideBackendTransport(transport: SecureTransport | null): void {
+  transportOverride = transport;
 }
 
 const localizedTransports = new WeakMap<SecureTransport, SecureTransport>();

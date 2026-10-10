@@ -11,6 +11,7 @@
     "check:electron": "node ./scripts/check-electron.mjs",
     "predev": "node ./scripts/check-electron.mjs",
     "dev": "electron-vite dev",
+    "dev:demo": "node ./scripts/dev-demo.mjs",
     "build": "electron-vite build",
     "package": "pnpm run build && electron-builder",
     "preview": "electron-vite preview",

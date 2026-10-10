@@ -7,25 +7,35 @@ import { getLocale, subscribeLocale } from './i18n';
 import '@fontsource-variable/inter';
 import './styles/global.css';
 
-installBrowserDesktopBridge();
-installRendererDebugLogging();
+async function boot() {
+  // Dev-only demo preview: `?demo` serves fixture data instead of a backend.
+  if (import.meta.env.DEV && new URLSearchParams(window.location.search).has('demo')) {
+    const { installDemoMode } = await import('./demo');
+    installDemoMode();
+  }
 
-// Expose the window chrome so CSS can reserve space for overlaid window
-// controls (macOS traffic lights) and mark drag regions.
-document.documentElement.dataset.windowChrome = window.todexDesktop.app.windowChrome;
+  installBrowserDesktopBridge();
+  installRendererDebugLogging();
 
-// Push the renderer locale to the main process so dialogs and the update
-// menu follow the in-app language choice.
-window.todexDesktop.locale.set(getLocale());
-subscribeLocale(() => window.todexDesktop.locale.set(getLocale()));
+  // Expose the window chrome so CSS can reserve space for overlaid window
+  // controls (macOS traffic lights) and mark drag regions.
+  document.documentElement.dataset.windowChrome = window.todexDesktop.app.windowChrome;
 
-const root = document.getElementById('root');
-if (!root) {
-  throw new Error('root element missing');
+  // Push the renderer locale to the main process so dialogs and the update
+  // menu follow the in-app language choice.
+  window.todexDesktop.locale.set(getLocale());
+  subscribeLocale(() => window.todexDesktop.locale.set(getLocale()));
+
+  const root = document.getElementById('root');
+  if (!root) {
+    throw new Error('root element missing');
+  }
+
+  createRoot(root).render(
+    <StrictMode>
+      <App />
+    </StrictMode>,
+  );
 }
 
-createRoot(root).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
-);
+void boot();

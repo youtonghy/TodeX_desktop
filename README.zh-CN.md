@@ -165,6 +165,7 @@ pnpm run dev
 | 脚本命令 | 说明 |
 | :--- | :--- |
 | `pnpm run dev` | 执行前置检查并在 Vite 开发模式下启动 Electron 应用。 |
+| `pnpm run dev:demo` | 仅启动渲染进程并使用内存演示数据，用于设计预览；在浏览器中打开输出的 `?demo` 地址。 |
 | `pnpm run build` | 编译构建主进程、Preload 脚本及渲染进程生产资源。 |
 | `pnpm run package` | 使用 electron-builder 编译并打包 Electron 应用。 |
 | `pnpm run preview` | 本地预览生产构建产物。 |

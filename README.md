@@ -163,6 +163,7 @@ The desktop window will launch at 1280×800.
 | Command | Description |
 | :--- | :--- |
 | `pnpm run dev` | Runs `predev` checks and starts the Electron app in Vite dev mode. |
+| `pnpm run dev:demo` | Serves the renderer alone with in-memory demo data for design previews; open the printed `?demo` URL in a browser. |
 | `pnpm run build` | Builds the main process, preload script, and renderer assets. |
 | `pnpm run package` | Builds and packages the Electron application with electron-builder. |
 | `pnpm run preview` | Previews the production build locally. |
