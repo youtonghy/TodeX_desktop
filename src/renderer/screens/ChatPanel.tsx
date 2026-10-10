@@ -1668,7 +1668,7 @@ export function ChatPanel({ session }: Props) {
                     </Select>
                     <Popover>
                       <Button
-                        className={`composer-control composer-model-control__trigger ${displayedReasoningEffort ? 'has-effort' : ''}`}
+                        className="composer-control composer-model-control__trigger"
                         size="sm"
                         variant="secondary"
                         isDisabled={readOnly || providerModels.length === 0}
