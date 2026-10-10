@@ -1388,12 +1388,12 @@ body {
    only around programmatic open/close, so separator drags and window resizes
    stay instant. The icon-collapsible sidebar is not a resizable panel — its
    own width transition lives on .sidebar. */
-[data-panel-motion='true'] [data-panel]#app-layout-aside {
+[data-panel-motion='true'] [data-panel]:is(#app-layout-aside, #app-layout-main) {
   transition: flex-grow 0.24s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  [data-panel-motion='true'] [data-panel]#app-layout-aside {
+  [data-panel-motion='true'] [data-panel]:is(#app-layout-aside, #app-layout-main) {
     transition: none;
   }
 }

@@ -20,6 +20,8 @@ export const ko: Messages = {
   'app.githubActions': 'GitHub 작업',
   'app.openAside': '오른쪽 패널 열기',
   'app.closeAside': '오른쪽 패널 닫기',
+  'app.collapseChat': '대화 접기',
+  'app.expandChat': '대화 펼치기',
   'app.subagents': '서브 에이전트',
   'app.loadingSettings': '설정과 워크스페이스를 불러오는 중...',
   'app.settings': '설정',

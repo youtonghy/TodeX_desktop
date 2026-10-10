@@ -20,6 +20,8 @@ export const ja: Messages = {
   'app.githubActions': 'GitHub 操作',
   'app.openAside': '右パネルを開く',
   'app.closeAside': '右パネルを閉じる',
+  'app.collapseChat': '会話を折りたたむ',
+  'app.expandChat': '会話を展開',
   'app.subagents': 'サブエージェント',
   'app.loadingSettings': '設定とワークスペースを読み込んでいます...',
   'app.settings': '設定',

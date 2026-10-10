@@ -1,7 +1,8 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
-import { Button, Label, ListBox, Modal, Select, Toast, toast } from '@heroui/react';
+import { Button, Label, ListBox, Modal, Select, Toast, Tooltip, toast } from '@heroui/react';
 import { AppLayout, Navbar } from '@heroui-pro/react';
-import { RiAddLine, RiGithubLine, RiLayoutLeftLine, RiLayoutRightLine, RiRobot2Line } from '@remixicon/react';
+import { RiAddLine, RiExpandLeftLine, RiExpandRightLine, RiGithubLine, RiLayoutLeftLine, RiLayoutRightLine, RiRobot2Line } from '@remixicon/react';
+import { ConversationSplit, useMediaQuery } from './components/ConversationSplit';
 import { useWorkbenchLayout } from './session/useWorkbenchLayout';
 import { sshWorkbenchScopeKey, workbenchScopeKey } from './session/workbenchLayout';
 import { createAgentBrowserWatch, takeNewAgentBrowserTab } from './session/agentBrowserTabs';
@@ -126,6 +127,14 @@ export function App() {
     if (open !== asideOpen) animatePanelMotion();
     setAsideOpenRaw(open);
   }, [animatePanelMotion, asideOpen, setAsideOpenRaw]);
+  // The right panel can take the whole width, leaving the conversation as a rail.
+  const [chatCollapsed, setChatCollapsed] = useState(false);
+  const toggleChatCollapsed = useCallback((collapsed: boolean) => {
+    animatePanelMotion();
+    setChatCollapsed(collapsed);
+  }, [animatePanelMotion]);
+  // AppLayout turns its aside into a sheet at this width; the split is desktop-only.
+  const compactLayout = useMediaQuery('(max-width: 1024px)');
 
   useNoticeToast(
     session.versionMismatch
@@ -300,6 +309,116 @@ export function App() {
   ).length;
   const overlayPanel = panelScopeRef.current === scopeKey && panel && panel !== 'kanban' && panel !== 'ssh' && !modalPanel && !isWorkbenchTab(panel) ? panel : null;
 
+  const asideContent = (
+    !scopeKey || !layout.hydrated ? null : (
+      <Suspense fallback={panelFallback}>
+        {overlayPanel ? (
+          <AsidePanel
+            session={session}
+            panel={overlayPanel}
+            slashCommand={slashCommand}
+            onBack={() => setPanel(workbenchTab)}
+          />
+        ) : (
+          <WorkbenchPanel key={scopeKey} scopeKey={scopeKey} shown={asideShown} session={session} tab={workbenchTab} target={panelTarget} onTabChange={changeWorkbenchTab} onTargetConsumed={consumePanelTarget} closeRequestRef={workbenchCloseRef}
+            sshMode={sshActive} requests={workbenchRequests} onRequestsHandled={workbenchRequestsHandled} onItemsChange={sshActive ? setWorkbenchItems : undefined} />
+        )}
+      </Suspense>
+    )
+  );
+  const navbar = (
+    <Navbar maxWidth="full">
+      <Navbar.Header className={`flex-nowrap gap-2 px-3 sm:px-6 [&>button]:shrink-0${insetChrome && !sidebarOpen ? ' navbar--clear-lights' : ''}`}>
+        <AppLayout.MenuToggle className="inline-flex min-[769px]:hidden" aria-label={t('app.openSidebar')}><RiLayoutLeftLine className="size-4" /></AppLayout.MenuToggle>
+        <span className="relative hidden min-[769px]:inline-flex shrink-0">
+          <Button isIconOnly size="sm" variant="ghost" aria-label={sidebarOpen ? t('app.collapseSidebar') : t('app.expandSidebar')} onPress={() => persistSidebarOpen(!sidebarOpen)}>
+            <RiLayoutLeftLine className="size-4" />
+          </Button>
+          <ShortcutHint id="toggleSidebar" className="absolute -top-1.5 -right-1.5 z-10" />
+        </span>
+        {sshActive ? (
+          <span className="min-w-0 flex-1 truncate text-sm font-semibold">{t('ssh.title')}</span>
+        ) : (
+          <ConversationHeaderDetails session={session} title={session.activeConversation?.title ?? t('app.conversation')} gitOpen={gitOpen} onOpenGit={() => setGitOpen(true)} />
+        )}
+        <Navbar.Content className="shrink-0 gap-2">
+          {!sshActive ? (
+            <span className="relative inline-flex shrink-0">
+              <Button isIconOnly size="sm" variant="ghost" aria-label={t('app.githubActions')} onPress={() => setGitOpen(true)}>
+                <RiGithubLine className="size-4" />
+              </Button>
+              <ShortcutHint id="gitActions" className="absolute -top-1.5 -right-1.5 z-10" />
+            </span>
+          ) : null}
+          {subagentRuns.length > 0 ? (
+            <span className="relative">
+              <Button isIconOnly size="sm" variant={panel === 'subagents' && asideOpen ? 'secondary' : 'ghost'} aria-label={t('app.subagents')} aria-expanded={asideOpen && panel === 'subagents'} onPress={() => openPanel('Subagents')}>
+                <RiRobot2Line className="size-4" />
+              </Button>
+              {activeSubagents > 0 ? (
+                <span className="bg-accent text-accent-foreground pointer-events-none absolute -right-1 -top-1 flex min-w-4 items-center justify-center rounded-full px-0.5 text-[10px] leading-4">{activeSubagents}</span>
+              ) : null}
+            </span>
+          ) : null}
+          {asideShown && !compactLayout ? (
+            <Tooltip delay={200}>
+              <Button isIconOnly size="sm" variant="ghost" aria-label={t('app.collapseChat')} onPress={() => toggleChatCollapsed(true)}>
+                <RiExpandLeftLine className="size-4" />
+              </Button>
+              <Tooltip.Content className="text-xs">{t('app.collapseChat')}</Tooltip.Content>
+            </Tooltip>
+          ) : null}
+          <span className="relative inline-flex shrink-0">
+            <Button isIconOnly size="sm" variant="ghost" aria-label={asideOpen ? t('app.closeAside') : t('app.openAside')} aria-expanded={asideOpen} onPress={() => persistAsideOpen(!asideOpen)}>
+              <RiLayoutRightLine className="size-4" />
+            </Button>
+            <ShortcutHint id="toggleAside" className="absolute -top-1.5 -right-1.5 z-10" />
+          </span>
+        </Navbar.Content>
+      </Navbar.Header>
+    </Navbar>
+  );
+  const mainContent = (
+    sshActive ? (
+      <Suspense fallback={panelFallback}>
+        <SshPanel
+          session={session}
+          scopeKey={scopeKey}
+          workbenchItems={workbenchItems}
+          onOpenSshTerminal={openSshTerminal}
+          onOpenRemoteFiles={openRemoteFiles}
+          onCloseWorkbenchItem={closeWorkbenchItem}
+        />
+      </Suspense>
+    ) : session.historyEncryption.recoveryNoticeVisible ? (
+      <div className="flex h-full min-h-0 w-full min-w-0 flex-col">
+        <div className="shrink-0 px-5 pt-3">
+          <HistoryRecoveryNotice
+            className="mx-auto max-w-2xl"
+            onSetup={() => { setHistoryRecoverySetup(true); setPanel('settings'); }}
+            onDismiss={session.historyEncryption.dismissRecoveryNotice}
+          />
+        </div>
+        <div className="min-h-0 flex-1"><ChatPanel session={session} /></div>
+      </div>
+    ) : <ChatPanel session={session} />
+  );
+
+  // Stands in for the navbar + conversation while the right panel takes the width.
+  const chatRail = (
+    <div className={`window-drag flex h-full flex-col items-center gap-1 pb-2 ${insetChrome && !sidebarOpen ? 'pt-10' : 'pt-2'}`}>
+      <Button isIconOnly size="sm" variant="ghost" aria-label={sidebarOpen ? t('app.collapseSidebar') : t('app.expandSidebar')} onPress={() => persistSidebarOpen(!sidebarOpen)}>
+        <RiLayoutLeftLine className="size-4" />
+      </Button>
+      <Tooltip delay={200}>
+        <Button isIconOnly size="sm" variant="ghost" aria-label={t('app.expandChat')} onPress={() => toggleChatCollapsed(false)}>
+          <RiExpandRightLine className="size-4" />
+        </Button>
+        <Tooltip.Content placement="right" className="text-xs">{t('app.expandChat')}</Tooltip.Content>
+      </Tooltip>
+    </div>
+  );
+
   return (
     <div className="bg-background text-foreground h-full" data-panel-motion={panelMotion || undefined}>
       <Toast.Provider placement="top" />
@@ -320,31 +439,9 @@ export function App() {
           sidebarOpen={sidebarOpen}
           onSidebarOpenChange={persistSidebarOpen}
           asideMobile="sheet"
-          asideResizable
-          asideDefaultSize="420px"
-          asideMinSize="320px"
-          asideMaxSize="640px"
-          asideResizeBehavior="preserve-pixel-size"
-          resizableAutoSaveId={LAYOUT_AUTO_SAVE_ID}
           asideOpen={asideShown}
           onAsideOpenChange={persistAsideOpen}
-          aside={
-            !scopeKey || !layout.hydrated ? null : (
-              <Suspense fallback={panelFallback}>
-                {overlayPanel ? (
-                  <AsidePanel
-                    session={session}
-                    panel={overlayPanel}
-                    slashCommand={slashCommand}
-                    onBack={() => setPanel(workbenchTab)}
-                  />
-                ) : (
-                  <WorkbenchPanel key={scopeKey} scopeKey={scopeKey} shown={asideShown} session={session} tab={workbenchTab} target={panelTarget} onTabChange={changeWorkbenchTab} onTargetConsumed={consumePanelTarget} closeRequestRef={workbenchCloseRef}
-                    sshMode={sshActive} requests={workbenchRequests} onRequestsHandled={workbenchRequestsHandled} onItemsChange={sshActive ? setWorkbenchItems : undefined} />
-                )}
-              </Suspense>
-            )
-          }
+          aside={compactLayout ? asideContent : null}
           sidebar={
             <AppSidebar
               session={session}
@@ -370,74 +467,25 @@ export function App() {
               onSelectConversation={() => setPanel(current => current === 'ssh' ? null : current)}
             />
           }
-          navbar={
-            <Navbar maxWidth="full">
-              <Navbar.Header className={`flex-nowrap gap-2 px-3 sm:px-6 [&>button]:shrink-0${insetChrome && !sidebarOpen ? ' navbar--clear-lights' : ''}`}>
-                <AppLayout.MenuToggle className="inline-flex min-[769px]:hidden" aria-label={t('app.openSidebar')}><RiLayoutLeftLine className="size-4" /></AppLayout.MenuToggle>
-                <span className="relative hidden min-[769px]:inline-flex shrink-0">
-                  <Button isIconOnly size="sm" variant="ghost" aria-label={sidebarOpen ? t('app.collapseSidebar') : t('app.expandSidebar')} onPress={() => persistSidebarOpen(!sidebarOpen)}>
-                    <RiLayoutLeftLine className="size-4" />
-                  </Button>
-                  <ShortcutHint id="toggleSidebar" className="absolute -top-1.5 -right-1.5 z-10" />
-                </span>
-                {sshActive ? (
-                  <span className="min-w-0 flex-1 truncate text-sm font-semibold">{t('ssh.title')}</span>
-                ) : (
-                  <ConversationHeaderDetails session={session} title={session.activeConversation?.title ?? t('app.conversation')} gitOpen={gitOpen} onOpenGit={() => setGitOpen(true)} />
-                )}
-                <Navbar.Content className="shrink-0 gap-2">
-                  {!sshActive ? (
-                    <span className="relative inline-flex shrink-0">
-                      <Button isIconOnly size="sm" variant="ghost" aria-label={t('app.githubActions')} onPress={() => setGitOpen(true)}>
-                        <RiGithubLine className="size-4" />
-                      </Button>
-                      <ShortcutHint id="gitActions" className="absolute -top-1.5 -right-1.5 z-10" />
-                    </span>
-                  ) : null}
-                  {subagentRuns.length > 0 ? (
-                    <span className="relative">
-                      <Button isIconOnly size="sm" variant={panel === 'subagents' && asideOpen ? 'secondary' : 'ghost'} aria-label={t('app.subagents')} aria-expanded={asideOpen && panel === 'subagents'} onPress={() => openPanel('Subagents')}>
-                        <RiRobot2Line className="size-4" />
-                      </Button>
-                      {activeSubagents > 0 ? (
-                        <span className="bg-accent text-accent-foreground pointer-events-none absolute -right-1 -top-1 flex min-w-4 items-center justify-center rounded-full px-0.5 text-[10px] leading-4">{activeSubagents}</span>
-                      ) : null}
-                    </span>
-                  ) : null}
-                  <span className="relative inline-flex shrink-0">
-                    <Button isIconOnly size="sm" variant="ghost" aria-label={asideOpen ? t('app.closeAside') : t('app.openAside')} aria-expanded={asideOpen} onPress={() => persistAsideOpen(!asideOpen)}>
-                      <RiLayoutRightLine className="size-4" />
-                    </Button>
-                    <ShortcutHint id="toggleAside" className="absolute -top-1.5 -right-1.5 z-10" />
-                  </span>
-                </Navbar.Content>
-              </Navbar.Header>
-            </Navbar>
-          }
+          navbar={compactLayout ? navbar : undefined}
         >
-          {sshActive ? (
-            <Suspense fallback={panelFallback}>
-              <SshPanel
-                session={session}
-                scopeKey={scopeKey}
-                workbenchItems={workbenchItems}
-                onOpenSshTerminal={openSshTerminal}
-                onOpenRemoteFiles={openRemoteFiles}
-                onCloseWorkbenchItem={closeWorkbenchItem}
-              />
-            </Suspense>
-          ) : session.historyEncryption.recoveryNoticeVisible ? (
-            <div className="flex h-full min-h-0 w-full min-w-0 flex-col">
-              <div className="shrink-0 px-5 pt-3">
-                <HistoryRecoveryNotice
-                  className="mx-auto max-w-2xl"
-                  onSetup={() => { setHistoryRecoverySetup(true); setPanel('settings'); }}
-                  onDismiss={session.historyEncryption.dismissRecoveryNotice}
-                />
-              </div>
-              <div className="min-h-0 flex-1"><ChatPanel session={session} /></div>
-            </div>
-          ) : <ChatPanel session={session} />}
+          {compactLayout ? mainContent : (
+            <ConversationSplit
+              autoSaveId={LAYOUT_AUTO_SAVE_ID}
+              aside={asideContent}
+              asideOpen={asideShown}
+              onAsideOpenChange={persistAsideOpen}
+              chatCollapsed={chatCollapsed}
+              onChatCollapsedChange={setChatCollapsed}
+              rail={chatRail}
+              chat={
+                <div className="flex h-full min-h-0 flex-col">
+                  <header className="shrink-0">{navbar}</header>
+                  <div className="min-h-0 flex-1">{mainContent}</div>
+                </div>
+              }
+            />
+          )}
         </AppLayout>
         )
       ) : (

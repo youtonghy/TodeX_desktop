@@ -20,6 +20,8 @@ export const zhCN = {
   'app.githubActions': 'GitHub 操作',
   'app.openAside': '打开右侧面板',
   'app.closeAside': '关闭右侧面板',
+  'app.collapseChat': '收起对话区',
+  'app.expandChat': '展开对话区',
   'app.subagents': '子代理',
   'app.loadingSettings': '正在加载设置和工作区...',
   'app.settings': '设置',

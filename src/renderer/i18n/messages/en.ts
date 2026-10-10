@@ -20,6 +20,8 @@ export const en: Messages = {
   'app.githubActions': 'GitHub actions',
   'app.openAside': 'Open right panel',
   'app.closeAside': 'Close right panel',
+  'app.collapseChat': 'Collapse conversation',
+  'app.expandChat': 'Expand conversation',
   'app.subagents': 'Subagents',
   'app.loadingSettings': 'Loading settings and workspaces...',
   'app.settings': 'Settings',
