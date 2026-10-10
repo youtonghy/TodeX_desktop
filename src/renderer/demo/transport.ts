@@ -24,6 +24,7 @@ const journals = new Map<string, Journal>(
 );
 let workspaces = [...fixtures.demoWorkspaces];
 let kanbanTasks = [...fixtures.demoKanbanTasks];
+let agentDesktop = { ...fixtures.demoAgentDesktop };
 const sockets = new Set<DemoSocket>();
 
 function json(value: unknown, status = 200): SecureResponse {
@@ -116,6 +117,10 @@ function route(request: SecureRequest): SecureResponse {
         return json({ conversations: [...journals.values()].map((journal) => journal.manifest) });
       case '/v2/kanban/tasks':
         return json({ tasks: kanbanTasks });
+      case '/v2/agent-desktop':
+        return json(agentDesktop);
+      case '/v2/agent-browser/profiles':
+        return json({ profiles: [{ id: 'default', name: '默认资料', createdAt: Date.now() }], workspaces: {} });
       case '/v2/git/workspace':
         return json(fixtures.demoGitWorkspace(query.get('workspacePath') ?? ''));
       case '/v2/git/status':
@@ -176,6 +181,11 @@ function route(request: SecureRequest): SecureResponse {
   if (journal && method === 'DELETE') {
     journals.delete(journal.manifest.id);
     return json({ deleted: true });
+  }
+  if (path.startsWith('/v2/agent-desktop') && (method === 'PUT' || method === 'POST' || method === 'PATCH')) {
+    if (typeof body.enabled === 'boolean') agentDesktop = { ...agentDesktop, enabled: body.enabled };
+    if (typeof body.computerEnabled === 'boolean') agentDesktop = { ...agentDesktop, computerEnabled: body.computerEnabled };
+    return json(agentDesktop);
   }
   const cli = path.match(/^\/v2\/providers\/([^/]+)\/(upgrade|install)$/);
   if (cli) {

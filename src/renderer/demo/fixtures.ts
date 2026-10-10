@@ -16,6 +16,7 @@ import type {
 } from '@todex/protocol/v2';
 import type { KanbanTask, WorkspaceRecord } from '@todex/protocol/todex';
 import type { UsageRecord } from '@todex/protocol/mobileParity';
+import type { AgentDesktopSettings } from '@todex/protocol/agentDesktop';
 import type { GitScanResult, GitStatusSummary, GitWorkspaceSnapshot } from '../lib/gitWorkspace';
 
 export const DEMO_SERVER_URL = 'http://127.0.0.1:7399';
@@ -99,20 +100,20 @@ export const demoModels: Partial<Record<ProviderKind, ProviderModelDescriptor[]>
   pi: [model('pi-default', 'Pi Default', 'Pi 默认模型', { isDefault: true, supportedReasoningEfforts: ['medium'] })],
 };
 
-function provider(id: ProviderKind, displayName: string, available: boolean, unavailableReason?: string): ProviderDescriptor {
+function provider(id: ProviderKind, displayName: string, available: boolean, unavailableReason?: string, extra: Partial<ProviderCapabilities> = {}): ProviderDescriptor {
   return {
     id,
     displayName,
     available,
     ...(unavailableReason ? { unavailableReason } : {}),
     profiles: ['default'],
-    capabilities,
+    capabilities: { ...capabilities, ...extra },
     models: demoModels[id] ?? [],
   };
 }
 
 export const demoProviders: ProviderDescriptor[] = [
-  provider('claude-code', 'Claude Code', true),
+  provider('claude-code', 'Claude Code', true, undefined, { controlActions: ['cancel', 'interrupt', 'fork'] }),
   provider('codex', 'Codex CLI', true),
   provider('pi', 'Pi', true),
   provider('opencode', 'OpenCode', false, 'opencode is not installed'),
@@ -465,3 +466,20 @@ export const demoUsageRecords: UsageRecord[] = Array.from({ length: 42 }, (_, in
     updatedAt: NOW - Math.round((index / 42) * 14 * DAY) - HOUR,
   };
 });
+
+export const demoAgentDesktop: AgentDesktopSettings = {
+  enabled: true,
+  computerEnabled: false,
+  browser: {
+    available: true,
+    host: 'lumen-devbox',
+    chromium: { version: '152.0.7977.78', installed: true, downloading: false, overridden: false },
+  },
+  computer: {
+    supported: true,
+    available: true,
+    host: 'lumen-devbox',
+    platform: 'linux',
+    permissions: { screen: true, accessibility: true },
+  },
+};
