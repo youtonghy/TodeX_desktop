@@ -79,7 +79,7 @@ function TranscriptModal({ transcript, loading, onClose }: {
  * (plus Claude Code's own retention setting), and the session list with a
  * transcript view. Sessions TodeX conversations resume, and running ones,
  * cannot be removed. */
-export function NativeHistoryTab({ session, provider }: { session: TodeXSession; provider: NativeHistoryProvider }) {
+export function NativeHistoryTab({ session, provider, label }: { session: TodeXSession; provider: NativeHistoryProvider; label: string }) {
   const t = useT();
   const [info, setInfo] = useState<NativeHistoryProviderInfo>();
   const [sessions, setSessions] = useState<NativeHistorySession[]>([]);
@@ -145,7 +145,7 @@ export function NativeHistoryTab({ session, provider }: { session: TodeXSession;
     }
   };
 
-  const displayName = session.v2Providers.find((item) => item.id === provider)?.displayName ?? (provider === 'pi' ? 'Pi' : 'Claude Code');
+  const displayName = session.v2Providers.find((item) => item.id === provider)?.displayName ?? label;
   const items: HistoryListItem[] = sessions.map((entry) => {
     const title = entry.title?.trim() || t('cleanup.untitledSession');
     const where = entry.cwd ? pathName(entry.cwd) : t('cleanup.unknownWorkspace');
@@ -164,11 +164,12 @@ export function NativeHistoryTab({ session, provider }: { session: TodeXSession;
         : entry.referencedBy.length > 0
           ? <Chip color="blue">{t('cleanup.inUseByTodex')}</Chip>
           : undefined,
-      onView: () => void openTranscript(entry.id),
+      onView: info?.capabilities.view ? () => void openTranscript(entry.id) : undefined,
     };
   });
 
   const nativeDays = info?.native?.cleanupPeriodDays ?? null;
+  const sizes = info?.capabilities.sizes ?? true;
 
   if (!loading && info && !info.available) {
     return (
@@ -194,15 +195,18 @@ export function NativeHistoryTab({ session, provider }: { session: TodeXSession;
         countLabel={t('cleanup.sessionCount')}
         totalBytes={totalBytes}
         measuredAt={measuredAt}
-        capacity={policy?.policy.maxTotalBytes}
+        capacity={sizes ? policy?.policy.maxTotalBytes : null}
         loading={loading}
         onRefresh={() => void refresh()}
       >
         {info?.root ? <p className="truncate font-mono text-caption-1-regular text-text-tertiary" title={info.root}>{info.root}</p> : null}
+        {provider === 'grok-build' ? <p className="text-caption-1-regular text-text-secondary">{t('cleanup.grokNote')}</p> : null}
+        {provider === 'devin' ? <p className="text-caption-1-regular text-text-secondary">{t('cleanup.devinNote')}</p> : null}
       </StorageSummaryCard>
       <CleanupPolicyCard
         hint={t('cleanup.agentAutoHint')}
         state={policy}
+        sizes={sizes}
         onSave={async (next) => setPolicy(await api().updateNativeHistoryPolicy(provider, next))}
         onRun={async () => {
           reportCleanupResult(await api().runNativeHistoryPolicy(provider), { cleaned: 'cleanup.sessionsCleaned', skipped: 'cleanup.sessionsSkipped' });
@@ -231,9 +235,10 @@ export function NativeHistoryTab({ session, provider }: { session: TodeXSession;
       <SelectableHistoryList
         items={items}
         loading={loading}
+        sizes={sizes}
         emptyLabel={t('cleanup.noSessions')}
         confirmTitle={(count) => t('cleanup.confirmSessionsTitle', { count })}
-        confirmBody={(size) => t('cleanup.confirmSessionsBody', { size })}
+        confirmBody={(size) => size ? t('cleanup.confirmSessionsBody', { size }) : t('cleanup.confirmSessionsBodyNoSize')}
         onClean={async (ids) => {
           reportCleanupResult(await api().cleanupNativeHistory(provider, ids), { cleaned: 'cleanup.sessionsCleaned', skipped: 'cleanup.sessionsSkipped' });
           await refresh();

@@ -22,7 +22,11 @@ const ACTIVE_STATUSES = new Set(['running', 'waiting_permission']);
 const NATIVE_TABS: Array<{ id: NativeHistoryProvider; label: string }> = [
   { id: 'claude-code', label: 'Claude Code' },
   { id: 'pi', label: 'Pi' },
+  { id: 'codex', label: 'Codex' },
+  { id: 'grok-build', label: 'Grok Build' },
+  { id: 'devin', label: 'Devin' },
 ];
+const NATIVE_IDS = new Set<string>(NATIVE_TABS.map((item) => item.id));
 
 type TabKey = 'todex' | NativeHistoryProvider;
 
@@ -110,7 +114,7 @@ function TodexHistoryTab({ session }: { session: TodeXSession }) {
         loading={loading}
         emptyLabel={t('cleanup.empty')}
         confirmTitle={(count) => t('cleanup.confirmSelectedTitle', { count })}
-        confirmBody={(size) => t('cleanup.confirmSelectedBody', { size })}
+        confirmBody={(size) => t('cleanup.confirmSelectedBody', { size: size ?? '' })}
         onClean={async (ids) => {
           reportCleanupResult(await purgeConversations(ids), { cleaned: 'cleanup.cleaned', skipped: 'cleanup.skipped' });
           await refresh();
@@ -126,7 +130,7 @@ export function CleanupPanel({ session }: { session: TodeXSession }) {
   const t = useT();
   const [tab, setTab] = useState<TabKey>('todex');
   return (
-    <Tabs selectedKey={tab} onSelectionChange={(key) => setTab(key === 'claude-code' || key === 'pi' ? key : 'todex')} className="gap-4 py-1">
+    <Tabs selectedKey={tab} onSelectionChange={(key) => setTab(NATIVE_IDS.has(String(key)) ? String(key) as NativeHistoryProvider : 'todex')} className="gap-4 py-1">
       <TabList aria-label={t('app.cleanup')}>
         <Tab id="todex">{t('cleanup.tabTodex')}</Tab>
         {NATIVE_TABS.map((item) => (
@@ -137,7 +141,7 @@ export function CleanupPanel({ session }: { session: TodeXSession }) {
       </TabList>
       <TabPanel id="todex"><TodexHistoryTab session={session} /></TabPanel>
       {NATIVE_TABS.map((item) => (
-        <TabPanel key={item.id} id={item.id}><NativeHistoryTab session={session} provider={item.id} /></TabPanel>
+        <TabPanel key={item.id} id={item.id}><NativeHistoryTab session={session} provider={item.id} label={item.label} /></TabPanel>
       ))}
     </Tabs>
   );

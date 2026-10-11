@@ -36,7 +36,7 @@ function demoCleanupPolicy() {
   return { policy: cleanupPolicy, lastRun: null, nextRunAt: cleanupPolicy.enabled ? new Date(Date.now() + 3_600_000).toISOString() : null };
 }
 
-type DemoNativeSession = { id: string; title: string | null; cwd: string | null; createdAt: string | null; updatedAt: string; bytes: number; referencedBy: string[]; running: boolean };
+type DemoNativeSession = { id: string; title: string | null; cwd: string | null; createdAt: string | null; updatedAt: string; bytes: number | null; referencedBy: string[]; running: boolean };
 const DAY = 86_400_000;
 const demoNativeAt = (daysAgo: number) => new Date(Date.now() - daysAgo * DAY).toISOString();
 const demoNativeSessions: Record<string, DemoNativeSession[]> = {
@@ -50,16 +50,36 @@ const demoNativeSessions: Record<string, DemoNativeSession[]> = {
     { id: '9a8b7c6d-5e4f-4a3b-9c2d-1e0f9a8b7c6d', title: '整理 design-tokens 命名', cwd: `${fixtures.DEMO_ROOT}/design-tokens`, createdAt: demoNativeAt(3), updatedAt: demoNativeAt(2), bytes: 420_000, referencedBy: [], running: false },
     { id: 'b1c2d3e4-f5a6-4b7c-8d9e-0f1a2b3c4d5e', title: '为订单列表加分页', cwd: `${fixtures.DEMO_ROOT}/lumen-web`, createdAt: demoNativeAt(20), updatedAt: demoNativeAt(19), bytes: 880_000, referencedBy: ['demo-conversation-2'], running: false },
   ],
+  codex: [
+    { id: '019a1b2c-3d4e-7f50-8a6b-7c8d9e0f1a2b', title: '修复 CI 中的 flaky 测试', cwd: `${fixtures.DEMO_ROOT}/lumen-api`, createdAt: demoNativeAt(6), updatedAt: demoNativeAt(5), bytes: 2_300_000, referencedBy: [], running: false },
+    { id: '019a1b2c-3d4e-7f50-8a6b-7c8d9e0f1a2c', title: '给支付回调加幂等', cwd: `${fixtures.DEMO_ROOT}/lumen-api`, createdAt: demoNativeAt(2), updatedAt: demoNativeAt(1), bytes: 760_000, referencedBy: ['demo-conversation-3'], running: false },
+  ],
+  'grok-build': [],
+  devin: [
+    { id: 'brisk-otter', title: '梳理部署脚本', cwd: `${fixtures.DEMO_ROOT}/infra-scripts`, createdAt: demoNativeAt(9), updatedAt: demoNativeAt(8), bytes: null, referencedBy: [], running: false },
+    { id: 'quiet-heron', title: '补充 README', cwd: `${fixtures.DEMO_ROOT}/design-tokens`, createdAt: demoNativeAt(30), updatedAt: demoNativeAt(29), bytes: null, referencedBy: [], running: false },
+  ],
+};
+const DEMO_NATIVE_ROOTS: Record<string, string> = {
+  'claude-code': '/home/demo/.claude/projects',
+  pi: '/home/demo/.pi/agent/sessions',
+  codex: '/home/demo/.codex/sessions',
+  'grok-build': '/home/demo/.grok/sessions',
+  devin: '/home/demo/.local/share/devin/cli/sessions.db',
 };
 const demoNativePolicies: Record<string, typeof cleanupPolicy> = {
   'claude-code': { enabled: false, maxAgeDays: null, maxTotalBytes: null },
   pi: { enabled: false, maxAgeDays: null, maxTotalBytes: null },
+  codex: { enabled: false, maxAgeDays: null, maxTotalBytes: null },
+  'grok-build': { enabled: false, maxAgeDays: null, maxTotalBytes: null },
+  devin: { enabled: false, maxAgeDays: null, maxTotalBytes: null },
 };
 let demoClaudeRetention: number | null = 30;
 
 function demoNativeList(provider: string) {
   const sessions = demoNativeSessions[provider] ?? [];
-  return { provider, root: provider === 'pi' ? '/home/demo/.pi/agent/sessions' : '/home/demo/.claude/projects', totalBytes: sessions.reduce((sum, item) => sum + item.bytes, 0), count: sessions.length, measuredAt: new Date().toISOString(), sessions };
+  const totalBytes = provider === 'devin' ? 18_400_000 : sessions.reduce((sum, item) => sum + (item.bytes ?? 0), 0);
+  return { provider, root: DEMO_NATIVE_ROOTS[provider] ?? null, totalBytes, count: sessions.length, measuredAt: new Date().toISOString(), sessions };
 }
 
 function demoNativePolicy(provider: string) {
@@ -80,7 +100,7 @@ function demoNativeDelete(provider: string, ids: string[]) {
       skipped.push({ conversationId: id, code: 'CONFLICT', message: 'session is in use' });
       continue;
     }
-    freedBytes += item.bytes;
+    freedBytes += item.bytes ?? 0;
     sessions.splice(index, 1);
     deleted.push(id);
   }
@@ -301,9 +321,13 @@ function route(request: SecureRequest): SecureResponse {
       case '/v2/history/cleanup-policy':
         return json(demoCleanupPolicy());
       case '/v2/native-history/providers':
-        return json({ providers: (['claude-code', 'pi'] as const).map((id) => {
+        return json({ providers: (['claude-code', 'pi', 'codex', 'grok-build', 'devin'] as const).map((id) => {
           const list = demoNativeList(id);
-          return { provider: id, available: true, root: list.root, sessionCount: list.count, totalBytes: list.totalBytes, measuredAt: list.measuredAt, native: id === 'claude-code' ? { cleanupPeriodDays: demoClaudeRetention, settingsPath: '/home/demo/.claude/settings.json' } : null };
+          return {
+            provider: id, available: id !== 'grok-build', root: list.root, sessionCount: list.count, totalBytes: list.totalBytes, measuredAt: list.measuredAt,
+            capabilities: { view: id !== 'devin', sizes: id !== 'devin' },
+            native: id === 'claude-code' ? { cleanupPeriodDays: demoClaudeRetention, settingsPath: '/home/demo/.claude/settings.json' } : null,
+          };
         }) });
       case '/v2/native-history/claude-code/native-retention':
         return json({ cleanupPeriodDays: demoClaudeRetention, settingsPath: '/home/demo/.claude/settings.json' });
@@ -327,9 +351,9 @@ function route(request: SecureRequest): SecureResponse {
     const conversation = path.match(/^\/v2\/conversations\/([^/]+)(\/events)?$/);
     const journal = conversation ? journals.get(decodeURIComponent(conversation[1])) : undefined;
     if (journal) return json(conversation?.[2] ? replay(journal, query) : journal.manifest);
-    const nativeList = path.match(/^\/v2\/native-history\/(claude-code|pi)\/(sessions|policy)$/);
+    const nativeList = path.match(/^\/v2\/native-history\/(claude-code|pi|codex|grok-build|devin)\/(sessions|policy)$/);
     if (nativeList) return json(nativeList[2] === 'sessions' ? demoNativeList(nativeList[1]) : demoNativePolicy(nativeList[1]));
-    const nativeTranscript = path.match(/^\/v2\/native-history\/(claude-code|pi)\/sessions\/([^/]+)\/transcript$/);
+    const nativeTranscript = path.match(/^\/v2\/native-history\/(claude-code|pi|codex|grok-build|devin)\/sessions\/([^/]+)\/transcript$/);
     if (nativeTranscript) {
       const item = demoNativeSessions[nativeTranscript[1]]?.find((entry) => entry.id === decodeURIComponent(nativeTranscript[2]));
       if (!item) return notFound(method, path);
@@ -360,7 +384,7 @@ function route(request: SecureRequest): SecureResponse {
     if (Array.isArray(body.tasks)) kanbanTasks = body.tasks as typeof kanbanTasks;
     return json({ tasks: kanbanTasks });
   }
-  const nativeAction = path.match(/^\/v2\/native-history\/(claude-code|pi)\/(cleanup|policy|policy\/run|native-retention)$/);
+  const nativeAction = path.match(/^\/v2\/native-history\/(claude-code|pi|codex|grok-build|devin)\/(cleanup|policy|policy\/run|native-retention)$/);
   if (nativeAction) {
     const [, nativeProvider, action] = nativeAction;
     if (action === 'cleanup') return json(demoNativeDelete(nativeProvider, Array.isArray(body.sessionIds) ? body.sessionIds.map(String) : []));
