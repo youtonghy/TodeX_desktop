@@ -112,6 +112,22 @@ export function AgentProvidersPanel({ session }: { session: TodeXSession }) {
     return () => { requestGeneration.current += 1; };
   }, [refresh]);
 
+  // Only agents installed on the backend's machine; until the provider list
+  // arrives every managed agent stays listed so the panel is never empty.
+  const installedAgents = useMemo(() => {
+    const providers = session.v2Providers;
+    if (!providers.length) return MANAGED_PROVIDER_AGENTS;
+    return MANAGED_PROVIDER_AGENTS.filter((id) => providers.some((item) => item.id === id && item.available));
+  }, [session.v2Providers]);
+
+  // A selected agent that is not installed falls back to the first one that is.
+  useEffect(() => {
+    if (installedAgents.length && !installedAgents.includes(agent)) {
+      setAgent(installedAgents[0]);
+      setEditor(null);
+    }
+  }, [agent, installedAgents]);
+
   const bucket: AgentProviderBucket | undefined = agents[agent];
 
   const applyBucket = (next: AgentProviderBucket) => {
@@ -232,7 +248,7 @@ export function AgentProvidersPanel({ session }: { session: TodeXSession }) {
       <p className="-mt-2 text-caption-1-regular text-text-secondary">{t(additiveAgent ? 'ap.globalNoteAdditive' : 'ap.globalNote')}</p>
 
       <PillTabList className="flex-wrap">
-        {MANAGED_PROVIDER_AGENTS.map((id) => (
+        {installedAgents.map((id) => (
           <PillTab key={id} variant="gray" isSelected={agent === id} onSelect={() => { setAgent(id); setEditor(null); }}>
             <span className="inline-flex items-center gap-1.5">
               <ProviderIcon provider={id} className="size-4" />
@@ -244,6 +260,8 @@ export function AgentProvidersPanel({ session }: { session: TodeXSession }) {
 
       {loading ? (
         <div className="flex min-h-48 items-center justify-center"><Spinner size="md" aria-label={t('cli.reading')} /></div>
+      ) : !installedAgents.length ? (
+        <p className="py-10 text-center text-body-regular text-text-secondary">{t('ap.noInstalledAgents')}</p>
       ) : !bucket ? (
         <p className="py-10 text-center text-body-regular text-text-secondary">{t('ap.unsupported')}</p>
       ) : (

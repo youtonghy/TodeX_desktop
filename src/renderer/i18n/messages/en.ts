@@ -1720,6 +1720,7 @@ export const en: Messages = {
   'ap.globalNote': 'Activating a provider rewrites the agent\u2019s global config file; it applies to new sessions in and outside TodeX.',
   'ap.globalNoteAdditive': 'Saved providers are written into the agent\u2019s global config and all stay enabled; \u201cDefault\u201d marks the agent\u2019s startup selection, changed on the agent side.',
   'ap.unsupported': 'This backend does not support managed providers',
+  'ap.noInstalledAgents': 'No supported agent is installed on this machine',
   'ap.liveMismatch': 'The live config differs from the stored provider. Import it to keep it recoverable.',
   'ap.importLive': 'Import current config',
   'ap.importedName': 'Imported',

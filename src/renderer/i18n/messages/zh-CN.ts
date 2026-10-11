@@ -1720,6 +1720,7 @@ export const zhCN = {
   'ap.globalNote': '激活供应商会改写该 Agent 的全局配置文件，对 TodeX 内外的新会话同时生效。',
   'ap.globalNoteAdditive': '供应商保存后即写入该 Agent 的全局配置，可多个并存；「默认」是该 Agent 的启动默认选中，在 Agent 侧修改。',
   'ap.unsupported': '当前后端不支持供应商管理',
+  'ap.noInstalledAgents': '本机未安装可管理的 Agent',
   'ap.liveMismatch': '当前生效配置与已存供应商不一致，可导入以便恢复。',
   'ap.importLive': '导入当前配置',
   'ap.importedName': '已导入',

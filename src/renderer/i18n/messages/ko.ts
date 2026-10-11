@@ -1720,6 +1720,7 @@ export const ko: Messages = {
   'ap.globalNote': '프로바이더를 활성화하면 에이전트의 전역 설정 파일이 다시 작성되며 TodeX 안팎의 새 세션에 적용됩니다.',
   'ap.globalNoteAdditive': '저장된 프로바이더는 에이전트의 전역 설정에 기록되며 여러 개를 동시에 활성화할 수 있습니다. "기본"은 에이전트 측에서 변경하는 시작 선택입니다.',
   'ap.unsupported': '이 백엔드는 프로바이더 관리를 지원하지 않습니다',
+  'ap.noInstalledAgents': '이 컴퓨터에 관리할 수 있는 에이전트가 설치되어 있지 않습니다',
   'ap.liveMismatch': '현재 설정이 저장된 프로바이더와 다릅니다. 복구할 수 있도록 가져오세요.',
   'ap.importLive': '현재 설정 가져오기',
   'ap.importedName': '가져옴',
