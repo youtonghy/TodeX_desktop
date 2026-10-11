@@ -1,4 +1,4 @@
-import { RiPushpin2Fill, RiLockLine, RiAddLine, RiArrowRightSLine, RiCheckLine, RiFolderReduceLine, RiFoldersLine, RiFolderTransferLine, RiPencilLine, RiEdit2Line, RiErrorWarningLine, RiFolder3Line, RiGitBranchLine, RiDeleteBinLine, RiArrowDownSLine, RiBarChartBoxLine, RiBookOpenLine, RiInformationLine, RiKanbanView2, RiPaletteLine, RiPriceTag3Line, RiPuzzle2Line, RiSettings3Line, RiTerminalBoxLine, RiTerminalLine, RiTimeLine, RiUserSettingsLine, RiVipCrownLine } from '@remixicon/react';
+import { RiPushpin2Fill, RiLockLine, RiAddLine, RiArrowRightSLine, RiCheckLine, RiFolderReduceLine, RiFoldersLine, RiFolderTransferLine, RiPencilLine, RiEdit2Line, RiErrorWarningLine, RiFolder3Line, RiFolderOpenLine, RiGitBranchLine, RiDeleteBinLine, RiArrowDownSLine, RiBarChartBoxLine, RiBookOpenLine, RiInformationLine, RiKanbanView2, RiPaletteLine, RiPriceTag3Line, RiPuzzle2Line, RiSettings3Line, RiTerminalBoxLine, RiTerminalLine, RiTimeLine, RiUserSettingsLine, RiVipCrownLine } from '@remixicon/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { MouseEvent, ReactNode } from 'react';
 import {
@@ -12,9 +12,11 @@ import {
   SubmenuTrigger,
   parseColor,
   type GridListItemRenderProps,
+  type Key,
 } from 'react-aria-components';
 import { DashboardSidebar, type DashboardNavItem } from '@/components/application/dashboard/dashboard-sidebar';
 import { Announcement } from '@/components/base/announcement/announcement';
+import { TreeView, TreeViewItem } from '@/components/base/tree-view/tree-view';
 import { NotificationCenter, type NotificationCenterItem } from '@/components/application/notification-center/notification-center';
 import { markAllNotificationsRead, markNotificationRead, useNotificationFeed } from '../session/notificationFeed';
 import { getLocale, translate } from '../i18n';
@@ -820,6 +822,118 @@ export function AppSidebar({
     return [header, ...entry.workspaces.map((workspace, index) => renderWorkspaceItem(workspace, { entry, last: index === entry.workspaces.length - 1, folded }))];
   };
 
+  // Expanded sidebar: the workspace list is a BoardUI tree. Groups are
+  // branches (folder, chevron, guides) holding their workspaces; lone
+  // workspaces are root leaves. The icon rail keeps the flat grid list.
+  const workspaceTreeItem = (workspace: WorkspaceRecord, group: { entry: WorkspaceGroupEntry; last: boolean } | null): ReactNode => {
+    const isSelected = workspace.id === session.activeWorkspaceId;
+    const drop = dropTarget?.kind === 'workspace' && dropTarget.id === workspace.id
+      ? dropTarget.position
+      : group?.last && dropTarget?.kind === 'group' && dropTarget.id === group.entry.id && dropTarget.position === 'after'
+        ? 'after' as const
+        : null;
+    const isMissing = Boolean(workspace.pathMissing);
+    const backend = session.backendConnections.find((profile) => profile.id === (workspace.backendConnectionId || session.activeBackendConnectionId));
+    const backendLabel = backend ? t('sidebar.backendLabel', { name: backend.name, url: backend.serverUrl }) : t('sidebar.backendRemoved');
+    const workspaceStatus = workspaceStatusMap[workspace.id];
+    const WorkspaceGlyph = workspaceIconComponent(workspace.icon);
+    return (
+      <TreeViewItem
+        key={workspace.id}
+        id={workspace.id}
+        label={workspaceDisplayName(workspace)}
+        className={({ isHovered, isPressed }) => cx(
+          // The sidebar's row fills: the tree's menu fill matches this surface.
+          isSelected ? 'bg-background-secondary-hover' : isPressed ? 'bg-background-tertiary-default' : isHovered ? 'bg-background-secondary-hover' : 'bg-transparent',
+          isSelected ? 'text-text-primary' : isMissing ? 'cursor-not-allowed text-text-tertiary opacity-50' : 'text-text-secondary',
+          'text-body-medium',
+          drop && DROP_CLASS[drop],
+          draggingKey === `workspace:${workspace.id}` && 'opacity-40',
+        )}
+        data-workspace-id={workspace.id}
+        data-workspace-drag={`workspace:${workspace.id}`}
+        data-workspace-in-group={group ? 'true' : undefined}
+        onContextMenu={(event) => openContextMenu(event, 'workspace', workspace.id)}
+        leading={(
+          <span className="relative flex size-5 shrink-0 items-center justify-center" title={isMissing ? t('sidebar.workspaceMissingPath') : undefined}>
+            {workspaceStatus ? (
+              <WorkspaceStatusRing
+                kind={workspaceStatus}
+                style={workspace.ringStyle}
+                label={workspaceStatus === 'working' ? t('sidebar.statusWorking') : workspaceStatus === 'issue' ? t('sidebar.statusIssue') : t('sidebar.statusUnread')}
+              />
+            ) : null}
+            <WorkspaceGlyph
+              className={cx('size-4', !workspace.iconColor && (isSelected ? 'text-foreground-icon-primary' : 'text-foreground-icon-secondary'))}
+              color={workspace.iconColor}
+            />
+          </span>
+        )}
+        trailingContent={(
+          <span className="flex items-center gap-1">
+            {pins.workspace.includes(workspace.id) ? <RiPushpin2Fill className="size-3 shrink-0 text-foreground-icon-tertiary" aria-label={t('sidebar.pinned')} /> : null}
+            {isMissing ? <RiErrorWarningLine className="size-3 shrink-0 text-status-yellow-text" aria-label={t('sidebar.workspaceMissingPath')} /> : null}
+            <TooltipTrigger delay={300}>
+              <Focusable>
+                <span role="img" tabIndex={-1} aria-label={backendLabel} className={cx('flex size-6 shrink-0 items-center justify-center rounded-full', FOCUS_RING)}>
+                  <span aria-hidden="true" className="size-2.5 rounded-full ring-1 ring-separator-border" style={{ backgroundColor: backendLabelColor(backend) }} />
+                </span>
+              </Focusable>
+              <Tooltip placement="right" className="max-w-xs break-all">{backendLabel}</Tooltip>
+            </TooltipTrigger>
+          </span>
+        )}
+      />
+    );
+  };
+
+  const groupTreeItem = (entry: WorkspaceGroupEntry): ReactNode => {
+    const folded = isGroupFolded(entry.id);
+    const name = entry.name || t('sidebar.newGroupName');
+    const containsSelected = entry.workspaces.some((workspace) => workspace.id === session.activeWorkspaceId);
+    const statuses = entry.workspaces
+      .map((workspace) => workspaceStatusMap[workspace.id])
+      .filter((status): status is NonNullable<typeof status> => Boolean(status))
+      .slice(0, 3);
+    const drop = dropTarget?.kind === 'group' && dropTarget.id === entry.id
+      ? dropTarget.position === 'after' && !folded ? null : dropTarget.position
+      : null;
+    return (
+      <TreeViewItem
+        key={`group:${entry.id}`}
+        id={`group:${entry.id}`}
+        label={name}
+        icon={RiFolder3Line}
+        expandedIcon={RiFolderOpenLine}
+        className={({ isHovered, isPressed }) => cx(
+          isPressed ? 'bg-background-tertiary-default' : isHovered ? 'bg-background-secondary-hover' : 'bg-transparent',
+          'text-body-semibold',
+          folded && containsSelected ? 'text-text-primary' : 'text-text-secondary',
+          drop && DROP_CLASS[drop],
+          draggingKey === `group:${entry.id}` && 'opacity-40',
+        )}
+        data-workspace-drag={`group:${entry.id}`}
+        onContextMenu={(event) => openContextMenu(event, 'group', entry.id)}
+        trailingContent={(
+          <span className="flex items-center gap-1.5 pe-1">
+            {folded && statuses.length > 0 ? (
+              <span className="flex items-center gap-1" aria-hidden="true">
+                {statuses.map((status, index) => <span key={index} className={cx('size-1.5 rounded-full', STATUS_DOT_CLASS[status])} />)}
+              </span>
+            ) : null}
+            <span className="tabular-nums">{entry.workspaces.length}</span>
+          </span>
+        )}
+      >
+        {entry.workspaces.map((workspace, index) => workspaceTreeItem(workspace, { entry, last: index === entry.workspaces.length - 1 }))}
+      </TreeViewItem>
+    );
+  };
+
+  const expandedGroupKeys = new Set<Key>(displayedEntries
+    .filter((entry): entry is WorkspaceGroupEntry => entry.kind === 'group' && !isGroupFolded(entry.id))
+    .map((entry) => `group:${entry.id}`));
+
   // Cached data renders immediately; the directory sync only blocks an
   // entirely empty sidebar (first run or cleared storage).
   const syncing = session.directorySyncStatus === 'loading' && session.workspaces.length === 0;
@@ -1048,28 +1162,62 @@ export function AppSidebar({
                 rail || query ? null : <p className="px-2 py-1 text-caption-1-regular text-text-tertiary">{t('sidebar.noWorkspaces')}</p>
               ) : displayedEntries.length === 0 ? null : (
                 <>
-                  <GridList
-                    key={`workspaces_${workspaceLimit}`}
-                    aria-label={t('sidebar.workspaces')}
-                    className="flex flex-col outline-none"
-                    disabledKeys={foldedWorkspaceKeys}
-                    disabledBehavior="all"
-                    onAction={(key) => {
-                      if (String(key).startsWith('group:')) {
-                        toggleGroupCollapsed(String(key).slice('group:'.length));
-                        return;
-                      }
-                      const target = session.workspaces.find((item) => item.id === String(key));
-                      if (target?.pathMissing) {
-                        return;
-                      }
-                      session.selectWorkspace(String(key));
-                    }}
-                  >
-                    {displayedEntries.flatMap((entry) => (entry.kind === 'group'
-                      ? renderGroupItems(entry)
-                      : [renderWorkspaceItem(entry.workspace, null)]))}
-                  </GridList>
+                  {rail ? (
+                    <GridList
+                      key={`workspaces_${workspaceLimit}`}
+                      aria-label={t('sidebar.workspaces')}
+                      className="flex flex-col outline-none"
+                      disabledKeys={foldedWorkspaceKeys}
+                      disabledBehavior="all"
+                      onAction={(key) => {
+                        if (String(key).startsWith('group:')) {
+                          toggleGroupCollapsed(String(key).slice('group:'.length));
+                          return;
+                        }
+                        const target = session.workspaces.find((item) => item.id === String(key));
+                        if (target?.pathMissing) {
+                          return;
+                        }
+                        session.selectWorkspace(String(key));
+                      }}
+                    >
+                      {displayedEntries.flatMap((entry) => (entry.kind === 'group'
+                        ? renderGroupItems(entry)
+                        : [renderWorkspaceItem(entry.workspace, null)]))}
+                    </GridList>
+                  ) : (
+                    <TreeView
+                      key={`workspaces_${workspaceLimit}`}
+                      aria-label={t('sidebar.workspaces')}
+                      className="rounded-none border-0 bg-transparent p-0"
+                      selectionMode="single"
+                      selectionBehavior="replace"
+                      selectedKeys={session.activeWorkspaceId ? [session.activeWorkspaceId] : []}
+                      expandedKeys={expandedGroupKeys}
+                      onExpandedChange={(keys) => {
+                        for (const entry of displayedEntries) {
+                          if (entry.kind !== 'group') continue;
+                          const key = `group:${entry.id}`;
+                          if (keys.has(key) !== expandedGroupKeys.has(key)) toggleGroupCollapsed(entry.id);
+                        }
+                      }}
+                      onSelectionChange={(keys) => {
+                        const key = keys === 'all' ? '' : String([...keys][0] ?? '');
+                        if (!key) return;
+                        // A group row folds or unfolds; it is never selected.
+                        if (key.startsWith('group:')) {
+                          toggleGroupCollapsed(key.slice('group:'.length));
+                          return;
+                        }
+                        if (session.workspaces.find((item) => item.id === key)?.pathMissing) return;
+                        session.selectWorkspace(key);
+                      }}
+                    >
+                      {displayedEntries.map((entry) => (entry.kind === 'group'
+                        ? groupTreeItem(entry)
+                        : workspaceTreeItem(entry.workspace, null)))}
+                    </TreeView>
+                  )}
 
                   {!query && workspaceEntries.length > 5 && !rail && (
                     <ListPaging

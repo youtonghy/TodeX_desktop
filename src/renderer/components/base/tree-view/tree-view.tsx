@@ -118,6 +118,9 @@ export interface TreeViewItemProps<T extends object = object>
   /** Optional replacement icon while a branch is open. */
   expandedIcon?: IconComponent;
   iconClassName?: string;
+  /** Custom content in the icon slot (e.g. a colored glyph with a status
+   *  ring); replaces `icon` when set. */
+  leading?: ReactNode;
   /** Optional metadata or a badge at the end of the row. */
   trailingContent?: ReactNode;
   /** Nested TreeViewItem elements or a TreeViewCollection. */
@@ -131,6 +134,7 @@ export function TreeViewItem<T extends object = object>({
   icon,
   expandedIcon,
   iconClassName,
+  leading,
   trailingContent,
   children,
   className,
@@ -191,11 +195,11 @@ export function TreeViewItem<T extends object = object>({
                   // and pull nested leaves in so their branch stays compact.
                   <span aria-hidden className={cx("h-5 shrink-0", level > 1 ? "w-2" : "w-5")} />
                 )}
-                {Icon && <Icon aria-hidden className={cx(
+                {leading ?? (Icon && <Icon aria-hidden className={cx(
                   "size-4 shrink-0 opacity-50",
                   hasChildItems ? "text-foreground-icon-primary" : "text-foreground-icon-secondary",
                   iconClassName,
-                )} />}
+                )} />)}
               </span>
               <span className="min-w-0 flex-1 truncate text-start"><bdi>{label}</bdi></span>
               {trailingContent != null && (
