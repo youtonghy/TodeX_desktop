@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { RiDeleteBin6Line, RiDownload2Line, RiDownloadCloud2Line, RiRefreshLine, RiServerLine } from '@remixicon/react';
+import { RiDeleteBin6Line, RiDownload2Line, RiDownloadCloud2Line, RiRefreshLine, RiServerLine, RiSettings3Line } from '@remixicon/react';
 import { Chip, type ChipProps } from '@/components/base/badges/chip';
 import { Button } from '@/components/base/buttons/button';
 import { Card } from '@/components/ui/card';
@@ -14,6 +14,7 @@ import {
   type CliVersionStatus,
   type ManagedCliProvider,
 } from '@todex/protocol/v2';
+import { ClaudeSettingsModal } from '../components/cli/ClaudeSettingsModal';
 import { ProviderIcon } from '../components/ProviderIcon';
 import { NoticeToast } from '../components/NoticeToast';
 import { t, useT, type MessageKey } from '../i18n';
@@ -21,6 +22,15 @@ import type { TodeXSession } from '../session/useTodeXSession';
 import { backendApi } from '../session/helpers';
 
 type ChipColor = NonNullable<ChipProps['color']>;
+
+/** Low-emphasis full-width card action under the primary button. */
+const QUIET_ACTION = cx(
+  'inline-flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-2lg px-2 py-1.5',
+  'text-body-medium text-text-secondary transition-colors duration-150 ease',
+  'hover:bg-background-secondary-hover hover:text-text-primary active:bg-background-tertiary-default',
+  'outline-none focus-visible:ring-2 focus-visible:ring-border-focus-ring',
+  'disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent',
+);
 
 const STATUS: Record<CliVersionStatus, { labelKey: MessageKey; color: ChipColor }> = {
   upToDate: { labelKey: 'cli.statusUpToDate', color: 'lime' },
@@ -117,6 +127,7 @@ export function CliManagerPanel({ session }: { session: TodeXSession }) {
     }
   };
 
+  const [claudeSettingsOpen, setClaudeSettingsOpen] = useState(false);
   const [removingIntegration, setRemovingIntegration] = useState(false);
   // TodeX keeps a PreToolUse hook and its MCP servers in Antigravity's global
   // config (shared with the Antigravity app); this takes them out again.
@@ -160,6 +171,7 @@ export function CliManagerPanel({ session }: { session: TodeXSession }) {
             const error = notInstalled ? undefined : cli.error;
             const busyLabel = installing ? t('cli.installing') : t('cli.upgrading');
             const showRemoveIntegration = cli.id === 'antigravity' && !notInstalled;
+            const showSettings = cli.id === 'claude-code' && !notInstalled;
             return (
               <Card key={cli.id} variant="secondary" className="min-w-0 gap-4">
                 <div className="flex items-start gap-3">
@@ -179,7 +191,7 @@ export function CliManagerPanel({ session }: { session: TodeXSession }) {
                       variant="danger" scope={session.activeBackendConnectionId} />
                   </div>
                 </div>
-                {cli.kind === 'managed' || showRemoveIntegration ? (
+                {cli.kind === 'managed' || showRemoveIntegration || showSettings ? (
                   <div className="flex flex-col gap-2">
                     {cli.kind === 'managed' && notInstalled ? (
                       <Button
@@ -212,16 +224,16 @@ export function CliManagerPanel({ session }: { session: TodeXSession }) {
                         aria-busy={removingIntegration || undefined}
                         disabled={removingIntegration}
                         onClick={() => void removeAntigravityIntegration()}
-                        className={cx(
-                          'inline-flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-2lg px-2 py-1.5',
-                          'text-body-medium text-text-secondary transition-colors duration-150 ease',
-                          'hover:bg-background-secondary-hover hover:text-text-primary active:bg-background-tertiary-default',
-                          'outline-none focus-visible:ring-2 focus-visible:ring-border-focus-ring',
-                          'disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent',
-                        )}
+                        className={QUIET_ACTION}
                       >
                         {removingIntegration ? <Spinner size="sm" /> : <RiDeleteBin6Line aria-hidden className="size-4 text-foreground-icon-secondary" />}
                         {t('cli.antigravityRemoveIntegration')}
+                      </button>
+                    ) : null}
+                    {showSettings ? (
+                      <button type="button" onClick={() => setClaudeSettingsOpen(true)} className={QUIET_ACTION}>
+                        <RiSettings3Line aria-hidden className="size-4 text-foreground-icon-secondary" />
+                        {t('cliSettings.open')}
                       </button>
                     ) : null}
                   </div>
@@ -231,6 +243,7 @@ export function CliManagerPanel({ session }: { session: TodeXSession }) {
           })}
         </div>
       )}
+      <ClaudeSettingsModal isOpen={claudeSettingsOpen} onOpenChange={setClaudeSettingsOpen} api={api} />
     </div>
   );
 }

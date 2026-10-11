@@ -11,6 +11,7 @@ import type {
   SecureTransport,
 } from '@todex/protocol/secureTransport';
 import type { ConversationEvent, ConversationManifest, McpCatalog, McpServerCatalogDescriptor, ProviderKind, SkillCatalog, SkillCatalogDescriptor } from '@todex/protocol/v2';
+import { applyMergePatch, type SettingsObject } from '../lib/claudeSettings';
 import * as fixtures from './fixtures';
 
 const encoder = new TextEncoder();
@@ -30,6 +31,21 @@ let cleanupPolicy = { enabled: false, maxAgeDays: null as number | null, maxTota
 function demoConversationBytes(journal: Journal): number {
   const seed = [...journal.manifest.id].reduce((sum, char) => sum + char.charCodeAt(0), 0);
   return 40_000 + (seed % 97) * 23_000 + journal.events.length * 1_800;
+}
+
+let demoClaudeSettingsText = `${JSON.stringify({
+  env: { ANTHROPIC_BASE_URL: 'https://gateway.example.com', ANTHROPIC_AUTH_TOKEN: 'sk-demo-0000' },
+  permissions: { defaultMode: 'acceptEdits', allow: ['Bash(pnpm test:*)'] },
+  attribution: { commit: '', pr: '' },
+  theme: 'dark',
+  hooks: { Stop: [] },
+}, null, 2)}\n`;
+
+function demoClaudeSettings() {
+  let parsed: SettingsObject | null = null;
+  try { parsed = JSON.parse(demoClaudeSettingsText) as SettingsObject; } catch { parsed = null; }
+  const revision = [...demoClaudeSettingsText].reduce((hash, char) => (hash * 31 + char.charCodeAt(0)) >>> 0, 7).toString(16);
+  return { path: '/home/demo/.claude/settings.json', exists: true, revision, text: demoClaudeSettingsText, settings: parsed };
 }
 
 function demoCleanupPolicy() {
@@ -308,6 +324,8 @@ function route(request: SecureRequest): SecureResponse {
         return json(fixtures.demoCliVersions);
       case '/v2/agent-providers':
         return json(fixtures.demoAgentProviders);
+      case '/v2/providers/claude-code/settings':
+        return json(demoClaudeSettings());
       case '/v2/workspaces':
         return json({ workspaces });
       case '/v2/conversations':
@@ -383,6 +401,14 @@ function route(request: SecureRequest): SecureResponse {
   if (path === '/v2/kanban/tasks' && method === 'PUT') {
     if (Array.isArray(body.tasks)) kanbanTasks = body.tasks as typeof kanbanTasks;
     return json({ tasks: kanbanTasks });
+  }
+  if (path === '/v2/providers/claude-code/settings' && (method === 'PATCH' || method === 'PUT')) {
+    const current = demoClaudeSettings();
+    if (body.revision !== current.revision) return json({ error: { code: 'CONFLICT', message: 'settings changed on disk' } }, 409);
+    demoClaudeSettingsText = method === 'PUT'
+      ? String(body.text)
+      : `${JSON.stringify(applyMergePatch(current.settings ?? {}, body.patch as SettingsObject), null, 2)}\n`;
+    return json(demoClaudeSettings());
   }
   const nativeAction = path.match(/^\/v2\/native-history\/(claude-code|pi|codex|grok-build|devin)\/(cleanup|policy|policy\/run|native-retention)$/);
   if (nativeAction) {
