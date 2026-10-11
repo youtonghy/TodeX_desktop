@@ -11,7 +11,7 @@ import type {
   SecureTransport,
 } from '@todex/protocol/secureTransport';
 import type { ConversationEvent, ConversationManifest, McpCatalog, McpServerCatalogDescriptor, ProviderKind, SkillCatalog, SkillCatalogDescriptor } from '@todex/protocol/v2';
-import { applyMergePatch, type SettingsObject } from '../lib/claudeSettings';
+import { applyMergePatch, type SettingsObject } from '../lib/cliSettings';
 import * as fixtures from './fixtures';
 
 const encoder = new TextEncoder();
@@ -33,19 +33,54 @@ function demoConversationBytes(journal: Journal): number {
   return 40_000 + (seed % 97) * 23_000 + journal.events.length * 1_800;
 }
 
-let demoClaudeSettingsText = `${JSON.stringify({
-  env: { ANTHROPIC_BASE_URL: 'https://gateway.example.com', ANTHROPIC_AUTH_TOKEN: 'sk-demo-0000' },
-  permissions: { defaultMode: 'acceptEdits', allow: ['Bash(pnpm test:*)'] },
-  attribution: { commit: '', pr: '' },
-  theme: 'dark',
-  hooks: { Stop: [] },
-}, null, 2)}\n`;
+type DemoSettingsFile = { path: string; format: 'json' | 'toml'; text: string; settings: SettingsObject | null };
 
-function demoClaudeSettings() {
-  let parsed: SettingsObject | null = null;
-  try { parsed = JSON.parse(demoClaudeSettingsText) as SettingsObject; } catch { parsed = null; }
-  const revision = [...demoClaudeSettingsText].reduce((hash, char) => (hash * 31 + char.charCodeAt(0)) >>> 0, 7).toString(16);
-  return { path: '/home/demo/.claude/settings.json', exists: true, revision, text: demoClaudeSettingsText, settings: parsed };
+/** Enough TOML for the demo: scalars and arrays, then one `[table]` per nested object. */
+function demoToml(settings: SettingsObject, prefix: string[] = []): string {
+  const entries = Object.entries(settings);
+  const isTable = (value: unknown) => typeof value === 'object' && value !== null && !Array.isArray(value);
+  const scalars = entries.filter(([, value]) => !isTable(value)).map(([key, value]) => `${key} = ${JSON.stringify(value)}\n`).join('');
+  const header = prefix.length > 0 && scalars ? `\n[${prefix.join('.')}]\n` : '';
+  const tables = entries.filter(([, value]) => isTable(value)).map(([key, value]) => demoToml(value as SettingsObject, [...prefix, key])).join('');
+  return header + scalars + tables;
+}
+
+function demoSettingsFile(path: string, format: 'json' | 'toml', settings: SettingsObject): DemoSettingsFile {
+  const text = format === 'toml' ? demoToml(settings).replace(/^\n/, '') : `${JSON.stringify(settings, null, 2)}\n`;
+  return { path, format, text, settings };
+}
+
+const demoCliSettings: Record<string, DemoSettingsFile> = {
+  'claude-code': demoSettingsFile('/home/demo/.claude/settings.json', 'json', {
+    env: { ANTHROPIC_BASE_URL: 'https://gateway.example.com', ANTHROPIC_AUTH_TOKEN: 'sk-demo-0000' },
+    permissions: { defaultMode: 'acceptEdits', allow: ['Bash(pnpm test:*)'] },
+    attribution: { commit: '', pr: '' },
+    theme: 'dark',
+    hooks: { Stop: [] },
+  }),
+  codex: demoSettingsFile('/home/demo/.codex/config.toml', 'toml', {
+    model: 'gpt-5.5',
+    model_reasoning_effort: 'high',
+    approval_policy: 'on-request',
+    sandbox_mode: 'workspace-write',
+    sandbox_workspace_write: { network_access: true },
+    tui: { notifications: ['agent-turn-complete', 'approval-requested'] },
+    mcp_servers: { docs: { command: 'docs-mcp' } },
+  }),
+  pi: demoSettingsFile('/home/demo/.pi/agent/settings.json', 'json', {
+    defaultProvider: 'anthropic',
+    defaultModel: 'claude-opus-4-5',
+    defaultThinkingLevel: 'medium',
+    theme: 'dark',
+    quietStartup: 'header',
+    compaction: { enabled: true, reserveTokens: 16384 },
+    packages: ['npm:pi-skills'],
+  }),
+};
+
+function demoCliSettingsDocument(file: DemoSettingsFile) {
+  const revision = [...file.text].reduce((hash, char) => (hash * 31 + char.charCodeAt(0)) >>> 0, 7).toString(16);
+  return { path: file.path, format: file.format, exists: true, revision, text: file.text, settings: file.settings };
 }
 
 function demoCleanupPolicy() {
@@ -293,6 +328,8 @@ function route(request: SecureRequest): SecureResponse {
   const now = new Date().toISOString();
 
   if (path.startsWith('/v2/catalog/')) return catalogRoute(method, path, provider, readBody(request));
+  const settingsFile = demoCliSettings[path.match(/^\/v2\/providers\/([^/]+)\/settings$/)?.[1] ?? ''];
+  if (settingsFile && method === 'GET') return json(demoCliSettingsDocument(settingsFile));
 
   if (method === 'GET') {
     switch (path) {
@@ -324,8 +361,6 @@ function route(request: SecureRequest): SecureResponse {
         return json(fixtures.demoCliVersions);
       case '/v2/agent-providers':
         return json(fixtures.demoAgentProviders);
-      case '/v2/providers/claude-code/settings':
-        return json(demoClaudeSettings());
       case '/v2/workspaces':
         return json({ workspaces });
       case '/v2/conversations':
@@ -402,13 +437,17 @@ function route(request: SecureRequest): SecureResponse {
     if (Array.isArray(body.tasks)) kanbanTasks = body.tasks as typeof kanbanTasks;
     return json({ tasks: kanbanTasks });
   }
-  if (path === '/v2/providers/claude-code/settings' && (method === 'PATCH' || method === 'PUT')) {
-    const current = demoClaudeSettings();
+  if (settingsFile && (method === 'PATCH' || method === 'PUT')) {
+    const current = demoCliSettingsDocument(settingsFile);
     if (body.revision !== current.revision) return json({ error: { code: 'CONFLICT', message: 'settings changed on disk' } }, 409);
-    demoClaudeSettingsText = method === 'PUT'
-      ? String(body.text)
-      : `${JSON.stringify(applyMergePatch(current.settings ?? {}, body.patch as SettingsObject), null, 2)}\n`;
-    return json(demoClaudeSettings());
+    if (method === 'PUT') {
+      settingsFile.text = String(body.text);
+      // The demo does not parse TOML; the form keeps the last patched values.
+      if (settingsFile.format === 'json') settingsFile.settings = JSON.parse(settingsFile.text) as SettingsObject;
+    } else {
+      Object.assign(settingsFile, demoSettingsFile(settingsFile.path, settingsFile.format, applyMergePatch(settingsFile.settings ?? {}, body.patch as SettingsObject)));
+    }
+    return json(demoCliSettingsDocument(settingsFile));
   }
   const nativeAction = path.match(/^\/v2\/native-history\/(claude-code|pi|codex|grok-build|devin)\/(cleanup|policy|policy\/run|native-retention)$/);
   if (nativeAction) {

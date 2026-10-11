@@ -11,10 +11,12 @@ import {
   type CliOperationAction,
   type CliUpgradeOperation,
   type CliVersionInfo,
+  type CliSettingsProvider,
   type CliVersionStatus,
   type ManagedCliProvider,
 } from '@todex/protocol/v2';
-import { ClaudeSettingsModal } from '../components/cli/ClaudeSettingsModal';
+import { CliSettingsModal } from '../components/cli/CliSettingsModal';
+import { hasCliSettings } from '../lib/cliSettings';
 import { ProviderIcon } from '../components/ProviderIcon';
 import { NoticeToast } from '../components/NoticeToast';
 import { t, useT, type MessageKey } from '../i18n';
@@ -127,7 +129,7 @@ export function CliManagerPanel({ session }: { session: TodeXSession }) {
     }
   };
 
-  const [claudeSettingsOpen, setClaudeSettingsOpen] = useState(false);
+  const [settingsProvider, setSettingsProvider] = useState<CliSettingsProvider | null>(null);
   const [removingIntegration, setRemovingIntegration] = useState(false);
   // TodeX keeps a PreToolUse hook and its MCP servers in Antigravity's global
   // config (shared with the Antigravity app); this takes them out again.
@@ -171,7 +173,7 @@ export function CliManagerPanel({ session }: { session: TodeXSession }) {
             const error = notInstalled ? undefined : cli.error;
             const busyLabel = installing ? t('cli.installing') : t('cli.upgrading');
             const showRemoveIntegration = cli.id === 'antigravity' && !notInstalled;
-            const showSettings = cli.id === 'claude-code' && !notInstalled;
+            const settingsId = hasCliSettings(cli.id) && !notInstalled ? cli.id : null;
             return (
               <Card key={cli.id} variant="secondary" className="min-w-0 gap-4">
                 <div className="flex items-start gap-3">
@@ -191,7 +193,7 @@ export function CliManagerPanel({ session }: { session: TodeXSession }) {
                       variant="danger" scope={session.activeBackendConnectionId} />
                   </div>
                 </div>
-                {cli.kind === 'managed' || showRemoveIntegration || showSettings ? (
+                {cli.kind === 'managed' || showRemoveIntegration || settingsId ? (
                   <div className="flex flex-col gap-2">
                     {cli.kind === 'managed' && notInstalled ? (
                       <Button
@@ -230,8 +232,8 @@ export function CliManagerPanel({ session }: { session: TodeXSession }) {
                         {t('cli.antigravityRemoveIntegration')}
                       </button>
                     ) : null}
-                    {showSettings ? (
-                      <button type="button" onClick={() => setClaudeSettingsOpen(true)} className={QUIET_ACTION}>
+                    {settingsId ? (
+                      <button type="button" onClick={() => setSettingsProvider(settingsId)} className={QUIET_ACTION}>
                         <RiSettings3Line aria-hidden className="size-4 text-foreground-icon-secondary" />
                         {t('cliSettings.open')}
                       </button>
@@ -243,7 +245,7 @@ export function CliManagerPanel({ session }: { session: TodeXSession }) {
           })}
         </div>
       )}
-      <ClaudeSettingsModal isOpen={claudeSettingsOpen} onOpenChange={setClaudeSettingsOpen} api={api} />
+      <CliSettingsModal provider={settingsProvider} onClose={() => setSettingsProvider(null)} api={api} />
     </div>
   );
 }

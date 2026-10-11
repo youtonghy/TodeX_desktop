@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { RiAddLine, RiDeleteBin6Line, RiEyeLine, RiEyeOffLine } from '@remixicon/react';
-import type { CliSettingsDocument, V2ApiClient } from '@todex/protocol/v2';
+import type { CliSettingsDocument, CliSettingsProvider, V2ApiClient } from '@todex/protocol/v2';
 import { isConflictError } from '@todex/protocol/connectionError';
 import { Button } from '@/components/base/buttons/button';
 import { Input } from '@/components/base/input/input';
@@ -17,7 +17,7 @@ import { SettingsCard, SettingsGroup, SettingsRow, SETTINGS_ROW } from '@/compon
 import { useT, type MessageKey } from '@/i18n';
 import { cx } from '@/utils/cx';
 import {
-  CLAUDE_SETTINGS_GROUPS,
+  CLI_SETTINGS,
   ENV_NAME,
   UNSET,
   applyMergePatch,
@@ -26,39 +26,47 @@ import {
   fieldId,
   getAt,
   mergePatch,
+  optionId,
   setAt,
+  type CliSettingsSchema,
   type FieldSpec,
+  type OptionValue,
   type SettingsObject,
-} from '@/lib/claudeSettings';
+} from '@/lib/cliSettings';
 
 type TabId = 'form' | 'env' | 'raw';
 type EnvRow = { key: number; name: string; value: string; revealed: boolean };
 
 const key = (value: string) => value as MessageKey;
 
-/** Settings for the Claude Code CLI on the backend host (`~/.claude/settings.json`). */
-export function ClaudeSettingsModal({ isOpen, onOpenChange, api }: {
-  isOpen: boolean;
-  onOpenChange: (open: boolean) => void;
+/** A CLI's user settings file on the backend host; open while `provider` is set. */
+export function CliSettingsModal({ provider, onClose, api }: {
+  provider: CliSettingsProvider | null;
+  onClose: () => void;
   api: () => V2ApiClient;
 }) {
   const t = useT();
+  // Keeps the last schema while the modal animates out.
+  const lastProvider = useRef<CliSettingsProvider>('claude-code');
+  if (provider) lastProvider.current = provider;
+  const schema = CLI_SETTINGS[lastProvider.current];
   return (
     <Modal
-      isOpen={isOpen}
-      onOpenChange={onOpenChange}
-      title={t('cliSettings.title', { name: 'Claude Code' })}
+      isOpen={provider !== null}
+      onOpenChange={(open) => { if (!open) onClose(); }}
+      title={t('cliSettings.title', { name: schema.name })}
       size="2xl"
       className="h-[min(760px,calc(100dvh-32px))]"
       isDismissable={false}
       bodyClassName="flex flex-col overflow-hidden pb-0"
     >
-      {isOpen ? <ClaudeSettingsEditor api={api} onClose={() => onOpenChange(false)} /> : null}
+      {provider ? <CliSettingsEditor key={provider} schema={schema} api={api} onClose={onClose} /> : null}
     </Modal>
   );
 }
 
-function ClaudeSettingsEditor({ api, onClose }: { api: () => V2ApiClient; onClose: () => void }) {
+function CliSettingsEditor({ schema, api, onClose }: { schema: CliSettingsSchema; api: () => V2ApiClient; onClose: () => void }) {
+  const { provider, envPath } = schema;
   const t = useT();
   const [doc, setDoc] = useState<CliSettingsDocument>();
   const [loadError, setLoadError] = useState<string>();
@@ -70,7 +78,7 @@ function ClaudeSettingsEditor({ api, onClose }: { api: () => V2ApiClient; onClos
   const [saving, setSaving] = useState(false);
   const nextEnvKey = useRef(0);
 
-  const toEnvRows = (settings: SettingsObject) => envRows(settings).map((row) => ({ ...row, key: nextEnvKey.current++, revealed: false }));
+  const toEnvRows = (settings: SettingsObject) => (envPath ? envRows(settings, envPath) : []).map((row) => ({ ...row, key: nextEnvKey.current++, revealed: false }));
 
   /** Takes in a document; `draft` replaces the form state (default: the saved settings). */
   const adopt = useCallback((next: CliSettingsDocument, draftSettings?: SettingsObject) => {
@@ -85,21 +93,23 @@ function ClaudeSettingsEditor({ api, onClose }: { api: () => V2ApiClient; onClos
   const load = useCallback(async () => {
     setLoadError(undefined);
     try {
-      adopt(await api().getClaudeSettings());
+      adopt(await api().getCliSettings(provider));
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : t('cliSettings.readFailed'));
     }
-  }, [adopt, api]);
+  }, [adopt, api, provider]);
 
   useEffect(() => { void load(); }, [load]);
 
   const saved = doc?.settings ?? null;
   // The form and the env tab edit one draft; env rows are folded in on save.
-  const formNext = useMemo(() => setAt(draft, ['env'], envFromRows(env)), [draft, env]);
+  const formNext = useMemo(() => (envPath ? setAt(draft, envPath, envFromRows(env)) : draft), [draft, env, envPath]);
   const patch = useMemo(() => (saved ? mergePatch(saved, formNext) : {}), [saved, formNext]);
   const formDirty = Object.keys(patch).length > 0;
   const rawDirty = Boolean(doc) && rawText !== doc?.text;
-  const rawError = useMemo(() => rawObjectError(rawText), [rawText]);
+  // TOML is checked by the backend on save.
+  const rawError = useMemo(() => (doc?.format === 'toml' ? null : rawObjectError(rawText)), [doc?.format, rawText]);
+  const fileName = doc?.path.split(/[\\/]/).pop() || doc?.path || '';
   const envInvalid = env.some((row) => row.name.trim() !== '' && !ENV_NAME.test(row.name.trim()));
   const editingRaw = tab === 'raw';
   const canSave = Boolean(doc) && !saving && (editingRaw ? rawDirty && !rawError : formDirty && !envInvalid);
@@ -109,10 +119,10 @@ function ClaudeSettingsEditor({ api, onClose }: { api: () => V2ApiClient; onClos
     setSaving(true);
     try {
       const next = editingRaw
-        ? await api().replaceClaudeSettings(doc.revision, rawText)
-        : await api().patchClaudeSettings(doc.revision, patch);
+        ? await api().replaceCliSettings(provider, doc.revision, rawText)
+        : await api().patchCliSettings(provider, doc.revision, patch);
       adopt(next);
-      toast.success(t('cliSettings.saved'));
+      toast.success(t('cliSettings.saved', { name: schema.name }));
     } catch (error) {
       if (!isConflictError(error)) {
         toast.danger(error instanceof Error ? error.message : t('cliSettings.saveFailed'));
@@ -122,7 +132,7 @@ function ClaudeSettingsEditor({ api, onClose }: { api: () => V2ApiClient; onClos
       // top (the raw text is kept as typed), so nothing is lost or silently
       // overwritten; the user reviews and saves again.
       try {
-        const latest = await api().getClaudeSettings();
+        const latest = await api().getCliSettings(provider);
         if (editingRaw) {
           setDoc(latest);
         } else {
@@ -157,21 +167,22 @@ function ClaudeSettingsEditor({ api, onClose }: { api: () => V2ApiClient; onClos
       <Tabs selectedKey={tab} onSelectionChange={(next) => setTab(next === 'env' || next === 'raw' ? next : 'form')} className="min-h-0 flex-1 gap-0">
         <TabList aria-label={t('cliSettings.tabsLabel')}>
           <Tab id="form" isDisabled={!saved}>{t('cliSettings.tabForm')}</Tab>
-          <Tab id="env" isDisabled={!saved} count={env.length || undefined}>{t('cliSettings.tabEnv')}</Tab>
+          {envPath ? <Tab id="env" isDisabled={!saved} count={env.length || undefined}>{t('cliSettings.tabEnv')}</Tab> : null}
           <Tab id="raw">{t('cliSettings.tabRaw')}</Tab>
         </TabList>
         <ScrollArea surface="full" className="-mx-6 flex-1" contentClassName="px-6 pt-4 pb-4">
           <TabPanel id="form" className="flex flex-col gap-5">
             <p className="px-3 text-body-2-regular text-text-secondary">
-              {doc.exists ? t('cliSettings.scopeHint') : t('cliSettings.missingHint')}
+              {doc.exists ? t(schema.hints.scope) : t('cliSettings.missingHint')}
             </p>
-            {CLAUDE_SETTINGS_GROUPS.map((group) => (
-              <SettingsGroup key={group.id} label={t(key(`cliSettings.group.${group.id}`))}>
+            {schema.groups.map((group) => (
+              <SettingsGroup key={group.id} label={t(key(`${schema.keyPrefix}.group.${group.id}`))}>
                 <SettingsCard>
                   {group.fields.map((field) => (
                     <SettingsField
                       key={fieldId(field.path)}
                       field={field}
+                      keyPrefix={schema.keyPrefix}
                       value={getAt(draft, field.path)}
                       onChange={(value) => setDraft((current) => setAt(current, field.path, value))}
                     />
@@ -179,31 +190,33 @@ function ClaudeSettingsEditor({ api, onClose }: { api: () => V2ApiClient; onClos
                 </SettingsCard>
               </SettingsGroup>
             ))}
-            <p className="px-3 text-body-2-regular text-text-secondary">{t('cliSettings.moreInRaw')}</p>
+            <p className="px-3 text-body-2-regular text-text-secondary">{t(schema.hints.moreInRaw)}</p>
           </TabPanel>
-          <TabPanel id="env" className="flex flex-col gap-3">
-            <p className="px-3 text-body-2-regular text-text-secondary">{t('cliSettings.envHint')}</p>
-            <EnvEditor rows={env} onChange={setEnv} nextKey={() => nextEnvKey.current++} />
-          </TabPanel>
+          {envPath ? (
+            <TabPanel id="env" className="flex flex-col gap-3">
+              {schema.hints.env ? <p className="px-3 text-body-2-regular text-text-secondary">{t(schema.hints.env)}</p> : null}
+              <EnvEditor rows={env} onChange={setEnv} nextKey={() => nextEnvKey.current++} />
+            </TabPanel>
+          ) : null}
           <TabPanel id="raw" className="flex flex-col gap-3">
-            {doc.parseError ? <Alert status="warning" title={t('cliSettings.parseError')} description={doc.parseError} /> : null}
+            {doc.parseError ? <Alert status="warning" title={t('cliSettings.parseError', { file: fileName })} description={doc.parseError} /> : null}
             {rawRevealed || !doc.exists ? (
               <Textarea
                 className="w-full"
-                aria-label="settings.json"
+                aria-label={fileName}
                 value={rawText}
                 onChange={setRawText}
                 rows={22}
                 spellCheck="false"
                 isInvalid={Boolean(rawError)}
-                hint={rawError ?? t('cliSettings.rawHint')}
+                hint={rawError ?? t(doc.format === 'toml' ? 'cliSettings.rawHintToml' : 'cliSettings.rawHintJson')}
                 inputClassName="font-mono text-caption-1-regular"
               />
             ) : (
               <Alert
                 status="neutral"
                 title={t('cliSettings.rawHiddenTitle')}
-                description={t('cliSettings.rawHiddenHint')}
+                description={t(schema.hints.rawHidden)}
                 actions={<Button size="small" variant="secondary" leadingIcon={RiEyeLine} onClick={() => setRawRevealed(true)}>{t('cliSettings.reveal')}</Button>}
               />
             )}
@@ -232,13 +245,15 @@ function rawObjectError(text: string): string | null {
 
 const COMPACT_SELECT = { className: 'w-44', triggerClassName: 'h-8 rounded-lg px-2 py-1.5', popoverClassName: 'w-(--trigger-width)' } as const;
 
-function SettingsField({ field, value, onChange }: { field: FieldSpec; value: unknown; onChange: (value: unknown) => void }) {
+function SettingsField({ field, keyPrefix, value, onChange }: {
+  field: FieldSpec; keyPrefix: string; value: unknown; onChange: (value: unknown) => void;
+}) {
   const t = useT();
   const id = fieldId(field.path);
-  const label = t(key(`cliSettings.field.${id}`));
+  const label = t(key(`${keyPrefix}.field.${id}`));
   const description = (
     <>
-      {t(key(`cliSettings.hint.${id}`))}
+      {t(key(`${keyPrefix}.hint.${id}`))}
       <span className="ms-1.5 font-mono text-caption-1-regular text-text-tertiary" dir="ltr">{id}</span>
     </>
   );
@@ -250,28 +265,36 @@ function SettingsField({ field, value, onChange }: { field: FieldSpec; value: un
 
   let control;
   switch (field.kind) {
-    case 'bool': {
-      const selected = value === true ? 'true' : value === false ? 'false' : UNSET;
-      control = (
-        <Select aria-label={label} {...COMPACT_SELECT} selectedKey={selected} onSelectionChange={(next) => onChange(next === 'true' ? true : next === 'false' ? false : undefined)}>
-          <SelectItem id={UNSET} textValue={unsetLabel}>{unsetLabel}</SelectItem>
-          <SelectItem id="true" textValue={t('cliSettings.on')}>{t('cliSettings.on')}</SelectItem>
-          <SelectItem id="false" textValue={t('cliSettings.off')}>{t('cliSettings.off')}</SelectItem>
-        </Select>
-      );
-      break;
-    }
+    case 'bool':
     case 'enum': {
-      // A value Claude Code accepts but the list lacks (a custom theme, a
-      // strftime pattern) stays selectable so it is shown and kept as is.
-      const options = typeof value === 'string' && value && !field.options.includes(value) ? [...field.options, value] : field.options;
+      const options: OptionValue[] = field.kind === 'bool' ? [true, false] : field.options;
+      const optionLabel = (option: OptionValue) => (field.kind === 'bool'
+        ? t(option ? 'cliSettings.on' : 'cliSettings.off')
+        : t(key(`${keyPrefix}.option.${id}.${String(option)}`)));
+      // A value the CLI accepts but the list lacks (a custom theme, a
+      // notification event list, a granular approval table) stays
+      // selectable so it is shown and kept as is.
+      const known = value === undefined || options.some((option) => option === value);
+      const custom = known ? null : optionId(value);
       control = (
-        <Select aria-label={label} {...COMPACT_SELECT} selectedKey={typeof value === 'string' ? value : UNSET} onSelectionChange={(next) => onChange(next === UNSET || next == null ? undefined : String(next))}>
+        <Select
+          aria-label={label}
+          {...COMPACT_SELECT}
+          selectedKey={value === undefined ? UNSET : optionId(value)}
+          onSelectionChange={(next) => {
+            if (next === UNSET || next == null) onChange(undefined);
+            else if (next !== custom) onChange(options.find((option) => optionId(option) === next));
+          }}
+        >
           <SelectItem id={UNSET} textValue={unsetLabel}>{unsetLabel}</SelectItem>
-          {options.map((option) => {
-            const optionLabel = field.options.includes(option) ? t(key(`cliSettings.option.${id}.${option}`)) : option;
-            return <SelectItem key={option} id={option} textValue={optionLabel}>{optionLabel}</SelectItem>;
-          })}
+          {options.map((option) => (
+            <SelectItem key={optionId(option)} id={optionId(option)} textValue={optionLabel(option)}>{optionLabel(option)}</SelectItem>
+          ))}
+          {custom ? (
+            <SelectItem id={custom} textValue={typeof value === 'string' ? value : custom}>
+              <span className="truncate" dir="ltr">{typeof value === 'string' ? value : custom}</span>
+            </SelectItem>
+          ) : null}
         </Select>
       );
       break;
@@ -290,6 +313,25 @@ function SettingsField({ field, value, onChange }: { field: FieldSpec; value: un
           value={typeof value === 'string' ? value : ''} onChange={(next) => onChange(next.trim() ? next : undefined)} />
       );
       break;
+    case 'longtext':
+      return (
+        <div className={cx(SETTINGS_ROW, 'flex flex-col gap-2')}>
+          <div className="flex min-w-0 flex-col">
+            <div className="text-body-regular text-text-primary">{label}</div>
+            <div className="text-body-2-regular text-text-secondary">{description}</div>
+          </div>
+          <Textarea
+            className="w-full"
+            aria-label={label}
+            value={typeof value === 'string' ? value : ''}
+            rows={3}
+            autoResize
+            maxRows={12}
+            placeholder={field.placeholder}
+            onChange={(next) => onChange(next.trim() ? next : undefined)}
+          />
+        </div>
+      );
     case 'integer':
       return <IntegerField label={label} description={description} placeholder={unsetLabel} min={field.min} max={field.max} value={value} onChange={onChange} />;
     case 'attribution':
