@@ -101,7 +101,7 @@ import { ConnectionError } from '@todex/protocol/connectionError';
 import { desktopAlert } from '../lib/desktopAlert';
 import { createConcurrencyLimit } from '../lib/concurrencyLimit';
 import { panelFromRoute, type DesktopPanel, type OpenPanelOptions } from '../lib/panels';
-import type { CatalogState } from '../screens/CapabilitiesPanel';
+import type { CapabilityManager, CatalogState } from '../screens/CapabilitiesPanel';
 import {
   DEFAULT_COMPOSER_SELECTION,
   EXPERIMENTAL_FEATURE_DEFAULTS,
@@ -7227,18 +7227,20 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     return backendApi(settings).getMcpServerConfig(provider, workspacePath, resourceId);
   }, [activeWorkspace?.path, settings.deviceSecret, settings.defaultWorkspacePath, settings.encryptionProtocol, settings.encryptionPublicKey, settings.transportVerified, settings.serverUrl]);
 
-  const deleteMcpServer = useCallback(async (provider: ProviderKind, resourceId: string) => {
+  // Shared skill folders and files such as `.mcp.json` are read by several
+  // providers, so a write reloads every catalog already on screen.
+  const mutateCapabilityCatalog = useCallback(async <T,>(
+    provider: ProviderKind,
+    write: (api: ReturnType<typeof backendApi>, workspacePath: string) => Promise<T>,
+  ): Promise<T> => {
     const workspacePath = activeWorkspace?.path || settings.defaultWorkspacePath;
     if (!workspacePath) {
       throw new Error(t('sess.pickWorkspaceFirst'));
     }
-    await backendApi(settings).deleteMcpServer(provider, workspacePath, resourceId);
-    // Resource ids hash the entry and its file, so every provider reading
-    // that file lists the same id; reload each of them.
-    const affected = (Object.entries(capabilityCatalogs) as Array<[ProviderKind, CatalogState | undefined]>)
-      .filter(([, entry]) => entry?.mcp?.servers.some((server) => server.resourceId === resourceId))
-      .map(([kind]) => kind);
-    await Promise.all([...new Set([provider, ...affected])].map((kind) => refreshCapabilityCatalog(kind)));
+    const result = await write(backendApi(settings), workspacePath);
+    const loaded = (Object.keys(capabilityCatalogs) as ProviderKind[]).filter((kind) => capabilityCatalogs[kind]);
+    await Promise.all([...new Set([provider, ...loaded])].map((kind) => refreshCapabilityCatalog(kind)));
+    return result;
   }, [activeWorkspace?.path, capabilityCatalogs, refreshCapabilityCatalog, settings.deviceSecret, settings.defaultWorkspacePath, settings.encryptionProtocol, settings.encryptionPublicKey, settings.transportVerified, settings.serverUrl]);
 
   /** Per-conversation disk usage on the active backend, titles decrypted. */
@@ -7272,6 +7274,15 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     forgetDeletedConversations(result.deleted);
     return result;
   }, [forgetDeletedConversations, settings.deviceSecret, settings.encryptionProtocol, settings.encryptionPublicKey, settings.transportVerified, settings.serverUrl]);
+
+  const capabilityManager = useMemo<CapabilityManager>(() => ({
+    createSkill: (provider, input) => mutateCapabilityCatalog(provider, (api, workspace) => api.createSkill(provider, workspace, input)),
+    updateSkill: (provider, resourceId, content) => mutateCapabilityCatalog(provider, (api, workspace) => api.updateSkill(provider, workspace, resourceId, content)),
+    deleteSkill: (provider, resourceId) => mutateCapabilityCatalog(provider, (api, workspace) => api.deleteSkill(provider, workspace, resourceId)).then(() => undefined),
+    createMcpServer: (provider, input) => mutateCapabilityCatalog(provider, (api, workspace) => api.createMcpServer(provider, workspace, input)),
+    updateMcpServer: (provider, resourceId, input) => mutateCapabilityCatalog(provider, (api, workspace) => api.updateMcpServer(provider, workspace, resourceId, input)),
+    deleteMcpServer: (provider, resourceId) => mutateCapabilityCatalog(provider, (api, workspace) => api.deleteMcpServer(provider, workspace, resourceId)).then(() => undefined),
+  }), [mutateCapabilityCatalog]);
 
   const refreshMcpServer = useCallback((conversationId: string, resourceId: string) => {
     const conversation = conversationsRef.current.find((item) => item.id === conversationId) ?? null;
@@ -8924,7 +8935,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     toggleCatalogSkill,
     previewSkillResource,
     getMcpServerConfig,
-    deleteMcpServer,
+    capabilityManager,
     refreshMcpServer,
     callMcpTool,
     fetchWorkspaceDirectorySnapshot: (path?: string) => fetchWorkspaceDirectorySnapshot(settings, path),

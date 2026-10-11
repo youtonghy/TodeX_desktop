@@ -63,7 +63,7 @@ export function AsidePanel({ session, panel, slashCommand, onBack }: Props) {
         }}
         onPreviewSkill={(skill, provider) => session.previewSkillResource(provider, skill.resourceId)}
         onLoadMcpConfig={(server) => session.getMcpServerConfig(server.provider, server.resourceId)}
-        onDeleteMcp={(server) => session.deleteMcpServer(server.provider, server.resourceId)}
+        manager={session.capabilityManager}
       />
       </div>
     );

@@ -10,7 +10,7 @@ import type {
   SecureStreamResponse,
   SecureTransport,
 } from '@todex/protocol/secureTransport';
-import type { ConversationEvent, ConversationManifest, ProviderKind } from '@todex/protocol/v2';
+import type { ConversationEvent, ConversationManifest, McpCatalog, McpServerCatalogDescriptor, ProviderKind, SkillCatalog, SkillCatalogDescriptor } from '@todex/protocol/v2';
 import * as fixtures from './fixtures';
 
 const encoder = new TextEncoder();
@@ -93,6 +93,110 @@ function replay(journal: Journal, query: URLSearchParams) {
   return { conversationId: journal.manifest.id, fromSequence: after + 1, nextSequence: last + 1, hasMore: last < journal.events.length, events };
 }
 
+type DemoCatalog = {
+  skills: SkillCatalog;
+  mcp: McpCatalog;
+  contents: Map<string, string>;
+  configs: Map<string, unknown>;
+};
+
+// Per-provider copies so created, edited and deleted items stick for the tab.
+const catalogs = new Map<ProviderKind, DemoCatalog>();
+
+function demoCatalog(provider: ProviderKind): DemoCatalog {
+  let catalog = catalogs.get(provider);
+  if (!catalog) {
+    const skills = fixtures.demoSkills(provider);
+    const mcp = fixtures.demoMcp(provider);
+    catalog = {
+      skills: { ...skills, editable: true, creatableSources: ['shared-user', 'provider-user', 'shared-project', 'provider-project'] },
+      mcp: { ...mcp, editable: true, creatableScopes: ['user', 'project'] },
+      contents: new Map(skills.skills.map((skill) => [skill.resourceId, `---\nname: ${skill.name}\ndescription: ${skill.description}\n---\n\n# ${skill.name}\n\n演示数据，不会发送到任何后端。\n`])),
+      configs: new Map(mcp.servers.map((server) => [server.resourceId, server.transport === 'http'
+        ? { type: 'http', url: `https://mcp.example.com/${server.name}` }
+        : { command: 'npx', args: ['-y', `${server.name}-mcp`] }])),
+    };
+    catalogs.set(provider, catalog);
+  }
+  return catalog;
+}
+
+function catalogRoute(method: string, path: string, provider: ProviderKind, body: Record<string, unknown>): SecureResponse {
+  const catalog = demoCatalog(provider);
+  const mcpConfig = (server: McpServerCatalogDescriptor) => ({
+    descriptor: server,
+    path: server.scope === 'user' ? '~/.claude.json' : '.mcp.json',
+    format: 'json',
+    config: catalog.configs.get(server.resourceId) ?? {},
+  });
+  const descriptionOf = (content: string) => /^description:[ \t]*(.*)$/m.exec(content)?.[1]?.trim() ?? '';
+  if (path === '/v2/catalog/skills') {
+    if (method === 'GET') return json(catalog.skills);
+    const name = String(body.name ?? '');
+    const content = String(body.content ?? '');
+    const source = String(body.source ?? 'provider-project');
+    const skill: SkillCatalogDescriptor = {
+      resourceId: `${provider}:skill:${name}:${Date.now()}`,
+      name,
+      description: descriptionOf(content),
+      scope: source.endsWith('user') ? 'user' : 'project',
+      source,
+      active: true,
+      valid: true,
+    };
+    catalog.skills = { ...catalog.skills, skills: [...catalog.skills.skills, skill] };
+    catalog.contents.set(skill.resourceId, content);
+    return json(skill);
+  }
+  if (path === '/v2/catalog/mcp') {
+    if (method === 'GET') return json(catalog.mcp);
+    const name = String(body.name ?? '');
+    const config = body.config as Record<string, unknown> | undefined;
+    const server: McpServerCatalogDescriptor = {
+      resourceId: `${provider}:mcp:${name}:${Date.now()}`,
+      name,
+      provider,
+      scope: body.scope === 'user' ? 'user' : 'project',
+      source: body.scope === 'user' ? 'claude-user' : 'claude-project',
+      transport: config && 'url' in config ? 'http' : 'stdio',
+      enabled: true,
+      active: true,
+    };
+    catalog.mcp = { ...catalog.mcp, servers: [...catalog.mcp.servers, server] };
+    catalog.configs.set(server.resourceId, config ?? {});
+    return json(mcpConfig(server));
+  }
+  const skillMatch = path.match(/^\/v2\/catalog\/skills\/(.+)$/);
+  const skill = skillMatch && catalog.skills.skills.find((item) => item.resourceId === decodeURIComponent(skillMatch[1]));
+  if (skill) {
+    if (method === 'GET') return json({ resourceId: skill.resourceId, content: catalog.contents.get(skill.resourceId) ?? '' });
+    if (method === 'DELETE') {
+      catalog.skills = { ...catalog.skills, skills: catalog.skills.skills.filter((item) => item !== skill) };
+      return json({ resourceId: skill.resourceId, name: skill.name, path: skill.source });
+    }
+    const content = String(body.content ?? '');
+    const updated = { ...skill, description: descriptionOf(content) };
+    catalog.skills = { ...catalog.skills, skills: catalog.skills.skills.map((item) => item === skill ? updated : item) };
+    catalog.contents.set(skill.resourceId, content);
+    return json(updated);
+  }
+  const mcpMatch = path.match(/^\/v2\/catalog\/mcp\/(.+)$/);
+  const server = mcpMatch && catalog.mcp.servers.find((item) => item.resourceId === decodeURIComponent(mcpMatch[1]));
+  if (server) {
+    if (method === 'GET') return json(mcpConfig(server));
+    if (method === 'DELETE') {
+      catalog.mcp = { ...catalog.mcp, servers: catalog.mcp.servers.filter((item) => item !== server) };
+      return json({ resourceId: server.resourceId, name: server.name, path: mcpConfig(server).path });
+    }
+    const config = body.config as Record<string, unknown> | undefined;
+    const updated = { ...server, name: String(body.name ?? server.name), transport: config && 'url' in config ? 'http' as const : 'stdio' as const };
+    catalog.mcp = { ...catalog.mcp, servers: catalog.mcp.servers.map((item) => item === server ? updated : item) };
+    catalog.configs.set(server.resourceId, config ?? {});
+    return json(mcpConfig(updated));
+  }
+  return notFound(method, path);
+}
+
 function route(request: SecureRequest): SecureResponse {
   const method = request.method.toUpperCase();
   const url = new URL(request.path, fixtures.DEMO_SERVER_URL);
@@ -100,6 +204,8 @@ function route(request: SecureRequest): SecureResponse {
   const query = readQuery(request, url);
   const provider = (query.get('provider') ?? 'claude-code') as ProviderKind;
   const now = new Date().toISOString();
+
+  if (path.startsWith('/v2/catalog/')) return catalogRoute(method, path, provider, readBody(request));
 
   if (method === 'GET') {
     switch (path) {
@@ -131,10 +237,6 @@ function route(request: SecureRequest): SecureResponse {
         return json(fixtures.demoCliVersions);
       case '/v2/agent-providers':
         return json(fixtures.demoAgentProviders);
-      case '/v2/catalog/skills':
-        return json(fixtures.demoSkills(provider));
-      case '/v2/catalog/mcp':
-        return json(fixtures.demoMcp(provider));
       case '/v2/workspaces':
         return json({ workspaces });
       case '/v2/conversations':
@@ -172,8 +274,6 @@ function route(request: SecureRequest): SecureResponse {
       const bucket = fixtures.demoAgentProviders.agents[live[1] as keyof typeof fixtures.demoAgentProviders.agents];
       return bucket ? json(bucket.live) : notFound(method, path);
     }
-    const skill = path.match(/^\/v2\/catalog\/skills\/(.+)$/);
-    if (skill) return json({ resourceId: decodeURIComponent(skill[1]), content: '# 示例 Skill\n\n演示数据，不会发送到任何后端。' });
     return notFound(method, path);
   }
 
