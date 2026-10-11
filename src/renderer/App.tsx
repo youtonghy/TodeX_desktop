@@ -608,7 +608,7 @@ export function App() {
       <Modal isOpen={settingsOpen} onOpenChange={closePanel('settings')} title={t('app.settings')} size="4xl" className="h-[min(90vh,48rem)]" bodyClassName="flex min-h-0 flex-col overflow-hidden px-0 pb-0">
         <Suspense fallback={panelFallback}><SettingsPanel session={session} historyRecoverySetup={historyRecoverySetup} repairPairing={repairPairing} /></Suspense>
       </Modal>
-      <Modal isOpen={usageOpen} onOpenChange={closePanel('usage')} title={t('app.usage')} size="5xl" className="max-h-[92vh]" bodyClassName="overflow-y-auto">
+      <Modal isOpen={usageOpen} onOpenChange={closePanel('usage')} title={t('app.usage')} size="3xl" className="max-h-[92vh]" bodyClassName="overflow-y-auto">
         <Suspense fallback={panelFallback}><UsagePanel session={session} /></Suspense>
       </Modal>
       <Modal isOpen={quotaOpen} onOpenChange={closePanel('quota')} title={t('usage.quotaTitle')} size="2xl" className="max-h-[90vh]" bodyClassName="overflow-y-auto">

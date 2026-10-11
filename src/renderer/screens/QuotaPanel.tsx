@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { RiRefreshLine, RiVipCrownLine } from '@remixicon/react';
-import { Chip } from '@/components/base/badges/chip';
 import { Button } from '@/components/base/buttons/button';
 import { EmptyState } from '@/components/ui/empty-state';
-import { Meter } from '@/components/ui/progress-bar';
+import { AgentLimitsCard, type AgentLimitsCardProps, type UsageLimit } from '@/components/application/agent-limits/agent-limits-card';
 import { SpinnerIcon } from '@/components/ui/spinner';
 import type { ProviderQuotaSnapshot, QuotaWindow } from '@todex/protocol/v2';
 import type { TodeXSession } from '../session/useTodeXSession';
@@ -51,59 +50,49 @@ function formatQuotaTime(unixSeconds: number): string {
   });
 }
 
-// Plan-limit row from the BoardUI agent-limits recipe: label and percent over
-// a thin usage bar, the reset time underneath.
-function QuotaWindowRow({ window }: { window: QuotaWindow }) {
+/** Quota window as an agent-limits plan row; the bar turns amber at 75% and red at 90%. */
+function quotaLimit(window: QuotaWindow): UsageLimit {
   const percent = typeof window.usedPercent === 'number' ? Math.min(100, Math.max(0, window.usedPercent)) : null;
-  return (
-    <div className="flex flex-col gap-1.5">
-      <div className="flex items-baseline justify-between gap-3">
-        <span className="min-w-0 truncate text-body-medium text-text-primary">{quotaWindowLabel(window)}</span>
-        <span className="shrink-0 text-body-medium text-text-primary tabular-nums">
-          {percent === null ? '—' : t('usage.quotaUsed', { percent: Math.round(percent) })}
-        </span>
-      </div>
-      <div aria-hidden={percent === null ? true : undefined}>
-        <Meter
-          aria-label={quotaWindowLabel(window)}
-          showValue={false}
-          tone={percent !== null && percent >= 90 ? 'danger' : percent !== null && percent >= 75 ? 'warning' : 'accent'}
-          value={percent ?? 0}
-        />
-      </div>
-      {window.resetsAt ? (
-        <span className="text-body-2-regular text-text-tertiary">{t('usage.quotaResets', { time: formatQuotaTime(window.resetsAt) })}</span>
-      ) : null}
-    </div>
-  );
+  return {
+    label: quotaWindowLabel(window),
+    used: (percent ?? 0) / 100,
+    resets: window.resetsAt ? t('usage.quotaResets', { time: formatQuotaTime(window.resetsAt) }) : '',
+    valueLabel: percent === null ? '—' : undefined,
+    color: percent !== null && percent >= 90 ? 'var(--color-foreground-icon-error)' : percent !== null && percent >= 75 ? 'var(--color-chart-8)' : undefined,
+  };
 }
 
-function QuotaCard({ snapshot, displayName }: { snapshot: ProviderQuotaSnapshot; displayName: string }) {
+/** One provider on the BoardUI agent-limits card: its plan windows, plus the
+ * current conversation's context window when that conversation runs on it. */
+function QuotaCard({ snapshot, displayName, context }: {
+  snapshot: ProviderQuotaSnapshot;
+  displayName: string;
+  context?: AgentLimitsCardProps['context'];
+}) {
   const windows = (snapshot.windows ?? []).filter((window) => window && typeof window.id === 'string');
   const fetchedAt = typeof snapshot.fetchedAt === 'number' ? new Date(snapshot.fetchedAt).toLocaleTimeString(getLocale(), { hour: '2-digit', minute: '2-digit' }) : null;
+  const message = snapshot.state === 'ok'
+    ? t('usage.quotaNoWindows')
+    : snapshot.state === 'unsupported'
+      ? t('usage.quotaUnsupported')
+      : snapshot.state === 'idle'
+        ? t('usage.quotaIdle')
+        : t('usage.quotaError', { reason: snapshot.reason ?? '—' });
   return (
-    <section className="flex min-w-0 flex-col rounded-2xl bg-background-secondary-default px-4 pt-3 pb-4">
-      <div className="flex min-w-0 items-center gap-2">
-        <ProviderIcon provider={snapshot.provider} className="size-4" />
-        <span className="truncate text-body-medium text-text-primary">{displayName}</span>
-        {snapshot.planType ? <Chip variant="caption" color="neutral" className="capitalize">{snapshot.planType}</Chip> : null}
-        {fetchedAt ? <span className="ml-auto shrink-0 text-caption-2-regular text-text-tertiary">{t('usage.quotaUpdated', { time: fetchedAt })}</span> : null}
-      </div>
-      {snapshot.state === 'ok' ? (
-        <div className="mt-3 flex flex-col gap-3">
-          {windows.map((window) => <QuotaWindowRow key={window.id} window={window} />)}
-          {windows.length === 0 ? <p className="text-body-2-regular text-text-secondary">{t('usage.quotaIdle')}</p> : null}
-        </div>
-      ) : (
-        <p className="mt-3 text-body-2-regular text-text-secondary">
-          {snapshot.state === 'unsupported'
-            ? t('usage.quotaUnsupported')
-            : snapshot.state === 'idle'
-              ? t('usage.quotaIdle')
-              : t('usage.quotaError', { reason: snapshot.reason ?? '—' })}
-        </p>
+    <AgentLimitsCard
+      title={(
+        <>
+          <ProviderIcon provider={snapshot.provider} className="size-4" />
+          <span className="truncate text-body-medium text-text-primary">{displayName}</span>
+          {fetchedAt ? <span className="ms-auto shrink-0 text-caption-1-regular text-text-tertiary">{t('usage.quotaUpdated', { time: fetchedAt })}</span> : null}
+        </>
       )}
-    </section>
+      context={context}
+      plan={snapshot.planType ?? undefined}
+      limits={snapshot.state === 'ok' ? windows.map(quotaLimit) : []}
+      emptyMessage={message}
+      labels={{ context: t('usage.quotaContext'), limits: t('usage.quotaPlanLimits'), free: t('usage.quotaContextFree') }}
+    />
   );
 }
 
@@ -145,6 +134,14 @@ export function QuotaPanel({ session }: Props) {
     return entries;
   }, [snapshots]);
 
+  // The current conversation's context window rides on its provider's card.
+  const conversation = session.activeConversation;
+  const contextUsage = conversation ? session.contextUsageByConversation[conversation.id] : undefined;
+  const contextProvider = conversation?.provider;
+  const context: AgentLimitsCardProps['context'] = contextUsage?.contextWindow
+    ? { max: contextUsage.contextWindow, segments: [{ label: t('usage.quotaContextUsed'), tokens: contextUsage.usedTokens }] }
+    : undefined;
+
   const displayName = (provider: string) => {
     const descriptor = session.v2Providers.find((item) => item.id === provider);
     return descriptor?.displayName ?? provider;
@@ -168,8 +165,15 @@ export function QuotaPanel({ session }: Props) {
       </div>
       {error ? <p className="text-caption-1-regular text-text-error-primary">{t('usage.quotaError', { reason: error })}</p> : null}
       {ordered.length ? (
-        <div className="grid gap-3 md:grid-cols-2">
-          {ordered.map((snapshot) => <QuotaCard key={snapshot.provider} snapshot={snapshot} displayName={displayName(snapshot.provider)} />)}
+        <div className="grid items-start gap-3 md:grid-cols-2">
+          {ordered.map((snapshot) => (
+            <QuotaCard
+              key={snapshot.provider}
+              snapshot={snapshot}
+              displayName={displayName(snapshot.provider)}
+              context={snapshot.provider === contextProvider ? context : undefined}
+            />
+          ))}
         </div>
       ) : (
         <EmptyState

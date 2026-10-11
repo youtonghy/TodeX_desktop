@@ -1,9 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
-import { RiBarChartBoxLine, RiDatabase2Line, RiDownloadCloud2Line, RiFlashlightLine, RiUploadCloud2Line } from '@remixicon/react';
+import { RiBarChartBoxLine } from '@remixicon/react';
 import { usageTotalTokens } from '@todex/protocol/conversationRuntime';
+import { AgentsChartCard } from '@/components/application/ai-profile/agents-chart-card';
+import { AiProfileCard } from '@/components/application/ai-profile/ai-profile-card';
+import { TokensChartCard } from '@/components/application/ai-profile/tokens-chart-card';
+import type { ContributionCell } from '@/components/application/dashboard/contributions-card';
+import { Badge } from '@/components/base/badges/badge';
+import { Chip } from '@/components/base/badges/chip';
 import { Select, SelectItem } from '@/components/base/select/select';
 import { EmptyState } from '@/components/ui/empty-state';
-import { Meter } from '@/components/ui/progress-bar';
+import { AppIcon } from '../components/AppIcon';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { getLocale, t, useT } from '../i18n';
 import type { UsageRecord } from '../session/helpers';
@@ -28,13 +34,13 @@ const EMPTY_TOTALS: UsageTotals = {
   cacheWriteTokens: 0,
 };
 
-function totalOf(record: UsageRecord): number {
-  return usageTotalTokens(record);
-}
+/** The activity heatmap: 38 week columns × 7 weekday rows, ending this week. */
+const HEATMAP_WEEKS = 38;
+const DAY_MS = 86_400_000;
 
 function addUsage(current: UsageTotals, record: UsageRecord): UsageTotals {
   return {
-    totalTokens: current.totalTokens + totalOf(record),
+    totalTokens: current.totalTokens + usageTotalTokens(record),
     inputTokens: current.inputTokens + record.inputTokens,
     outputTokens: current.outputTokens + record.outputTokens,
     cachedInputTokens: current.cachedInputTokens + record.cachedInputTokens,
@@ -57,70 +63,63 @@ function titleCase(value: string): string {
   return value === 'unknown' ? t('usage.unknown') : value.charAt(0).toUpperCase() + value.slice(1);
 }
 
-// BoardUI plain stat card: the icon tile sits above the label so the value
-// gets the card's full width; a side tile left five-up cards too narrow and
-// truncated large totals.
-function MetricCard({ label, value, detail, icon: Icon }: {
-  label: string;
-  value: number;
-  detail: string;
-  icon: typeof RiBarChartBoxLine;
-}) {
-  return (
-    <section className="flex min-w-0 flex-col gap-3 rounded-2xl bg-background-secondary-default p-4">
-      <span className="flex w-fit items-center rounded-md bg-stat-card-icon-background p-1.5">
-        <Icon className="size-5 shrink-0 text-foreground-icon-primary" aria-hidden="true" />
-      </span>
-      <div className="flex min-w-0 flex-col gap-0.5">
-        <p className="truncate text-body-medium text-text-secondary">{label}</p>
-        <p className="truncate text-title-1-medium text-text-primary tabular-nums">{formatTokens(value)}</p>
-        <p className="text-caption-1-regular text-text-tertiary">{detail}</p>
-      </div>
-    </section>
-  );
+/** Local calendar day key, YYYY-MM-DD. */
+function dayKey(date: Date): string {
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
-/** Bars mount at zero and grow in (a timeout so the first frame is painted). */
-function useMounted() {
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => {
-    const timer = window.setTimeout(() => setMounted(true), 60);
-    return () => window.clearTimeout(timer);
-  }, []);
-  return mounted;
+function startOfDay(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
 }
 
-// BoardUI bar-list row: a translucent chart-6 bar sized against the top row
-// sits behind the label with the total on the right; hover deepens the tint.
-function UsageBar({ label, totals, max, mounted }: { label: string; totals: UsageTotals; max: number; mounted: boolean }) {
-  const [active, setActive] = useState(false);
-  const total = totals.totalTokens;
-  const width = max ? Math.max((total / max) * 100, 2) : 0;
-  return (
-    <div
-      className="relative flex h-9 items-center justify-between gap-3 rounded-lg px-2.5"
-      onMouseEnter={() => setActive(true)}
-      onMouseLeave={() => setActive(false)}
-    >
-      <div
-        aria-hidden
-        className="absolute inset-y-0 start-0 rounded-lg transition-[width,background-color] duration-500 ease-out motion-reduce:transition-none"
-        style={{
-          width: mounted ? `${width}%` : 0,
-          backgroundColor: `color-mix(in srgb, ${active ? 'var(--color-chart-6-active)' : 'var(--color-chart-6)'} ${active ? 26 : 14}%, transparent)`,
-        }}
-      />
-      <span className="relative min-w-0 truncate text-body-regular text-text-primary" title={label}>{label}</span>
-      <span className="relative shrink-0 text-body-medium text-text-primary tabular-nums">{formatTokens(total)}</span>
-    </div>
-  );
+function shortDate(date: Date): string {
+  return date.toLocaleDateString(getLocale(), { month: 'short', day: 'numeric' });
 }
 
+/** Daily token totals and the conversations seen each day. */
+function dailyUsage(records: UsageRecord[]) {
+  const tokens = new Map<string, number>();
+  const conversations = new Map<string, Set<string>>();
+  for (const record of records) {
+    const key = dayKey(new Date(record.updatedAt));
+    tokens.set(key, (tokens.get(key) ?? 0) + usageTotalTokens(record));
+    let seen = conversations.get(key);
+    if (!seen) conversations.set(key, seen = new Set());
+    seen.add(record.conversationId);
+  }
+  return { tokens, conversations };
+}
+
+/** Heatmap cells: weekday rows × week columns, tiers by quintile of the busy days. */
+function heatmapCells(tokens: Map<string, number>, today: Date): ContributionCell[][] {
+  const end = startOfDay(today);
+  const firstColumnStart = new Date(end.getTime() - ((HEATMAP_WEEKS - 1) * 7 + end.getDay()) * DAY_MS);
+  const busy = [...tokens.values()].filter((value) => value > 0).sort((a, b) => a - b);
+  const tierOf = (value: number) => {
+    if (value <= 0 || !busy.length) return 0;
+    const rank = busy.findIndex((item) => item >= value);
+    return Math.min(5, 1 + Math.floor(((rank < 0 ? busy.length - 1 : rank) / busy.length) * 5));
+  };
+  return Array.from({ length: 7 }, (_, row) => Array.from({ length: HEATMAP_WEEKS }, (_, col) => {
+    const date = new Date(firstColumnStart.getFullYear(), firstColumnStart.getMonth(), firstColumnStart.getDate() + col * 7 + row);
+    if (date > end) return { tier: 0, label: shortDate(date) };
+    const value = tokens.get(dayKey(date)) ?? 0;
+    return {
+      tier: tierOf(value),
+      label: value ? t('usage.dayTokens', { date: shortDate(date), tokens: formatTokens(value) }) : t('usage.dayNone', { date: shortDate(date) }),
+    };
+  }));
+}
+
+/** Usage on the BoardUI AI profile template: the profile card with totals and
+ * the activity heatmap, active conversations per day for a month, the token
+ * trend of the last 30 days, and the per-agent / per-model breakdown. */
 export function UsagePanel({ session }: Props) {
   const t = useT();
   const [provider, setProvider] = useState('all');
   const [model, setModel] = useState('all');
-  const mounted = useMounted();
+  const [monthOffset, setMonthOffset] = useState(0);
   const providers = useMemo(() => [...new Set(session.usageRecords.map((record) => record.provider))].sort(), [session.usageRecords]);
   const providerRecords = useMemo(
     () => provider === 'all' ? session.usageRecords : session.usageRecords.filter((record) => record.provider === provider),
@@ -132,89 +131,147 @@ export function UsagePanel({ session }: Props) {
     [model, providerRecords],
   );
   const totals = useMemo(() => sum(filtered), [filtered]);
-  const totalTokens = totals.totalTokens;
   const knownCacheRecords = filtered.filter(record => record.cacheSemantics === 'included' || record.cacheSemantics === 'additional');
   const cacheBase = knownCacheRecords.reduce((total, record) => total + record.inputTokens
     + (record.cacheSemantics === 'additional' ? record.cachedInputTokens + record.cacheWriteTokens : 0), 0);
   const cacheRead = knownCacheRecords.reduce((total, record) => total + record.cachedInputTokens, 0);
   const cacheRate = cacheBase ? Math.min(100, Math.round((cacheRead / cacheBase) * 100)) : null;
-  const byProvider = useMemo(() => {
+  const breakdown = useMemo(() => {
+    const key = (record: UsageRecord) => provider === 'all' ? record.provider : record.model;
     const values = new Map<string, UsageRecord[]>();
-    for (const record of filtered) values.set(record.provider, [...(values.get(record.provider) ?? []), record]);
-    return [...values].map(([name, records]) => ({ name: titleCase(name), totals: sum(records) })).sort((a, b) => b.totals.totalTokens - a.totals.totalTokens);
-  }, [filtered]);
-  const byModel = useMemo(() => {
-    const values = new Map<string, UsageRecord[]>();
-    for (const record of filtered) values.set(record.model, [...(values.get(record.model) ?? []), record]);
-    return [...values].map(([name, records]) => ({ name, totals: sum(records) })).sort((a, b) => b.totals.totalTokens - a.totals.totalTokens);
-  }, [filtered]);
-  const chartRows = provider === 'all' ? byProvider : byModel;
-  const chartMax = Math.max(0, ...chartRows.map((row) => row.totals.totalTokens));
+    for (const record of filtered) values.set(key(record), [...(values.get(key(record)) ?? []), record]);
+    return [...values]
+      .map(([name, records]) => ({ name: provider === 'all' ? titleCase(name) : name, total: sum(records).totalTokens }))
+      .sort((a, b) => b.total - a.total);
+  }, [filtered, provider]);
+  const breakdownMax = Math.max(0, ...breakdown.map((row) => row.total));
+
+  const today = useMemo(() => new Date(), []);
+  const daily = useMemo(() => dailyUsage(filtered), [filtered]);
+  const cells = useMemo(() => heatmapCells(daily.tokens, today), [daily, today]);
+
+  // Active conversations per day for the selected month.
+  const month = new Date(today.getFullYear(), today.getMonth() + monthOffset, 1);
+  const monthDays = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate();
+  const dayDates = Array.from({ length: monthDays }, (_, index) => new Date(month.getFullYear(), month.getMonth(), index + 1));
+  const conversationDays = dayDates.map((date) => daily.conversations.get(dayKey(date))?.size ?? 0);
+  const monthConversations = new Set(dayDates.flatMap((date) => [...(daily.conversations.get(dayKey(date)) ?? [])])).size;
+  const monthLabel = month.toLocaleDateString(getLocale(), { year: month.getFullYear() === today.getFullYear() ? undefined : 'numeric', month: 'long' });
+
+  // Daily tokens over the last 30 days, against the 30 before them.
+  const trendDates = Array.from({ length: 30 }, (_, index) => new Date(today.getFullYear(), today.getMonth(), today.getDate() - 29 + index));
+  const trend = trendDates.map((date) => ({ value: daily.tokens.get(dayKey(date)) ?? 0, label: shortDate(date) }));
+  const trendTotal = trend.reduce((total, point) => total + point.value, 0);
+  const previousTotal = Array.from({ length: 30 }, (_, index) => daily.tokens.get(dayKey(new Date(today.getFullYear(), today.getMonth(), today.getDate() - 59 + index))) ?? 0)
+    .reduce((total, value) => total + value, 0);
+  const change = previousTotal > 0 ? (trendTotal - previousTotal) / previousTotal * 100 : null;
+
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setMounted(true), 60);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   return (
-    <div className="flex flex-col gap-5 py-1">
-      <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
-        <p className="text-body-regular text-text-secondary">{t('usage.subtitle')}</p>
-        <div className="grid min-w-0 shrink-0 grid-cols-1 gap-3 sm:w-96 sm:grid-cols-2">
-          <Select
-            aria-label="Agent"
-            className="w-full min-w-0"
-            selectedKey={provider}
-            onSelectionChange={(key) => { if (typeof key === 'string') { setProvider(key); setModel('all'); } }}
-          >
-            <SelectItem id="all" textValue={t('usage.allAgents')}>{t('usage.allAgents')}</SelectItem>
-            {providers.map((item) => <SelectItem key={item} id={item} textValue={titleCase(item)}>{titleCase(item)}</SelectItem>)}
-          </Select>
-          <Select
-            aria-label={t('usage.modelLabel')}
-            className="w-full min-w-0"
-            selectedKey={models.includes(model) ? model : 'all'}
-            onSelectionChange={(key) => { if (typeof key === 'string') setModel(key); }}
-          >
-            <SelectItem id="all" textValue={t('usage.allModels')}>{t('usage.allModels')}</SelectItem>
-            {models.map((item) => <SelectItem key={item} id={item} textValue={item}>{item}</SelectItem>)}
-          </Select>
+    <div className="mx-auto flex w-full max-w-[680px] flex-col items-center gap-4 py-1">
+      <AiProfileCard
+        avatar={<AppIcon className="size-12" />}
+        name={t('app.usage')}
+        subtitle={t('usage.profileSummary', { records: filtered.length, models: new Set(filtered.map((record) => record.model)).size })}
+        badge={<Badge color="neutral">{provider === 'all' ? t('usage.allAgents') : titleCase(provider)}</Badge>}
+        actions={(
+          <>
+            <Select
+              aria-label="Agent"
+              size="sm"
+              className="w-36"
+              triggerClassName="w-full"
+              popoverClassName="w-56"
+              selectedKey={provider}
+              onSelectionChange={(key) => { if (typeof key === 'string') { setProvider(key); setModel('all'); } }}
+            >
+              <SelectItem id="all" textValue={t('usage.allAgents')}>{t('usage.allAgents')}</SelectItem>
+              {providers.map((item) => <SelectItem key={item} id={item} textValue={titleCase(item)}>{titleCase(item)}</SelectItem>)}
+            </Select>
+            <Select
+              aria-label={t('usage.modelLabel')}
+              size="sm"
+              className="w-36"
+              triggerClassName="w-full"
+              popoverClassName="w-56"
+              selectedKey={models.includes(model) ? model : 'all'}
+              onSelectionChange={(key) => { if (typeof key === 'string') setModel(key); }}
+            >
+              <SelectItem id="all" textValue={t('usage.allModels')}>{t('usage.allModels')}</SelectItem>
+              {models.map((item) => <SelectItem key={item} id={item} textValue={item}>{item}</SelectItem>)}
+            </Select>
+          </>
+        )}
+        headlineLabel={t('usage.totalLabel')}
+        headline={totals.totalTokens}
+        formatHeadline={formatTokens}
+        chip={cacheRate === null ? undefined : <Chip variant="bold" color="purple">{t('usage.cacheChip', { rate: cacheRate })}</Chip>}
+        stats={[
+          { value: formatTokens(totals.inputTokens), label: t('usage.inputLabel') },
+          { value: formatTokens(totals.outputTokens), label: t('usage.outputLabel') },
+          { value: formatTokens(totals.cachedInputTokens), label: t('usage.cacheReadLabel') },
+          { value: formatTokens(totals.cacheWriteTokens), label: t('usage.cacheWriteLabel') },
+        ]}
+        activityLabel={t('usage.activity')}
+        cells={cells}
+      />
+
+      <AgentsChartCard
+        title={t('usage.activeConversations')}
+        total={monthConversations}
+        days={conversationDays}
+        formatValue={(value) => t('usage.conversationCount', { count: value })}
+        dayLabel={(index) => shortDate(dayDates[index])}
+        periodLabel={monthLabel}
+        onPrev={() => setMonthOffset((offset) => offset - 1)}
+        onNext={() => setMonthOffset((offset) => Math.min(0, offset + 1))}
+        prevLabel={t('usage.previousMonth')}
+        nextLabel={t('usage.nextMonth')}
+        startLabel={shortDate(dayDates[0])}
+        endLabel={monthOffset === 0 ? t('usage.today') : shortDate(dayDates[dayDates.length - 1])}
+      />
+
+      <TokensChartCard
+        title={t('usage.last30Days')}
+        series={trend}
+        total={trendTotal}
+        change={change === null ? '' : `${change >= 0 ? '+' : '−'}${Math.abs(change).toFixed(1)}%`}
+        formatValue={(value) => t('usage.tokensValue', { value: formatTokens(value) })}
+        startLabel={trend[0].label}
+        endLabel={t('usage.today')}
+      />
+
+      <section className="flex w-full flex-col gap-2.5 rounded-[20px] bg-background-secondary-default px-2.5 py-3">
+        <div className="flex flex-col gap-0.5 px-1.5 pt-1">
+          <p className="text-body-medium text-text-secondary">{provider === 'all' ? t('usage.byAgent') : t('usage.byModel')}</p>
+          <p className="text-body-2-regular text-text-tertiary">{t('usage.chartHint')}</p>
         </div>
-      </div>
-
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
-        <MetricCard label={t('usage.totalLabel')} value={totalTokens} detail={t('usage.recordCount', { count: filtered.length })} icon={RiBarChartBoxLine} />
-        <MetricCard label={t('usage.inputLabel')} value={totals.inputTokens} detail={t('usage.inputDetail')} icon={RiDownloadCloud2Line} />
-        <MetricCard label={t('usage.outputLabel')} value={totals.outputTokens} detail={t('usage.outputDetail')} icon={RiUploadCloud2Line} />
-        <MetricCard label={t('usage.cacheReadLabel')} value={totals.cachedInputTokens} detail={cacheRate === null ? t('usage.cacheSemanticsPending') : t('usage.cacheHitRate', { rate: cacheRate })} icon={RiFlashlightLine} />
-        <MetricCard label={t('usage.cacheWriteLabel')} value={totals.cacheWriteTokens} detail={t('usage.cacheWriteDetail')} icon={RiDatabase2Line} />
-      </div>
-
-      <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(16rem,1fr)]">
-        <section className="flex min-w-0 flex-col rounded-2xl bg-background-secondary-default px-4 pb-3">
-          <div className="-mx-4 mb-3 flex flex-col gap-0.5 border-b border-separator-border px-4 pt-4 pb-3">
-            <h3 className="text-body-medium text-text-primary">{provider === 'all' ? t('usage.byAgent') : t('usage.byModel')}</h3>
-            <p className="text-body-2-regular text-text-secondary">{t('usage.chartHint')}</p>
+        {breakdown.length ? (
+          <div className="flex flex-col gap-1">
+            {breakdown.slice(0, 12).map((row) => {
+              const width = breakdownMax ? Math.max((row.total / breakdownMax) * 100, 2) : 0;
+              return (
+                <div key={row.name} className="group relative flex h-9 items-center justify-between gap-3 rounded-lg px-2.5">
+                  <div
+                    aria-hidden
+                    className="absolute inset-y-0 start-0 rounded-lg bg-chart-agents-bar/40 transition-[width,background-color] duration-500 ease-out group-hover:bg-chart-agents-bar/70 motion-reduce:transition-none"
+                    style={{ width: mounted ? `${width}%` : 0 }}
+                  />
+                  <span className="relative min-w-0 truncate text-body-regular text-text-primary" title={row.name}>{row.name}</span>
+                  <span className="relative shrink-0 text-body-medium text-text-primary tabular-nums">{formatTokens(row.total)}</span>
+                </div>
+              );
+            })}
           </div>
-          {chartRows.length ? (
-            <div className="-mx-2 flex flex-col gap-1">
-              {chartRows.slice(0, 12).map((row) => <UsageBar key={row.name} label={row.name} totals={row.totals} max={chartMax} mounted={mounted} />)}
-            </div>
-          ) : (
-            <EmptyState className="min-h-48" icon={RiBarChartBoxLine} title={t('usage.emptyTitle')} description={t('usage.emptyHint')} />
-          )}
-        </section>
-        <section className="flex min-w-0 flex-col rounded-2xl bg-background-secondary-default p-4">
-          <h3 className="text-body-medium text-text-primary">{t('usage.cacheComposition')}</h3>
-          <p className="mt-0.5 text-body-2-regular text-text-secondary">{t('usage.cacheHint')}</p>
-          <div className="mt-6 flex flex-col gap-1">
-            <p className="text-display-4-medium text-text-primary tabular-nums">{cacheRate === null ? '—' : `${cacheRate}%`}</p>
-            <p className="text-caption-1-regular text-text-secondary">{t('usage.cacheHitRateLabel')}</p>
-            {cacheRate === null ? null : (
-              <Meter className="mt-2" aria-label={t('usage.cacheHitRateLabel')} showValue={false} value={cacheRate} />
-            )}
-          </div>
-          <dl className="mt-6 grid grid-cols-2 gap-3 border-t border-separator-border pt-4">
-            <div className="min-w-0"><dt className="text-caption-1-regular text-text-secondary">{t('usage.lastUpdate')}</dt><dd className="mt-1 text-body-2-medium text-text-primary">{filtered[0] ? new Date(filtered[0].updatedAt).toLocaleString(getLocale()) : t('usage.none')}</dd></div>
-            <div className="min-w-0"><dt className="text-caption-1-regular text-text-secondary">{t('usage.modelCount')}</dt><dd className="mt-1 text-body-2-medium text-text-primary tabular-nums">{new Set(filtered.map((record) => record.model)).size}</dd></div>
-          </dl>
-        </section>
-      </div>
+        ) : (
+          <EmptyState className="min-h-40" size="sm" icon={RiBarChartBoxLine} title={t('usage.emptyTitle')} description={t('usage.emptyHint')} />
+        )}
+      </section>
     </div>
   );
 }

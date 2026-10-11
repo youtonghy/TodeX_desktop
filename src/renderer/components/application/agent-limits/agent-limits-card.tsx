@@ -1,7 +1,7 @@
 "use client";
 
 import { useTemplateCopy } from "@/components/foundations/template-copy/template-copy";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { RiArrowDownSLine, RiArrowRightLine, RiArrowRightSLine } from "@remixicon/react";
 import { AnimatePresence, motion } from "motion/react";
 import { resolveTone } from "@/components/application/charts/chart-card";
@@ -46,9 +46,24 @@ export type UsageLimit = {
   used: number;
   /** "Resets in 2 hr 46 min", "Resets Tue 3:00 PM"… */
   resets: string;
+  /** Bar colour (any CSS colour); defaults to chart-6. */
+  color?: string;
+  /** Replaces the percentage, e.g. "—" when the share is unknown. */
+  valueLabel?: string;
+};
+
+/** Visible copy, for localized apps. */
+export type AgentLimitsLabels = {
+  context?: string;
+  limits?: string;
+  free?: string;
+  managePlan?: string;
 };
 
 export interface AgentLimitsCardProps {
+  /** Optional heading row above the sections (e.g. provider + updated time). */
+  title?: ReactNode;
+  /** Omit to hide the context window section. */
   context?: {
     /** Window size in tokens (e.g. 1_000_000). */
     max: number;
@@ -60,62 +75,14 @@ export interface AgentLimitsCardProps {
   /** Where the plan arrow points (omit to hide the arrow). */
   planHref?: string;
   limits?: UsageLimit[];
+  /** Shown in the plan section when there are no limits. */
+  emptyMessage?: ReactNode;
+  labels?: AgentLimitsLabels;
   /** Start with the context breakdown open. */
   defaultExpanded?: boolean;
   onExpandedChange?: (expanded: boolean) => void;
   className?: string;
 }
-
-const DEFAULT_CONTEXT: NonNullable<AgentLimitsCardProps["context"]> = {
-  max: 1_000_000,
-  // 820k used of 1M: messages dominate, the rest is spread, 18% free.
-  segments: [
-    { label: "Messages", tokens: 520_000 },
-    { label: "System tools", tokens: 96_000 },
-    { label: "MCP tools", tokens: 68_000 },
-    { label: "Skills", tokens: 54_000 },
-    { label: "System prompt", tokens: 42_000 },
-    { label: "Memory files", tokens: 24_000 },
-    { label: "Custom agents", tokens: 16_000 },
-    { label: "MCP tools (deferred)", tokens: 69_900, deferred: true },
-    { label: "System tools (deferred)", tokens: 16_100, deferred: true },
-  ],
-  groups: [
-    {
-      label: "MCP tools",
-      tokens: 137_900,
-      items: [
-        { label: "browser", tokens: 54_200 },
-        { label: "figma", tokens: 41_800 },
-        { label: "vercel", tokens: 26_500 },
-        { label: "session", tokens: 15_400 },
-      ],
-    },
-    {
-      label: "Memory files",
-      tokens: 24_000,
-      items: [
-        { label: "MEMORY.md", tokens: 16_400 },
-        { label: "project-conventions.md", tokens: 7_600 },
-      ],
-    },
-    {
-      label: "Custom agents",
-      tokens: 16_000,
-      items: [
-        { label: "reviewer", tokens: 7_100 },
-        { label: "explorer", tokens: 5_200 },
-        { label: "planner", tokens: 3_700 },
-      ],
-    },
-  ],
-};
-
-const DEFAULT_LIMITS: UsageLimit[] = [
-  { label: "5-hour limit", used: 0.38, resets: "Resets in 2 hr 46 min" },
-  { label: "Weekly · all models", used: 0.03, resets: "Resets Tue 3:00 PM" },
-  { label: "Weekly · Pro", used: 0.05, resets: "Resets Tue 3:00 PM" },
-];
 
 /** 482_800 → "482.8k", 96_000 → "96k", 1_000_000 → "1M", 314 → "314". */
 export function formatTokens(n: number) {
@@ -137,10 +104,13 @@ function Bar({ children, className }: { children: React.ReactNode; className?: s
 }
 
 export function AgentLimitsCard({
-  context = DEFAULT_CONTEXT,
-  plan = "Max (5x)",
+  title,
+  context,
+  plan,
   planHref,
-  limits = DEFAULT_LIMITS,
+  limits = [],
+  emptyMessage,
+  labels,
   defaultExpanded = false,
   onExpandedChange,
   className,
@@ -149,11 +119,13 @@ export function AgentLimitsCard({
   const [expanded, setExpanded] = useState(defaultExpanded);
   const [openGroups, setOpenGroups] = useState<Set<string>>(new Set());
 
-  const counted = context.segments.filter((s) => !s.deferred);
+  const segments = context?.segments ?? [];
+  const max = context?.max ?? 0;
+  const counted = segments.filter((s) => !s.deferred);
   const used = counted.reduce((sum, s) => sum + s.tokens, 0);
-  const free = Math.max(0, context.max - used);
-  const share = (n: number) => (n / Math.max(1, context.max)) * 100;
-  const tones = context.segments.map((s, i) => resolveTone(i + 1, s.color));
+  const free = Math.max(0, max - used);
+  const share = (n: number) => (n / Math.max(1, max)) * 100;
+  const tones = segments.map((s, i) => resolveTone(i + 1, s.color));
 
   const toggle = () => {
     const next = !expanded;
@@ -176,17 +148,20 @@ export function AgentLimitsCard({
         className,
       )}
     >
+      {title ? <div className="flex min-w-0 items-center gap-2 pt-1.5 pb-2">{title}</div> : null}
+
       {/* ---------------------------------------------- context window */}
+      {context ? <>
       <button
         type="button"
         onClick={toggle}
         aria-expanded={expanded}
         className="group -mx-2 flex cursor-pointer items-center justify-between gap-3 rounded-2lg px-2 py-1 text-start outline-none transition-colors duration-150 hover:bg-background-secondary-hover focus-visible:ring-2 focus-visible:ring-border-focus-ring"
       >
-        <span className="text-body-medium text-text-secondary">Context window</span>
+        <span className="min-w-0 truncate text-body-medium text-text-secondary">{labels?.context ?? "Context window"}</span>
         <span className="flex items-center gap-2">
           <span className="text-body-medium whitespace-nowrap text-text-secondary tabular-nums">
-            {formatTokens(used)} / {formatTokens(context.max)}{" "}
+            {formatTokens(used)} / {formatTokens(max)}{" "}
             <span className="text-text-primary">({Math.round(share(used))}%)</span>
           </span>
           <RiArrowDownSLine
@@ -200,7 +175,7 @@ export function AgentLimitsCard({
       </button>
 
       <Bar className="mt-1.5">
-        {context.segments.map((s, i) =>
+        {segments.map((s, i) =>
           s.deferred ? null : (
             <div
               key={s.label}
@@ -226,7 +201,7 @@ export function AgentLimitsCard({
             className="-mx-2 overflow-hidden px-2"
           >
             <div className="flex flex-col pt-3">
-              {context.segments.map((s, i) => (
+              {segments.map((s, i) => (
                 <div key={s.label} className="flex items-center gap-2 py-[5px]">
                   <span
                     className="size-2.5 shrink-0 rounded-[3px]"
@@ -241,7 +216,7 @@ export function AgentLimitsCard({
               ))}
               <div className="flex items-center gap-2 py-[5px]">
                 <span className="size-2.5 shrink-0 rounded-[3px] bg-chart-track" />
-                <span className="min-w-0 flex-1 truncate text-body-regular text-text-primary">Free space</span>
+                <span className="min-w-0 flex-1 truncate text-body-regular text-text-primary">{labels?.free ?? "Free space"}</span>
                 <span className="text-body-regular text-text-tertiary tabular-nums">{formatTokens(free)}</span>
                 <span className="w-14 text-end text-body-medium text-text-primary tabular-nums">
                   {share(free).toFixed(1)}%
@@ -309,17 +284,18 @@ export function AgentLimitsCard({
         )}
       </AnimatePresence>
 
-      {/* ------------------------------------------------- plan limits */}
       <div className="my-3 h-px w-full bg-separator-border-strong" />
+      </> : null}
 
+      {/* ------------------------------------------------- plan limits */}
       <div className="flex items-center justify-between gap-3 py-1">
         <span className="text-body-medium text-text-secondary">
-          Plan usage limits{plan ? ` · ${plan}` : ""}
+          {labels?.limits ?? "Plan usage limits"}{plan ? ` · ${plan}` : ""}
         </span>
         {planHref && (
           <a
             href={planHref}
-            aria-label="Manage plan"
+            aria-label={labels?.managePlan ?? "Manage plan"}
             className="flex size-6 items-center justify-center rounded-md text-text-tertiary outline-none transition-colors duration-150 hover:bg-background-secondary-hover hover:text-text-secondary focus-visible:ring-2 focus-visible:ring-border-focus-ring"
           >
             <RiArrowRightLine className="size-4 rtl:rotate-180" aria-hidden />
@@ -328,6 +304,7 @@ export function AgentLimitsCard({
       </div>
 
       <div className="flex flex-col gap-3 pt-1">
+        {limits.length === 0 && emptyMessage ? <p className="text-body-2-regular text-text-secondary">{emptyMessage}</p> : null}
         {limits.map((limit) => {
           const pct = Math.round(Math.max(0, Math.min(1, limit.used)) * 100);
           return (
@@ -336,13 +313,13 @@ export function AgentLimitsCard({
                 <span className="min-w-0 truncate text-body-medium text-text-primary">{limit.label}</span>
                 <span className="flex shrink-0 items-baseline gap-2">
                   <span className="text-body-regular text-text-tertiary">{limit.resets}</span>
-                  <span className="w-9 text-end text-body-medium text-text-primary tabular-nums">{pct}%</span>
+                  <span className="w-9 text-end text-body-medium text-text-primary tabular-nums">{limit.valueLabel ?? `${pct}%`}</span>
                 </span>
               </div>
               <Bar>
                 <div
                   className="h-full rounded-full transition-[width] duration-500 ease-out"
-                  style={{ width: `${pct}%`, backgroundColor: "var(--color-chart-6)" }}
+                  style={{ width: `${pct}%`, backgroundColor: limit.color ?? "var(--color-chart-6)" }}
                 />
               </Bar>
             </div>
