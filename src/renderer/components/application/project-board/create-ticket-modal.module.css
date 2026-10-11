@@ -1,0 +1,73 @@
+.panel {
+  transform-origin: center bottom;
+}
+
+.genie {
+  position: relative;
+  isolation: isolate;
+}
+
+.surface {
+  position: relative;
+  transform-origin: center bottom;
+}
+
+/* Paint once on a sibling layer, then animate only transform/opacity. The
+ * broad shadows no longer sample and re-blur the changing dialog pixels. */
+.shadow {
+  position: absolute;
+  inset: 0;
+  border-radius: 24px;
+  pointer-events: none;
+  transform-origin: center bottom;
+  box-shadow:
+    0 1px 1px rgb(0 0 0 / 0.04),
+    0 4px 4px rgb(0 0 0 / 0.02),
+    0 0 120px rgb(0 0 0 / 0.1),
+    0 0 48px rgb(0 0 0 / 0.2);
+}
+
+:global(.dark) .shadow {
+  box-shadow:
+    0 1px 1px rgb(0 0 0 / 0.14),
+    0 4px 4px rgb(0 0 0 / 0.1),
+    0 0 120px rgb(0 0 0 / 0.1),
+    0 0 48px rgb(0 0 0 / 0.2);
+}
+
+/* React Aria waits for this animation before unmounting. Geometry is driven
+ * by one Motion timeline on the surface, so the panel itself never slides. */
+.panel[data-entering],
+.panel[data-exiting] {
+  animation: ticket-presence 480ms linear both;
+}
+
+.panel[data-exiting] {
+  pointer-events: none;
+}
+
+.panel[data-entering] .surface,
+.panel[data-exiting] .surface,
+.panel[data-entering] .shadow,
+.panel[data-exiting] .shadow {
+  will-change: transform, opacity;
+}
+
+@keyframes ticket-presence {
+  from { opacity: 0.9999; }
+  to { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .panel[data-entering],
+  .panel[data-exiting] {
+    animation: none;
+  }
+
+  .panel[data-entering] .surface,
+  .panel[data-exiting] .surface,
+  .panel[data-entering] .shadow,
+  .panel[data-exiting] .shadow {
+    will-change: auto;
+  }
+}

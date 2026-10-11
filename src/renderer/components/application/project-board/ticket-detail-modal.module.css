@@ -1,0 +1,40 @@
+/* React Aria keeps the panel mounted for the shared Genie timeline.
+ * Its pixels bend into the bottom-right dock; the shell never slides. */
+.panel[data-entering], .panel[data-exiting] { animation: detail-presence 560ms linear both; }
+.panel[data-exiting] { pointer-events: none; }
+@keyframes detail-presence {
+  from { opacity: 0.9999; }
+  to { opacity: 1; }
+}
+.genie, .surface { position: relative; height: 100%; min-height: 0; }
+.genie { isolation: isolate; }
+/* Start the chart's own drawing animation only after the visual bands hand
+ * back to the live panel, so it never flashes a completed copy first. */
+.genie:not([data-entered="true"]) :global(.animate-chart-reveal) {
+  animation: none;
+  clip-path: inset(0 100% 0 0);
+}
+/* Skip the barely visible lead-in while retaining the clean Genie handoff. */
+.surface :global(.animate-chart-reveal) { animation-delay: -150ms; }
+.shadow {
+  position: absolute;
+  inset: 0;
+  border-radius: 24px;
+  pointer-events: none;
+  transform-origin: right bottom;
+  box-shadow: -10px 0 34px rgb(0 0 0 / 0.05), -10px 0 250px rgb(0 0 0 / 0.25);
+}
+.bands { position: absolute; inset: 0; pointer-events: none; opacity: 0; }
+.band {
+  position: absolute;
+  top: 0;
+  left: 0;
+  overflow: hidden;
+  contain: strict;
+  transform-origin: 0 0;
+  will-change: transform;
+  backface-visibility: hidden;
+}
+@media (prefers-reduced-motion: reduce) {
+  .panel[data-entering], .panel[data-exiting] { animation: none; }
+}

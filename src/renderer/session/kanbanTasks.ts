@@ -265,6 +265,25 @@ export function renameKanbanTask(id: string, title: string): void {
   )));
 }
 
+/** Edits the description and due date; an empty value clears the field. */
+export function updateKanbanTaskDetails(id: string, details: { description?: string; dueDate?: string }): void {
+  commit(tasks.map((task) => {
+    if (task.id !== id || task.deletedAt) return task;
+    const next: KanbanTask = { ...task };
+    if (details.description !== undefined) {
+      const description = details.description.trim().slice(0, KANBAN_TASK_DESCRIPTION_LIMIT);
+      if (description) next.description = description;
+      else delete next.description;
+    }
+    if (details.dueDate !== undefined) {
+      if (/^\d{4}-\d{2}-\d{2}$/.test(details.dueDate)) next.dueDate = details.dueDate;
+      else delete next.dueDate;
+    }
+    if (next.description === task.description && next.dueDate === task.dueDate) return task;
+    return { ...next, updatedAt: Date.now() };
+  }));
+}
+
 export function setKanbanTaskStatus(id: string, status: KanbanTaskStatus): void {
   if (!kanbanTaskStatuses.includes(status)) return;
   const task = tasks.find((item) => item.id === id && !item.deletedAt);
