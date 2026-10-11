@@ -12,7 +12,7 @@ const buildVersion = process.env.TODEX_BUILD_VERSION?.trim() || 'DEV0.0.0';
  * app bundle ('wasm-unsafe-eval' lets Shiki compile its bundled Oniguruma
  * WebAssembly; it does not allow JS eval); connections go to whatever backend the user configured (any
  * http/https/ws/wss host). Images allow remote http(s) for Markdown in chat.
- * Styles keep 'unsafe-inline' because HeroUI and xterm inject <style> tags.
+ * Styles keep 'unsafe-inline' because React Aria, motion and xterm inject inline styles.
  * Build-only: the dev server needs inline React Refresh code and its HMR socket.
  */
 const RENDERER_CSP = [
@@ -88,6 +88,8 @@ export default defineConfig({
     },
     resolve: {
       alias: {
+        // BoardUI components import through '@/…' (see AGENTS.md).
+        '@': resolve(desktopRoot, 'src/renderer'),
         '@renderer': resolve(desktopRoot, 'src/renderer'),
         '@todex/protocol': resolve(desktopRoot, '../TodeX_protocol/src'),
         '@noble/ciphers': resolve(desktopRoot, 'node_modules/@noble/ciphers'),

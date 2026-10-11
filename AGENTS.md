@@ -15,14 +15,12 @@
 
 ## Frontend UI
 
-- All user-facing UI must use the official HeroUI React components, and use HeroUI Pro components from `@heroui-pro/react` when the required pattern is provided there. Prefer the existing component APIs over raw HTML controls or ad-hoc replacements.
-- Before adding or changing a component, query the current HeroUI and HeroUI Pro documentation through the Context7 MCP (`resolve-library-id` followed by `query-docs`). Use the documented API and verify the installed versions in `package.json`.
-- Use HeroUI/Pro for controls such as buttons, inputs, dialogs, menus, tables, tabs, forms, and feedback states. Native HTML elements remain appropriate for semantic structure, layout, and cases where the libraries have no equivalent.
-- Every time you build or change frontend UI, invoke the relevant skills (`heroui-react`, and `heroui-react-pro` when Pro components are involved) and query the HeroUI / HeroUI Pro MCP servers (`heroui-pro`, Context7) before writing code. Do not rely on memory of the component APIs.
-- Install or update HeroUI Pro through `hpsetup`, run from this project's root with pnpm: `pnpm dlx hpsetup@latest "$HEROUI_PRO_HPSETUP"`. The key must come from the `HEROUI_PRO_HPSETUP` system environment variable; never commit, log, echo, or hard-code it, and never paste its value into commands, files, or messages.
+- All user-facing UI uses BoardUI (React + Tailwind CSS v4, source-owned components). Installed components live under `src/renderer/components/{base,application,foundations}`, with `utils/cx.ts` and `hooks/`; import them through the `@/` alias (it maps to `src/renderer/`). The always-on BoardUI design rules are in the `boardui:rules` section at the end of this file.
+- Patterns BoardUI does not ship (modal and confirm dialog, action/context menus, toasts, cards, alerts, empty states, spinners, progress/meter bars, scroll areas, combobox, Markdown, code blocks, resizable panels, icon toolbar actions) live in `src/renderer/components/ui/`, built from BoardUI recipes. Extend those or the installed BoardUI components instead of writing one-off lookalikes. HeroUI is no longer used.
+- Every time you build or change frontend UI, invoke the `boardui` skill and query the BoardUI MCP server (`get_component`, `get_usage_examples`, `get_theme`) before writing code. Do not rely on memory of the component APIs.
+- Add components from this project's root with pnpm, writing into the renderer: `pnpm dlx @collectui/bdui add <name> -p src/renderer`. Pro components and templates need a license key, which must come from the `BOARDUI_KEY` system environment variable: pass `--key "$BOARDUI_KEY"`. Never commit, log, echo, or hard-code the key, and never paste its value into commands, files, MCP tool arguments, or messages. If `BOARDUI_KEY` is unavailable, stop before installing Pro items and report the missing variable.
+- The BoardUI CLI targets Next.js: replace any `next/image` / `next/link` imports in added files with plain elements, and keep the global CSS entry at `src/renderer/styles/global.css` (it imports `styles/globals.css`, which brings Tailwind, the theme tokens and the type scale).
 - If `pnpm install` fails with `ERR_PNPM_IGNORED_BUILDS`, run `pnpm approve-builds` and approve the build scripts, then continue.
-- After `hpsetup`, make sure the global CSS imports the styles in this order: `@import "tailwindcss";`, `@import "@heroui/styles";`, `@import "@heroui-pro/react/css";`. Import Pro components from their subpaths, e.g. `import {AreaChart} from "@heroui-pro/react/area-chart";`.
-- If `HEROUI_PRO_HPSETUP` is unavailable, stop before running an authenticated `hpsetup` operation and report the missing environment variable. Do not substitute a value from source files, shell history, or local config.
 
 ## Sibling repositories (cross-repo access)
 
@@ -50,3 +48,55 @@ When a task requires it — the Dual-Client Synchronization rules, aligning clie
 - Push the created commits to the current branch's upstream remote after committing.
 - If committing or pushing is blocked, report the blocker explicitly and leave the working tree status clear in the final response.
 - Do not include unrelated local changes in a task commit. Preserve user changes unless the user explicitly asks to modify or discard them.
+
+<!-- boardui:rules start -->
+---
+description: BoardUI design system rules. Always apply when writing or editing UI code in this project.
+alwaysApply: true
+---
+
+# BoardUI design rules
+
+This project uses BoardUI (React + Tailwind CSS v4, source-owned components under `components/`). These rules always apply when writing UI code. MCP tools are on demand; these rules are not optional context.
+
+## Components first
+
+- Before hand-building any UI element, check for an installed BoardUI component under `components/base/` and `components/application/`, and prefer it.
+- Missing a component? Install it (BoardUI MCP `install_components`, or `npx -y @collectui/bdui add <name>`) instead of writing a lookalike.
+- Import through the `@/` alias, e.g. `import { Button } from "@/components/base/buttons/button"`.
+
+## Color: semantic tokens only
+
+- Never use raw palette classes (`text-gray-500`, `bg-white`, `border-neutral-200`) or hex/oklch literals. Every color rides a BoardUI semantic token, which also makes dark mode automatic.
+- Text: `text-text-primary`, `text-text-secondary`, `text-text-tertiary`, `text-text-placeholder`, errors `text-text-error-primary`.
+- Surfaces: `bg-background-primary-default`, `bg-background-secondary-default` / `-hover`, `bg-background-tertiary-default`, page ground `bg-background-full`.
+- Borders: `border-border-button-default` / `-hover`, hairlines `border-separator-border`, tables `border-border-table`, errors `border-border-error-default`.
+- Icons: `text-foreground-icon-primary` through `text-foreground-icon-quaternary`.
+- Charts: the `chart-1` … `chart-5` tokens (plus `-active` variants). CTAs and selection states: the `accent-50` … `accent-950` ramp.
+- Dark mode flips tokens via the `.dark` class on `<html>`. Do not write `dark:` overrides with raw colors; if a token pair looks wrong in dark mode, pick a different token, not a literal.
+
+## Typography: composite utilities only
+
+- Use BoardUI's composite type utilities: `text-title-1-medium`, `text-title-2-medium`, `text-title-3-semibold`, `text-headline-medium`, `text-body-medium`, `text-body-regular`, `text-body-2-*`, `text-caption-1-semibold`, and friends. Each sets size, weight, line-height, and letter-spacing together.
+- Never rebuild type by stacking `text-sm font-medium leading-5`; if a style seems missing, look in `styles/typography.css` before inventing one.
+
+## Spacing and shape
+
+- Stay on Tailwind's spacing scale (`gap-2`, `p-4`, `mt-6`); prefer flex/grid `gap` over per-child margins. Arbitrary values (`p-[13px]`) only when matching an existing BoardUI component exactly.
+- Cards and panels: `rounded-3xl` with `border-border-button-default`. Inputs and menu rows: `rounded-md` to `rounded-xl`. Pills: `rounded-full`.
+
+## Mechanics
+
+- Direction: wrap the app (or a mixed-language region) in `DirectionProvider` from `@/components/foundations/direction/direction`, with an explicit BCP 47 `locale` (`ar`, `he`, `en-US`, `zh-CN`). Set matching `lang` and `dir` on `<html>` for full-app RTL. CSS `dir` alone does not configure React Aria keyboard navigation or portal placement. Use `useDirection()` for custom interactions and put its value on custom portal roots.
+- Use logical styles: `ms`/`me`, `ps`/`pe`, `start`/`end`, `text-start`/`text-end`, `border-s`/`border-e`, `rounded-s`/`rounded-e`, and inline logical CSS properties. Mirror navigation/disclosure glyphs and horizontal drawer motion in RTL. Preserve physical coordinates for measured geometry, charts, canvas, and decorative art. Keep code, OTP digits, email addresses and URLs in explicit LTR regions; isolate mixed text with `<bdi>` or `dir="auto"`. Translating labels and formatting application data is separate from layout direction. See https://www.boardui.com/rtl.
+
+- Internal vertical scroll regions must soften the top edge with a progressive blur and surface fade once scrolled, rather than sharply clipping content. Keep headers outside the scroll region. Use a stationary, `pointer-events-none`, `aria-hidden` overlay in a relative wrapper: a 24px masked 1px backdrop blur, a 16px masked 4px backdrop blur, and a gradient from the enclosing semantic surface token to transparent. Ramp each layer's opacity from 0 to 1 over the first 24px of scrolling; keep it invisible at scrollTop 0. Apply opacity to the individual layers, never the overlay parent (a translucent parent creates a backdrop root and can break blur at normal browser zoom). Verify top/reset, overflow, light/dark mode, and 100% zoom; preserve keyboard scrolling and do not blur the whole content area.
+
+- Merge classes with `cx()` from `@/utils/cx` (tailwind-merge aware of BoardUI's composite text styles). No string concatenation, no plain `clsx`.
+- Icons come from `@remixicon/react`, passed as component references (`leadingIcon={RiAddLine}`), not rendered elements.
+- Form components build on `react-aria-components`; extend the installed BoardUI form components rather than raw `<input>`/`<select>`.
+- Focus states: `outline-none focus-visible:ring-2 focus-visible:ring-border-focus-ring`.
+
+When unsure about a token, a component's API, or working example code, ask the BoardUI MCP server: `get_theme`, `get_component`, `get_usage_examples`.
+
+<!-- boardui:rules end -->
