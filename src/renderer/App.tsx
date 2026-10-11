@@ -158,6 +158,8 @@ export function App() {
   // The SSH view swaps the main content but keeps sidebar and Workbench; its
   // Workbench tabs (SSH terminals, remote files) live in a per-backend scope.
   const sshActive = panel === 'ssh';
+  // The task board, like the terminal, takes the conversation's place in the shell.
+  const kanbanActive = panel === 'kanban';
   const scopeKey = !session.hydrated || !session.workbenchSharingHydrated ? ''
     : sshActive ? sshWorkbenchScopeKey(session.activeBackendConnectionId || session.settings.serverUrl)
       : workbenchScopeKey(
@@ -169,7 +171,7 @@ export function App() {
   const { isOpen: asideOpen, setOpen: setAsideOpenRaw, tab: workbenchTab, setTab: setWorkbenchTab,
     target: panelTarget, setTarget: setPanelTarget } = layout;
   // The aside is actually on screen; live views stop streaming otherwise.
-  const asideShown = Boolean(scopeKey) && layout.hydrated && asideOpen;
+  const asideShown = Boolean(scopeKey) && layout.hydrated && asideOpen && !kanbanActive;
   const persistAsideOpen = useCallback((open: boolean) => {
     if (open !== asideOpen) animatePanelMotion();
     setAsideOpenRaw(open);
@@ -402,19 +404,19 @@ export function App() {
           <ShortcutHint id="toggleSidebar" className={headerHint} />
         </span>
       )}
-      {sshActive ? (
-        <span className="min-w-0 flex-1 truncate text-body-semibold text-text-primary">{t('ssh.title')}</span>
+      {sshActive || kanbanActive ? (
+        <span className="min-w-0 flex-1 truncate text-body-semibold text-text-primary">{t(kanbanActive ? 'sidebar.kanban' : 'ssh.title')}</span>
       ) : (
         <ConversationHeaderDetails session={session} title={session.activeConversation?.title ?? t('app.conversation')} gitOpen={gitOpen} onOpenGit={() => setGitOpen(true)} />
       )}
       <div className="flex shrink-0 items-center gap-1">
-        {!sshActive ? (
+        {!sshActive && !kanbanActive ? (
           <span className="relative inline-flex shrink-0">
             <IconAction icon={RiGithubLine} aria-label={t('app.githubActions')} onClick={() => setGitOpen(true)} />
             <ShortcutHint id="gitActions" className={headerHint} />
           </span>
         ) : null}
-        {subagentRuns.length > 0 ? (
+        {subagentRuns.length > 0 && !kanbanActive ? (
           <span className="relative inline-flex shrink-0">
             <IconAction
               icon={RiRobot2Line}
@@ -432,15 +434,19 @@ export function App() {
         {asideShown && !compactLayout ? (
           <IconAction icon={RiExpandLeftLine} aria-label={t('app.collapseChat')} tooltip onClick={() => toggleChatCollapsed(true)} />
         ) : null}
-        <span className="relative inline-flex shrink-0">
+        {kanbanActive ? null : <span className="relative inline-flex shrink-0">
           <IconAction icon={RiLayoutRightLine} aria-label={asideOpen ? t('app.closeAside') : t('app.openAside')} aria-expanded={asideOpen} onClick={() => persistAsideOpen(!asideOpen)} />
           <ShortcutHint id="toggleAside" className={headerHint} />
-        </span>
+        </span>}
       </div>
     </header>
   );
   const mainContent = (
-    sshActive ? (
+    kanbanActive ? (
+      <Suspense fallback={panelFallback}>
+        <KanbanPanel session={session} onOpenConversation={() => setPanel(null)} />
+      </Suspense>
+    ) : sshActive ? (
       <Suspense fallback={panelFallback}>
         <SshPanel
           session={session}
@@ -468,7 +474,11 @@ export function App() {
   // The conversation container of the BoardUI AI chat shell: header row, then
   // the chat.
   const chatContainer = (
-    <main className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-3xl bg-background-secondary-default">
+    <main className={cx(
+      'flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-3xl',
+      // The board's columns are secondary panels, so it sits on the full surface.
+      kanbanActive ? 'border border-border-button-default bg-background-full' : 'bg-background-secondary-default',
+    )}>
       {header}
       <div className="min-h-0 flex-1">{mainContent}</div>
     </main>
@@ -516,7 +526,8 @@ export function App() {
       onOpenKanban={() => { setPanel('kanban'); persistAsideOpen(false); }}
       onOpenTerminal={toggleSshView}
       terminalActive={sshActive}
-      onSelectConversation={() => setPanel(current => current === 'ssh' ? null : current)}
+      kanbanActive={kanbanActive}
+      onSelectConversation={() => setPanel(current => current === 'ssh' || current === 'kanban' ? null : current)}
     />
   );
   const drawerOpen = isMobile && mobileNavOpen;
@@ -591,11 +602,7 @@ export function App() {
         onRepair={() => { setRepairPairing(true); setPanel('settings'); }} />
       <DesktopAlertHost />
       {session.hydrated ? (
-        panel === 'kanban' ? (
-          <Suspense fallback={panelFallback}>
-            <KanbanPanel session={session} onOpenConversation={() => setPanel(null)} />
-          </Suspense>
-        ) : shell
+        shell
       ) : (
         <div className="window-drag flex h-full flex-col items-center justify-center gap-3">
           <AppIcon className="size-16" />

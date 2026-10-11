@@ -69,6 +69,8 @@ type Props = {
   /** Toggles the SSH view (hosts, keys, SSH terminals, remote files). */
   onOpenTerminal: () => void;
   terminalActive?: boolean;
+  /** The task board is showing in the main area. */
+  kanbanActive?: boolean;
   /** Called after the user picks a conversation, e.g. to leave the SSH view. */
   onSelectConversation?: () => void;
 };
@@ -297,6 +299,7 @@ export function AppSidebar({
   onOpenKanban,
   onOpenTerminal,
   terminalActive = false,
+  kanbanActive = false,
   onSelectConversation,
 }: Props) {
   const t = useT();
@@ -883,8 +886,12 @@ export function AppSidebar({
       key: 'kanban',
       label: t('sidebar.kanban'),
       icon: RiKanbanView2,
-      isSelected: false,
-      onClick: onOpenKanban,
+      isSelected: kanbanActive,
+      toggle: true,
+      onClick: () => {
+        if (mobile) onCloseMobile?.();
+        onOpenKanban();
+      },
       hint: <ShortcutHint id="kanban" />,
     },
   ];

@@ -540,13 +540,11 @@ export function ProjectBoard({ groups, workspaces, total, handlers, defaultWorks
 
   return (
     <div className="flex min-h-0 w-full flex-1 flex-col gap-2.5">
-      <header className="window-drag flex w-full shrink-0 flex-wrap items-end justify-between gap-x-4 gap-y-2">
-        <div className="flex min-w-0 flex-col gap-1">
-          <div className="flex min-w-0 items-center gap-2">
-            <h1 className="truncate px-1 text-title-2-medium text-text-primary">{t("sidebar.kanban")}</h1>
-            <Chip color="blue" variant="caption">{t("kanban.taskCount", { count: total })}</Chip>
-          </div>
-          <p className="px-1 text-body-regular text-text-secondary">{t("kanban.subtitle")}</p>
+      {/* The page title lives in the app header above the board. */}
+      <header className="flex w-full shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <Chip color="blue" variant="caption">{t("kanban.taskCount", { count: total })}</Chip>
+          <p className="truncate text-body-regular text-text-secondary">{t("kanban.subtitle")}</p>
         </div>
         <div className="flex flex-wrap items-center justify-start gap-2.5 sm:justify-end">
           <ProjectBoardControls

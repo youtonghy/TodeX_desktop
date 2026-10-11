@@ -214,9 +214,9 @@ export function KanbanPanel({ session, onOpenConversation }: Props) {
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-background-full p-3 sm:px-6 sm:pt-6 sm:pb-[22px]">
+    <div className="flex h-full min-h-0 flex-col px-3 pt-1 pb-3 sm:px-6 sm:pb-5">
       {orderedWorkspaces.length === 0 ? (
-        <div className="window-drag flex min-h-0 flex-1 flex-col items-center justify-center gap-4">
+        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4">
           <EmptyState icon={RiFolder3Line} title={t('kanban.noWorkspaces')} description={t('kanban.noWorkspacesHint')}>
             <Button size="small" variant="secondary" onClick={onOpenConversation}>{t('kanban.backToChat')}</Button>
           </EmptyState>
