@@ -855,6 +855,12 @@ app.whenReady().then(() => {
 
   handleIpc('theme:shouldUseDark', () => nativeTheme.shouldUseDarkColors);
 
+  // The renderer's light/dark/system choice; native chrome follows it and
+  // `updated` reports the resulting mode back.
+  ipcMain.on('theme:setSource', (_event, source: unknown) => {
+    if (source === 'system' || source === 'light' || source === 'dark') nativeTheme.themeSource = source;
+  });
+
   nativeTheme.on('updated', () => {
     debugLog('info', 'theme.updated', { dark: nativeTheme.shouldUseDarkColors });
     applySystemAppIcon();

@@ -70,6 +70,9 @@ const api = {
   },
   theme: {
     shouldUseDark: () => ipcRenderer.invoke('theme:shouldUseDark') as Promise<boolean>,
+    setSource: (source: 'system' | 'light' | 'dark') => {
+      ipcRenderer.send('theme:setSource', source);
+    },
     onUpdated: (listener: (dark: boolean) => void) => {
       const handler = (_event: Electron.IpcRendererEvent, dark: boolean) => listener(dark);
       ipcRenderer.on('theme:updated', handler);

@@ -31,6 +31,7 @@ export type TodeXDesktopApi = {
   };
   theme: {
     shouldUseDark: () => Promise<boolean>;
+    setSource: (source: 'system' | 'light' | 'dark') => void;
     onUpdated: (listener: (dark: boolean) => void) => () => void;
   };
   preview: {

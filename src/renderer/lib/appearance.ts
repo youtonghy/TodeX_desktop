@@ -3,7 +3,11 @@ import { useSyncExternalStore } from 'react';
 // Interface font, bold text and scale. Kept in localStorage (like the locale)
 // so the saved look applies synchronously before the first render.
 
+export type ThemeSource = 'system' | 'light' | 'dark';
+
 export type Appearance = {
+  /** Light or dark mode, or follow the system. */
+  theme: ThemeSource;
   /** A system font family name; null keeps the bundled Inter. */
   fontFamily: string | null;
   /** Heavier text throughout the interface. */
@@ -12,7 +16,7 @@ export type Appearance = {
   scale: number;
 };
 
-export const DEFAULT_APPEARANCE: Appearance = { fontFamily: null, boldText: false, scale: 1 };
+export const DEFAULT_APPEARANCE: Appearance = { theme: 'system', fontFamily: null, boldText: false, scale: 1 };
 export const APPEARANCE_SCALE_MIN = 0.8;
 export const APPEARANCE_SCALE_MAX = 1.5;
 
@@ -32,7 +36,8 @@ function readStoredAppearance(): Appearance {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     const value = raw ? JSON.parse(raw) as Partial<Appearance> : {};
     const fontFamily = typeof value.fontFamily === 'string' && value.fontFamily.trim() ? value.fontFamily.trim() : null;
-    return { fontFamily, boldText: value.boldText === true, scale: clampScale(value.scale) };
+    const theme = value.theme === 'light' || value.theme === 'dark' ? value.theme : 'system';
+    return { theme, fontFamily, boldText: value.boldText === true, scale: clampScale(value.scale) };
   } catch {
     return DEFAULT_APPEARANCE;
   }

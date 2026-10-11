@@ -32,6 +32,7 @@ import { isWorkbenchTab, panelFromRoute, type DesktopPanel, type OpenPanelOption
 import type { RemoteFilesBinding } from './session/fileSources';
 import { ShortcutHint, useAppShortcuts, useShortcutHintTracking } from './lib/shortcuts';
 import { useT } from './i18n';
+import { useAppearance } from './lib/appearance';
 
 // Secondary surfaces load on demand so the main bundle stays small.
 const SettingsPanel = lazy(() => import('./screens/SettingsPanel').then((module) => ({ default: module.SettingsPanel })));
@@ -123,6 +124,7 @@ function writeLayoutOpen(next: LayoutOpenState) {
 
 export function App() {
   const t = useT();
+  const themeSource = useAppearance().theme;
   const [panel, setPanel] = useState<DesktopPanel | null>(null);
   const panelScopeRef = useRef('');
   const [slashCommand, setSlashCommand] = useState<string>();
@@ -336,14 +338,14 @@ export function App() {
     },
   });
 
+  useEffect(() => window.todexDesktop.theme.onUpdated(applyTheme), []);
+
+  // Hand the light/dark/system choice to the platform, then read the result
+  // (`onUpdated` covers later system changes while following the system).
   useEffect(() => {
-    let unsubscribe: (() => void) | undefined;
-    void window.todexDesktop.theme.shouldUseDark().then((dark) => {
-      applyTheme(dark);
-    });
-    unsubscribe = window.todexDesktop.theme.onUpdated(applyTheme);
-    return () => unsubscribe?.();
-  }, []);
+    window.todexDesktop.theme.setSource(themeSource);
+    void window.todexDesktop.theme.shouldUseDark().then(applyTheme);
+  }, [themeSource]);
 
   useEffect(() => {
     const conversation = session.activeConversation;

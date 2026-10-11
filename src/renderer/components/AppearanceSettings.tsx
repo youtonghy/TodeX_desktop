@@ -3,6 +3,7 @@ import type { Key } from 'react-aria-components';
 import { Button } from '@/components/base/buttons/button';
 import { Input } from '@/components/base/input/input';
 import { Slider } from '@/components/base/slider/slider';
+import { SegmentedControl, SegmentedControlItem } from '@/components/base/segmented-control/segmented-control';
 import { Switch } from '@/components/base/switch/switch';
 import { ComboBox, ComboBoxItem } from './ui/combo-box';
 import { SettingsCard, SettingsNote, SettingsRow } from './settings/SettingsRows';
@@ -13,6 +14,7 @@ import {
   listSystemFonts,
   updateAppearance,
   useAppearance,
+  type ThemeSource,
 } from '../lib/appearance';
 import { useT } from '../i18n';
 
@@ -47,6 +49,22 @@ export function AppearanceSettings() {
 
   return (
     <>
+      <SettingsCard>
+        <SettingsRow label={t('settings.theme')} description={t('settings.themeHint')}>
+          <SegmentedControl
+            aria-label={t('settings.theme')}
+            selectedKeys={[appearance.theme]}
+            onSelectionChange={(keys) => {
+              const [theme] = [...keys] as ThemeSource[];
+              if (theme) updateAppearance({ theme });
+            }}
+          >
+            <SegmentedControlItem id="system">{t('settings.themeSystem')}</SegmentedControlItem>
+            <SegmentedControlItem id="light">{t('settings.themeLight')}</SegmentedControlItem>
+            <SegmentedControlItem id="dark">{t('settings.themeDark')}</SegmentedControlItem>
+          </SegmentedControl>
+        </SettingsRow>
+      </SettingsCard>
       <SettingsCard>
         <SettingsRow label={t('settings.font')} description={fonts === null ? t('settings.fontUnavailable') : t('settings.fontHint')}>
           {fonts === null ? (

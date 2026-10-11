@@ -80,15 +80,7 @@ export function installBrowserDesktopBridge(): void {
       scan: async () => [],
       run: async () => ({ output: t('storage.browserGit') }),
     },
-    theme: {
-      shouldUseDark: async () => window.matchMedia('(prefers-color-scheme: dark)').matches,
-      onUpdated: (listener) => {
-        const media = window.matchMedia('(prefers-color-scheme: dark)');
-        const handler = () => listener(media.matches);
-        media.addEventListener('change', handler);
-        return () => media.removeEventListener('change', handler);
-      },
-    },
+    theme: browserTheme(),
     // No Electron: no native preview or agent browser views, no executor.
     preview: {
       open: async () => {
@@ -113,4 +105,24 @@ export function installBrowserDesktopBridge(): void {
   };
 
   window.todexDesktop = api;
+}
+
+/** The system scheme from the media query, unless the user picked light or dark. */
+function browserTheme(): TodeXDesktopApi['theme'] {
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const listeners = new Set<(dark: boolean) => void>();
+  let source: 'system' | 'light' | 'dark' = 'system';
+  const dark = () => (source === 'system' ? media.matches : source === 'dark');
+  media.addEventListener('change', () => listeners.forEach((listener) => listener(dark())));
+  return {
+    shouldUseDark: async () => dark(),
+    setSource: (next) => {
+      source = next;
+      listeners.forEach((listener) => listener(dark()));
+    },
+    onUpdated: (listener) => {
+      listeners.add(listener);
+      return () => { listeners.delete(listener); };
+    },
+  };
 }
