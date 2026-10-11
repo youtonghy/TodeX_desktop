@@ -33,6 +33,7 @@ export function ProjectBoardControls({ sort, onSort, workspaceId, onWorkspace, w
   const filtered = workspaceId !== "all";
   const sorts: { id: BoardSort; label: string }[] = [
     { id: "manual", label: t("kanban.sortManual") },
+    { id: "priority", label: t("kanban.sortPriority") },
     { id: "title", label: t("kanban.sortTitle") },
     { id: "due", label: t("kanban.sortDue") },
   ];

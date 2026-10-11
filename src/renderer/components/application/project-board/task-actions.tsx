@@ -6,6 +6,7 @@ import { useT } from '@/i18n';
 import { conversationDisplayTitle, type ConversationRecord } from '@/session/helpers';
 import {
   cancelKanbanTaskSchedule,
+  kanbanTaskCanStartConversation,
   kanbanTaskDraftText,
   kanbanTaskStatusLabel,
   kanbanTaskStatuses,
@@ -14,6 +15,7 @@ import {
   setKanbanTaskStatus,
   type KanbanTask,
   type KanbanTaskStatus,
+  useKanbanTasks,
 } from '@/session/kanbanTasks';
 import type { TodeXSession } from '@/session/useTodeXSession';
 import { groupLinkedConversations, keptTaskConversationIds, type LatestEntries } from './project-board-data';
@@ -41,6 +43,10 @@ export function useTaskActions(task: KanbanTask, handlers: TaskBoardHandlers, op
     task, session, conversations, latestEntries, t('kanban.groupPlain'), t('kanban.linkStale'),
   );
   const { linked, staleCount } = linkedState;
+  const allTasks = useKanbanTasks();
+  // One conversation per task; a task split into subtasks talks through them.
+  const hasSubtasks = allTasks.some((item) => item.parentId === task.id && !item.deletedAt);
+  const canStart = kanbanTaskCanStartConversation(task, allTasks);
 
   const run = (key: Key) => {
     const value = String(key);
@@ -50,8 +56,9 @@ export function useTaskActions(task: KanbanTask, handlers: TaskBoardHandlers, op
     if (action === 'open') {
       onOpenConversation(task.workspaceId, linked[0]?.conversation.id ?? '');
     } else if (action === 'new') {
-      onStartConversation(task);
+      if (canStart) onStartConversation(task);
     } else if (action === 'schedule') {
+      if (hasSubtasks) return;
       onSchedule(task);
     } else if (action === 'cancel-schedule') {
       cancelKanbanTaskSchedule(task.id);
@@ -92,8 +99,10 @@ export function useTaskActions(task: KanbanTask, handlers: TaskBoardHandlers, op
           </MenuItem>
         ))}
       </MenuSection>
-      <MenuSeparator />
-      <MenuItem id="new" textValue={t('kanban.newConversation')}>{t('kanban.newConversation')}</MenuItem>
+      {canStart || linked.length || !hasSubtasks || staleCount ? <MenuSeparator /> : null}
+      {canStart ? (
+        <MenuItem id="new" textValue={t('kanban.newConversation')}>{t('kanban.newConversation')}</MenuItem>
+      ) : null}
       {linked.length ? (
         <MenuItem id="open" textValue={t('kanban.openConversation')}>{t('kanban.openConversation')}</MenuItem>
       ) : null}
@@ -121,7 +130,9 @@ export function useTaskActions(task: KanbanTask, handlers: TaskBoardHandlers, op
           </MenuPopover>
         </SubmenuTrigger>
       ) : null}
-      <MenuItem id="schedule" textValue={t('kanban.schedule')}>{t('kanban.schedule')}</MenuItem>
+      {hasSubtasks ? null : (
+        <MenuItem id="schedule" textValue={t('kanban.schedule')}>{t('kanban.schedule')}</MenuItem>
+      )}
       {task.schedule?.status === 'pending' ? (
         <MenuItem id="cancel-schedule" textValue={t('kanban.scheduleCancel')}>{t('kanban.scheduleCancel')}</MenuItem>
       ) : null}
@@ -134,5 +145,5 @@ export function useTaskActions(task: KanbanTask, handlers: TaskBoardHandlers, op
     </>
   );
 
-  return { run, items, ...linkedState };
+  return { run, items, canStart, hasSubtasks, ...linkedState };
 }

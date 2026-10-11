@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import {
+  KANBAN_TASK_PRIORITIES,
   KANBAN_TASK_STATUSES,
   mergeKanbanTasks,
   normalizeKanbanTask,
@@ -7,6 +8,7 @@ import {
   parseKanbanTimeZone,
   prepareKanbanSyncPayload,
   type KanbanTask,
+  type KanbanTaskPriority,
   type KanbanTaskSchedule,
   type KanbanTaskStatus,
   type KanbanTimeZone,
@@ -15,7 +17,7 @@ import { loadJson, saveJson } from '../lib/storage';
 import { KANBAN_TASKS_STORAGE_KEY, WORKSPACE_SYNC_DEBOUNCE_MS, backendFetch, type BackendTransportProfile } from './helpers';
 import { t } from '../i18n';
 
-export type { KanbanTask, KanbanTaskSchedule, KanbanTaskStatus, KanbanTimeZone };
+export type { KanbanTask, KanbanTaskPriority, KanbanTaskSchedule, KanbanTaskStatus, KanbanTimeZone };
 
 export const kanbanTaskStatuses: readonly KanbanTaskStatus[] = KANBAN_TASK_STATUSES;
 
@@ -27,6 +29,19 @@ const kanbanTaskStatusKeys: Record<KanbanTaskStatus, 'kanban.statusPlanned' | 'k
 
 export function kanbanTaskStatusLabel(status: KanbanTaskStatus): string {
   return t(kanbanTaskStatusKeys[status]);
+}
+
+export const kanbanTaskPriorities: readonly KanbanTaskPriority[] = KANBAN_TASK_PRIORITIES;
+
+const kanbanTaskPriorityKeys: Record<KanbanTaskPriority, 'kanban.priorityLow' | 'kanban.priorityMedium' | 'kanban.priorityHigh' | 'kanban.priorityUrgent'> = {
+  low: 'kanban.priorityLow',
+  medium: 'kanban.priorityMedium',
+  high: 'kanban.priorityHigh',
+  urgent: 'kanban.priorityUrgent',
+};
+
+export function kanbanTaskPriorityLabel(priority: KanbanTaskPriority): string {
+  return t(kanbanTaskPriorityKeys[priority]);
 }
 
 const KANBAN_TASK_TITLE_LIMIT = 200;
@@ -225,10 +240,16 @@ export function resetKanbanTasksForTests(): void {
 export function addKanbanTask(
   workspaceId: string,
   title: string,
-  details?: { description?: string; dueDate?: string },
+  details?: { description?: string; dueDate?: string; priority?: KanbanTaskPriority; parentId?: string },
 ): KanbanTask | null {
   const name = title.trim().slice(0, KANBAN_TASK_TITLE_LIMIT);
   const activeCount = tasks.filter((task) => !task.deletedAt).length;
+  // Subtasks are one level deep and live in their parent's workspace.
+  const parent = details?.parentId
+    ? tasks.find((task) => task.id === details.parentId && !task.deletedAt && !task.parentId)
+    : undefined;
+  if (details?.parentId && !parent) return null;
+  if (parent) workspaceId = parent.workspaceId;
   if (!workspaceId || !name || activeCount >= KANBAN_TASK_LIMIT) return null;
   const description = details?.description?.trim().slice(0, KANBAN_TASK_DESCRIPTION_LIMIT) || undefined;
   const dueDate = details?.dueDate && /^\d{4}-\d{2}-\d{2}$/.test(details.dueDate)
@@ -237,8 +258,9 @@ export function addKanbanTask(
   const now = Date.now();
   // Append after manually ordered siblings; untouched groups stay unordered so
   // they keep their createdAt order.
-  const groupOrders = tasks
-    .filter((item) => item.workspaceId === workspaceId && item.status === 'planned' && !item.deletedAt)
+  const groupOrders = (parent
+    ? tasks.filter((item) => item.parentId === parent.id && !item.deletedAt)
+    : tasks.filter((item) => item.workspaceId === workspaceId && item.status === 'planned' && !item.deletedAt && !item.parentId))
     .map((item) => item.sortOrder)
     .filter((order): order is number => order !== undefined);
   const task: KanbanTask = {
@@ -249,6 +271,8 @@ export function addKanbanTask(
     description,
     dueDate,
     status: 'planned',
+    ...(parent ? { parentId: parent.id } : {}),
+    ...(details?.priority && kanbanTaskPriorities.includes(details.priority) ? { priority: details.priority } : {}),
     ...(groupOrders.length ? { sortOrder: Math.max(...groupOrders) + 1 } : {}),
     createdAt: now,
     updatedAt: now,
@@ -263,6 +287,16 @@ export function renameKanbanTask(id: string, title: string): void {
   commit(tasks.map((task) => (
     task.id === id && !task.deletedAt && task.title !== name ? { ...task, title: name, updatedAt: Date.now() } : task
   )));
+}
+
+export function setKanbanTaskPriority(id: string, priority: KanbanTaskPriority | null): void {
+  commit(tasks.map((task) => {
+    if (task.id !== id || task.deletedAt || (task.priority ?? null) === priority) return task;
+    const next: KanbanTask = { ...task, updatedAt: Date.now() };
+    if (priority && kanbanTaskPriorities.includes(priority)) next.priority = priority;
+    else delete next.priority;
+    return next;
+  }));
 }
 
 /** Edits the description and due date; an empty value clears the field. */
@@ -288,8 +322,51 @@ export function setKanbanTaskStatus(id: string, status: KanbanTaskStatus): void 
   if (!kanbanTaskStatuses.includes(status)) return;
   const task = tasks.find((item) => item.id === id && !item.deletedAt);
   if (!task || task.status === status) return;
+  if (task.parentId) {
+    commit(tasks.map((item) => (item.id === id ? { ...item, status, updatedAt: Date.now() } : item)));
+    rollUpParentStatus(task.parentId);
+    return;
+  }
   // A status change appends the task at the end of the target group.
   moveKanbanTasks([id], { workspaceId: task.workspaceId, status, index: Number.MAX_SAFE_INTEGER });
+}
+
+/** The parent follows its subtasks: done once all are, in progress once any
+ * has started (or one reopens after the parent was done). */
+function rollUpParentStatus(parentId: string): void {
+  const parent = tasks.find((item) => item.id === parentId && !item.deletedAt);
+  const children = tasks.filter((item) => item.parentId === parentId && !item.deletedAt);
+  if (!parent || !children.length) return;
+  const next: KanbanTaskStatus = children.every((item) => item.status === 'done')
+    ? 'done'
+    : children.some((item) => item.status !== 'planned') || parent.status === 'done' ? 'in-progress' : parent.status;
+  if (next !== parent.status) setKanbanTaskStatus(parent.id, next);
+}
+
+/** Active subtasks of a task, in their manual order. */
+export function kanbanSubtasks(all: readonly KanbanTask[], parentId: string): KanbanTask[] {
+  return all.filter((task) => task.parentId === parentId && !task.deletedAt).sort(compareKanbanTasks);
+}
+
+/** Reorders a subtask among its siblings. */
+export function moveKanbanSubtask(id: string, index: number): void {
+  const task = tasks.find((item) => item.id === id && !item.deletedAt);
+  if (!task?.parentId) return;
+  const siblings = kanbanSubtasks(tasks, task.parentId).filter((item) => item.id !== id);
+  siblings.splice(Math.max(0, Math.min(index, siblings.length)), 0, task);
+  const orders = new Map(siblings.map((item, order) => [item.id, order]));
+  const now = Date.now();
+  commit(tasks.map((item) => {
+    const order = orders.get(item.id);
+    return order === undefined || order === item.sortOrder ? item : { ...item, sortOrder: order, updatedAt: now };
+  }));
+}
+
+/** A task holds one conversation; once split into subtasks, each subtask
+ * holds its own instead. */
+export function kanbanTaskCanStartConversation(task: KanbanTask, all: readonly KanbanTask[]): boolean {
+  return kanbanTaskConversationIds(task).length === 0
+    && !all.some((item) => item.parentId === task.id && !item.deletedAt);
 }
 
 /** Attached conversation ids; tolerates the legacy single `conversationId`. */
@@ -396,7 +473,7 @@ function compareKanbanTasks(a: KanbanTask, b: KanbanTask): number {
 
 function orderedGroup(workspaceId: string, status: KanbanTaskStatus, excludeIds?: Set<string>): KanbanTask[] {
   return tasks
-    .filter((task) => task.workspaceId === workspaceId && task.status === status && !task.deletedAt && !excludeIds?.has(task.id))
+    .filter((task) => task.workspaceId === workspaceId && task.status === status && !task.deletedAt && !task.parentId && !excludeIds?.has(task.id))
     .sort(compareKanbanTasks);
 }
 
@@ -437,14 +514,24 @@ export function moveKanbanTasks(
   for (const items of groups.values()) {
     items.forEach((task, index) => patches.set(task.id, { ...task, sortOrder: index }));
   }
+  // Subtasks follow their parent to another workspace.
+  for (const task of tasks) {
+    if (task.parentId && movingIds.has(task.parentId) && !task.deletedAt && task.workspaceId !== target.workspaceId) {
+      patches.set(task.id, { ...task, workspaceId: target.workspaceId, updatedAt: now });
+    }
+  }
   commit(tasks.map((task) => patches.get(task.id) ?? task));
 }
 
+/** Deletes a task with its subtasks; deleting a subtask updates the parent's
+ * rolled-up status. */
 export function removeKanbanTask(id: string): void {
   const now = Date.now();
+  const parentId = tasks.find((task) => task.id === id)?.parentId;
   commit(tasks.map((task) => (
-    task.id === id && !task.deletedAt ? { ...task, deletedAt: now, updatedAt: now } : task
+    (task.id === id || task.parentId === id) && !task.deletedAt ? { ...task, deletedAt: now, updatedAt: now } : task
   )));
+  if (parentId) rollUpParentStatus(parentId);
 }
 
 export function kanbanTasksForWorkspace(
@@ -452,8 +539,10 @@ export function kanbanTasksForWorkspace(
   workspaceId: string,
   connectionId?: string | null,
 ): KanbanTask[] {
+  const parents = new Set(all.filter((task) => !task.deletedAt && !task.parentId).map((task) => task.id));
   return all
-    .filter((task) => task.workspaceId === workspaceId && !task.deletedAt)
+    // Subtasks show inside their parent; one whose parent is gone stands alone.
+    .filter((task) => task.workspaceId === workspaceId && !task.deletedAt && !(task.parentId && parents.has(task.parentId)))
     .filter((task) => connectionId === undefined
       || !task.backendConnectionId
       || task.backendConnectionId === connectionId)
@@ -468,6 +557,8 @@ export function isKanbanTaskOverdue(task: KanbanTask, now = new Date()): boolean
 }
 
 export function kanbanTaskDraftText(task: KanbanTask): string {
+  // A subtask's description is its prompt.
+  if (task.parentId && task.description) return task.description;
   const lines = [t('kanban.draftTask', { title: task.title })];
   if (task.description) lines.push(t('kanban.draftDesc', { description: task.description }));
   if (task.dueDate) lines.push(t('kanban.draftDue', { dueDate: task.dueDate }));

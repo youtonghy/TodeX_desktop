@@ -430,11 +430,15 @@ export const demoGitScan = (path: string): GitScanResult => ({
 });
 
 export const demoKanbanTasks: KanbanTask[] = [
-  { id: 'task-1', workspaceId: lumenWeb.id, title: '结账页表单校验收敛', description: '统一 schema 并补测试', status: 'done', conversationId: demoJournals[0].manifest.id, conversationIds: [demoJournals[0].manifest.id], sortOrder: 0, createdAt: NOW - 3 * DAY, updatedAt: NOW - HOUR },
-  { id: 'task-2', workspaceId: lumenWeb.id, title: 'Safari 卡片抖动', status: 'in-progress', conversationId: demoJournals[1].manifest.id, conversationIds: [demoJournals[1].manifest.id], sortOrder: 1, createdAt: NOW - DAY, updatedAt: NOW - 25 * MINUTE },
-  { id: 'task-3', workspaceId: lumenWeb.id, title: '订单列表虚拟滚动', description: '超过 500 条时启用', status: 'planned', dueDate: new Date(NOW + 3 * DAY).toISOString().slice(0, 10), sortOrder: 2, createdAt: NOW - DAY, updatedAt: NOW - DAY },
+  { id: 'task-1', workspaceId: lumenWeb.id, title: '结账页表单校验收敛', description: '统一 schema 并补测试', status: 'done', priority: 'medium', conversationId: demoJournals[0].manifest.id, conversationIds: [demoJournals[0].manifest.id], sortOrder: 0, createdAt: NOW - 3 * DAY, updatedAt: NOW - HOUR },
+  { id: 'task-2', workspaceId: lumenWeb.id, title: 'Safari 卡片抖动', status: 'in-progress', priority: 'urgent', conversationId: demoJournals[1].manifest.id, conversationIds: [demoJournals[1].manifest.id], sortOrder: 1, createdAt: NOW - DAY, updatedAt: NOW - 25 * MINUTE },
+  { id: 'task-3', workspaceId: lumenWeb.id, title: '订单列表虚拟滚动', description: '超过 500 条时启用', status: 'planned', priority: 'low', dueDate: new Date(NOW + 3 * DAY).toISOString().slice(0, 10), sortOrder: 2, createdAt: NOW - DAY, updatedAt: NOW - DAY },
   { id: 'task-4', workspaceId: lumenApi.id, title: '支付回调幂等', status: 'done', conversationId: demoJournals[3].manifest.id, conversationIds: [demoJournals[3].manifest.id], sortOrder: 0, createdAt: NOW - 2 * DAY, updatedAt: NOW - DAY },
-  { id: 'task-5', workspaceId: infra.id, title: '夜间备份告警接入飞书', status: 'planned', sortOrder: 0, createdAt: NOW - 5 * DAY, updatedAt: NOW - 5 * DAY },
+  { id: 'task-6', workspaceId: lumenWeb.id, title: '首页首屏性能优化', description: 'LCP 降到 2s 以内', status: 'in-progress', priority: 'high', sortOrder: 3, createdAt: NOW - 4 * DAY, updatedAt: NOW - 2 * HOUR },
+  { id: 'task-6a', parentId: 'task-6', workspaceId: lumenWeb.id, title: '分析首屏瀑布图', description: '用 Lighthouse 跑首页，列出阻塞渲染的资源和耗时最长的请求。', status: 'done', conversationId: demoJournals[2].manifest.id, conversationIds: [demoJournals[2].manifest.id], sortOrder: 0, createdAt: NOW - 4 * DAY, updatedAt: NOW - 3 * DAY },
+  { id: 'task-6b', parentId: 'task-6', workspaceId: lumenWeb.id, title: '图片改用 AVIF 并懒加载', description: '把首页的商品图换成 AVIF，首屏以下的图片加 loading="lazy"。', status: 'in-progress', priority: 'medium', sortOrder: 1, createdAt: NOW - 3 * DAY, updatedAt: NOW - 2 * HOUR },
+  { id: 'task-6c', parentId: 'task-6', workspaceId: lumenWeb.id, title: '拆分首页 bundle', description: '按路由拆分首页 JS，确认首屏只加载必要的 chunk。', status: 'planned', schedule: { id: 'sched-demo-6c', at: new Date(NOW + DAY + 8 * 60 * 60_000 - new Date(NOW).getTimezoneOffset() * 60_000).toISOString().slice(0, 14) + '00', action: 'start', text: '按路由拆分首页 JS，确认首屏只加载必要的 chunk。', status: 'pending' }, sortOrder: 2, createdAt: NOW - 3 * DAY, updatedAt: NOW - 3 * DAY },
+  { id: 'task-5', workspaceId: infra.id, title: '夜间备份告警接入飞书', status: 'planned', priority: 'high', sortOrder: 0, createdAt: NOW - 5 * DAY, updatedAt: NOW - 5 * DAY },
 ];
 
 /** Two weeks of per-turn usage so the usage panel has a realistic spread. */

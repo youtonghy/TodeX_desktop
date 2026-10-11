@@ -5,7 +5,7 @@ import { useRef, useState, type ReactNode } from "react";
 import { Dialog, Form, Modal, ModalOverlay, TextArea, TextField } from "react-aria-components";
 import { parseDate } from "@internationalized/date";
 import type { WorkspaceRecord } from "@todex/protocol/todex";
-import { RiArrowRightSLine, RiCalendarLine, RiFolder6Line } from "@remixicon/react";
+import { RiArrowRightSLine, RiCalendarLine, RiFlag2Fill, RiFlag2Line, RiFolder6Line } from "@remixicon/react";
 import { Button } from "@/components/base/buttons/button";
 import { CloseButton } from "@/components/base/buttons/close-button";
 import { DatePicker } from "@/components/base/date-picker/date-picker";
@@ -13,9 +13,11 @@ import { Select, SelectItem } from "@/components/base/select/select";
 import { Switch } from "@/components/base/switch/switch";
 import { useT } from "@/i18n";
 import { workspaceDisplayName } from "@/session/helpers";
-import { kanbanTaskStatusLabel, kanbanTaskStatuses, type KanbanTaskStatus } from "@/session/kanbanTasks";
+import { kanbanTaskPriorities, kanbanTaskPriorityLabel, kanbanTaskStatusLabel, kanbanTaskStatuses, type KanbanTaskPriority, type KanbanTaskStatus } from "@/session/kanbanTasks";
 import { cx } from "@/utils/cx";
+import { PRIORITY_FLAG_CLASS } from "./project-board-data";
 import { TaskStatusIcon } from "./project-board-icons";
+import { PriorityChip } from "./ticket-detail-modal";
 import { TicketGenieSurface } from "./ticket-genie-surface";
 import styles from "./create-ticket-modal.module.css";
 
@@ -25,7 +27,10 @@ export type NewBoardTask = {
   status: KanbanTaskStatus;
   workspaceId: string;
   dueDate: string;
+  priority: KanbanTaskPriority | null;
 };
+
+const NO_PRIORITY = "none";
 
 const PILL_TRIGGER = "w-auto justify-start rounded-md border-0 bg-transparent p-0 text-body-medium text-text-secondary shadow-none hover:bg-background-primary-hover [&>svg]:hidden";
 
@@ -67,6 +72,7 @@ export function CreateTicketModal({ isOpen, onClose, initialStatus, initialWorks
   const [status, setStatus] = useState<KanbanTaskStatus>(initialStatus ?? "planned");
   const [workspaceId, setWorkspaceId] = useState(initialWorkspaceId ?? workspaces[0]?.id ?? "");
   const [dueDate, setDueDate] = useState("");
+  const [priority, setPriority] = useState<KanbanTaskPriority | null>(null);
   const [dateOpen, setDateOpen] = useState(false);
   const [keepCreating, setKeepCreating] = useState(false);
   const titleRef = useRef<HTMLTextAreaElement>(null);
@@ -91,7 +97,7 @@ export function CreateTicketModal({ isOpen, onClose, initialStatus, initialWorks
                 titleRef.current?.focus();
                 return;
               }
-              if (!onCreate({ title: title.trim(), description: description.trim(), status, workspaceId, dueDate })) return;
+              if (!onCreate({ title: title.trim(), description: description.trim(), status, workspaceId, dueDate, priority })) return;
               if (keepCreating) {
                 setTitle("");
                 setDescription("");
@@ -124,6 +130,15 @@ export function CreateTicketModal({ isOpen, onClose, initialStatus, initialWorks
               <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
                 <TaskSelect label={t("kanban.setStatus")} value={status} onChange={(value) => setStatus(value as KanbanTaskStatus)} renderValue={<><TaskStatusIcon status={status} />{kanbanTaskStatusLabel(status)}</>}>
                   {kanbanTaskStatuses.map((item) => <SelectItem key={item} id={item} textValue={kanbanTaskStatusLabel(item)}><TaskStatusIcon status={item} className="text-foreground-icon-secondary" />{kanbanTaskStatusLabel(item)}</SelectItem>)}
+                </TaskSelect>
+                <TaskSelect
+                  label={t("kanban.priority")}
+                  value={priority ?? NO_PRIORITY}
+                  onChange={(value) => setPriority(value === NO_PRIORITY ? null : value as KanbanTaskPriority)}
+                  renderValue={priority ? <PriorityChip priority={priority} /> : <><RiFlag2Line className="size-[18px] text-text-primary opacity-30" aria-hidden /><span className="text-text-tertiary">{t("kanban.priority")}</span></>}
+                >
+                  <SelectItem id={NO_PRIORITY} textValue={t("kanban.priorityNone")}><RiFlag2Line className="size-[18px] text-foreground-icon-tertiary" aria-hidden />{t("kanban.priorityNone")}</SelectItem>
+                  {kanbanTaskPriorities.map((item) => <SelectItem key={item} id={item} textValue={kanbanTaskPriorityLabel(item)}><RiFlag2Fill className={cx("size-[18px]", PRIORITY_FLAG_CLASS[item])} aria-hidden />{kanbanTaskPriorityLabel(item)}</SelectItem>)}
                 </TaskSelect>
                 <TaskSelect label={t("kanban.workspace")} value={workspaceId || null} onChange={setWorkspaceId} renderValue={<><RiFolder6Line className="size-[18px] text-text-primary opacity-30" aria-hidden /><span className={workspace ? "text-text-secondary" : "text-text-tertiary"}>{workspace ? workspaceDisplayName(workspace) : t("kanban.workspace")}</span></>}>
                   {workspaces.map((item) => <SelectItem key={item.id} id={item.id} textValue={workspaceDisplayName(item)}><RiFolder6Line className="size-[18px] text-foreground-icon-secondary" aria-hidden />{workspaceDisplayName(item)}</SelectItem>)}

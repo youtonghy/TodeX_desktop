@@ -3,6 +3,7 @@
 import { useDirection } from "@/components/foundations/direction/direction";
 import { useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
+import { Focusable as AriaFocusable } from "react-aria-components";
 import { AnimatePresence, motion, useIsPresent, useReducedMotion } from "motion/react";
 import {
   DndContext,
@@ -34,34 +35,38 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import type { WorkspaceRecord } from "@todex/protocol/todex";
-import { RiAddLine, RiArrowRightLine, RiCalendarLine, RiChat3Line, RiFolder6Line, RiTimerLine } from "@remixicon/react";
+import { RiAddLine, RiArrowRightLine, RiCalendarLine, RiFolder6Line, RiTimerLine } from "@remixicon/react";
 
 import { ProviderIcon } from "@/components/ProviderIcon";
 import { Chip } from "@/components/base/badges/chip";
+import { Tooltip, TooltipTrigger } from "@/components/base/tooltip/tooltip";
 import { Button } from "@/components/base/buttons/button";
 import { ContextMenu, Menu } from "@/components/ui/menu";
-import { useT } from "@/i18n";
-import { isV2Conversation, workspaceDisplayName } from "@/session/helpers";
+import { getLocale, useT } from "@/i18n";
+import { isV2Conversation, workspaceDisplayName, type ConversationRecord } from "@/session/helpers";
 import {
   addKanbanTask,
   isKanbanTaskOverdue,
+  kanbanSubtasks,
+  kanbanTaskConversationIds,
   kanbanTaskStatusLabel,
   moveKanbanTasks,
   setKanbanTaskStatus,
+  useKanbanTasks,
   type KanbanTask,
   type KanbanTaskStatus,
 } from "@/session/kanbanTasks";
 import { cx } from "@/utils/cx";
 import { ProjectBoardEmptyState } from "./project-board-empty-state";
 import { CreateTicketModal, type NewBoardTask } from "./create-ticket-modal";
-import { TicketDetailModal } from "./ticket-detail-modal";
+import { PriorityChip, TicketDetailModal } from "./ticket-detail-modal";
 import { ProjectBoardControls } from "./project-board-controls";
-import { CONVERSATION_GROUP_DOT, buildBoardColumns, localDate, type BoardColumn, type BoardSort, type LinkedConversation, type WorkspaceTasks } from "./project-board-data";
-import { TaskStatusIcon } from "./project-board-icons";
+import { CONVERSATION_GROUP_DOT, buildBoardColumns, findTaskConversation, type BoardColumn, type BoardSort, type LinkedConversation, type WorkspaceTasks } from "./project-board-data";
 import { useTaskActions, type TaskBoardHandlers } from "./task-actions";
-import { useScheduleText } from "./task-schedule";
+import { scheduleTone, useScheduleText } from "./task-schedule";
 
 const subscribeToDocument = () => () => {};
+const NO_SUBTASKS: KanbanTask[] = [];
 const getPortalRoot = () => document.body;
 const getServerPortalRoot = () => null;
 const SORT_TRANSITION = { duration: 260, easing: "cubic-bezier(0.22, 1, 0.36, 1)" };
@@ -69,11 +74,6 @@ const DROP_TRANSITION = { duration: 320, easing: "cubic-bezier(0.22, 1, 0.36, 1)
 const DROP_SIDE_EFFECTS = defaultDropAnimationSideEffects({
   styles: { active: { opacity: "0" } },
 });
-const SCHEDULE_CHIP: Record<string, string> = {
-  pending: "bg-status-yellow-background text-status-yellow-text",
-  running: "bg-status-lime-background text-status-lime-text",
-  failed: "bg-status-rose-background text-status-rose-text",
-};
 
 // Pick the column under the pointer first. Comparing every card's corners
 // across columns makes short lists steal the drop from a neighbouring list.
@@ -131,16 +131,38 @@ function ConversationAvatars({ linked }: { linked: LinkedConversation[] }) {
   );
 }
 
-function TaskCard({ task, workspaceName, linked, overlay = false }: {
+function shortDate(timestamp: number | string): string {
+  const date = typeof timestamp === "string" ? new Date(`${timestamp}T00:00`) : new Date(timestamp);
+  return new Intl.DateTimeFormat(getLocale(), { month: "short", day: "numeric" }).format(date);
+}
+
+/** Small ring showing the share of finished subtasks. */
+function SubtaskRing({ done, total }: { done: number; total: number }) {
+  const share = total ? done / total : 0;
+  return (
+    <svg aria-hidden viewBox="0 0 16 16" className="size-3.5 shrink-0 -rotate-90">
+      <circle cx="8" cy="8" r="6" fill="none" stroke="var(--color-border-button-default)" strokeWidth="2.5" />
+      {share > 0 ? (
+        <circle cx="8" cy="8" r="6" fill="none" stroke="var(--color-agent-progress-ring)" strokeWidth="2.5" strokeLinecap="round" pathLength={1} strokeDasharray={`${share} 1`} />
+      ) : null}
+    </svg>
+  );
+}
+
+/** A board card, laid out like the BoardUI project board: priority and
+ * workspace chips with the working agents, the title, then since/completed
+ * with the subtask, due date and schedule markers. */
+function TaskCard({ task, workspaceName, linked, subtasks, overlay = false }: {
   task: KanbanTask;
   workspaceName: string;
   linked: LinkedConversation[];
+  subtasks: readonly KanbanTask[];
   overlay?: boolean;
 }) {
   const t = useT();
   const overdue = isKanbanTaskOverdue(task);
   const scheduleText = useScheduleText(task.schedule);
-  const scheduleChip = task.schedule && scheduleText ? SCHEDULE_CHIP[task.schedule.status] : undefined;
+  const doneSubtasks = subtasks.filter((item) => item.status === "done").length;
   return (
     <article
       className={cx(
@@ -151,40 +173,47 @@ function TaskCard({ task, workspaceName, linked, overlay = false }: {
           : "cursor-grab hover:shadow-sm hover:ring-border-button-hover active:cursor-grabbing",
       )}
     >
-      <div className="flex min-h-[22px] items-start justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-1 text-body-2-medium text-text-secondary">
-          <RiFolder6Line className="size-[15px] shrink-0 text-foreground-icon-tertiary" aria-hidden />
-          <span className="truncate">{workspaceName}</span>
+      <div className="flex min-h-[22px] items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-1.5">
+          {task.priority ? <PriorityChip priority={task.priority} className="shrink-0" /> : null}
+          <span className="flex min-w-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-body-2-medium text-text-secondary ring-1 ring-inset ring-border-button-default">
+            <RiFolder6Line className="size-[13px] shrink-0 text-foreground-icon-tertiary" aria-hidden />
+            <span className="truncate">{workspaceName}</span>
+          </span>
         </div>
         <ConversationAvatars linked={linked} />
       </div>
-      {task.dueDate || scheduleChip || linked.length ? (
-        <div className="flex flex-wrap items-center gap-1.5">
+      <h3 className={cx("text-body-medium wrap-anywhere", task.status === "done" ? "text-text-secondary" : "text-text-primary")}>{task.title}</h3>
+      <div className="flex min-w-0 items-center justify-between gap-2 text-body-2-medium text-text-secondary">
+        <span className="truncate">
+          {task.status === "done"
+            ? t("kanban.completedOn", { date: shortDate(task.updatedAt) })
+            : t("kanban.since", { date: shortDate(task.createdAt) })}
+        </span>
+        <span className="flex shrink-0 items-center gap-2.5">
+          {subtasks.length ? (
+            <span className="flex items-center gap-1 tabular-nums" aria-label={t("kanban.subtaskProgress", { done: doneSubtasks, total: subtasks.length })}>
+              <SubtaskRing done={doneSubtasks} total={subtasks.length} />
+              {doneSubtasks}/{subtasks.length}
+            </span>
+          ) : null}
           {task.dueDate ? (
-            <Chip className={cx("gap-1 text-body-2-medium", overdue ? "bg-status-rose-background text-status-rose-text" : "bg-status-blue-background text-status-blue-text")}>
+            <span className={cx("flex items-center gap-1", overdue && "text-text-error-primary")}>
               <RiCalendarLine className="size-[13px] shrink-0" aria-hidden />
-              {task.dueDate}{overdue ? t("kanban.overdue") : ""}
-            </Chip>
+              {shortDate(task.dueDate)}{overdue ? t("kanban.overdue") : ""}
+            </span>
           ) : null}
-          {scheduleChip ? (
-            <Chip className={cx("max-w-full gap-1 text-body-2-medium", scheduleChip)} title={task.schedule?.status === "failed" ? task.schedule.error : undefined}>
-              <RiTimerLine className="size-[13px] shrink-0" aria-hidden />
-              <span className="truncate">{scheduleText}</span>
-            </Chip>
+          {task.schedule && scheduleText ? (
+            <TooltipTrigger delay={200}>
+              <AriaFocusable>
+                <span role="img" aria-label={scheduleText} className={cx("flex", scheduleTone(task.schedule))}>
+                  <RiTimerLine className="size-[14px]" aria-hidden />
+                </span>
+              </AriaFocusable>
+              <Tooltip placement="bottom">{scheduleText}</Tooltip>
+            </TooltipTrigger>
           ) : null}
-          {linked.length ? (
-            <Chip className="gap-1 bg-background-primary-default text-body-2-medium text-text-primary ring-1 ring-inset ring-border-button-default">
-              <RiChat3Line className="size-[13px] shrink-0 opacity-30" aria-hidden />
-              <span className="text-text-secondary">{t("kanban.conversationCount", { count: linked.length })}</span>
-            </Chip>
-          ) : null}
-        </div>
-      ) : null}
-      <div className="flex w-full flex-col gap-[5px]">
-        <h3 className={cx("text-body-medium wrap-anywhere", task.status === "done" ? "text-text-secondary" : "text-text-primary")}>{task.title}</h3>
-        <p className="line-clamp-2 text-body-2-medium text-text-secondary wrap-anywhere">
-          {task.description || t("kanban.createdAt", { date: localDate(task.createdAt) })}
-        </p>
+        </span>
       </div>
     </article>
   );
@@ -193,8 +222,25 @@ function TaskCard({ task, workspaceName, linked, overlay = false }: {
 type CardContext = {
   handlers: TaskBoardHandlers;
   workspaceName: (task: KanbanTask) => string;
+  /** Active subtasks of a task, in order. */
+  subtasks: (task: KanbanTask) => KanbanTask[];
   onOpen: (id: string, options?: { editTitle?: boolean }) => void;
 };
+
+/** The task's own agents followed by one per subtask conversation. */
+function withSubtaskAgents(linked: LinkedConversation[], subtasks: readonly KanbanTask[], conversations: readonly ConversationRecord[]): LinkedConversation[] {
+  const seen = new Set(linked.map((item) => item.conversation.id));
+  const extra: LinkedConversation[] = [];
+  for (const subtask of subtasks) {
+    for (const id of kanbanTaskConversationIds(subtask)) {
+      const conversation = findTaskConversation(conversations, id);
+      if (!conversation || seen.has(conversation.id)) continue;
+      seen.add(conversation.id);
+      extra.push({ conversation, status: "plain", label: subtask.title });
+    }
+  }
+  return [...linked, ...extra];
+}
 
 function SortableTask({ task, columnId, context }: { task: KanbanTask; columnId: KanbanTaskStatus; context: CardContext }) {
   const t = useT();
@@ -246,7 +292,7 @@ function SortableTask({ task, columnId, context }: { task: KanbanTask; columnId:
           animate={{ opacity: 1, scale: 1, filter: "blur(0px)" }}
           transition={{ duration: reduceMotion ? 0 : 0.32, ease: [0.22, 1, 0.36, 1] }}
         >
-          <TaskCard task={task} workspaceName={context.workspaceName(task)} linked={actions.linked} />
+          <TaskCard task={task} workspaceName={context.workspaceName(task)} linked={withSubtaskAgents(actions.linked, context.subtasks(task), context.handlers.conversations)} subtasks={context.subtasks(task)} />
         </motion.div>
       </div>
       <ContextMenu position={menu} onClose={closeMenu}>
@@ -289,7 +335,7 @@ function TaskPresence({ task, columnId, context }: { task: KanbanTask; columnId:
         ) : (
           // Unregister the old sortable immediately; only its visual ghost remains.
           <div className="pointer-events-none opacity-20">
-            <TaskCard task={task} workspaceName={context.workspaceName(task)} linked={[]} overlay />
+            <TaskCard task={task} workspaceName={context.workspaceName(task)} linked={[]} subtasks={context.subtasks(task)} overlay />
           </div>
         )}
       </motion.div>
@@ -321,7 +367,6 @@ function StatusColumn({ column, context, onAdd }: {
     >
       <div className="flex h-5 shrink-0 items-center justify-between px-3">
         <div className="flex min-w-0 items-center gap-1.5">
-          <TaskStatusIcon status={column.id} className="size-4 text-foreground-icon-secondary" />
           <h2 className="truncate text-body-medium text-text-primary">{title}</h2>
           <span className="text-body-medium text-text-secondary">{column.tasks.length}</span>
         </div>
@@ -415,10 +460,20 @@ export function ProjectBoard({ groups, workspaces, total, handlers, defaultWorks
 
   const workspaceNames = useMemo(() => new Map(workspaces.map((workspace) => [workspace.id, workspaceDisplayName(workspace)])), [workspaces]);
   const allTasks = useMemo(() => groups.flatMap((group) => group.tasks), [groups]);
+  const storeTasks = useKanbanTasks();
+  const subtasksByParent = useMemo(() => {
+    const map = new Map<string, KanbanTask[]>();
+    for (const task of storeTasks) {
+      if (!task.parentId || task.deletedAt || map.has(task.parentId)) continue;
+      map.set(task.parentId, kanbanSubtasks(storeTasks, task.parentId));
+    }
+    return map;
+  }, [storeTasks]);
 
   const [createModal, setCreateModal] = useState({ open: false, session: 0, status: undefined as KanbanTaskStatus | undefined });
   const [detail, setDetail] = useState({ id: null as string | null, open: false, session: 0, editTitle: false });
-  const detailTask = allTasks.find((task) => task.id === detail.id);
+  // The sheet also shows subtasks, which are not on the board itself.
+  const detailTask = storeTasks.find((task) => task.id === detail.id && !task.deletedAt);
 
   const openDetail = (id: string, options?: { editTitle?: boolean }) => {
     if (dragColumnsRef.current || performance.now() - lastDragEnd.current < 350) return;
@@ -427,6 +482,7 @@ export function ProjectBoard({ groups, workspaces, total, handlers, defaultWorks
   const context: CardContext = {
     handlers,
     workspaceName: (task) => workspaceNames.get(task.workspaceId) ?? "",
+    subtasks: (task) => subtasksByParent.get(task.id) ?? NO_SUBTASKS,
     onOpen: openDetail,
   };
 
@@ -436,7 +492,7 @@ export function ProjectBoard({ groups, workspaces, total, handlers, defaultWorks
   const closeCreateModal = () => setCreateModal((current) => ({ ...current, open: false }));
 
   const createTask = (draft: NewBoardTask) => {
-    const task = addKanbanTask(draft.workspaceId, draft.title, { description: draft.description, dueDate: draft.dueDate });
+    const task = addKanbanTask(draft.workspaceId, draft.title, { description: draft.description, dueDate: draft.dueDate, priority: draft.priority ?? undefined });
     if (!task) return false;
     if (draft.status !== "planned") setKanbanTaskStatus(task.id, draft.status);
     if (filter !== "all" && filter !== draft.workspaceId) setWorkspaceFilter("all");
@@ -589,7 +645,7 @@ export function ProjectBoard({ groups, workspaces, total, handlers, defaultWorks
               <DragOverlay dropAnimation={reduceMotion ? null : { ...DROP_TRANSITION, sideEffects: DROP_SIDE_EFFECTS }}>
                 {activeTask ? (
                   <div dir={direction} className="origin-top-left" style={{ width: dragWidth, transform: `scale(${dragScale})` }}>
-                    <TaskCard task={activeTask} workspaceName={context.workspaceName(activeTask)} linked={[]} overlay />
+                    <TaskCard task={activeTask} workspaceName={context.workspaceName(activeTask)} linked={[]} subtasks={context.subtasks(activeTask)} overlay />
                   </div>
                 ) : null}
               </DragOverlay>,
@@ -599,12 +655,13 @@ export function ProjectBoard({ groups, workspaces, total, handlers, defaultWorks
       </DndContext>
       {detailTask ? (
         <TicketDetailModal
-          key={`${detail.id}-${detail.session}`}
+          key={detail.session}
           isOpen={detail.open}
           task={detailTask}
           workspaces={workspaces}
           handlers={handlers}
           editTitle={detail.editTitle}
+          onOpenTask={(id) => setDetail((current) => ({ ...current, id, editTitle: false }))}
           onClose={() => setDetail((current) => ({ ...current, open: false }))}
         />
       ) : null}

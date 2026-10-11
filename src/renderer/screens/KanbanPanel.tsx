@@ -14,7 +14,9 @@ import type { TodeXSession } from '../session/useTodeXSession';
 import { useT } from '../i18n';
 import {
   attachKanbanTask,
+  getKanbanTasks,
   kanbanBackendLocalTime,
+  kanbanTaskCanStartConversation,
   kanbanTaskConversationIds,
   kanbanTaskDraftText,
   kanbanTasksForWorkspace,
@@ -51,6 +53,9 @@ function ScheduleTaskDialog({ session, task, onClose }: {
     .map((id) => findTaskConversation(session.conversations, id))
     .filter((conversation): conversation is ConversationRecord => Boolean(conversation?.v2ConversationId && !conversation.archived));
 
+  // A task holds one conversation: once it has one, a schedule sends to it.
+  const startAllowed = !task || kanbanTaskConversationIds(task).length === 0;
+
   // Reset the form whenever the dialog opens for a task.
   if (task && openedFor !== task.id) {
     const previous = task.schedule?.status === 'pending' ? task.schedule : undefined;
@@ -58,7 +63,7 @@ function ScheduleTaskDialog({ session, task, onClose }: {
       ? targets.find((conversation) => conversation.v2ConversationId === previous.conversationId)
       : undefined;
     setOpenedFor(task.id);
-    setAction(target ? 'send' : 'start');
+    setAction(target || !startAllowed ? 'send' : 'start');
     setConversationId(target?.id ?? targets[0]?.id ?? '');
     setAt(previous?.at ?? (zone ? kanbanBackendLocalTime(zone, Date.now() + 60 * 60_000).slice(0, 14) + '00' : ''));
     setText(previous?.text ?? kanbanTaskDraftText(task));
@@ -71,6 +76,10 @@ function ScheduleTaskDialog({ session, task, onClose }: {
     if (!task || !zone) return;
     if (!at || at <= kanbanBackendLocalTime(zone)) {
       setError(t('kanban.schedulePast'));
+      return;
+    }
+    if (action === 'start' && !startAllowed) {
+      setError(t('kanban.scheduleOneConversation'));
       return;
     }
     const target = action === 'send' ? targets.find((conversation) => conversation.id === conversationId) : undefined;
@@ -112,7 +121,7 @@ function ScheduleTaskDialog({ session, task, onClose }: {
         className="w-full"
         popoverClassName="w-(--trigger-width)"
         selectedKey={action}
-        disabledKeys={targets.length ? [] : ['send']}
+        disabledKeys={[...(startAllowed ? [] : ['start']), ...(targets.length ? [] : ['send'])]}
         onSelectionChange={(key) => setAction(String(key) === 'send' ? 'send' : 'start')}
       >
         <SelectItem id="start" textValue={t('kanban.scheduleStart')}>{t('kanban.scheduleStart')}</SelectItem>
@@ -189,11 +198,12 @@ export function KanbanPanel({ session, onOpenConversation }: Props) {
     onOpenConversation();
   };
 
-  /** Starts another conversation for the task, prefilled with its draft. It
+  /** Starts the task's conversation, prefilled with its draft. It
    * is created on the backend right away: an unsent local draft is dropped
    * as soon as another one opens, and only the backend id resolves on other
    * devices and for schedules. */
   const startTaskConversation = (task: KanbanTask) => {
+    if (!kanbanTaskCanStartConversation(task, getKanbanTasks())) return;
     const created = session.createConversation(task.workspaceId, { title: task.title, fresh: true });
     if (!created) return;
     attachKanbanTask(task.id, created.id);

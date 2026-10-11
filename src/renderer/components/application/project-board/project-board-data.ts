@@ -4,6 +4,7 @@ import {
   kanbanTaskConversationIds,
   kanbanTaskStatuses,
   type KanbanTask,
+  type KanbanTaskPriority,
   type KanbanTaskStatus,
 } from '@/session/kanbanTasks';
 import type { TodeXSession } from '@/session/useTodeXSession';
@@ -15,7 +16,7 @@ import type { TodeXSession } from '@/session/useTodeXSession';
  */
 
 export type BoardColumn = { id: KanbanTaskStatus; tasks: KanbanTask[] };
-export type BoardSort = 'manual' | 'title' | 'due';
+export type BoardSort = 'manual' | 'priority' | 'title' | 'due';
 export type WorkspaceTasks = { workspace: WorkspaceRecord; tasks: KanbanTask[] };
 
 export type LatestEntries = Record<string, { latest: TimelineEntry | undefined; latestIncomingAt: number }>;
@@ -32,12 +33,31 @@ export const CONVERSATION_GROUP_DOT: Record<ConversationGroupKind, string> = {
   stale: 'bg-foreground-icon-quaternary',
 };
 
+/** Chip color per priority (low → urgent), as on the BoardUI project board. */
+export const PRIORITY_CHIP_COLOR: Record<KanbanTaskPriority, 'blue' | 'yellow' | 'orange' | 'rose'> = {
+  low: 'blue',
+  medium: 'yellow',
+  high: 'orange',
+  urgent: 'rose',
+};
+
+/** Flag color per priority in pickers (the chip's text color). */
+export const PRIORITY_FLAG_CLASS: Record<KanbanTaskPriority, string> = {
+  low: 'text-status-blue-text',
+  medium: 'text-status-yellow-text',
+  high: 'text-status-orange-text',
+  urgent: 'text-status-rose-text',
+};
+
+const PRIORITY_RANK: Record<KanbanTaskPriority, number> = { urgent: 0, high: 1, medium: 2, low: 3 };
+
 /** Columns in status order, each holding the matching tasks of every
  * workspace in sidebar order (the per-workspace lists arrive sorted). */
 export function buildBoardColumns(groups: readonly WorkspaceTasks[], sort: BoardSort): BoardColumn[] {
   return kanbanTaskStatuses.map((status) => {
     const tasks = groups.flatMap((group) => group.tasks.filter((task) => task.status === status));
     if (sort === 'title') tasks.sort((a, b) => a.title.localeCompare(b.title));
+    else if (sort === 'priority') tasks.sort((a, b) => (a.priority ? PRIORITY_RANK[a.priority] : 4) - (b.priority ? PRIORITY_RANK[b.priority] : 4));
     else if (sort === 'due') tasks.sort((a, b) => (a.dueDate ?? '9999').localeCompare(b.dueDate ?? '9999'));
     return { id: status, tasks };
   });

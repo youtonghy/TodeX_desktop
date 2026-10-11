@@ -2,7 +2,7 @@
 
 import { useTemplateCopy } from "@/components/foundations/template-copy/template-copy";
 
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useState, type ReactNode } from "react";
 import { AnimatePresence, LayoutGroup, motion } from "motion/react";
 import { cx } from "@/utils/cx";
 
@@ -588,4 +588,117 @@ export function AgentProgress({
       </AnimatePresence>
     </motion.div>
   ));
+}
+
+/** A step of a {@link TaskProgress} list. */
+export interface TaskProgressItem {
+  id: string;
+  label: string;
+  state: "done" | "active" | "pending";
+  /** Trailing details (linked agent, schedule) at the end of the row. */
+  trailing?: ReactNode;
+}
+
+function ActiveStepSpinner() {
+  return (
+    <svg aria-hidden viewBox="0 0 14 14" className="size-3.5 shrink-0 animate-spin motion-reduce:animate-none">
+      <circle cx="7" cy="7" r="5.75" fill="none" stroke="var(--color-border-button-default)" strokeWidth="1.5" />
+      <circle
+        cx="7" cy="7" r="5.75" fill="none"
+        stroke="var(--color-agent-progress-ring)" strokeWidth="1.5" strokeLinecap="round"
+        pathLength={1} strokeDasharray="0.3 1"
+      />
+    </svg>
+  );
+}
+
+/**
+ * The agent-progress module driven by real steps instead of the demo clock:
+ * the header ring fills with the share of finished steps, each row shows its
+ * state (finished rows struck through, the running one outlined), and a row
+ * opens through `onSelect`. `footer` sits under the list (e.g. an add field).
+ */
+export function TaskProgress({
+  items,
+  status,
+  onSelect,
+  footer,
+  label,
+  className,
+}: {
+  items: readonly TaskProgressItem[];
+  /** Header label, e.g. "3 left" / "All done". */
+  status: string;
+  onSelect: (id: string) => void;
+  footer?: ReactNode;
+  /** Accessible name of the list. */
+  label: string;
+  className?: string;
+}) {
+  const layoutGroupId = useId();
+  const doneCount = items.filter((item) => item.state === "done").length;
+  const share = items.length ? doneCount / items.length : 0;
+  return (
+    <div
+      className={cx(
+        "relative w-full overflow-hidden rounded-2xl border border-border-button-default bg-background-primary-default px-2.5 pt-2 pb-2.5 shadow-xs",
+        className,
+      )}
+    >
+      <div className="flex h-6 w-full items-center gap-2 ps-1 pt-1">
+        <svg aria-hidden viewBox="0 0 16 16" width={16} height={16} className="shrink-0 -rotate-90">
+          <circle cx="8" cy="8" r="6.75" fill="none" stroke="var(--color-border-button-default)" strokeWidth="2.5" />
+          <motion.circle
+            cx="8" cy="8" r="6.75" fill="none"
+            stroke="var(--color-agent-progress-ring)" strokeWidth="2.5" strokeLinecap="round"
+            initial={false}
+            animate={{ pathLength: share, opacity: share > 0 ? 1 : 0 }}
+            transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
+          />
+        </svg>
+        <AnimatedStatusLabel label={status} className="flex-1 text-body-medium text-text-secondary" />
+        <span className="text-body-2-medium text-text-tertiary tabular-nums">{doneCount}/{items.length}</span>
+      </div>
+      <LayoutGroup id={layoutGroupId}>
+        <ul aria-label={label} className={cx("flex flex-col gap-1.5", items.length > 0 && "mt-[9px]")}>
+          {items.map((item) => {
+            const complete = item.state === "done";
+            const active = item.state === "active";
+            return (
+              <motion.li key={item.id} layout="position" transition={ACTIVE_BORDER_TRANSITION} className="min-h-8 w-full">
+                <button
+                  type="button"
+                  onClick={() => onSelect(item.id)}
+                  className={cx(
+                    "relative flex h-8 w-full cursor-pointer items-center gap-2 rounded-full text-start outline-none transition-[padding,background-color] duration-300 ease-out",
+                    "hover:bg-background-secondary-hover focus-visible:ring-2 focus-visible:ring-border-focus-ring",
+                    active ? "ps-[9px] pe-[13px]" : "px-1",
+                  )}
+                >
+                  {active && (
+                    <motion.span
+                      layoutId="active-step-border"
+                      aria-hidden
+                      className="pointer-events-none absolute inset-0 rounded-full border border-border-button-default"
+                      transition={ACTIVE_BORDER_TRANSITION}
+                    />
+                  )}
+                  <span className="relative z-10 flex size-3.5 shrink-0 items-center justify-center">
+                    {complete ? <span className="absolute inset-[-0.5px]"><CompletedStepIcon /></span>
+                      : active ? <ActiveStepSpinner />
+                        : <span className="absolute inset-[-0.5px]"><PendingStepIcon /></span>}
+                  </span>
+                  <span className="relative z-10 flex min-w-0 flex-1 items-center truncate leading-5">
+                    <AnimatedStepLabel label={item.label} complete={complete} active={active} />
+                  </span>
+                  {item.trailing ? <span className="relative z-10 flex shrink-0 items-center gap-1.5">{item.trailing}</span> : null}
+                </button>
+              </motion.li>
+            );
+          })}
+        </ul>
+      </LayoutGroup>
+      {footer ? <div className="mt-1.5">{footer}</div> : null}
+    </div>
+  );
 }
