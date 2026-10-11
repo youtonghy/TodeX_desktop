@@ -8,6 +8,12 @@ export const zhCN = {
   'common.save': '保存',
   'common.delete': '删除',
   'common.copy': '复制',
+  'common.close': '关闭',
+  'common.copied': '已复制',
+  'common.copyCode': '复制代码',
+  'common.dismiss': '关闭通知',
+  'common.notifications': '通知',
+  'common.resizePanels': '调整面板大小',
 
   // app
   'app.loading': '加载中…',

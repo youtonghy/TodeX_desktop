@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ViewBounds } from '../../preload/index';
 
-/** Overlays a native view would cover: dialogs, menus, popovers, listboxes. */
-const OVERLAY_SELECTOR = '[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"], [data-slot="popover"]';
+/** Overlays a native view would cover: dialogs, menus, listboxes, and any
+ * react-aria popover (they carry [data-trigger]). */
+const OVERLAY_SELECTOR = '[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"], [data-trigger]';
 
 function overlayOpen(): boolean {
   return document.querySelector(OVERLAY_SELECTOR) !== null;
@@ -26,7 +27,7 @@ export function useNativeViewHost(key: string | undefined, isActive: boolean, ap
 
   useEffect(() => {
     const observer = new MutationObserver(() => setCovered(overlayOpen()));
-    observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['role', 'data-slot'] });
+    observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['role', 'data-trigger'] });
     return () => observer.disconnect();
   }, []);
 

@@ -8,6 +8,12 @@ export const ko: Messages = {
   'common.save': '저장',
   'common.delete': '삭제',
   'common.copy': '복사',
+  'common.close': '닫기',
+  'common.copied': '복사됨',
+  'common.copyCode': '코드 복사',
+  'common.dismiss': '알림 닫기',
+  'common.notifications': '알림',
+  'common.resizePanels': '패널 크기 조정',
 
   // app
   'app.loading': '불러오는 중…',

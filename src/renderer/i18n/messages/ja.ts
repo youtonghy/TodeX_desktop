@@ -8,6 +8,12 @@ export const ja: Messages = {
   'common.save': '保存',
   'common.delete': '削除',
   'common.copy': 'コピー',
+  'common.close': '閉じる',
+  'common.copied': 'コピーしました',
+  'common.copyCode': 'コードをコピー',
+  'common.dismiss': '通知を閉じる',
+  'common.notifications': '通知',
+  'common.resizePanels': 'パネルのサイズを変更',
 
   // app
   'app.loading': '読み込み中…',

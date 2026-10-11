@@ -8,6 +8,12 @@ export const en: Messages = {
   'common.save': 'Save',
   'common.delete': 'Delete',
   'common.copy': 'Copy',
+  'common.close': 'Close',
+  'common.copied': 'Copied',
+  'common.copyCode': 'Copy code',
+  'common.dismiss': 'Dismiss',
+  'common.notifications': 'Notifications',
+  'common.resizePanels': 'Resize panels',
 
   // app
   'app.loading': 'Loading…',
