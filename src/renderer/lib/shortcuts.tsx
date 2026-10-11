@@ -12,7 +12,8 @@ export type ShortcutId =
   | 'sshTerminal'
   | 'gitActions'
   | 'toggleSidebar'
-  | 'toggleAside';
+  | 'toggleAside'
+  | 'quickSearch';
 
 type ShortcutCombo = {
   /** Physical key, compared against KeyboardEvent.code (e.g. 'KeyN'). */
@@ -23,6 +24,9 @@ type ShortcutCombo = {
   mod?: boolean;
   shift?: boolean;
   alt?: boolean;
+  /** Left alone while typing in a field or the terminal, which own the key
+   * (Ctrl+L clears an xterm screen). */
+  outsideEditors?: boolean;
 };
 
 const COMBOS: Record<ShortcutId, ShortcutCombo> = {
@@ -33,6 +37,7 @@ const COMBOS: Record<ShortcutId, ShortcutCombo> = {
   newWorkspace: { code: 'KeyN', label: 'N', mod: true, shift: true },
   kanban: { code: 'KeyK', label: 'K', mod: true, shift: true },
   sshTerminal: { code: 'KeyT', label: 'T', mod: true, shift: true },
+  quickSearch: { code: 'KeyL', label: 'L', mod: true, outsideEditors: true },
 };
 
 const MODIFIER_KEY = isMacLike ? 'Meta' : 'Control';
@@ -41,6 +46,10 @@ const HINT_DELAY_MS = 250;
 function isEditableTarget(target: EventTarget | null): boolean {
   return target instanceof HTMLElement
     && Boolean(target.closest('input, textarea, [contenteditable="true"], [contenteditable=""]'));
+}
+
+function isTerminalTarget(target: EventTarget | null): boolean {
+  return target instanceof Element && Boolean(target.closest('.xterm'));
 }
 
 function matchesCombo(event: KeyboardEvent, combo: ShortcutCombo): boolean {
@@ -107,6 +116,7 @@ export function useAppShortcuts(handlers: Partial<Record<ShortcutId, () => void>
         if (!matchesCombo(event, combo)) continue;
         // Option is a dead-key modifier on macOS (⌥N → ˜); never steal it while typing.
         if (combo.alt && isEditableTarget(event.target)) return;
+        if (combo.outsideEditors && (isEditableTarget(event.target) || isTerminalTarget(event.target))) return;
         const handler = handlersRef.current[id];
         if (!handler) return;
         event.preventDefault();
@@ -119,16 +129,19 @@ export function useAppShortcuts(handlers: Partial<Record<ShortcutId, () => void>
   }, []);
 }
 
-export function ShortcutHint({ id, className }: { id: ShortcutId; className?: string }) {
+/** The key combination as shown to the user: ⌥ ⇧ ⌘ glyphs on macOS (the
+ * platform's own modifier order), spelled-out modifiers elsewhere. */
+export function shortcutKeys(id: ShortcutId): string {
   const combo = COMBOS[id];
-  // ⌥ ⇧ ⌘ glyphs on macOS (the platform's own modifier order), spelled-out
-  // modifiers elsewhere.
-  const keys = isMacLike
+  return isMacLike
     ? `${combo.alt ? '⌥' : ''}${combo.shift ? '⇧' : ''}${combo.mod ? '⌘' : ''}${combo.label}`
     : [combo.alt && 'Alt', combo.shift && 'Shift', combo.mod && 'Ctrl', combo.label].filter(Boolean).join('+');
+}
+
+export function ShortcutHint({ id, className }: { id: ShortcutId; className?: string }) {
   return (
     <span aria-hidden="true" className={cx('shortcut-hint', className)}>
-      <Kbd className="shortcut-hint__kbd">{keys}</Kbd>
+      <Kbd className="shortcut-hint__kbd">{shortcutKeys(id)}</Kbd>
     </span>
   );
 }

@@ -494,6 +494,7 @@ export function App() {
     <AppSidebar
       session={session}
       open={sidebarOpen}
+      onOpenChange={persistSidebarOpen}
       mobile={isMobile}
       onCloseMobile={() => setMobileNavOpen(false)}
       onCreateWorkspace={() => { setEditingWorkspaceId(null); setCreateOpen(true); }}
