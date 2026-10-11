@@ -36,6 +36,57 @@ function demoCleanupPolicy() {
   return { policy: cleanupPolicy, lastRun: null, nextRunAt: cleanupPolicy.enabled ? new Date(Date.now() + 3_600_000).toISOString() : null };
 }
 
+type DemoNativeSession = { id: string; title: string | null; cwd: string | null; createdAt: string | null; updatedAt: string; bytes: number; referencedBy: string[]; running: boolean };
+const DAY = 86_400_000;
+const demoNativeAt = (daysAgo: number) => new Date(Date.now() - daysAgo * DAY).toISOString();
+const demoNativeSessions: Record<string, DemoNativeSession[]> = {
+  'claude-code': [
+    { id: '0f9d6c1e-7a1b-4c55-9e1a-3c1b2a4d5e60', title: '重构结账页表单校验', cwd: `${fixtures.DEMO_ROOT}/lumen-web`, createdAt: demoNativeAt(1), updatedAt: demoNativeAt(0.1), bytes: 4_800_000, referencedBy: ['demo-conversation'], running: false },
+    { id: '2b7e1d0c-4f3a-4e2b-8c9d-1a2b3c4d5e6f', title: '排查 Safari 下商品卡片抖动', cwd: `${fixtures.DEMO_ROOT}/lumen-web`, createdAt: demoNativeAt(0.2), updatedAt: demoNativeAt(0.01), bytes: 1_200_000, referencedBy: [], running: true },
+    { id: '5c4b3a29-1807-4f6e-9d5c-4b3a29180716', title: '升级 Vite 到 7', cwd: `${fixtures.DEMO_ROOT}/infra-scripts`, createdAt: demoNativeAt(40), updatedAt: demoNativeAt(38), bytes: 9_600_000, referencedBy: [], running: false },
+    { id: '7d6e5f40-3a2b-4c1d-8e9f-0a1b2c3d4e5f', title: null, cwd: `${fixtures.DEMO_ROOT}/lumen-api`, createdAt: demoNativeAt(12), updatedAt: demoNativeAt(11), bytes: 310_000, referencedBy: [], running: false },
+  ],
+  pi: [
+    { id: '9a8b7c6d-5e4f-4a3b-9c2d-1e0f9a8b7c6d', title: '整理 design-tokens 命名', cwd: `${fixtures.DEMO_ROOT}/design-tokens`, createdAt: demoNativeAt(3), updatedAt: demoNativeAt(2), bytes: 420_000, referencedBy: [], running: false },
+    { id: 'b1c2d3e4-f5a6-4b7c-8d9e-0f1a2b3c4d5e', title: '为订单列表加分页', cwd: `${fixtures.DEMO_ROOT}/lumen-web`, createdAt: demoNativeAt(20), updatedAt: demoNativeAt(19), bytes: 880_000, referencedBy: ['demo-conversation-2'], running: false },
+  ],
+};
+const demoNativePolicies: Record<string, typeof cleanupPolicy> = {
+  'claude-code': { enabled: false, maxAgeDays: null, maxTotalBytes: null },
+  pi: { enabled: false, maxAgeDays: null, maxTotalBytes: null },
+};
+let demoClaudeRetention: number | null = 30;
+
+function demoNativeList(provider: string) {
+  const sessions = demoNativeSessions[provider] ?? [];
+  return { provider, root: provider === 'pi' ? '/home/demo/.pi/agent/sessions' : '/home/demo/.claude/projects', totalBytes: sessions.reduce((sum, item) => sum + item.bytes, 0), count: sessions.length, measuredAt: new Date().toISOString(), sessions };
+}
+
+function demoNativePolicy(provider: string) {
+  const policy = demoNativePolicies[provider];
+  return { policy, lastRun: null, nextRunAt: policy.enabled ? new Date(Date.now() + 3_600_000).toISOString() : null };
+}
+
+function demoNativeDelete(provider: string, ids: string[]) {
+  const sessions = demoNativeSessions[provider] ?? [];
+  const deleted: string[] = [];
+  const skipped: Array<{ conversationId: string; code: string; message: string }> = [];
+  let freedBytes = 0;
+  for (const id of ids) {
+    const index = sessions.findIndex((item) => item.id === id);
+    if (index < 0) continue;
+    const item = sessions[index];
+    if (item.running || item.referencedBy.length > 0) {
+      skipped.push({ conversationId: id, code: 'CONFLICT', message: 'session is in use' });
+      continue;
+    }
+    freedBytes += item.bytes;
+    sessions.splice(index, 1);
+    deleted.push(id);
+  }
+  return { deleted, skipped, freedBytes };
+}
+
 function demoDelete(ids: string[]) {
   const deleted: string[] = [];
   let freedBytes = 0;
@@ -249,6 +300,13 @@ function route(request: SecureRequest): SecureResponse {
       }
       case '/v2/history/cleanup-policy':
         return json(demoCleanupPolicy());
+      case '/v2/native-history/providers':
+        return json({ providers: (['claude-code', 'pi'] as const).map((id) => {
+          const list = demoNativeList(id);
+          return { provider: id, available: true, root: list.root, sessionCount: list.count, totalBytes: list.totalBytes, measuredAt: list.measuredAt, native: id === 'claude-code' ? { cleanupPeriodDays: demoClaudeRetention, settingsPath: '/home/demo/.claude/settings.json' } : null };
+        }) });
+      case '/v2/native-history/claude-code/native-retention':
+        return json({ cleanupPeriodDays: demoClaudeRetention, settingsPath: '/home/demo/.claude/settings.json' });
       case '/v2/agent-desktop':
         return json(agentDesktop);
       case '/v2/agent-browser/profiles':
@@ -269,6 +327,22 @@ function route(request: SecureRequest): SecureResponse {
     const conversation = path.match(/^\/v2\/conversations\/([^/]+)(\/events)?$/);
     const journal = conversation ? journals.get(decodeURIComponent(conversation[1])) : undefined;
     if (journal) return json(conversation?.[2] ? replay(journal, query) : journal.manifest);
+    const nativeList = path.match(/^\/v2\/native-history\/(claude-code|pi)\/(sessions|policy)$/);
+    if (nativeList) return json(nativeList[2] === 'sessions' ? demoNativeList(nativeList[1]) : demoNativePolicy(nativeList[1]));
+    const nativeTranscript = path.match(/^\/v2\/native-history\/(claude-code|pi)\/sessions\/([^/]+)\/transcript$/);
+    if (nativeTranscript) {
+      const item = demoNativeSessions[nativeTranscript[1]]?.find((entry) => entry.id === decodeURIComponent(nativeTranscript[2]));
+      if (!item) return notFound(method, path);
+      return json({
+        provider: nativeTranscript[1], id: item.id, title: item.title, cwd: item.cwd, totalMessages: 214, truncated: true,
+        messages: [
+          { role: 'user', text: item.title ?? '看一下这个目录', at: item.createdAt },
+          { role: 'assistant', text: '我先看看相关文件的结构，再给出修改方案。', at: item.createdAt },
+          { role: 'tool', text: 'Read: {"file_path":"src/checkout/schema.ts"}', at: item.createdAt },
+          { role: 'assistant', text: '改好了：\n- 字段错误改用语义 token\n- 文案集中到 messages.ts', at: item.updatedAt },
+        ],
+      });
+    }
     const live = path.match(/^\/v2\/agent-providers\/([^/]+)\/live$/);
     if (live) {
       const bucket = fixtures.demoAgentProviders.agents[live[1] as keyof typeof fixtures.demoAgentProviders.agents];
@@ -285,6 +359,27 @@ function route(request: SecureRequest): SecureResponse {
   if (path === '/v2/kanban/tasks' && method === 'PUT') {
     if (Array.isArray(body.tasks)) kanbanTasks = body.tasks as typeof kanbanTasks;
     return json({ tasks: kanbanTasks });
+  }
+  const nativeAction = path.match(/^\/v2\/native-history\/(claude-code|pi)\/(cleanup|policy|policy\/run|native-retention)$/);
+  if (nativeAction) {
+    const [, nativeProvider, action] = nativeAction;
+    if (action === 'cleanup') return json(demoNativeDelete(nativeProvider, Array.isArray(body.sessionIds) ? body.sessionIds.map(String) : []));
+    if (action === 'native-retention') {
+      demoClaudeRetention = typeof body.cleanupPeriodDays === 'number' ? body.cleanupPeriodDays : null;
+      return json({ cleanupPeriodDays: demoClaudeRetention, settingsPath: '/home/demo/.claude/settings.json' });
+    }
+    if (action === 'policy') {
+      demoNativePolicies[nativeProvider] = {
+        enabled: body.enabled === true,
+        maxAgeDays: typeof body.maxAgeDays === 'number' ? body.maxAgeDays : null,
+        maxTotalBytes: typeof body.maxTotalBytes === 'number' ? body.maxTotalBytes : null,
+      };
+      return json(demoNativePolicy(nativeProvider));
+    }
+    const maxAge = demoNativePolicies[nativeProvider].maxAgeDays;
+    const expired = (demoNativeSessions[nativeProvider] ?? []).filter((item) => maxAge != null && Date.parse(item.updatedAt) < Date.now() - maxAge * DAY);
+    const result = demoNativeDelete(nativeProvider, expired.map((item) => item.id));
+    return json({ ...result, lastRun: { at: now, trigger: 'manual', deleted: result.deleted.length, freedBytes: result.freedBytes, error: null } });
   }
   if (path === '/v2/history/cleanup' && method === 'POST') {
     return json(demoDelete(Array.isArray(body.conversationIds) ? body.conversationIds.map(String) : []));
