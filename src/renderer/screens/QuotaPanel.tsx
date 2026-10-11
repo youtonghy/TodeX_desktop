@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Button, Card, Chip, Meter } from '@heroui/react';
 import { RiRefreshLine, RiVipCrownLine } from '@remixicon/react';
+import { Chip } from '@/components/base/badges/chip';
+import { Button } from '@/components/base/buttons/button';
+import { EmptyState } from '@/components/ui/empty-state';
+import { Meter } from '@/components/ui/progress-bar';
+import { SpinnerIcon } from '@/components/ui/spinner';
 import type { ProviderQuotaSnapshot, QuotaWindow } from '@todex/protocol/v2';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { ProviderIcon } from '../components/ProviderIcon';
@@ -47,29 +51,28 @@ function formatQuotaTime(unixSeconds: number): string {
   });
 }
 
+// Plan-limit row from the BoardUI agent-limits recipe: label and percent over
+// a thin usage bar, the reset time underneath.
 function QuotaWindowRow({ window }: { window: QuotaWindow }) {
   const percent = typeof window.usedPercent === 'number' ? Math.min(100, Math.max(0, window.usedPercent)) : null;
   return (
-    <div className="flex flex-col gap-1">
-      <div className="flex items-baseline justify-between gap-2">
-        <span className="text-muted text-xs">{quotaWindowLabel(window)}</span>
-        <span className="text-xs tabular-nums">
+    <div className="flex flex-col gap-1.5">
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="min-w-0 truncate text-body-medium text-text-primary">{quotaWindowLabel(window)}</span>
+        <span className="shrink-0 text-body-medium text-text-primary tabular-nums">
           {percent === null ? '—' : t('usage.quotaUsed', { percent: Math.round(percent) })}
         </span>
       </div>
-      <Meter
-        aria-label={quotaWindowLabel(window)}
-        aria-hidden={percent === null}
-        size="sm"
-        color={percent !== null && percent >= 90 ? 'danger' : percent !== null && percent >= 75 ? 'warning' : 'accent'}
-        value={percent ?? 0}
-      >
-        <Meter.Track>
-          <Meter.Fill />
-        </Meter.Track>
-      </Meter>
+      <div aria-hidden={percent === null ? true : undefined}>
+        <Meter
+          aria-label={quotaWindowLabel(window)}
+          showValue={false}
+          tone={percent !== null && percent >= 90 ? 'danger' : percent !== null && percent >= 75 ? 'warning' : 'accent'}
+          value={percent ?? 0}
+        />
+      </div>
       {window.resetsAt ? (
-        <span className="text-muted text-[11px]">{t('usage.quotaResets', { time: formatQuotaTime(window.resetsAt) })}</span>
+        <span className="text-body-2-regular text-text-tertiary">{t('usage.quotaResets', { time: formatQuotaTime(window.resetsAt) })}</span>
       ) : null}
     </div>
   );
@@ -79,20 +82,20 @@ function QuotaCard({ snapshot, displayName }: { snapshot: ProviderQuotaSnapshot;
   const windows = (snapshot.windows ?? []).filter((window) => window && typeof window.id === 'string');
   const fetchedAt = typeof snapshot.fetchedAt === 'number' ? new Date(snapshot.fetchedAt).toLocaleTimeString(getLocale(), { hour: '2-digit', minute: '2-digit' }) : null;
   return (
-    <Card className="min-w-0 p-4">
-      <div className="flex items-center gap-2">
+    <section className="flex min-w-0 flex-col rounded-2xl bg-background-secondary-default px-4 pt-3 pb-4">
+      <div className="flex min-w-0 items-center gap-2">
         <ProviderIcon provider={snapshot.provider} className="size-4" />
-        <span className="truncate text-sm font-medium">{displayName}</span>
-        {snapshot.planType ? <Chip size="sm" variant="soft" className="capitalize">{snapshot.planType}</Chip> : null}
-        {fetchedAt ? <span className="text-muted ml-auto shrink-0 text-[11px]">{t('usage.quotaUpdated', { time: fetchedAt })}</span> : null}
+        <span className="truncate text-body-medium text-text-primary">{displayName}</span>
+        {snapshot.planType ? <Chip variant="caption" color="neutral" className="capitalize">{snapshot.planType}</Chip> : null}
+        {fetchedAt ? <span className="ml-auto shrink-0 text-caption-2-regular text-text-tertiary">{t('usage.quotaUpdated', { time: fetchedAt })}</span> : null}
       </div>
       {snapshot.state === 'ok' ? (
         <div className="mt-3 flex flex-col gap-3">
           {windows.map((window) => <QuotaWindowRow key={window.id} window={window} />)}
-          {windows.length === 0 ? <p className="text-muted text-xs">{t('usage.quotaIdle')}</p> : null}
+          {windows.length === 0 ? <p className="text-body-2-regular text-text-secondary">{t('usage.quotaIdle')}</p> : null}
         </div>
       ) : (
-        <p className="text-muted mt-3 text-xs">
+        <p className="mt-3 text-body-2-regular text-text-secondary">
           {snapshot.state === 'unsupported'
             ? t('usage.quotaUnsupported')
             : snapshot.state === 'idle'
@@ -100,7 +103,7 @@ function QuotaCard({ snapshot, displayName }: { snapshot: ProviderQuotaSnapshot;
               : t('usage.quotaError', { reason: snapshot.reason ?? '—' })}
         </p>
       )}
-    </Card>
+    </section>
   );
 }
 
@@ -150,22 +153,30 @@ export function QuotaPanel({ session }: Props) {
   return (
     <div className="flex flex-col gap-5 py-1">
       <div className="flex items-center justify-between gap-3">
-        <p className="text-muted text-sm">{t('usage.quotaHint')}</p>
-        <Button size="sm" variant="ghost" isDisabled={loading} onPress={() => void refresh()}>
-          <RiRefreshLine className={`size-4 ${loading ? 'animate-spin' : ''}`} />
+        <p className="text-body-regular text-text-secondary">{t('usage.quotaHint')}</p>
+        <Button
+          size="small"
+          variant="secondary"
+          className="shrink-0"
+          leadingIcon={loading ? SpinnerIcon : RiRefreshLine}
+          disabled={loading}
+          aria-busy={loading || undefined}
+          onClick={() => void refresh()}
+        >
           {t('usage.quotaRefresh')}
         </Button>
       </div>
-      {error ? <p className="text-danger text-xs">{t('usage.quotaError', { reason: error })}</p> : null}
+      {error ? <p className="text-caption-1-regular text-text-error-primary">{t('usage.quotaError', { reason: error })}</p> : null}
       {ordered.length ? (
         <div className="grid gap-3 md:grid-cols-2">
           {ordered.map((snapshot) => <QuotaCard key={snapshot.provider} snapshot={snapshot} displayName={displayName(snapshot.provider)} />)}
         </div>
       ) : (
-        <div className="flex min-h-48 flex-col items-center justify-center text-center">
-          <RiVipCrownLine className="text-muted size-7" />
-          <p className="mt-3 text-sm font-medium">{t(error ? 'usage.quotaError' : 'usage.quotaLoading', { reason: error ?? '' })}</p>
-        </div>
+        <EmptyState
+          className="min-h-48"
+          icon={RiVipCrownLine}
+          title={t(error ? 'usage.quotaError' : 'usage.quotaLoading', { reason: error ?? '' })}
+        />
       )}
     </div>
   );

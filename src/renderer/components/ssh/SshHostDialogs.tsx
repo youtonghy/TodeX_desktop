@@ -1,10 +1,27 @@
 import { useState, type ReactNode } from 'react';
-import { Alert, Button, Dropdown, Label, ListBox, Modal, Select, Spinner, TextArea, TextField, toast } from '@heroui/react';
+import { Button as AriaButton } from 'react-aria-components';
 import { RiKey2Line } from '@remixicon/react';
 import type { FtpProtocol, FtpSite, FtpSiteInput, ManagedHost, SshHostImportResult, SshKey } from '@todex/protocol/ssh';
 import { Field } from '../Field';
 import { useT } from '../../i18n';
 import { errorMessage, parsePort, type SshApi } from './sshShared';
+import { Button } from '@/components/base/buttons/button';
+import { Select, SelectItem } from '@/components/base/select/select';
+import { Textarea } from '@/components/base/textarea/textarea';
+import { Alert } from '@/components/ui/alert';
+import { Menu, MenuItem, MenuPopover, MenuTrigger } from '@/components/ui/menu';
+import { Modal } from '@/components/ui/modal';
+import { SpinnerIcon } from '@/components/ui/spinner';
+import { toast } from '@/components/ui/toast';
+import { cx } from '@/utils/cx';
+
+function SaveButton({ saving, disabled, onClick, children }: { saving: boolean; disabled?: boolean; onClick: () => void; children: ReactNode }) {
+  return (
+    <Button disabled={saving || disabled} leadingIcon={saving ? SpinnerIcon : undefined} aria-busy={saving || undefined} onClick={onClick}>
+      {children}
+    </Button>
+  );
+}
 
 function DialogShell({ title, onClose, footer, children, wide = false }: {
   title: string;
@@ -14,16 +31,17 @@ function DialogShell({ title, onClose, footer, children, wide = false }: {
   wide?: boolean;
 }) {
   return (
-    <Modal.Backdrop isOpen onOpenChange={(open) => { if (!open) onClose(); }}>
-      <Modal.Container>
-        <Modal.Dialog className={`max-h-[90vh] ${wide ? 'sm:max-w-2xl' : 'sm:max-w-lg'}`}>
-          <Modal.CloseTrigger />
-          <Modal.Header><Modal.Heading>{title}</Modal.Heading></Modal.Header>
-          <Modal.Body className="flex max-h-[70vh] flex-col gap-4 overflow-y-auto">{children}</Modal.Body>
-          <Modal.Footer>{footer}</Modal.Footer>
-        </Modal.Dialog>
-      </Modal.Container>
-    </Modal.Backdrop>
+    <Modal
+      isOpen
+      onOpenChange={(open) => { if (!open) onClose(); }}
+      title={title}
+      size={wide ? '2xl' : 'lg'}
+      className="max-h-[90vh]"
+      bodyClassName="flex flex-col gap-4"
+      footer={footer}
+    >
+      {children}
+    </Modal>
   );
 }
 
@@ -82,8 +100,8 @@ export function SshHostFormDialog({ api, host, keys, onClose, onSaved }: {
       onClose={onClose}
       footer={(
         <>
-          <Button slot="close" variant="tertiary">{t('common.cancel')}</Button>
-          <Button isDisabled={saving} onPress={() => void submit()}>{saving ? <Spinner size="sm" /> : null}{t('common.save')}</Button>
+          <Button variant="secondary" onClick={onClose}>{t('common.cancel')}</Button>
+          <SaveButton saving={saving} onClick={() => void submit()}>{t('common.save')}</SaveButton>
         </>
       )}
     >
@@ -97,25 +115,29 @@ export function SshHostFormDialog({ api, host, keys, onClose, onSaved }: {
         <div className="min-w-0 flex-1">
           <Field label={t('ssh.hostForm.identityFile')} value={identityFile} onChange={setIdentityFile} />
         </div>
-        <Dropdown>
-          <Dropdown.Trigger
+        <MenuTrigger>
+          <AriaButton
             isDisabled={!privateKeys.length}
             aria-label={t('ssh.hostForm.pickKey')}
-            className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg px-3 text-sm text-muted hover:bg-surface-secondary hover:text-foreground cursor-pointer"
+            className={cx(
+              'inline-flex h-9 shrink-0 cursor-pointer items-center gap-1.5 rounded-2lg px-3 text-body-medium text-text-secondary',
+              'transition-colors duration-150 ease hover:bg-background-secondary-hover hover:text-text-primary',
+              'outline-none focus-visible:ring-2 focus-visible:ring-border-focus-ring',
+              'data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50 data-[disabled]:hover:bg-transparent data-[disabled]:hover:text-text-secondary',
+            )}
           >
-            <RiKey2Line className="size-4" />{t('ssh.hostForm.pickKey')}
-          </Dropdown.Trigger>
-          <Dropdown.Popover>
-            <Dropdown.Menu onAction={(key) => setIdentityFile(String(key))}>
+            <RiKey2Line aria-hidden className="size-4 text-foreground-icon-secondary" />{t('ssh.hostForm.pickKey')}
+          </AriaButton>
+          <MenuPopover placement="bottom end">
+            <Menu aria-label={t('ssh.hostForm.pickKey')} onAction={(key) => setIdentityFile(String(key))}>
               {privateKeys.map((key) => (
-                <Dropdown.Item key={key.name} id={key.privateKeyPath ?? key.name} textValue={key.name}>
-                  <Label>{key.name}</Label>
-                  <span className="text-muted ml-auto text-xs">{key.algorithm}</span>
-                </Dropdown.Item>
+                <MenuItem key={key.name} id={key.privateKeyPath ?? key.name} textValue={key.name} trailing={key.algorithm}>
+                  {key.name}
+                </MenuItem>
               ))}
-            </Dropdown.Menu>
-          </Dropdown.Popover>
-        </Dropdown>
+            </Menu>
+          </MenuPopover>
+        </MenuTrigger>
       </div>
       <Field label={t('ssh.hostForm.proxyJump')} value={proxyJump} onChange={setProxyJump} description={t('ssh.hostForm.proxyJumpHint')} />
     </DialogShell>
@@ -149,42 +171,44 @@ export function SshImportDialog({ api, onClose, onImported }: { api: SshApi; onC
       title={t('ssh.import.title')}
       onClose={onClose}
       footer={result ? (
-        <Button onPress={onClose}>{t('ssh.done')}</Button>
+        <Button onClick={onClose}>{t('ssh.done')}</Button>
       ) : (
         <>
-          <Button slot="close" variant="tertiary">{t('common.cancel')}</Button>
-          <Button isDisabled={saving || !text.trim()} onPress={() => void submit()}>{saving ? <Spinner size="sm" /> : null}{t('ssh.import.submit')}</Button>
+          <Button variant="secondary" onClick={onClose}>{t('common.cancel')}</Button>
+          <SaveButton saving={saving} disabled={!text.trim()} onClick={() => void submit()}>{t('ssh.import.submit')}</SaveButton>
         </>
       )}
     >
       {result ? (
         <div className="flex flex-col gap-3">
-          <p className="text-sm">{t('ssh.import.created', { count: result.hosts.length })}</p>
+          <p className="text-body-regular text-text-primary">{t('ssh.import.created', { count: result.hosts.length })}</p>
           {result.hosts.length ? (
-            <ul className="flex flex-col gap-1 text-sm">
-              {result.hosts.map((host) => <li key={host.alias} className="font-mono text-xs">{host.alias} → {host.user ? `${host.user}@` : ''}{host.hostName}{host.port ? `:${host.port}` : ''}</li>)}
+            <ul className="flex flex-col gap-1 text-text-primary">
+              {result.hosts.map((host) => <li key={host.alias} className="font-mono text-caption-1-regular">{host.alias} → {host.user ? `${host.user}@` : ''}{host.hostName}{host.port ? `:${host.port}` : ''}</li>)}
             </ul>
           ) : null}
           {result.errors.length ? (
-            <Alert status="warning">
-              <Alert.Indicator />
-              <Alert.Content>
-                <Alert.Title>{t('ssh.import.errors', { count: result.errors.length })}</Alert.Title>
-                <Alert.Description>
-                  <ul className="mt-1 list-inside list-disc space-y-0.5 text-xs">
-                    {result.errors.map((error, index) => <li key={index}>{error}</li>)}
-                  </ul>
-                </Alert.Description>
-              </Alert.Content>
-            </Alert>
+            <Alert
+              status="warning"
+              title={t('ssh.import.errors', { count: result.errors.length })}
+              description={(
+                <ul className="mt-1 list-inside list-disc space-y-0.5 text-caption-1-regular">
+                  {result.errors.map((error, index) => <li key={index}>{error}</li>)}
+                </ul>
+              )}
+            />
           ) : null}
         </div>
       ) : (
-        <TextField className="w-full" value={text} onChange={setText}>
-          <Label>{t('ssh.import.label')}</Label>
-          <TextArea className="w-full font-mono text-xs" rows={12} placeholder={'Host prod\n  HostName 203.0.113.10\n  User deploy\n  Port 2222'} />
-          <p className="text-muted mt-1 text-xs">{t('ssh.import.hint')}</p>
-        </TextField>
+        <Textarea
+          label={t('ssh.import.label')}
+          hint={t('ssh.import.hint')}
+          value={text}
+          onChange={setText}
+          rows={12}
+          inputClassName="font-mono text-caption-1-regular"
+          placeholder={'Host prod\n  HostName 203.0.113.10\n  User deploy\n  Port 2222'}
+        />
       )}
     </DialogShell>
   );
@@ -237,27 +261,24 @@ export function FtpSiteFormDialog({ api, site, onClose, onSaved }: {
       onClose={onClose}
       footer={(
         <>
-          <Button slot="close" variant="tertiary">{t('common.cancel')}</Button>
-          <Button isDisabled={saving} onPress={() => void submit()}>{saving ? <Spinner size="sm" /> : null}{t('common.save')}</Button>
+          <Button variant="secondary" onClick={onClose}>{t('common.cancel')}</Button>
+          <SaveButton saving={saving} onClick={() => void submit()}>{t('common.save')}</SaveButton>
         </>
       )}
     >
       <Field label={t('ssh.ftpForm.name')} value={name} onChange={setName} />
-      <Select selectedKey={protocol} onSelectionChange={(key) => { if (key === 'ftp' || key === 'ftps') setProtocol(key); }}>
-        <Label>{t('ssh.ftpForm.protocol')}</Label>
-        <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
-        <Select.Popover>
-          <ListBox>
-            <ListBox.Item id="ftps" textValue="FTPS">FTPS<ListBox.ItemIndicator /></ListBox.Item>
-            <ListBox.Item id="ftp" textValue="FTP">FTP<ListBox.ItemIndicator /></ListBox.Item>
-          </ListBox>
-        </Select.Popover>
+      <Select
+        label={t('ssh.ftpForm.protocol')}
+        className="w-full"
+        popoverClassName="w-(--trigger-width)"
+        selectedKey={protocol}
+        onSelectionChange={(key) => { if (key === 'ftp' || key === 'ftps') setProtocol(key); }}
+      >
+        <SelectItem id="ftps" textValue="FTPS">FTPS</SelectItem>
+        <SelectItem id="ftp" textValue="FTP">FTP</SelectItem>
       </Select>
       {protocol === 'ftp' ? (
-        <Alert status="warning">
-          <Alert.Indicator />
-          <Alert.Content><Alert.Description>{t('ssh.ftp.cleartextWarning')}</Alert.Description></Alert.Content>
-        </Alert>
+        <Alert status="warning" description={t('ssh.ftp.cleartextWarning')} />
       ) : null}
       <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_8rem]">
         <Field label={t('ssh.ftpForm.host')} value={host} onChange={setHost} />

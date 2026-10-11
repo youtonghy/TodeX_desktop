@@ -1,9 +1,22 @@
-import { useEffect, useRef, useState } from 'react';
-import { Button, Checkbox, Chip, Input, Label, Link, ListBox, Modal, Select, Spinner, Tabs, TextArea, TextField, toast } from '@heroui/react';
-import { Command } from '@heroui-pro/react/command';
-import { buttonVariants } from '@heroui/styles';
-import { RiArrowRightLine, RiArrowUpLine, RiCloseLine, RiFlashlightLine, RiGitBranchLine, RiGitCommitLine, RiGitMergeLine,
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { Autocomplete, Button as AriaButton, MenuItem as AriaMenuItem, SearchField, useFilter } from 'react-aria-components';
+import { RiArrowRightLine, RiArrowUpLine, RiCloseLine, RiExternalLinkLine, RiFlashlightLine, RiGitBranchLine, RiGitCommitLine, RiGitMergeLine,
   RiGitPullRequestLine, RiGithubLine, RiPulseLine, RiSearchLine, RiStackLine, RiUploadCloud2Line } from '@remixicon/react';
+import { Chip } from '@/components/base/badges/chip';
+import { Button, ButtonLink } from '@/components/base/buttons/button';
+import { Checkbox } from '@/components/base/checkbox/checkbox';
+import { MENU_ITEM_ACTIVE } from '@/components/base/dropdown/menu-styles';
+import { Input, InputBase } from '@/components/base/input/input';
+import { SegmentedControl, SegmentedControlItem } from '@/components/base/segmented-control/segmented-control';
+import { Select, SelectItem } from '@/components/base/select/select';
+import { Tab, TabList, TabPanel, Tabs } from '@/components/base/tabs/tabs';
+import { Textarea } from '@/components/base/textarea/textarea';
+import { Menu, MenuSection } from '@/components/ui/menu';
+import { Modal, ModalCloseButton } from '@/components/ui/modal';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Spinner, SpinnerIcon } from '@/components/ui/spinner';
+import { toast } from '@/components/ui/toast';
+import { cx } from '@/utils/cx';
 import { providerDisplayName } from '@todex/protocol/v2';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { buildGitAgentPrompt, buildGitFailurePrompt, gitAgentActionGroups, type GitAgentActionId } from '../session/gitAgentActions';
@@ -28,6 +41,14 @@ const prMethodLabelKeys: Record<GitPullRequestMethod, MessageKey> = { merge: 'gi
 const prMergeStateLabelKeys: Record<string, MessageKey> = { clean: 'git.mergeStateClean', dirty: 'git.mergeStateDirty', blocked: 'git.mergeStateBlocked',
   behind: 'git.mergeStateBehind', unstable: 'git.mergeStateUnstable', unknown: 'git.mergeStateUnknown' };
 
+/** Small status chip with an optional leading glyph. */
+function Tag({ color = 'neutral', children }: { color?: 'neutral' | 'blue' | 'lime' | 'yellow'; children: ReactNode }) {
+  return <Chip variant="caption" color={color} className="gap-1 px-1.5 py-0.5">{children}</Chip>;
+}
+
+/** Grouped section inside the dialog (the secondary card recipe). */
+const GROUP_CARD = 'rounded-2xl bg-background-secondary-default p-3';
+
 export function GitActionsModal({ session, isOpen, onOpenChange }: Props) {
   const t = useT();
   const [sending, setSending] = useState<GitAgentActionId | null>(null);
@@ -51,6 +72,8 @@ export function GitActionsModal({ session, isOpen, onOpenChange }: Props) {
   const [jumpGroup, setJumpGroup] = useState<string | null>(null);
   const outcomeUnknown = useRef(false);
   const generation = useRef(0);
+  const opsListRef = useRef<HTMLDivElement>(null);
+  const { contains } = useFilter({ sensitivity: 'base' });
   useEffect(() => {
     generation.current++;
     setView(null); setSnapshot(null); setPr(null); setConfirming(null); setError(''); setFailure(null); setOutput(''); setRemovePath('');
@@ -69,9 +92,12 @@ export function GitActionsModal({ session, isOpen, onOpenChange }: Props) {
     if (tab !== 'operations' || !jumpGroup) return;
     const firstAction = gitAgentActionGroups.find(group => group.id === jumpGroup)?.actions[0]?.id;
     setJumpGroup(null);
-    // Command.Group renders no id; its first item carries the action id as data-key.
-    document.querySelector(`[data-slot="command-list"] [data-key="${firstAction}"]`)
-      ?.closest('[data-slot="command-group"]')?.scrollIntoView({ block: 'start' });
+    // Menu sections render no id; their first item carries the action id as
+    // data-key. The list fills in after the tab panel mounts, so wait a frame.
+    requestAnimationFrame(() => {
+      opsListRef.current?.querySelector(`[data-key="${firstAction}"]`)
+        ?.closest('section')?.scrollIntoView({ block: 'start' });
+    });
   }, [tab, jumpGroup]);
   const chooseRepo = (key: React.Key | null) => {
     const path = typeof key === 'string' ? key : '';
@@ -205,43 +231,52 @@ export function GitActionsModal({ session, isOpen, onOpenChange }: Props) {
   const worktreePath = worktreeName && worktreeBase ? `${worktreeBase}/todex/${worktreeName}` : '';
   const prConfirm = (id: GitAgentActionId, label: string, operation: GitWorkspaceOperation,
     options?: { danger?: boolean; hint?: string; methodPicker?: boolean }) => confirming === id
-    ? <div className="space-y-2 rounded-xl border border-default p-3">
-        <p className="text-sm">{options?.hint || t('git.confirmHint', { label })}</p>
-        {options?.methodPicker ? <div className="flex items-center gap-1">
-          <span className="text-muted text-xs">{t('git.mergeMethod')}</span>
-          {prMethods.map(method => <Button key={method} size="sm" variant={mergeMethod === method ? 'secondary' : 'ghost'} onPress={() => setMergeMethod(method)}>{t(prMethodLabelKeys[method])}</Button>)}
+    ? <div className={cx(GROUP_CARD, 'space-y-2')}>
+        <p className="text-body-regular text-text-primary">{options?.hint || t('git.confirmHint', { label })}</p>
+        {options?.methodPicker ? <div className="flex flex-wrap items-center gap-2">
+          <span className="text-caption-1-regular text-text-secondary">{t('git.mergeMethod')}</span>
+          <SegmentedControl aria-label={t('git.mergeMethod')} selectedKeys={[mergeMethod]}
+            onSelectionChange={keys => { const next = [...keys][0]; if (next) setMergeMethod(next as GitPullRequestMethod); }}>
+            {prMethods.map(method => <SegmentedControlItem key={method} id={method}>{t(prMethodLabelKeys[method])}</SegmentedControlItem>)}
+          </SegmentedControl>
         </div> : null}
         <div className="flex gap-2">
-          <Button size="sm" variant={options?.danger ? 'danger' : 'secondary'} isDisabled={writingBlocked || Boolean(sending) || Boolean(failure?.unknown)} onPress={() => void prDirect(id, operation)}>{t('git.confirmLabel', { label })}</Button>
-          <Button size="sm" variant="ghost" onPress={() => setConfirming(null)}>{t('common.cancel')}</Button>
+          <Button size="small" variant={options?.danger ? 'danger' : 'primary'} disabled={writingBlocked || Boolean(sending) || Boolean(failure?.unknown)} onClick={() => void prDirect(id, operation)}>{t('git.confirmLabel', { label })}</Button>
+          <Button size="small" variant="secondary" onClick={() => setConfirming(null)}>{t('common.cancel')}</Button>
         </div>
       </div>
-    : <Button size="sm" variant="secondary" isDisabled={writingBlocked || Boolean(sending) || Boolean(failure?.unknown)} onPress={() => setConfirming(id)}>{label}</Button>;
-  if (view) return <Modal.Backdrop isOpen={isOpen} onOpenChange={onOpenChange}>
-    <Modal.Container><Modal.Dialog className="w-[calc(100vw-2rem)] max-w-xl max-h-[88dvh]">
-      <Modal.Header><Modal.Heading>{title}</Modal.Heading><p className="text-muted break-all text-xs">{repoPath}</p></Modal.Header>
-      <Modal.Body className="space-y-4 overflow-y-auto">
-        <p className="text-muted text-xs">{isPrView
+    : <Button size="small" variant="secondary" disabled={writingBlocked || Boolean(sending) || Boolean(failure?.unknown)} onClick={() => setConfirming(id)}>{label}</Button>;
+  if (view) return <Modal isOpen={isOpen} onOpenChange={onOpenChange} size="xl" hideCloseButton
+    className="max-h-[88dvh]" bodyClassName="space-y-4"
+    title={title}
+    description={<span className="break-all text-caption-1-regular text-text-tertiary">{repoPath}</span>}
+    footer={<>
+      <Button variant="secondary" disabled={Boolean(sending)} onClick={() => { setView(null); setError(''); setFailure(null); }}>{t('git.backToMenu')}</Button>
+      <Button variant="secondary" disabled={Boolean(sending)} onClick={() => void (isPrView ? prDirect(view) : direct(view))}>{t('git.refreshStatus')}</Button>
+      <Button onClick={() => onOpenChange(false)}>{t('controls.close')}</Button>
+    </>}>
+        <p className="text-caption-1-regular text-text-secondary">{isPrView
           ? t('git.execViaGithubApi', { detail: pr ? ` · ${pr.branch || t('git.noCommitDetached')}` : '' })
           : t('git.execDirectGit', { detail: snapshot ? ` · ${snapshot.currentBranch || t('git.noCommitDetached')}${snapshot.dirty ? ` · ${t('git.dirtyChanges')}` : ''}` : '' })}</p>
-        {failure ? <Button size="sm" variant="secondary" isDisabled={unavailable || Boolean(sending)} onPress={() => void send(failure.id, true)}>{t('git.handToAgent')}</Button> : null}
-        {sending ? <div role="status" className="flex items-center gap-2"><Spinner size="sm" />{t('git.processing')}</div> : null}
-        {output ? <pre role="status" className="whitespace-pre-wrap break-all rounded-xl bg-default p-3 text-xs">{output}</pre> : null}
+        {failure ? <Button size="small" variant="secondary" disabled={unavailable || Boolean(sending)} onClick={() => void send(failure.id, true)}>{t('git.handToAgent')}</Button> : null}
+        {sending ? <div role="status" className="flex items-center gap-2 text-body-regular text-text-secondary"><Spinner size="sm" />{t('git.processing')}</div> : null}
+        {output ? <pre role="status" className="whitespace-pre-wrap break-all rounded-2xl bg-background-secondary-default p-3 font-mono text-caption-1-regular text-text-primary">{output}</pre> : null}
         {isPrView ? <div className="space-y-3">
           {pr?.initialized && !prItem ? <div className="space-y-2">
-            <p className="text-sm">{pr.branch ? t('git.noPrOnBranch', { branch: pr.branch }) : t('git.noPrDetached')}</p>
-            <Button size="sm" variant="secondary" isDisabled={writingBlocked || Boolean(sending)} onPress={() => choose('create-pr')}>{t('git.createPrTitle')}</Button>
+            <p className="text-body-regular text-text-primary">{pr.branch ? t('git.noPrOnBranch', { branch: pr.branch }) : t('git.noPrDetached')}</p>
+            <Button size="small" variant="secondary" disabled={writingBlocked || Boolean(sending)} onClick={() => choose('create-pr')}>{t('git.createPrTitle')}</Button>
           </div> : null}
-          {prItem ? <div className="space-y-2 rounded-xl border border-default p-3">
+          {prItem ? <div className={cx(GROUP_CARD, 'space-y-2')}>
             <div className="flex items-start justify-between gap-3">
-              <p className="min-w-0 break-all text-sm font-medium">#{prItem.number} {prItem.title}</p>
-              <Link href={prUrl || undefined} target="_blank" rel="noopener noreferrer" isDisabled={!prUrl}
-                className={buttonVariants({ variant: 'ghost', size: 'sm' })}>{t('git.open')}<Link.Icon /></Link>
+              <p className="min-w-0 break-all text-body-medium text-text-primary">#{prItem.number} {prItem.title}</p>
+              <ButtonLink href={prUrl || undefined} target="_blank" rel="noopener noreferrer" aria-disabled={!prUrl || undefined}
+                variant="secondary" size="small" trailingIcon={RiExternalLinkLine}
+                className={cx('shrink-0', !prUrl && 'pointer-events-none opacity-50')}>{t('git.open')}</ButtonLink>
             </div>
-            <p className="text-muted break-all text-xs">{prItem.headRef} → {prItem.baseRef}{prItem.draft ? ` · ${t('git.draft')}` : ''}</p>
-            <p className="text-muted text-xs">{prItem.state === 'merged' ? t('git.prStateMerged') : prItem.state === 'closed' ? t('git.prStateClosed') : t('git.prStateOpen')}
+            <p className="break-all text-caption-1-regular text-text-secondary">{prItem.headRef} → {prItem.baseRef}{prItem.draft ? ` · ${t('git.draft')}` : ''}</p>
+            <p className="text-caption-1-regular text-text-secondary">{prItem.state === 'merged' ? t('git.prStateMerged') : prItem.state === 'closed' ? t('git.prStateClosed') : t('git.prStateOpen')}
               {' · '}{t('git.prChecksLine', { passing: prItem.checks.passing, failing: prItem.checks.failing, pending: prItem.checks.pending, approved: prItem.reviews.approved, changes: prItem.reviews.changesRequested, comments: prItem.reviews.commented })}</p>
-            <p className="text-muted text-xs">{t('git.mergeStatus', { status: prItem.mergeable === 'unknown' ? t('git.mergeStateUnknown') : prItem.mergeable === 'mergeable' ? t('git.mergeable') : t('git.unmergeable', { detail: prMergeStateLabelKeys[prItem.mergeState] ? `(${t(prMergeStateLabelKeys[prItem.mergeState])})` : '' }) })}
+            <p className="text-caption-1-regular text-text-secondary">{t('git.mergeStatus', { status: prItem.mergeable === 'unknown' ? t('git.mergeStateUnknown') : prItem.mergeable === 'mergeable' ? t('git.mergeable') : t('git.unmergeable', { detail: prMergeStateLabelKeys[prItem.mergeState] ? `(${t(prMergeStateLabelKeys[prItem.mergeState])})` : '' }) })}
               {prItem.autoMergeMethod ? ` · ${t('git.autoMergeOn', { method: prMethodLabelKeys[prItem.autoMergeMethod as GitPullRequestMethod] ? t(prMethodLabelKeys[prItem.autoMergeMethod as GitPullRequestMethod]) : prItem.autoMergeMethod })}` : ''}</p>
           </div> : null}
           {prItem?.state === 'open' ? <div className="flex flex-wrap gap-2">
@@ -251,8 +286,8 @@ export function GitActionsModal({ session, isOpen, onOpenChange }: Props) {
             {prConfirm('close-pr', t('git.closePrTitle'), { action: 'close-pr' }, { danger: true, hint: t('git.closePrHint', { number: prItem.number }) })}
           </div> : null}
           {prItem?.state === 'closed' ? prConfirm('reopen-pr', t('git.reopenPr'), { action: 'reopen-pr' }, { hint: t('git.reopenPrHint', { number: prItem.number }) }) : null}
-          {prItem?.state === 'open' ? <div className="space-y-2 rounded-xl border border-default p-3">
-            <p className="text-sm font-medium">{t('git.merge')}</p>
+          {prItem?.state === 'open' ? <div className={cx(GROUP_CARD, 'space-y-2')}>
+            <p className="text-body-medium text-text-primary">{t('git.merge')}</p>
             {prItem.autoMergeMethod
               ? prConfirm('disable-pr-auto-merge', t('git.disablePrAutoMergeTitle'), { action: 'disable-pr-auto-merge' }, { hint: t('git.disableAutoMergeHint') })
               : prConfirm('enable-pr-auto-merge', t('git.enablePrAutoMergeTitle'), { action: 'enable-pr-auto-merge', method: mergeMethod }, { hint: t('git.enableAutoMergeHint'), methodPicker: true })}
@@ -265,14 +300,16 @@ export function GitActionsModal({ session, isOpen, onOpenChange }: Props) {
           void direct('create-pr', { action: 'create-pr', title: prTitle.trim(), body: prBody,
             baseBranch: prBase.trim(), repository: prRepository.trim(), draft: prDraft });
         }}>
-          <p className="text-muted text-sm">{t('git.createPrHint')}</p>
-          <TextField isRequired value={prRepository} onChange={setPrRepository}><Label>{t('git.repoLabel')}</Label><Input placeholder={t('git.repoPlaceholder')} /></TextField>
-          <TextField isRequired value={prBase} onChange={setPrBase}><Label>{t('git.baseBranch')}</Label><Input placeholder={t('git.baseBranchPlaceholder')} /></TextField>
-          <TextField isRequired value={prTitle} onChange={setPrTitle}><Label>{t('git.prTitleLabel')}</Label><Input placeholder={t('git.prTitlePlaceholder')} maxLength={256} /></TextField>
-          <TextField value={prBody} onChange={setPrBody}><Label>{t('git.prBodyLabel')}</Label><TextArea rows={5} placeholder={t('git.prBodyPlaceholder')} /></TextField>
-          <Checkbox isSelected={prDraft} onChange={setPrDraft}><Checkbox.Content><Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>{t('git.createAsDraft')}</Checkbox.Content></Checkbox>
-          <Button type="submit" isDisabled={writingBlocked || Boolean(sending) || outcomeUnknown.current || Boolean(output) || !snapshot?.initialized || !snapshot.currentBranch || !prTitle.trim() || !prBase.trim() || !prRepository.trim()}>{t('git.createPrTitle')}</Button>
-          {output ? <Button variant="secondary" isDisabled={unavailable || Boolean(sending)} onPress={() => void send('view-pr')}>{t('git.letAgentViewPr')}</Button> : null}
+          <p className="text-body-regular text-text-secondary">{t('git.createPrHint')}</p>
+          <Input isRequired value={prRepository} onChange={setPrRepository} label={t('git.repoLabel')} placeholder={t('git.repoPlaceholder')} />
+          <Input isRequired value={prBase} onChange={setPrBase} label={t('git.baseBranch')} placeholder={t('git.baseBranchPlaceholder')} />
+          <Input isRequired value={prTitle} onChange={setPrTitle} label={t('git.prTitleLabel')} placeholder={t('git.prTitlePlaceholder')} maxLength={256} />
+          <Textarea value={prBody} onChange={setPrBody} label={t('git.prBodyLabel')} rows={5} placeholder={t('git.prBodyPlaceholder')} />
+          <Checkbox isSelected={prDraft} onChange={setPrDraft}>{t('git.createAsDraft')}</Checkbox>
+          <div className="flex flex-wrap gap-2">
+            <Button type="submit" disabled={writingBlocked || Boolean(sending) || outcomeUnknown.current || Boolean(output) || !snapshot?.initialized || !snapshot.currentBranch || !prTitle.trim() || !prBase.trim() || !prRepository.trim()}>{t('git.createPrTitle')}</Button>
+            {output ? <Button variant="secondary" disabled={unavailable || Boolean(sending)} onClick={() => void send('view-pr')}>{t('git.letAgentViewPr')}</Button> : null}
+          </div>
         </form> : null}
         {isBranchForm ? <form className="space-y-3" onSubmit={event => {
           event.preventDefault();
@@ -281,129 +318,128 @@ export function GitActionsModal({ session, isOpen, onOpenChange }: Props) {
             ? { action: 'create-worktree', path: worktreePath, branchName: worktreeBranch, ...(startPoint.trim() ? { startPoint: startPoint.trim() } : {}) }
             : { action: 'create-branch', branchName: branchName.trim(), ...(startPoint.trim() ? { startPoint: startPoint.trim() } : {}) });
         }}>
-          <TextField isRequired value={branchName} onChange={setBranchName}><Label>{view === 'create-worktree' ? t('git.worktreeName') : t('git.newBranchName')}</Label><Input placeholder={view === 'create-worktree' ? t('git.worktreeNamePlaceholder') : 'codex/my-task'} /></TextField>
-          <TextField value={startPoint} onChange={setStartPoint}><Label>{t('git.startPoint')}</Label><Input placeholder={t('git.startPointPlaceholder')} /></TextField>
-          {view === 'create-worktree' ? <p className="text-muted break-all text-xs">{t('git.worktreeDerived', { branch: worktreeBranch || 'todex/…', path: worktreePath || `${worktreeBase}/todex/…` })}</p> : <p className="text-muted text-xs">{t('git.branchStays')}</p>}
-          <Button type="submit" isDisabled={writingBlocked || Boolean(sending) || Boolean(failure?.unknown) || !snapshot?.initialized || (view === 'create-worktree' && !worktreePath)}>{title}</Button>
+          <Input isRequired value={branchName} onChange={setBranchName} label={view === 'create-worktree' ? t('git.worktreeName') : t('git.newBranchName')} placeholder={view === 'create-worktree' ? t('git.worktreeNamePlaceholder') : 'codex/my-task'} />
+          <Input value={startPoint} onChange={setStartPoint} label={t('git.startPoint')} placeholder={t('git.startPointPlaceholder')} />
+          {view === 'create-worktree' ? <p className="break-all text-caption-1-regular text-text-secondary">{t('git.worktreeDerived', { branch: worktreeBranch || 'todex/…', path: worktreePath || `${worktreeBase}/todex/…` })}</p> : <p className="text-caption-1-regular text-text-secondary">{t('git.branchStays')}</p>}
+          <Button type="submit" disabled={writingBlocked || Boolean(sending) || Boolean(failure?.unknown) || !snapshot?.initialized || (view === 'create-worktree' && !worktreePath)}>{title}</Button>
         </form> : null}
         {(view === 'list-branches' || view === 'switch-branch') && snapshot ? <div className="space-y-2">
-          {snapshot.branches.length === 0 ? <p>{t('git.noBranches')}</p> : snapshot.branches.map(branch => <div key={branch.name} className="flex items-center justify-between gap-3 rounded-xl border border-default p-3">
-            <div className="min-w-0"><p className="break-all text-sm">{branch.name}{branch.current ? ` · ${t('git.currentBranch')}` : ''}{branch.remote ? ` · ${t('git.remoteBranch')}` : ''}</p>{branch.worktreePath ? <p className="text-muted break-all text-xs">{branch.worktreePath}</p> : null}</div>
-            {view === 'switch-branch' && !branch.remote ? <Button size="sm" variant="secondary" isDisabled={writingBlocked || Boolean(sending) || Boolean(failure?.unknown) || snapshot.dirty || branch.current || Boolean(branch.worktreePath)} onPress={() => void direct(view, { action: 'switch-branch', branchName: branch.name })}>{t('git.switch')}</Button> : null}
+          {snapshot.branches.length === 0 ? <p className="text-body-regular text-text-secondary">{t('git.noBranches')}</p> : snapshot.branches.map(branch => <div key={branch.name} className={cx(GROUP_CARD, 'flex items-center justify-between gap-3')}>
+            <div className="min-w-0"><p className="break-all text-body-regular text-text-primary">{branch.name}{branch.current ? ` · ${t('git.currentBranch')}` : ''}{branch.remote ? ` · ${t('git.remoteBranch')}` : ''}</p>{branch.worktreePath ? <p className="break-all text-caption-1-regular text-text-secondary">{branch.worktreePath}</p> : null}</div>
+            {view === 'switch-branch' && !branch.remote ? <Button size="small" variant="secondary" disabled={writingBlocked || Boolean(sending) || Boolean(failure?.unknown) || snapshot.dirty || branch.current || Boolean(branch.worktreePath)} onClick={() => void direct(view, { action: 'switch-branch', branchName: branch.name })}>{t('git.switch')}</Button> : null}
           </div>)}
         </div> : null}
         {(view === 'list-worktrees' || view === 'switch-worktree' || view === 'manage-worktrees') && snapshot ? <div className="space-y-3">
-          {view === 'switch-worktree' ? <p className="text-muted text-xs">{t('git.switchWorktreeHint')}</p> : null}
-          {snapshot.worktrees.map(tree => <div key={tree.path} className="space-y-2 rounded-xl border border-default p-3">
-            <p className="break-all text-sm">{tree.branch || t('git.detachedHead')}{tree.current ? ` · ${t('git.currentBranch')}` : ''}{tree.main ? ` · ${t('git.mainWorktree')}` : ''}</p><p className="text-muted break-all text-xs">{tree.path}</p>
-            <p className="text-muted text-xs">{!tree.accessible ? t('git.worktreeInaccessible') : tree.dirty ? t('git.dirtyChanges') : t('git.mergeStateClean')}{tree.locked ? ` · ${t('git.locked')}` : ''}</p>
-            {view === 'switch-worktree' ? <Button size="sm" variant="secondary" isDisabled={Boolean(sending) || tree.current || !tree.accessible} onPress={() => {
+          {view === 'switch-worktree' ? <p className="text-caption-1-regular text-text-secondary">{t('git.switchWorktreeHint')}</p> : null}
+          {snapshot.worktrees.map(tree => <div key={tree.path} className={cx(GROUP_CARD, 'space-y-2')}>
+            <p className="break-all text-body-regular text-text-primary">{tree.branch || t('git.detachedHead')}{tree.current ? ` · ${t('git.currentBranch')}` : ''}{tree.main ? ` · ${t('git.mainWorktree')}` : ''}</p><p className="break-all text-caption-1-regular text-text-secondary">{tree.path}</p>
+            <p className="text-caption-1-regular text-text-secondary">{!tree.accessible ? t('git.worktreeInaccessible') : tree.dirty ? t('git.dirtyChanges') : t('git.mergeStateClean')}{tree.locked ? ` · ${t('git.locked')}` : ''}</p>
+            {view === 'switch-worktree' ? <Button size="small" variant="secondary" disabled={Boolean(sending) || tree.current || !tree.accessible} onClick={() => {
               if (conversation && session.openGitWorktree(tree.path, conversation.id)) onOpenChange(false);
             }}>{t('git.openWorktree')}</Button> : null}
-            {view === 'manage-worktrees' ? removePath === tree.path ? <div className="space-y-2"><p className="text-sm">{t('git.removeWorktreeConfirm')}</p><Button size="sm" variant="danger" isDisabled={writingBlocked || Boolean(sending) || Boolean(failure?.unknown)} onPress={() => void direct(view, { action: 'remove-worktree', path: tree.path })}>{t('git.confirmRemove')}</Button><Button size="sm" variant="ghost" onPress={() => setRemovePath('')}>{t('common.cancel')}</Button></div> : <Button size="sm" variant="secondary" isDisabled={writingBlocked || Boolean(sending) || Boolean(failure?.unknown) || tree.main || tree.current || tree.dirty || tree.locked || !tree.accessible} onPress={() => setRemovePath(tree.path)}>{t('git.removeWorktree')}</Button> : null}
+            {view === 'manage-worktrees' ? removePath === tree.path ? <div className="space-y-2"><p className="text-body-regular text-text-primary">{t('git.removeWorktreeConfirm')}</p><div className="flex gap-2"><Button size="small" variant="danger" disabled={writingBlocked || Boolean(sending) || Boolean(failure?.unknown)} onClick={() => void direct(view, { action: 'remove-worktree', path: tree.path })}>{t('git.confirmRemove')}</Button><Button size="small" variant="secondary" onClick={() => setRemovePath('')}>{t('common.cancel')}</Button></div></div> : <Button size="small" variant="secondary" disabled={writingBlocked || Boolean(sending) || Boolean(failure?.unknown) || tree.main || tree.current || tree.dirty || tree.locked || !tree.accessible} onClick={() => setRemovePath(tree.path)}>{t('git.removeWorktree')}</Button> : null}
           </div>)}
         </div> : null}
-      </Modal.Body>
-      <Modal.Footer><Button variant="ghost" isDisabled={Boolean(sending)} onPress={() => { setView(null); setError(''); setFailure(null); }}>{t('git.backToMenu')}</Button><Button variant="secondary" isDisabled={Boolean(sending)} onPress={() => void (isPrView ? prDirect(view) : direct(view))}>{t('git.refreshStatus')}</Button><Button onPress={() => onOpenChange(false)}>{t('controls.close')}</Button></Modal.Footer>
-    </Modal.Dialog></Modal.Container>
-  </Modal.Backdrop>;
+  </Modal>;
 
-  return <Command>
-    <Command.Backdrop isOpen={isOpen} onOpenChange={onOpenChange}>
-      <Command.Container className="w-[calc(100vw-2rem)] max-w-xl">
-        {/* One fixed height for both tabs; the scrolling area of the active tab takes what the header leaves. */}
-        <Command.Dialog aria-label={t('git.operations')} className="flex h-[min(46rem,88dvh)] max-h-[88dvh] flex-col overflow-hidden">
-          <Command.Header className="flex items-start justify-between gap-4 px-5 pt-5 pb-3">
-            <div className="min-w-0 flex-1">
-              <h2 className="flex items-center gap-2 text-lg font-semibold"><RiGithubLine className="size-5" />{t('git.operations')}</h2>
-              <p className="mt-1 truncate text-sm" title={workspace?.path}>{workspace?.name || t('git.noWorkspace')}</p>
-              {workspace?.path ? <p className="text-muted mt-0.5 truncate text-xs" title={workspace.path}>{workspace.path}</p> : null}
-              {workspace && git.repoOptions.length > 1 ? <Select
-                aria-label={t('git.selectRepository')}
-                className="mt-2 w-full"
-                selectedKey={repoPath}
-                onSelectionChange={chooseRepo}
-              >
-                <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
-                <Select.Popover>
-                  <ListBox>
-                    {git.repoOptions.map(repo => <ListBox.Item key={repo.path} id={repo.path} textValue={`${repo.name} ${repo.branch} ${repo.path}`}>
-                      <div className="flex min-w-0 flex-col">
-                        <span className="truncate">{repo.name}{repo.uninitialized ? ` · ${t('git.repoUninitialized')}` : repo.containing ? ` · ${t('git.containingRepo')}` : ''}</span>
-                        <span className="text-muted truncate text-xs">{repo.uninitialized || repo.error
-                          ? repo.error || repo.path
-                          : `${repo.branch || t('git.noCommitDetached')} · ${t('git.changedFiles', { count: repo.changedFiles })} +${repo.additions} −${repo.deletions}`}</span>
-                      </div>
-                      <ListBox.ItemIndicator />
-                    </ListBox.Item>)}
-                  </ListBox>
-                </Select.Popover>
-              </Select> : null}
+  const disabledKeys = allActions.filter(action => unavailable || sending || (writingBlocked && (action.id === 'init' || action.id === 'push'))).map(action => action.id);
+  const changedFiles = overview.status.data?.changedFiles;
+  const selectedRepo = git.repoOptions.find(repo => repo.path === repoPath);
+  // One fixed height for both tabs; the scrolling area of the active tab takes what the header leaves.
+  return <Modal isOpen={isOpen} onOpenChange={onOpenChange} aria-label={t('git.operations')} hideCloseButton size="xl"
+    className="h-[min(46rem,88dvh)] max-h-[88dvh]" bodyClassName="flex flex-col overflow-y-hidden p-0">
+    <div className="flex shrink-0 items-start justify-between gap-4 px-6 pt-6 pb-3">
+      <div className="min-w-0 flex-1">
+        <h2 className="flex items-center gap-2 text-title-3-semibold text-text-primary"><RiGithubLine aria-hidden className="size-5 text-foreground-icon-primary" />{t('git.operations')}</h2>
+        <p className="mt-1 truncate text-body-regular text-text-primary" title={workspace?.path}>{workspace?.name || t('git.noWorkspace')}</p>
+        {workspace?.path ? <p className="mt-0.5 truncate text-caption-1-regular text-text-tertiary" title={workspace.path}>{workspace.path}</p> : null}
+        {workspace && git.repoOptions.length > 1 ? <Select
+          aria-label={t('git.selectRepository')}
+          className="mt-2 w-full"
+          popoverClassName="w-(--trigger-width)"
+          selectedKey={repoPath}
+          onSelectionChange={chooseRepo}
+          renderValue={() => selectedRepo ? `${selectedRepo.name}${selectedRepo.uninitialized ? ` · ${t('git.repoUninitialized')}` : selectedRepo.containing ? ` · ${t('git.containingRepo')}` : ''}` : repoPath}
+        >
+          {git.repoOptions.map(repo => <SelectItem key={repo.path} id={repo.path} textValue={`${repo.name} ${repo.branch} ${repo.path}`}>
+            <div className="flex min-w-0 flex-col">
+              <span className="truncate">{repo.name}{repo.uninitialized ? ` · ${t('git.repoUninitialized')}` : repo.containing ? ` · ${t('git.containingRepo')}` : ''}</span>
+              <span className="truncate text-caption-1-regular text-text-secondary">{repo.uninitialized || repo.error
+                ? repo.error || repo.path
+                : `${repo.branch || t('git.noCommitDetached')} · ${t('git.changedFiles', { count: repo.changedFiles })} +${repo.additions} −${repo.deletions}`}</span>
             </div>
-            <Button isIconOnly variant="ghost" size="sm" aria-label={t('git.closeOperations')} onPress={() => onOpenChange(false)}><RiCloseLine className="size-5" /></Button>
-          </Command.Header>
-          <Tabs selectedKey={tab} onSelectionChange={key => setTab(key === 'operations' ? 'operations' : 'status')} className="px-5 pb-2">
-            <Tabs.ListContainer className="w-full">
-              <Tabs.List aria-label={t('git.pagesLabel')} className="grid w-full grid-cols-2">
-                <Tabs.Tab id="status" className="gap-1.5">
-                  <RiPulseLine className="size-4" />{t('git.tabStatus')}
-                  {overview.status.data?.changedFiles ? <Chip size="sm" variant="soft" color="warning" className="tabular-nums">{overview.status.data.changedFiles}</Chip> : null}
-                  <Tabs.Indicator />
-                </Tabs.Tab>
-                <Tabs.Tab id="operations" className="gap-1.5">
-                  <RiFlashlightLine className="size-4" />{t('git.tabOperations')}
-                  <Tabs.Indicator />
-                </Tabs.Tab>
-              </Tabs.List>
-            </Tabs.ListContainer>
-          </Tabs>
-          {tab === 'status' ? <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-4">
-            <GitStatusOverview key={repoPath} overview={overview} files={git.files} filesTruncated={git.filesTruncated}
-              onJump={group => { setTab('operations'); setJumpGroup(group); }} />
-          </div> : <>
-          <div className="text-muted flex items-center gap-2 px-5 pb-2 text-xs">
-            <ProviderIcon provider={provider} className="size-4" />
-            <span className="truncate">{conversation ? t('git.sendTo', { provider: providerDisplayName(provider), title: conversation.title }) : t('git.pickAgent')}</span>
-          </div>
-          {overview.status.data?.initialized ? <div className="flex flex-wrap items-center gap-1.5 px-5 pb-2">
-            <Chip size="sm" variant="soft"><RiGitBranchLine className="size-3" /><span className="font-mono">{overview.status.data.branch || t('git.detachedHead')}</span></Chip>
-            {overview.status.data.changedFiles
-              ? <Chip size="sm" variant="soft" color="warning">{t('git.changedFiles', { count: overview.status.data.changedFiles })}</Chip>
-              : <Chip size="sm" variant="soft" color="success">{t('git.cleanTree')}</Chip>}
-            {overview.status.data.ahead ? <Chip size="sm" variant="soft" color="warning"><RiArrowUpLine className="size-3" />{overview.status.data.ahead}</Chip> : null}
-            {overview.pullRequest.data?.pullRequest ? <Chip size="sm" variant="soft" color="accent"><RiGitPullRequestLine className="size-3" />#{overview.pullRequest.data.pullRequest.number}</Chip> : null}
-          </div> : null}
-          <Command.InputGroup aria-label={t('git.searchOps')} className="mx-3">
-            <Command.InputGroup.Prefix><RiSearchLine className="size-4" /></Command.InputGroup.Prefix>
-            <Command.InputGroup.Input placeholder={t('git.searchPlaceholder')} />
-            <Command.InputGroup.ClearButton aria-label={t('git.clearSearch')} />
-          </Command.InputGroup>
-          <Command.List aria-label={t('git.opsList')} className="min-h-0 flex-1 overflow-y-auto px-3 pb-3"
-            disabledKeys={allActions.filter(action => unavailable || sending || (writingBlocked && (action.id === 'init' || action.id === 'push'))).map(action => action.id)}
-            onAction={key => { const action = allActions.find(item => item.id === String(key)); if (action) choose(action.id); }}
-            renderEmptyState={() => <span>{t('git.noMatch')}</span>}>
-            {gitAgentActionGroups.map(group => {
-              const GroupIcon = groupIcons[group.id as keyof typeof groupIcons] || RiGitBranchLine;
-              return <Command.Group key={group.id} id={group.id} heading={group.title}>
-                {group.actions.map(action => {
-                  const Icon = group.id.startsWith('pr-') || group.id === 'pull-requests' ? RiGitPullRequestLine
-                    : action.id === 'push' || action.id === 'commit-and-push' ? RiUploadCloud2Line : GroupIcon;
-                  return <Command.Item key={action.id} id={action.id} textValue={`${action.title} ${action.description} ${action.id}`}
-                    className="group flex min-h-14 items-center gap-3 rounded-xl px-3 py-2">
-                    <Icon className="text-muted size-4 shrink-0" />
-                    <div className="min-w-0 flex-1">
-                      <span className="block text-sm font-medium">{action.title}</span>
-                      <span className="text-muted block text-xs">{action.description} · {action.mode === 'agent' ? 'Agent' : t('git.modeDirect')}</span>
-                    </div>
-                    {sending === action.id ? <Spinner size="sm" /> : <RiArrowRightLine className="text-muted size-4 shrink-0 opacity-0 group-hover:opacity-100 group-data-[focused]:opacity-100" />}
-                  </Command.Item>;
-                })}
-              </Command.Group>;
-            })}
-          </Command.List>
-          </>}
-        </Command.Dialog>
-      </Command.Container>
-    </Command.Backdrop>
-  </Command>;
+          </SelectItem>)}
+        </Select> : null}
+      </div>
+      <ModalCloseButton label={t('git.closeOperations')} onPress={() => onOpenChange(false)} />
+    </div>
+    <Tabs selectedKey={tab} onSelectionChange={key => setTab(key === 'operations' ? 'operations' : 'status')} className="min-h-0 flex-1 gap-0">
+      <div className="shrink-0 px-6 pb-2">
+        <TabList aria-label={t('git.pagesLabel')}>
+          <Tab id="status" icon={RiPulseLine} count={changedFiles ? <span className="tabular-nums">{changedFiles}</span> : undefined}>{t('git.tabStatus')}</Tab>
+          <Tab id="operations" icon={RiFlashlightLine}>{t('git.tabOperations')}</Tab>
+        </TabList>
+      </div>
+      <TabPanel id="status" className="flex min-h-0 flex-1 flex-col">
+        <ScrollArea className="min-h-0 flex-1" contentClassName="px-6 pb-4" surface="full">
+          <GitStatusOverview key={repoPath} overview={overview} files={git.files} filesTruncated={git.filesTruncated}
+            onJump={group => { setTab('operations'); setJumpGroup(group); }} />
+        </ScrollArea>
+      </TabPanel>
+      <TabPanel id="operations" className="flex min-h-0 flex-1 flex-col">
+        <div className="flex shrink-0 items-center gap-2 px-6 pb-2 text-caption-1-regular text-text-secondary">
+          <ProviderIcon provider={provider} className="size-4" />
+          <span className="truncate">{conversation ? t('git.sendTo', { provider: providerDisplayName(provider), title: conversation.title }) : t('git.pickAgent')}</span>
+        </div>
+        {overview.status.data?.initialized ? <div className="flex shrink-0 flex-wrap items-center gap-1.5 px-6 pb-2">
+          <Tag><RiGitBranchLine aria-hidden className="size-3" /><span className="font-mono">{overview.status.data.branch || t('git.detachedHead')}</span></Tag>
+          {overview.status.data.changedFiles
+            ? <Tag color="yellow">{t('git.changedFiles', { count: overview.status.data.changedFiles })}</Tag>
+            : <Tag color="lime">{t('git.cleanTree')}</Tag>}
+          {overview.status.data.ahead ? <Tag color="yellow"><RiArrowUpLine aria-hidden className="size-3" />{overview.status.data.ahead}</Tag> : null}
+          {overview.pullRequest.data?.pullRequest ? <Tag color="blue"><RiGitPullRequestLine aria-hidden className="size-3" />#{overview.pullRequest.data.pullRequest.number}</Tag> : null}
+        </div> : null}
+        <Autocomplete filter={contains}>
+          <SearchField aria-label={t('git.searchOps')} className="group/search relative mx-6 mb-1 shrink-0">
+            <InputBase leadingIcon={RiSearchLine} placeholder={t('git.searchPlaceholder')} className="pe-7 [&::-webkit-search-cancel-button]:appearance-none" />
+            <AriaButton aria-label={t('git.clearSearch')} className={cx(
+              'absolute end-2 top-1/2 flex size-6 -translate-y-1/2 cursor-pointer items-center justify-center rounded-md text-foreground-icon-secondary',
+              'outline-none transition-colors duration-150 ease hover:bg-background-tertiary-hover hover:text-foreground-icon-primary',
+              'data-[focus-visible]:ring-2 data-[focus-visible]:ring-border-focus-ring group-data-[empty]/search:hidden',
+            )}>
+              <RiCloseLine aria-hidden className="size-4" />
+            </AriaButton>
+          </SearchField>
+          <ScrollArea className="min-h-0 flex-1" contentClassName="px-4 pt-1 pb-4" viewportRef={opsListRef} surface="full">
+            <Menu aria-label={t('git.opsList')} disabledKeys={disabledKeys}
+              onAction={key => { const action = allActions.find(item => item.id === String(key)); if (action) choose(action.id); }}
+              renderEmptyState={() => <p className="px-2 py-8 text-center text-body-regular text-text-tertiary">{t('git.noMatch')}</p>}>
+              {gitAgentActionGroups.map(group => {
+                const GroupIcon = groupIcons[group.id as keyof typeof groupIcons] || RiGitBranchLine;
+                return <MenuSection key={group.id} id={group.id} title={group.title} className="pb-2">
+                  {group.actions.map(action => {
+                    const Icon = group.id.startsWith('pr-') || group.id === 'pull-requests' ? RiGitPullRequestLine
+                      : action.id === 'push' || action.id === 'commit-and-push' ? RiUploadCloud2Line : GroupIcon;
+                    return <AriaMenuItem key={action.id} id={action.id} textValue={`${action.title} ${action.description} ${action.id}`}
+                      className={({ isFocused, isHovered, isDisabled }) => cx(
+                        'group flex min-h-14 cursor-pointer items-center gap-3 rounded-2lg px-3 py-2 text-start outline-none transition-colors duration-150 ease',
+                        (isFocused || isHovered) && !isDisabled && MENU_ITEM_ACTIVE,
+                        isDisabled && 'cursor-not-allowed opacity-50',
+                      )}>
+                      <Icon aria-hidden className="size-[18px] shrink-0 text-foreground-icon-secondary" />
+                      <div className="min-w-0 flex-1">
+                        <span className="block text-body-medium text-text-primary">{action.title}</span>
+                        <span className="block text-caption-1-regular text-text-secondary">{action.description} · {action.mode === 'agent' ? 'Agent' : t('git.modeDirect')}</span>
+                      </div>
+                      {sending === action.id ? <Spinner size="sm" /> : <RiArrowRightLine aria-hidden className="size-4 shrink-0 text-foreground-icon-tertiary opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-data-[focused]:opacity-100" />}
+                    </AriaMenuItem>;
+                  })}
+                </MenuSection>;
+              })}
+            </Menu>
+          </ScrollArea>
+        </Autocomplete>
+      </TabPanel>
+    </Tabs>
+  </Modal>;
 }

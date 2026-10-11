@@ -1,6 +1,5 @@
 import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { RiArrowDownLine, RiDeleteBinLine, RiFileCopyLine } from '@remixicon/react';
-import { Button, Chip, Spinner, ToggleButton, Tooltip, toast } from '@heroui/react';
 import { isSshFailureKind, type SshExecRun } from '@todex/protocol/ssh';
 import { SSH_FAILURE_HINT_KEYS, SSH_FAILURE_LABEL_KEYS } from './sshShared';
 import {
@@ -16,17 +15,29 @@ import {
   visibleSshExecs,
 } from '../../session/sshExecTabs';
 import { t, useT } from '../../i18n';
+import { Chip } from '@/components/base/badges/chip';
+import { Button } from '@/components/base/buttons/button';
+import { LinkButton } from '@/components/base/buttons/link-button';
+import { SegmentedControl, SegmentedControlItem } from '@/components/base/segmented-control/segmented-control';
+import { Switch } from '@/components/base/switch/switch';
+import { IconAction } from '@/components/ui/icon-action';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Spinner } from '@/components/ui/spinner';
+import { toast } from '@/components/ui/toast';
+import { cx } from '@/utils/cx';
 
-type ChipColor = 'default' | 'accent' | 'success' | 'warning' | 'danger';
+type ChipColor = 'neutral' | 'blue' | 'lime' | 'yellow' | 'rose';
 
 /** Lines shown before an output block collapses behind "show all". */
 export const SSH_EXEC_COLLAPSED_LINES = 12;
 /** Distance from the bottom (px) that still counts as following the log. */
 const FOLLOW_THRESHOLD = 40;
 // Opaque, so the collapse fade can blend into it.
-const OUTPUT_BG = 'bg-[color-mix(in_oklab,var(--surface-secondary)_55%,var(--surface))]';
-const OUTPUT_FADE = 'to-[color-mix(in_oklab,var(--surface-secondary)_55%,var(--surface))]';
-const FILTER_CLASS = 'h-6 rounded-full px-2.5 text-xs';
+const OUTPUT_BG = 'bg-background-secondary-default';
+const OUTPUT_FADE = 'to-background-secondary-default';
+/** Host filter key for "all hosts"; the space keeps it apart from any host
+ * name or ssh_config alias. */
+const ALL_HOSTS = 'all hosts';
 
 function copyText(text: string, success: string) {
   void navigator.clipboard.writeText(text)
@@ -35,14 +46,14 @@ function copyText(text: string, success: string) {
 }
 
 function runStatus(run: SshExecRun): { label: string; color: ChipColor; hint: string } {
-  if (run.status === 'running') return { label: t('sshExec.running'), color: 'accent', hint: '' };
-  if (run.status === 'cancelled' || run.failure === 'cancelled') return { label: t('sshExec.cancelled'), color: 'default', hint: '' };
+  if (run.status === 'running') return { label: t('sshExec.running'), color: 'blue', hint: '' };
+  if (run.status === 'cancelled' || run.failure === 'cancelled') return { label: t('sshExec.cancelled'), color: 'neutral', hint: '' };
   if (run.status === 'failed') {
     const kind = isSshFailureKind(run.failure) ? run.failure : 'other';
-    return { label: t(SSH_FAILURE_LABEL_KEYS[kind]), color: 'warning', hint: t(SSH_FAILURE_HINT_KEYS[kind]) };
+    return { label: t(SSH_FAILURE_LABEL_KEYS[kind]), color: 'yellow', hint: t(SSH_FAILURE_HINT_KEYS[kind]) };
   }
-  if (run.exitCode === undefined) return { label: t('sshExec.completed'), color: 'success', hint: '' };
-  return { label: t('sshExec.exitCode', { code: run.exitCode }), color: run.exitCode === 0 ? 'success' : 'danger', hint: '' };
+  if (run.exitCode === undefined) return { label: t('sshExec.completed'), color: 'lime', hint: '' };
+  return { label: t('sshExec.exitCode', { code: run.exitCode }), color: run.exitCode === 0 ? 'lime' : 'rose', hint: '' };
 }
 
 /** Ticks while the call runs; kept apart so only this text re-renders. */
@@ -54,14 +65,6 @@ function LiveDuration({ startedAt }: { startedAt?: string }) {
     return () => window.clearInterval(timer);
   }, []);
   return Number.isFinite(started) ? <>{formatSshExecDuration(Math.max(0, now - started))}</> : null;
-}
-
-function LinkButton({ label, onPress }: { label: string; onPress: () => void }) {
-  return (
-    <Button size="sm" variant="ghost" className="text-accent-soft-foreground h-auto min-w-0 rounded-md px-1 py-0.5 text-xs font-medium" onPress={onPress}>
-      {label}
-    </Button>
-  );
 }
 
 /** One call. Memoized on the run object, which the runtime only replaces when
@@ -87,66 +90,68 @@ const SshExecCard = memo(function SshExecCard({ run }: { run: SshExecRun }) {
     if (pre && clamped && running) pre.scrollTop = pre.scrollHeight;
   }, [clamped, output, running]);
   const border = running
-    ? 'border-[color-mix(in_oklab,var(--accent)_45%,transparent)]'
-    : failed ? 'border-[color-mix(in_oklab,var(--danger)_35%,transparent)]' : 'border-default';
+    ? 'border-accent-300'
+    : failed ? 'border-border-error-default' : 'border-border-button-default';
   // A connection failure without output shows only its hint.
   const showOutput = Boolean(output.text) || running || !status.hint;
   return (
-    <article data-ssh-exec={run.id} data-failed={failed || undefined} className={`bg-surface mb-2.5 overflow-hidden rounded-[calc(var(--radius)*0.9)] border ${border}`}>
-      <div className="flex items-center gap-2 px-3 pt-2.5 text-xs">
-        <span className="min-w-0 truncate text-[13px] font-semibold">{run.host || '—'}</span>
-        <span className="text-muted shrink-0">{formatSshExecTime(run.startedAt, true)}</span>
+    <article data-ssh-exec={run.id} data-failed={failed || undefined} className={cx('mb-2.5 overflow-hidden rounded-2xl border bg-background-primary-default shadow-card', border)}>
+      <div className="flex items-center gap-2 px-3 pt-2.5 text-caption-1-regular">
+        <span className="min-w-0 truncate text-body-2-semibold text-text-primary">{run.host || '—'}</span>
+        <span className="shrink-0 text-text-tertiary">{formatSshExecTime(run.startedAt, true)}</span>
         <span className="flex-1" />
-        <span className="text-muted shrink-0 tabular-nums">
+        <span className="shrink-0 tabular-nums text-text-tertiary">
           {running ? <LiveDuration startedAt={run.startedAt} /> : run.durationMs !== undefined ? formatSshExecDuration(run.durationMs) : null}
         </span>
-        <Chip size="sm" variant="soft" color={status.color} className="shrink-0 font-semibold">
-          {running ? <Spinner size="sm" color="current" className="size-3" /> : null}
-          <Chip.Label>{status.label}</Chip.Label>
+        <Chip variant="caption" color={status.color} className="shrink-0 gap-1 text-caption-1-semibold">
+          {running ? <Spinner size="xs" className="size-3 text-current" /> : null}
+          {status.label}
         </Chip>
       </div>
       <button
         type="button" aria-expanded={commandOpen} title={run.command}
-        className="bg-surface-secondary mx-3 mt-2 flex w-[calc(100%-1.5rem)] cursor-pointer items-start gap-1.5 rounded-lg px-2 py-1.5 text-left font-mono text-[12.5px] leading-normal"
+        className="mx-3 mt-2 flex w-[calc(100%-1.5rem)] cursor-pointer items-start gap-1.5 rounded-xl bg-background-secondary-default px-2 py-1.5 text-start font-mono text-caption-1-regular text-text-primary transition-colors duration-150 ease outline-none hover:bg-background-secondary-hover focus-visible:ring-2 focus-visible:ring-border-focus-ring"
         onClick={() => setCommandOpen(open => !open)}
       >
-        <span aria-hidden="true" className="text-accent select-none">$</span>
-        <span className={`min-w-0 flex-1 whitespace-pre-wrap break-all${commandOpen ? '' : ' line-clamp-2'}`}>{run.command || '…'}</span>
+        <span aria-hidden="true" className="select-none text-text-accent">$</span>
+        <span className={cx('min-w-0 flex-1 whitespace-pre-wrap break-all', !commandOpen && 'line-clamp-2')}>{run.command || '…'}</span>
       </button>
       {run.cwd ? (
-        <div className="text-muted mx-3.5 mt-1 truncate text-[11.5px]" title={run.cwd}>
+        <div className="mx-3.5 mt-1 truncate text-caption-2-regular text-text-tertiary" title={run.cwd}>
           {t('sshExec.cwd')} <code className="font-mono">{run.cwd}</code>
         </div>
       ) : null}
-      {status.hint ? <div className="bg-warning-soft text-warning-soft-foreground mx-3 mt-2 rounded-lg px-2.5 py-1.5 text-xs">{status.hint}</div> : null}
+      {status.hint ? <div className="mx-3 mt-2 rounded-xl bg-status-yellow-background px-2.5 py-1.5 text-caption-1-regular text-status-yellow-text">{status.hint}</div> : null}
       {showOutput ? (
-        <div className={`relative mx-3 mt-2 rounded-lg border border-separator ${OUTPUT_BG}`}>
+        <div className={cx('relative mx-3 mt-2 rounded-xl border border-separator-border', OUTPUT_BG)}>
           {output.text || running ? (
             <pre
               ref={preRef}
               aria-label={t('sshExec.output')}
-              className="m-0 overflow-x-auto px-2.5 py-2 font-mono text-xs leading-[1.55] whitespace-pre [tab-size:8]"
-              style={clamped ? { maxHeight: `calc(${SSH_EXEC_COLLAPSED_LINES} * 1.55em + 1rem)`, overflowY: 'hidden' } : undefined}
+              className="m-0 overflow-x-auto px-2.5 py-2 font-mono text-caption-1-regular whitespace-pre text-text-primary [tab-size:8]"
+              style={clamped ? { maxHeight: `calc(${SSH_EXEC_COLLAPSED_LINES} * 1lh + 1rem)`, overflowY: 'hidden' } : undefined}
             >
               {output.chunks.map((chunk, index) => (
-                <span key={index} data-stream={chunk.stream} className={chunk.stream === 'stderr' ? 'text-danger-soft-foreground' : undefined}>{chunk.data}</span>
+                <span key={index} data-stream={chunk.stream} className={chunk.stream === 'stderr' ? 'text-text-error-primary' : undefined}>{chunk.data}</span>
               ))}
             </pre>
           ) : (
-            <p className="text-muted m-0 px-2.5 py-2 text-xs italic">{t('sshExec.noOutput')}</p>
+            <p className="m-0 px-2.5 py-2 text-caption-1-regular italic text-text-tertiary">{t('sshExec.noOutput')}</p>
           )}
           {clamped ? (
-            <div aria-hidden="true" className={`pointer-events-none absolute inset-x-0 h-9 from-transparent ${OUTPUT_FADE} ${running ? 'top-0 rounded-t-lg bg-linear-to-t' : 'bottom-0 rounded-b-lg bg-linear-to-b'}`} />
+            <div aria-hidden="true" className={cx('pointer-events-none absolute inset-x-0 h-9 from-transparent', OUTPUT_FADE, running ? 'top-0 rounded-t-xl bg-linear-to-t' : 'bottom-0 rounded-b-xl bg-linear-to-b')} />
           ) : null}
         </div>
       ) : null}
-      {run.outputTruncated ? <p className="text-muted mx-3.5 mt-1 text-[11.5px]">{t('sshExec.outputTruncated')}</p> : null}
-      <div className="flex flex-wrap items-center gap-1 px-2 pt-1 pb-1.5">
+      {run.outputTruncated ? <p className="mx-3.5 mt-1 text-caption-2-regular text-text-tertiary">{t('sshExec.outputTruncated')}</p> : null}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3.5 pt-2 pb-2.5">
         {collapsible ? (
-          <LinkButton label={expanded ? t('sshExec.collapse') : t('sshExec.expand', { lines: output.lines })} onPress={() => setExpanded(open => !open)} />
+          <LinkButton size="xs" onClick={() => setExpanded(open => !open)}>
+            {expanded ? t('sshExec.collapse') : t('sshExec.expand', { lines: output.lines })}
+          </LinkButton>
         ) : null}
-        {run.command ? <LinkButton label={t('sshExec.copyCommand')} onPress={() => copyText(run.command, t('sshExec.commandCopied'))} /> : null}
-        {!running && output.text ? <LinkButton label={t('sshExec.copyOutput')} onPress={() => copyText(output.text, t('sshExec.outputCopied'))} /> : null}
+        {run.command ? <LinkButton size="xs" onClick={() => copyText(run.command, t('sshExec.commandCopied'))}>{t('sshExec.copyCommand')}</LinkButton> : null}
+        {!running && output.text ? <LinkButton size="xs" onClick={() => copyText(output.text, t('sshExec.outputCopied'))}>{t('sshExec.copyOutput')}</LinkButton> : null}
       </div>
     </article>
   );
@@ -154,10 +159,10 @@ const SshExecCard = memo(function SshExecCard({ run }: { run: SshExecRun }) {
 
 function TurnSeparator({ label }: { label: string }) {
   return (
-    <div role="separator" className="text-muted mx-1 mt-3.5 mb-2 flex items-center gap-2 text-[11px]">
-      <span className="bg-separator h-px flex-1" />
+    <div role="separator" className="mx-1 mt-3.5 mb-2 flex items-center gap-2 text-caption-2-regular text-text-tertiary">
+      <span className="h-px flex-1 bg-separator-border" />
       <span>{label}</span>
-      <span className="bg-separator h-px flex-1" />
+      <span className="h-px flex-1 bg-separator-border" />
     </div>
   );
 }
@@ -215,45 +220,57 @@ export function SshExecPane({ conversationId, runs, isActive }: { conversationId
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex items-center gap-2 px-4 pt-3 pb-2">
-        <span className="shrink-0 text-[15px] font-semibold">{t('sshExec.title')}</span>
-        <span className="text-muted min-w-0 truncate text-xs">{t('sshExec.summary', { count: shown.length, failed: failedCount })}</span>
+        <span className="shrink-0 text-headline-semibold text-text-primary">{t('sshExec.title')}</span>
+        <span className="min-w-0 truncate text-caption-1-regular text-text-secondary">{t('sshExec.summary', { count: shown.length, failed: failedCount })}</span>
         <span className="flex-1" />
-        <Tooltip delay={200}>
-          <Button isIconOnly size="sm" variant="ghost" aria-label={t('sshExec.copyAll')} isDisabled={!filtered.length}
-            onPress={() => copyText(sshExecTranscript(filtered), t('sshExec.allCopied'))}>
-            <RiFileCopyLine className="size-4" />
-          </Button>
-          <Tooltip.Content className="text-xs">{t('sshExec.copyAll')}</Tooltip.Content>
-        </Tooltip>
-        <Tooltip delay={200}>
-          <Button isIconOnly size="sm" variant="ghost" aria-label={t('sshExec.clearView')} isDisabled={!shown.length}
-            onPress={() => clearSshExecView(conversationId, runs)}>
-            <RiDeleteBinLine className="size-4" />
-          </Button>
-          <Tooltip.Content className="text-xs">{t('sshExec.clearView')}</Tooltip.Content>
-        </Tooltip>
+        <IconAction
+          icon={RiFileCopyLine}
+          size="sm"
+          aria-label={t('sshExec.copyAll')}
+          tooltip
+          disabled={!filtered.length}
+          onClick={() => copyText(sshExecTranscript(filtered), t('sshExec.allCopied'))}
+        />
+        <IconAction
+          icon={RiDeleteBinLine}
+          size="sm"
+          aria-label={t('sshExec.clearView')}
+          tooltip
+          disabled={!shown.length}
+          onClick={() => clearSshExecView(conversationId, runs)}
+        />
       </div>
       {shown.length ? (
-        <div className="flex flex-wrap gap-1.5 px-4 pb-2.5">
-          <ToggleButton size="sm" className={FILTER_CLASS} isSelected={!host} onChange={() => setHostFilter('')}>
-            {t('sshExec.allHosts')}
-          </ToggleButton>
-          {hosts.map(name => (
-            <ToggleButton key={name} size="sm" className={FILTER_CLASS} isSelected={host === name} onChange={() => setHostFilter(name)}>
-              {name}
-            </ToggleButton>
-          ))}
-          <ToggleButton size="sm" className={FILTER_CLASS} isSelected={failedOnly} onChange={setFailedOnly}>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 pb-2.5">
+          <SegmentedControl
+            aria-label={t('sshExec.allHosts')}
+            className="max-w-full flex-wrap"
+            selectedKeys={[host || ALL_HOSTS]}
+            onSelectionChange={(keys) => {
+              const next = [...keys][0];
+              if (next !== undefined) setHostFilter(next === ALL_HOSTS ? '' : String(next));
+            }}
+          >
+            <SegmentedControlItem id={ALL_HOSTS}>{t('sshExec.allHosts')}</SegmentedControlItem>
+            {hosts.map(name => (
+              <SegmentedControlItem key={name} id={name} className="max-w-48">
+                <span className="min-w-0 truncate">{name}</span>
+              </SegmentedControlItem>
+            ))}
+          </SegmentedControl>
+          <Switch size="sm" className="ms-auto" isSelected={failedOnly} onChange={setFailedOnly}>
             {t('sshExec.failedOnly')}
-          </ToggleButton>
+          </Switch>
         </div>
       ) : null}
       <div className="relative min-h-0 flex-1">
-        <div
-          ref={scrollRef}
+        <ScrollArea
+          className="h-full"
+          contentClassName="px-3 pb-4"
+          surface="secondary"
+          viewportRef={scrollRef}
           role="log"
           aria-label={t('sshExec.title')}
-          className="h-full overflow-y-auto px-3 pb-4"
           onScroll={(event) => {
             const element = event.currentTarget;
             followRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < FOLLOW_THRESHOLD;
@@ -261,14 +278,18 @@ export function SshExecPane({ conversationId, runs, isActive }: { conversationId
           }}
         >
           {entries.length ? entries : (
-            <div className="text-muted flex h-full items-center justify-center px-6 text-center text-sm">
+            <div className="flex h-full items-center justify-center px-6 text-center text-body-regular text-text-tertiary">
               {shown.length ? t('sshExec.filteredEmpty') : t('sshExec.empty')}
             </div>
           )}
-        </div>
+        </ScrollArea>
         {behind ? (
-          <Button size="sm" className="bg-foreground text-background absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full px-3.5 text-xs font-semibold shadow-lg" onPress={scrollToBottom}>
-            <RiArrowDownLine className="size-3.5" />
+          <Button
+            size="small"
+            leadingIcon={RiArrowDownLine}
+            className="absolute bottom-3 left-1/2 z-20 -translate-x-1/2 rounded-full px-3 shadow-dropdown"
+            onClick={scrollToBottom}
+          >
             {t('sshExec.newResults')}
           </Button>
         ) : null}

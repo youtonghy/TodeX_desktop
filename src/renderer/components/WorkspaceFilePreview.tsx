@@ -1,7 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import { AlertDialog, Button, Modal, TextArea, TextField, toast } from '@heroui/react';
-import { CodeBlock } from '@heroui-pro/react/code-block';
-import { Markdown } from '@heroui-pro/react/markdown';
+import { Button } from '@/components/base/buttons/button';
+import { Textarea } from '@/components/base/textarea/textarea';
+import { CodeBlock } from '@/components/ui/code-block';
+import { Markdown } from '@/components/ui/markdown';
+import { ConfirmDialog, Modal } from '@/components/ui/modal';
+import { SpinnerIcon } from '@/components/ui/spinner';
+import { toast } from '@/components/ui/toast';
 import { baseMarkdownComponents } from './markdownComponents';
 import { lineRangeForOffsets, selectionInside, selectionStartOffset, type TextLineRange } from '../lib/selection';
 import { buildConflictMergeDocument, conflictMarkersRemain, WORKSPACE_FILE_MAX_TEXT_BYTES } from '../session/helpers';
@@ -267,7 +271,7 @@ export function WorkspaceFilePreview({ file, onAddReference, onSaveFile, onReloa
       const info = selectionInside(container);
       if (!info) { setQuote(null); return; }
       let range: TextLineRange | undefined;
-      const codeElement = container.querySelector<HTMLElement>('[data-slot="code-block-code"]');
+      const codeElement = container.querySelector<HTMLElement>('.code-block-code');
       const source = file?.text;
       if (source && codeElement && codeElement.textContent === source) {
         const start = selectionStartOffset(codeElement);
@@ -296,12 +300,17 @@ export function WorkspaceFilePreview({ file, onAddReference, onSaveFile, onReloa
 
   let content: React.ReactNode;
   if (!file) {
-    content = <p className="text-muted text-xs">{t('filePreview.hint')}</p>;
+    content = <p className="text-caption-1-regular text-text-tertiary">{t('filePreview.hint')}</p>;
   } else if (editing) {
     content = (
-      <TextField value={draft} onChange={setDraft} className="w-full" isDisabled={saving}>
-        <TextArea aria-label={t('filePreview.editorLabel')} rows={Math.min(40, Math.max(16, draft.split('\n').length + 2))} className="w-full font-mono text-xs" />
-      </TextField>
+      <Textarea
+        aria-label={t('filePreview.editorLabel')}
+        value={draft}
+        onChange={setDraft}
+        isDisabled={saving}
+        rows={Math.min(40, Math.max(16, draft.split('\n').length + 2))}
+        inputClassName="font-mono text-caption-1-regular"
+      />
     );
   } else {
     // Older backends report images as application/octet-stream with text: null.
@@ -309,22 +318,15 @@ export function WorkspaceFilePreview({ file, onAddReference, onSaveFile, onReloa
     if (imageMime) {
       content = file.dataUrl?.startsWith(`data:${imageMime};base64,`)
         ? <img src={file.dataUrl} alt={file.name || file.path.split('/').pop() || t('filePreview.imageAlt')} className="block h-auto max-w-full rounded-lg object-contain" />
-        : <p className="text-muted text-xs">{t('filePreview.noImageData')}</p>;
+        : <p className="text-caption-1-regular text-text-tertiary">{t('filePreview.noImageData')}</p>;
     } else if (typeof file.text !== 'string') {
-      content = <p className="text-muted text-xs">{t('filePreview.unsupported')}</p>;
+      content = <p className="text-caption-1-regular text-text-tertiary">{t('filePreview.unsupported')}</p>;
     } else if (!file.text) {
-      content = <p className="text-muted text-xs">{file.sizeBytes ? t('filePreview.noText') : t('filePreview.empty')}</p>;
+      content = <p className="text-caption-1-regular text-text-tertiary">{file.sizeBytes ? t('filePreview.noText') : t('filePreview.empty')}</p>;
     } else if (isMarkdownFile(file.path)) {
       content = <Markdown components={baseMarkdownComponents}>{file.text}</Markdown>;
     } else {
-      content = (
-        <CodeBlock className="min-w-0">
-          <CodeBlock.Header>
-            <span className="text-muted text-xs uppercase">{codeLanguage(file.path)}</span>
-          </CodeBlock.Header>
-          <CodeBlock.Code code={file.text} language={codeLanguage(file.path)} />
-        </CodeBlock>
-      );
+      content = <CodeBlock code={file.text} language={codeLanguage(file.path)} className="my-0 min-w-0" />;
     }
   }
 
@@ -334,60 +336,63 @@ export function WorkspaceFilePreview({ file, onAddReference, onSaveFile, onReloa
         <div className="mb-2 flex items-center justify-end gap-2">
           {editing ? (
             <>
-              {mergePending ? <span className="text-warning text-xs">{t('filePreview.mergePending')}</span> : null}
-              {dirty ? <span className="text-muted text-xs">{t('filePreview.unsaved')}</span> : null}
-              <Button size="sm" variant="tertiary" isDisabled={saving} onPress={cancelEdit}>{t('filePreview.cancelEdit')}</Button>
-              <Button size="sm" variant="secondary" isDisabled={!dirty || saving} onPress={() => void save()}>{saving ? t('filePreview.saving') : t('filePreview.save')}</Button>
+              {mergePending ? <span className="text-caption-1-regular text-status-yellow-text">{t('filePreview.mergePending')}</span> : null}
+              {dirty ? <span className="text-caption-1-regular text-text-tertiary">{t('filePreview.unsaved')}</span> : null}
+              <Button size="small" variant="secondary" disabled={saving} onClick={cancelEdit}>{t('filePreview.cancelEdit')}</Button>
+              <Button
+                size="small"
+                disabled={!dirty || saving}
+                aria-busy={saving || undefined}
+                leadingIcon={saving ? SpinnerIcon : undefined}
+                onClick={() => void save()}
+              >
+                {saving ? t('filePreview.saving') : t('filePreview.save')}
+              </Button>
             </>
           ) : (
-            <Button size="sm" variant="tertiary" onPress={beginEdit}>{t('filePreview.edit')}</Button>
+            <Button size="small" variant="secondary" onClick={beginEdit}>{t('filePreview.edit')}</Button>
           )}
         </div>
       ) : null}
       {content}
       {quote ? (
         <div className="fixed z-50 -translate-x-1/2" style={{ left: quote.left, top: quote.top }}>
-          <Button size="sm" variant="secondary" onPress={addQuote}>{t('filePreview.addToChat')}</Button>
+          <Button size="small" variant="secondary" className="shadow-dropdown" onClick={addQuote}>{t('filePreview.addToChat')}</Button>
         </div>
       ) : null}
-      <AlertDialog isOpen={conflictOpen} onOpenChange={setConflictOpen}>
-        <AlertDialog.Backdrop>
-          <AlertDialog.Container>
-            <AlertDialog.Dialog className="sm:max-w-md">
-              <AlertDialog.Header>
-                <AlertDialog.Heading>{t('filePreview.conflictTitle')}</AlertDialog.Heading>
-              </AlertDialog.Header>
-              <AlertDialog.Body>
-                <p className="text-muted text-sm">{t('filePreview.conflictBody')}</p>
-              </AlertDialog.Body>
-              <AlertDialog.Footer>
-                <Button slot="close" variant="tertiary">{t('filePreview.keepEditing')}</Button>
-                <Button variant="secondary" isDisabled={conflictLoading} onPress={() => void mergeFromRemote()}>{t('filePreview.compareMerge')}</Button>
-              </AlertDialog.Footer>
-            </AlertDialog.Dialog>
-          </AlertDialog.Container>
-        </AlertDialog.Backdrop>
-      </AlertDialog>
-      <Modal.Backdrop isOpen={mergeOpen} onOpenChange={(open) => { setMergeOpen(open); if (!open) setMergeError(''); }}>
-        <Modal.Container>
-          <Modal.Dialog className="w-[calc(100vw-2rem)] max-w-3xl">
-            <Modal.Header>
-              <Modal.Heading>{t('filePreview.mergeTitle')}</Modal.Heading>
-              <p className="text-muted text-xs">{t('filePreview.mergeHint')}</p>
-            </Modal.Header>
-            <Modal.Body className="overflow-y-auto">
-              <TextField value={mergeDraft} onChange={(value) => { setMergeDraft(value); setMergeError(''); }} className="w-full">
-                <TextArea aria-label={t('filePreview.mergeEditorLabel')} rows={20} className="w-full font-mono text-xs" />
-              </TextField>
-              {mergeError ? <p className="text-danger text-xs">{mergeError}</p> : null}
-            </Modal.Body>
-            <Modal.Footer>
-              <Button variant="tertiary" onPress={() => setMergeOpen(false)}>{t('filePreview.mergeBack')}</Button>
-              <Button variant="secondary" onPress={adoptMerge}>{t('filePreview.mergeAdopt')}</Button>
-            </Modal.Footer>
-          </Modal.Dialog>
-        </Modal.Container>
-      </Modal.Backdrop>
+      <ConfirmDialog
+        isOpen={conflictOpen}
+        onOpenChange={setConflictOpen}
+        title={t('filePreview.conflictTitle')}
+        description={t('filePreview.conflictBody')}
+        cancelLabel={t('filePreview.keepEditing')}
+        confirmLabel={t('filePreview.compareMerge')}
+        isConfirmDisabled={conflictLoading}
+        onConfirm={() => void mergeFromRemote()}
+      />
+      <Modal
+        isOpen={mergeOpen}
+        onOpenChange={(open) => { setMergeOpen(open); if (!open) setMergeError(''); }}
+        title={t('filePreview.mergeTitle')}
+        description={t('filePreview.mergeHint')}
+        size="3xl"
+        bodyClassName="flex flex-col gap-2"
+        footer={(
+          <>
+            <Button variant="secondary" onClick={() => setMergeOpen(false)}>{t('filePreview.mergeBack')}</Button>
+            <Button onClick={adoptMerge}>{t('filePreview.mergeAdopt')}</Button>
+          </>
+        )}
+      >
+        <Textarea
+          aria-label={t('filePreview.mergeEditorLabel')}
+          value={mergeDraft}
+          onChange={(value) => { setMergeDraft(value); setMergeError(''); }}
+          rows={20}
+          inputClassName="font-mono text-caption-1-regular"
+        />
+        {mergeError ? <p className="text-caption-1-regular text-text-error-primary">{mergeError}</p> : null}
+      </Modal>
     </div>
   );
 }

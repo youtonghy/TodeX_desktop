@@ -1,6 +1,32 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Button, Card, Chip, ComboBox, Input, Label, ListBox, Select, Spinner, Switch, TextArea, TextField, toast } from '@heroui/react';
+import {
+  Button as AriaButton,
+  ListBox as AriaListBox,
+  ListBoxItem as AriaListBoxItem,
+  Popover as AriaPopover,
+  Select as AriaSelect,
+  SelectValue as AriaSelectValue,
+} from 'react-aria-components';
 import { RiAddLine, RiArrowDownSLine, RiCheckLine, RiCloseLine, RiDeleteBinLine, RiDownload2Line, RiEdit2Line, RiRefreshLine, RiUpload2Line, RiUserSettingsLine } from '@remixicon/react';
+import { Chip } from '@/components/base/badges/chip';
+import { Button } from '@/components/base/buttons/button';
+import { ButtonGroup, ButtonGroupItem } from '@/components/base/buttons/button-group';
+import { MENU_ITEM, MENU_ITEM_ACTIVE, MENU_ITEMS_CONTAINER, MENU_POPOVER_SURFACE } from '@/components/base/dropdown/menu-styles';
+import { Input } from '@/components/base/input/input';
+import { Label } from '@/components/base/input/label';
+import { SegmentedControl, SegmentedControlItem } from '@/components/base/segmented-control/segmented-control';
+import { Select, SelectItem } from '@/components/base/select/select';
+import { Switch } from '@/components/base/switch/switch';
+import { PillTab, PillTabList } from '@/components/base/tabs/pill-tab';
+import { Textarea } from '@/components/base/textarea/textarea';
+import { ChevronDownSmall } from '@/components/foundations/icons/chevrons';
+import { Alert } from '@/components/ui/alert';
+import { Card } from '@/components/ui/card';
+import { ComboBox, ComboBoxItem } from '@/components/ui/combo-box';
+import { IconAction } from '@/components/ui/icon-action';
+import { Spinner, SpinnerIcon } from '@/components/ui/spinner';
+import { toast } from '@/components/ui/toast';
+import { cx } from '@/utils/cx';
 import {
   AGENT_PROVIDER_TRANSFER_FORMAT,
   MANAGED_PROVIDER_AGENTS,
@@ -193,49 +219,49 @@ export function AgentProvidersPanel({ session }: { session: TodeXSession }) {
   return (
     <div className="flex flex-col gap-4 py-1">
       <div className="flex min-w-0 items-center gap-3">
-        <div className="bg-accent-soft text-accent flex size-10 shrink-0 items-center justify-center rounded-lg">
-          <RiUserSettingsLine className="size-5" />
+        <div className="flex size-10 shrink-0 items-center justify-center rounded-2lg bg-badge-new-background text-badge-new-text">
+          <RiUserSettingsLine aria-hidden className="size-5" />
         </div>
         <div className="min-w-0 flex-1">
-          <h2 className="truncate text-base font-semibold">{activeBackend?.name || t('cli.currentBackend')}</h2>
-          <p className="text-muted truncate text-xs" title={session.settings.serverUrl}>{session.settings.serverUrl}</p>
+          <h2 className="truncate text-headline-semibold text-text-primary">{activeBackend?.name || t('cli.currentBackend')}</h2>
+          <p className="truncate text-caption-1-regular text-text-secondary" title={session.settings.serverUrl}>{session.settings.serverUrl}</p>
         </div>
-        <Button isIconOnly size="sm" variant="ghost" aria-label={t('ap.refresh')} isDisabled={loading} onPress={() => void refresh()}>
-          <RiRefreshLine className="size-4" />
-        </Button>
+        <IconAction icon={RiRefreshLine} size="md" aria-label={t('ap.refresh')} disabled={loading} onClick={() => void refresh()} />
       </div>
 
-      <p className="text-muted -mt-2 text-xs">{t(additiveAgent ? 'ap.globalNoteAdditive' : 'ap.globalNote')}</p>
+      <p className="-mt-2 text-caption-1-regular text-text-secondary">{t(additiveAgent ? 'ap.globalNoteAdditive' : 'ap.globalNote')}</p>
 
-      <div className="flex flex-wrap gap-2">
+      <PillTabList className="flex-wrap">
         {MANAGED_PROVIDER_AGENTS.map((id) => (
-          <Button key={id} size="sm" variant={agent === id ? 'primary' : 'tertiary'} onPress={() => { setAgent(id); setEditor(null); }}>
-            <ProviderIcon provider={id} className="size-4" />
-            {PROVIDER_DISPLAY_NAMES[id]}
-          </Button>
+          <PillTab key={id} variant="gray" isSelected={agent === id} onSelect={() => { setAgent(id); setEditor(null); }}>
+            <span className="inline-flex items-center gap-1.5">
+              <ProviderIcon provider={id} className="size-4" />
+              {PROVIDER_DISPLAY_NAMES[id]}
+            </span>
+          </PillTab>
         ))}
-      </div>
+      </PillTabList>
 
       {loading ? (
-        <div className="flex min-h-48 items-center justify-center"><Spinner aria-label={t('cli.reading')} /></div>
+        <div className="flex min-h-48 items-center justify-center"><Spinner size="md" aria-label={t('cli.reading')} /></div>
       ) : !bucket ? (
-        <p className="text-muted py-10 text-center text-sm">{t('ap.unsupported')}</p>
+        <p className="py-10 text-center text-body-regular text-text-secondary">{t('ap.unsupported')}</p>
       ) : (
         <>
           {liveMismatch ? (
-            <Alert status="warning" className="items-center">
-              <Alert.Indicator />
-              <Alert.Content>
-                <Alert.Description>{t('ap.liveMismatch')}</Alert.Description>
-              </Alert.Content>
-              <Button size="sm" variant="secondary" isDisabled={Boolean(busy)}
-                onPress={() => void run('import-live', () => api().importLiveAgentProvider(agent, 'imported', t('ap.importedName')), 'ap.imported')}>
-                {t('ap.importLive')}
-              </Button>
-            </Alert>
+            <Alert
+              status="warning"
+              description={t('ap.liveMismatch')}
+              actions={(
+                <Button size="small" variant="secondary" disabled={Boolean(busy)}
+                  onClick={() => void run('import-live', () => api().importLiveAgentProvider(agent, 'imported', t('ap.importedName')), 'ap.imported')}>
+                  {t('ap.importLive')}
+                </Button>
+              )}
+            />
           ) : null}
 
-          <div className="grid gap-3">
+          <div className="grid gap-2">
             {bucket.providers.map((profile) => {
               const editingThis = editor?.kind === 'edit' && editor.profile.id === profile.id;
               const settings = profile.settingsConfig as Record<string, unknown>;
@@ -243,25 +269,25 @@ export function AgentProvidersPanel({ session }: { session: TodeXSession }) {
               const isDefault = liveSelection?.providerId === profile.id;
               const defaultModelId = isDefault ? liveSelection?.modelId : null;
               const modelIds = providerModelIds(agent, settings);
+              const activating = busy === `activate:${profile.id}`;
               return (
                 <Fragment key={profile.id}>
-                <Card className="min-w-0 rounded-lg p-4">
+                <Card variant="secondary" className="min-w-0 gap-0">
                   <div className="flex items-start gap-3">
-                    <div className="bg-surface-secondary flex size-9 shrink-0 items-center justify-center rounded-lg">
+                    <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-stat-card-icon-background">
                       <ProviderIcon className="size-5" provider={agent} />
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
-                        <h3 className="truncate text-sm font-semibold">{profile.name}</h3>
-                        {isCurrent ? <Chip size="sm" variant="soft" color="success">{t('ap.active')}</Chip> : null}
-                        {isDefault ? <Chip size="sm" variant="soft" color="success">{t('ap.default')}</Chip> : null}
+                        <h3 className="truncate text-body-semibold text-text-primary">{profile.name}</h3>
+                        {isCurrent ? <Chip variant="caption" color="lime">{t('ap.active')}</Chip> : null}
+                        {isDefault ? <Chip variant="caption" color="lime">{t('ap.default')}</Chip> : null}
                       </div>
-                      <p className="text-muted mt-1 truncate text-xs">{providerBaseUrl(agent, settings) || profile.id}</p>
+                      <p className="mt-0.5 truncate text-caption-1-regular text-text-secondary">{providerBaseUrl(agent, settings) || profile.id}</p>
                       {additive && modelIds.length ? (
                         <div className="mt-2 flex flex-wrap gap-1">
                           {modelIds.map((modelId) => (
-                            <Chip key={modelId} size="sm" variant="soft"
-                              color={modelId === defaultModelId ? 'success' : undefined}>
+                            <Chip key={modelId} variant="caption" color={modelId === defaultModelId ? 'lime' : 'neutral'}>
                               {modelId}
                             </Chip>
                           ))}
@@ -269,25 +295,19 @@ export function AgentProvidersPanel({ session }: { session: TodeXSession }) {
                       ) : null}
                     </div>
                     <div className="flex shrink-0 items-center gap-1">
-                      <Button isIconOnly size="sm" variant="ghost" aria-label={t('ap.edit')}
-                        onPress={() => setEditor({ kind: 'edit', profile })}>
-                        <RiEdit2Line className="size-4" />
-                      </Button>
-                      <Button isIconOnly size="sm" variant="ghost" aria-label={t('ap.delete')}
-                        isDisabled={busy === `delete:${profile.id}`} onPress={() => remove(profile)}>
-                        <RiDeleteBinLine className="size-4" />
-                      </Button>
+                      {!additive && !isCurrent ? (
+                        <Button size="small" variant="primary" className="me-1" disabled={Boolean(busy)} aria-busy={activating || undefined}
+                          leadingIcon={activating ? SpinnerIcon : RiCheckLine}
+                          onClick={() => activate(profile)}>
+                          {t('ap.activate')}
+                        </Button>
+                      ) : null}
+                      <IconAction icon={RiEdit2Line} size="sm" aria-label={t('ap.edit')}
+                        onClick={() => setEditor({ kind: 'edit', profile })} />
+                      <IconAction icon={RiDeleteBinLine} size="sm" aria-label={t('ap.delete')}
+                        disabled={busy === `delete:${profile.id}`} onClick={() => remove(profile)} />
                     </div>
                   </div>
-                  {!additive && !isCurrent ? (
-                    <div className="mt-3 flex flex-wrap items-center gap-2">
-                      <Button size="sm" variant="primary" isDisabled={Boolean(busy)}
-                        onPress={() => activate(profile)}>
-                        {busy === `activate:${profile.id}` ? <Spinner size="sm" /> : <RiCheckLine className="size-4" />}
-                        {t('ap.activate')}
-                      </Button>
-                    </div>
-                  ) : null}
                 </Card>
                 {editingThis ? renderEditor() : null}
                 </Fragment>
@@ -302,55 +322,56 @@ export function AgentProvidersPanel({ session }: { session: TodeXSession }) {
               const adoptingThis = editor?.kind === 'adopt' && editor.nodeId === nodeId;
               return (
                 <Fragment key={nodeId}>
-                <Card className="min-w-0 rounded-lg border-dashed p-4">
+                <div className="min-w-0 rounded-2xl border border-dashed border-border-button-default bg-background-primary-default p-4">
                   <div className="flex items-start gap-3">
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
-                        <h3 className="truncate text-sm font-semibold">{nodeId}</h3>
-                        <Chip size="sm" variant="soft">{t('ap.unmanaged')}</Chip>
-                        {isLiveSelection ? <Chip size="sm" variant="soft" color="success">{t('ap.default')}</Chip> : null}
+                        <h3 className="truncate text-body-semibold text-text-primary">{nodeId}</h3>
+                        <Chip variant="caption" color="neutral">{t('ap.unmanaged')}</Chip>
+                        {isLiveSelection ? <Chip variant="caption" color="lime">{t('ap.default')}</Chip> : null}
                       </div>
                       {nodeBaseUrl ? (
-                        <p className="text-muted mt-1 truncate text-xs">{nodeBaseUrl}</p>
+                        <p className="mt-0.5 truncate text-caption-1-regular text-text-secondary">{nodeBaseUrl}</p>
                       ) : null}
                       {nodeModels.length ? (
                         <div className="mt-2 flex flex-wrap gap-1">
                           {nodeModels.map((modelId) => (
-                            <Chip key={modelId} size="sm" variant="soft"
-                              color={isLiveSelection && liveSelection?.modelId === modelId ? 'success' : undefined}>
+                            <Chip key={modelId} variant="caption"
+                              color={isLiveSelection && liveSelection?.modelId === modelId ? 'lime' : 'neutral'}>
                               {modelId}
                             </Chip>
                           ))}
                         </div>
                       ) : null}
                     </div>
-                    <Button size="sm" variant="secondary" isDisabled={Boolean(busy)} onPress={() => setEditor({ kind: 'adopt', nodeId })}>
+                    <Button size="small" variant="secondary" className="shrink-0" disabled={Boolean(busy)} onClick={() => setEditor({ kind: 'adopt', nodeId })}>
                       {t('ap.adopt')}
                     </Button>
                   </div>
-                </Card>
+                </div>
                 {adoptingThis ? renderEditor() : null}
                 </Fragment>
               );
             })}
 
             {bucket.providers.length === 0 && unmanaged.length === 0 ? (
-              <p className="text-muted py-8 text-center text-sm">{t('ap.noProviders')}</p>
+              <p className="rounded-2xl bg-background-secondary-default px-6 py-8 text-center text-body-regular text-text-secondary">{t('ap.noProviders')}</p>
             ) : null}
           </div>
 
           {editor?.kind === 'new' ? renderEditor() : (
             <div className="flex flex-wrap items-center gap-2">
-              <Button variant="secondary" onPress={() => setEditor({ kind: 'new' })}>
-                <RiAddLine className="size-4" />
+              <Button variant="secondary" leadingIcon={RiAddLine} onClick={() => setEditor({ kind: 'new' })}>
                 {t('ap.add')}
               </Button>
-              <Button variant="tertiary" isDisabled={Boolean(busy) || bucket.providers.length === 0} onPress={exportProviders}>
-                {busy === 'export' ? <Spinner size="sm" /> : <RiDownload2Line className="size-4" />}
+              <Button variant="secondary" disabled={Boolean(busy) || bucket.providers.length === 0}
+                leadingIcon={busy === 'export' ? SpinnerIcon : RiDownload2Line} aria-busy={busy === 'export' || undefined}
+                onClick={exportProviders}>
                 {t('ap.export')}
               </Button>
-              <Button variant="tertiary" isDisabled={Boolean(busy)} onPress={() => importInput.current?.click()}>
-                {busy === 'import' ? <Spinner size="sm" /> : <RiUpload2Line className="size-4" />}
+              <Button variant="secondary" disabled={Boolean(busy)}
+                leadingIcon={busy === 'import' ? SpinnerIcon : RiUpload2Line} aria-busy={busy === 'import' || undefined}
+                onClick={() => importInput.current?.click()}>
                 {t('ap.import')}
               </Button>
               <input
@@ -472,162 +493,146 @@ function ProviderEditor({
     onSave(providerId, { name, settingsConfig: buildSettingsConfig(agent, form, baseSource) });
   };
 
+  const switchToJson = () => {
+    if (!jsonMode && (editor.kind === 'new' || formDirty)) {
+      setJsonText(JSON.stringify(buildSettingsConfig(agent, form, baseSource), null, 2));
+      setFormDirty(false);
+    }
+    setJsonMode(true);
+  };
+
   return (
-    <Card className="rounded-lg p-4">
-      <div className="flex flex-col gap-3">
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold">
-            {editor.kind === 'new' ? t('ap.add') : editor.kind === 'adopt' ? t('ap.adopt') : t('ap.edit')}
-          </h3>
-          <div className="flex gap-1">
-            <Button size="sm" variant={jsonMode ? 'ghost' : 'secondary'} onPress={() => setJsonMode(false)}>{t('ap.formMode')}</Button>
-            <Button size="sm" variant={jsonMode ? 'secondary' : 'ghost'} onPress={() => {
-              if (!jsonMode && (editor.kind === 'new' || formDirty)) {
-                setJsonText(JSON.stringify(buildSettingsConfig(agent, form, baseSource), null, 2));
-                setFormDirty(false);
-              }
-              setJsonMode(true);
-            }}>{t('ap.jsonMode')}</Button>
-          </div>
-        </div>
+    <Card className="gap-3">
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="text-body-semibold text-text-primary">
+          {editor.kind === 'new' ? t('ap.add') : editor.kind === 'adopt' ? t('ap.adopt') : t('ap.edit')}
+        </h3>
+        <SegmentedControl
+          selectedKeys={[jsonMode ? 'json' : 'form']}
+          onSelectionChange={(keys) => {
+            const next = [...keys][0];
+            if (next === 'form') setJsonMode(false);
+            else if (next === 'json') switchToJson();
+          }}
+        >
+          <SegmentedControlItem id="form">{t('ap.formMode')}</SegmentedControlItem>
+          <SegmentedControlItem id="json">{t('ap.jsonMode')}</SegmentedControlItem>
+        </SegmentedControl>
+      </div>
 
-        {editor.kind === 'adopt' ? (
-          <p className="text-muted text-xs">{t('ap.adoptParsed')}</p>
-        ) : null}
+      {editor.kind === 'adopt' ? (
+        <p className="text-caption-1-regular text-text-secondary">{t('ap.adoptParsed')}</p>
+      ) : null}
 
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Field label={t('ap.name')} value={form.name} onChange={(name) => updateForm({ name })} />
+        <Input className="w-full" label={t('ap.providerId')} placeholder="my-provider" value={id} onChange={setId} isDisabled={idLocked} />
+      </div>
+
+      {jsonMode ? (
+        <Textarea
+          className="w-full"
+          label={t('ap.settingsConfig')}
+          value={jsonText}
+          onChange={setJsonText}
+          rows={10}
+          inputClassName="font-mono text-caption-1-regular"
+        />
+      ) : (
         <div className="grid gap-3 sm:grid-cols-2">
-          <Field label={t('ap.name')} value={form.name} onChange={(name) => updateForm({ name })} />
-          <TextField className="w-full" value={id} onChange={setId} isDisabled={idLocked}>
-            <Label>{t('ap.providerId')}</Label>
-            <Input className="w-full" placeholder="my-provider" />
-          </TextField>
+          {isGrok ? (
+            <Select
+              label={t('ap.authMode')}
+              className="w-full sm:col-span-2"
+              popoverClassName="w-(--trigger-width)"
+              selectedKey={form.authMode}
+              onSelectionChange={(key) => {
+                if (key === 'subscription' || key === 'api') updateForm({ authMode: key });
+              }}
+            >
+              <SelectItem id="subscription" textValue={t('ap.authSubscription')}>{t('ap.authSubscription')}</SelectItem>
+              <SelectItem id="api" textValue={t('ap.authApi')}>{t('ap.authApi')}</SelectItem>
+            </Select>
+          ) : null}
+          {grokSubscription ? null : (
+            <>
+              <Field label={t('ap.baseUrl')} value={form.baseUrl} onChange={(baseUrl) => updateForm({ baseUrl })}
+                description={isGrok ? t('ap.grokBaseUrlHint') : undefined} />
+              <Field label={t('ap.apiKey')} value={form.apiKey} onChange={(apiKey) => updateForm({ apiKey })} description={t('ap.secretKept')} />
+            </>
+          )}
+          {isClaude || isCodex || isGrok ? (
+            <Field label={t('ap.model')} value={form.model} onChange={(model) => updateForm({ model })}
+              description={grokSubscription ? t('ap.grokModelHint') : undefined} />
+          ) : null}
+          {isGrok && !grokSubscription ? (
+            <Select
+              label={t('ap.apiKind')}
+              className="w-full"
+              popoverClassName="w-(--trigger-width)"
+              placeholder={GROK_API_BACKENDS[0]}
+              selectedKey={form.apiKind || null}
+              onSelectionChange={(key) => {
+                if (typeof key === 'string') updateForm({ apiKind: key });
+              }}
+            >
+              {GROK_API_BACKENDS.map((backend) => (
+                <SelectItem key={backend} id={backend} textValue={backend}>{backend}</SelectItem>
+              ))}
+            </Select>
+          ) : null}
+          {grokSubscription ? (
+            <p className="text-caption-1-regular text-text-secondary sm:col-span-2">{t('ap.grokSubscriptionHint')}</p>
+          ) : null}
+          {isCodex ? (
+            <>
+              <Field label={t('ap.reasoningEffort')} value={form.reasoningEffort} onChange={(reasoningEffort) => updateForm({ reasoningEffort })} />
+              <Field label={t('ap.contextWindow')} value={form.contextWindow} onChange={(contextWindow) => updateForm({ contextWindow })} />
+            </>
+          ) : null}
+          {agent === 'pi' ? (
+            <Select
+              label={t('ap.apiKind')}
+              className="w-full"
+              popoverClassName="w-(--trigger-width)"
+              selectedKey={form.apiKind || null}
+              onSelectionChange={(key) => {
+                if (typeof key === 'string') updateForm({ apiKind: key });
+              }}
+            >
+              {apiKindOptions.map((kind) => (
+                <SelectItem key={kind} id={kind} textValue={kind}>{kind}</SelectItem>
+              ))}
+            </Select>
+          ) : null}
+          {isAdditive ? (
+            <div className="flex flex-col gap-2 sm:col-span-2">
+              <ModelsField
+                ids={form.models.map((model) => model.id)}
+                onChange={(ids) =>
+                  updateForm({
+                    models: ids.map(
+                      (id) => form.models.find((model) => model.id === id) ?? emptyModelEntry(id),
+                    ),
+                  })
+                }
+                fetchModels={fetchEditorModels}
+                autoFetch={editor.kind !== 'new' || Boolean(form.baseUrl.trim())}
+              />
+              <ModelConfigList
+                agent={agent}
+                models={form.models}
+                onChange={(models) => updateForm({ models })}
+              />
+            </div>
+          ) : null}
         </div>
+      )}
 
-        {jsonMode ? (
-          <TextField className="w-full" value={jsonText} onChange={setJsonText}>
-            <Label>{t('ap.settingsConfig')}</Label>
-            <TextArea className="w-full font-mono text-xs" rows={10} />
-          </TextField>
-        ) : (
-          <div className="grid gap-3 sm:grid-cols-2">
-            {isGrok ? (
-              <Select
-                className="w-full sm:col-span-2"
-                selectedKey={form.authMode}
-                onSelectionChange={(key) => {
-                  if (key === 'subscription' || key === 'api') updateForm({ authMode: key });
-                }}
-              >
-                <Label>{t('ap.authMode')}</Label>
-                <Select.Trigger className="w-full"><Select.Value /><Select.Indicator /></Select.Trigger>
-                <Select.Popover>
-                  <ListBox>
-                    <ListBox.Item id="subscription" textValue={t('ap.authSubscription')}>
-                      {t('ap.authSubscription')}
-                      <ListBox.ItemIndicator />
-                    </ListBox.Item>
-                    <ListBox.Item id="api" textValue={t('ap.authApi')}>
-                      {t('ap.authApi')}
-                      <ListBox.ItemIndicator />
-                    </ListBox.Item>
-                  </ListBox>
-                </Select.Popover>
-              </Select>
-            ) : null}
-            {grokSubscription ? null : (
-              <>
-                <Field label={t('ap.baseUrl')} value={form.baseUrl} onChange={(baseUrl) => updateForm({ baseUrl })}
-                  description={isGrok ? t('ap.grokBaseUrlHint') : undefined} />
-                <Field label={t('ap.apiKey')} value={form.apiKey} onChange={(apiKey) => updateForm({ apiKey })} description={t('ap.secretKept')} />
-              </>
-            )}
-            {isClaude || isCodex || isGrok ? (
-              <Field label={t('ap.model')} value={form.model} onChange={(model) => updateForm({ model })}
-                description={grokSubscription ? t('ap.grokModelHint') : undefined} />
-            ) : null}
-            {isGrok && !grokSubscription ? (
-              <Select
-                className="w-full"
-                placeholder={GROK_API_BACKENDS[0]}
-                selectedKey={form.apiKind || null}
-                onSelectionChange={(key) => {
-                  if (typeof key === 'string') updateForm({ apiKind: key });
-                }}
-              >
-                <Label>{t('ap.apiKind')}</Label>
-                <Select.Trigger className="w-full"><Select.Value /><Select.Indicator /></Select.Trigger>
-                <Select.Popover>
-                  <ListBox>
-                    {GROK_API_BACKENDS.map((backend) => (
-                      <ListBox.Item key={backend} id={backend} textValue={backend}>
-                        {backend}
-                        <ListBox.ItemIndicator />
-                      </ListBox.Item>
-                    ))}
-                  </ListBox>
-                </Select.Popover>
-              </Select>
-            ) : null}
-            {grokSubscription ? (
-              <p className="text-muted text-xs sm:col-span-2">{t('ap.grokSubscriptionHint')}</p>
-            ) : null}
-            {isCodex ? (
-              <>
-                <Field label={t('ap.reasoningEffort')} value={form.reasoningEffort} onChange={(reasoningEffort) => updateForm({ reasoningEffort })} />
-                <Field label={t('ap.contextWindow')} value={form.contextWindow} onChange={(contextWindow) => updateForm({ contextWindow })} />
-              </>
-            ) : null}
-            {agent === 'pi' ? (
-              <Select
-                className="w-full"
-                selectedKey={form.apiKind || null}
-                onSelectionChange={(key) => {
-                  if (typeof key === 'string') updateForm({ apiKind: key });
-                }}
-              >
-                <Label>{t('ap.apiKind')}</Label>
-                <Select.Trigger className="w-full"><Select.Value /><Select.Indicator /></Select.Trigger>
-                <Select.Popover>
-                  <ListBox>
-                    {apiKindOptions.map((kind) => (
-                      <ListBox.Item key={kind} id={kind} textValue={kind}>
-                        {kind}
-                        <ListBox.ItemIndicator />
-                      </ListBox.Item>
-                    ))}
-                  </ListBox>
-                </Select.Popover>
-              </Select>
-            ) : null}
-            {isAdditive ? (
-              <div className="flex flex-col gap-2 sm:col-span-2">
-                <ModelsField
-                  ids={form.models.map((model) => model.id)}
-                  onChange={(ids) =>
-                    updateForm({
-                      models: ids.map(
-                        (id) => form.models.find((model) => model.id === id) ?? emptyModelEntry(id),
-                      ),
-                    })
-                  }
-                  fetchModels={fetchEditorModels}
-                  autoFetch={editor.kind !== 'new' || Boolean(form.baseUrl.trim())}
-                />
-                <ModelConfigList
-                  agent={agent}
-                  models={form.models}
-                  onChange={(models) => updateForm({ models })}
-                />
-              </div>
-            ) : null}
-          </div>
-        )}
-
-        {error ? <p className="text-danger text-xs">{error}</p> : null}
-        <div className="flex justify-end gap-2">
-          <Button variant="ghost" onPress={onCancel}>{t('ap.cancel')}</Button>
-          <Button variant="primary" isDisabled={busy} onPress={save}>{t('ap.save')}</Button>
-        </div>
+      {error ? <p className="text-caption-1-regular text-text-error-primary">{error}</p> : null}
+      <div className="flex justify-end gap-2">
+        <Button variant="secondary" onClick={onCancel}>{t('ap.cancel')}</Button>
+        <Button variant="primary" disabled={busy} onClick={save}>{t('ap.save')}</Button>
       </div>
     </Card>
   );
@@ -689,10 +694,13 @@ function ModelsField({
     setDraft('');
   };
 
+  // A bespoke multi-select on the BoardUI select recipe (trigger, menu
+  // surface, listbox rows): the popover carries an add/fetch row above the
+  // options, which the stock BoardUI Select has no slot for.
   return (
     <div>
-      <Select
-        className="w-full"
+      <AriaSelect
+        className="group flex w-full flex-col gap-1"
         selectionMode="multiple"
         value={ids}
         onChange={(keys) => onChange([...keys].map(String))}
@@ -701,89 +709,114 @@ function ModelsField({
           if (open && autoFetch && fetched === undefined && !fetchFailed) void runFetch();
         }}
       >
-        <Label>{t('ap.models')}</Label>
-        <Select.Trigger className="w-full">
-          <Select.Value>
-            {({ isPlaceholder, selectedItems }) =>
-              isPlaceholder
-                ? t('ap.modelsHint')
-                : t('ap.modelsSelected', { count: selectedItems.length })}
-          </Select.Value>
-          <Select.Indicator />
-        </Select.Trigger>
-        <Select.Popover>
-          <div className="border-separator flex items-center gap-1 border-b p-1">
-            <Input
-              className="h-8 min-w-0 flex-1 text-xs"
-              placeholder={t('ap.addModelPlaceholder')}
-              aria-label={t('ap.addModelPlaceholder')}
-              value={draft}
-              onChange={(event) => setDraft(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') {
-                  event.preventDefault();
-                  commitDraft();
-                }
-              }}
-            />
-            <Button
-              isIconOnly
-              size="sm"
-              variant="ghost"
-              aria-label={t('ap.addModel')}
-              isDisabled={!draft.trim()}
-              onPress={commitDraft}
+        {({ isOpen }) => (
+          <>
+            <Label>{t('ap.models')}</Label>
+            <AriaButton
+              className={cx(
+                'flex w-full cursor-pointer items-center justify-between gap-1.5 rounded-2lg px-2.5 py-2',
+                'border border-border-button-default bg-background-primary-default text-body-medium text-text-primary shadow-xs',
+                'transition-[background-color,border-color] duration-150 ease',
+                'hover:border-border-button-hover hover:bg-background-primary-hover',
+                'outline-none focus-visible:ring-2 focus-visible:ring-border-focus-ring focus-visible:ring-offset-2',
+              )}
             >
-              <RiAddLine className="size-4" />
-            </Button>
-            <Button
-              isIconOnly
-              size="sm"
-              variant="ghost"
-              aria-label={t('ap.fetchModels')}
-              isDisabled={fetching}
-              onPress={() => void runFetch()}
-            >
-              {fetching ? <Spinner size="sm" /> : <RiRefreshLine className="size-4" />}
-            </Button>
-          </div>
-          <ListBox
-            renderEmptyState={() => (
-              <span className="text-muted block px-3 py-2 text-xs">{t('ap.noModels')}</span>
-            )}
-          >
-            {options.map((option) => (
-              <ListBox.Item key={option.id} id={option.id} textValue={option.id}>
-                <div className="flex min-w-0 flex-col">
-                  <span className="truncate">{option.label}</span>
-                  {option.label !== option.id ? (
-                    <span className="text-muted truncate text-xs">{option.id}</span>
-                  ) : null}
-                </div>
-                <ListBox.ItemIndicator />
-              </ListBox.Item>
-            ))}
-          </ListBox>
-        </Select.Popover>
-      </Select>
+              <AriaSelectValue className="flex min-w-0 items-center truncate data-[placeholder]:text-text-tertiary">
+                {({ isPlaceholder, selectedItems }) =>
+                  isPlaceholder
+                    ? t('ap.modelsHint')
+                    : t('ap.modelsSelected', { count: selectedItems.length })}
+              </AriaSelectValue>
+              <ChevronDownSmall
+                className={cx('size-4 shrink-0 text-text-secondary transition-transform duration-200 ease', isOpen && 'rotate-180')}
+              />
+            </AriaButton>
+            <AriaPopover offset={4} className={cx('w-(--trigger-width) min-w-64', MENU_POPOVER_SURFACE, 'p-2')}>
+              <div className="mb-1 flex items-center gap-1 border-b border-separator-border pb-2">
+                <Input
+                  size="small"
+                  className="min-w-0 flex-1"
+                  placeholder={t('ap.addModelPlaceholder')}
+                  aria-label={t('ap.addModelPlaceholder')}
+                  value={draft}
+                  onChange={setDraft}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault();
+                      commitDraft();
+                    }
+                  }}
+                />
+                <IconAction
+                  icon={RiAddLine}
+                  size="sm"
+                  aria-label={t('ap.addModel')}
+                  disabled={!draft.trim()}
+                  onClick={commitDraft}
+                />
+                <IconAction
+                  icon={fetching ? SpinnerIcon : RiRefreshLine}
+                  size="sm"
+                  aria-label={t('ap.fetchModels')}
+                  aria-busy={fetching || undefined}
+                  disabled={fetching}
+                  onClick={() => void runFetch()}
+                />
+              </div>
+              <AriaListBox
+                className={cx(MENU_ITEMS_CONTAINER, 'max-h-[240px] overflow-auto')}
+                renderEmptyState={() => (
+                  <span className="block px-3 py-2 text-caption-1-regular text-text-secondary">{t('ap.noModels')}</span>
+                )}
+              >
+                {options.map((option) => (
+                  <AriaListBoxItem
+                    key={option.id}
+                    id={option.id}
+                    textValue={option.id}
+                    className={({ isFocused, isDisabled }) => cx(
+                      MENU_ITEM,
+                      'text-body-medium',
+                      isFocused && MENU_ITEM_ACTIVE,
+                      isDisabled && 'cursor-not-allowed text-text-disabled',
+                    )}
+                  >
+                    {({ isSelected }) => (
+                      <>
+                        <div className="flex min-w-0 flex-1 flex-col">
+                          <span className="truncate">{option.label}</span>
+                          {option.label !== option.id ? (
+                            <span className="truncate text-caption-1-regular text-text-secondary">{option.id}</span>
+                          ) : null}
+                        </div>
+                        {isSelected ? <RiCheckLine aria-hidden className="size-4 shrink-0 text-foreground-icon-primary" /> : null}
+                      </>
+                    )}
+                  </AriaListBoxItem>
+                ))}
+              </AriaListBox>
+            </AriaPopover>
+          </>
+        )}
+      </AriaSelect>
       {ids.length ? (
         <div className="mt-2 flex flex-wrap gap-1">
           {ids.map((id) => (
-            <Chip key={id} size="sm" variant="soft" className="gap-0.5 pr-1">
+            <Chip key={id} variant="caption" color="neutral" className="gap-0.5 pe-1">
               {id}
               <button
                 type="button"
                 aria-label={t('ap.removeModel')}
-                className="text-muted hover:text-foreground inline-flex items-center"
+                className="inline-flex cursor-pointer items-center rounded-xs text-foreground-icon-tertiary outline-none transition-colors duration-150 ease hover:text-foreground-icon-primary focus-visible:ring-2 focus-visible:ring-border-focus-ring"
                 onClick={() => onChange(ids.filter((item) => item !== id))}
               >
-                <RiCloseLine className="size-3.5" />
+                <RiCloseLine aria-hidden className="size-3.5" />
               </button>
             </Chip>
           ))}
         </div>
       ) : null}
-      <p className="text-muted mt-1 text-xs">{t('ap.modelsHint')}</p>
+      <p className="mt-1 text-caption-1-medium text-text-secondary">{t('ap.modelsHint')}</p>
     </div>
   );
 }
@@ -814,7 +847,7 @@ function ModelConfigList({
   const update = (id: string, patch: Partial<ModelFormEntry>) =>
     onChange(models.map((model) => (model.id === id ? { ...model, ...patch } : model)));
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col rounded-2xl bg-background-secondary-default ps-3">
       {models.map((model) => {
         const open = expanded === model.id;
         const summary = [
@@ -824,43 +857,42 @@ function ModelConfigList({
           .filter(Boolean)
           .join(' · ');
         return (
-          <div key={model.id} className="border-separator rounded-lg border">
-            <div className="flex items-center gap-1 px-2">
+          <div key={model.id} className="border-b border-separator-border pe-2.5 last:border-b-0">
+            <div className="flex items-center gap-1">
               <button
                 type="button"
-                className="flex min-w-0 flex-1 items-center gap-1.5 py-2 text-left"
+                aria-expanded={open}
+                className="flex min-h-11 min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-md py-2 text-start outline-none focus-visible:ring-2 focus-visible:ring-border-focus-ring"
                 onClick={() => setExpanded(open ? null : model.id)}
               >
                 <RiArrowDownSLine
-                  className={`text-muted size-4 shrink-0 transition-transform ${open ? '' : '-rotate-90'}`}
+                  aria-hidden
+                  className={cx('size-4 shrink-0 text-foreground-icon-tertiary transition-transform duration-200 ease-out motion-reduce:transition-none', !open && '-rotate-90')}
                 />
-                <span className="truncate text-sm">{model.name || model.id}</span>
+                <span className="truncate text-body-regular text-text-primary">{model.name || model.id}</span>
                 {model.name ? (
-                  <span className="text-muted truncate text-xs">{model.id}</span>
+                  <span className="truncate text-caption-1-regular text-text-tertiary">{model.id}</span>
                 ) : null}
                 {summary ? (
-                  <span className="text-muted ml-auto shrink-0 pl-2 text-xs">{summary}</span>
+                  <span className="ml-auto shrink-0 pl-2 text-caption-1-regular text-text-secondary">{summary}</span>
                 ) : null}
               </button>
-              <Button
-                isIconOnly
+              <IconAction
+                icon={RiDeleteBinLine}
                 size="sm"
-                variant="ghost"
                 aria-label={t('ap.removeModel')}
-                onPress={() => onChange(models.filter((item) => item.id !== model.id))}
-              >
-                <RiDeleteBinLine className="size-4" />
-              </Button>
+                onClick={() => onChange(models.filter((item) => item.id !== model.id))}
+              />
             </div>
             {open ? (
-              <div className="border-separator grid gap-3 border-t px-3 py-3 sm:grid-cols-2">
+              <div className="grid gap-3 border-t border-separator-border py-3 sm:grid-cols-2">
                 <Field
                   label={t('ap.displayName')}
                   value={model.name}
                   onChange={(name) => update(model.id, { name })}
                 />
                 <ComboBox
-                  className="w-full"
+                  label={t('ap.contextWindow')}
                   allowsCustomValue
                   inputValue={model.contextWindow}
                   items={CONTEXT_PRESETS}
@@ -870,24 +902,14 @@ function ModelConfigList({
                     if (key != null) update(model.id, { contextWindow: String(key) });
                   }}
                 >
-                  <Label>{t('ap.contextWindow')}</Label>
-                  <ComboBox.InputGroup className="w-full">
-                    <Input className="w-full" />
-                    <ComboBox.Trigger />
-                  </ComboBox.InputGroup>
-                  <ComboBox.Popover>
-                    <ListBox items={CONTEXT_PRESETS}>
-                      {(preset) => (
-                        <ListBox.Item id={preset.id} textValue={preset.id}>
-                          <div className="flex min-w-0 items-baseline gap-2">
-                            <span>{preset.label}</span>
-                            <span className="text-muted text-xs">{preset.id}</span>
-                          </div>
-                          <ListBox.ItemIndicator />
-                        </ListBox.Item>
-                      )}
-                    </ListBox>
-                  </ComboBox.Popover>
+                  {(preset) => (
+                    <ComboBoxItem id={preset.id} textValue={preset.id}>
+                      <div className="flex min-w-0 items-baseline gap-2">
+                        <span>{preset.label}</span>
+                        <span className="text-caption-1-regular text-text-secondary">{preset.id}</span>
+                      </div>
+                    </ComboBoxItem>
+                  )}
                 </ComboBox>
                 <Field
                   label={t('ap.maxTokens')}
@@ -896,6 +918,7 @@ function ModelConfigList({
                 />
                 <div className="sm:col-span-2">
                   <Switch
+                    size="sm"
                     isSelected={model.reasoning}
                     onChange={(reasoning) =>
                       update(model.id, {
@@ -905,26 +928,23 @@ function ModelConfigList({
                       })
                     }
                   >
-                    <Switch.Content>
-                      <Switch.Control>
-                        <Switch.Thumb />
-                      </Switch.Control>
-                      <p className="text-sm">{t('ap.reasoning')}</p>
-                    </Switch.Content>
+                    {t('ap.reasoning')}
                   </Switch>
                 </div>
                 {model.reasoning ? (
                   <div className="sm:col-span-2">
-                    <p className="text-muted mb-1.5 text-xs">{t('ap.efforts')}</p>
-                    <div className="flex flex-wrap gap-1">
+                    <p className="mb-1.5 text-caption-1-regular text-text-secondary">{t('ap.efforts')}</p>
+                    <ButtonGroup size="small" aria-label={t('ap.efforts')} className="max-w-full">
                       {levels.map((level) => {
                         const enabled = model.efforts.includes(level);
                         return (
-                          <Button
+                          <ButtonGroupItem
                             key={level}
-                            size="sm"
-                            variant={enabled ? 'primary' : 'tertiary'}
-                            onPress={() =>
+                            size="small"
+                            selected={enabled}
+                            aria-pressed={enabled}
+                            className={cx(enabled ? 'bg-badge-new-background text-badge-new-text hover:bg-badge-new-background' : 'text-text-secondary')}
+                            onClick={() =>
                               update(model.id, {
                                 efforts: enabled
                                   ? model.efforts.filter((item) => item !== level)
@@ -933,10 +953,10 @@ function ModelConfigList({
                             }
                           >
                             {level}
-                          </Button>
+                          </ButtonGroupItem>
                         );
                       })}
-                    </div>
+                    </ButtonGroup>
                   </div>
                 ) : null}
               </div>

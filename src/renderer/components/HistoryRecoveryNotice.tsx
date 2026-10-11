@@ -1,5 +1,7 @@
 import { useState } from 'react';
-import { Alert, AlertDialog, Button } from '@heroui/react';
+import { Button } from '@/components/base/buttons/button';
+import { Alert } from '@/components/ui/alert';
+import { ConfirmDialog } from '@/components/ui/modal';
 import { useT } from '../i18n';
 
 type Props = {
@@ -18,34 +20,33 @@ export function HistoryRecoveryNotice({ onSetup, onDismiss, className }: Props) 
   const [confirming, setConfirming] = useState(false);
   return (
     <>
-      <Alert status="warning" className={className}>
-        <Alert.Indicator />
-        <Alert.Content>
-          <Alert.Description>{t('history.recoveryNotice')}</Alert.Description>
-        </Alert.Content>
-        <div className="flex shrink-0 gap-2">
-          <Button size="sm" variant="secondary" onPress={onSetup}>{t('history.recoveryNoticeSetup')}</Button>
-          <Button size="sm" variant="ghost" onPress={() => setConfirming(true)}>{t('history.recoveryNoticeDismiss')}</Button>
-        </div>
-      </Alert>
-      <AlertDialog isOpen={confirming} onOpenChange={setConfirming}>
-        <AlertDialog.Backdrop>
-          <AlertDialog.Container>
-            <AlertDialog.Dialog className="sm:max-w-md">
-              <AlertDialog.Header>
-                <AlertDialog.Heading>{t('history.recoveryNoticeDismissTitle')}</AlertDialog.Heading>
-              </AlertDialog.Header>
-              <AlertDialog.Body>
-                <p className="text-muted text-sm">{t('history.recoveryNoticeDismissBody')}</p>
-              </AlertDialog.Body>
-              <AlertDialog.Footer>
-                <Button slot="close" variant="tertiary">{t('common.cancel')}</Button>
-                <Button variant="danger" onPress={() => { setConfirming(false); onDismiss(); }}>{t('history.recoveryNoticeDismissConfirm')}</Button>
-              </AlertDialog.Footer>
-            </AlertDialog.Dialog>
-          </AlertDialog.Container>
-        </AlertDialog.Backdrop>
-      </AlertDialog>
+      <Alert
+        status="warning"
+        className={className}
+        description={t('history.recoveryNotice')}
+        actions={(
+          <>
+            <Button size="small" variant="secondary" onClick={onSetup}>{t('history.recoveryNoticeSetup')}</Button>
+            <button
+              type="button"
+              onClick={() => setConfirming(true)}
+              className="inline-flex h-8 cursor-pointer items-center rounded-lg px-2 text-body-medium text-text-secondary outline-none transition-colors duration-150 ease hover:bg-background-secondary-hover hover:text-text-primary focus-visible:ring-2 focus-visible:ring-border-focus-ring"
+            >
+              {t('history.recoveryNoticeDismiss')}
+            </button>
+          </>
+        )}
+      />
+      <ConfirmDialog
+        isOpen={confirming}
+        onOpenChange={setConfirming}
+        title={t('history.recoveryNoticeDismissTitle')}
+        description={t('history.recoveryNoticeDismissBody')}
+        cancelLabel={t('common.cancel')}
+        confirmLabel={t('history.recoveryNoticeDismissConfirm')}
+        tone="danger"
+        onConfirm={() => { setConfirming(false); onDismiss(); }}
+      />
     </>
   );
 }

@@ -1,11 +1,20 @@
 import { useRef, useState, type ReactNode } from 'react';
-import { Alert, Button, Card, Chip, Label, ListBox, Modal, Select, Spinner, TextArea, TextField, Tooltip, toast } from '@heroui/react';
-import { EmptyState } from '@heroui-pro/react';
 import { RiAddLine, RiFileCopyLine, RiFolderOpenLine, RiKey2Line, RiUpload2Line } from '@remixicon/react';
 import { SSH_KEY_ALGORITHMS, isValidSshKeyName, type SshKeyAlgorithm, type SshKeysResponse } from '@todex/protocol/ssh';
 import { Field } from '../Field';
 import { useT } from '../../i18n';
 import { errorMessage, type SshApi } from './sshShared';
+import { Chip } from '@/components/base/badges/chip';
+import { Button } from '@/components/base/buttons/button';
+import { Select, SelectItem } from '@/components/base/select/select';
+import { Textarea } from '@/components/base/textarea/textarea';
+import { Alert } from '@/components/ui/alert';
+import { Card } from '@/components/ui/card';
+import { EmptyState } from '@/components/ui/empty-state';
+import { IconAction } from '@/components/ui/icon-action';
+import { Modal } from '@/components/ui/modal';
+import { SpinnerIcon } from '@/components/ui/spinner';
+import { toast } from '@/components/ui/toast';
 
 type Props = {
   api: SshApi;
@@ -30,55 +39,50 @@ export function SshKeysTab({ api, keys, onReload }: Props) {
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="min-w-0">
-          <h3 className="text-sm font-semibold">{t('ssh.keys.title')}</h3>
+          <h3 className="text-body-semibold text-text-primary">{t('ssh.keys.title')}</h3>
           {keys ? (
-            <p className="text-muted truncate text-xs">
+            <p className="truncate text-caption-1-regular text-text-secondary">
               {keys.sshDirectory} · {keys.agentAvailable ? t('ssh.keys.agentAvailable') : t('ssh.keys.agentUnavailable')}
             </p>
           ) : null}
         </div>
         <div className="flex gap-2">
-          <Button size="sm" variant="secondary" onPress={() => setDialog('import')}><RiUpload2Line className="size-4" />{t('ssh.keys.import')}</Button>
-          <Button size="sm" onPress={() => setDialog('generate')}><RiAddLine className="size-4" />{t('ssh.keys.generate')}</Button>
+          <Button size="small" variant="secondary" leadingIcon={RiUpload2Line} onClick={() => setDialog('import')}>{t('ssh.keys.import')}</Button>
+          <Button size="small" leadingIcon={RiAddLine} onClick={() => setDialog('generate')}>{t('ssh.keys.generate')}</Button>
         </div>
       </div>
       {!keys?.keys.length ? (
-        <EmptyState size="sm">
-          <EmptyState.Header>
-            <EmptyState.Media variant="icon"><RiKey2Line /></EmptyState.Media>
-            <EmptyState.Title>{t('ssh.keys.emptyTitle')}</EmptyState.Title>
-            <EmptyState.Description>{t('ssh.keys.emptyHint')}</EmptyState.Description>
-          </EmptyState.Header>
-        </EmptyState>
+        <EmptyState size="sm" icon={RiKey2Line} title={t('ssh.keys.emptyTitle')} description={t('ssh.keys.emptyHint')} />
       ) : (
         <div className="grid gap-3 xl:grid-cols-2">
           {keys.keys.map((key) => (
-            <Card key={key.name} className="min-w-0 rounded-lg p-4">
+            <Card key={key.name} className="min-w-0">
               <div className="flex items-start gap-3">
-                <div className="bg-surface-secondary flex size-9 shrink-0 items-center justify-center rounded-lg">
+                <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-background-secondary-default text-foreground-icon-secondary">
                   <RiKey2Line className="size-5" />
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
-                    <h4 className="truncate text-sm font-semibold">{key.name}</h4>
-                    <Chip size="sm" variant="soft">{key.algorithm}{key.bits ? ` · ${key.bits}` : ''}</Chip>
-                    {key.encrypted ? <Chip size="sm" variant="soft" color="accent">{t('ssh.keys.encrypted')}</Chip> : null}
-                    {key.loadedInAgent ? <Chip size="sm" variant="soft" color="success">{t('ssh.keys.inAgent')}</Chip> : null}
-                    {!key.privateKeyPath ? <Chip size="sm" variant="soft" color="warning">{t('ssh.keys.publicOnly')}</Chip> : null}
+                    <h4 className="truncate text-body-semibold text-text-primary">{key.name}</h4>
+                    <Chip variant="caption" color="neutral">{key.algorithm}{key.bits ? ` · ${key.bits}` : ''}</Chip>
+                    {key.encrypted ? <Chip variant="caption" color="blue">{t('ssh.keys.encrypted')}</Chip> : null}
+                    {key.loadedInAgent ? <Chip variant="caption" color="lime">{t('ssh.keys.inAgent')}</Chip> : null}
+                    {!key.privateKeyPath ? <Chip variant="caption" color="yellow">{t('ssh.keys.publicOnly')}</Chip> : null}
                   </div>
-                  <p className="text-muted mt-1 truncate font-mono text-xs" title={key.fingerprint}>{key.fingerprint}</p>
-                  {key.comment ? <p className="text-muted mt-0.5 truncate text-xs">{key.comment}</p> : null}
-                  <p className="text-muted mt-0.5 truncate text-xs">
+                  <p className="mt-1 truncate font-mono text-caption-1-regular text-text-secondary" title={key.fingerprint}>{key.fingerprint}</p>
+                  {key.comment ? <p className="mt-0.5 truncate text-caption-1-regular text-text-tertiary">{key.comment}</p> : null}
+                  <p className="mt-0.5 truncate text-caption-1-regular text-text-tertiary">
                     {key.usedBy.length ? t('ssh.keys.usedBy', { hosts: key.usedBy.join(', ') }) : t('ssh.keys.unused')}
                   </p>
                 </div>
                 {key.publicKey ? (
-                  <Tooltip delay={200}>
-                    <Button isIconOnly size="sm" variant="ghost" aria-label={t('ssh.keys.copyPublic', { name: key.name })} onPress={() => void copyPublicKey(key.publicKey ?? '')}>
-                      <RiFileCopyLine className="size-4" />
-                    </Button>
-                    <Tooltip.Content className="text-xs">{t('ssh.keys.copyPublic', { name: key.name })}</Tooltip.Content>
-                  </Tooltip>
+                  <IconAction
+                    icon={RiFileCopyLine}
+                    size="sm"
+                    aria-label={t('ssh.keys.copyPublic', { name: key.name })}
+                    tooltip
+                    onClick={() => void copyPublicKey(key.publicKey ?? '')}
+                  />
                 ) : null}
               </div>
             </Card>
@@ -101,19 +105,24 @@ function KeyDialogShell({ title, onClose, onSubmit, saving, children }: {
 }) {
   const t = useT();
   return (
-    <Modal.Backdrop isOpen onOpenChange={(open) => { if (!open) onClose(); }}>
-      <Modal.Container>
-        <Modal.Dialog className="max-h-[90vh] sm:max-w-lg">
-          <Modal.CloseTrigger />
-          <Modal.Header><Modal.Heading>{title}</Modal.Heading></Modal.Header>
-          <Modal.Body className="flex max-h-[70vh] flex-col gap-4 overflow-y-auto">{children}</Modal.Body>
-          <Modal.Footer>
-            <Button slot="close" variant="tertiary">{t('common.cancel')}</Button>
-            <Button isDisabled={saving} onPress={onSubmit}>{saving ? <Spinner size="sm" /> : null}{t('common.save')}</Button>
-          </Modal.Footer>
-        </Modal.Dialog>
-      </Modal.Container>
-    </Modal.Backdrop>
+    <Modal
+      isOpen
+      onOpenChange={(open) => { if (!open) onClose(); }}
+      title={title}
+      size="lg"
+      className="max-h-[90vh]"
+      bodyClassName="flex flex-col gap-4"
+      footer={(
+        <>
+          <Button variant="secondary" onClick={onClose}>{t('common.cancel')}</Button>
+          <Button disabled={saving} leadingIcon={saving ? SpinnerIcon : undefined} aria-busy={saving || undefined} onClick={onSubmit}>
+            {t('common.save')}
+          </Button>
+        </>
+      )}
+    >
+      {children}
+    </Modal>
   );
 }
 
@@ -157,12 +166,18 @@ function ImportKeyDialog({ api, onClose, onSaved }: { api: SshApi; onClose: () =
   return (
     <KeyDialogShell title={t('ssh.keys.importTitle')} onClose={onClose} onSubmit={() => void submit()} saving={saving}>
       <Field label={t('ssh.keys.name')} value={name} onChange={setName} description={t('ssh.keys.nameHint')} />
-      <TextField className="w-full" value={privateKey} onChange={setPrivateKey}>
-        <Label>{t('ssh.keys.privateKey')}</Label>
-        <TextArea className="w-full font-mono text-xs" rows={8} spellCheck={false} autoComplete="off" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----" />
-      </TextField>
+      <Textarea
+        label={t('ssh.keys.privateKey')}
+        value={privateKey}
+        onChange={setPrivateKey}
+        rows={8}
+        spellCheck="false"
+        autoComplete="off"
+        inputClassName="font-mono text-caption-1-regular"
+        placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
+      />
       <div>
-        <Button size="sm" variant="tertiary" onPress={() => fileInputRef.current?.click()}><RiFolderOpenLine className="size-4" />{t('ssh.keys.pickFile')}</Button>
+        <Button size="small" variant="secondary" leadingIcon={RiFolderOpenLine} onClick={() => fileInputRef.current?.click()}>{t('ssh.keys.pickFile')}</Button>
         <input
           ref={fileInputRef}
           className="hidden"
@@ -215,30 +230,27 @@ function GenerateKeyDialog({ api, onClose, onSaved }: { api: SshApi; onClose: ()
   return (
     <KeyDialogShell title={t('ssh.keys.generateTitle')} onClose={onClose} onSubmit={() => void submit()} saving={saving}>
       <Field label={t('ssh.keys.name')} value={name} onChange={setName} description={t('ssh.keys.nameHint')} />
-      <Select selectedKey={algorithm} onSelectionChange={(key) => {
-        const next = SSH_KEY_ALGORITHMS.find((item) => item === key);
-        if (!next) return;
-        setAlgorithm(next);
-        // Follow the algorithm while the name is still a default one.
-        if (/^id_(ed25519|rsa|ecdsa)$/.test(name)) setName(`id_${next}`);
-      }}>
-        <Label>{t('ssh.keys.algorithm')}</Label>
-        <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
-        <Select.Popover>
-          <ListBox>
-            <ListBox.Item id="ed25519" textValue="Ed25519">Ed25519 ({t('ssh.keys.recommended')})<ListBox.ItemIndicator /></ListBox.Item>
-            <ListBox.Item id="rsa" textValue="RSA 4096">RSA 4096<ListBox.ItemIndicator /></ListBox.Item>
-            <ListBox.Item id="ecdsa" textValue="ECDSA P-256">ECDSA P-256<ListBox.ItemIndicator /></ListBox.Item>
-          </ListBox>
-        </Select.Popover>
+      <Select
+        label={t('ssh.keys.algorithm')}
+        className="w-full"
+        popoverClassName="w-(--trigger-width)"
+        selectedKey={algorithm}
+        onSelectionChange={(key) => {
+          const next = SSH_KEY_ALGORITHMS.find((item) => item === key);
+          if (!next) return;
+          setAlgorithm(next);
+          // Follow the algorithm while the name is still a default one.
+          if (/^id_(ed25519|rsa|ecdsa)$/.test(name)) setName(`id_${next}`);
+        }}
+      >
+        <SelectItem id="ed25519" textValue="Ed25519">Ed25519 ({t('ssh.keys.recommended')})</SelectItem>
+        <SelectItem id="rsa" textValue="RSA 4096">RSA 4096</SelectItem>
+        <SelectItem id="ecdsa" textValue="ECDSA P-256">ECDSA P-256</SelectItem>
       </Select>
       <Field label={t('ssh.keys.comment')} value={comment} onChange={setComment} />
       <Field label={t('ssh.keys.passphraseOptional')} type="password" value={passphrase} onChange={setPassphrase} />
       <Field label={t('ssh.keys.passphraseConfirm')} type="password" value={confirm} onChange={setConfirm} />
-      <Alert>
-        <Alert.Indicator />
-        <Alert.Content><Alert.Description>{t('ssh.keys.passphraseNotStored')}</Alert.Description></Alert.Content>
-      </Alert>
+      <Alert status="neutral" description={t('ssh.keys.passphraseNotStored')} />
     </KeyDialogShell>
   );
 }

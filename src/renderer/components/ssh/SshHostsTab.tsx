@@ -1,6 +1,5 @@
 import { useState } from 'react';
-import { Alert, AlertDialog, Button, Card, Chip, Dropdown, Label, Spinner, Switch, Tooltip, toast } from '@heroui/react';
-import { EmptyState } from '@heroui-pro/react';
+import { Button as AriaButton, Focusable } from 'react-aria-components';
 import {
   RiAddLine, RiDeleteBinLine, RiEdit2Line, RiFileCopyLine, RiFolder3Line, RiLinkUnlink, RiMore2Line,
   RiPlugLine, RiPulseLine, RiServerLine, RiTerminalBoxLine,
@@ -10,6 +9,21 @@ import { useT } from '../../i18n';
 import { FtpSiteFormDialog, SshHostFormDialog, SshImportDialog } from './SshHostDialogs';
 import type { RemoteConnectTarget } from './useRemoteConnector';
 import { SSH_FAILURE_HINT_KEYS, SSH_FAILURE_LABEL_KEYS, errorMessage, type SshApi } from './sshShared';
+import { Chip } from '@/components/base/badges/chip';
+import { Button } from '@/components/base/buttons/button';
+import { Switch } from '@/components/base/switch/switch';
+import { Tooltip, TooltipTrigger } from '@/components/base/tooltip/tooltip';
+import { Alert } from '@/components/ui/alert';
+import { Card } from '@/components/ui/card';
+import { EmptyState } from '@/components/ui/empty-state';
+import { Menu, MenuItem, MenuPopover, MenuTrigger } from '@/components/ui/menu';
+import { ConfirmDialog } from '@/components/ui/modal';
+import { SpinnerIcon } from '@/components/ui/spinner';
+import { toast } from '@/components/ui/toast';
+import { cx } from '@/utils/cx';
+
+/** Rounded tile holding a card's leading glyph. */
+const ICON_TILE = 'flex size-9 shrink-0 items-center justify-center rounded-xl bg-background-secondary-default text-foreground-icon-secondary';
 
 type Props = {
   api: SshApi;
@@ -83,104 +97,109 @@ export function SshHostsTab({ api, hosts, ftpSites, keys, onReload, onConnect, o
     <div className="flex flex-col gap-6">
       <section className="flex flex-col gap-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h3 className="text-sm font-semibold">{t('ssh.hosts.title')}</h3>
+          <h3 className="text-body-semibold text-text-primary">{t('ssh.hosts.title')}</h3>
           <div className="flex gap-2">
-            <Button size="sm" variant="secondary" onPress={() => setImportOpen(true)}><RiFileCopyLine className="size-4" />{t('ssh.hosts.import')}</Button>
-            <Button size="sm" onPress={() => setHostDialog({})}><RiAddLine className="size-4" />{t('ssh.hosts.add')}</Button>
+            <Button size="small" variant="secondary" leadingIcon={RiFileCopyLine} onClick={() => setImportOpen(true)}>{t('ssh.hosts.import')}</Button>
+            <Button size="small" leadingIcon={RiAddLine} onClick={() => setHostDialog({})}>{t('ssh.hosts.add')}</Button>
           </div>
         </div>
         {hosts.length === 0 ? (
-          <EmptyState size="sm">
-            <EmptyState.Header>
-              <EmptyState.Media variant="icon"><RiServerLine /></EmptyState.Media>
-              <EmptyState.Title>{t('ssh.hosts.emptyTitle')}</EmptyState.Title>
-              <EmptyState.Description>{t('ssh.hosts.emptyHint')}</EmptyState.Description>
-            </EmptyState.Header>
-          </EmptyState>
+          <EmptyState size="sm" icon={RiServerLine} title={t('ssh.hosts.emptyTitle')} description={t('ssh.hosts.emptyHint')} />
         ) : (
           <div className="grid gap-3 xl:grid-cols-2">
             {hosts.map((host) => {
               const result = testResults[host.alias];
               const managed = host.source === 'managed';
               return (
-                <Card key={host.alias} className="min-w-0 rounded-lg p-4">
+                <Card key={host.alias} className="min-w-0">
                   <div className="flex items-start gap-3">
-                    <div className="bg-surface-secondary flex size-9 shrink-0 items-center justify-center rounded-lg">
+                    <div className={ICON_TILE}>
                       <RiServerLine className="size-5" />
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
-                        <h4 className="truncate text-sm font-semibold">{host.alias}</h4>
-                        <Tooltip delay={200}>
-                          <Tooltip.Trigger className="cursor-default outline-none">
-                            <Chip size="sm" variant="soft" color={managed ? 'accent' : 'default'}>{managed ? t('ssh.hosts.sourceManaged') : '~/.ssh/config'}</Chip>
-                          </Tooltip.Trigger>
-                          <Tooltip.Content className="max-w-sm break-all text-xs">
+                        <h4 className="truncate text-body-semibold text-text-primary">{host.alias}</h4>
+                        <TooltipTrigger delay={200}>
+                          <Focusable>
+                            <span role="button" tabIndex={0} className="cursor-default rounded-md outline-none focus-visible:ring-2 focus-visible:ring-border-focus-ring">
+                              <Chip variant="caption" color={managed ? 'blue' : 'neutral'}>{managed ? t('ssh.hosts.sourceManaged') : '~/.ssh/config'}</Chip>
+                            </span>
+                          </Focusable>
+                          <Tooltip className="max-w-sm break-all">
                             {managed ? t('ssh.hosts.sourceManagedHint') : t('ssh.hosts.sourceConfigHint', { path: host.sourcePath || '~/.ssh/config' })}
-                          </Tooltip.Content>
-                        </Tooltip>
+                          </Tooltip>
+                        </TooltipTrigger>
                       </div>
-                      <p className="text-muted mt-1 truncate font-mono text-xs" title={sshHostEndpoint(host)}>{sshHostEndpoint(host)}</p>
-                      {host.resolved?.proxyJump ? <p className="text-muted mt-0.5 truncate text-xs">{t('ssh.hosts.via', { jump: host.resolved.proxyJump })}</p> : null}
-                      {host.resolveError ? <p className="text-danger mt-1 break-words text-xs">{host.resolveError}</p> : null}
+                      <p className="mt-1 truncate font-mono text-caption-1-regular text-text-secondary" title={sshHostEndpoint(host)}>{sshHostEndpoint(host)}</p>
+                      {host.resolved?.proxyJump ? <p className="mt-0.5 truncate text-caption-1-regular text-text-tertiary">{t('ssh.hosts.via', { jump: host.resolved.proxyJump })}</p> : null}
+                      {host.resolveError ? <p className="mt-1 break-words text-caption-1-regular text-text-error-primary">{host.resolveError}</p> : null}
                     </div>
-                    <Dropdown>
-                      <Dropdown.Trigger aria-label={t('ssh.hosts.more', { alias: host.alias })} className="inline-flex size-8 shrink-0 items-center justify-center rounded-lg text-muted hover:bg-surface-secondary hover:text-foreground cursor-pointer">
-                        <RiMore2Line className="size-4" />
-                      </Dropdown.Trigger>
-                      <Dropdown.Popover>
-                        <Dropdown.Menu onAction={(key) => {
+                    <MenuTrigger>
+                      <AriaButton
+                        aria-label={t('ssh.hosts.more', { alias: host.alias })}
+                        className={cx(
+                          'inline-flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-lg text-foreground-icon-secondary',
+                          'transition-colors duration-150 ease hover:bg-background-secondary-hover hover:text-foreground-icon-primary',
+                          'outline-none focus-visible:ring-2 focus-visible:ring-border-focus-ring',
+                        )}
+                      >
+                        <RiMore2Line aria-hidden className="size-4" />
+                      </AriaButton>
+                      <MenuPopover placement="bottom end">
+                        <Menu aria-label={t('ssh.hosts.more', { alias: host.alias })} onAction={(key) => {
                           if (key === 'edit') setHostDialog({ host });
                           if (key === 'delete') setPendingDelete({ kind: 'host', alias: host.alias });
                           if (key === 'disconnect') void disconnect(host.alias);
                         }}>
-                          <Dropdown.Item id="disconnect" textValue={t('ssh.hosts.disconnect')}><RiLinkUnlink className="text-muted size-4" /><Label>{t('ssh.hosts.disconnect')}</Label></Dropdown.Item>
-                          {managed ? <Dropdown.Item id="edit" textValue={t('ssh.edit')}><RiEdit2Line className="text-muted size-4" /><Label>{t('ssh.edit')}</Label></Dropdown.Item> : null}
-                          {managed ? <Dropdown.Item id="delete" textValue={t('common.delete')} variant="danger"><RiDeleteBinLine className="size-4" /><Label>{t('common.delete')}</Label></Dropdown.Item> : null}
-                        </Dropdown.Menu>
-                      </Dropdown.Popover>
-                    </Dropdown>
+                          <MenuItem id="disconnect" icon={RiLinkUnlink} textValue={t('ssh.hosts.disconnect')}>{t('ssh.hosts.disconnect')}</MenuItem>
+                          {managed ? <MenuItem id="edit" icon={RiEdit2Line} textValue={t('ssh.edit')}>{t('ssh.edit')}</MenuItem> : null}
+                          {managed ? <MenuItem id="delete" icon={RiDeleteBinLine} tone="danger" textValue={t('common.delete')}>{t('common.delete')}</MenuItem> : null}
+                        </Menu>
+                      </MenuPopover>
+                    </MenuTrigger>
                   </div>
                   {result ? (
-                    <Alert status={result.ok ? 'success' : 'danger'} className="mt-3">
-                      <Alert.Indicator />
-                      <Alert.Content>
-                        <Alert.Title>
-                          {result.ok
-                            ? t('ssh.hosts.testOk', { ms: result.durationMs })
-                            : t(SSH_FAILURE_LABEL_KEYS[result.failure ?? 'other'])}
-                        </Alert.Title>
-                        {!result.ok ? (
-                          <Alert.Description>
-                            {t(SSH_FAILURE_HINT_KEYS[result.failure ?? 'other'])}
-                            {result.detail ? <span className="mt-1 block break-words font-mono text-xs opacity-80">{result.detail}</span> : null}
-                          </Alert.Description>
-                        ) : null}
-                      </Alert.Content>
-                    </Alert>
+                    <Alert
+                      status={result.ok ? 'success' : 'danger'}
+                      title={result.ok
+                        ? t('ssh.hosts.testOk', { ms: result.durationMs })
+                        : t(SSH_FAILURE_LABEL_KEYS[result.failure ?? 'other'])}
+                      description={!result.ok ? (
+                        <>
+                          {t(SSH_FAILURE_HINT_KEYS[result.failure ?? 'other'])}
+                          {result.detail ? <span className="mt-1 block break-words font-mono text-caption-1-regular opacity-80">{result.detail}</span> : null}
+                        </>
+                      ) : undefined}
+                    />
                   ) : null}
-                  <div className="mt-3 flex flex-wrap items-center gap-2">
-                    <Button size="sm" onPress={() => onConnect(host.alias)}><RiTerminalBoxLine className="size-4" />{t('ssh.hosts.connect')}</Button>
-                    <Button size="sm" variant="secondary" onPress={() => onOpenFiles({ kind: 'sftp', host: host.alias, label: host.alias })}><RiFolder3Line className="size-4" />{t('ssh.hosts.files')}</Button>
-                    <Button size="sm" variant="tertiary" isDisabled={testing[host.alias]} onPress={() => void testHost(host.alias)}>
-                      {testing[host.alias] ? <Spinner size="sm" /> : <RiPulseLine className="size-4" />}{t('ssh.hosts.test')}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button size="small" leadingIcon={RiTerminalBoxLine} onClick={() => onConnect(host.alias)}>{t('ssh.hosts.connect')}</Button>
+                    <Button size="small" variant="secondary" leadingIcon={RiFolder3Line} onClick={() => onOpenFiles({ kind: 'sftp', host: host.alias, label: host.alias })}>{t('ssh.hosts.files')}</Button>
+                    <Button
+                      size="small"
+                      variant="secondary"
+                      leadingIcon={testing[host.alias] ? SpinnerIcon : RiPulseLine}
+                      disabled={testing[host.alias]}
+                      aria-busy={testing[host.alias] || undefined}
+                      onClick={() => void testHost(host.alias)}
+                    >
+                      {t('ssh.hosts.test')}
                     </Button>
-                    <Tooltip delay={200}>
-                      <Tooltip.Trigger className="ml-auto outline-none">
-                        <Switch
-                          size="sm"
-                          isSelected={host.agentAccess}
-                          isDisabled={accessPending[host.alias]}
-                          onChange={(enabled) => void setAgentAccess(host.alias, enabled)}
-                        >
-                          <Switch.Content>
-                            <Switch.Control><Switch.Thumb /></Switch.Control>
-                            <span className="text-xs">{t('ssh.hosts.agentAccess')}</span>
-                          </Switch.Content>
-                        </Switch>
-                      </Tooltip.Trigger>
-                      <Tooltip.Content className="max-w-xs text-xs">{t('ssh.hosts.agentAccessHint')}</Tooltip.Content>
-                    </Tooltip>
+                    <TooltipTrigger delay={200}>
+                      <Focusable>
+                        <span role="button" tabIndex={-1} className="ms-auto outline-none">
+                          <Switch
+                            size="sm"
+                            isSelected={host.agentAccess}
+                            isDisabled={accessPending[host.alias]}
+                            onChange={(enabled) => void setAgentAccess(host.alias, enabled)}
+                          >
+                            {t('ssh.hosts.agentAccess')}
+                          </Switch>
+                        </span>
+                      </Focusable>
+                      <Tooltip className="max-w-xs">{t('ssh.hosts.agentAccessHint')}</Tooltip>
+                    </TooltipTrigger>
                   </div>
                 </Card>
               );
@@ -191,34 +210,34 @@ export function SshHostsTab({ api, hosts, ftpSites, keys, onReload, onConnect, o
 
       <section className="flex flex-col gap-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h3 className="text-sm font-semibold">{t('ssh.ftp.title')}</h3>
-          <Button size="sm" variant="secondary" onPress={() => setFtpDialog({})}><RiAddLine className="size-4" />{t('ssh.ftp.add')}</Button>
+          <h3 className="text-body-semibold text-text-primary">{t('ssh.ftp.title')}</h3>
+          <Button size="small" variant="secondary" leadingIcon={RiAddLine} onClick={() => setFtpDialog({})}>{t('ssh.ftp.add')}</Button>
         </div>
         {ftpSites.length === 0 ? (
-          <p className="text-muted text-xs">{t('ssh.ftp.empty')}</p>
+          <p className="text-caption-1-regular text-text-tertiary">{t('ssh.ftp.empty')}</p>
         ) : (
           <div className="grid gap-3 xl:grid-cols-2">
             {ftpSites.map((site) => (
-              <Card key={site.id} className="min-w-0 rounded-lg p-4">
+              <Card key={site.id} className="min-w-0">
                 <div className="flex items-start gap-3">
-                  <div className="bg-surface-secondary flex size-9 shrink-0 items-center justify-center rounded-lg">
+                  <div className={ICON_TILE}>
                     <RiPlugLine className="size-5" />
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
-                      <h4 className="truncate text-sm font-semibold">{site.name}</h4>
-                      <Chip size="sm" variant="soft" color={site.protocol === 'ftp' ? 'warning' : 'success'}>{site.protocol.toUpperCase()}</Chip>
+                      <h4 className="truncate text-body-semibold text-text-primary">{site.name}</h4>
+                      <Chip variant="caption" color={site.protocol === 'ftp' ? 'yellow' : 'lime'}>{site.protocol.toUpperCase()}</Chip>
                     </div>
-                    <p className="text-muted mt-1 truncate font-mono text-xs">{site.user ? `${site.user}@` : ''}{site.host}:{site.port}{site.initialDirectory ? ` ${site.initialDirectory}` : ''}</p>
-                    {site.protocol === 'ftp' ? <p className="text-warning mt-1 text-xs">{t('ssh.ftp.cleartextWarning')}</p> : null}
+                    <p className="mt-1 truncate font-mono text-caption-1-regular text-text-secondary">{site.user ? `${site.user}@` : ''}{site.host}:{site.port}{site.initialDirectory ? ` ${site.initialDirectory}` : ''}</p>
+                    {site.protocol === 'ftp' ? <p className="mt-1 text-caption-1-regular text-status-yellow-text">{t('ssh.ftp.cleartextWarning')}</p> : null}
                   </div>
                 </div>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <Button size="sm" variant="secondary" onPress={() => onOpenFiles({ kind: 'ftp', siteId: site.id, label: site.name, askPassword: Boolean(site.user) })}>
-                    <RiFolder3Line className="size-4" />{t('ssh.hosts.files')}
+                <div className="flex flex-wrap gap-2">
+                  <Button size="small" variant="secondary" leadingIcon={RiFolder3Line} onClick={() => onOpenFiles({ kind: 'ftp', siteId: site.id, label: site.name, askPassword: Boolean(site.user) })}>
+                    {t('ssh.hosts.files')}
                   </Button>
-                  <Button size="sm" variant="tertiary" onPress={() => setFtpDialog({ site })}><RiEdit2Line className="size-4" />{t('ssh.edit')}</Button>
-                  <Button size="sm" variant="danger-soft" onPress={() => setPendingDelete({ kind: 'ftp', site })}><RiDeleteBinLine className="size-4" />{t('common.delete')}</Button>
+                  <Button size="small" variant="secondary" leadingIcon={RiEdit2Line} onClick={() => setFtpDialog({ site })}>{t('ssh.edit')}</Button>
+                  <Button size="small" variant="danger" leadingIcon={RiDeleteBinLine} onClick={() => setPendingDelete({ kind: 'ftp', site })}>{t('common.delete')}</Button>
                 </div>
               </Card>
             ))}
@@ -231,28 +250,18 @@ export function SshHostsTab({ api, hosts, ftpSites, keys, onReload, onConnect, o
       ) : null}
       {importOpen ? <SshImportDialog api={api} onClose={() => setImportOpen(false)} onImported={onReload} /> : null}
       {ftpDialog ? <FtpSiteFormDialog api={api} site={ftpDialog.site} onClose={() => setFtpDialog(null)} onSaved={onReload} /> : null}
-      <AlertDialog isOpen={Boolean(pendingDelete)} onOpenChange={(open) => { if (!open) setPendingDelete(null); }}>
-        <AlertDialog.Backdrop>
-          <AlertDialog.Container>
-            <AlertDialog.Dialog className="sm:max-w-md">
-              <AlertDialog.Header>
-                <AlertDialog.Heading>{t('ssh.deleteTitle')}</AlertDialog.Heading>
-              </AlertDialog.Header>
-              <AlertDialog.Body>
-                <p className="text-muted text-sm">
-                  {pendingDelete?.kind === 'host'
-                    ? t('ssh.hosts.deleteBody', { alias: pendingDelete.alias })
-                    : pendingDelete ? t('ssh.ftp.deleteBody', { name: pendingDelete.site.name }) : null}
-                </p>
-              </AlertDialog.Body>
-              <AlertDialog.Footer>
-                <Button slot="close" variant="tertiary">{t('common.cancel')}</Button>
-                <Button variant="danger" onPress={() => void confirmDelete()}>{t('common.delete')}</Button>
-              </AlertDialog.Footer>
-            </AlertDialog.Dialog>
-          </AlertDialog.Container>
-        </AlertDialog.Backdrop>
-      </AlertDialog>
+      <ConfirmDialog
+        isOpen={Boolean(pendingDelete)}
+        onOpenChange={(open) => { if (!open) setPendingDelete(null); }}
+        title={t('ssh.deleteTitle')}
+        description={pendingDelete?.kind === 'host'
+          ? t('ssh.hosts.deleteBody', { alias: pendingDelete.alias })
+          : pendingDelete ? t('ssh.ftp.deleteBody', { name: pendingDelete.site.name }) : null}
+        cancelLabel={t('common.cancel')}
+        confirmLabel={t('common.delete')}
+        tone="danger"
+        onConfirm={() => void confirmDelete()}
+      />
     </div>
   );
 }

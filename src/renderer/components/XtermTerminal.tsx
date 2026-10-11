@@ -29,8 +29,8 @@ function resolveSurfaceColors(container?: HTMLElement | null, isDark: boolean = 
   if (typeof document !== 'undefined') {
     try {
       const probe = document.createElement('div');
-      probe.style.backgroundColor = 'var(--surface-secondary)';
-      probe.style.color = 'var(--surface-secondary-foreground)';
+      probe.style.backgroundColor = 'var(--color-background-secondary-default)';
+      probe.style.color = 'var(--color-text-primary)';
       document.body.appendChild(probe);
       const computed = window.getComputedStyle(probe);
       const canvas = document.createElement('canvas');

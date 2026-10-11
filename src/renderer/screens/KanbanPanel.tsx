@@ -1,13 +1,44 @@
-import { useMemo, useState, type DragEvent, type Key, type ReactNode } from 'react';
-import { isTextDropItem, useDragAndDrop, type Selection } from 'react-aria-components';
-import { Plus } from '@gravity-ui/icons';
-import { RiArrowDownSLine, RiArrowRightLine, RiCalendarLine, RiChat3Line, RiCheckLine, RiDraggable, RiFolder3Line, RiKanbanView2, RiMoreFill, RiTimerLine } from '@remixicon/react';
-import { Button, Chip, Dropdown, Header, Label, ListBox, Modal, Select, Separator, TextArea, TextField, Tooltip } from '@heroui/react';
-import { ContextMenu, EmptyState, Kanban } from '@heroui-pro/react';
+import { useCallback, useMemo, useState, type DragEvent, type Key, type ReactNode } from 'react';
+import {
+  Button as AriaButton,
+  DropIndicator,
+  Focusable,
+  GridList,
+  GridListItem,
+  SubmenuTrigger,
+  isTextDropItem,
+  useDragAndDrop,
+  type Selection,
+} from 'react-aria-components';
+import { motion, useReducedMotion } from 'motion/react';
+import {
+  RiAddLine,
+  RiArrowDownSLine,
+  RiArrowRightLine,
+  RiArrowRightSLine,
+  RiCalendarLine,
+  RiChat3Line,
+  RiCheckLine,
+  RiDraggable,
+  RiFolder3Line,
+  RiKanbanView2,
+  RiMoreFill,
+  RiTimerLine,
+} from '@remixicon/react';
 import type { WorkspaceRecord } from '@todex/protocol/todex';
+import { Chip } from '@/components/base/badges/chip';
+import { Button } from '@/components/base/buttons/button';
+import { Input } from '@/components/base/input/input';
+import { Select, SelectItem } from '@/components/base/select/select';
+import { Textarea } from '@/components/base/textarea/textarea';
+import { Tooltip, TooltipTrigger } from '@/components/base/tooltip/tooltip';
+import { EmptyState } from '@/components/ui/empty-state';
+import { IconAction } from '@/components/ui/icon-action';
+import { ContextMenu, Menu, MenuItem, MenuPopover, MenuSection, MenuSeparator, MenuTrigger } from '@/components/ui/menu';
+import { Modal } from '@/components/ui/modal';
+import { cx } from '@/utils/cx';
 import { conversationDisplayTitle, getConversationStatus, workspaceDisplayName, type ConversationRecord, type TimelineEntry } from '../session/helpers';
 import type { TodeXSession } from '../session/useTodeXSession';
-import { Field } from '../components/Field';
 import { useT } from '../i18n';
 import {
   addKanbanTask,
@@ -37,58 +68,46 @@ import {
 
 type Props = { session: TodeXSession; onOpenConversation: () => void };
 
-type ChipColor = 'accent' | 'danger' | 'default' | 'success' | 'warning';
+type ChipColor = 'blue' | 'yellow' | 'neutral';
 
-type ColumnMeta = {
-  bodyBg: string;
-  countColor: string;
-  indicator: string;
-  pillBg: string;
-};
-
-const COLUMN_META: ColumnMeta[] = [
-  {
-    bodyBg: 'bg-accent/8',
-    countColor: 'text-accent',
-    indicator: 'bg-accent',
-    pillBg: 'bg-accent/15',
-  },
-  {
-    bodyBg: 'bg-warning/8',
-    countColor: 'text-warning',
-    indicator: 'bg-warning',
-    pillBg: 'bg-warning/15',
-  },
-  {
-    bodyBg: 'bg-danger/8',
-    countColor: 'text-danger',
-    indicator: 'bg-danger',
-    pillBg: 'bg-danger/15',
-  },
-  {
-    bodyBg: 'bg-success/8',
-    countColor: 'text-success',
-    indicator: 'bg-success',
-    pillBg: 'bg-success/15',
-  },
-];
+/** Column identity dots, cycling through the chart hues so neighbouring
+ * workspaces stay apart (blue, yellow, pink, emerald). */
+const COLUMN_INDICATORS = ['bg-chart-6', 'bg-chart-8', 'bg-chart-3', 'bg-chart-7'];
 
 const STATUS_META: Record<KanbanTaskStatus, { chip: ChipColor }> = {
-  planned: { chip: 'accent' },
-  'in-progress': { chip: 'warning' },
-  done: { chip: 'default' },
+  planned: { chip: 'blue' },
+  'in-progress': { chip: 'yellow' },
+  done: { chip: 'neutral' },
 };
 
 // Custom mime so task drags never collide with the column drag (text/plain).
 const TASK_DRAG_TYPE = 'application/x-todex-kanban-task';
 
+/** Borderless 24px icon trigger used on cards and column headers. */
+const ICON_TRIGGER = cx(
+  'flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-foreground-icon-secondary',
+  'transition-colors duration-150 ease hover:bg-background-tertiary-default hover:text-foreground-icon-primary',
+  'outline-none focus-visible:ring-2 focus-visible:ring-border-focus-ring',
+);
+
+/** Spring the cards settle with when a drop reorders them. */
+const CARD_LAYOUT_TRANSITION = { layout: { type: 'spring' as const, bounce: 0.15, duration: 0.35 } };
+
 type ConversationGroupKind = 'working' | 'issue' | 'unread' | 'plain' | 'stale';
 
 const CONVERSATION_GROUP_ORDER: ConversationGroupKind[] = ['working', 'issue', 'unread', 'plain', 'stale'];
 
+const CONVERSATION_GROUP_DOT: Record<ConversationGroupKind, string> = {
+  working: 'bg-chart-7',
+  issue: 'bg-chart-8',
+  unread: 'bg-chart-6',
+  plain: 'bg-foreground-icon-quaternary',
+  stale: 'bg-foreground-icon-quaternary',
+};
+
 type LatestEntries = Record<string, { latest: TimelineEntry | undefined; latestIncomingAt: number }>;
 
-type LinkedConversation = { conversation: ConversationRecord; status: ConversationGroupKind; label: string; dot: string };
+type LinkedConversation = { conversation: ConversationRecord; status: ConversationGroupKind; label: string };
 
 /** Task links hold the local id of a conversation started on this device, or
  * the backend id of one started elsewhere (another device, a schedule). */
@@ -131,7 +150,6 @@ function groupLinkedConversations(
       conversation,
       status: status?.kind ?? 'plain',
       label: status?.label ?? plainLabel,
-      dot: status?.color ?? 'bg-muted',
     });
   }
   const groups = CONVERSATION_GROUP_ORDER
@@ -158,7 +176,10 @@ function TaskScheduleLine({ schedule }: { schedule: KanbanTaskSchedule }) {
         : t('kanban.scheduleFailed', { error: schedule.error ?? '' });
   return (
     <div
-      className={`flex min-w-0 items-center gap-1 text-xs ${schedule.status === 'failed' ? 'text-danger' : schedule.status === 'done' ? 'text-muted' : 'text-accent'}`}
+      className={cx(
+        'flex min-w-0 items-center gap-1 text-caption-1-regular',
+        schedule.status === 'failed' ? 'text-text-error-primary' : schedule.status === 'done' ? 'text-text-tertiary' : 'text-text-accent',
+      )}
       title={schedule.status === 'failed' ? schedule.error : undefined}
     >
       <RiTimerLine className="size-3.5 shrink-0" />
@@ -167,7 +188,7 @@ function TaskScheduleLine({ schedule }: { schedule: KanbanTaskSchedule }) {
   );
 }
 
-function TaskCard({ task, session, conversations, latestEntries, onOpen, onNewConversation, onSchedule }: {
+type TaskCardProps = {
   task: KanbanTask;
   session: TodeXSession;
   conversations: ConversationRecord[];
@@ -175,8 +196,32 @@ function TaskCard({ task, session, conversations, latestEntries, onOpen, onNewCo
   onOpen: (workspaceId: string, conversationId: string) => void;
   onNewConversation: (task: KanbanTask) => void;
   onSchedule: (task: KanbanTask) => void;
-}) {
+};
+
+/** The grid-list row of one task. Its content (and the menu state) renders
+ * inside the row, outside react-aria's collection wrapper. */
+function TaskCard(props: TaskCardProps) {
+  return (
+    <GridListItem
+      id={props.task.id}
+      textValue={props.task.title}
+      className={({ isDragging, isFocusVisible }) => cx(
+        'group/card relative cursor-pointer rounded-xl outline-none select-none',
+        'transition-opacity duration-200 ease-out motion-reduce:transition-none',
+        isDragging && 'opacity-50',
+        isFocusVisible && 'ring-[2.5px] ring-border-focus-ring',
+      )}
+    >
+      <TaskCardContent {...props} />
+    </GridListItem>
+  );
+}
+
+function TaskCardContent({ task, session, conversations, latestEntries, onOpen, onNewConversation, onSchedule }: TaskCardProps) {
   const t = useT();
+  const reduceMotion = useReducedMotion();
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const closeContextMenu = useCallback(() => setContextMenu(null), []);
   const done = task.status === 'done';
   const { groups, staleCount, linked } = groupLinkedConversations(
     task, session, conversations, latestEntries, t('kanban.groupPlain'), t('kanban.linkStale'),
@@ -219,175 +264,183 @@ function TaskCard({ task, session, conversations, latestEntries, onOpen, onNewCo
     }
   };
 
-  // ContextMenu.Item and friends re-export the Dropdown parts, so one JSX
-  // block serves both the right-click menu and the "…" dropdown. A submenu
-  // must use its own root's popover and menu: a Dropdown popover nested in
-  // the context menu renders unstyled beside it.
-  const menuItems = (Popover: typeof Dropdown.Popover, Menu: typeof Dropdown.Menu): ReactNode => (
+  // One block of items serves both the right-click menu and the "…" menu.
+  const menuItems = (): ReactNode => (
     <>
-      <Dropdown.Section
+      <MenuSection
+        title={t('kanban.setStatus')}
         selectionMode="single"
         selectedKeys={new Set([task.status])}
         onSelectionChange={applyStatusSelection}
       >
-        <Header>{t('kanban.setStatus')}</Header>
         {kanbanTaskStatuses.map((status) => (
-          <Dropdown.Item key={status} id={status} textValue={kanbanTaskStatusLabel(status)}>
-            <Dropdown.ItemIndicator type="dot" />
-            <Label>{kanbanTaskStatusLabel(status)}</Label>
-          </Dropdown.Item>
+          <MenuItem key={status} id={status} textValue={kanbanTaskStatusLabel(status)}>
+            {kanbanTaskStatusLabel(status)}
+          </MenuItem>
         ))}
-      </Dropdown.Section>
-      <Separator />
-      <Dropdown.Item id="new" textValue={t('kanban.newConversation')}>
-        <Label>{t('kanban.newConversation')}</Label>
-      </Dropdown.Item>
+      </MenuSection>
+      <MenuSeparator />
+      <MenuItem id="new" textValue={t('kanban.newConversation')}>{t('kanban.newConversation')}</MenuItem>
       {linked.length ? (
-        <Dropdown.Item id="open" textValue={t('kanban.openConversation')}>
-          <Label>{t('kanban.openConversation')}</Label>
-        </Dropdown.Item>
+        <MenuItem id="open" textValue={t('kanban.openConversation')}>{t('kanban.openConversation')}</MenuItem>
       ) : null}
       {linked.length ? (
-        <Dropdown.SubmenuTrigger>
-          <Dropdown.Item id="draft" textValue={t('kanban.draftToChat')}>
-            <Label>{t('kanban.draftToChat')}</Label>
-            <Dropdown.SubmenuIndicator />
-          </Dropdown.Item>
-          <Popover>
-            <Menu aria-label={t('kanban.draftToChat')} onAction={runTaskAction}>
+        <SubmenuTrigger>
+          <MenuItem
+            id="draft"
+            textValue={t('kanban.draftToChat')}
+            trailing={<RiArrowRightSLine aria-hidden className="size-4 text-foreground-icon-tertiary rtl:rotate-180" />}
+          >
+            {t('kanban.draftToChat')}
+          </MenuItem>
+          <MenuPopover placement="end top" offset={2}>
+            {/* Outside a MenuTrigger the submenu cannot close the pointer
+                menu itself, so close it here. */}
+            <Menu aria-label={t('kanban.draftToChat')} onAction={(key) => { closeContextMenu(); runTaskAction(key); }}>
               {linked.map(({ conversation }) => (
-                <Dropdown.Item
+                <MenuItem
                   key={conversation.id}
                   id={`draft:${conversation.id}`}
                   textValue={conversationDisplayTitle(conversation, session.timeline)}
                 >
-                  <Label className="truncate">{conversationDisplayTitle(conversation, session.timeline)}</Label>
-                </Dropdown.Item>
+                  {conversationDisplayTitle(conversation, session.timeline)}
+                </MenuItem>
               ))}
             </Menu>
-          </Popover>
-        </Dropdown.SubmenuTrigger>
+          </MenuPopover>
+        </SubmenuTrigger>
       ) : null}
-      <Dropdown.Item id="schedule" textValue={t('kanban.schedule')}>
-        <Label>{t('kanban.schedule')}</Label>
-      </Dropdown.Item>
+      <MenuItem id="schedule" textValue={t('kanban.schedule')}>{t('kanban.schedule')}</MenuItem>
       {task.schedule?.status === 'pending' ? (
-        <Dropdown.Item id="cancel-schedule" textValue={t('kanban.scheduleCancel')}>
-          <Label>{t('kanban.scheduleCancel')}</Label>
-        </Dropdown.Item>
+        <MenuItem id="cancel-schedule" textValue={t('kanban.scheduleCancel')}>{t('kanban.scheduleCancel')}</MenuItem>
       ) : null}
       {staleCount ? (
-        <Dropdown.Item id="clear-stale" textValue={t('kanban.clearStale')}>
-          <Label>{t('kanban.clearStale')}</Label>
-        </Dropdown.Item>
+        <MenuItem id="clear-stale" textValue={t('kanban.clearStale')}>{t('kanban.clearStale')}</MenuItem>
       ) : null}
-      <Separator />
-      <Dropdown.Item id="rename" textValue={t('kanban.renameAria')}>
-        <Label>{t('kanban.rename')}</Label>
-      </Dropdown.Item>
-      <Dropdown.Item id="delete" textValue={t('kanban.delete')} variant="danger">
-        <Label className="text-danger">{t('kanban.delete')}</Label>
-      </Dropdown.Item>
+      <MenuSeparator />
+      <MenuItem id="rename" textValue={t('kanban.renameAria')}>{t('kanban.rename')}</MenuItem>
+      <MenuItem id="delete" textValue={t('kanban.delete')} tone="danger">{t('kanban.delete')}</MenuItem>
     </>
   );
 
   return (
-    <Kanban.Card id={task.id} textValue={task.title} className="group/card">
-      <ContextMenu>
-        <ContextMenu.Trigger className="min-w-0">
-          <div className="flex min-w-0 flex-col gap-2">
-            <div className="flex items-start gap-2">
-              <button
-                type="button"
-                aria-label={done ? t('kanban.markUndone') : t('kanban.markDone')}
-                title={done ? t('kanban.markUndone') : t('kanban.markDone')}
-                className={`group/check mt-0.5 flex size-4 shrink-0 cursor-pointer items-center justify-center rounded-full border-2 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent/40 ${
-                  done
-                    ? 'border-muted bg-muted text-background'
-                    : 'border-separator hover:border-muted'
-                }`}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  setKanbanTaskStatus(task.id, done ? 'planned' : 'done');
-                }}
-              >
-                <RiCheckLine className={`size-2.5 ${done ? '' : 'text-muted opacity-0 transition-opacity group-hover/check:opacity-100'}`} />
-              </button>
-              <span className={`min-w-0 break-all font-semibold leading-snug ${done ? 'text-muted' : 'text-foreground'}`}>{task.title}</span>
-            </div>
+    <>
+      <motion.div
+        layout={!reduceMotion}
+        transition={CARD_LAYOUT_TRANSITION}
+        className={cx(
+          'flex min-w-0 flex-col gap-2 rounded-xl bg-background-primary-default p-3 text-start shadow-card',
+          'ring-[2.5px] ring-transparent transition-[box-shadow] duration-200 ease-out motion-reduce:transition-none',
+          'hover:shadow-sm hover:ring-border-button-hover',
+        )}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          setContextMenu({ x: event.clientX, y: event.clientY });
+        }}
+      >
+        <div className="flex items-start gap-2">
+          <button
+            type="button"
+            aria-label={done ? t('kanban.markUndone') : t('kanban.markDone')}
+            title={done ? t('kanban.markUndone') : t('kanban.markDone')}
+            className={cx(
+              'group/check mt-0.5 flex size-4 shrink-0 cursor-pointer items-center justify-center rounded-full border-2',
+              'transition-colors duration-150 ease outline-none focus-visible:ring-2 focus-visible:ring-border-focus-ring',
+              done
+                ? 'border-foreground-icon-tertiary bg-foreground-icon-tertiary text-text-white'
+                : 'border-border-button-hover hover:border-foreground-icon-tertiary',
+            )}
+            onClick={(event) => {
+              event.stopPropagation();
+              setKanbanTaskStatus(task.id, done ? 'planned' : 'done');
+            }}
+          >
+            <RiCheckLine
+              className={cx(
+                'size-2.5',
+                !done && 'text-foreground-icon-tertiary opacity-0 transition-opacity duration-150 group-hover/check:opacity-100',
+              )}
+            />
+          </button>
+          <span className={cx('min-w-0 break-all text-body-medium', done ? 'text-text-tertiary' : 'text-text-primary')}>{task.title}</span>
+        </div>
 
-            {task.description ? (
-              <p className="text-muted break-all text-xs leading-snug line-clamp-2">{task.description}</p>
-            ) : null}
+        {task.description ? (
+          <p className="line-clamp-2 break-all text-caption-1-regular text-text-secondary">{task.description}</p>
+        ) : null}
 
-            {task.dueDate ? (
-              <div className={`flex min-w-0 items-center gap-1 text-xs ${isKanbanTaskOverdue(task) ? 'text-danger' : 'text-muted'}`}>
-                <RiCalendarLine className="size-3.5 shrink-0" />
-                <span className="truncate">
-                  {task.dueDate}{isKanbanTaskOverdue(task) ? t('kanban.overdue') : ''}
-                </span>
-              </div>
-            ) : null}
-
-            {task.schedule ? <TaskScheduleLine schedule={task.schedule} /> : null}
-
-            {groups.map((group) => (
-              <div key={group.kind} className="flex min-w-0 flex-col gap-0.5">
-                {groups.length > 1 || group.kind !== 'plain' ? (
-                  <span className="text-muted flex items-center gap-1.5 text-[11px] leading-snug">
-                    <span className={`size-1.5 shrink-0 rounded-full ${group.kind === 'stale' ? 'bg-muted' : group.items[0]?.dot ?? 'bg-muted'}`} />
-                    {group.label} · {group.kind === 'stale' ? staleCount : group.items.length}
-                  </span>
-                ) : null}
-                {group.kind === 'stale' ? null : group.items.map(({ conversation }) => (
-                  <button
-                    key={conversation.id}
-                    type="button"
-                    className="text-accent flex min-w-0 items-center gap-1.5 truncate text-left text-xs outline-none hover:underline focus-visible:ring-2 focus-visible:ring-accent/40"
-                    onClick={(event) => { event.stopPropagation(); onOpen(task.workspaceId, conversation.id); }}
-                  >
-                    <RiChat3Line className="text-muted size-3.5 shrink-0" />
-                    <span className="min-w-0 truncate">{conversationDisplayTitle(conversation, session.timeline)}</span>
-                  </button>
-                ))}
-              </div>
-            ))}
-
-            <div className="flex items-center gap-1">
-              <Chip color={STATUS_META[task.status].chip} size="sm" variant="soft">
-                {kanbanTaskStatusLabel(task.status)}
-              </Chip>
-
-              <span className="flex-1" />
-
-              {/* Pointer users drag the card itself; this icon hints at it. */}
-              <RiDraggable aria-hidden className="text-muted size-3.5 opacity-0 transition-opacity group-hover/card:opacity-100" />
-              {/* Keyboard-operable drag trigger; visually hidden until focused. */}
-              <Kanban.DragHandle aria-label={t('kanban.reorderTask')} />
-
-              <Dropdown>
-                <Dropdown.Trigger
-                  aria-label={t('kanban.taskActions')}
-                  className="text-muted hover:text-foreground flex size-6 cursor-pointer items-center justify-center rounded-md outline-none hover:bg-surface-secondary focus-visible:ring-2 focus-visible:ring-accent/40"
-                >
-                  <RiMoreFill className="size-4" />
-                </Dropdown.Trigger>
-                <Dropdown.Popover>
-                  <Dropdown.Menu aria-label={t('kanban.taskActions')} onAction={runTaskAction}>
-                    {menuItems(Dropdown.Popover, Dropdown.Menu)}
-                  </Dropdown.Menu>
-                </Dropdown.Popover>
-              </Dropdown>
-            </div>
+        {task.dueDate ? (
+          <div className={cx('flex min-w-0 items-center gap-1 text-caption-1-regular', isKanbanTaskOverdue(task) ? 'text-text-error-primary' : 'text-text-tertiary')}>
+            <RiCalendarLine className="size-3.5 shrink-0" />
+            <span className="truncate">
+              {task.dueDate}{isKanbanTaskOverdue(task) ? t('kanban.overdue') : ''}
+            </span>
           </div>
-        </ContextMenu.Trigger>
-        <ContextMenu.Popover>
-          <ContextMenu.Menu aria-label={t('kanban.taskActions')} onAction={runTaskAction}>
-            {menuItems(ContextMenu.Popover, ContextMenu.Menu)}
-          </ContextMenu.Menu>
-        </ContextMenu.Popover>
+        ) : null}
+
+        {task.schedule ? <TaskScheduleLine schedule={task.schedule} /> : null}
+
+        {groups.map((group) => (
+          <div key={group.kind} className="flex min-w-0 flex-col gap-0.5">
+            {groups.length > 1 || group.kind !== 'plain' ? (
+              <span className="flex items-center gap-1.5 text-caption-2-regular text-text-tertiary">
+                <span className={cx('size-1.5 shrink-0 rounded-full', CONVERSATION_GROUP_DOT[group.kind])} />
+                {group.label} · {group.kind === 'stale' ? staleCount : group.items.length}
+              </span>
+            ) : null}
+            {group.kind === 'stale' ? null : group.items.map(({ conversation }) => (
+              <button
+                key={conversation.id}
+                type="button"
+                className="flex min-w-0 items-center gap-1.5 truncate rounded-sm text-start text-caption-1-regular text-text-accent underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-border-focus-ring"
+                onClick={(event) => { event.stopPropagation(); onOpen(task.workspaceId, conversation.id); }}
+              >
+                <RiChat3Line className="size-3.5 shrink-0 text-foreground-icon-tertiary" />
+                <span className="min-w-0 truncate">{conversationDisplayTitle(conversation, session.timeline)}</span>
+              </button>
+            ))}
+          </div>
+        ))}
+
+        <div className="flex items-center gap-1">
+          <Chip color={STATUS_META[task.status].chip} variant="caption">
+            {kanbanTaskStatusLabel(task.status)}
+          </Chip>
+
+          <span className="flex-1" />
+
+          {/* Pointer users drag the card itself, so the grip only hints at it
+              on hover; keyboard users focus it to start a drag. */}
+          <AriaButton
+            slot="drag"
+            aria-label={t('kanban.reorderTask')}
+            className={cx(
+              ICON_TRIGGER,
+              'cursor-grab opacity-0 transition-[opacity,background-color,color] group-hover/card:opacity-100',
+              'group-data-[focus-visible]/card:opacity-100 data-[focus-visible]:opacity-100',
+            )}
+          >
+            <RiDraggable aria-hidden className="size-3.5" />
+          </AriaButton>
+
+          <MenuTrigger>
+            <AriaButton aria-label={t('kanban.taskActions')} className={ICON_TRIGGER}>
+              <RiMoreFill aria-hidden className="size-4" />
+            </AriaButton>
+            <MenuPopover placement="bottom end">
+              <Menu aria-label={t('kanban.taskActions')} onAction={runTaskAction}>
+                {menuItems()}
+              </Menu>
+            </MenuPopover>
+          </MenuTrigger>
+        </div>
+      </motion.div>
+      <ContextMenu position={contextMenu} onClose={closeContextMenu}>
+        <Menu aria-label={t('kanban.taskActions')} onAction={runTaskAction}>
+          {menuItems()}
+        </Menu>
       </ContextMenu>
-    </Kanban.Card>
+    </>
   );
 }
 
@@ -410,7 +463,15 @@ function StatusSection({ workspace, status, items, collapsed, onToggleCollapsed,
     getItems: (keys) => [...keys].map((key) => ({ [TASK_DRAG_TYPE]: String(key) })),
     acceptedDragTypes: [TASK_DRAG_TYPE],
     getDropOperation: () => 'move',
-    renderDropIndicator: (target) => <Kanban.DropIndicator target={target} />,
+    renderDropIndicator: (target) => (
+      <DropIndicator
+        target={target}
+        className={({ isDropTarget }) => cx(
+          'outline-none',
+          isDropTarget && 'h-10 shrink-0 rounded-xl border border-dashed border-border-button-hover bg-background-tertiary-default transition-[height] duration-150 ease-out motion-reduce:transition-none',
+        )}
+      />
+    ),
     onReorder: (event) => {
       if (event.target.type !== 'item') return;
       const ids = [...event.keys].map(String);
@@ -446,16 +507,20 @@ function StatusSection({ workspace, status, items, collapsed, onToggleCollapsed,
       <button
         type="button"
         aria-expanded={!collapsed}
-        className="text-muted hover:text-foreground flex w-full items-center gap-1 px-3 pt-2 text-left text-xs outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+        className="flex w-full cursor-pointer items-center gap-1 rounded-md px-1.5 pt-2 text-start text-caption-1-medium text-text-secondary transition-colors duration-150 ease outline-none hover:text-text-primary focus-visible:ring-2 focus-visible:ring-border-focus-ring"
         onClick={onToggleCollapsed}
       >
-        <RiArrowDownSLine className={`size-3.5 shrink-0 transition-transform ${collapsed ? '-rotate-90' : ''}`} />
+        <RiArrowDownSLine className={cx('size-3.5 shrink-0 transition-transform duration-150 ease', collapsed && '-rotate-90')} />
         {kanbanTaskStatusLabel(status)} · {items.length}
       </button>
       {collapsed ? null : (
-        <Kanban.CardList
+        <GridList
           aria-label={t('kanban.columnAria', { workspace: workspaceDisplayName(workspace), status: kanbanTaskStatusLabel(status) })}
-          className="pb-1 pt-1"
+          className={({ isFocusVisible, isDropTarget }) => cx(
+            'flex flex-col gap-1.5 rounded-xl py-1.5 outline-none',
+            isFocusVisible && 'ring-2 ring-inset ring-border-focus-ring',
+            isDropTarget && 'bg-background-secondary-hover',
+          )}
           dragAndDropHooks={dragAndDropHooks}
           items={items}
           onAction={(key) => {
@@ -464,7 +529,7 @@ function StatusSection({ workspace, status, items, collapsed, onToggleCollapsed,
           }}
         >
           {(task: KanbanTask) => children(task)}
-        </Kanban.CardList>
+        </GridList>
       )}
     </div>
   );
@@ -472,9 +537,9 @@ function StatusSection({ workspace, status, items, collapsed, onToggleCollapsed,
 
 type ColumnDropPosition = 'before' | 'after';
 
-function WorkspaceColumn({ workspace, meta, tasks, session, latestEntries, onOpenConversation, onScheduleTask, dragging, dropPosition, onHandleDragStart, onColumnDragOver, onColumnDrop, onColumnDragEnd }: {
+function WorkspaceColumn({ workspace, indicator, tasks, session, latestEntries, onOpenConversation, onScheduleTask, dragging, dropPosition, onHandleDragStart, onColumnDragOver, onColumnDrop, onColumnDragEnd }: {
   workspace: WorkspaceRecord;
-  meta: ColumnMeta;
+  indicator: string;
   tasks: KanbanTask[];
   session: TodeXSession;
   latestEntries: LatestEntries;
@@ -517,60 +582,67 @@ function WorkspaceColumn({ workspace, meta, tasks, session, latestEntries, onOpe
   };
 
   return (
-    <Kanban.Column
-      className={`relative gap-0 transition-opacity ${dragging ? 'opacity-50' : ''}`}
+    <section
+      className={cx('group/column relative flex min-w-0 flex-col transition-opacity duration-150 ease', dragging && 'opacity-50')}
       onDragOver={onColumnDragOver}
       onDrop={onColumnDrop}
     >
       {dropPosition ? (
         <span
           aria-hidden
-          className={`bg-accent pointer-events-none absolute inset-y-1 z-20 w-1 rounded-full ${dropPosition === 'before' ? '-left-2.5' : '-right-2.5'}`}
+          className={cx(
+            'pointer-events-none absolute inset-y-1 z-20 w-1 rounded-full bg-accent-500',
+            dropPosition === 'before' ? '-left-2' : '-right-2',
+          )}
         />
       ) : null}
-      <div className="bg-background sticky top-0 z-10 pt-2">
-        <Kanban.ColumnHeader
-          className={`rounded-t-[calc(var(--radius-2xl)_+_var(--radius-sm))] px-3 py-2.5 ${meta.bodyBg}`}
-        >
-          <span className={`flex min-w-0 items-center gap-2 rounded-[calc(var(--radius)*infinity)] px-3 py-1 ${meta.pillBg}`}>
-            <Kanban.ColumnIndicator className={meta.indicator} />
-            <Tooltip delay={300}>
-              <Tooltip.Trigger className="min-w-0 cursor-default outline-none">
-                <Kanban.ColumnTitle className="truncate">{workspaceDisplayName(workspace)}</Kanban.ColumnTitle>
-              </Tooltip.Trigger>
-              <Tooltip.Content className="max-w-xs break-all">{workspace.path}</Tooltip.Content>
-            </Tooltip>
-          </span>
-          <Kanban.ColumnCount className={meta.countColor}>{tasks.length}</Kanban.ColumnCount>
-          <Kanban.ColumnActions>
-            <Tooltip delay={300}>
-              <Tooltip.Trigger
-                aria-label={t('kanban.reorderColumn')}
-                className="text-muted hover:text-foreground flex size-6 cursor-grab items-center justify-center rounded-md outline-none hover:bg-surface-secondary focus-visible:ring-2 focus-visible:ring-accent/40 active:cursor-grabbing"
-              >
-                <span draggable onDragStart={onHandleDragStart} onDragEnd={onColumnDragEnd} className="flex">
-                  <RiDraggable className="size-4" />
+      <div className="sticky top-0 z-10 bg-background-full pt-2">
+        <header className="flex items-center gap-2 rounded-t-2-5xl bg-background-secondary-default px-3 pt-3 pb-1">
+          <span aria-hidden className={cx('size-2.5 shrink-0 rounded-full', indicator)} />
+          <TooltipTrigger delay={300}>
+            <Focusable>
+              <span role="button" tabIndex={0} className="min-w-0 cursor-default truncate rounded-sm text-body-medium text-text-primary outline-none focus-visible:ring-2 focus-visible:ring-border-focus-ring">
+                {workspaceDisplayName(workspace)}
+              </span>
+            </Focusable>
+            <Tooltip placement="bottom" className="max-w-xs break-all">{workspace.path}</Tooltip>
+          </TooltipTrigger>
+          <span className="shrink-0 text-body-medium text-text-secondary">{tasks.length}</span>
+          <div
+            className={cx(
+              'ms-auto flex shrink-0 items-center gap-0.5 transition-opacity duration-150 ease motion-reduce:transition-none',
+              'opacity-0 group-hover/column:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100',
+            )}
+          >
+            <TooltipTrigger delay={300}>
+              <Focusable>
+                <span
+                  role="button"
+                  tabIndex={0}
+                  aria-label={t('kanban.reorderColumn')}
+                  draggable
+                  onDragStart={onHandleDragStart}
+                  onDragEnd={onColumnDragEnd}
+                  className={cx(ICON_TRIGGER, 'cursor-grab active:cursor-grabbing')}
+                >
+                  <RiDraggable aria-hidden className="size-4" />
                 </span>
-              </Tooltip.Trigger>
-              <Tooltip.Content>{t('kanban.reorderColumn')}</Tooltip.Content>
-            </Tooltip>
-            <Tooltip delay={300}>
-              <Button
-                isIconOnly
-                aria-label={t('kanban.enterWorkspace')}
-                className={meta.countColor}
-                size="sm"
-                variant="ghost"
-                onPress={() => onOpenConversation(workspace.id, '')}
-              >
-                <RiArrowRightLine />
-              </Button>
-              <Tooltip.Content>{t('kanban.enterWorkspace')}</Tooltip.Content>
-            </Tooltip>
-          </Kanban.ColumnActions>
-        </Kanban.ColumnHeader>
+              </Focusable>
+              <Tooltip placement="bottom">{t('kanban.reorderColumn')}</Tooltip>
+            </TooltipTrigger>
+            <IconAction
+              icon={RiArrowRightLine}
+              size="xs"
+              aria-label={t('kanban.enterWorkspace')}
+              tooltip
+              className="hover:bg-background-tertiary-default"
+              iconClassName="rtl:rotate-180"
+              onClick={() => onOpenConversation(workspace.id, '')}
+            />
+          </div>
+        </header>
       </div>
-      <Kanban.ColumnBody className={`min-h-0 rounded-t-none pb-2 ${meta.bodyBg}`}>
+      <div className="flex min-h-16 flex-col rounded-b-2-5xl bg-background-secondary-default px-1.5 pb-1.5">
         {kanbanTaskStatuses.map((status) => {
           const items = tasks.filter((task) => task.status === status);
           if (!items.length) return null;
@@ -599,8 +671,8 @@ function WorkspaceColumn({ workspace, meta, tasks, session, latestEntries, onOpe
             </StatusSection>
           );
         })}
-      </Kanban.ColumnBody>
-    </Kanban.Column>
+      </div>
+    </section>
   );
 }
 
@@ -669,74 +741,60 @@ function ScheduleTaskDialog({ session, task, onClose }: {
   };
 
   return (
-    <Modal.Backdrop isOpen={Boolean(task)} onOpenChange={(open) => { if (!open) onClose(); }}>
-      <Modal.Container>
-        <Modal.Dialog className="sm:max-w-lg">
-          <Modal.CloseTrigger />
-          <Modal.Header>
-            <Modal.Heading>{t('kanban.scheduleTitle')}</Modal.Heading>
-          </Modal.Header>
-          <Modal.Body className="flex flex-col gap-4">
-            <Select
-              selectedKey={action}
-              disabledKeys={targets.length ? [] : ['send']}
-              onSelectionChange={(key) => setAction(String(key) === 'send' ? 'send' : 'start')}
+    <Modal
+      isOpen={Boolean(task)}
+      onOpenChange={(open) => { if (!open) onClose(); }}
+      title={t('kanban.scheduleTitle')}
+      size="lg"
+      bodyClassName="flex flex-col gap-4"
+      footer={(
+        <>
+          <Button variant="secondary" onClick={onClose}>{t('common.cancel')}</Button>
+          <Button onClick={submit} disabled={!zone || !at || !text.trim()}>{t('kanban.scheduleSave')}</Button>
+        </>
+      )}
+    >
+      <Select
+        label={t('kanban.scheduleAction')}
+        className="w-full"
+        popoverClassName="w-(--trigger-width)"
+        selectedKey={action}
+        disabledKeys={targets.length ? [] : ['send']}
+        onSelectionChange={(key) => setAction(String(key) === 'send' ? 'send' : 'start')}
+      >
+        <SelectItem id="start" textValue={t('kanban.scheduleStart')}>{t('kanban.scheduleStart')}</SelectItem>
+        <SelectItem id="send" textValue={t('kanban.scheduleSend')}>{t('kanban.scheduleSend')}</SelectItem>
+      </Select>
+      {action === 'send' ? (
+        <Select
+          label={t('kanban.scheduleConversation')}
+          className="w-full"
+          popoverClassName="w-(--trigger-width)"
+          selectedKey={conversationId}
+          onSelectionChange={(key) => setConversationId(String(key))}
+        >
+          {targets.map((conversation) => (
+            <SelectItem
+              key={conversation.id}
+              id={conversation.id}
+              textValue={conversationDisplayTitle(conversation, session.timeline)}
             >
-              <Label>{t('kanban.scheduleAction')}</Label>
-              <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
-              <Select.Popover>
-                <ListBox>
-                  <ListBox.Item id="start" textValue={t('kanban.scheduleStart')}>
-                    {t('kanban.scheduleStart')}
-                    <ListBox.ItemIndicator />
-                  </ListBox.Item>
-                  <ListBox.Item id="send" textValue={t('kanban.scheduleSend')}>
-                    {t('kanban.scheduleSend')}
-                    <ListBox.ItemIndicator />
-                  </ListBox.Item>
-                </ListBox>
-              </Select.Popover>
-            </Select>
-            {action === 'send' ? (
-              <Select selectedKey={conversationId} onSelectionChange={(key) => setConversationId(String(key))}>
-                <Label>{t('kanban.scheduleConversation')}</Label>
-                <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
-                <Select.Popover>
-                  <ListBox>
-                    {targets.map((conversation) => (
-                      <ListBox.Item
-                        key={conversation.id}
-                        id={conversation.id}
-                        textValue={conversationDisplayTitle(conversation, session.timeline)}
-                      >
-                        {conversationDisplayTitle(conversation, session.timeline)}
-                        <ListBox.ItemIndicator />
-                      </ListBox.Item>
-                    ))}
-                  </ListBox>
-                </Select.Popover>
-              </Select>
-            ) : null}
-            <Field
-              label={t('kanban.scheduleAt')}
-              value={at}
-              onChange={(value) => { setAt(value); setError(''); }}
-              type="datetime-local"
-              description={zone ? t('kanban.scheduleZone', { zone: kanbanTimeZoneLabel(zone) }) : t('kanban.scheduleZoneUnknown')}
-            />
-            <TextField value={text} onChange={setText}>
-              <Label>{t('kanban.scheduleText')}</Label>
-              <TextArea rows={4} maxLength={20000} />
-            </TextField>
-            {error ? <p className="text-danger text-sm">{error}</p> : null}
-          </Modal.Body>
-          <Modal.Footer>
-            <Button variant="tertiary" onPress={onClose}>{t('common.cancel')}</Button>
-            <Button onPress={submit} isDisabled={!zone || !at || !text.trim()}>{t('kanban.scheduleSave')}</Button>
-          </Modal.Footer>
-        </Modal.Dialog>
-      </Modal.Container>
-    </Modal.Backdrop>
+              {conversationDisplayTitle(conversation, session.timeline)}
+            </SelectItem>
+          ))}
+        </Select>
+      ) : null}
+      <Input
+        label={t('kanban.scheduleAt')}
+        name="schedule-at"
+        type="datetime-local"
+        value={at}
+        onChange={(value) => { setAt(value); setError(''); }}
+        hint={zone ? t('kanban.scheduleZone', { zone: kanbanTimeZoneLabel(zone) }) : t('kanban.scheduleZoneUnknown')}
+      />
+      <Textarea label={t('kanban.scheduleText')} value={text} onChange={setText} rows={4} maxLength={20000} />
+      {error ? <p className="text-body-regular text-text-error-primary">{error}</p> : null}
+    </Modal>
   );
 }
 
@@ -767,45 +825,43 @@ function NewTaskDialog({ session, workspaces, open, onOpenChange }: {
   };
 
   return (
-    <Modal.Backdrop isOpen={open} onOpenChange={(next) => (next ? onOpenChange(true) : close())}>
-      <Modal.Container>
-        <Modal.Dialog className="sm:max-w-lg">
-          <Modal.CloseTrigger />
-          <Modal.Header>
-            <Modal.Heading>{t('kanban.newTask')}</Modal.Heading>
-          </Modal.Header>
-          <Modal.Body className="flex flex-col gap-4">
-            <Select
-              selectedKey={effectiveWorkspaceId}
-              onSelectionChange={(key) => setWorkspaceId(String(key))}
-            >
-              <Label>{t('kanban.workspace')}</Label>
-              <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
-              <Select.Popover>
-                <ListBox>
-                  {workspaces.map((workspace) => (
-                    <ListBox.Item key={workspace.id} id={workspace.id} textValue={workspaceDisplayName(workspace)}>
-                      {workspaceDisplayName(workspace)}
-                      <ListBox.ItemIndicator />
-                    </ListBox.Item>
-                  ))}
-                </ListBox>
-              </Select.Popover>
-            </Select>
-            <Field label={t('kanban.titlePlaceholder')} value={title} onChange={setTitle} />
-            <TextField value={description} onChange={setDescription}>
-              <Label>{t('kanban.descLabel')}</Label>
-              <TextArea placeholder={t('kanban.descPlaceholder')} rows={3} maxLength={2000} />
-            </TextField>
-            <Field label={t('kanban.dueDateAria')} value={dueDate} onChange={setDueDate} type="date" />
-          </Modal.Body>
-          <Modal.Footer>
-            <Button variant="tertiary" onPress={close}>{t('common.cancel')}</Button>
-            <Button onPress={submit} isDisabled={!title.trim() || !effectiveWorkspaceId}>{t('kanban.add')}</Button>
-          </Modal.Footer>
-        </Modal.Dialog>
-      </Modal.Container>
-    </Modal.Backdrop>
+    <Modal
+      isOpen={open}
+      onOpenChange={(next) => (next ? onOpenChange(true) : close())}
+      title={t('kanban.newTask')}
+      size="lg"
+      bodyClassName="flex flex-col gap-4"
+      footer={(
+        <>
+          <Button variant="secondary" onClick={close}>{t('common.cancel')}</Button>
+          <Button onClick={submit} disabled={!title.trim() || !effectiveWorkspaceId}>{t('kanban.add')}</Button>
+        </>
+      )}
+    >
+      <Select
+        label={t('kanban.workspace')}
+        className="w-full"
+        popoverClassName="w-(--trigger-width)"
+        selectedKey={effectiveWorkspaceId}
+        onSelectionChange={(key) => setWorkspaceId(String(key))}
+      >
+        {workspaces.map((workspace) => (
+          <SelectItem key={workspace.id} id={workspace.id} textValue={workspaceDisplayName(workspace)}>
+            {workspaceDisplayName(workspace)}
+          </SelectItem>
+        ))}
+      </Select>
+      <Input label={t('kanban.titlePlaceholder')} name="task-title" value={title} onChange={setTitle} />
+      <Textarea
+        label={t('kanban.descLabel')}
+        placeholder={t('kanban.descPlaceholder')}
+        value={description}
+        onChange={setDescription}
+        rows={3}
+        maxLength={2000}
+      />
+      <Input label={t('kanban.dueDateAria')} name="task-due-date" type="date" value={dueDate} onChange={setDueDate} />
+    </Modal>
   );
 }
 
@@ -870,62 +926,42 @@ export function KanbanPanel({ session, onOpenConversation }: Props) {
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-background">
+    <div className="flex h-full min-h-0 flex-col bg-background-full">
       <div className="window-drag flex shrink-0 items-center justify-between gap-3 px-6 pt-8 pb-4">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <RiKanbanView2 className="text-accent size-5" />
-            <h1 className="truncate text-lg font-semibold">{t('sidebar.kanban')}</h1>
-            <Chip color="accent" size="sm" variant="soft">{t('kanban.taskCount', { count: total })}</Chip>
+            <RiKanbanView2 className="size-5 shrink-0 text-text-accent" />
+            <h1 className="truncate text-title-3-semibold text-text-primary">{t('sidebar.kanban')}</h1>
+            <Chip color="blue" variant="caption">{t('kanban.taskCount', { count: total })}</Chip>
           </div>
-          <p className="text-muted mt-1 text-sm">{t('kanban.subtitle')}</p>
+          <p className="mt-1 text-body-regular text-text-secondary">{t('kanban.subtitle')}</p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
           {columns.length ? (
-            <Button size="sm" onPress={() => setCreating(true)}>
-              <Plus />
+            <Button size="small" leadingIcon={RiAddLine} onClick={() => setCreating(true)}>
               {t('kanban.newTask')}
             </Button>
           ) : null}
-          <Button size="sm" variant="secondary" onPress={onOpenConversation}>
+          <Button size="small" variant="secondary" trailingIcon={RiArrowRightLine} onClick={onOpenConversation}>
             {t('kanban.backToChat')}
-            <RiArrowRightLine />
           </Button>
         </div>
       </div>
       {orderedWorkspaces.length === 0 ? (
         <div className="flex min-h-0 flex-1 items-center justify-center p-6">
-          <EmptyState>
-            <EmptyState.Header>
-              <EmptyState.Media variant="icon">
-                <RiFolder3Line />
-              </EmptyState.Media>
-              <EmptyState.Title>{t('kanban.noWorkspaces')}</EmptyState.Title>
-              <EmptyState.Description>{t('kanban.noWorkspacesHint')}</EmptyState.Description>
-            </EmptyState.Header>
-          </EmptyState>
+          <EmptyState icon={RiFolder3Line} title={t('kanban.noWorkspaces')} description={t('kanban.noWorkspacesHint')} />
         </div>
       ) : columns.length === 0 ? (
         <div className="flex min-h-0 flex-1 items-center justify-center p-6">
-          <EmptyState>
-            <EmptyState.Header>
-              <EmptyState.Media variant="icon">
-                <RiKanbanView2 />
-              </EmptyState.Media>
-              <EmptyState.Title>{t('kanban.noTasksYet')}</EmptyState.Title>
-              <EmptyState.Description>{t('kanban.noTasksHint')}</EmptyState.Description>
-            </EmptyState.Header>
-            <EmptyState.Content>
-              <Button size="sm" onPress={() => setCreating(true)}>
-                <Plus />
-                {t('kanban.newTask')}
-              </Button>
-            </EmptyState.Content>
+          <EmptyState icon={RiKanbanView2} title={t('kanban.noTasksYet')} description={t('kanban.noTasksHint')}>
+            <Button size="small" leadingIcon={RiAddLine} onClick={() => setCreating(true)}>
+              {t('kanban.newTask')}
+            </Button>
           </EmptyState>
         </div>
       ) : (
         <div
-          className="min-h-0 flex-1 overflow-auto pr-3"
+          className="min-h-0 flex-1 overflow-auto overscroll-contain pe-3 [scrollbar-width:thin]"
           onDragLeave={(event) => {
             if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
               setColumnDrop(null);
@@ -933,12 +969,12 @@ export function KanbanPanel({ session, onOpenConversation }: Props) {
           }}
         >
           {/* Cap column width so a lone workspace doesn't stretch full-width. */}
-          <Kanban hideScrollBar className="auto-cols-[minmax(280px,360px)] items-start overflow-visible px-5 pb-5" isEnabled={false}>
+          <div className="grid w-max min-w-full auto-cols-[minmax(280px,360px)] grid-flow-col items-start justify-start gap-3 px-5 pb-5">
             {columns.map(({ workspace, tasks }, index) => (
               <WorkspaceColumn
                 key={workspace.id}
                 workspace={workspace}
-                meta={COLUMN_META[index % COLUMN_META.length]}
+                indicator={COLUMN_INDICATORS[index % COLUMN_INDICATORS.length]}
                 tasks={tasks}
                 session={session}
                 latestEntries={latestEntries}
@@ -979,7 +1015,7 @@ export function KanbanPanel({ session, onOpenConversation }: Props) {
                 onColumnDragEnd={clearColumnDrag}
               />
             ))}
-          </Kanban>
+          </div>
         </div>
       )}
       <ScheduleTaskDialog

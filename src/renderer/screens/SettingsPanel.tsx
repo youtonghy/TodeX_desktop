@@ -1,14 +1,23 @@
-import { useEffect, useRef, useState, type ComponentType } from 'react';
-import { Button, Chip, ColorSwatchPicker, Description, Label, ListBox, Select, Surface, Switch, Tabs, toast } from '@heroui/react';
-import { RadioButtonGroup } from '@heroui-pro/react';
+import { useEffect, useRef, useState, type ComponentType, type ReactNode, type Ref } from 'react';
+import { Radio, RadioGroup, Tab, TabList, TabPanel, Tabs } from 'react-aria-components';
 import { RiComputerLine, RiNotification3Line, RiPaletteLine, RiServerLine, RiSettings3Line, RiShieldKeyholeLine } from '@remixicon/react';
 import { normalizeServerUrl } from '@todex/protocol/todex';
+import { Chip } from '@/components/base/badges/chip';
+import { Button } from '@/components/base/buttons/button';
+import { Input } from '@/components/base/input/input';
+import { Label } from '@/components/base/input/label';
+import { RadioCard } from '@/components/base/radio/radio-card';
+import { Select, SelectItem } from '@/components/base/select/select';
+import { Switch } from '@/components/base/switch/switch';
+import { cx } from '@/utils/cx';
 import { BACKEND_LABEL_COLORS, backendLabelColor } from '../session/backendColors';
-import { Field } from '../components/Field';
 import { DevicePairingPanel } from '../components/DevicePairingPanel';
 import { HistoryEncryptionPanel } from '../components/HistoryEncryptionPanel';
 import { AgentDesktopSettings, type AgentDesktopPage } from '../components/AgentDesktopSettings';
 import { AppearanceSettings } from '../components/AppearanceSettings';
+import { SettingsCard, SettingsGroup, SettingsRow } from '../components/settings/SettingsRows';
+import { ScrollArea } from '../components/ui/scroll-area';
+import { toast } from '../components/ui/toast';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { UNPAIRED_TRANSPORT, connectionStateLabel, healthLabelOf, settingsFromProfile } from '../session/helpers';
 import { LOCALE_LABELS, SUPPORTED_LOCALES, getLocalePreference, isLocale, setLocalePreference, useT, type LocalePreference } from '../i18n';
@@ -22,6 +31,9 @@ type Props = {
   /** Start device pairing again (from a refused connection's re-pair action). */
   repairPairing?: boolean;
 };
+
+/** Compact select trigger for the right side of a settings row. */
+const ROW_SELECT_TRIGGER = 'h-8 w-auto gap-1 rounded-lg px-2 py-1.5';
 
 export function SettingsPanel({ session, historyRecoverySetup = false, repairPairing = false }: Props) {
   const t = useT();
@@ -46,7 +58,7 @@ export function SettingsPanel({ session, historyRecoverySetup = false, repairPai
     if (agentPage) agentPanel.current?.scrollTo({ top: 0 });
   }, [agentPage]);
 
-  const sections: Array<{ id: SettingsSection; label: string; icon: ComponentType<{ className?: string }> }> = [
+  const sections: Array<{ id: SettingsSection; label: string; icon: ComponentType<{ className?: string; 'aria-hidden'?: boolean | 'true' | 'false' }> }> = [
     { id: 'general', label: t('settings.general'), icon: RiSettings3Line },
     { id: 'appearance', label: t('settings.appearance'), icon: RiPaletteLine },
     { id: 'connection', label: t('settings.connection'), icon: RiServerLine },
@@ -54,6 +66,7 @@ export function SettingsPanel({ session, historyRecoverySetup = false, repairPai
     { id: 'notifications', label: t('settings.notifications'), icon: RiNotification3Line },
     { id: 'agent', label: t('agentDesktop.title'), icon: RiComputerLine },
   ];
+  const titleOf = (id: SettingsSection) => sections.find((item) => item.id === id)?.label ?? '';
 
   // A different backend never keeps the old device key or transport pin.
   const updateServerUrl = (serverUrl: string) => {
@@ -73,183 +86,201 @@ export function SettingsPanel({ session, historyRecoverySetup = false, repairPai
   // Categories on the left, each one's page on the right. Inactive pages stay
   // mounted (hidden), so an in-progress pairing or recovery-key setup
   // survives a visit to another category.
-  const panelClassName = 'flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto p-1 data-[inert=true]:hidden';
   return (
-    <Tabs orientation="vertical" className="h-full min-h-0 gap-6" selectedKey={section} onSelectionChange={(key) => setSection(key as SettingsSection)}>
-      <Tabs.ListContainer className="w-48 shrink-0">
-        <Tabs.List aria-label={t('app.settings')} className="w-full">
+    <Tabs
+      orientation="vertical"
+      className="flex h-full min-h-0 flex-1"
+      selectedKey={section}
+      onSelectionChange={(key) => setSection(key as SettingsSection)}
+    >
+      <div className="flex w-14 shrink-0 flex-col overflow-y-auto border-e border-t border-separator-border bg-background-secondary-default p-2.5 sm:w-48 lg:w-60">
+        <TabList aria-label={t('app.settings')} className="flex w-full flex-col gap-1 pt-1">
           {sections.map(({ id, label, icon: Icon }) => (
-            <Tabs.Tab key={id} id={id} className="justify-start gap-2">
-              <Icon className="size-4 shrink-0" />
-              <span className="truncate">{label}</span>
-              <Tabs.Indicator />
-            </Tabs.Tab>
+            <Tab
+              key={id}
+              id={id}
+              aria-label={label}
+              className={({ isSelected, isFocusVisible }) => cx(
+                'flex w-full cursor-pointer items-center gap-2 rounded-2lg p-2 text-start outline-none transition-colors duration-150 ease',
+                isSelected ? 'bg-background-secondary-hover text-text-primary' : 'text-text-secondary hover:bg-background-secondary-hover/60',
+                isFocusVisible && 'ring-2 ring-border-focus-ring',
+              )}
+            >
+              <Icon aria-hidden className="size-5 shrink-0 text-foreground-icon-secondary" />
+              <span className="hidden truncate text-body-medium sm:block">{label}</span>
+            </Tab>
           ))}
-        </Tabs.List>
-      </Tabs.ListContainer>
-      <Tabs.Panel id="appearance" shouldForceMount className={panelClassName}>
-        <AppearanceSettings />
-      </Tabs.Panel>
-      <Tabs.Panel id="connection" shouldForceMount className={panelClassName}>
-        <div>
-          <p className="text-muted text-sm">{healthLabelOf(connectionHealth)} · {connectionStateLabel(connectionState)}</p>
-          {serverVersion ? (
-            <Chip className="mt-2" variant="soft" color={versionMismatch ? 'warning' : 'default'}>{serverVersion.name} {serverVersion.version}{settings.tenantId ? ` · ${settings.tenantId}` : ''}{versionMismatch ? ` · ${t('conn.versionMismatchShort')}` : ''}</Chip>
-          ) : null}
-        </div>
-        <Surface className="flex flex-col gap-4 rounded-2xl p-5">
-          <div className="flex items-center justify-between">
-            <h3 className="font-semibold">{t('settings.backendConnections')}</h3>
-            <Button size="sm" variant="secondary" onPress={() => addBackendConnection()}>{t('settings.addBackend')}</Button>
+        </TabList>
+      </div>
+      <div className="flex min-w-0 flex-1 flex-col">
+        <SettingsPage id="general" title={titleOf('general')}>
+          <SettingsCard>
+            <SettingsRow label={t('common.language')} description={t('settings.languageHint')}>
+              <Select
+                aria-label={t('common.language')}
+                selectedKey={languagePreference}
+                triggerClassName={ROW_SELECT_TRIGGER}
+                onSelectionChange={(value) => {
+                  if (value === 'auto' || isLocale(value)) {
+                    const preference = value as LocalePreference;
+                    setLanguagePreference(preference);
+                    setLocalePreference(preference);
+                  }
+                }}
+              >
+                <SelectItem id="auto" textValue={t('common.language.auto')}>{t('common.language.auto')}</SelectItem>
+                {SUPPORTED_LOCALES.map((locale) => (
+                  <SelectItem key={locale} id={locale} textValue={LOCALE_LABELS[locale]}>{LOCALE_LABELS[locale]}</SelectItem>
+                ))}
+              </Select>
+            </SettingsRow>
+          </SettingsCard>
+          <SettingsGroup label={t('settings.aside')}>
+            <SettingsCard>
+              <SettingsRow
+                label={t('settings.asideSharing')}
+                description={session.workbenchSharing === 'workspace' ? t('settings.shareWorkspaceHint') : t('settings.shareConversationHint')}
+              >
+                <Select
+                  aria-label={t('settings.asideSharing')}
+                  selectedKey={session.workbenchSharing}
+                  isDisabled={!session.workbenchSharingHydrated}
+                  triggerClassName={ROW_SELECT_TRIGGER}
+                  onSelectionChange={(value) => {
+                    if (value === 'conversation' || value === 'workspace') session.setWorkbenchSharing(value);
+                  }}
+                >
+                  <SelectItem id="conversation" textValue={t('settings.shareConversation')}>{t('settings.shareConversation')}</SelectItem>
+                  <SelectItem id="workspace" textValue={t('settings.shareWorkspace')}>{t('settings.shareWorkspace')}</SelectItem>
+                </Select>
+              </SettingsRow>
+            </SettingsCard>
+          </SettingsGroup>
+        </SettingsPage>
+
+        <SettingsPage id="appearance" title={titleOf('appearance')}>
+          <AppearanceSettings />
+        </SettingsPage>
+
+        <SettingsPage id="connection" title={titleOf('connection')}>
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-body-regular text-text-secondary">{healthLabelOf(connectionHealth)} · {connectionStateLabel(connectionState)}</p>
+            {serverVersion ? (
+              <Chip variant="caption" color={versionMismatch ? 'yellow' : 'neutral'}>{serverVersion.name} {serverVersion.version}{settings.tenantId ? ` · ${settings.tenantId}` : ''}{versionMismatch ? ` · ${t('conn.versionMismatchShort')}` : ''}</Chip>
+            ) : null}
           </div>
-          <RadioButtonGroup
-            className={backendConnections.length > 1 ? 'grid-cols-2' : 'grid-cols-1'}
-            layout="grid"
-            name="backend-connection"
-            value={activeBackendConnectionId}
-            variant="secondary"
-            onChange={selectBackend}
+          <SettingsGroup
+            className="gap-3"
+            label={t('settings.backendConnections')}
+            action={<Button size="small" variant="secondary" onClick={() => addBackendConnection()}>{t('settings.addBackend')}</Button>}
           >
-            <Label className="col-span-full">{t('settings.currentBackend')}</Label>
-            {backendConnections.map((profile) => (
-              <RadioButtonGroup.Item key={profile.id} value={profile.id}>
-                <RadioButtonGroup.Indicator />
-                <RadioButtonGroup.ItemContent>
-                  <Label className="flex items-center gap-2"><span aria-hidden="true" className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: backendLabelColor(profile) }} />{profile.name}</Label>
-                  <Description className="truncate">{profile.tenantId ? `${profile.serverUrl} · ${profile.tenantId}` : profile.serverUrl}</Description>
-                </RadioButtonGroup.ItemContent>
-              </RadioButtonGroup.Item>
-            ))}
-          </RadioButtonGroup>
+            <RadioGroup
+              className={cx('grid gap-2', backendConnections.length > 1 ? 'grid-cols-2' : 'grid-cols-1')}
+              name="backend-connection"
+              value={activeBackendConnectionId}
+              onChange={selectBackend}
+            >
+              <Label className="col-span-full px-3 text-body-2-regular text-text-secondary">{t('settings.currentBackend')}</Label>
+              {backendConnections.map((profile) => (
+                <RadioCard
+                  key={profile.id}
+                  value={profile.id}
+                  title={<span className="flex items-center gap-2"><span aria-hidden="true" className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: backendLabelColor(profile) }} /><span className="truncate">{profile.name}</span></span>}
+                  description={profile.tenantId ? `${profile.serverUrl} · ${profile.tenantId}` : profile.serverUrl}
+                />
+              ))}
+            </RadioGroup>
+            {activeProfile ? (
+              <>
+                <SettingsCard>
+                  <SettingsRow label={t('settings.name')}>
+                    <Input aria-label={t('settings.name')} name={t('settings.name')} size="small" className="w-64" value={activeProfile.name} onChange={(name) => updateBackendConnection(activeProfile.id, { name })} />
+                  </SettingsRow>
+                  <SettingsRow label={t('settings.labelColor')} description={t('settings.labelColorHint')}>
+                    <RadioGroup
+                      aria-label={t('settings.labelColorAria')}
+                      orientation="horizontal"
+                      className="flex flex-wrap items-center gap-2"
+                      value={backendLabelColor(activeProfile)}
+                      onChange={(color) => updateBackendConnection(activeProfile.id, { labelColor: color })}
+                    >
+                      {BACKEND_LABEL_COLORS.map(({ value, label }) => (
+                        <Radio
+                          key={value}
+                          value={value}
+                          aria-label={label}
+                          className={({ isSelected, isFocusVisible }) => cx(
+                            'size-6 cursor-pointer rounded-full outline-none transition-shadow duration-150 ease',
+                            (isSelected || isFocusVisible) && 'ring-2 ring-border-focus-ring ring-offset-2 ring-offset-background-secondary-default',
+                          )}
+                          style={{ backgroundColor: value }}
+                        />
+                      ))}
+                    </RadioGroup>
+                  </SettingsRow>
+                  <SettingsRow label={t('settings.serverUrl')} description={<span className="text-status-yellow-text">{t('settings.credentialWarning')}</span>}>
+                    <Input aria-label={t('settings.serverUrl')} name={t('settings.serverUrl')} size="small" className="w-64" value={activeProfile.serverUrl} onChange={updateServerUrl} />
+                  </SettingsRow>
+                  <SettingsRow label="Tenant">
+                    <Input aria-label="Tenant" name="Tenant" size="small" className="w-64" value={activeProfile.tenantId} onChange={(tenantId) => { updateBackendConnection(activeProfile.id, { tenantId }); setSettings((current) => ({ ...current, tenantId })); }} />
+                  </SettingsRow>
+                </SettingsCard>
+                <div className="flex gap-2">
+                  <Button size="small" onClick={() => (connected ? closeSocket(true) : connect())}>{connected ? t('settings.disconnect') : connectionState === 'error' ? t('settings.retry') : t('settings.connect')}</Button>
+                  {backendConnections.length > 1 ? <Button size="small" variant="danger" onClick={() => removeBackendConnection(activeProfile.id)}>{t('settings.removeBackend')}</Button> : null}
+                </div>
+              </>
+            ) : null}
+          </SettingsGroup>
+        </SettingsPage>
+
+        <SettingsPage id="security" title={titleOf('security')}>
           {activeProfile ? (
             <>
-              <Field label={t('settings.name')} value={activeProfile.name} onChange={(name) => updateBackendConnection(activeProfile.id, { name })} />
-              <div className="flex flex-col gap-2">
-                <span className="text-sm font-medium">{t('settings.labelColor')}</span>
-                <ColorSwatchPicker
-                  aria-label={t('settings.labelColorAria')}
-                  value={backendLabelColor(activeProfile)}
-                  onChange={(color) => updateBackendConnection(activeProfile.id, { labelColor: color.toString('hex') })}
-                >
-                  {BACKEND_LABEL_COLORS.map(({ value, label }) => (
-                    <ColorSwatchPicker.Item key={value} color={value} aria-label={label}>
-                      <ColorSwatchPicker.Swatch />
-                      <ColorSwatchPicker.Indicator />
-                    </ColorSwatchPicker.Item>
-                  ))}
-                </ColorSwatchPicker>
-                <p className="text-muted text-xs">{t('settings.labelColorHint')}</p>
-              </div>
-              <Field label={t('settings.serverUrl')} value={activeProfile.serverUrl} onChange={updateServerUrl} />
-              <p className="text-warning-soft-foreground text-xs">{t('settings.credentialWarning')}</p>
-              <Field label="Tenant" value={activeProfile.tenantId} onChange={(tenantId) => { updateBackendConnection(activeProfile.id, { tenantId }); setSettings((current) => ({ ...current, tenantId })); }} />
-              <div className="flex gap-2"><Button onPress={() => (connected ? closeSocket(true) : connect())}>{connected ? t('settings.disconnect') : connectionState === 'error' ? t('settings.retry') : t('settings.connect')}</Button>{backendConnections.length > 1 ? <Button variant="danger-soft" onPress={() => removeBackendConnection(activeProfile.id)}>{t('settings.removeBackend')}</Button> : null}</div>
+              <DevicePairingPanel session={session} deviceName="TodeX Desktop" autoStartNonce={pairingAutoStart} />
+              <HistoryEncryptionPanel history={session.historyEncryption} autoStartRecovery={historyRecoverySetup} />
             </>
           ) : null}
-        </Surface>
-      </Tabs.Panel>
-      <Tabs.Panel id="security" shouldForceMount className={panelClassName}>
-        {activeProfile ? (
-          <Surface className="flex flex-col gap-4 rounded-2xl p-5">
-            <DevicePairingPanel session={session} deviceName="TodeX Desktop" autoStartNonce={pairingAutoStart} />
-            <HistoryEncryptionPanel history={session.historyEncryption} autoStartRecovery={historyRecoverySetup} />
-          </Surface>
-        ) : null}
-      </Tabs.Panel>
-      <Tabs.Panel id="general" shouldForceMount className={panelClassName}>
-        <Surface className="flex flex-col gap-4 rounded-2xl p-5">
-          <h3 className="font-semibold">{t('settings.language')}</h3>
-          <Select
-            value={languagePreference}
-            onChange={(value) => {
-              if (value === 'auto' || isLocale(value)) {
-                const preference = value as LocalePreference;
-                setLanguagePreference(preference);
-                setLocalePreference(preference);
-              }
-            }}
-          >
-            <Label>{t('common.language')}</Label>
-            <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
-            <Select.Popover>
-              <ListBox>
-                <ListBox.Item id="auto" textValue={t('common.language.auto')}>
-                  {t('common.language.auto')}
-                  <ListBox.ItemIndicator />
-                </ListBox.Item>
-                {SUPPORTED_LOCALES.map((locale) => (
-                  <ListBox.Item key={locale} id={locale} textValue={LOCALE_LABELS[locale]}>
-                    {LOCALE_LABELS[locale]}
-                    <ListBox.ItemIndicator />
-                  </ListBox.Item>
-                ))}
-              </ListBox>
-            </Select.Popover>
-            <Description>{t('settings.languageHint')}</Description>
-          </Select>
-        </Surface>
-        <Surface className="flex flex-col gap-4 rounded-2xl p-5">
-          <h3 className="font-semibold">{t('settings.aside')}</h3>
-          <Select
-            value={session.workbenchSharing}
-            isDisabled={!session.workbenchSharingHydrated}
-            onChange={(value) => {
-              if (value === 'conversation' || value === 'workspace') session.setWorkbenchSharing(value);
-            }}
-          >
-            <Label>{t('settings.asideSharing')}</Label>
-            <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
-            <Select.Popover>
-              <ListBox>
-                <ListBox.Item id="conversation" textValue={t('settings.shareConversation')}>
-                  {t('settings.shareConversation')}
-                  <ListBox.ItemIndicator />
-                </ListBox.Item>
-                <ListBox.Item id="workspace" textValue={t('settings.shareWorkspace')}>
-                  {t('settings.shareWorkspace')}
-                  <ListBox.ItemIndicator />
-                </ListBox.Item>
-              </ListBox>
-            </Select.Popover>
-            <Description>
-              {session.workbenchSharing === 'workspace'
-                ? t('settings.shareWorkspaceHint')
-                : t('settings.shareConversationHint')}
-            </Description>
-          </Select>
-        </Surface>
-      </Tabs.Panel>
-      <Tabs.Panel id="notifications" shouldForceMount className={panelClassName}>
-        <Surface className="flex flex-col gap-4 rounded-2xl p-5">
-          <Switch
-            isSelected={session.completionNotifications}
-            isDisabled={!session.completionNotificationsHydrated}
-            onChange={(selected) => {
-              void session.setCompletionNotifications(selected).then((result) => {
-                if (result === 'denied') toast.danger(t('settings.notifyDenied'));
-                if (result === 'unsupported') toast.danger(t('settings.notifyUnsupported'));
-              });
-            }}
-          >
-            <Switch.Content>
-              <Switch.Control>
-                <Switch.Thumb />
-              </Switch.Control>
-              <div>
-                <p className="text-sm font-medium">{t('settings.notifyTaskDone')}</p>
-                <p className="text-muted text-xs">
-                  {session.completionNotificationsSupported
-                    ? t('settings.notifyTaskDoneHint')
-                    : t('settings.notifyUnsupported')}
-                </p>
-              </div>
-            </Switch.Content>
-          </Switch>
-        </Surface>
-      </Tabs.Panel>
-      <Tabs.Panel ref={agentPanel} id="agent" shouldForceMount className={panelClassName}>
-        <AgentDesktopSettings session={session} page={agentPage} onPageChange={setAgentPage} />
-      </Tabs.Panel>
+        </SettingsPage>
+
+        <SettingsPage id="notifications" title={titleOf('notifications')}>
+          <SettingsCard>
+            <SettingsRow
+              label={t('settings.notifyTaskDone')}
+              description={session.completionNotificationsSupported ? t('settings.notifyTaskDoneHint') : t('settings.notifyUnsupported')}
+            >
+              <Switch
+                size="sm"
+                aria-label={t('settings.notifyTaskDone')}
+                isSelected={session.completionNotifications}
+                isDisabled={!session.completionNotificationsHydrated}
+                onChange={(selected) => {
+                  void session.setCompletionNotifications(selected).then((result) => {
+                    if (result === 'denied') toast.danger(t('settings.notifyDenied'));
+                    if (result === 'unsupported') toast.danger(t('settings.notifyUnsupported'));
+                  });
+                }}
+              />
+            </SettingsRow>
+          </SettingsCard>
+        </SettingsPage>
+
+        <SettingsPage id="agent" title={titleOf('agent')} viewportRef={agentPanel}>
+          <AgentDesktopSettings session={session} page={agentPage} onPageChange={setAgentPage} />
+        </SettingsPage>
+      </div>
     </Tabs>
+  );
+}
+
+/** One category's page: a fixed title over its own scroll region. */
+function SettingsPage({ id, title, viewportRef, children }: { id: SettingsSection; title: string; viewportRef?: Ref<HTMLDivElement>; children: ReactNode }) {
+  return (
+    <TabPanel id={id} shouldForceMount className="flex min-h-0 flex-1 flex-col outline-none data-[inert=true]:hidden">
+      <h2 className="shrink-0 px-8 pt-6 pb-3 text-title-3-medium text-text-primary">{title}</h2>
+      <ScrollArea className="flex-1" contentClassName="px-8 pb-8" surface="full" viewportRef={viewportRef}>
+        <div className="flex flex-col gap-6 pt-1">{children}</div>
+      </ScrollArea>
+    </TabPanel>
   );
 }

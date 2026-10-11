@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Button, Card, Input, Label, ScrollShadow, Switch, TextArea, TextField } from '@heroui/react';
+import { Button } from '@/components/base/buttons/button';
+import { Switch } from '@/components/base/switch/switch';
+import { Textarea } from '@/components/base/textarea/textarea';
+import { Card } from '@/components/ui/card';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import type { ProviderKind } from '@todex/protocol/v2';
 import type { DesktopPanel } from '../lib/panels';
 import type { TodeXSession } from '../session/useTodeXSession';
@@ -17,6 +21,7 @@ import { XtermTerminal } from '../components/XtermTerminal';
 import { CapabilitiesPanel } from './CapabilitiesPanel';
 import { SubagentsPanel } from './SubagentsPanel';
 import { useT } from '../i18n';
+import { cx } from '@/utils/cx';
 
 type Props = {
   session: TodeXSession;
@@ -31,7 +36,7 @@ export function AsidePanel({ session, panel, slashCommand, onBack }: Props) {
   const workspace = session.activeWorkspace;
   const back = onBack ? (
     <div className="px-4 pt-3">
-      <Button size="sm" variant="tertiary" onPress={onBack}>{t('aside.back')}</Button>
+      <Button size="small" variant="secondary" onClick={onBack}>{t('aside.back')}</Button>
     </div>
   ) : null;
 
@@ -85,22 +90,18 @@ export function AsidePanel({ session, panel, slashCommand, onBack }: Props) {
     return (
       <div className="flex flex-col gap-4 p-5">
         {back}
-        <h2 className="text-lg font-semibold">{t('aside.experimental')}</h2>
+        <h2 className="text-title-3-semibold text-text-primary">{t('aside.experimental')}</h2>
         {EXPERIMENTAL_FEATURES.map((feature) => (
           <Switch
             key={feature.id}
+            className="items-start gap-3"
             isSelected={session.experimentalFeatures[feature.id]}
             onChange={(selected) => session.setExperimentalFeatures((current) => ({ ...current, [feature.id]: selected }))}
           >
-            <Switch.Content>
-              <Switch.Control>
-                <Switch.Thumb />
-              </Switch.Control>
-              <div>
-                <p className="text-sm font-medium">{feature.title}</p>
-                <p className="text-muted text-xs">{feature.description}</p>
-              </div>
-            </Switch.Content>
+            <span className="flex flex-col gap-0.5">
+              <span className="text-body-medium text-text-primary">{feature.title}</span>
+              <span className="text-caption-1-regular text-text-secondary">{feature.description}</span>
+            </span>
           </Switch>
         ))}
       </div>
@@ -112,16 +113,16 @@ export function AsidePanel({ session, panel, slashCommand, onBack }: Props) {
     return (
       <div className="flex h-full min-h-0 flex-col p-5">
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-lg font-semibold">Git Diff</h2>
-          <Button size="sm" variant="secondary" isDisabled={!conversation} onPress={() => conversation && session.requestGitDiff(conversation.id, session.selectedGitRepoByWorkspace[conversation.workspaceId] || '')}>
+          <h2 className="text-title-3-semibold text-text-primary">Git Diff</h2>
+          <Button size="small" variant="secondary" disabled={!conversation} onClick={() => conversation && session.requestGitDiff(conversation.id, session.selectedGitRepoByWorkspace[conversation.workspaceId] || '')}>
             {t('aside.refresh')}
           </Button>
         </div>
-        <ScrollShadow className="min-h-0 flex-1">
-          <pre className="text-xs whitespace-pre-wrap">{state?.diff || state?.error || t('aside.noDiff')}</pre>
-        </ScrollShadow>
+        <ScrollArea className="min-h-0 flex-1" surface="secondary">
+          <pre className="whitespace-pre-wrap font-mono text-caption-1-regular text-text-primary">{state?.diff || state?.error || t('aside.noDiff')}</pre>
+        </ScrollArea>
         {state?.diff ? (
-          <Button className="mt-3" variant="tertiary" onPress={() => void navigator.clipboard.writeText(state.diff)}>{t('common.copy')}</Button>
+          <Button className="mt-3" variant="secondary" onClick={() => void navigator.clipboard.writeText(state.diff)}>{t('common.copy')}</Button>
         ) : null}
       </div>
     );
@@ -138,34 +139,37 @@ export function AsidePanel({ session, panel, slashCommand, onBack }: Props) {
     return (
       <div className="flex h-full min-h-0 flex-col p-5">
         {back}
-        <h2 className="text-lg font-semibold">{t('aside.slashCommands')}</h2>
-        <ScrollShadow className="mt-3 min-h-0 flex-1">
+        <h2 className="text-title-3-semibold text-text-primary">{t('aside.slashCommands')}</h2>
+        <ScrollArea className="mt-3 min-h-0 flex-1" surface="secondary">
           {SLASH_COMMAND_CATEGORY_ORDER.map((category) => {
             const commands = SLASH_COMMANDS.filter((item) => item.category === category);
             if (!commands.length) return null;
             return (
               <div key={category} className="mb-4">
-                <p className="text-muted mb-2 text-xs font-semibold">{SLASH_COMMAND_CATEGORY_LABELS[category]}</p>
+                <p className="mb-2 text-caption-1-semibold text-text-secondary">{SLASH_COMMAND_CATEGORY_LABELS[category]}</p>
                 <div className="flex flex-col gap-1">
                   {commands.map((item) => (
-                    <Button
+                    <button
                       key={item.command}
-                      variant="ghost"
-                      className="justify-start"
-                      onPress={() => {
+                      type="button"
+                      className={cx(
+                        'flex w-full cursor-pointer items-baseline gap-2 rounded-2lg px-2 py-1.5 text-start',
+                        'outline-none transition-colors duration-150 ease hover:bg-background-secondary-hover focus-visible:ring-2 focus-visible:ring-border-focus-ring',
+                      )}
+                      onClick={() => {
                         if (!workspace || !conversation) return;
                         session.openSlashCommandActionPage(workspace, conversation, item.command);
                       }}
                     >
-                      <span className="font-medium">{item.command}</span>
-                      <span className="text-muted ml-2 text-xs">{item.description}</span>
-                    </Button>
+                      <span className="text-body-medium text-text-primary">{item.command}</span>
+                      <span className="min-w-0 truncate text-caption-1-regular text-text-secondary">{item.description}</span>
+                    </button>
                   ))}
                 </div>
               </div>
             );
           })}
-        </ScrollShadow>
+        </ScrollArea>
       </div>
     );
   }
@@ -184,17 +188,17 @@ export function AsidePanel({ session, panel, slashCommand, onBack }: Props) {
     return (
       <div className="flex flex-col gap-3 p-5">
         {back}
-        <h2 className="text-lg font-semibold">TodeX 2.0</h2>
+        <h2 className="text-title-3-semibold text-text-primary">TodeX 2.0</h2>
         {session.v2Providers.map((provider) => (
-          <Card key={provider.id} className="p-3">
-            <p className="font-medium">{provider.displayName}</p>
-            <p className="text-muted text-xs">{provider.available ? t('aside.available') : provider.unavailableReason || t('aside.unavailable')}</p>
+          <Card key={provider.id} variant="secondary" className="gap-0.5 p-3">
+            <p className="text-headline-medium text-text-primary">{provider.displayName}</p>
+            <p className="text-caption-1-regular text-text-secondary">{provider.available ? t('aside.available') : provider.unavailableReason || t('aside.unavailable')}</p>
           </Card>
         ))}
         {session.v2Conversations.map((item) => (
-          <Card key={item.id} className="p-3">
-            <p className="text-sm font-medium">{item.title || item.id}</p>
-            <p className="text-muted text-xs">{item.provider} · {item.status}</p>
+          <Card key={item.id} variant="secondary" className="gap-0.5 p-3">
+            <p className="text-body-medium text-text-primary">{item.title || item.id}</p>
+            <p className="text-caption-1-regular text-text-secondary">{item.provider} · {item.status}</p>
           </Card>
         ))}
       </div>
@@ -234,21 +238,21 @@ function TerminalAside({ session, terminalId }: { session: TodeXSession; termina
   }, [session.resizeTerminalSession, session.settings.tenantId, terminalId, workspace]);
 
   if (!workspace || !conversation) {
-    return <p className="text-muted p-5 text-sm">{t('aside.selectConversation')}</p>;
+    return <p className="p-5 text-body-regular text-text-secondary">{t('aside.selectConversation')}</p>;
   }
 
   return (
     <div className="flex h-full min-h-0 flex-col p-5">
       <div className="mb-3 flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-semibold">{t('aside.terminal')}</h2>
-          <p className="text-muted text-xs">{terminal ? terminalStatusLabel(terminal.status) : t('aside.terminalNotStarted')}</p>
+          <h2 className="text-title-3-semibold text-text-primary">{t('aside.terminal')}</h2>
+          <p className="text-caption-1-regular text-text-secondary">{terminal ? terminalStatusLabel(terminal.status) : t('aside.terminalNotStarted')}</p>
         </div>
         <div className="flex gap-2">
           <Button
-            size="sm"
-            isDisabled={terminal?.status === 'running' || terminal?.status === 'starting'}
-            onPress={() => {
+            size="small"
+            disabled={terminal?.status === 'running' || terminal?.status === 'starting'}
+            onClick={() => {
               const size = terminalSizeRef.current;
               session.startTerminalSession({ kind: 'workspace', workspace, conversation }, {
                 cwd: workspace.path,
@@ -261,16 +265,16 @@ function TerminalAside({ session, terminalId }: { session: TodeXSession; termina
             {t('aside.terminalStart')}
           </Button>
           <Button
-            size="sm"
-            variant="danger-soft"
-            isDisabled={!terminal || terminal.status === 'idle' || terminal.status === 'exited'}
-            onPress={() => session.stopTerminalSession(terminalId, workspace.tenantId || session.settings.tenantId)}
+            size="small"
+            variant="danger"
+            disabled={!terminal || terminal.status === 'idle' || terminal.status === 'exited'}
+            onClick={() => session.stopTerminalSession(terminalId, workspace.tenantId || session.settings.tenantId)}
           >
             {t('aside.terminalStop')}
           </Button>
         </div>
       </div>
-      <div className="min-h-0 flex-1 overflow-hidden rounded-lg bg-eclipse">
+      <div className="min-h-0 flex-1 overflow-hidden rounded-2xl bg-background-secondary-default">
         <XtermTerminal
           entries={terminal?.output ?? []}
           isActive
@@ -288,20 +292,17 @@ function SlashActionAside({ session, command, conversationId }: { session: TodeX
   const [value, setValue] = useState('');
   const memoryEntries = session.memoryEntriesByConversation[conversationId] ?? [];
   if (command === '/memory') {
-    return <div className="flex h-full flex-col gap-3 p-5"><h2 className="text-lg font-semibold">{t('aside.memoryTitle')}</h2><p className="text-muted text-sm">{t('aside.memoryHint')}</p><ScrollShadow className="min-h-0 flex-1 overflow-y-auto">{memoryEntries.length ? memoryEntries.map(entry => <Card key={entry.id} className="mb-2 p-3"><p className="whitespace-pre-wrap text-sm">{entry.content}</p><p className="text-muted mt-2 text-xs">{entry.scope === 'user' ? t('aside.memoryUser') : entry.scope === 'workspace' ? t('aside.memoryWorkspace') : t('aside.memoryConversation')}</p></Card>) : <p className="text-muted text-sm">{t('aside.memoryEmpty')}</p>}</ScrollShadow></div>;
+    return <div className="flex h-full flex-col gap-3 p-5"><h2 className="text-title-3-semibold text-text-primary">{t('aside.memoryTitle')}</h2><p className="text-body-regular text-text-secondary">{t('aside.memoryHint')}</p><ScrollArea className="min-h-0 flex-1" surface="secondary">{memoryEntries.length ? memoryEntries.map(entry => <Card key={entry.id} variant="secondary" className="mb-2 gap-2 p-3"><p className="whitespace-pre-wrap text-body-regular text-text-primary">{entry.content}</p><p className="text-caption-1-regular text-text-secondary">{entry.scope === 'user' ? t('aside.memoryUser') : entry.scope === 'workspace' ? t('aside.memoryWorkspace') : t('aside.memoryConversation')}</p></Card>) : <p className="text-body-regular text-text-secondary">{t('aside.memoryEmpty')}</p>}</ScrollArea></div>;
   }
   if (command === '/subagents') {
     return <SubagentsPanel session={session} conversationId={conversationId} />;
   }
   return (
     <div className="flex flex-col gap-4 p-5">
-      <h2 className="text-lg font-semibold">{command}</h2>
-      <p className="text-muted text-sm">{t('aside.slashConfirm')}</p>
-      <TextField value={value} onChange={setValue}>
-        <Label>{t('aside.slashArgs')}</Label>
-        <TextArea className="w-full" rows={4} />
-      </TextField>
-      <Button onPress={() => session.sendSlashCommand(`${command} ${value}`.trim(), conversationId)}>{t('aside.slashRun')}</Button>
+      <h2 className="text-title-3-semibold text-text-primary">{command}</h2>
+      <p className="text-body-regular text-text-secondary">{t('aside.slashConfirm')}</p>
+      <Textarea label={t('aside.slashArgs')} value={value} onChange={setValue} rows={4} />
+      <Button onClick={() => session.sendSlashCommand(`${command} ${value}`.trim(), conversationId)}>{t('aside.slashRun')}</Button>
     </div>
   );
 }

@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Button, Card, Chip, Spinner, toast } from '@heroui/react';
 import { RiDeleteBin6Line, RiDownload2Line, RiDownloadCloud2Line, RiRefreshLine, RiServerLine } from '@remixicon/react';
+import { Chip, type ChipProps } from '@/components/base/badges/chip';
+import { Button } from '@/components/base/buttons/button';
+import { Card } from '@/components/ui/card';
+import { IconAction } from '@/components/ui/icon-action';
+import { Spinner, SpinnerIcon } from '@/components/ui/spinner';
+import { toast } from '@/components/ui/toast';
+import { cx } from '@/utils/cx';
 import {
   type CliOperationAction,
   type CliUpgradeOperation,
@@ -14,14 +20,16 @@ import { t, useT, type MessageKey } from '../i18n';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { backendApi } from '../session/helpers';
 
-const STATUS: Record<CliVersionStatus, { labelKey: MessageKey; color: 'success' | 'warning' | 'default' | 'danger' }> = {
-  upToDate: { labelKey: 'cli.statusUpToDate', color: 'success' },
-  updateAvailable: { labelKey: 'cli.statusUpdateAvailable', color: 'warning' },
-  ahead: { labelKey: 'cli.statusAhead', color: 'default' },
-  unknown: { labelKey: 'cli.statusUnknownLatest', color: 'default' },
+type ChipColor = NonNullable<ChipProps['color']>;
+
+const STATUS: Record<CliVersionStatus, { labelKey: MessageKey; color: ChipColor }> = {
+  upToDate: { labelKey: 'cli.statusUpToDate', color: 'lime' },
+  updateAvailable: { labelKey: 'cli.statusUpdateAvailable', color: 'yellow' },
+  ahead: { labelKey: 'cli.statusAhead', color: 'neutral' },
+  unknown: { labelKey: 'cli.statusUnknownLatest', color: 'neutral' },
   // Not installed is a normal state with an Install action, not a failure.
-  notInstalled: { labelKey: 'cli.statusNotInstalled', color: 'default' },
-  external: { labelKey: 'cli.statusExternal', color: 'default' },
+  notInstalled: { labelKey: 'cli.statusNotInstalled', color: 'neutral' },
+  external: { labelKey: 'cli.statusExternal', color: 'neutral' },
 };
 
 export function CliManagerPanel({ session }: { session: TodeXSession }) {
@@ -129,83 +137,94 @@ export function CliManagerPanel({ session }: { session: TodeXSession }) {
   return (
     <div className="flex flex-col gap-4 py-1">
       <div className="flex min-w-0 items-center gap-3">
-        <div className="bg-accent-soft text-accent flex size-10 shrink-0 items-center justify-center rounded-lg">
-          <RiServerLine className="size-5" />
+        <div className="flex size-10 shrink-0 items-center justify-center rounded-2lg bg-badge-new-background text-badge-new-text">
+          <RiServerLine aria-hidden className="size-5" />
         </div>
         <div className="min-w-0 flex-1">
-          <h2 className="truncate text-base font-semibold">{activeBackend?.name || t('cli.currentBackend')}</h2>
-          <p className="text-muted truncate text-xs" title={session.settings.serverUrl}>{session.settings.serverUrl}</p>
+          <h2 className="truncate text-headline-semibold text-text-primary">{activeBackend?.name || t('cli.currentBackend')}</h2>
+          <p className="truncate text-caption-1-regular text-text-secondary" title={session.settings.serverUrl}>{session.settings.serverUrl}</p>
         </div>
-        <Button isIconOnly size="sm" variant="ghost" aria-label={t('cli.refreshAria')} isDisabled={loading} onPress={() => void refresh()}>
-          <RiRefreshLine className="size-4" />
-        </Button>
+        <IconAction icon={RiRefreshLine} size="md" aria-label={t('cli.refreshAria')} disabled={loading} onClick={() => void refresh()} />
       </div>
 
       {loading ? (
-        <div className="flex min-h-48 items-center justify-center"><Spinner aria-label={t('cli.reading')} /></div>
+        <div className="flex min-h-48 items-center justify-center"><Spinner size="md" aria-label={t('cli.reading')} /></div>
       ) : (
         <div className="grid gap-3 sm:grid-cols-2">
           {clis.map((cli) => {
-            const status = STATUS[cli.status] ?? { labelKey: 'cli.statusUnknown' as MessageKey, color: 'default' as const };
+            const status = STATUS[cli.status] ?? { labelKey: 'cli.statusUnknown' as MessageKey, color: 'neutral' as const };
             const running = operation?.provider === cli.id && operation.status === 'running';
             const installing = running && operation?.action === 'install';
             const notInstalled = cli.status === 'notInstalled';
             // Older backends attach the lookup failure to a missing CLI.
             const error = notInstalled ? undefined : cli.error;
             const busyLabel = installing ? t('cli.installing') : t('cli.upgrading');
+            const showRemoveIntegration = cli.id === 'antigravity' && !notInstalled;
             return (
-              <Card key={cli.id} className="min-w-0 rounded-lg p-4">
+              <Card key={cli.id} variant="secondary" className="min-w-0 gap-4">
                 <div className="flex items-start gap-3">
-                  <div className="bg-surface-secondary flex size-9 shrink-0 items-center justify-center rounded-lg">
+                  <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-stat-card-icon-background">
                     <ProviderIcon className="size-5" provider={cli.id} />
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
-                      <h3 className="truncate text-sm font-semibold">{cli.name}</h3>
-                      <Chip size="sm" variant="soft" color={status.color}>{running ? busyLabel : t(status.labelKey)}</Chip>
+                      <h3 className="truncate text-body-semibold text-text-primary">{cli.name}</h3>
+                      <Chip variant="caption" color={status.color}>{running ? busyLabel : t(status.labelKey)}</Chip>
                     </div>
-                    <dl className="mt-3 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-xs">
-                      <dt className="text-muted">{t('cli.currentVersion')}</dt><dd className="truncate font-medium tabular-nums">{cli.currentVersion || t(notInstalled ? 'cli.statusNotInstalled' : 'cli.unavailable')}</dd>
-                      <dt className="text-muted">{t('cli.latestVersion')}</dt><dd className="truncate font-medium tabular-nums">{cli.latestVersion || t('cli.notFetched')}</dd>
+                    <dl className="mt-3 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-caption-1-regular">
+                      <dt className="text-text-secondary">{t('cli.currentVersion')}</dt><dd className="truncate text-caption-1-medium text-text-primary tabular-nums">{cli.currentVersion || t(notInstalled ? 'cli.statusNotInstalled' : 'cli.unavailable')}</dd>
+                      <dt className="text-text-secondary">{t('cli.latestVersion')}</dt><dd className="truncate text-caption-1-medium text-text-primary tabular-nums">{cli.latestVersion || t('cli.notFetched')}</dd>
                     </dl>
                     <NoticeToast message={error && error !== operation?.error ? t('cli.namedError', { name: cli.name, error }) : null}
                       variant="danger" scope={session.activeBackendConnectionId} />
                   </div>
                 </div>
-                {cli.kind === 'managed' && notInstalled ? (
-                  <Button
-                    className="mt-4 w-full"
-                    size="sm"
-                    variant="secondary"
-                    isDisabled={!cli.installSupported || Boolean(operation?.status === 'running') || Boolean(submittingProvider)}
-                    onPress={() => void startOperation(cli.id, 'install')}
-                  >
-                    {running ? <Spinner size="sm" /> : <RiDownload2Line className="size-4" />}
-                    {running ? t('cli.installingNow') : t('cli.install')}
-                  </Button>
-                ) : cli.kind === 'managed' ? (
-                  <Button
-                    className="mt-4 w-full"
-                    size="sm"
-                    variant="secondary"
-                    isDisabled={!cli.upgradeSupported || Boolean(operation?.status === 'running') || Boolean(submittingProvider)}
-                    onPress={() => void startOperation(cli.id, 'upgrade')}
-                  >
-                    {running ? <Spinner size="sm" /> : <RiDownloadCloud2Line className="size-4" />}
-                    {running ? t('cli.upgradingNow') : t('cli.upgradeToLatest')}
-                  </Button>
-                ) : null}
-                {cli.id === 'antigravity' && !notInstalled ? (
-                  <Button
-                    className="mt-2 w-full"
-                    size="sm"
-                    variant="ghost"
-                    isDisabled={removingIntegration}
-                    onPress={() => void removeAntigravityIntegration()}
-                  >
-                    {removingIntegration ? <Spinner size="sm" /> : <RiDeleteBin6Line className="size-4" />}
-                    {t('cli.antigravityRemoveIntegration')}
-                  </Button>
+                {cli.kind === 'managed' || showRemoveIntegration ? (
+                  <div className="flex flex-col gap-2">
+                    {cli.kind === 'managed' && notInstalled ? (
+                      <Button
+                        className="w-full"
+                        size="small"
+                        variant="secondary"
+                        leadingIcon={running ? SpinnerIcon : RiDownload2Line}
+                        aria-busy={running || undefined}
+                        disabled={!cli.installSupported || Boolean(operation?.status === 'running') || Boolean(submittingProvider)}
+                        onClick={() => void startOperation(cli.id, 'install')}
+                      >
+                        {running ? t('cli.installingNow') : t('cli.install')}
+                      </Button>
+                    ) : cli.kind === 'managed' ? (
+                      <Button
+                        className="w-full"
+                        size="small"
+                        variant="secondary"
+                        leadingIcon={running ? SpinnerIcon : RiDownloadCloud2Line}
+                        aria-busy={running || undefined}
+                        disabled={!cli.upgradeSupported || Boolean(operation?.status === 'running') || Boolean(submittingProvider)}
+                        onClick={() => void startOperation(cli.id, 'upgrade')}
+                      >
+                        {running ? t('cli.upgradingNow') : t('cli.upgradeToLatest')}
+                      </Button>
+                    ) : null}
+                    {showRemoveIntegration ? (
+                      <button
+                        type="button"
+                        aria-busy={removingIntegration || undefined}
+                        disabled={removingIntegration}
+                        onClick={() => void removeAntigravityIntegration()}
+                        className={cx(
+                          'inline-flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-2lg px-2 py-1.5',
+                          'text-body-medium text-text-secondary transition-colors duration-150 ease',
+                          'hover:bg-background-secondary-hover hover:text-text-primary active:bg-background-tertiary-default',
+                          'outline-none focus-visible:ring-2 focus-visible:ring-border-focus-ring',
+                          'disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent',
+                        )}
+                      >
+                        {removingIntegration ? <Spinner size="sm" /> : <RiDeleteBin6Line aria-hidden className="size-4 text-foreground-icon-secondary" />}
+                        {t('cli.antigravityRemoveIntegration')}
+                      </button>
+                    ) : null}
+                  </div>
                 ) : null}
               </Card>
             );

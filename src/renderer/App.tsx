@@ -1,7 +1,16 @@
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
-import { Button, Label, ListBox, Modal, Select, Toast, Tooltip, toast } from '@heroui/react';
-import { AppLayout, Navbar } from '@heroui-pro/react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { RiAddLine, RiExpandLeftLine, RiExpandRightLine, RiGithubLine, RiLayoutLeftLine, RiLayoutRightLine, RiRobot2Line } from '@remixicon/react';
+import { motion, useReducedMotion } from 'motion/react';
+import { Dialog, Modal as AriaModal, ModalOverlay } from 'react-aria-components';
+import { Badge } from '@/components/base/badges/badge';
+import { Button } from '@/components/base/buttons/button';
+import { Select, SelectItem } from '@/components/base/select/select';
+import { useDirection } from '@/components/foundations/direction/direction';
+import { IconAction } from '@/components/ui/icon-action';
+import { Modal } from '@/components/ui/modal';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { ToastViewport, toast } from '@/components/ui/toast';
+import { cx } from '@/utils/cx';
 import { ConversationSplit, useMediaQuery } from './components/ConversationSplit';
 import { useWorkbenchLayout } from './session/useWorkbenchLayout';
 import { sshWorkbenchScopeKey, workbenchScopeKey } from './session/workbenchLayout';
@@ -39,9 +48,47 @@ const SshPanel = lazy(() => import('./screens/SshPanel').then((module) => ({ def
 
 function PanelFallback() {
   const t = useT();
-  return <div className="text-muted flex h-full min-h-24 items-center justify-center text-sm">{t('app.loading')}</div>;
+  return <div className="flex h-full min-h-24 items-center justify-center text-body-regular text-text-secondary">{t('app.loading')}</div>;
 }
 const panelFallback = <PanelFallback />;
+
+/** The compact-layout drawer motion from the BoardUI AI chat shell. */
+const DRAWER_EASE = [0.42, 0, 0.58, 1] as const;
+/** Sidebar width plus its 12px inset: how far the workspace slides aside. */
+const DRAWER_OFFSET = 272;
+
+/** Compact layout: the right panel slides in from the inline end over a
+ * dimmed backdrop (the AI chat shell's mobile panel drawer). */
+function AsideSheet({ isOpen, onOpenChange, label, children }: {
+  isOpen: boolean;
+  onOpenChange: (open: boolean) => void;
+  label: string;
+  children: ReactNode;
+}) {
+  const direction = useDirection();
+  return (
+    <ModalOverlay
+      dir={direction}
+      isOpen={isOpen}
+      onOpenChange={onOpenChange}
+      isDismissable
+      className="fixed inset-0 z-50 bg-black/40 transition-opacity duration-300 ease-out data-[entering]:opacity-0 data-[exiting]:opacity-0 motion-reduce:transition-none"
+    >
+      <AriaModal
+        className={cx(
+          'absolute inset-y-0 end-0 flex w-[min(26rem,calc(100%-12px))] outline-none',
+          'transition-transform duration-300 ease-in-out motion-reduce:transition-none',
+          'data-[entering]:translate-x-[110%] data-[exiting]:translate-x-[110%]',
+          'rtl:data-[entering]:-translate-x-[110%] rtl:data-[exiting]:-translate-x-[110%]',
+        )}
+      >
+        <Dialog aria-label={label} className="flex size-full flex-col bg-background-full p-3 shadow-sidebar outline-none">
+          <div className="min-h-0 flex-1 overflow-hidden rounded-3xl bg-background-secondary-default">{children}</div>
+        </Dialog>
+      </AriaModal>
+    </ModalOverlay>
+  );
+}
 
 const LAYOUT_AUTO_SAVE_ID = 'todex-desktop-app-layout';
 const LAYOUT_OPEN_STORAGE_KEY = 'todex.desktop.layoutOpen.v3';
@@ -90,7 +137,7 @@ export function App() {
   // Panel sizes are driven by inline flex-grow; the CSS transition is gated on
   // [data-panel-motion] so handle drags and window resizes stay instant.
   const animatePanelMotion = useCallback(() => {
-    if (document.querySelector('.resizable [data-separator="drag"], .resizable [data-separator="active"]')) return;
+    if (document.querySelector('[data-separator="active"]')) return;
     setPanelMotion(true);
     if (panelMotionTimerRef.current !== null) window.clearTimeout(panelMotionTimerRef.current);
     panelMotionTimerRef.current = window.setTimeout(() => {
@@ -133,8 +180,23 @@ export function App() {
     animatePanelMotion();
     setChatCollapsed(collapsed);
   }, [animatePanelMotion]);
-  // AppLayout turns its aside into a sheet at this width; the split is desktop-only.
+  // At this width the right panel becomes a sheet; the split is desktop-only.
   const compactLayout = useMediaQuery('(max-width: 1024px)');
+  // Below 769px the sidebar leaves the layout for a push drawer.
+  const isMobile = useMediaQuery('(max-width: 768px)');
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  useEffect(() => { if (!isMobile) setMobileNavOpen(false); }, [isMobile]);
+  useEffect(() => {
+    if (!mobileNavOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !event.defaultPrevented) setMobileNavOpen(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [mobileNavOpen]);
+  const direction = useDirection();
+  const reduceMotion = useReducedMotion();
+  const drawerTransition = { duration: reduceMotion ? 0 : 0.325, ease: DRAWER_EASE };
 
   useNoticeToast(
     session.versionMismatch
@@ -326,57 +388,56 @@ export function App() {
       </Suspense>
     )
   );
-  const navbar = (
-    <Navbar maxWidth="full">
-      <Navbar.Header className={`flex-nowrap gap-2 px-3 sm:px-6 [&>button]:shrink-0${insetChrome && !sidebarOpen ? ' navbar--clear-lights' : ''}`}>
-        <AppLayout.MenuToggle className="inline-flex min-[769px]:hidden" aria-label={t('app.openSidebar')}><RiLayoutLeftLine className="size-4" /></AppLayout.MenuToggle>
-        <span className="relative hidden min-[769px]:inline-flex shrink-0">
-          <Button isIconOnly size="sm" variant="ghost" aria-label={sidebarOpen ? t('app.collapseSidebar') : t('app.expandSidebar')} onPress={() => persistSidebarOpen(!sidebarOpen)}>
-            <RiLayoutLeftLine className="size-4" />
-          </Button>
-          <ShortcutHint id="toggleSidebar" className="absolute -top-1.5 -right-1.5 z-10" />
+  // macOS hidden-inset chrome: with the sidebar in its drawer the traffic
+  // lights sit over the conversation header, so it keeps clear of them.
+  const clearLights = insetChrome && isMobile;
+  const headerHint = 'absolute -top-1.5 -end-1.5 z-10';
+  const header = (
+    <header className={cx('window-drag flex min-h-13 shrink-0 items-center gap-2 px-3 py-2', clearLights && 'ps-[84px]')}>
+      {isMobile ? (
+        <IconAction icon={RiLayoutLeftLine} aria-label={t('app.openSidebar')} aria-expanded={mobileNavOpen} onClick={() => setMobileNavOpen(true)} />
+      ) : (
+        <span className="relative inline-flex shrink-0">
+          <IconAction icon={RiLayoutLeftLine} aria-label={sidebarOpen ? t('app.collapseSidebar') : t('app.expandSidebar')} onClick={() => persistSidebarOpen(!sidebarOpen)} />
+          <ShortcutHint id="toggleSidebar" className={headerHint} />
         </span>
-        {sshActive ? (
-          <span className="min-w-0 flex-1 truncate text-sm font-semibold">{t('ssh.title')}</span>
-        ) : (
-          <ConversationHeaderDetails session={session} title={session.activeConversation?.title ?? t('app.conversation')} gitOpen={gitOpen} onOpenGit={() => setGitOpen(true)} />
-        )}
-        <Navbar.Content className="shrink-0 gap-2">
-          {!sshActive ? (
-            <span className="relative inline-flex shrink-0">
-              <Button isIconOnly size="sm" variant="ghost" aria-label={t('app.githubActions')} onPress={() => setGitOpen(true)}>
-                <RiGithubLine className="size-4" />
-              </Button>
-              <ShortcutHint id="gitActions" className="absolute -top-1.5 -right-1.5 z-10" />
-            </span>
-          ) : null}
-          {subagentRuns.length > 0 ? (
-            <span className="relative">
-              <Button isIconOnly size="sm" variant={panel === 'subagents' && asideOpen ? 'secondary' : 'ghost'} aria-label={t('app.subagents')} aria-expanded={asideOpen && panel === 'subagents'} onPress={() => openPanel('Subagents')}>
-                <RiRobot2Line className="size-4" />
-              </Button>
-              {activeSubagents > 0 ? (
-                <span className="bg-accent text-accent-foreground pointer-events-none absolute -right-1 -top-1 flex min-w-4 items-center justify-center rounded-full px-0.5 text-[10px] leading-4">{activeSubagents}</span>
-              ) : null}
-            </span>
-          ) : null}
-          {asideShown && !compactLayout ? (
-            <Tooltip delay={200}>
-              <Button isIconOnly size="sm" variant="ghost" aria-label={t('app.collapseChat')} onPress={() => toggleChatCollapsed(true)}>
-                <RiExpandLeftLine className="size-4" />
-              </Button>
-              <Tooltip.Content className="text-xs">{t('app.collapseChat')}</Tooltip.Content>
-            </Tooltip>
-          ) : null}
+      )}
+      {sshActive ? (
+        <span className="min-w-0 flex-1 truncate text-body-semibold text-text-primary">{t('ssh.title')}</span>
+      ) : (
+        <ConversationHeaderDetails session={session} title={session.activeConversation?.title ?? t('app.conversation')} gitOpen={gitOpen} onOpenGit={() => setGitOpen(true)} />
+      )}
+      <div className="flex shrink-0 items-center gap-1">
+        {!sshActive ? (
           <span className="relative inline-flex shrink-0">
-            <Button isIconOnly size="sm" variant="ghost" aria-label={asideOpen ? t('app.closeAside') : t('app.openAside')} aria-expanded={asideOpen} onPress={() => persistAsideOpen(!asideOpen)}>
-              <RiLayoutRightLine className="size-4" />
-            </Button>
-            <ShortcutHint id="toggleAside" className="absolute -top-1.5 -right-1.5 z-10" />
+            <IconAction icon={RiGithubLine} aria-label={t('app.githubActions')} onClick={() => setGitOpen(true)} />
+            <ShortcutHint id="gitActions" className={headerHint} />
           </span>
-        </Navbar.Content>
-      </Navbar.Header>
-    </Navbar>
+        ) : null}
+        {subagentRuns.length > 0 ? (
+          <span className="relative inline-flex shrink-0">
+            <IconAction
+              icon={RiRobot2Line}
+              aria-label={t('app.subagents')}
+              active={panel === 'subagents' && asideOpen}
+              aria-pressed={undefined}
+              aria-expanded={asideOpen && panel === 'subagents'}
+              onClick={() => openPanel('Subagents')}
+            />
+            {activeSubagents > 0 ? (
+              <Badge color="primary" className="pointer-events-none absolute -end-1 -top-1 min-w-4 rounded-full px-0.5 text-caption-2-semibold">{activeSubagents}</Badge>
+            ) : null}
+          </span>
+        ) : null}
+        {asideShown && !compactLayout ? (
+          <IconAction icon={RiExpandLeftLine} aria-label={t('app.collapseChat')} tooltip onClick={() => toggleChatCollapsed(true)} />
+        ) : null}
+        <span className="relative inline-flex shrink-0">
+          <IconAction icon={RiLayoutRightLine} aria-label={asideOpen ? t('app.closeAside') : t('app.openAside')} aria-expanded={asideOpen} onClick={() => persistAsideOpen(!asideOpen)} />
+          <ShortcutHint id="toggleAside" className={headerHint} />
+        </span>
+      </div>
+    </header>
   );
   const mainContent = (
     sshActive ? (
@@ -404,24 +465,126 @@ export function App() {
     ) : <ChatPanel session={session} />
   );
 
-  // Stands in for the navbar + conversation while the right panel takes the width.
+  // The conversation container of the BoardUI AI chat shell: header row, then
+  // the chat.
+  const chatContainer = (
+    <main className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-3xl bg-background-secondary-default">
+      {header}
+      <div className="min-h-0 flex-1">{mainContent}</div>
+    </main>
+  );
+
+  // Stands in for the header + conversation while the right panel takes the width.
   const chatRail = (
-    <div className={`window-drag flex h-full flex-col items-center gap-1 pb-2 ${insetChrome && !sidebarOpen ? 'pt-10' : 'pt-2'}`}>
-      <Button isIconOnly size="sm" variant="ghost" aria-label={sidebarOpen ? t('app.collapseSidebar') : t('app.expandSidebar')} onPress={() => persistSidebarOpen(!sidebarOpen)}>
-        <RiLayoutLeftLine className="size-4" />
-      </Button>
-      <Tooltip delay={200}>
-        <Button isIconOnly size="sm" variant="ghost" aria-label={t('app.expandChat')} onPress={() => toggleChatCollapsed(false)}>
-          <RiExpandRightLine className="size-4" />
-        </Button>
-        <Tooltip.Content placement="right" className="text-xs">{t('app.expandChat')}</Tooltip.Content>
-      </Tooltip>
+    <div className="window-drag flex h-full flex-col items-center gap-1 rounded-3xl bg-background-secondary-default py-2">
+      <IconAction icon={RiLayoutLeftLine} aria-label={sidebarOpen ? t('app.collapseSidebar') : t('app.expandSidebar')} onClick={() => persistSidebarOpen(!sidebarOpen)} />
+      <IconAction icon={RiExpandRightLine} aria-label={t('app.expandChat')} tooltip tooltipPlacement="right" onClick={() => toggleChatCollapsed(false)} />
     </div>
   );
 
+  // The split's right panel; its inline-end padding is the page frame, so the
+  // grip handle can sit at the frame edge while the panel is closed.
+  const desktopAside = (
+    <div className="h-full min-h-0 pe-3">
+      <div className="h-full min-h-0 overflow-hidden rounded-3xl bg-background-secondary-default">{asideContent}</div>
+    </div>
+  );
+
+  const sidebar = (
+    <AppSidebar
+      session={session}
+      open={sidebarOpen}
+      mobile={isMobile}
+      onCloseMobile={() => setMobileNavOpen(false)}
+      onCreateWorkspace={() => { setEditingWorkspaceId(null); setCreateOpen(true); }}
+      onEditWorkspace={(workspaceId) => { setEditingWorkspaceId(workspaceId); setCreateOpen(true); }}
+      onCreateConversation={() => {
+        if (!session.activeWorkspaceId) {
+          return;
+        }
+        session.createConversation(session.activeWorkspaceId);
+        setPanel(null);
+      }}
+      onOpenSettings={() => setPanel('settings')}
+      onOpenCapabilities={() => setCapabilitiesOpen(true)}
+      onOpenCliManager={() => { persistAsideOpen(false); setPanel('cli-manager'); }}
+      onOpenAgentProviders={() => { persistAsideOpen(false); setPanel('agent-providers'); }}
+      onOpenUsage={() => setPanel('usage')}
+      onOpenQuota={() => setPanel('quota')}
+      onOpenAbout={() => setPanel('about')}
+      onOpenKanban={() => { setPanel('kanban'); persistAsideOpen(false); }}
+      onOpenTerminal={toggleSshView}
+      terminalActive={sshActive}
+      onSelectConversation={() => setPanel(current => current === 'ssh' ? null : current)}
+    />
+  );
+  const drawerOpen = isMobile && mobileNavOpen;
+
+  // Page ground with a 12px frame: floating sidebar panel, then the
+  // conversation (beside the right panel on wide windows).
+  const shell = (
+    <div className={cx('relative flex h-full min-h-0 gap-3 overflow-hidden p-3', !compactLayout && 'pe-0')}>
+      {insetChrome ? <div aria-hidden="true" className="window-drag absolute inset-x-0 top-0 z-30 h-3" /> : null}
+      {isMobile ? (
+        // The drawer sidebar waits beneath the workspace; opening it slides
+        // the workspace aside while the sidebar fades and scales in.
+        <div className="absolute inset-y-0 start-0 z-10 flex w-68 py-3 ps-1.5" aria-hidden={!mobileNavOpen} inert={!mobileNavOpen}>
+          <motion.div
+            initial={false}
+            animate={{ scale: mobileNavOpen ? 1 : 0.94, opacity: mobileNavOpen ? 1 : 0 }}
+            transition={drawerTransition}
+            className={cx('h-full w-65 origin-left will-change-transform rtl:origin-right', mobileNavOpen ? 'pointer-events-auto' : 'pointer-events-none')}
+          >
+            {sidebar}
+          </motion.div>
+        </div>
+      ) : sidebar}
+      <motion.div
+        initial={false}
+        animate={{ x: drawerOpen ? (direction === 'rtl' ? -DRAWER_OFFSET : DRAWER_OFFSET) : 0, borderRadius: drawerOpen ? 32 : 0 }}
+        transition={drawerTransition}
+        className={cx('relative z-20 flex min-h-0 min-w-0 flex-1 bg-background-full', isMobile && 'overflow-hidden will-change-transform')}
+      >
+        {isMobile ? (
+          <motion.button
+            type="button"
+            aria-label={t('app.collapseSidebar')}
+            tabIndex={mobileNavOpen ? 0 : -1}
+            onClick={() => setMobileNavOpen(false)}
+            initial={false}
+            animate={{ opacity: mobileNavOpen ? 1 : 0 }}
+            transition={drawerTransition}
+            className={cx('absolute inset-0 z-50 cursor-pointer rounded-[inherit] bg-black/10', mobileNavOpen ? 'pointer-events-auto' : 'pointer-events-none')}
+          />
+        ) : null}
+        <div className="flex min-h-0 min-w-0 flex-1" inert={drawerOpen}>
+          {compactLayout ? chatContainer : (
+            <ConversationSplit
+              autoSaveId={LAYOUT_AUTO_SAVE_ID}
+              aside={desktopAside}
+              asideOpen={asideShown}
+              onAsideOpenChange={persistAsideOpen}
+              chatCollapsed={chatCollapsed}
+              onChatCollapsedChange={setChatCollapsed}
+              rail={chatRail}
+              chat={chatContainer}
+            />
+          )}
+        </div>
+      </motion.div>
+      {compactLayout ? (
+        <AsideSheet isOpen={asideShown} onOpenChange={persistAsideOpen} label={t('settings.aside')}>{asideContent}</AsideSheet>
+      ) : null}
+    </div>
+  );
+
+  const closePanel = (name: DesktopPanel) => (open: boolean) => {
+    if (!open) setPanel((current) => current === name ? null : current);
+  };
+
   return (
-    <div className="bg-background text-foreground h-full" data-panel-motion={panelMotion || undefined}>
-      <Toast.Provider placement="top" />
+    <div className="h-full bg-background-full text-text-primary" data-panel-motion={panelMotion || undefined}>
+      <ToastViewport />
       <SessionNoticeToasts lastError={session.lastError} health={session.connectionHealth}
         scope={`${session.activeBackendConnectionId}:${session.settings.serverUrl}`}
         onRepair={() => { setRepairPairing(true); setPanel('settings'); }} />
@@ -431,131 +594,37 @@ export function App() {
           <Suspense fallback={panelFallback}>
             <KanbanPanel session={session} onOpenConversation={() => setPanel(null)} />
           </Suspense>
-        ) : (
-        <AppLayout
-          className="h-full min-h-0"
-          scrollMode="content"
-          sidebarCollapsible="icon"
-          sidebarOpen={sidebarOpen}
-          onSidebarOpenChange={persistSidebarOpen}
-          asideMobile="sheet"
-          asideOpen={asideShown}
-          onAsideOpenChange={persistAsideOpen}
-          aside={compactLayout ? asideContent : null}
-          sidebar={
-            <AppSidebar
-              session={session}
-              onCreateWorkspace={() => { setEditingWorkspaceId(null); setCreateOpen(true); }}
-              onEditWorkspace={(workspaceId) => { setEditingWorkspaceId(workspaceId); setCreateOpen(true); }}
-              onCreateConversation={() => {
-                if (!session.activeWorkspaceId) {
-                  return;
-                }
-                session.createConversation(session.activeWorkspaceId);
-                setPanel(null);
-              }}
-              onOpenSettings={() => setPanel('settings')}
-              onOpenCapabilities={() => setCapabilitiesOpen(true)}
-              onOpenCliManager={() => { persistAsideOpen(false); setPanel('cli-manager'); }}
-              onOpenAgentProviders={() => { persistAsideOpen(false); setPanel('agent-providers'); }}
-              onOpenUsage={() => setPanel('usage')}
-              onOpenQuota={() => setPanel('quota')}
-              onOpenAbout={() => setPanel('about')}
-              onOpenKanban={() => { setPanel('kanban'); persistAsideOpen(false); }}
-              onOpenTerminal={toggleSshView}
-              terminalActive={sshActive}
-              onSelectConversation={() => setPanel(current => current === 'ssh' ? null : current)}
-            />
-          }
-          navbar={compactLayout ? navbar : undefined}
-        >
-          {compactLayout ? mainContent : (
-            <ConversationSplit
-              autoSaveId={LAYOUT_AUTO_SAVE_ID}
-              aside={asideContent}
-              asideOpen={asideShown}
-              onAsideOpenChange={persistAsideOpen}
-              chatCollapsed={chatCollapsed}
-              onChatCollapsedChange={setChatCollapsed}
-              rail={chatRail}
-              chat={
-                <div className="flex h-full min-h-0 flex-col">
-                  <header className="shrink-0">{navbar}</header>
-                  <div className="min-h-0 flex-1">{mainContent}</div>
-                </div>
-              }
-            />
-          )}
-        </AppLayout>
-        )
+        ) : shell
       ) : (
         <div className="window-drag flex h-full flex-col items-center justify-center gap-3">
           <AppIcon className="size-16" />
-          <p className="text-lg font-semibold">TodeX</p>
-          <p className="text-muted text-sm">{t('app.loadingSettings')}</p>
+          <p className="text-title-3-semibold text-text-primary">TodeX</p>
+          <p className="text-body-regular text-text-secondary">{t('app.loadingSettings')}</p>
         </div>
       )}
-      <Modal.Backdrop isOpen={settingsOpen} onOpenChange={(open) => { if (!open) setPanel((current) => current === 'settings' ? null : current); }}>
-        <Modal.Container>
-          {/* A fixed height keeps the dialog still when switching sections. */}
-          <Modal.Dialog className="h-[min(90vh,48rem)] sm:max-w-4xl">
-            <Modal.CloseTrigger />
-            <Modal.Header>
-              <Modal.Heading className="text-lg font-semibold">{t('app.settings')}</Modal.Heading>
-            </Modal.Header>
-            {/* Each category page scrolls on its own beside the category list. */}
-            <Modal.Body className="text-foreground min-h-0 overflow-hidden">
-              <Suspense fallback={panelFallback}><SettingsPanel session={session} historyRecoverySetup={historyRecoverySetup} repairPairing={repairPairing} /></Suspense>
-            </Modal.Body>
-          </Modal.Dialog>
-        </Modal.Container>
-      </Modal.Backdrop>
-      <Modal.Backdrop isOpen={usageOpen} onOpenChange={(open) => { if (!open) setPanel((current) => current === 'usage' ? null : current); }}>
-        <Modal.Container>
-          <Modal.Dialog className="max-h-[92vh] sm:max-w-5xl">
-            <Modal.CloseTrigger />
-            <Modal.Header><Modal.Heading className="text-lg font-semibold">{t('app.usage')}</Modal.Heading></Modal.Header>
-            <Modal.Body className="text-foreground max-h-[82vh] overflow-y-auto"><Suspense fallback={panelFallback}><UsagePanel session={session} /></Suspense></Modal.Body>
-          </Modal.Dialog>
-        </Modal.Container>
-      </Modal.Backdrop>
-      <Modal.Backdrop isOpen={quotaOpen} onOpenChange={(open) => { if (!open) setPanel((current) => current === 'quota' ? null : current); }}>
-        <Modal.Container>
-          <Modal.Dialog className="max-h-[90vh] sm:max-w-2xl">
-            <Modal.CloseTrigger />
-            <Modal.Header><Modal.Heading className="text-lg font-semibold">{t('usage.quotaTitle')}</Modal.Heading></Modal.Header>
-            <Modal.Body className="text-foreground max-h-[76vh] overflow-y-auto"><Suspense fallback={panelFallback}><QuotaPanel session={session} /></Suspense></Modal.Body>
-          </Modal.Dialog>
-        </Modal.Container>
-      </Modal.Backdrop>
-      <Modal.Backdrop isOpen={aboutOpen} onOpenChange={(open) => { if (!open) setPanel((current) => current === 'about' ? null : current); }}>
-        <Modal.Container>
-          <Modal.Dialog className="max-h-[90vh] sm:max-w-2xl">
-            <Modal.CloseTrigger />
-            <Modal.Header><Modal.Heading className="text-lg font-semibold">{t('app.about')}</Modal.Heading></Modal.Header>
-            <Modal.Body className="text-foreground max-h-[76vh] overflow-y-auto"><Suspense fallback={panelFallback}><AboutPanel session={session} /></Suspense></Modal.Body>
-          </Modal.Dialog>
-        </Modal.Container>
-      </Modal.Backdrop>
-      <Modal.Backdrop isOpen={cliManagerOpen} onOpenChange={(open) => { if (!open) setPanel((current) => current === 'cli-manager' ? null : current); }}>
-        <Modal.Container>
-          <Modal.Dialog className="max-h-[92vh] sm:max-w-3xl">
-            <Modal.CloseTrigger />
-            <Modal.Header><Modal.Heading className="text-lg font-semibold">{t('app.cliManager')}</Modal.Heading></Modal.Header>
-            <Modal.Body className="text-foreground max-h-[80vh] overflow-y-auto"><Suspense fallback={panelFallback}><CliManagerPanel session={session} /></Suspense></Modal.Body>
-          </Modal.Dialog>
-        </Modal.Container>
-      </Modal.Backdrop>
-      <Modal.Backdrop isOpen={agentProvidersOpen} onOpenChange={(open) => { if (!open) setPanel((current) => current === 'agent-providers' ? null : current); }}>
-        <Modal.Container>
-          <Modal.Dialog className="max-h-[92vh] sm:max-w-3xl">
-            <Modal.CloseTrigger />
-            <Modal.Header><Modal.Heading className="text-lg font-semibold">{t('app.agentProviders')}</Modal.Heading></Modal.Header>
-            <Modal.Body className="text-foreground max-h-[80vh] overflow-y-auto"><Suspense fallback={panelFallback}><AgentProvidersPanel session={session} /></Suspense></Modal.Body>
-          </Modal.Dialog>
-        </Modal.Container>
-      </Modal.Backdrop>
-      <Modal.Backdrop isOpen={capabilitiesOpen} onOpenChange={setCapabilitiesOpen}><Modal.Container><Modal.Dialog className="max-h-[90vh] sm:max-w-2xl"><Modal.CloseTrigger /><Modal.Header><Modal.Heading className="text-lg font-semibold">{t('app.mcpSkillManager')}</Modal.Heading></Modal.Header><Modal.Body className="text-foreground max-h-[75vh] overflow-y-auto"><Suspense fallback={panelFallback}><CapabilitiesPanel inDialog workspacePath={session.activeWorkspace?.path ?? session.settings.defaultWorkspacePath} providers={session.v2Providers} catalogs={session.capabilityCatalogs} onRefresh={(provider) => void session.refreshCapabilityCatalog(provider)} conversationId={session.activeConversation?.id} selectedSkills={session.activeConversation ? session.selectedSkills[session.activeConversation.id] ?? [] : []} canInvoke={Boolean(session.activeConversation?.v2ConversationId)} onToggleSkill={(skill, provider) => session.activeConversation && session.toggleCatalogSkill(session.activeConversation.id, skill, provider)} onPreviewSkill={(skill, provider) => session.previewSkillResource(provider, skill.resourceId)} onRefreshMcp={(resourceId) => session.activeConversation && session.refreshMcpServer(session.activeConversation.id, resourceId)} onCallMcp={(resourceId, toolName) => session.activeConversation && session.callMcpTool(session.activeConversation.id, resourceId, toolName)} /></Suspense></Modal.Body></Modal.Dialog></Modal.Container></Modal.Backdrop>
+      {/* A fixed height keeps the dialog still when switching sections; each
+          category page scrolls on its own beside the category list. */}
+      <Modal isOpen={settingsOpen} onOpenChange={closePanel('settings')} title={t('app.settings')} size="4xl" className="h-[min(90vh,48rem)]" bodyClassName="flex min-h-0 flex-col overflow-hidden px-0 pb-0">
+        <Suspense fallback={panelFallback}><SettingsPanel session={session} historyRecoverySetup={historyRecoverySetup} repairPairing={repairPairing} /></Suspense>
+      </Modal>
+      <Modal isOpen={usageOpen} onOpenChange={closePanel('usage')} title={t('app.usage')} size="5xl" className="max-h-[92vh]" bodyClassName="overflow-y-auto">
+        <Suspense fallback={panelFallback}><UsagePanel session={session} /></Suspense>
+      </Modal>
+      <Modal isOpen={quotaOpen} onOpenChange={closePanel('quota')} title={t('usage.quotaTitle')} size="2xl" className="max-h-[90vh]" bodyClassName="overflow-y-auto">
+        <Suspense fallback={panelFallback}><QuotaPanel session={session} /></Suspense>
+      </Modal>
+      <Modal isOpen={aboutOpen} onOpenChange={closePanel('about')} title={t('app.about')} size="2xl" className="max-h-[90vh]" bodyClassName="overflow-y-auto">
+        <Suspense fallback={panelFallback}><AboutPanel session={session} /></Suspense>
+      </Modal>
+      <Modal isOpen={cliManagerOpen} onOpenChange={closePanel('cli-manager')} title={t('app.cliManager')} size="3xl" className="max-h-[92vh]" bodyClassName="overflow-y-auto">
+        <Suspense fallback={panelFallback}><CliManagerPanel session={session} /></Suspense>
+      </Modal>
+      <Modal isOpen={agentProvidersOpen} onOpenChange={closePanel('agent-providers')} title={t('app.agentProviders')} size="3xl" className="max-h-[92vh]" bodyClassName="overflow-y-auto">
+        <Suspense fallback={panelFallback}><AgentProvidersPanel session={session} /></Suspense>
+      </Modal>
+      <Modal isOpen={capabilitiesOpen} onOpenChange={setCapabilitiesOpen} title={t('app.mcpSkillManager')} size="2xl" className="max-h-[90vh]" bodyClassName="overflow-y-auto">
+        <Suspense fallback={panelFallback}><CapabilitiesPanel inDialog workspacePath={session.activeWorkspace?.path ?? session.settings.defaultWorkspacePath} providers={session.v2Providers} catalogs={session.capabilityCatalogs} onRefresh={(provider) => void session.refreshCapabilityCatalog(provider)} conversationId={session.activeConversation?.id} selectedSkills={session.activeConversation ? session.selectedSkills[session.activeConversation.id] ?? [] : []} canInvoke={Boolean(session.activeConversation?.v2ConversationId)} onToggleSkill={(skill, provider) => session.activeConversation && session.toggleCatalogSkill(session.activeConversation.id, skill, provider)} onPreviewSkill={(skill, provider) => session.previewSkillResource(provider, skill.resourceId)} onRefreshMcp={(resourceId) => session.activeConversation && session.refreshMcpServer(session.activeConversation.id, resourceId)} onCallMcp={(resourceId, toolName) => session.activeConversation && session.callMcpTool(session.activeConversation.id, resourceId, toolName)} /></Suspense>
+      </Modal>
       <GitActionsModal key={session.activeConversation?.id} session={session} isOpen={gitOpen} onOpenChange={setGitOpen} />
       {createOpen ? <CreateWorkspaceModal
         key={editingWorkspaceId ?? 'create'}
@@ -621,96 +690,109 @@ function CreateWorkspaceModal({
       });
   }, [isOpen, workspace, session.activeBackendConnectionId, session.serverVersion?.workspace_root, session.settings]);
 
+  const readFailed = (error: unknown) => toast.danger(error instanceof Error ? error.message : t('app.workspaceReadFailed'));
+
   return (
-    <Modal.Backdrop isOpen={isOpen} onOpenChange={onOpenChange}>
-      <Modal.Container>
-        <Modal.Dialog className="sm:max-w-lg">
-          <Modal.CloseTrigger />
-          <Modal.Header>
-            <Modal.Heading>{workspace ? t('app.workspaceEditTitle') : t('app.workspaceCreateTitle')}</Modal.Heading>
-          </Modal.Header>
-          <Modal.Body className="flex flex-col gap-4">
-            <Field label={t('app.workspaceName')} value={name} onChange={setName} />
-            <Select isDisabled={Boolean(workspace)} selectedKey={backendId} onSelectionChange={(key) => { if (typeof key === 'string') setBackendId(key); }}>
-              <Label>{t('app.workspaceBackend')}</Label><Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
-              <Select.Popover><ListBox>{session.backendConnections.map((profile) => <ListBox.Item key={profile.id} id={profile.id} textValue={profile.name}>{profile.name} · {profile.serverUrl}</ListBox.Item>)}</ListBox></Select.Popover>
-            </Select>
-            <Field label={t('app.workspaceDirectory')} value={path} onChange={setPath} />
-            {roots.length > 1 ? (
-              <Select
-                selectedKey={activeRoot}
-                onSelectionChange={(key) => {
-                  if (typeof key !== 'string' || key === activeRoot) return;
-                  void fetchWorkspaceDirectorySnapshot(directorySettings, key)
-                    .then(applySnapshot)
-                    .catch((error) => toast.danger(error instanceof Error ? error.message : t('app.workspaceReadFailed')));
-                }}
-              >
-                <Label>{t('app.workspaceRoot')}</Label><Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
-                <Select.Popover><ListBox>{roots.map((root) => <ListBox.Item key={root} id={root} textValue={root}>{root}</ListBox.Item>)}</ListBox></Select.Popover>
-              </Select>
-            ) : null}
-            <div className="flex gap-2">
-              <Button
-                variant="secondary"
-                onPress={async () => {
-                  const selected = await window.todexDesktop.dialog.openDirectory();
-                  if (selected) setPath(selected);
-                }}
-              >
-                {t('app.workspacePickLocal')}
-              </Button>
-              <Button
-                variant="tertiary"
-                onPress={async () => {
-                  try {
-                    applySnapshot(await fetchWorkspaceDirectorySnapshot(directorySettings, path));
-                  } catch (error) {
-                    toast.danger(error instanceof Error ? error.message : t('app.workspaceReadFailed'));
-                  }
-                }}
-              >
-                {t('app.workspaceBrowse')}
-              </Button>
-            </div>
-            {entries.length ? (
-              <div className="flex max-h-40 flex-col gap-1 overflow-y-auto">
-                {entries.map((entry) => (
-                  <Button key={entry} variant="ghost" className="justify-start" onPress={() => setPath(entry)}>
-                    {entry}
-                  </Button>
-                ))}
-              </div>
-            ) : null}
-          </Modal.Body>
-          <Modal.Footer>
-            <Button slot="close" variant="tertiary">{t('common.cancel')}</Button>
-            <Button
-              onPress={async () => {
-                let validatedPath = path;
-                if (session.connectionState === 'open') {
-                  try {
-                    validatedPath = (await fetchWorkspaceDirectorySnapshot(directorySettings, path)).current;
-                  } catch (error) {
-                    toast.danger(error instanceof Error ? error.message : t('app.workspaceReadFailed'));
-                    return;
-                  }
+    <Modal
+      isOpen={isOpen}
+      onOpenChange={onOpenChange}
+      title={workspace ? t('app.workspaceEditTitle') : t('app.workspaceCreateTitle')}
+      size="lg"
+      bodyClassName="flex flex-col gap-4"
+      footer={(
+        <>
+          <Button variant="secondary" onClick={() => onOpenChange(false)}>{t('common.cancel')}</Button>
+          <Button
+            leadingIcon={workspace ? undefined : RiAddLine}
+            onClick={async () => {
+              let validatedPath = path;
+              if (session.connectionState === 'open') {
+                try {
+                  validatedPath = (await fetchWorkspaceDirectorySnapshot(directorySettings, path)).current;
+                } catch (error) {
+                  readFailed(error);
+                  return;
                 }
-                if (workspace) {
-                  session.updateWorkspace(workspace.id, { name: name.trim() || validatedPath, path: validatedPath });
-                } else {
-                  session.setActiveBackendConnectionId(backendId);
-                  session.createWorkspace(name.trim() || validatedPath, validatedPath);
-                }
-                onOpenChange(false);
-              }}
+              }
+              if (workspace) {
+                session.updateWorkspace(workspace.id, { name: name.trim() || validatedPath, path: validatedPath });
+              } else {
+                session.setActiveBackendConnectionId(backendId);
+                session.createWorkspace(name.trim() || validatedPath, validatedPath);
+              }
+              onOpenChange(false);
+            }}
+          >
+            {workspace ? t('common.save') : t('app.workspaceCreate')}
+          </Button>
+        </>
+      )}
+    >
+      <Field label={t('app.workspaceName')} value={name} onChange={setName} />
+      <Select
+        label={t('app.workspaceBackend')}
+        className="w-full"
+        popoverClassName="w-(--trigger-width)"
+        isDisabled={Boolean(workspace)}
+        selectedKey={backendId}
+        onSelectionChange={(key) => { if (typeof key === 'string') setBackendId(key); }}
+      >
+        {session.backendConnections.map((profile) => <SelectItem key={profile.id} id={profile.id} textValue={profile.name}>{profile.name} · {profile.serverUrl}</SelectItem>)}
+      </Select>
+      <Field label={t('app.workspaceDirectory')} value={path} onChange={setPath} />
+      {roots.length > 1 ? (
+        <Select
+          label={t('app.workspaceRoot')}
+          className="w-full"
+          popoverClassName="w-(--trigger-width)"
+          selectedKey={activeRoot}
+          onSelectionChange={(key) => {
+            if (typeof key !== 'string' || key === activeRoot) return;
+            void fetchWorkspaceDirectorySnapshot(directorySettings, key)
+              .then(applySnapshot)
+              .catch(readFailed);
+          }}
+        >
+          {roots.map((root) => <SelectItem key={root} id={root} textValue={root}>{root}</SelectItem>)}
+        </Select>
+      ) : null}
+      <div className="flex gap-2">
+        <Button
+          variant="secondary"
+          onClick={async () => {
+            const selected = await window.todexDesktop.dialog.openDirectory();
+            if (selected) setPath(selected);
+          }}
+        >
+          {t('app.workspacePickLocal')}
+        </Button>
+        <Button
+          variant="secondary"
+          onClick={async () => {
+            try {
+              applySnapshot(await fetchWorkspaceDirectorySnapshot(directorySettings, path));
+            } catch (error) {
+              readFailed(error);
+            }
+          }}
+        >
+          {t('app.workspaceBrowse')}
+        </Button>
+      </div>
+      {entries.length ? (
+        <ScrollArea className="max-h-40" contentClassName="flex flex-col gap-0.5" surface="full">
+          {entries.map((entry) => (
+            <button
+              key={entry}
+              type="button"
+              className="flex w-full cursor-pointer items-center rounded-lg px-2 py-1.5 text-start text-body-regular text-text-secondary outline-none transition-colors duration-150 ease hover:bg-background-secondary-hover hover:text-text-primary focus-visible:ring-2 focus-visible:ring-border-focus-ring"
+              onClick={() => setPath(entry)}
             >
-              {workspace ? null : <RiAddLine className="size-4" />}
-              {workspace ? t('common.save') : t('app.workspaceCreate')}
-            </Button>
-          </Modal.Footer>
-        </Modal.Dialog>
-      </Modal.Container>
-    </Modal.Backdrop>
+              <span className="truncate">{entry}</span>
+            </button>
+          ))}
+        </ScrollArea>
+      ) : null}
+    </Modal>
   );
 }

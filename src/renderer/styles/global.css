@@ -1,199 +1,119 @@
-@import "tailwindcss";
-@import "@heroui/styles";
-@import "@heroui-pro/react/css";
-@import "@heroui-pro/react/themes/mouve";
+@import "./globals.css";
 @import "@xterm/xterm/css/xterm.css";
 
-.xterm,
-.xterm .xterm-viewport,
-.xterm .xterm-screen {
-  background-color: var(--surface-secondary) !important;
-}
+/* ---------------------------------------------------------------------------
+ * TodeX on BoardUI
+ *
+ * globals.css brings Tailwind, the BoardUI theme tokens (theme.css) and the
+ * type scale (typography.css). This file adds what the desktop app needs on
+ * top: the bundled fonts, a few app tokens that follow the same light/dark
+ * semantic pattern, the appearance settings (bold text), prose styles for
+ * Markdown and code, and the app-specific component CSS below.
+ * --------------------------------------------------------------------------- */
 
-/* Spacing (4px base) and the type scale (12/14/16/18/20/24px ...) follow the
-   TodeX design system, which matches Tailwind's defaults, so neither is
-   overridden here. */
 @theme {
+  /* Inter ships with the app (@fontsource-variable/inter); the appearance
+     setting can swap the family at runtime through --font-sans. */
   --font-sans: "Inter Variable", "Inter", ui-sans-serif, system-ui, -apple-system,
     "Segoe UI", sans-serif;
-
-  --color-black: var(--black);
-  --color-white: var(--white);
-  --color-snow: var(--snow);
-  --color-eclipse: var(--eclipse);
-  --color-chart-1: var(--chart-1);
-  --color-chart-2: var(--chart-2);
-  --color-chart-3: var(--chart-3);
-  --color-chart-4: var(--chart-4);
-  --color-chart-5: var(--chart-5);
-  --color-scrollbar: var(--scrollbar);
-  --color-field-background: var(--field-background);
-  --color-field-background-hover: var(--field-background-hover);
+  --font-mono: ui-monospace, "SFMono-Regular", "JetBrains Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
 }
 
-/* TodeX design system: HeroUI Pro "mouve" re-hued to 253.83. Only base tokens
-   live here; HeroUI derives the hover, soft, secondary and tertiary variants
-   from them with the formulas DESIGN.md documents. The mouve theme's own
-   variables are scoped to .mouve-light/.mouve-dark, so its component
-   overrides read the --mouve-* shadows defined below. */
-:root,
-[data-theme="light"] {
-  --radius: 1rem;
-  --field-radius: 1.5rem;
-  --field-border-width: 1px;
-  --border-width-field: 1px;
-
-  --white: oklch(100% 0 0);
-  --black: oklch(0% 0 0);
-  --snow: oklch(99.11% 0 0);
-  --eclipse: oklch(25% 0.0093 253.83);
-
-  --background: oklch(95.5% 0.0056 253.83);
-  --foreground: var(--eclipse);
-  --muted: oklch(58% 0.014 253.83);
-
-  --surface: oklch(97.5% 0.0037 253.83);
-  --surface-foreground: var(--foreground);
-  --surface-secondary: oklch(95% 0.0056 253.83);
-  --surface-secondary-foreground: var(--foreground);
-  --surface-tertiary: oklch(93.5% 0.0075 253.83);
-  --surface-tertiary-foreground: var(--foreground);
-  --overlay: oklch(97.5% 0.0037 253.83);
-  --overlay-foreground: var(--foreground);
-
-  --default: oklch(92% 0.0056 253.83);
-  --default-foreground: var(--eclipse);
-  --accent: oklch(62.04% 0.1951 253.83);
-  --accent-foreground: var(--snow);
-  --accent-hover: color-mix(in oklab, var(--accent) 90%, var(--snow) 10%);
-  --accent-soft: color-mix(in oklab, var(--accent) 15%, transparent);
-
-  --success: oklch(73.29% 0.1935 150.81);
-  --success-foreground: var(--eclipse);
-  --warning: oklch(78.19% 0.1585 72.33);
-  --warning-foreground: var(--eclipse);
-  --danger: oklch(65.32% 0.2328 25.74);
-  --danger-foreground: var(--snow);
-
-  /* Reasoning-effort intensity ramp: gray → teal → green → blue → amber → violet */
-  --effort-none: #8E959D;
-  --effort-minimal: #0FA9A0;
-  --effort-low: var(--success);
-  --effort-medium: var(--accent);
-  --effort-high: var(--warning);
-  --effort-xhigh: #7C5CFC;
-  --effort-xhigh-alt: #C14DF3;
-
-  --field-background: oklch(97% 0.0028 253.83);
-  --field-background-hover: var(--field-hover);
-  --field-foreground: var(--foreground);
-  --field-placeholder: var(--muted);
-  --field-border: oklch(88% 0.0093 253.83);
-
-  --segment: var(--white);
-  --segment-foreground: var(--foreground);
-  --border: oklch(88% 0.007 253.83);
-  --separator: oklch(92% 0.0047 253.83);
-  --focus: var(--accent);
-  --link: var(--foreground);
-  --backdrop: oklch(50% 0.0187 253.83 / 0.4);
-  --scrollbar-thumb: oklch(82% 0.0093 253.83);
-  --scrollbar: var(--scrollbar-thumb);
-
-  --chart-1: oklch(42% 0.14 253.83);
-  --chart-2: oklch(50% 0.16 253.83);
-  --chart-3: oklch(55% 0.18 253.83);
-  --chart-4: oklch(65% 0.14 253.83);
-  --chart-5: oklch(75% 0.1 253.83);
-
-  --surface-shadow: 0 0 5px 0 rgba(0, 0, 0, 0.02),
-    0 2px 10px 0 rgba(0, 0, 0, 0.06), 0 0 1px 0 rgba(0, 0, 0, 0.2);
-  --overlay-shadow: 0 24px 40px -12px rgb(0 0 0 / 0.08),
-    0 16px 28px -8px rgb(0 0 0 / 0.04), 0 4px 6px -2px rgb(0 0 0 / 0.04),
-    0 0 2px 0 rgb(0 0 0 / 0.04), 0 0 0 1px rgb(0 0 0 / 0.04);
-  --field-shadow: inset 0 0 2px 0 rgba(0, 0, 0, 0.04),
-    inset 0 0 4px 0 rgba(0, 0, 0, 0.03), inset 0 0 2px 0 rgba(0, 0, 0, 0.03);
-  --mouve-raised-shadow: 0 1px 2px -0.5px #ffffff1f inset, 0 0.5px 0.5px #ffffff29 inset,
-    0 8px 24px -4px #ffffff29 inset, 0 8px 8px -3px #00000008, 0 5px 5px -2.5px #00000008,
-    0 3px 3px -1.5px #00000008, 0 2px 2px -1px #00000008, 0 1px 1px -0.5px #00000008,
-    0 0.5px 0.5px #00000008;
-  --mouve-accent-fill-shadow: 0 1px 2px -0.5px #ffffff1f inset, 0 0.5px 0.5px #ffffff29 inset,
-    0 8px 24px -4px #ffffff29 inset;
-  --mouve-pressed-shadow: inset 0 1px 2px 0 #00000014, inset 0 0 4px 0 #0000000f,
-    inset 0 1px 1px 0 #0000000d;
+/* App tokens. Reasoning effort is a ramp of its own (gray → teal → green →
+   accent → amber → violet); text-accent is the link / selected-text blue. */
+:root {
+  --color-text-accent: var(--color-accent-600);
+  --color-effort-none: var(--color-neutral-400);
+  --color-effort-minimal: var(--color-teal-500);
+  --color-effort-low: var(--color-green-500);
+  --color-effort-medium: var(--color-accent-500);
+  --color-effort-high: var(--color-amber-500);
+  --color-effort-xhigh: var(--color-violet-500);
+  --color-effort-xhigh-alt: var(--color-fuchsia-500);
 }
 
-.dark,
-[data-theme="dark"] {
-  color-scheme: dark;
-
-  --background: oklch(16% 0.0093 253.83);
-  --foreground: var(--snow);
-  --muted: oklch(65% 0.0093 253.83);
-
-  --surface: oklch(20% 0.0093 253.83);
-  --surface-secondary: oklch(24% 0.0093 253.83);
-  --surface-tertiary: oklch(27% 0.0093 253.83);
-  --overlay: oklch(20% 0.0093 253.83);
-
-  --default: oklch(26% 0.0093 253.83);
-  --default-foreground: var(--snow);
-  --accent: oklch(62.04% 0.1951 253.83);
-  --accent-foreground: var(--snow);
-  --accent-hover: color-mix(in oklab, var(--accent) 90%, var(--snow) 10%);
-  --accent-soft: color-mix(in oklab, var(--accent) 15%, transparent);
-
-  --success-foreground: oklch(20% 0.0093 253.83);
-  --warning: oklch(82.03% 0.1388 76.34);
-  --warning-foreground: oklch(20% 0.0093 253.83);
-  --danger: oklch(59.4% 0.1967 24.63);
-
-  /* Reasoning-effort intensity ramp, brightened for dark surfaces */
-  --effort-none: #8B9095;
-  --effort-minimal: #2DD4BF;
-  --effort-xhigh: #9D7BFF;
-  --effort-xhigh-alt: #D075F5;
-
-  --field-background: oklch(22% 0.0084 253.83);
-  --field-border: oklch(32% 0.0117 253.83);
-
-  --segment: oklch(28% 0.0117 253.83);
-  --border: oklch(30% 0.0093 253.83);
-  --separator: oklch(28% 0.0084 253.83);
-  --backdrop: oklch(0% 0 0 / 0.5);
-  --scrollbar-thumb: oklch(35% 0.0093 253.83);
-
-  --chart-1: oklch(50% 0.12 253.83);
-  --chart-2: oklch(60% 0.14 253.83);
-  --chart-3: oklch(70% 0.16 253.83);
-  --chart-4: oklch(78% 0.12 253.83);
-  --chart-5: oklch(85% 0.08 253.83);
-
-  --surface-shadow: inset 0 1px 0 0 #ffffff0a, inset 0 0 0 1px #ffffff0a,
-    0 0 0 1px #00000029, 0 1px 1px -0.5px #0000002e, 0 3px 3px -1.5px #0000002e,
-    0 6px 6px -3px #0000002e, 0 12px 12px -6px #0000002e;
-  --overlay-shadow: 0 1px 3px rgba(255, 255, 255, 0.04) inset,
-    0 0.5px 0.5px rgba(255, 255, 255, 0.04) inset,
-    0 16px 56px rgba(0, 0, 0, 0.24), 0 4px 16px rgba(0, 0, 0, 0.24),
-    0 1px 2px rgba(0, 0, 0, 0.24), 0 0 0 1px rgba(0, 0, 0, 0.1);
-  --field-shadow: inset 0 1px 1px 0 rgba(255, 255, 255, 0.02),
-    inset 0 -0.5px 1px 0 rgba(255, 255, 255, 0.06),
-    inset 1px 1.5px 4px 0 rgba(0, 0, 0, 0.06),
-    inset 1px 1.5px 4px 0 rgba(0, 0, 0, 0.08);
-  --mouve-raised-shadow: inset 0 1px 0 0 #fff3, inset 0 1px 2px -0.5px #ffffff24,
-    inset 0 8px 24px -4px #ffffff1a, 0 0 0 1px #0006, 0 1px 1px -0.5px #0000004d,
-    0 3px 3px -1.5px #0000004d, 0 6px 6px -3px #0000004d, 0 12px 12px -6px #0000004d;
-  --mouve-accent-fill-shadow: inset 0 1px 0 0 #fff3, inset 0 1px 2px -0.5px #ffffff24,
-    inset 0 8px 24px -4px #ffffff1a;
-  --mouve-pressed-shadow: inset 0 1px 2px 0 #ffffff0d, inset 0 1px 1px 0 #ffffff1a;
+.dark {
+  --color-text-accent: var(--color-accent-400);
+  --color-effort-none: var(--color-neutral-500);
+  --color-effort-minimal: var(--color-teal-400);
+  --color-effort-low: var(--color-green-400);
+  --color-effort-medium: var(--color-accent-400);
+  --color-effort-high: var(--color-amber-400);
+  --color-effort-xhigh: var(--color-violet-400);
+  --color-effort-xhigh-alt: var(--color-fuchsia-400);
 }
 
-/* Bold text setting (lib/appearance.ts): every weight steps up one level. */
+@theme inline {
+  --color-text-accent: var(--color-text-accent);
+  --color-effort-none: var(--color-effort-none);
+  --color-effort-minimal: var(--color-effort-minimal);
+  --color-effort-low: var(--color-effort-low);
+  --color-effort-medium: var(--color-effort-medium);
+  --color-effort-high: var(--color-effort-high);
+  --color-effort-xhigh: var(--color-effort-xhigh);
+  --color-effort-xhigh-alt: var(--color-effort-xhigh-alt);
+}
+
+/* Bold text setting (lib/appearance.ts): every weight steps up one level,
+   for the composite type utilities and the plain font-* utilities alike. */
 :root[data-bold-text='true'] {
   --font-weight-normal: 500;
   --font-weight-medium: 600;
   --font-weight-semibold: 700;
   --font-weight-bold: 800;
+  --text-large-title-regular--font-weight: 500;
+  --text-large-title-medium--font-weight: 600;
+  --text-large-title-semibold--font-weight: 700;
+  --text-large-title-bold--font-weight: 800;
+  --text-display-1-regular--font-weight: 500;
+  --text-display-1-medium--font-weight: 600;
+  --text-display-1-semibold--font-weight: 700;
+  --text-display-1-bold--font-weight: 800;
+  --text-display-2-regular--font-weight: 500;
+  --text-display-2-medium--font-weight: 600;
+  --text-display-2-semibold--font-weight: 700;
+  --text-display-2-bold--font-weight: 800;
+  --text-display-3-regular--font-weight: 500;
+  --text-display-3-medium--font-weight: 600;
+  --text-display-3-semibold--font-weight: 700;
+  --text-display-3-bold--font-weight: 800;
+  --text-display-4-regular--font-weight: 500;
+  --text-display-4-medium--font-weight: 600;
+  --text-display-4-semibold--font-weight: 700;
+  --text-display-4-bold--font-weight: 800;
+  --text-title-1-regular--font-weight: 500;
+  --text-title-1-medium--font-weight: 600;
+  --text-title-1-semibold--font-weight: 700;
+  --text-title-1-bold--font-weight: 800;
+  --text-title-2-regular--font-weight: 500;
+  --text-title-2-medium--font-weight: 600;
+  --text-title-2-semibold--font-weight: 700;
+  --text-title-2-bold--font-weight: 800;
+  --text-title-3-regular--font-weight: 500;
+  --text-title-3-medium--font-weight: 600;
+  --text-title-3-semibold--font-weight: 700;
+  --text-title-3-bold--font-weight: 800;
+  --text-headline-regular--font-weight: 500;
+  --text-headline-medium--font-weight: 600;
+  --text-headline-semibold--font-weight: 700;
+  --text-headline-bold--font-weight: 800;
+  --text-body-regular--font-weight: 500;
+  --text-body-medium--font-weight: 600;
+  --text-body-semibold--font-weight: 700;
+  --text-body-bold--font-weight: 800;
+  --text-body-2-regular--font-weight: 500;
+  --text-body-2-medium--font-weight: 600;
+  --text-body-2-semibold--font-weight: 700;
+  --text-body-2-bold--font-weight: 800;
+  --text-caption-1-regular--font-weight: 500;
+  --text-caption-1-medium--font-weight: 600;
+  --text-caption-1-semibold--font-weight: 700;
+  --text-caption-1-bold--font-weight: 800;
+  --text-caption-2-regular--font-weight: 500;
+  --text-caption-2-medium--font-weight: 600;
+  --text-caption-2-semibold--font-weight: 700;
+  --text-caption-2-bold--font-weight: 800;
 }
 
 :root[data-bold-text='true'] body {
@@ -209,258 +129,171 @@ body,
 
 body {
   overflow: hidden;
+  font-family: var(--font-sans);
 }
 
-[data-slot="app-layout"],
-[data-slot="app-layout"] > * {
-  min-height: 0;
+/* Thin, token-colored scrollbars everywhere. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border-button-hover) transparent;
 }
 
-/* Inside dialogs, default surfaces step down one level so grouped
-   sections stay distinct from the overlay background. */
-.modal__dialog .surface--default,
-.modal__dialog .card--default {
-  background-color: var(--surface-secondary);
+.xterm,
+.xterm .xterm-viewport,
+.xterm .xterm-screen {
+  background-color: var(--color-background-secondary-default) !important;
 }
 
-/* Agent output can contain long unbroken tokens (URLs, request ids); they
-   must wrap inside the chat column instead of overflowing it. */
+/* Hidden title bar (macOS): the window controls overlay the page, so the
+   top strips are drag regions while their controls stay clickable. */
+:root[data-window-chrome='hidden-inset'] .window-drag {
+  -webkit-app-region: drag;
+}
+
+:root[data-window-chrome='hidden-inset'] .window-drag :is(button, a, input, select, textarea, [role='button'], [role='combobox'], [role='listbox'], [role='menu'], [role='tab'], [role='separator']),
+:root[data-window-chrome='hidden-inset'] .window-no-drag {
+  -webkit-app-region: no-drag;
+}
+
+/* The conversation / right panel split animates only around programmatic
+   open/close ([data-panel-motion], set by App), so drags stay instant. */
+[data-panel-motion='true'] [data-panel]:is(#app-layout-aside, #app-layout-main) {
+  transition: flex-grow 0.24s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-panel-motion='true'] [data-panel]:is(#app-layout-aside, #app-layout-main) {
+    transition: none;
+  }
+}
+
+@keyframes progress-indeterminate {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(300%); }
+}
+
+/* ---------------------------------------------------------------- Markdown
+ * Prose for agent replies and file previews (components/ui/markdown.tsx).
+ * Every top-level block renders in its own .markdown-block, so spacing sits
+ * between non-empty blocks, with more room above headings. */
 .markdown {
+  @apply w-full text-body-regular text-text-primary;
+  line-height: 1.7;
   overflow-wrap: break-word;
 }
 
-/* Streamdown wraps every block in its own .markdown__block, so the Pro
-   markdown's sibling margins (p:last-child, h3:first-child) all collapse to
-   zero. Space the non-empty blocks instead, with more room above headings. */
-.markdown > .markdown__block:has(> *) ~ .markdown__block:has(> *) {
+.markdown > .markdown-block:has(> *) ~ .markdown-block:has(> *) {
   margin-top: calc(var(--spacing) * 3);
 }
 
-.markdown > .markdown__block:has(> *) ~ .markdown__block:has(> :is(h1, h2, h3, h4):first-child) {
+.markdown > .markdown-block:has(> *) ~ .markdown-block:has(> :is(h1, h2, h3, h4):first-child) {
   margin-top: calc(var(--spacing) * 5);
 }
 
-/* Toasts carry raw provider errors with long unbroken tokens (request ids);
-   the flex column must be allowed to shrink and wrap, and the shrink-to-fit
-   region must stay inside the viewport. */
-.toast-region {
-  max-width: calc(100vw - 2rem);
+.markdown p + p {
+  margin-top: calc(var(--spacing) * 3);
 }
 
-.toast__content {
-  min-width: 0;
-  overflow-wrap: anywhere;
+.markdown :is(h1, h2, h3, h4) {
+  @apply text-text-primary;
 }
 
-.composer-toolbar {
-  container-type: inline-size;
-  gap: 0.5rem;
+.markdown h1 { @apply text-title-2-semibold; }
+.markdown h2 { @apply text-title-3-semibold; }
+.markdown :is(h3, h4) { @apply text-headline-semibold; }
+
+.markdown strong { @apply font-semibold text-text-primary; }
+
+.markdown a {
+  @apply text-text-accent underline underline-offset-2 transition-colors duration-150;
 }
 
-.composer-editor {
-  position: relative;
-  max-height: 240px;
-  overflow-y: auto;
-  cursor: text;
-  word-break: break-word;
-  caret-color: var(--foreground);
+.markdown :is(ul, ol) {
+  @apply flex flex-col gap-1 ps-5;
 }
 
+.markdown ul { list-style-type: disc; }
+.markdown ol { list-style-type: decimal; }
+.markdown li::marker { color: var(--color-text-tertiary); }
+.markdown li > :is(ul, ol) { margin-top: calc(var(--spacing) * 1); }
+
+.markdown blockquote {
+  @apply border-s-2 border-border-button-default ps-4 text-text-secondary;
+}
+
+.markdown hr {
+  @apply my-4 border-separator-border;
+}
+
+.markdown table {
+  @apply w-full border-collapse text-body-regular;
+}
+
+.markdown :is(th, td) {
+  @apply border border-border-table px-3 py-2 text-start;
+}
+
+.markdown th {
+  @apply bg-background-secondary-default text-body-medium;
+}
+
+.markdown-inline-code {
+  @apply rounded-md bg-background-tertiary-default px-1.5 py-0.5 font-mono text-text-primary;
+  font-size: 0.875em;
+}
+
+/* Shiki renders both themes into CSS variables (components/ui/code-block). */
+.code-block-code pre {
+  margin: 0;
+  padding: calc(var(--spacing) * 2) calc(var(--spacing) * 3) calc(var(--spacing) * 3);
+  background: transparent !important;
+}
+
+.code-block-code .shiki,
+.code-block-code .shiki span {
+  color: var(--shiki-light, var(--color-text-primary));
+}
+
+.dark .code-block-code .shiki,
+.dark .code-block-code .shiki span {
+  color: var(--shiki-dark, var(--color-text-primary));
+}
+
+/* ------------------------------------------------------- App components */
+/* The composer editor is a contentEditable (ReferenceComposer); its empty
+   state draws the placeholder. The rest of its styling is in utilities. */
 .composer-editor[data-empty='true']::after {
   content: attr(data-placeholder);
   position: absolute;
-  inset-block-start: calc(var(--spacing, 0.25rem) * 3);
-  inset-inline: calc(var(--spacing, 0.25rem) * 3);
-  color: var(--field-placeholder, var(--muted));
+  inset-block-start: 0;
+  inset-inline: 0;
+  color: var(--color-text-tertiary);
   pointer-events: none;
-}
-
-.composer-ref {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 0.3rem;
-  max-width: 20rem;
-  margin-inline: 0.0625rem;
-  padding-block: 0.0625rem;
-  padding-inline: 0.5rem;
-  border-radius: 999px;
-  background: var(--surface-tertiary);
-  color: var(--surface-tertiary-foreground, var(--foreground));
-  font-weight: 500;
-  vertical-align: baseline;
-  user-select: none;
-}
-
-.composer-ref__icon {
-  align-self: center;
-  width: 0.9em;
-  height: 0.9em;
-  flex: none;
-  color: var(--accent);
-}
-
-/* A quote is an excerpt of the conversation, so it keeps the accent fill. */
-.composer-ref--reference {
-  background: var(--accent-soft, color-mix(in oklab, var(--accent) 14%, transparent));
-  color: var(--accent);
-}
-
-.composer-ref--reference .composer-ref__icon {
-  color: currentColor;
-  opacity: 0.8;
-}
-
-.composer-ref__label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.composer-ref__remove {
-  cursor: pointer;
-  opacity: 0.55;
-  margin-inline-start: 0.125rem;
-}
-
-.composer-ref__remove:hover {
-  opacity: 1;
-}
-
-.connection-select {
-  width: 100%;
-}
-
-.connection-select__trigger {
-  min-height: 2rem;
-  width: 100%;
-}
-
-.connection-select__trigger [data-slot="select-value"] {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.connection-select__trigger [data-sidebar="label"] {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.command-suggestions {
-  border: 1px solid var(--separator);
-  border-radius: 0.5rem;
-  padding: 0.25rem;
-  background: var(--surface);
-}
-
-.composer-container {
-  position: relative;
-}
-
-.composer-suggestions-popover {
-  position: absolute;
-  right: 0;
-  bottom: calc(100% + 0.5rem);
-  left: 0;
-  z-index: 30;
-  max-height: 18rem;
-  overflow-y: auto;
-  border: 1px solid var(--separator);
-  border-radius: 0.65rem;
-  padding: 0.35rem;
-  background: var(--surface);
-  box-shadow: var(--overlay-shadow);
-}
-
-.composer-suggestion-item {
-  display: grid;
-  grid-template-columns: minmax(7rem, auto) minmax(0, 1fr);
-  align-items: center;
-  gap: 0.75rem;
-  min-height: 2.5rem;
-  border-radius: 0.4rem;
-  padding: 0.45rem 0.65rem;
-  cursor: pointer;
-}
-
-.composer-suggestion-item--active {
-  background: var(--surface-secondary);
-}
-
-.composer-suggestion-item:hover,
-.composer-suggestion-item[data-focused="true"] {
-  background: var(--surface-secondary);
-}
-
-.composer-suggestion-command {
-  color: var(--foreground);
-  font-size: 0.875rem;
-  font-weight: 600;
-}
-
-.composer-suggestion-description {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--muted);
-  font-size: 0.75rem;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .connection-create-button {
   min-height: 2.25rem;
 }
 
-.context-menu-item {
-  display: block;
-  width: 100%;
-  border-radius: 0.375rem;
-  padding: 0.4rem 0.6rem;
-  text-align: left;
-  font-size: 0.75rem;
+/* Composer controls (components/chat/ComposerControls) rest as icon-only
+   pills and expand to reveal their label on hover, keyboard focus, or while
+   their menu is open. The expansion only applies while the toolbar is wider
+   than 34rem; below that every control stays icon-only. */
+.composer-toolbar {
+  container-type: inline-size;
 }
 
-.context-menu-item:hover,
-.context-menu-item:focus-visible {
-  background: var(--surface-secondary);
-  outline: none;
-}
-
-/* Composer controls rest as icon-only pills and expand to reveal their label
-   on hover, keyboard focus, or while their popover is open — the same motion
-   as .expandable-action-btn. The expansion only applies while the toolbar is
-   wider than 34rem; below that every control stays icon-only. */
 .composer-control {
   --composer-control-ease: cubic-bezier(0.16, 1, 0.3, 1);
-  flex: none;
-  min-width: 2.25rem;
-}
-
-.composer-control__trigger,
-.composer-control__static,
-.composer-model-control__trigger {
   display: inline-flex;
+  flex: none;
   align-items: center;
-  justify-content: flex-start;
-  width: auto;
   min-width: 2.25rem;
   height: 2.25rem;
-  min-height: 2.25rem;
   padding: 0;
-  gap: 0;
   overflow: hidden;
   transition: background-color 0.15s ease,
               padding-inline-end 0.22s var(--composer-control-ease);
-}
-
-.composer-control__trigger [data-slot="select-value"] {
-  display: flex;
-  align-items: center;
-  min-width: 0;
-  gap: 0;
 }
 
 /* The inline margins center the icon in the 2.25rem pill. */
@@ -472,12 +305,9 @@ body {
   transition: margin-inline-end 0.22s var(--composer-control-ease);
 }
 
-.composer-model-control__trigger[data-effort] .composer-control__icon {
-  color: var(--effort-color);
-}
-
 .composer-control__text,
-.composer-control__effort {
+.composer-control__effort,
+.composer-control__indicator {
   max-width: 0;
   opacity: 0;
   overflow: hidden;
@@ -492,35 +322,26 @@ body {
   text-overflow: ellipsis;
 }
 
-.composer-control__effort {
-  display: inline-flex;
-  align-items: center;
+.composer-control__effort,
+.composer-control__indicator {
   flex-shrink: 0;
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: var(--effort-color, var(--accent));
 }
 
 .composer-control__indicator {
-  opacity: 0;
+  width: 1rem;
+  height: 1rem;
 }
 
 @container (width > 34rem) {
-  .composer-control:is(:hover, :focus-visible, [data-focus-visible="true"], [aria-expanded="true"], :has(:focus-visible, [data-focus-visible="true"], [aria-expanded="true"])) :is(.composer-control__trigger, .composer-control__static),
-  .composer-model-control__trigger:is(:hover, :focus-visible, [data-focus-visible="true"], [aria-expanded="true"]) {
-    padding-inline-end: 0.75rem;
+  .composer-control:is(:hover, [data-focus-visible], [aria-expanded='true']):not([data-disabled]) {
+    padding-inline-end: 0.625rem;
   }
 
-  /* Leave room for the select's absolutely positioned chevron. */
-  .composer-control:is(:hover, :focus-visible, [data-focus-visible="true"], [aria-expanded="true"], :has(:focus-visible, [data-focus-visible="true"], [aria-expanded="true"])) .composer-control__trigger:has(.composer-control__indicator) {
-    padding-inline-end: 1.75rem;
-  }
-
-  .composer-control:is(:hover, :focus-visible, [data-focus-visible="true"], [aria-expanded="true"], :has(:focus-visible, [data-focus-visible="true"], [aria-expanded="true"])) .composer-control__icon {
+  .composer-control:is(:hover, [data-focus-visible], [aria-expanded='true']):not([data-disabled]) .composer-control__icon {
     margin-inline-end: 0.375rem;
   }
 
-  .composer-control:is(:hover, :focus-visible, [data-focus-visible="true"], [aria-expanded="true"], :has(:focus-visible, [data-focus-visible="true"], [aria-expanded="true"])) :is(.composer-control__text, .composer-control__effort) {
+  .composer-control:is(:hover, [data-focus-visible], [aria-expanded='true']):not([data-disabled]) :is(.composer-control__text, .composer-control__effort) {
     max-width: 7rem;
     opacity: 1;
     transition: max-width 0.22s var(--composer-control-ease),
@@ -528,359 +349,71 @@ body {
                 margin-inline-start 0.22s var(--composer-control-ease);
   }
 
-  .composer-model-control__trigger:is(:hover, :focus-visible, [data-focus-visible="true"], [aria-expanded="true"]) .composer-control__text {
+  .composer-control:is(:hover, [data-focus-visible], [aria-expanded='true']):not([data-disabled]) .composer-control__indicator {
+    max-width: 1rem;
+    opacity: 1;
+    margin-inline-start: 0.125rem;
+  }
+
+  .composer-model-control__trigger:is(:hover, [data-focus-visible], [aria-expanded='true']):not([data-disabled]) .composer-control__text {
     max-width: 10rem;
   }
 
-  .composer-model-control__trigger:is(:hover, :focus-visible, [data-focus-visible="true"], [aria-expanded="true"]) .composer-control__effort {
+  .composer-model-control__trigger:is(:hover, [data-focus-visible], [aria-expanded='true']):not([data-disabled]) .composer-control__effort {
     margin-inline-start: 0.35rem;
-  }
-
-  .composer-control:is(:hover, :focus-visible, [data-focus-visible="true"], [aria-expanded="true"], :has(:focus-visible, [data-focus-visible="true"], [aria-expanded="true"])) .composer-control__indicator {
-    opacity: 1;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .composer-control__trigger,
-  .composer-control__static,
-  .composer-model-control__trigger,
+  .composer-control,
   .composer-control__icon,
   .composer-control__text,
-  .composer-control__effort {
+  .composer-control__effort,
+  .composer-control__indicator {
     transition: none !important;
   }
 }
 
-.composer-model-popover {
-  width: min(20.5rem, calc(100vw - 2rem));
-  border: 1px solid var(--separator);
-  border-radius: 1.25rem;
-  background: var(--overlay);
-  box-shadow: var(--overlay-shadow);
-  overflow: hidden;
-  padding: 0;
-}
-
-.composer-model-popover__dialog {
-  display: block;
-  padding: 0;
-  outline: none;
-}
-
+/* Reasoning effort → color, for the model card's slider and the composer's
+   model trigger. Components read it as var(--effort-color). */
 .composer-model-card {
-  display: flex;
-  flex-direction: column;
-  gap: 0.85rem;
-  padding: 0.95rem 1.15rem 1.05rem;
+  --effort-color: var(--color-accent-500);
 }
 
-.composer-model-card__header {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 1.85rem;
+:is(.composer-model-card, .composer-model-control__trigger)[data-effort='none'] {
+  --effort-color: var(--color-effort-none);
 }
 
-.composer-model-card__fast-wrapper {
-  position: absolute;
-  left: 0;
-  top: 50%;
-  transform: translateY(-50%);
-  display: flex;
-  align-items: center;
-  z-index: 1;
+:is(.composer-model-card, .composer-model-control__trigger)[data-effort='minimal'] {
+  --effort-color: var(--color-effort-minimal);
 }
 
-.composer-model-card__fast-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.85rem;
-  height: 1.85rem;
-  border-radius: 0.5rem;
-  border: 0;
-  background: transparent;
-  color: var(--muted);
-  cursor: pointer;
-  transition: all 0.15s ease;
+:is(.composer-model-card, .composer-model-control__trigger)[data-effort='low'] {
+  --effort-color: var(--color-effort-low);
 }
 
-.composer-model-card__fast-btn:hover:not(.is-disabled) {
-  color: var(--foreground);
-  background: var(--surface-secondary);
+:is(.composer-model-card, .composer-model-control__trigger)[data-effort='medium'] {
+  --effort-color: var(--color-effort-medium);
 }
 
-.composer-model-card__fast-btn.is-active {
-  color: var(--accent);
-  background: color-mix(in oklab, var(--accent) 14%, var(--surface-secondary));
+:is(.composer-model-card, .composer-model-control__trigger)[data-effort='high'] {
+  --effort-color: var(--color-effort-high);
 }
 
-.composer-model-card__fast-btn.is-disabled {
-  cursor: default;
-  opacity: 0.6;
+:is(.composer-model-card, .composer-model-control__trigger):is([data-effort='xhigh'], [data-effort='max'], [data-effort='ultra'], [data-effort='ultracode']) {
+  --effort-color: var(--color-effort-xhigh);
 }
 
-.composer-model-card__select {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 0;
-  max-width: 100%;
-  margin-inline: auto;
-}
-
-.composer-model-card:has(.composer-model-card__fast-wrapper) .composer-model-card__select {
-  max-width: calc(100% - 4rem);
-}
-
-.composer-model-card__trigger {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.35rem;
-  border: 0 !important;
-  background: transparent !important;
-  box-shadow: none !important;
-  padding: 0.25rem 0.5rem !important;
-  margin: 0 !important;
-  border-radius: 0.5rem;
-  min-height: unset !important;
-  min-width: 0;
-  max-width: 100%;
-  cursor: pointer;
-  transition: opacity 0.15s ease, background 0.15s ease;
-}
-
-.composer-model-card__trigger:hover {
-  opacity: 0.85;
-  background: var(--surface-secondary) !important;
-}
-
-.composer-model-card__value {
-  display: inline-flex;
-  align-items: baseline;
-  justify-content: center;
-  gap: 0.4rem;
-  min-width: 0;
-}
-
-.composer-model-card__model-title {
-  font-size: 0.975rem;
-  font-weight: 600;
-  color: var(--foreground);
-  letter-spacing: -0.015em;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.composer-model-card__effort-badge {
-  font-size: 0.975rem;
-  font-weight: 600;
-  color: var(--effort-color, var(--accent));
-  letter-spacing: -0.015em;
-  white-space: nowrap;
-}
-
-.composer-model-card__chevron {
-  width: 0.95rem;
-  height: 0.95rem;
-  color: var(--muted);
-  flex-shrink: 0;
-  transition: transform 0.15s ease;
-}
-
-.composer-model-card__trigger[data-pressed="true"] .composer-model-card__chevron,
-.composer-model-card__trigger[data-focus-visible="true"] .composer-model-card__chevron {
-  transform: translateX(1px);
-}
-
-.composer-model-card__dropdown {
-  display: flex;
-  flex-direction: column;
-  width: 24rem;
-  min-width: min(13rem, calc(100vw - 2rem));
-  max-width: calc(100vw - 2rem);
-  overflow: hidden;
-  border: 1px solid var(--separator);
-  border-radius: 0.75rem;
-  background: var(--surface);
-  box-shadow: var(--overlay-shadow);
-  padding: 0.35rem;
-}
-
-.composer-model-card__search {
-  flex-shrink: 0;
-  padding: 0.25rem 0.25rem 0.55rem;
-  margin-bottom: 0.25rem;
-  border-bottom: 1px solid var(--separator);
-}
-
-.composer-model-card__empty {
-  padding: 1.25rem 0.65rem;
-  font-size: 0.85rem;
-  color: var(--muted);
-  text-align: center;
-}
-
-.composer-model-card__option-name {
-  min-width: 0;
-  white-space: normal;
-  overflow-wrap: anywhere;
-}
-
-.composer-model-card__option-detail {
-  margin-left: 0.45rem;
-  font-size: 0.78rem;
-  font-weight: 400;
-  color: var(--muted);
-}
-
-.composer-model-card__menu-scope {
-  display: contents;
-}
-
-.composer-model-card__split {
-  display: flex;
-  flex: 1;
-  min-height: 0;
-}
-
-.composer-model-card__families {
-  flex: 0 0 9.5rem;
-  border-inline-end: 1px solid var(--separator);
-  margin-inline-end: 0.15rem;
-  padding-inline-end: 0.15rem;
-}
-
-.composer-model-card__versions {
-  flex: 1;
-  min-width: 0;
-}
-
-.composer-model-card__list-item.is-active {
-  background: var(--surface-secondary);
-}
-
-.composer-model-card__option-chevron {
-  margin-left: auto;
-  width: 0.9rem;
-  height: 0.9rem;
-  flex-shrink: 0;
-  color: var(--muted);
-}
-
-.composer-model-card__listbox {
-  outline: none;
-  flex: 1;
-  min-height: 0;
-  max-height: 14rem;
-  overflow-y: auto;
-}
-
-.composer-model-card__list-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  /* The listbox is a column flex container; without this, overflowing items
-     shrink to min-height and their wrapped text overlaps adjacent rows. */
-  flex-shrink: 0;
-  padding: 0.45rem 0.65rem;
-  font-size: 0.85rem;
-  font-weight: 500;
-  border-radius: 0.45rem;
-  cursor: pointer;
-  color: var(--foreground);
-  outline: none;
-  transition: background 0.12s ease;
-}
-
-.composer-model-card__list-item:hover,
-.composer-model-card__list-item[data-focused="true"] {
-  background: var(--surface-secondary);
-}
-
-.composer-model-card__list-item[data-selected="true"] {
-  color: var(--accent);
-  font-weight: 600;
-}
-
-/* Effort level → color mapping for the card and the composer trigger */
-.composer-model-card[data-effort='none'],
-.composer-model-control__trigger[data-effort='none'] {
-  --effort-color: var(--effort-none);
-}
-.composer-model-card[data-effort='minimal'],
-.composer-model-control__trigger[data-effort='minimal'] {
-  --effort-color: var(--effort-minimal);
-}
-.composer-model-card[data-effort='low'],
-.composer-model-control__trigger[data-effort='low'] {
-  --effort-color: var(--effort-low);
-}
-.composer-model-card[data-effort='medium'],
-.composer-model-control__trigger[data-effort='medium'] {
-  --effort-color: var(--effort-medium);
-}
-.composer-model-card[data-effort='high'],
-.composer-model-control__trigger[data-effort='high'] {
-  --effort-color: var(--effort-high);
-}
-.composer-model-card[data-effort='xhigh'],
-.composer-model-card[data-effort='max'],
-.composer-model-card[data-effort='ultra'],
-.composer-model-card[data-effort='ultracode'],
-.composer-model-control__trigger[data-effort='xhigh'],
-.composer-model-control__trigger[data-effort='max'],
-.composer-model-control__trigger[data-effort='ultra'],
-.composer-model-control__trigger[data-effort='ultracode'] {
-  --effort-color: var(--effort-xhigh);
-}
-
-/* Stepped Slider Track */
-.composer-model-card__track {
-  position: relative;
-  width: 100%;
-  height: 1.625rem; /* ~26px */
-  border-radius: 9999px;
-  background: var(--surface-tertiary);
-  cursor: pointer;
-  user-select: none;
-  touch-action: none;
-  outline: none;
-}
-
-.composer-model-card__track:focus-visible {
-  box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--effort-color, var(--accent));
-}
-
-/* Fill tinted by the current effort level */
-.composer-model-card__fill {
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  background: var(--effort-color, var(--accent));
-  pointer-events: none;
-  transition: width 0.18s cubic-bezier(0.16, 1, 0.3, 1), background 0.18s ease, box-shadow 0.18s ease;
-}
-
-/* Top effort tiers get a flowing gradient and a soft glow */
-.composer-model-card[data-effort='xhigh'] .composer-model-card__fill,
-.composer-model-card[data-effort='max'] .composer-model-card__fill,
-.composer-model-card[data-effort='ultra'] .composer-model-card__fill,
-.composer-model-card[data-effort='ultracode'] .composer-model-card__fill {
+/* Top effort tiers: the slider fill flows with a gradient and a soft glow. */
+.composer-model-card:is([data-effort='xhigh'], [data-effort='max'], [data-effort='ultra'], [data-effort='ultracode']) .composer-model-card__fill {
   background: linear-gradient(
     100deg,
-    var(--effort-xhigh) 0%,
-    var(--effort-xhigh-alt) 50%,
-    var(--effort-xhigh) 100%
+    var(--color-effort-xhigh) 0%,
+    var(--color-effort-xhigh-alt) 50%,
+    var(--color-effort-xhigh) 100%
   );
   background-size: 200% 100%;
-  box-shadow: 0 0 14px color-mix(in oklab, var(--effort-xhigh) 45%, transparent);
+  box-shadow: 0 0 14px color-mix(in oklab, var(--color-effort-xhigh) 45%, transparent);
   animation: composer-model-card__effort-flow 3.2s linear infinite;
 }
 
@@ -891,511 +424,10 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .composer-model-card[data-effort='xhigh'] .composer-model-card__fill,
-  .composer-model-card[data-effort='max'] .composer-model-card__fill,
-  .composer-model-card[data-effort='ultra'] .composer-model-card__fill,
-  .composer-model-card[data-effort='ultracode'] .composer-model-card__fill {
+  .composer-model-card:is([data-effort='xhigh'], [data-effort='max'], [data-effort='ultra'], [data-effort='ultracode']) .composer-model-card__fill {
     animation: none;
   }
-}
 
-.composer-model-card__track.is-dragging .composer-model-card__fill {
-  transition: none;
-}
-
-/* Stepped discrete marks */
-.composer-model-card__marks {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  z-index: 1;
-}
-
-.composer-model-card__dot {
-  position: absolute;
-  top: 50%;
-  width: 0.25rem; /* 4px */
-  height: 0.25rem;
-  border-radius: 50%;
-  transform: translate(-50%, -50%);
-  transition: background 0.15s ease;
-}
-
-.composer-model-card__dot.is-past {
-  background: color-mix(in oklab, var(--accent-foreground) 55%, transparent);
-}
-
-.composer-model-card__dot.is-future {
-  background: color-mix(in oklab, var(--foreground) 26%, transparent);
-}
-
-/* Tactile solid white thumb with a level-colored center pip */
-.composer-model-card__thumb {
-  position: absolute;
-  top: 50%;
-  width: 1.85rem; /* ~29.6px */
-  height: 1.85rem;
-  border-radius: 50%;
-  background: var(--white);
-  box-shadow: 0 2px 7px rgba(0, 0, 0, 0.18), 0 1px 2px rgba(0, 0, 0, 0.08);
-  transform: translate(-50%, -50%);
-  cursor: grab;
-  z-index: 2;
-  pointer-events: none;
-  transition: left 0.18s cubic-bezier(0.16, 1, 0.3, 1), transform 0.15s ease, box-shadow 0.15s ease;
-}
-
-.composer-model-card__thumb::after {
-  content: '';
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 0.375rem;
-  height: 0.375rem;
-  border-radius: 50%;
-  transform: translate(-50%, -50%);
-  background: var(--effort-color, var(--accent));
-  transition: background 0.18s ease;
-}
-
-.composer-model-card[data-effort='xhigh'] .composer-model-card__thumb,
-.composer-model-card[data-effort='max'] .composer-model-card__thumb,
-.composer-model-card[data-effort='ultra'] .composer-model-card__thumb,
-.composer-model-card[data-effort='ultracode'] .composer-model-card__thumb {
-  box-shadow: 0 2px 7px rgba(0, 0, 0, 0.18), 0 1px 2px rgba(0, 0, 0, 0.08),
-    0 0 12px color-mix(in oklab, var(--effort-xhigh) 50%, transparent);
-}
-
-.composer-model-card__track.is-dragging .composer-model-card__thumb {
-  transition: transform 0.15s ease;
-  cursor: grabbing;
-  transform: translate(-50%, -50%) scale(0.96);
-}
-
-.composer-model-card__track:hover .composer-model-card__thumb {
-  box-shadow: 0 3px 9px rgba(0, 0, 0, 0.22), 0 1px 3px rgba(0, 0, 0, 0.1);
-}
-
-.composer-model-card[data-effort='xhigh'] .composer-model-card__track:hover .composer-model-card__thumb,
-.composer-model-card[data-effort='max'] .composer-model-card__track:hover .composer-model-card__thumb,
-.composer-model-card[data-effort='ultra'] .composer-model-card__track:hover .composer-model-card__thumb,
-.composer-model-card[data-effort='ultracode'] .composer-model-card__track:hover .composer-model-card__thumb {
-  box-shadow: 0 3px 9px rgba(0, 0, 0, 0.22), 0 1px 3px rgba(0, 0, 0, 0.1),
-    0 0 14px color-mix(in oklab, var(--effort-xhigh) 60%, transparent);
-}
-
-.composer-model-card__no-effort {
-  padding: 0.35rem 0;
-  font-size: 0.75rem;
-  color: var(--muted);
-  text-align: center;
-}
-
-.context-usage-ring {
-  display: grid;
-  width: 1.25rem;
-  height: 1.25rem;
-  flex: none;
-  cursor: help;
-  place-items: center;
-  border: 0;
-  border-radius: 50%;
-  padding: 0;
-  transition: transform 0.15s ease, opacity 0.15s ease;
-}
-
-.context-usage-ring:hover {
-  transform: scale(1.08);
-}
-
-.context-usage-ring > span {
-  width: 0.85rem;
-  height: 0.85rem;
-  border-radius: 50%;
-  background: var(--field-background);
-}
-
-.context-usage-ring:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-
-/* Compact Workbench File Tree */
-.workbench-file-tree {
-  padding: 0 !important;
-  --file-tree-indent: 14px !important;
-  --file-tree-item-px: 2px !important;
-}
-
-.workbench-file-tree .file-tree__item {
-  padding-inline-start: 2px !important;
-  padding-inline-end: 4px !important;
-  border-radius: 0.375rem;
-}
-
-.workbench-file-tree .file-tree__chevron {
-  width: 1rem !important;
-  height: 1rem !important;
-  flex-shrink: 0;
-}
-
-.workbench-file-tree .file-tree__indicator {
-  width: 0.85rem !important;
-  height: 0.85rem !important;
-}
-
-.workbench-file-tree .file-tree__item-content {
-  gap: 0.25rem !important;
-}
-
-/* Sidebar rows match the nav buttons' height and share their leading edge.
-   ListView's content-list padding and row separators made rows taller than
-   the buttons, uneven (the backend dot inflated some), and hairline-divided. */
-.sidebar-chat-list .list-view__item {
-  border-radius: 0.5rem;
-  transition: background-color 0.15s ease, color 0.15s ease;
-  margin-block: 1px;
-  position: relative;
-  min-height: calc(var(--spacing) * 9);
-  padding-block: calc(var(--spacing) * 1.5);
-  padding-inline: calc(var(--spacing) * 3);
-  border-bottom-width: 0;
-}
-
-.sidebar-chat-list .list-view__item-content {
-  gap: calc(var(--spacing) * 2);
-}
-
-.sidebar:not([data-state='collapsed']) [data-slot='sidebar-header'] {
-  padding-inline: calc(var(--spacing) * 3);
-}
-
-.sidebar-chat-list .list-view__item[data-selected="true"],
-.sidebar-chat-list .list-view__item.is-selected {
-  background-color: color-mix(in oklab, var(--accent) 12%, var(--surface)) !important;
-}
-
-.dark .sidebar-chat-list .list-view__item[data-selected="true"],
-.dark .sidebar-chat-list .list-view__item.is-selected,
-[data-theme="dark"] .sidebar-chat-list .list-view__item[data-selected="true"],
-[data-theme="dark"] .sidebar-chat-list .list-view__item.is-selected {
-  background-color: color-mix(in oklab, var(--accent) 18%, var(--surface-secondary)) !important;
-}
-
-.sidebar-chat-list .list-view__item[data-selected="true"]::before,
-.sidebar-chat-list .list-view__item.is-selected::before {
-  content: '';
-  position: absolute;
-  left: 3px;
-  top: 18%;
-  bottom: 18%;
-  width: 3px;
-  border-radius: 9999px;
-  background-color: var(--accent);
-}
-
-.sidebar-chat-list .list-view__item[data-selected="true"] .chat-list-view__title,
-.sidebar-chat-list .list-view__item.is-selected .chat-list-view__title {
-  color: var(--accent) !important;
-  font-weight: 600 !important;
-}
-
-.sidebar-chat-list .list-view__item[data-selected="true"] .chat-list-view__icon,
-.sidebar-chat-list .list-view__item.is-selected .chat-list-view__icon {
-  color: var(--accent) !important;
-}
-
-
-.workbench-file-tree .file-tree__icon svg {
-  width: 0.95rem !important;
-  height: 0.95rem !important;
-  flex-shrink: 0;
-}
-
-.workbench-file-tree .file-tree__label {
-  padding-inline: 0.2rem !important;
-  font-size: 0.8125rem;
-}
-
-/* Expandable Action Button (icon by default, expands on hover to reveal label) */
-.expandable-action-btn {
-  height: 2rem !important;
-  min-height: 2rem !important;
-  padding: 0 !important;
-  gap: 0 !important;
-  overflow: hidden !important;
-  border-radius: 9999px !important;
-  justify-content: flex-start !important;
-  cursor: pointer;
-  transition: background-color 0.15s ease,
-              border-color 0.15s ease,
-              box-shadow 0.15s ease,
-              transform 0.12s ease !important;
-}
-
-.expandable-action-btn__icon {
-  display: inline-flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  width: 2rem !important;
-  height: 2rem !important;
-  min-width: 2rem !important;
-  flex-shrink: 0 !important;
-}
-
-.expandable-action-btn__icon svg {
-  margin: 0 !important;
-  width: 1rem !important;
-  height: 1rem !important;
-  flex-shrink: 0 !important;
-}
-
-.expandable-action-btn__label {
-  display: inline-flex !important;
-  align-items: center !important;
-  height: 2rem !important;
-  max-width: 0 !important;
-  opacity: 0 !important;
-  overflow: hidden !important;
-  white-space: nowrap !important;
-  font-size: 0.75rem !important;
-  font-weight: 500 !important;
-  line-height: 1 !important;
-  padding-right: 0 !important;
-  transition: max-width 0.22s cubic-bezier(0.16, 1, 0.3, 1),
-              opacity 0.14s ease-out,
-              padding-right 0.22s cubic-bezier(0.16, 1, 0.3, 1) !important;
-}
-
-.expandable-action-btn:hover .expandable-action-btn__label,
-.expandable-action-btn[data-hovered="true"] .expandable-action-btn__label,
-.expandable-action-btn:focus-visible .expandable-action-btn__label,
-.expandable-action-btn[data-focus-visible="true"] .expandable-action-btn__label {
-  max-width: 6rem !important;
-  opacity: 1 !important;
-  padding-right: 0.65rem !important;
-  transition: max-width 0.22s cubic-bezier(0.16, 1, 0.3, 1),
-              opacity 0.2s cubic-bezier(0.16, 1, 0.3, 1) 0.04s,
-              padding-right 0.22s cubic-bezier(0.16, 1, 0.3, 1) !important;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .expandable-action-btn,
-  .expandable-action-btn__label {
-    transition: none !important;
-  }
-}
-
-.sidebar-chat-list .list-view__item.drop-before::after,
-.sidebar-chat-list .list-view__item.drop-after::after {
-  content: '';
-  position: absolute;
-  left: 10px;
-  right: 10px;
-  height: 3px;
-  border-radius: 999px;
-  background: var(--accent);
-  pointer-events: none;
-  z-index: 3;
-}
-.sidebar-chat-list .list-view__item.drop-before::after { top: -3px; }
-.sidebar-chat-list .list-view__item.drop-after::after { bottom: -3px; }
-
-/* Workspace groups: dropping onto the middle of a row groups it with the
-   dragged workspace (or adds it to the group), shown as an outlined row. */
-.sidebar-chat-list .list-view__item.drop-merge {
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
-  box-shadow: inset 0 0 0 1.5px var(--accent);
-}
-.sidebar-chat-list .list-view__item.is-dragging {
-  opacity: 0.4;
-}
-.sidebar-chat-list .list-view__item.is-group-child {
-  padding-inline-start: 1.75rem;
-}
-.sidebar-group-rail-glyph {
-  display: none;
-}
-
-/* Collapsed icon rail + hover peek: AppSidebar sets data-peek while the
-   sidebar is logically collapsed, and flips data-state back to expanded while
-   the pointer/focus is inside. The negative margin keeps the rail's 48px
-   layout footprint during the peek, so the expanded sidebar floats over the
-   main content instead of pushing it. */
-.sidebar[data-collapsible='icon'] {
-  /* rem, so the sidebar grows with the interface scale setting. */
-  --sidebar-width: 15.5rem;
-  transition: width var(--sidebar-duration) var(--sidebar-ease),
-    margin-inline-end var(--sidebar-duration) var(--sidebar-ease),
-    box-shadow 0.15s var(--ease-out);
-}
-
-/* AppLayout sets [data-resizable] whenever any panel resizes, and its blanket
-   `width:100%; transition:none` still matches the icon-mode sidebar even though
-   it lives outside the resizable group — restore the sidebar's own width (the
-   collapsed rail width below still wins on [data-state=collapsed]) and the
-   collapse/expand animation. */
-[data-app-layout][data-resizable] [data-slot='sidebar'].sidebar[data-collapsible='icon'] {
-  transition: width var(--sidebar-duration) var(--sidebar-ease),
-    margin-inline-end var(--sidebar-duration) var(--sidebar-ease),
-    box-shadow 0.15s var(--ease-out);
-}
-
-[data-app-layout][data-resizable] [data-slot='sidebar'].sidebar[data-collapsible='icon']:not([data-state='collapsed']) {
-  width: var(--sidebar-width);
-}
-
-/* That same resizable rule drops the sidebar's edge outline, but the left
-   sidebar sits outside the resizable group, so nothing separated it from the
-   conversation. Restore a separator-weight edge to match the right panel's. */
-[data-app-layout][data-resizable] .sidebar--default.sidebar--left:not([data-peek='true']) {
-  box-shadow: inset -1px 0 0 var(--separator);
-}
-
-/* Above the sticky app-layout header/toolbar (z 40/39) so the peek isn't
-   clipped at the top, but below HeroUI popovers and modals (z 50). */
-.sidebar[data-peek='true'] {
-  z-index: 45;
-}
-
-.sidebar[data-peek='true'][data-state='expanded'] {
-  margin-inline-end: calc(var(--sidebar-width-collapsed) - var(--sidebar-width));
-  box-shadow: 12px 0 32px -16px rgb(0 0 0 / 0.45), inset -1px 0 0 var(--sidebar-edge-outline);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .sidebar[data-collapsible='icon'],
-  [data-app-layout][data-resizable] [data-slot='sidebar'].sidebar[data-collapsible='icon'] {
-    transition: none;
-  }
-}
-
-/* Inside the rail, rows reduce to their leading icon; section headers, "show
-   more" affordances, empty hints, and shortcut badges have no icon form. */
-.sidebar[data-peek='true'][data-state='collapsed'] .sidebar-section-head,
-.sidebar[data-peek='true'][data-state='collapsed'] .sidebar-list-more,
-.sidebar[data-peek='true'][data-state='collapsed'] .sidebar-empty-hint,
-.sidebar[data-peek='true'][data-state='collapsed'] .shortcut-hint {
-  display: none;
-}
-
-.sidebar[data-peek='true'][data-state='collapsed'] .sidebar-chat-list .list-view__item {
-  padding-inline: 0;
-  gap: 0;
-}
-
-/* A group header has no chevron form in the rail; it shows a folders glyph. */
-.sidebar[data-peek='true'][data-state='collapsed'] .sidebar-group-chevron {
-  display: none;
-}
-.sidebar[data-peek='true'][data-state='collapsed'] .sidebar-group-rail-glyph {
-  display: block;
-}
-
-.sidebar[data-peek='true'][data-state='collapsed'] .sidebar-chat-list .list-view__item-content {
-  justify-content: center;
-  gap: 0;
-}
-
-.sidebar[data-peek='true'][data-state='collapsed'] .sidebar-chat-list .list-view__item-content > :not([data-slot='chat-list-view-icon']) {
-  display: none;
-}
-
-/* The footer row (identity + usage) is wider than the 48px rail — stack it so
-   each control keeps a centered icon form. */
-.sidebar[data-peek='true'][data-state='collapsed'] .sidebar-footer-row {
-  flex-direction: column;
-  align-items: center;
-}
-
-.sidebar[data-peek='true'][data-state='collapsed'] .sidebar-footer-row > * {
-  justify-content: center;
-  gap: 0;
-  padding-inline: 0;
-}
-
-/* Secondary list items carry a bottom separator hairline that renders as stray
-   dashes between rail icons — drop it. And pin the selection bar flush to the
-   rail's left edge instead of floating inside the inset row. */
-.sidebar[data-peek='true'][data-state='collapsed'] .sidebar-chat-list .list-view__item {
-  border-bottom-width: 0;
-}
-
-.sidebar[data-peek='true'][data-state='collapsed'] .sidebar-chat-list .list-view__item:is([data-selected='true'], .is-selected)::before {
-  left: -6px;
-  top: 8px;
-  bottom: 8px;
-}
-
-/* The icon slot is 16px, but workspace glyphs sit in a 20px status-ring box;
-   center it so the overflow is symmetric instead of spilling to the right. */
-.sidebar-chat-list .chat-list-view__icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-/* Give the rail glyphs a bit more presence (16px icon -> ~19px visual). */
-.sidebar[data-peek='true'][data-state='collapsed'] .chat-list-view__icon {
-  transform: scale(1.2);
-}
-
-.sidebar[data-peek='true'][data-state='collapsed'] [data-slot='sidebar-header'] > .button svg {
-  transform: scale(1.15);
-}
-
-/* HeroUI centers header children in the collapsed rail, but that rule sits in
-   a cascade layer, so the triggers' own `justify-start` / `gap-*` / `px-*`
-   utilities win and push the glyphs to the left edge. Re-center them here. */
-.sidebar[data-peek='true'][data-state='collapsed'] [data-slot='sidebar-header'] > * {
-  width: 2.5rem;
-  min-height: 2.5rem;
-  justify-content: center;
-  gap: 0;
-  padding-inline: 0;
-}
-
-.sidebar[data-peek='true'][data-state='collapsed'] [data-slot='sidebar-group'] + [data-slot='sidebar-group'] {
-  margin-top: calc(var(--spacing, 0.25rem) * 3);
-}
-
-/* Hidden title bar (macOS): window controls are overlaid on the page, so the
-   top strips double as drag regions and the traffic lights need clear space
-   at the top of the sidebar. */
-:root[data-window-chrome='hidden-inset'] [data-slot='sidebar-header'] {
-  padding-top: calc(var(--spacing, 0.25rem) * 8);
-}
-
-:root[data-window-chrome='hidden-inset'] [data-slot='navbar-header'],
-:root[data-window-chrome='hidden-inset'] [data-slot='sidebar-header'],
-:root[data-window-chrome='hidden-inset'] .window-drag {
-  -webkit-app-region: drag;
-}
-
-:root[data-window-chrome='hidden-inset'] :is([data-slot='navbar-header'], [data-slot='sidebar-header'], .window-drag) :is(button, a, input, select, textarea, [role='button'], [role='combobox'], [role='listbox'], [role='menu'], [role='tab'], [data-slot='navbar-content']),
-:root[data-window-chrome='hidden-inset'] .window-no-drag {
-  -webkit-app-region: no-drag;
-}
-
-/* With the sidebar collapsed the traffic lights sit over the navbar instead. */
-:root[data-window-chrome='hidden-inset'] [data-slot='navbar-header'].navbar--clear-lights {
-  padding-left: 84px;
-}
-
-/* The AppLayout aside panel sizes through the outer [data-panel] element's
-   inline flex-grow (react-resizable-panels puts the panel class on an inner
-   content div). The transition is gated on [data-panel-motion], which App sets
-   only around programmatic open/close, so separator drags and window resizes
-   stay instant. The icon-collapsible sidebar is not a resizable panel — its
-   own width transition lives on .sidebar. */
-[data-panel-motion='true'] [data-panel]:is(#app-layout-aside, #app-layout-main) {
-  transition: flex-grow 0.24s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  [data-panel-motion='true'] [data-panel]:is(#app-layout-aside, #app-layout-main) {
-    transition: none;
-  }
 }
 
 /* Shortcut hint badges: revealed while the modifier key (⌘ / Ctrl) is held.
@@ -1423,16 +455,19 @@ body {
   display: none;
 }
 
-/* Compact keycap that still reads on top of buttons and list rows. */
+/* Compact keycap that still reads on top of buttons and list rows: the
+   BoardUI Kbd on a white bordered cap at the Caption 2 size. */
 .shortcut-hint__kbd {
   height: 1rem;
-  padding-inline: 0.3rem;
-  border: 1px solid var(--separator);
-  border-radius: 0.375rem;
-  background: var(--overlay);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
-  color: var(--foreground);
-  font-size: 10px;
+  padding-inline: 0.25rem;
+  border: 1px solid var(--color-border-button-default);
+  border-radius: var(--radius-md, 0.375rem);
+  background: var(--color-background-primary-default);
+  box-shadow: var(--shadow-xs);
+  color: var(--color-text-primary);
+  font-size: var(--text-caption-2-semibold);
+  font-weight: var(--text-caption-2-semibold--font-weight);
+  letter-spacing: 0;
   line-height: 1;
 }
 
@@ -1440,6 +475,7 @@ body {
   .shortcut-hint {
     transition: none;
   }
+
 }
 
 /* Workspace status rings: the 'pulse' ring breathes and the 'ellipsis' dots
@@ -1469,346 +505,5 @@ body {
   .ws-dot {
     animation: none;
   }
-}
 
-/* user_input questions: one card at a time. The remaining questions peek out
-   beneath the current card; switching cards is animated by motion/react in
-   ConversationRunStatus.tsx. */
-.question-deck {
-  display: flex;
-  flex-direction: column;
-  gap: 0.625rem;
-  width: 100%;
-  min-width: 0;
-  padding-block: 0.25rem;
-}
-
-.question-deck__bar {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.question-deck__steps {
-  display: flex;
-  flex: 1;
-  gap: 0.375rem;
-  min-width: 0;
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-
-.question-deck__step {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  gap: 0.3rem;
-  padding: 0.125rem 0.625rem 0.125rem 0.5rem;
-  border: 1px solid transparent;
-  border-radius: 999px;
-  background: var(--surface-tertiary);
-  color: var(--muted);
-  font-size: 0.75rem;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background-color 0.2s, color 0.2s, border-color 0.2s;
-}
-
-.question-deck__step[data-answered] {
-  color: var(--foreground);
-}
-
-.question-deck__step[aria-current='step'] {
-  border-color: color-mix(in oklab, var(--accent) 35%, transparent);
-  background: var(--accent-soft);
-  color: var(--accent-soft-foreground);
-}
-
-.question-deck__step:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
-}
-
-@media (hover: hover) {
-  .question-deck__step:hover:not([aria-current='step']) {
-    background: var(--default);
-    color: var(--foreground);
-  }
-}
-
-.question-deck__step-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 999px;
-  background: currentColor;
-  opacity: 0.5;
-}
-
-.question-deck__step[aria-current='step'] .question-deck__step-dot {
-  opacity: 1;
-}
-
-.question-deck__step-check {
-  width: 12px;
-  height: 12px;
-  color: var(--success);
-}
-
-.question-deck__count {
-  flex: none;
-  color: var(--muted);
-  font-size: 0.75rem;
-  font-variant-numeric: tabular-nums;
-}
-
-.question-deck__stack {
-  position: relative;
-  padding-bottom: 12px;
-}
-
-.question-deck__ghost {
-  position: absolute;
-  inset: 0 0 12px;
-  border: 1px solid var(--separator);
-  border-radius: var(--radius);
-  background: var(--surface);
-  opacity: 0;
-  transform: scale(0.9);
-  transform-origin: 50% 100%;
-  transition: transform 0.32s cubic-bezier(0.32, 0.72, 0, 1), opacity 0.32s cubic-bezier(0.32, 0.72, 0, 1);
-}
-
-.question-deck__ghost--1[data-visible] {
-  opacity: 0.75;
-  transform: translateY(6px) scale(0.965);
-}
-
-.question-deck__ghost--2[data-visible] {
-  opacity: 0.45;
-  transform: translateY(12px) scale(0.93);
-}
-
-.question-deck__viewport {
-  position: relative;
-  border-radius: var(--radius);
-}
-
-/* Clip only while cards fly in and out so the resting card keeps its shadow. */
-.question-deck__viewport[data-switching] {
-  overflow: clip;
-}
-
-.question-deck__card {
-  position: relative;
-  padding: 0.875rem 0.875rem 0.75rem;
-  border: 1px solid var(--separator);
-  border-radius: var(--radius);
-  background: var(--surface);
-  box-shadow: var(--surface-shadow);
-}
-
-.question-deck__meta {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin-bottom: 0.375rem;
-  color: var(--muted);
-  font-size: 0.75rem;
-}
-
-.question-deck__chip {
-  padding: 1px 0.5rem;
-  border-radius: 999px;
-  background: var(--accent-soft);
-  color: var(--accent-soft-foreground);
-  font-weight: 600;
-}
-
-.question-deck__question {
-  margin: 0 0 0.75rem;
-  font-size: 0.9375rem;
-  font-weight: 600;
-  line-height: 1.45;
-  text-wrap: pretty;
-  overflow-wrap: anywhere;
-}
-
-.question-deck__options {
-  display: flex;
-  flex-direction: column;
-  gap: 0.375rem;
-}
-
-.question-deck__option {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.625rem;
-  padding: 0.5625rem 0.625rem;
-  border: 1px solid var(--separator);
-  border-radius: 0.75rem;
-  cursor: pointer;
-  transition: background-color 0.15s, border-color 0.15s, transform 0.12s cubic-bezier(0.32, 0.72, 0, 1);
-  -webkit-tap-highlight-color: transparent;
-}
-
-@media (hover: hover) {
-  .question-deck__option:hover {
-    background: var(--surface-secondary);
-  }
-}
-
-.question-deck__option:active {
-  transform: scale(0.99);
-}
-
-.question-deck__option:has(input:focus-visible),
-.question-deck__option--other:focus-within {
-  outline: 2px solid color-mix(in oklab, var(--accent) 55%, transparent);
-  outline-offset: 1px;
-}
-
-.question-deck__option[data-selected] {
-  border-color: color-mix(in oklab, var(--accent) 55%, transparent);
-  background: var(--accent-soft);
-}
-
-.question-deck__option--other {
-  align-items: center;
-  cursor: text;
-}
-
-.question-deck__key {
-  display: grid;
-  flex: none;
-  place-items: center;
-  width: 22px;
-  height: 22px;
-  margin-top: 1px;
-  border-radius: 7px;
-  background: var(--surface-tertiary);
-  color: var(--muted);
-  font: 600 11px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  transition: background-color 0.15s, color 0.15s;
-}
-
-.question-deck__option--other .question-deck__key {
-  margin-top: 0;
-}
-
-.question-deck__option[data-selected] .question-deck__key {
-  background: var(--accent);
-  color: var(--accent-foreground);
-}
-
-.question-deck__text {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.question-deck__label {
-  font-weight: 500;
-}
-
-.question-deck__description {
-  color: var(--muted);
-  font-size: 0.75rem;
-}
-
-.question-deck__other {
-  flex: 1;
-  min-width: 0;
-  padding: 1px 0;
-  border: 0;
-  outline: 0;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-}
-
-.question-deck__other::placeholder {
-  color: var(--muted);
-}
-
-/* Round mark for single choice, rounded square for multiple choice. */
-.question-deck__mark {
-  display: grid;
-  flex: none;
-  place-items: center;
-  width: 18px;
-  height: 18px;
-  margin-top: 3px;
-  border: 1.5px solid var(--default);
-  border-radius: 999px;
-  transition: background-color 0.15s, border-color 0.15s;
-}
-
-.question-deck__option--other .question-deck__mark {
-  margin-top: 0;
-}
-
-.question-deck__options[data-multiple] .question-deck__mark {
-  border-radius: 6px;
-}
-
-.question-deck__mark svg {
-  width: 12px;
-  height: 12px;
-  color: var(--accent-foreground);
-  opacity: 0;
-  transform: scale(0.6);
-  transition: opacity 0.15s, transform 0.2s cubic-bezier(0.32, 0.72, 0, 1);
-}
-
-.question-deck__option[data-selected] .question-deck__mark {
-  border-color: var(--accent);
-  background: var(--accent);
-}
-
-.question-deck__option[data-selected] .question-deck__mark svg {
-  opacity: 1;
-  transform: scale(1);
-}
-
-.question-deck__hint {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.25rem 0.75rem;
-  margin: 0.625rem 0 0;
-  color: var(--muted);
-  font-size: 0.71875rem;
-}
-
-.question-deck__hint kbd {
-  height: 1.125rem;
-  padding-inline: 0.3rem;
-  font-size: 10.5px;
-}
-
-/* Key hints only help with a keyboard at hand. */
-@media (pointer: coarse) {
-  .question-deck__hint {
-    display: none;
-  }
-}
-
-.question-deck__footer {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .question-deck__step,
-  .question-deck__ghost,
-  .question-deck__option,
-  .question-deck__key,
-  .question-deck__mark,
-  .question-deck__mark svg {
-    transition: none;
-  }
 }

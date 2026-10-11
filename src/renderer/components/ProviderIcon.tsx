@@ -6,6 +6,7 @@ import grokSvg from '@lobehub/icons-static-svg/icons/grok.svg?raw';
 import opencodeSvg from '@lobehub/icons-static-svg/icons/opencode.svg?raw';
 import piSvg from '@lobehub/icons-static-svg/icons/pi.svg?raw';
 import { RiRobot2Line } from '@remixicon/react';
+import { cx } from '@/utils/cx';
 
 type Props = {
   provider?: string | null;
@@ -16,7 +17,7 @@ function InlineSvg({ svg, className }: { svg: string; className?: string }) {
   return (
     <span
       aria-hidden
-      className={['inline-flex shrink-0 [&>svg]:block [&>svg]:size-full', className].filter(Boolean).join(' ')}
+      className={cx('inline-flex shrink-0 [&>svg]:block [&>svg]:size-full', className)}
       dangerouslySetInnerHTML={{ __html: svg }}
     />
   );

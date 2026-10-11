@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { RiGlobalLine, RiStopCircleLine } from '@remixicon/react';
-import { Button, Chip, toast } from '@heroui/react';
+import { Chip } from '@/components/base/badges/chip';
+import { Button } from '@/components/base/buttons/button';
+import { toast } from '@/components/ui/toast';
 import type { AgentBrowserFrame } from '@todex/protocol/agentDesktop';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { useT } from '../i18n';
@@ -144,26 +146,25 @@ export function AgentBrowserLiveView({ session, conversationId, isActive }: {
   const open = Boolean(state?.tabOpen) && !closed;
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="border-border flex items-center gap-2 border-b px-3 py-2">
-        <RiGlobalLine className="text-muted size-4 shrink-0" />
+      <div className="flex items-center gap-2 border-b border-separator-border px-3 py-2">
+        <RiGlobalLine className="size-4 shrink-0 text-foreground-icon-secondary" />
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium">{page?.title || page?.url || t('agentBrowser.title')}</p>
-          <p className="text-muted truncate text-xs">
+          <p className="truncate text-body-medium text-text-primary">{page?.title || page?.url || t('agentBrowser.title')}</p>
+          <p className="truncate text-caption-1-regular text-text-tertiary">
             {latest ? `${latest.summary}${page?.url ? ` · ${page.url}` : ''}` : t('agentBrowser.host', { host: state?.deviceName || t('computerLive.host') })}
           </p>
         </div>
-        {live ? <Chip size="sm" variant="soft" color="warning">{t('agentBrowser.live')}</Chip> : null}
-        <Button size="sm" variant="danger-soft" isDisabled={!open || stopping} onPress={() => { void stop(); }}>
-          <RiStopCircleLine className="size-4" />
+        {live ? <Chip variant="caption" color="yellow">{t('agentBrowser.live')}</Chip> : null}
+        <Button size="small" variant="danger" leadingIcon={RiStopCircleLine} disabled={!open || stopping} onClick={() => { void stop(); }}>
           {t('agentBrowser.stop')}
         </Button>
       </div>
       {/* Outlined so the user always sees which page the agent controls. */}
-      <div className="bg-black/80 relative flex min-h-0 flex-1 items-center justify-center outline outline-2 -outline-offset-2 outline-warning">
+      <div className="relative flex min-h-0 flex-1 items-center justify-center bg-background-secondary-default outline outline-2 -outline-offset-2 outline-chart-8">
         <canvas ref={canvasRef} className={live ? 'h-full w-full object-contain' : 'hidden'} aria-label={t('agentBrowser.frame')} />
         {!live && still ? <img src={still.dataUrl} alt={t('agentBrowser.screenshot')} className="h-full w-full object-contain" /> : null}
         {!live && !still ? (
-          <p className="px-6 text-center text-sm text-white/70">{open ? t('agentBrowser.waiting') : t('agentBrowser.closed')}</p>
+          <p className="px-6 text-center text-body-regular text-text-secondary">{open ? t('agentBrowser.waiting') : t('agentBrowser.closed')}</p>
         ) : null}
       </div>
     </div>

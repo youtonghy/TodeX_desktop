@@ -1,6 +1,4 @@
 import { useState, type ComponentType, type ReactNode } from 'react';
-import { Button, Chip, ScrollShadow } from '@heroui/react';
-import { ChatTool, type ToolPartState } from '@heroui-pro/react/chat-tool';
 import {
   RiCheckLine,
   RiExportLine,
@@ -12,6 +10,13 @@ import {
   RiToolsLine,
 } from '@remixicon/react';
 import type { SubagentRun, SubagentStatus } from '@todex/protocol/v2';
+import { Badge } from '@/components/base/badges/badge';
+import { Chip, type ChipProps } from '@/components/base/badges/chip';
+import { Button } from '@/components/base/buttons/button';
+import { IconAction } from '@/components/ui/icon-action';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { cx } from '@/utils/cx';
+import { ToolCallCard, ToolCallText, type ToolCallState } from '../components/chat/ToolCallCard';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { useT, type MessageKey } from '../i18n';
 
@@ -28,22 +33,22 @@ const STATUS_LABELS: Record<SubagentStatus, MessageKey> = {
   cancelled: 'aside.subagentCancelled',
 };
 
-const STATUS_COLORS: Record<SubagentStatus, 'default' | 'accent' | 'success' | 'danger' | 'warning'> = {
-  queued: 'default',
-  running: 'accent',
-  completed: 'success',
-  failed: 'danger',
-  cancelled: 'warning',
+const STATUS_COLORS: Record<SubagentStatus, NonNullable<ChipProps['color']>> = {
+  queued: 'neutral',
+  running: 'blue',
+  completed: 'lime',
+  failed: 'rose',
+  cancelled: 'yellow',
 };
 
 /** Runs render like the chat's tool cards: collapsed by default, status icon
  * plus summary in the trigger, task/result/error folded into the body. */
-const STATUS_TOOL_STATE: Record<SubagentStatus, ToolPartState> = {
-  queued: 'input-available',
-  running: 'input-available',
-  completed: 'output-available',
-  failed: 'output-error',
-  cancelled: 'output-available',
+const STATUS_TOOL_STATE: Record<SubagentStatus, ToolCallState> = {
+  queued: 'pending',
+  running: 'running',
+  completed: 'completed',
+  failed: 'failed',
+  cancelled: 'completed',
 };
 
 function timeLabel(iso?: string): string {
@@ -75,24 +80,24 @@ function CopyValue({ value, label, pill = false }: { value: string; label: strin
       window.setTimeout(() => setCopied(false), 1200);
     }).catch(() => {});
   };
-  const icon = copied ? <RiCheckLine className="size-3.5" /> : <RiFileCopyLine className="size-3.5" />;
+  const icon = copied ? RiCheckLine : RiFileCopyLine;
   return pill
-    ? <Button size="sm" variant="tertiary" aria-label={label} onPress={onPress}>{icon}{label}</Button>
-    : <Button isIconOnly size="sm" variant="ghost" aria-label={label} onPress={onPress}>{icon}</Button>;
+    ? <Button size="xs" variant="secondary" leadingIcon={icon} aria-label={label} onClick={onPress}>{label}</Button>
+    : <IconAction size="xs" icon={icon} aria-label={label} onClick={onPress} />;
 }
 
 function DetailRow({ label, children }: { label: string; children?: ReactNode }) {
   if (!children) return null;
   return (
     <div className="flex items-center justify-between gap-3 py-1.5">
-      <dt className="text-muted shrink-0 text-xs">{label}</dt>
-      <dd className="flex min-w-0 items-center justify-end gap-1">{children}</dd>
+      <dt className="shrink-0 text-caption-1-regular text-text-secondary">{label}</dt>
+      <dd className="flex min-w-0 items-center justify-end gap-1 text-caption-1-regular text-text-primary">{children}</dd>
     </div>
   );
 }
 
 function SectionLabel({ children }: { children: string }) {
-  return <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted">{children}</div>;
+  return <div className="mb-1 text-caption-2-medium uppercase tracking-wide text-text-tertiary">{children}</div>;
 }
 
 type UsageStat = {
@@ -104,10 +109,10 @@ type UsageStat = {
 };
 
 const USAGE_TONE_CLASS: Record<UsageStat['tone'], { chip: string; value: string }> = {
-  accent: { chip: 'bg-accent-soft text-accent-soft-foreground', value: '' },
-  success: { chip: 'bg-success-soft text-success-soft-foreground', value: '' },
-  warning: { chip: 'bg-warning-soft text-warning-soft-foreground', value: '' },
-  default: { chip: 'bg-surface-secondary text-muted', value: 'text-foreground' },
+  accent: { chip: 'bg-badge-new-background text-badge-new-text', value: '' },
+  success: { chip: 'bg-status-lime-background text-status-lime-text', value: '' },
+  warning: { chip: 'bg-status-yellow-background text-status-yellow-text', value: '' },
+  default: { chip: 'bg-background-secondary-default text-text-secondary', value: 'text-text-primary' },
 };
 
 function usageStats(usage: SubagentRun['usage'], t: ReturnType<typeof useT>): UsageStat[] {
@@ -138,8 +143,8 @@ function SubagentCard({ run }: { run: SubagentRun }) {
   const t = useT();
   const duration = durationLabel(run);
   const stats = usageStats(run.usage, t);
-  // ChatTool hides the result section in the error state, so a failed run's
-  // result is surfaced as its error text — same convention as chat tool cards.
+  // A failed run's result is surfaced as its error text — same convention
+  // as the chat tool cards.
   const errorText = run.error || (run.status === 'failed' ? run.result ?? '' : '');
   const resultText = run.status === 'failed' ? '' : run.result ?? '';
   const agentId = run.agentId || run.id;
@@ -151,77 +156,63 @@ function SubagentCard({ run }: { run: SubagentRun }) {
   );
 
   return (
-    <ChatTool
-      defaultExpanded={false}
+    <ToolCallCard
+      variant="card"
       state={STATUS_TOOL_STATE[run.status]}
       active={run.status === 'running'}
+      title={run.title}
       isExpandable={hasContent}
-      className="mb-2"
+      toolCallId={run.providerItemId}
+      meta={(
+        <>
+          {duration ? <span className="shrink-0 text-caption-1-regular text-text-tertiary">{duration}</span> : null}
+          <Chip variant="caption" color={STATUS_COLORS[run.status]} className="shrink-0">{t(STATUS_LABELS[run.status])}</Chip>
+        </>
+      )}
     >
-      <ChatTool.Trigger>
-        <ChatTool.StatusIcon />
-        <span className="min-w-0 truncate font-medium">{run.title}</span>
-        {duration ? <span className="text-muted shrink-0">{duration}</span> : null}
-        <Chip size="sm" variant="soft" color={STATUS_COLORS[run.status]}>{t(STATUS_LABELS[run.status])}</Chip>
-      </ChatTool.Trigger>
-      <ChatTool.Content>
-        {run.task ? (
-          <ChatTool.Args label={t('aside.subagentTask')}>
-            <p className="max-h-52 overflow-y-auto whitespace-pre-wrap wrap-anywhere px-1">{run.task}</p>
-          </ChatTool.Args>
-        ) : null}
-        {resultText ? (
-          <ChatTool.Result label={t('aside.subagentResult')}>
-            <p className="max-h-52 overflow-y-auto whitespace-pre-wrap wrap-anywhere px-1">{resultText}</p>
-          </ChatTool.Result>
-        ) : null}
-        {errorText ? (
-          <ChatTool.Error label={t('aside.subagentError')}>
-            <p className="whitespace-pre-wrap wrap-anywhere px-1">{errorText}</p>
-          </ChatTool.Error>
-        ) : null}
-        <div className="px-1 py-1">
-          <SectionLabel>{t('aside.subagentDetails')}</SectionLabel>
-          <dl className="bg-surface-secondary divide-separator m-0 divide-y rounded-xl px-3">
-            <DetailRow label={t('aside.subagentId')}>
-              <span className="truncate font-mono text-xs">{agentId}</span>
-              <CopyValue value={agentId} label={t('common.copy')} />
-            </DetailRow>
-            <DetailRow label={t('aside.subagentStarted')}>
-              {started ? <span className="text-xs">{started}</span> : null}
-            </DetailRow>
-            <DetailRow label={t('aside.subagentFinished')}>
-              {finished ? <span className="text-xs">{finished}</span> : null}
-            </DetailRow>
-            <DetailRow label={t('aside.subagentDuration')}>
-              {duration ? <span className="text-xs">{duration}</span> : null}
-            </DetailRow>
-            <DetailRow label={t('aside.subagentOutput')}>
-              {run.outputFile ? <CopyValue pill value={run.outputFile} label={t('aside.subagentCopyPath')} /> : null}
-            </DetailRow>
-          </dl>
-        </div>
-        {stats.length ? (
-          <div className="px-1 py-1">
-            <SectionLabel>{t('aside.subagentUsage')}</SectionLabel>
-            <div className="flex flex-wrap gap-1.5">
-              {stats.map((stat) => {
-                const tone = USAGE_TONE_CLASS[stat.tone];
-                const Icon = stat.Icon;
-                return (
-                  <span key={stat.key} className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs ${tone.chip}`}>
-                    {Icon ? <Icon className="size-3 shrink-0" /> : null}
-                    <b className={`font-semibold tabular-nums ${tone.value}`}>{stat.text}</b>
-                    <span className="text-[11px]">{stat.label}</span>
-                  </span>
-                );
-              })}
-            </div>
+      {run.task ? <ToolCallText label={t('aside.subagentTask')}>{run.task}</ToolCallText> : null}
+      {resultText ? <ToolCallText label={t('aside.subagentResult')}>{resultText}</ToolCallText> : null}
+      {errorText ? <ToolCallText label={t('aside.subagentError')} tone="error">{errorText}</ToolCallText> : null}
+      <div>
+        <SectionLabel>{t('aside.subagentDetails')}</SectionLabel>
+        <dl className="m-0 divide-y divide-separator-border rounded-xl bg-background-secondary-default px-3">
+          <DetailRow label={t('aside.subagentId')}>
+            <span className="truncate font-mono">{agentId}</span>
+            <CopyValue value={agentId} label={t('common.copy')} />
+          </DetailRow>
+          <DetailRow label={t('aside.subagentStarted')}>
+            {started ? <span>{started}</span> : null}
+          </DetailRow>
+          <DetailRow label={t('aside.subagentFinished')}>
+            {finished ? <span>{finished}</span> : null}
+          </DetailRow>
+          <DetailRow label={t('aside.subagentDuration')}>
+            {duration ? <span>{duration}</span> : null}
+          </DetailRow>
+          <DetailRow label={t('aside.subagentOutput')}>
+            {run.outputFile ? <CopyValue pill value={run.outputFile} label={t('aside.subagentCopyPath')} /> : null}
+          </DetailRow>
+        </dl>
+      </div>
+      {stats.length ? (
+        <div>
+          <SectionLabel>{t('aside.subagentUsage')}</SectionLabel>
+          <div className="flex flex-wrap gap-1.5">
+            {stats.map((stat) => {
+              const tone = USAGE_TONE_CLASS[stat.tone];
+              const Icon = stat.Icon;
+              return (
+                <span key={stat.key} className={cx('inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-caption-1-regular', tone.chip)}>
+                  {Icon ? <Icon className="size-3 shrink-0" /> : null}
+                  <b className={cx('text-caption-1-semibold tabular-nums', tone.value)}>{stat.text}</b>
+                  <span className="text-caption-2-regular">{stat.label}</span>
+                </span>
+              );
+            })}
           </div>
-        ) : null}
-        {run.providerItemId ? <ChatTool.Meta toolCallId={run.providerItemId} /> : null}
-      </ChatTool.Content>
-    </ChatTool>
+        </div>
+      ) : null}
+    </ToolCallCard>
   );
 }
 
@@ -231,19 +222,19 @@ export function SubagentsPanel({ session, conversationId }: Props) {
   return (
     <div className="flex h-full min-h-0 flex-col gap-4 p-5">
       <div className="flex items-center justify-between gap-2">
-        <h2 className="flex items-center gap-2 text-lg font-semibold">
-          <RiRobot2Line className="size-5" />
+        <h2 className="flex items-center gap-2 text-title-3-semibold text-text-primary">
+          <RiRobot2Line aria-hidden className="size-5 text-foreground-icon-secondary" />
           {t('aside.subagentsTitle')}
         </h2>
-        {runs.length ? <Chip size="sm" variant="soft">{runs.length}</Chip> : null}
+        {runs.length ? <Badge>{runs.length}</Badge> : null}
       </div>
-      <ScrollShadow className="min-h-0 flex-1">
+      <ScrollArea className="flex-1" contentClassName="flex flex-col gap-2" surface="secondary">
         {runs.length ? (
           runs.map((run) => <SubagentCard key={run.id} run={run} />)
         ) : (
-          <p className="text-muted text-sm">{t('aside.subagentEmpty')}</p>
+          <p className="text-body-regular text-text-secondary">{t('aside.subagentEmpty')}</p>
         )}
-      </ScrollShadow>
+      </ScrollArea>
     </div>
   );
 }

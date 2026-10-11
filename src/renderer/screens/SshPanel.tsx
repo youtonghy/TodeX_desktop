@@ -1,6 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Button, Spinner, Tabs, toast } from '@heroui/react';
-import { EmptyState } from '@heroui-pro/react';
 import { RiKey2Line, RiLinksLine, RiRefreshLine, RiServerLine, RiTerminalLine } from '@remixicon/react';
 import { isNotFoundError, type SshHostsResponse, type SshKeysResponse } from '@todex/protocol/ssh';
 import type { TodeXSession } from '../session/useTodeXSession';
@@ -13,6 +11,13 @@ import { useRemoteConnector, type RemoteConnectTarget } from '../components/ssh/
 import { errorMessage } from '../components/ssh/sshShared';
 import { useT } from '../i18n';
 import { backendApi } from '../session/helpers';
+import { Tab, TabList, TabPanel, Tabs } from '@/components/base/tabs/tabs';
+import { Alert } from '@/components/ui/alert';
+import { EmptyState } from '@/components/ui/empty-state';
+import { IconAction } from '@/components/ui/icon-action';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Spinner, SpinnerIcon } from '@/components/ui/spinner';
+import { toast } from '@/components/ui/toast';
 
 type SshTab = 'hosts' | 'keys' | 'connections';
 
@@ -98,70 +103,68 @@ export function SshPanel({ session, scopeKey, workbenchItems, onOpenSshTerminal,
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex min-w-0 items-center gap-3 px-6 pb-3 pt-5">
-        <div className="bg-accent-soft text-accent flex size-10 shrink-0 items-center justify-center rounded-lg">
+        <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-badge-new-background text-badge-new-text">
           <RiTerminalLine className="size-5" />
         </div>
         <div className="min-w-0 flex-1">
-          <h2 className="truncate text-base font-semibold">{t('ssh.title')}</h2>
-          <p className="text-muted truncate text-xs" title={backendLabel}>{t('ssh.machineNote', { backend: backendLabel })}</p>
+          <h2 className="truncate text-headline-semibold text-text-primary">{t('ssh.title')}</h2>
+          <p className="truncate text-caption-1-regular text-text-secondary" title={backendLabel}>{t('ssh.machineNote', { backend: backendLabel })}</p>
         </div>
-        <Button isIconOnly size="sm" variant="ghost" aria-label={t('ssh.refresh')} isDisabled={loading} onPress={() => void reloadAll()}>
-          {loading ? <Spinner size="sm" /> : <RiRefreshLine className="size-4" />}
-        </Button>
+        <IconAction
+          icon={loading ? SpinnerIcon : RiRefreshLine}
+          size="sm"
+          aria-label={t('ssh.refresh')}
+          tooltip
+          disabled={loading}
+          aria-busy={loading || undefined}
+          onClick={() => void reloadAll()}
+        />
       </div>
       {unsupported ? (
         <div className="flex flex-1 items-center justify-center p-6">
-          <EmptyState>
-            <EmptyState.Header>
-              <EmptyState.Media variant="icon"><RiServerLine /></EmptyState.Media>
-              <EmptyState.Title>{t('ssh.unsupportedTitle')}</EmptyState.Title>
-              <EmptyState.Description>{t('ssh.unsupportedHint')}</EmptyState.Description>
-            </EmptyState.Header>
-          </EmptyState>
+          <EmptyState icon={RiServerLine} title={t('ssh.unsupportedTitle')} description={t('ssh.unsupportedHint')} />
         </div>
       ) : (
-        <Tabs selectedKey={tab} onSelectionChange={(key) => setTab(key === 'keys' || key === 'connections' ? key : 'hosts')} className="flex min-h-0 flex-1 flex-col px-6">
-          <Tabs.ListContainer>
-            <Tabs.List aria-label={t('ssh.title')}>
-              <Tabs.Tab id="hosts" className="gap-1.5"><RiServerLine className="size-4" />{t('ssh.tabHosts')}<Tabs.Indicator /></Tabs.Tab>
-              <Tabs.Tab id="keys" className="gap-1.5"><RiKey2Line className="size-4" />{t('ssh.tabKeys')}<Tabs.Indicator /></Tabs.Tab>
-              <Tabs.Tab id="connections" className="gap-1.5"><RiLinksLine className="size-4" />{t('ssh.tabConnections')}<Tabs.Indicator /></Tabs.Tab>
-            </Tabs.List>
-          </Tabs.ListContainer>
+        <Tabs selectedKey={tab} onSelectionChange={(key) => setTab(key === 'keys' || key === 'connections' ? key : 'hosts')} className="min-h-0 flex-1 gap-0 px-6">
+          <TabList aria-label={t('ssh.title')}>
+            <Tab id="hosts" icon={RiServerLine}>{t('ssh.tabHosts')}</Tab>
+            <Tab id="keys" icon={RiKey2Line}>{t('ssh.tabKeys')}</Tab>
+            <Tab id="connections" icon={RiLinksLine}>{t('ssh.tabConnections')}</Tab>
+          </TabList>
           {loadError ? (
-            <Alert status="danger" className="mt-3">
-              <Alert.Indicator />
-              <Alert.Content>
-                <Alert.Title>{t('ssh.loadFailed')}</Alert.Title>
-                <Alert.Description>{loadError}</Alert.Description>
-              </Alert.Content>
-            </Alert>
+            <Alert status="danger" className="mt-3" title={t('ssh.loadFailed')} description={loadError} />
           ) : null}
-          <Tabs.Panel id="hosts" className="min-h-0 flex-1 overflow-y-auto py-4">
-            {hosts ? (
-              <SshHostsTab
+          <TabPanel id="hosts" className="flex min-h-0 flex-1 flex-col">
+            <ScrollArea className="flex-1" contentClassName="py-4" surface="secondary">
+              {hosts ? (
+                <SshHostsTab
+                  api={api}
+                  hosts={hosts.hosts}
+                  ftpSites={hosts.ftpSites}
+                  keys={keys?.keys ?? []}
+                  onReload={() => void reloadHosts()}
+                  onConnect={onOpenSshTerminal}
+                  onOpenFiles={(target) => void openFiles(target)}
+                />
+              ) : loading ? <div className="flex min-h-48 items-center justify-center"><Spinner size="md" aria-label={t('app.loading')} /></div> : null}
+            </ScrollArea>
+          </TabPanel>
+          <TabPanel id="keys" className="flex min-h-0 flex-1 flex-col">
+            <ScrollArea className="flex-1" contentClassName="py-4" surface="secondary">
+              <SshKeysTab api={api} keys={keys} onReload={() => void reloadAll()} />
+            </ScrollArea>
+          </TabPanel>
+          <TabPanel id="connections" className="flex min-h-0 flex-1 flex-col">
+            <ScrollArea className="flex-1" contentClassName="py-4" surface="secondary">
+              <SshConnectionsTab
                 api={api}
-                hosts={hosts.hosts}
-                ftpSites={hosts.ftpSites}
-                keys={keys?.keys ?? []}
-                onReload={() => void reloadHosts()}
-                onConnect={onOpenSshTerminal}
-                onOpenFiles={(target) => void openFiles(target)}
+                scopeKey={scopeKey}
+                workbenchItems={workbenchItems}
+                terminalById={session.terminalById}
+                onCloseWorkbenchItem={onCloseWorkbenchItem}
               />
-            ) : loading ? <div className="flex min-h-48 items-center justify-center"><Spinner aria-label={t('app.loading')} /></div> : null}
-          </Tabs.Panel>
-          <Tabs.Panel id="keys" className="min-h-0 flex-1 overflow-y-auto py-4">
-            <SshKeysTab api={api} keys={keys} onReload={() => void reloadAll()} />
-          </Tabs.Panel>
-          <Tabs.Panel id="connections" className="min-h-0 flex-1 overflow-y-auto py-4">
-            <SshConnectionsTab
-              api={api}
-              scopeKey={scopeKey}
-              workbenchItems={workbenchItems}
-              terminalById={session.terminalById}
-              onCloseWorkbenchItem={onCloseWorkbenchItem}
-            />
-          </Tabs.Panel>
+            </ScrollArea>
+          </TabPanel>
         </Tabs>
       )}
       {remoteConnector.dialog}

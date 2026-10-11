@@ -1,4 +1,4 @@
-import { Input, Label, TextField } from '@heroui/react';
+import { Input } from '@/components/base/input/input';
 
 type Props = {
   label: string;
@@ -9,11 +9,5 @@ type Props = {
 };
 
 export function Field({ label, value, onChange, type = 'text', description }: Props) {
-  return (
-    <TextField className="w-full" name={label} type={type} value={value} onChange={onChange}>
-      <Label>{label}</Label>
-      <Input className="w-full" />
-      {description ? <p className="text-muted mt-1 text-xs">{description}</p> : null}
-    </TextField>
-  );
+  return <Input className="w-full" name={label} type={type} label={label} value={value} onChange={onChange} hint={description} />;
 }

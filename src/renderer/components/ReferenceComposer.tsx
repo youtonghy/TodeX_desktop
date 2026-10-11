@@ -6,6 +6,7 @@ import {
   useRef,
 } from 'react';
 import type { KeyboardEvent } from 'react';
+import { cx } from '@/utils/cx';
 import { useT } from '../i18n';
 import {
   composerToken,
@@ -25,12 +26,28 @@ const TOKEN_ICON_PATHS: Record<TokenKind, string> = {
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
+/* Capsules are built as DOM nodes inside the contentEditable, so their
+   BoardUI styling lives in these class strings. `composer-ref*` stay as the
+   hooks the editor's event handlers look up. A quote is an excerpt of the
+   conversation, so it keeps the accent tint. */
+const CAPSULE_CLASS = 'inline-flex max-w-80 items-baseline gap-1 mx-px rounded-full px-2 py-px align-baseline text-body-medium select-none';
+const CAPSULE_TONE: Record<TokenKind, string> = {
+  reference: 'bg-badge-new-background text-badge-new-text',
+  file: 'bg-background-tertiary-default text-text-primary',
+  image: 'bg-background-tertiary-default text-text-primary',
+};
+const CAPSULE_ICON_TONE: Record<TokenKind, string> = {
+  reference: 'opacity-80',
+  file: 'text-text-accent',
+  image: 'text-text-accent',
+};
+
 function makeIcon(kind: TokenKind): SVGElement {
   const svg = document.createElementNS(SVG_NS, 'svg');
   svg.setAttribute('aria-hidden', 'true');
   svg.setAttribute('viewBox', '0 0 24 24');
   svg.setAttribute('focusable', 'false');
-  svg.setAttribute('class', 'composer-ref__icon');
+  svg.setAttribute('class', cx('composer-ref__icon size-[0.9em] flex-none self-center', CAPSULE_ICON_TONE[kind]));
   const path = document.createElementNS(SVG_NS, 'path');
   path.setAttribute('d', TOKEN_ICON_PATHS[kind]);
   path.setAttribute('fill', 'currentColor');
@@ -66,17 +83,17 @@ function serialize(root: HTMLElement): string {
 
 function makeCapsule(kind: TokenKind, name: string, label: string): HTMLElement {
   const el = document.createElement('span');
-  el.className = `composer-ref composer-ref--${kind}`;
+  el.className = cx('composer-ref', `composer-ref--${kind}`, CAPSULE_CLASS, CAPSULE_TONE[kind]);
   el.contentEditable = 'false';
   el.dataset.ref = name;
   el.dataset.kind = kind;
   el.dataset.token = composerToken(kind, name);
   el.title = name;
   const text = document.createElement('span');
-  text.className = 'composer-ref__label';
+  text.className = 'composer-ref__label truncate';
   text.textContent = label || name;
   const close = document.createElement('span');
-  close.className = 'composer-ref__remove';
+  close.className = 'composer-ref__remove ms-0.5 cursor-pointer opacity-55 transition-opacity duration-150 hover:opacity-100';
   close.setAttribute('aria-hidden', 'true');
   close.textContent = '×';
   el.append(makeIcon(kind), text, close);
@@ -292,9 +309,12 @@ export const ReferenceComposer = forwardRef<ReferenceComposerHandle, {
       aria-multiline="true"
       aria-label={t('composer.messageInput')}
       aria-disabled={isDisabled || undefined}
-      data-slot="prompt-input-textarea"
       data-placeholder={placeholder}
-      className="composer-editor prompt-input__textarea textarea"
+      className={cx(
+        'composer-editor relative max-h-60 min-h-10 cursor-text overflow-y-auto wrap-break-word outline-none',
+        'text-body-regular text-text-primary caret-accent-500',
+        isDisabled && 'cursor-not-allowed',
+      )}
       contentEditable={!isDisabled}
       suppressContentEditableWarning
       onInput={emitChange}

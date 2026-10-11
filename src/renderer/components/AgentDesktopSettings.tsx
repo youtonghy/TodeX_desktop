@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Button, Chip, Separator, Surface, Switch, toast } from '@heroui/react';
-import { ItemCard, ItemCardGroup } from '@heroui-pro/react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from 'react';
 import { RiArrowLeftSLine, RiArrowRightSLine, RiComputerLine, RiGlobalLine } from '@remixicon/react';
+import { Chip } from '@/components/base/badges/chip';
+import { Button } from '@/components/base/buttons/button';
+import { Switch } from '@/components/base/switch/switch';
+import { cx } from '@/utils/cx';
 import type { AgentDesktopSettings as Settings } from '@todex/protocol/agentDesktop';
 import { ConnectionError } from '@todex/protocol/connectionError';
 import type { TodeXSession } from '../session/useTodeXSession';
@@ -9,11 +11,15 @@ import { useT } from '../i18n';
 import { backendApi } from '../session/helpers';
 import { AgentBrowserSettings } from './AgentBrowserSettings';
 import { ComputerUseSettings } from './ComputerUseSettings';
+import { SettingsCard, SettingsNote, SettingsRow } from './settings/SettingsRows';
+import { IconAction } from './ui/icon-action';
+import { toast } from './ui/toast';
 
 /** A tool with its own settings page; `null` is the settings overview. */
 export type AgentDesktopPage = 'browser' | 'computer';
 
 type ChipColor = 'success' | 'warning' | 'default' | 'danger';
+const CHIP_COLORS = { success: 'lime', warning: 'yellow', default: 'neutral', danger: 'rose' } as const;
 
 /**
  * Agent desktop tools for the active backend. The agent browser and
@@ -102,9 +108,9 @@ export function AgentDesktopSettings({ session, page = null, onPageChange = () =
 
   if (settings === null) {
     return (
-      <Surface className="flex flex-col gap-2 rounded-2xl p-5">
-        <p className="text-muted text-sm">{t('agentDesktop.unsupported')}</p>
-      </Surface>
+      <SettingsCard>
+        <SettingsNote className="py-3 text-body-regular">{t('agentDesktop.unsupported')}</SettingsNote>
+      </SettingsCard>
     );
   }
 
@@ -135,48 +141,48 @@ export function AgentDesktopSettings({ session, page = null, onPageChange = () =
 
   const browser = settings ? browserSummary(settings, t) : undefined;
   const computer = settings ? computerSummary(settings, t) : undefined;
-  // The settings section tab already names this card, so it has no heading.
+  // The settings section tab already names this page, so it has no heading.
   return (
-    <Surface ref={overview} className="flex flex-col gap-4 rounded-2xl p-5">
-      <Switch isSelected={enabled} isDisabled={settings === undefined || saving} onChange={selected => { void save(() => api.setAgentDesktopEnabled(selected)); }}>
-        <Switch.Content>
-          <Switch.Control>
-            <Switch.Thumb />
-          </Switch.Control>
-          <div>
-            <p className="text-sm font-medium">{t('agentDesktop.enable')}</p>
-            <p className="text-muted text-xs">{t('agentDesktop.enableHint')}</p>
-          </div>
-        </Switch.Content>
-      </Switch>
-      <ItemCardGroup className="overflow-hidden">
+    <div ref={overview} className="flex flex-col gap-6">
+      <SettingsCard>
+        <SettingsRow label={t('agentDesktop.enable')} description={t('agentDesktop.enableHint')}>
+          <Switch
+            size="sm"
+            aria-label={t('agentDesktop.enable')}
+            isSelected={enabled}
+            isDisabled={settings === undefined || saving}
+            onChange={selected => { void save(() => api.setAgentDesktopEnabled(selected)); }}
+          />
+        </SettingsRow>
+      </SettingsCard>
+      <SettingsCard className="overflow-hidden ps-0">
         <SettingsEntry
           page="browser"
-          icon={<RiGlobalLine />}
+          icon={RiGlobalLine}
           title={t('agentBrowser.title')}
           description={t('agentDesktop.browserEntry')}
           status={enabled ? browser : undefined}
           isDisabled={!enabled}
           onPress={() => onPageChange('browser')}
         />
-        <Separator />
         <SettingsEntry
           page="computer"
-          icon={<RiComputerLine />}
+          icon={RiComputerLine}
           title={t('computerSettings.title')}
           description={t('agentDesktop.computerEntry')}
           status={enabled ? computer : undefined}
           isDisabled={!enabled}
           onPress={() => onPageChange('computer')}
         />
-      </ItemCardGroup>
+      </SettingsCard>
       {legacyData ? (
-        <div className="border-separator flex items-center gap-3 border-t pt-4">
-          <p className="text-muted min-w-0 flex-1 text-xs">{t('agentDesktop.legacyData')}</p>
-          <Button size="sm" variant="secondary" onPress={() => { void clearLegacyData(); }}>{t('agentDesktop.legacyDataClear')}</Button>
-        </div>
+        <SettingsCard>
+          <SettingsRow description={t('agentDesktop.legacyData')}>
+            <Button size="small" variant="secondary" onClick={() => { void clearLegacyData(); }}>{t('agentDesktop.legacyDataClear')}</Button>
+          </SettingsRow>
+        </SettingsCard>
       ) : null}
-    </Surface>
+    </div>
   );
 }
 
@@ -203,9 +209,9 @@ function computerSummary(settings: Settings, t: ReturnType<typeof useT>): Summar
 }
 
 /** A row in the overview that opens a tool's own settings page. */
-function SettingsEntry({ page, icon, title, description, status, isDisabled, onPress }: {
+function SettingsEntry({ page, icon: Icon, title, description, status, isDisabled, onPress }: {
   page: AgentDesktopPage;
-  icon: ReactNode;
+  icon: ComponentType<{ className?: string; 'aria-hidden'?: boolean | 'true' | 'false' }>;
   title: string;
   description: string;
   status?: Summary;
@@ -213,21 +219,29 @@ function SettingsEntry({ page, icon, title, description, status, isDisabled, onP
   onPress: () => void;
 }) {
   return (
-    <ItemCard<'button'>
-      variant="transparent"
-      className="hover:bg-default/40 w-full cursor-pointer text-start transition-colors disabled:cursor-default disabled:opacity-50 disabled:hover:bg-transparent"
-      render={props => <button {...props} type="button" data-agent-desktop-page={page} disabled={isDisabled} onClick={onPress} />}
+    <button
+      type="button"
+      data-agent-desktop-page={page}
+      disabled={isDisabled}
+      onClick={onPress}
+      className={cx(
+        'group flex w-full cursor-pointer items-center gap-3 ps-3 text-start',
+        'outline-none transition-colors duration-150 ease hover:bg-background-secondary-hover focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-border-focus-ring',
+        'disabled:cursor-default disabled:opacity-50 disabled:hover:bg-transparent',
+      )}
     >
-      <ItemCard.Icon>{icon}</ItemCard.Icon>
-      <ItemCard.Content>
-        <ItemCard.Title>{title}</ItemCard.Title>
-        <ItemCard.Description>{description}</ItemCard.Description>
-      </ItemCard.Content>
-      <ItemCard.Action className="flex items-center gap-2">
-        {status ? <Chip size="sm" variant="soft" color={status.color}>{status.label}</Chip> : null}
-        <RiArrowRightSLine className="text-muted size-4 rtl:-scale-x-100" aria-hidden />
-      </ItemCard.Action>
-    </ItemCard>
+      <Icon aria-hidden className="size-5 shrink-0 text-foreground-icon-secondary" />
+      <span className="flex min-h-[52px] min-w-0 flex-1 items-center gap-4 border-b border-separator-border py-2.5 pe-2.5 group-last:border-b-0">
+        <span className="flex min-w-0 flex-1 flex-col">
+          <span className="text-body-regular text-text-primary">{title}</span>
+          <span className="text-body-2-regular text-text-secondary">{description}</span>
+        </span>
+        <span className="flex shrink-0 items-center gap-2">
+          {status ? <Chip variant="caption" color={CHIP_COLORS[status.color]}>{status.label}</Chip> : null}
+          <RiArrowRightSLine className="size-4 text-foreground-icon-tertiary rtl:-scale-x-100" aria-hidden />
+        </span>
+      </span>
+    </button>
   );
 }
 
@@ -242,12 +256,10 @@ function SettingsSubpage({ title, description, onBack, children }: {
   return (
     <div className="flex flex-col gap-6">
       <div className="flex items-start gap-2">
-        <Button isIconOnly size="sm" variant="ghost" className="-ms-2 shrink-0" aria-label={t('settings.back')} onPress={onBack}>
-          <RiArrowLeftSLine className="size-5 rtl:-scale-x-100" />
-        </Button>
+        <IconAction icon={RiArrowLeftSLine} size="sm" className="-ms-1.5 shrink-0" iconClassName="size-5 rtl:-scale-x-100" aria-label={t('settings.back')} onClick={onBack} />
         <div className="min-w-0 pt-0.5">
-          <h2 className="text-foreground text-xl font-semibold">{title}</h2>
-          {description ? <p className="text-muted mt-1 text-sm">{description}</p> : null}
+          <h3 className="text-headline-medium text-text-primary">{title}</h3>
+          {description ? <p className="mt-1 text-body-regular text-text-secondary">{description}</p> : null}
         </div>
       </div>
       {children}

@@ -1,7 +1,9 @@
-import { useMemo, useState } from 'react';
-import { Card, Label, ListBox, Select } from '@heroui/react';
+import { useEffect, useMemo, useState } from 'react';
 import { RiBarChartBoxLine, RiDatabase2Line, RiDownloadCloud2Line, RiFlashlightLine, RiUploadCloud2Line } from '@remixicon/react';
 import { usageTotalTokens } from '@todex/protocol/conversationRuntime';
+import { Select, SelectItem } from '@/components/base/select/select';
+import { EmptyState } from '@/components/ui/empty-state';
+import { Meter } from '@/components/ui/progress-bar';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { getLocale, t, useT } from '../i18n';
 import type { UsageRecord } from '../session/helpers';
@@ -55,8 +57,9 @@ function titleCase(value: string): string {
   return value === 'unknown' ? t('usage.unknown') : value.charAt(0).toUpperCase() + value.slice(1);
 }
 
-// The icon rides in the label row so the value gets the card's full width;
-// a side tile left five-up cards too narrow and truncated large totals.
+// BoardUI plain stat card: the icon tile sits above the label so the value
+// gets the card's full width; a side tile left five-up cards too narrow and
+// truncated large totals.
 function MetricCard({ label, value, detail, icon: Icon }: {
   label: string;
   value: number;
@@ -64,26 +67,51 @@ function MetricCard({ label, value, detail, icon: Icon }: {
   icon: typeof RiBarChartBoxLine;
 }) {
   return (
-    <Card className="min-w-0 p-4">
-      <div className="flex items-center justify-between gap-2">
-        <p className="text-muted truncate text-xs">{label}</p>
-        <Icon className="text-muted size-4 shrink-0" aria-hidden="true" />
+    <section className="flex min-w-0 flex-col gap-3 rounded-2xl bg-background-secondary-default p-4">
+      <span className="flex w-fit items-center rounded-md bg-stat-card-icon-background p-1.5">
+        <Icon className="size-5 shrink-0 text-foreground-icon-primary" aria-hidden="true" />
+      </span>
+      <div className="flex min-w-0 flex-col gap-0.5">
+        <p className="truncate text-body-medium text-text-secondary">{label}</p>
+        <p className="truncate text-title-1-medium text-text-primary tabular-nums">{formatTokens(value)}</p>
+        <p className="text-caption-1-regular text-text-tertiary">{detail}</p>
       </div>
-      <p className="mt-2 truncate text-xl font-semibold tabular-nums">{formatTokens(value)}</p>
-      <p className="text-muted mt-1 text-xs">{detail}</p>
-    </Card>
+    </section>
   );
 }
 
-function UsageBar({ label, totals, max }: { label: string; totals: UsageTotals; max: number }) {
+/** Bars mount at zero and grow in (a timeout so the first frame is painted). */
+function useMounted() {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setMounted(true), 60);
+    return () => window.clearTimeout(timer);
+  }, []);
+  return mounted;
+}
+
+// BoardUI bar-list row: a translucent chart-6 bar sized against the top row
+// sits behind the label with the total on the right; hover deepens the tint.
+function UsageBar({ label, totals, max, mounted }: { label: string; totals: UsageTotals; max: number; mounted: boolean }) {
+  const [active, setActive] = useState(false);
   const total = totals.totalTokens;
+  const width = max ? Math.max((total / max) * 100, 2) : 0;
   return (
-    <div className="grid grid-cols-[minmax(7rem,0.8fr)_minmax(10rem,2fr)_4rem] items-center gap-3">
-      <span className="truncate text-sm font-medium" title={label}>{label}</span>
-      <div className="bg-surface-secondary h-3 overflow-hidden rounded-sm" style={{ width: `${max ? Math.max((total / max) * 100, 2) : 0}%` }}>
-        <div className="bg-accent h-full w-full" />
-      </div>
-      <span className="text-muted text-right text-xs tabular-nums">{formatTokens(total)}</span>
+    <div
+      className="relative flex h-9 items-center justify-between gap-3 rounded-lg px-2.5"
+      onMouseEnter={() => setActive(true)}
+      onMouseLeave={() => setActive(false)}
+    >
+      <div
+        aria-hidden
+        className="absolute inset-y-0 start-0 rounded-lg transition-[width,background-color] duration-500 ease-out motion-reduce:transition-none"
+        style={{
+          width: mounted ? `${width}%` : 0,
+          backgroundColor: `color-mix(in srgb, ${active ? 'var(--color-chart-6-active)' : 'var(--color-chart-6)'} ${active ? 26 : 14}%, transparent)`,
+        }}
+      />
+      <span className="relative min-w-0 truncate text-body-regular text-text-primary" title={label}>{label}</span>
+      <span className="relative shrink-0 text-body-medium text-text-primary tabular-nums">{formatTokens(total)}</span>
     </div>
   );
 }
@@ -92,6 +120,7 @@ export function UsagePanel({ session }: Props) {
   const t = useT();
   const [provider, setProvider] = useState('all');
   const [model, setModel] = useState('all');
+  const mounted = useMounted();
   const providers = useMemo(() => [...new Set(session.usageRecords.map((record) => record.provider))].sort(), [session.usageRecords]);
   const providerRecords = useMemo(
     () => provider === 'all' ? session.usageRecords : session.usageRecords.filter((record) => record.provider === provider),
@@ -125,17 +154,25 @@ export function UsagePanel({ session }: Props) {
   return (
     <div className="flex flex-col gap-5 py-1">
       <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
-        <p className="text-muted text-sm">{t('usage.subtitle')}</p>
-        <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
-          <Select selectedKey={provider} onSelectionChange={(key) => { if (typeof key === 'string') { setProvider(key); setModel('all'); } }}>
-            <Label className="sr-only">Agent</Label>
-            <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
-            <Select.Popover><ListBox><ListBox.Item id="all" textValue={t('usage.allAgents')}>{t('usage.allAgents')}</ListBox.Item>{providers.map((item) => <ListBox.Item key={item} id={item} textValue={titleCase(item)}>{titleCase(item)}</ListBox.Item>)}</ListBox></Select.Popover>
+        <p className="text-body-regular text-text-secondary">{t('usage.subtitle')}</p>
+        <div className="grid min-w-0 shrink-0 grid-cols-1 gap-3 sm:w-96 sm:grid-cols-2">
+          <Select
+            aria-label="Agent"
+            className="w-full min-w-0"
+            selectedKey={provider}
+            onSelectionChange={(key) => { if (typeof key === 'string') { setProvider(key); setModel('all'); } }}
+          >
+            <SelectItem id="all" textValue={t('usage.allAgents')}>{t('usage.allAgents')}</SelectItem>
+            {providers.map((item) => <SelectItem key={item} id={item} textValue={titleCase(item)}>{titleCase(item)}</SelectItem>)}
           </Select>
-          <Select selectedKey={models.includes(model) ? model : 'all'} onSelectionChange={(key) => { if (typeof key === 'string') setModel(key); }}>
-            <Label className="sr-only">{t('usage.modelLabel')}</Label>
-            <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
-            <Select.Popover><ListBox><ListBox.Item id="all" textValue={t('usage.allModels')}>{t('usage.allModels')}</ListBox.Item>{models.map((item) => <ListBox.Item key={item} id={item} textValue={item}>{item}</ListBox.Item>)}</ListBox></Select.Popover>
+          <Select
+            aria-label={t('usage.modelLabel')}
+            className="w-full min-w-0"
+            selectedKey={models.includes(model) ? model : 'all'}
+            onSelectionChange={(key) => { if (typeof key === 'string') setModel(key); }}
+          >
+            <SelectItem id="all" textValue={t('usage.allModels')}>{t('usage.allModels')}</SelectItem>
+            {models.map((item) => <SelectItem key={item} id={item} textValue={item}>{item}</SelectItem>)}
           </Select>
         </div>
       </div>
@@ -149,35 +186,34 @@ export function UsagePanel({ session }: Props) {
       </div>
 
       <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(16rem,1fr)]">
-        <Card className="p-5">
-          <div className="mb-5">
-            <h3 className="font-semibold">{provider === 'all' ? t('usage.byAgent') : t('usage.byModel')}</h3>
-            <p className="text-muted mt-1 text-xs">{t('usage.chartHint')}</p>
+        <section className="flex min-w-0 flex-col rounded-2xl bg-background-secondary-default px-4 pb-3">
+          <div className="-mx-4 mb-3 flex flex-col gap-0.5 border-b border-separator-border px-4 pt-4 pb-3">
+            <h3 className="text-body-medium text-text-primary">{provider === 'all' ? t('usage.byAgent') : t('usage.byModel')}</h3>
+            <p className="text-body-2-regular text-text-secondary">{t('usage.chartHint')}</p>
           </div>
           {chartRows.length ? (
-            <div className="flex flex-col gap-4">
-              {chartRows.slice(0, 12).map((row) => <UsageBar key={row.name} label={row.name} totals={row.totals} max={chartMax} />)}
+            <div className="-mx-2 flex flex-col gap-1">
+              {chartRows.slice(0, 12).map((row) => <UsageBar key={row.name} label={row.name} totals={row.totals} max={chartMax} mounted={mounted} />)}
             </div>
           ) : (
-            <div className="flex min-h-48 flex-col items-center justify-center text-center">
-              <RiBarChartBoxLine className="text-muted size-7" />
-              <p className="mt-3 text-sm font-medium">{t('usage.emptyTitle')}</p>
-              <p className="text-muted mt-1 max-w-sm text-xs">{t('usage.emptyHint')}</p>
-            </div>
+            <EmptyState className="min-h-48" icon={RiBarChartBoxLine} title={t('usage.emptyTitle')} description={t('usage.emptyHint')} />
           )}
-        </Card>
-        <Card className="p-5">
-          <h3 className="font-semibold">{t('usage.cacheComposition')}</h3>
-          <p className="text-muted mt-1 text-xs">{t('usage.cacheHint')}</p>
-          <div className="mt-6">
-            <p className="text-3xl font-semibold tabular-nums">{cacheRate === null ? '—' : `${cacheRate}%`}</p>
-            <p className="text-muted mt-1 text-xs">{t('usage.cacheHitRateLabel')}</p>
+        </section>
+        <section className="flex min-w-0 flex-col rounded-2xl bg-background-secondary-default p-4">
+          <h3 className="text-body-medium text-text-primary">{t('usage.cacheComposition')}</h3>
+          <p className="mt-0.5 text-body-2-regular text-text-secondary">{t('usage.cacheHint')}</p>
+          <div className="mt-6 flex flex-col gap-1">
+            <p className="text-display-4-medium text-text-primary tabular-nums">{cacheRate === null ? '—' : `${cacheRate}%`}</p>
+            <p className="text-caption-1-regular text-text-secondary">{t('usage.cacheHitRateLabel')}</p>
+            {cacheRate === null ? null : (
+              <Meter className="mt-2" aria-label={t('usage.cacheHitRateLabel')} showValue={false} value={cacheRate} />
+            )}
           </div>
-          <dl className="mt-6 grid grid-cols-2 gap-3 text-xs">
-            <div><dt className="text-muted">{t('usage.lastUpdate')}</dt><dd className="mt-1 font-medium">{filtered[0] ? new Date(filtered[0].updatedAt).toLocaleString(getLocale()) : t('usage.none')}</dd></div>
-            <div><dt className="text-muted">{t('usage.modelCount')}</dt><dd className="mt-1 font-medium">{new Set(filtered.map((record) => record.model)).size}</dd></div>
+          <dl className="mt-6 grid grid-cols-2 gap-3 border-t border-separator-border pt-4">
+            <div className="min-w-0"><dt className="text-caption-1-regular text-text-secondary">{t('usage.lastUpdate')}</dt><dd className="mt-1 text-body-2-medium text-text-primary">{filtered[0] ? new Date(filtered[0].updatedAt).toLocaleString(getLocale()) : t('usage.none')}</dd></div>
+            <div className="min-w-0"><dt className="text-caption-1-regular text-text-secondary">{t('usage.modelCount')}</dt><dd className="mt-1 text-body-2-medium text-text-primary tabular-nums">{new Set(filtered.map((record) => record.model)).size}</dd></div>
           </dl>
-        </Card>
+        </section>
       </div>
     </div>
   );

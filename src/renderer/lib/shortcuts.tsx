@@ -1,5 +1,6 @@
-import { Kbd } from '@heroui/react';
 import { useEffect, useRef } from 'react';
+import { Kbd } from '@/components/base/kbd/kbd';
+import { cx } from '@/utils/cx';
 
 export const isMacLike = window.todexDesktop?.shell.platform === 'darwin'
   || navigator.userAgent.includes('Mac');
@@ -120,23 +121,14 @@ export function useAppShortcuts(handlers: Partial<Record<ShortcutId, () => void>
 
 export function ShortcutHint({ id, className }: { id: ShortcutId; className?: string }) {
   const combo = COMBOS[id];
+  // ⌥ ⇧ ⌘ glyphs on macOS (the platform's own modifier order), spelled-out
+  // modifiers elsewhere.
+  const keys = isMacLike
+    ? `${combo.alt ? '⌥' : ''}${combo.shift ? '⇧' : ''}${combo.mod ? '⌘' : ''}${combo.label}`
+    : [combo.alt && 'Alt', combo.shift && 'Shift', combo.mod && 'Ctrl', combo.label].filter(Boolean).join('+');
   return (
-    <span aria-hidden="true" className={`shortcut-hint ${className ?? ''}`}>
-      <Kbd className="shortcut-hint__kbd">
-        {isMacLike ? (
-          <>
-            {combo.alt ? <Kbd.Abbr keyValue="option" /> : null}
-            {combo.shift ? <Kbd.Abbr keyValue="shift" /> : null}
-            {combo.mod ? <Kbd.Abbr keyValue="command" /> : null}
-            <Kbd.Content>{combo.label}</Kbd.Content>
-          </>
-        ) : (
-          <Kbd.Content>
-            {[combo.alt && 'Alt', combo.shift && 'Shift', combo.mod && 'Ctrl', combo.label]
-              .filter(Boolean).join('+')}
-          </Kbd.Content>
-        )}
-      </Kbd>
+    <span aria-hidden="true" className={cx('shortcut-hint', className)}>
+      <Kbd className="shortcut-hint__kbd">{keys}</Kbd>
     </span>
   );
 }

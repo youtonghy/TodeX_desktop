@@ -1,8 +1,16 @@
 import { useMemo, useState } from 'react';
-import { Button, Card, ScrollShadow, Spinner, Tabs, toast } from '@heroui/react';
 import { RiArrowDownSLine, RiFlashlightLine, RiGitlabLine, RiRefreshLine } from '@remixicon/react';
 import type { McpCatalog, McpServerCatalogDescriptor, ProviderDescriptor, ProviderKind, SkillCatalog, SkillCatalogDescriptor } from '@todex/protocol/v2';
 import { providerDisplayName } from '@todex/protocol/v2';
+import { Button } from '@/components/base/buttons/button';
+import { PillTab, PillTabList } from '@/components/base/tabs/pill-tab';
+import { Tab, TabList, Tabs } from '@/components/base/tabs/tabs';
+import { Card } from '@/components/ui/card';
+import { IconAction } from '@/components/ui/icon-action';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Spinner } from '@/components/ui/spinner';
+import { toast } from '@/components/ui/toast';
+import { cx } from '@/utils/cx';
 import { ProviderIcon } from '../components/ProviderIcon';
 import { useNoticeToast } from '../components/NoticeToast';
 import { useT } from '../i18n';
@@ -87,57 +95,55 @@ export function CapabilitiesPanel({
   }, [providerChoice, selectedCatalogs]);
 
   return (
-    <div className={`flex h-full min-h-0 flex-col ${inDialog ? 'py-1' : 'p-5'}`}>
+    <div className={cx('flex h-full min-h-0 flex-col', inDialog ? 'py-1' : 'p-5')}>
       <div className="mb-3 flex items-start justify-between gap-2">
-        <div>
-          {inDialog ? null : <h2 className="text-lg font-semibold">{t('cap.title')}</h2>}
-          <p className={`text-muted text-xs ${inDialog ? '' : 'mt-1'}`}>{provider ? `${providerDisplayName(provider.id, provider.displayName)} · ${workspacePath}` : t('cap.commonPath', { path: workspacePath })}</p>
+        <div className="min-w-0">
+          {inDialog ? null : <h2 className="text-title-3-semibold text-text-primary">{t('cap.title')}</h2>}
+          <p className={cx('text-caption-1-regular text-text-secondary', !inDialog && 'mt-1')}>{provider ? `${providerDisplayName(provider.id, provider.displayName)} · ${workspacePath}` : t('cap.commonPath', { path: workspacePath })}</p>
           {conversationId && canInvoke ? (
-            <p className="text-muted mt-1 text-xs">{t('cap.attachHint')}</p>
+            <p className="mt-1 text-caption-1-regular text-text-secondary">{t('cap.attachHint')}</p>
           ) : (
-            <p className="text-muted mt-1 text-xs">{t('cap.needV2')}</p>
+            <p className="mt-1 text-caption-1-regular text-text-secondary">{t('cap.needV2')}</p>
           )}
         </div>
         {providerChoice !== 'common' ? (
-          <Button isIconOnly size="sm" variant="ghost" aria-label={t('workbench.refresh')} onPress={() => onRefresh(providerChoice)}>
-            <RiRefreshLine className="size-4" />
-          </Button>
+          <IconAction icon={RiRefreshLine} size="sm" aria-label={t('workbench.refresh')} onClick={() => onRefresh(providerChoice)} />
         ) : null}
       </div>
-      <div className="mb-3 flex flex-wrap gap-2">
-        <Button size="sm" variant={providerChoice === 'common' ? 'primary' : 'tertiary'} onPress={() => setProviderChoice('common')}>{t('cap.common')}</Button>
+      <PillTabList className="mb-3 flex-wrap">
+        <PillTab variant="gray" isSelected={providerChoice === 'common'} onSelect={() => setProviderChoice('common')}>{t('cap.common')}</PillTab>
         {providers.map((item) => (
-          <Button key={item.id} size="sm" variant={providerChoice === item.id ? 'primary' : 'tertiary'} onPress={() => setProviderChoice(item.id)}>
-            <ProviderIcon provider={item.id} />
-            {providerDisplayName(item.id)} {item.available ? '●' : '○'}
-          </Button>
+          <PillTab key={item.id} variant="gray" isSelected={providerChoice === item.id} onSelect={() => setProviderChoice(item.id)}>
+            <span className="inline-flex items-center gap-1.5">
+              <ProviderIcon provider={item.id} className="size-4" />
+              {providerDisplayName(item.id)}
+              <span
+                aria-hidden
+                className={cx(
+                  'size-1.5 shrink-0 rounded-full',
+                  item.available ? 'bg-chart-7' : 'border border-foreground-icon-tertiary',
+                )}
+              />
+            </span>
+          </PillTab>
         ))}
-      </div>
+      </PillTabList>
       <Tabs
         selectedKey={viewMode}
         onSelectionChange={(key) => setViewMode(key === 'mcp' ? 'mcp' : 'skills')}
-        className="w-full"
       >
-        <Tabs.ListContainer className="w-full">
-          <Tabs.List aria-label={t('cap.tabsLabel')} className="grid w-full grid-cols-2">
-            <Tabs.Tab id="skills">
-              Skills
-              <Tabs.Indicator />
-            </Tabs.Tab>
-            <Tabs.Tab id="mcp">
-              MCPs
-              <Tabs.Indicator />
-            </Tabs.Tab>
-          </Tabs.List>
-        </Tabs.ListContainer>
+        <TabList aria-label={t('cap.tabsLabel')} className="grid grid-cols-2 gap-0">
+          <Tab id="skills" className="justify-center">Skills</Tab>
+          <Tab id="mcp" className="justify-center">MCPs</Tab>
+        </TabList>
       </Tabs>
       {state?.status === 'loading' ? (
-        <div className="flex flex-col items-center py-10">
-          <Spinner />
-          <p className="text-muted mt-2 text-xs">{t('cap.loading')}</p>
+        <div className="flex flex-col items-center gap-2 py-10">
+          <Spinner size="md" />
+          <p className="text-caption-1-regular text-text-secondary">{t('cap.loading')}</p>
         </div>
       ) : null}
-      <ScrollShadow className="mt-3 min-h-0 flex-1">
+      <ScrollArea className="mt-3 flex-1" contentClassName="flex flex-col gap-2" surface={inDialog ? 'full' : 'secondary'}>
         {viewMode === 'skills' && state?.status !== 'loading' ? (
           skills.length ? skills.map((item) => (
             <SkillRow
@@ -157,7 +163,7 @@ export function CapabilitiesPanel({
                 }
               }}
             />
-          )) : <p className="text-muted py-10 text-center text-sm">{t('cap.noSkills')}</p>
+          )) : <p className="py-10 text-center text-body-regular text-text-secondary">{t('cap.noSkills')}</p>
         ) : null}
         {viewMode === 'mcp' && state?.status !== 'loading' ? (
           mcpServers.length ? mcpServers.map((item) => (
@@ -168,9 +174,9 @@ export function CapabilitiesPanel({
               onRefresh={() => onRefreshMcp?.(item.resourceId)}
               onCall={(toolName) => onCallMcp?.(item.resourceId, toolName)}
             />
-          )) : <p className="text-muted py-10 text-center text-sm">{t('cap.noMcps')}</p>
+          )) : <p className="py-10 text-center text-body-regular text-text-secondary">{t('cap.noMcps')}</p>
         ) : null}
-      </ScrollShadow>
+      </ScrollArea>
     </div>
   );
 }
@@ -211,12 +217,15 @@ function SkillRow({
 
   return (
     <Card
+      variant="secondary"
       role="button"
       tabIndex={0}
       aria-expanded={expanded}
-      className={`mb-2 p-3.5 transition-all cursor-pointer select-none hover:bg-surface-secondary/40 active:bg-surface-secondary/60 ${
-        expanded ? 'bg-surface-secondary/20 ring-1 ring-separator' : ''
-      }`}
+      className={cx(
+        'cursor-pointer gap-0 p-3.5 select-none',
+        'outline-none transition-colors duration-150 ease focus-visible:ring-2 focus-visible:ring-border-focus-ring',
+        expanded ? 'bg-background-secondary-hover' : 'hover:bg-background-secondary-hover',
+      )}
       onClick={handleToggle}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
@@ -226,57 +235,59 @@ function SkillRow({
       }}
     >
       <div className="flex gap-3">
-        <div className="bg-accent-soft flex size-9 shrink-0 items-center justify-center rounded-lg">
-          <RiFlashlightLine className="text-accent size-4" />
+        <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-badge-new-background">
+          <RiFlashlightLine aria-hidden className="size-4 text-badge-new-text" />
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between gap-2">
-            <p className="truncate font-semibold text-sm">{item.name}</p>
-            <div className="flex items-center gap-2 shrink-0">
-              <span className={`text-xs ${selected ? 'text-accent font-medium' : 'text-muted'}`}>
+            <p className="truncate text-body-semibold text-text-primary">{item.name}</p>
+            <div className="flex shrink-0 items-center gap-2">
+              <span className={selected ? 'text-caption-1-medium text-text-accent' : 'text-caption-1-regular text-text-secondary'}>
                 {selected ? t('cap.attached') : status}
               </span>
               <RiArrowDownSLine
-                className={`text-muted size-4 transition-transform duration-200 ${
-                  expanded ? 'rotate-180' : ''
-                }`}
+                aria-hidden
+                className={cx(
+                  'size-4 text-foreground-icon-tertiary transition-transform duration-200 ease-out motion-reduce:transition-none',
+                  expanded && 'rotate-180',
+                )}
               />
             </div>
           </div>
           {item.description ? (
-            <p className={`text-muted mt-1 text-xs leading-relaxed ${expanded ? 'whitespace-pre-line' : 'line-clamp-2'}`}>
+            <p className={cx('mt-1 text-caption-1-regular text-text-secondary', expanded ? 'whitespace-pre-line' : 'line-clamp-2')}>
               {item.description}
             </p>
           ) : null}
-          <p className="text-muted mt-1.5 text-[11px]">{item.scope} · {item.source}</p>
+          <p className="mt-1.5 text-caption-2-regular text-text-tertiary">{item.scope} · {item.source}</p>
 
           {expanded ? (
-            <div className="mt-3 border-t border-separator/40 pt-3" onClick={(e) => e.stopPropagation()}>
+            <div className="mt-3 cursor-default border-t border-separator-border pt-3" onClick={(e) => e.stopPropagation()}>
               {loading ? (
-                <div className="flex items-center gap-2 py-3 text-muted text-xs">
+                <div className="flex items-center gap-2 py-3 text-caption-1-regular text-text-secondary">
                   <Spinner size="sm" />
                   <span>{t('cap.loadingSkill')}</span>
                 </div>
               ) : preview ? (
-                <div className="rounded-lg bg-surface-secondary/60 border border-separator/50 p-2.5">
-                  <p className="text-muted mb-1 text-[11px] font-medium">{t('cap.previewLabel')}</p>
-                  <pre className="text-foreground/80 max-h-52 overflow-auto whitespace-pre-wrap font-mono text-[11px] leading-relaxed select-text">
+                <div className="rounded-2lg border border-border-button-default bg-background-primary-default p-2.5">
+                  <p className="mb-1 text-caption-2-medium text-text-secondary">{t('cap.previewLabel')}</p>
+                  <pre className="max-h-52 overflow-auto font-mono text-caption-2-regular whitespace-pre-wrap text-text-primary select-text">
                     {preview.slice(0, 4000)}
                   </pre>
                 </div>
               ) : (
-                <p className="text-muted text-xs">{t('cap.noPreview')}</p>
+                <p className="text-caption-1-regular text-text-secondary">{t('cap.noPreview')}</p>
               )}
 
               {canSelect ? (
-                <div className="mt-3 flex items-center justify-between">
-                  <span className="text-muted text-xs">
+                <div className="mt-3 flex items-center justify-between gap-2">
+                  <span className="text-caption-1-regular text-text-secondary">
                     {selected ? t('cap.attachedToChat') : t('cap.attachable')}
                   </span>
                   <Button
-                    size="sm"
+                    size="small"
                     variant={selected ? 'secondary' : 'primary'}
-                    onPress={onToggle}
+                    onClick={onToggle}
                   >
                     {selected ? t('cap.detach') : t('cap.attach')}
                   </Button>
@@ -304,36 +315,36 @@ function McpRow({
   const t = useT();
   const status = item.enabled && item.active ? t('cap.statusActive') : item.shadowedBy ? t('cap.statusShadowed') : item.enabled ? t('cap.statusAvailable') : t('cap.statusDisabled');
   return (
-    <Card className="mb-2 p-3">
+    <Card variant="secondary" className="gap-0 p-3.5">
       <div className="flex gap-3">
-        <div className="bg-success-soft flex size-9 items-center justify-center rounded-lg">
-          <RiGitlabLine className="text-success size-4" />
+        <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-status-lime-background">
+          <RiGitlabLine aria-hidden className="size-4 text-status-lime-text" />
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between gap-2">
-            <p className="truncate font-semibold">{item.name}</p>
-            <p className="text-muted text-xs">{status}</p>
+            <p className="truncate text-body-semibold text-text-primary">{item.name}</p>
+            <p className="shrink-0 text-caption-1-regular text-text-secondary">{status}</p>
           </div>
-          <p className="text-muted mt-2 text-[11px]">{item.transport} · {item.scope} · {item.source}</p>
-          {item.error ? <p className="text-danger mt-1 text-xs">{item.error}</p> : null}
-          <div className="mt-2 flex flex-wrap gap-2">
-            {canInvoke ? (
-              <Button size="sm" variant="tertiary" onPress={onRefresh}>{t('cap.refreshTools')}</Button>
-            ) : null}
-          </div>
+          <p className="mt-1.5 text-caption-2-regular text-text-tertiary">{item.transport} · {item.scope} · {item.source}</p>
+          {item.error ? <p className="mt-1 text-caption-1-regular text-text-error-primary">{item.error}</p> : null}
+          {canInvoke ? (
+            <div className="mt-2 flex flex-wrap gap-2">
+              <Button size="small" variant="secondary" onClick={onRefresh}>{t('cap.refreshTools')}</Button>
+            </div>
+          ) : null}
           {item.tools?.length ? (
             <div className="mt-2 flex flex-col gap-1">
               {item.tools.map((tool) => (
-                <div key={tool.name} className="flex items-center justify-between gap-2">
-                  <p className="truncate text-xs">{tool.name}{tool.description ? ` · ${tool.description}` : ''}</p>
+                <div key={tool.name} className="flex min-h-8 items-center justify-between gap-2">
+                  <p className="truncate text-caption-1-regular text-text-primary">{tool.name}{tool.description ? ` · ${tool.description}` : ''}</p>
                   {canInvoke ? (
-                    <Button size="sm" variant="primary" onPress={() => onCall(tool.name)}>{t('cap.call')}</Button>
+                    <Button className="shrink-0" size="small" variant="primary" onClick={() => onCall(tool.name)}>{t('cap.call')}</Button>
                   ) : null}
                 </div>
               ))}
             </div>
           ) : (
-            <p className="text-muted mt-2 text-xs">{t('cap.noTools')}</p>
+            <p className="mt-2 text-caption-1-regular text-text-secondary">{t('cap.noTools')}</p>
           )}
         </div>
       </div>

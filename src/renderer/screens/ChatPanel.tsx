@@ -1,21 +1,57 @@
 import { ConversationControls } from '../components/ConversationControls';
 import { ComputerLiveView } from '../components/ComputerLiveView';
 import { NoticeToast } from '../components/NoticeToast';
-import { RiArrowDownDoubleLine, RiAttachment2, RiBarChartBoxLine, RiClipboardLine, RiCpuLine, RiGitBranchLine, RiListCheck2, RiShieldLine, RiStopCircleLine } from '@remixicon/react';
+import {
+  RiArrowDownDoubleLine,
+  RiArrowUpLine,
+  RiAttachment2,
+  RiBarChartBoxLine,
+  RiChat3Line,
+  RiCloseLine,
+  RiCodeSSlashLine,
+  RiCpuLine,
+  RiGitBranchLine,
+  RiGitMergeLine,
+  RiListCheck2,
+  RiListCheck3,
+  RiRouteLine,
+  RiShieldCheckLine,
+  RiShieldLine,
+  RiSpeedUpLine,
+  RiStopFill,
+  RiTimerLine,
+} from '@remixicon/react';
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { Dispatch, KeyboardEvent, SetStateAction } from 'react';
-import { Alert, Button, Label, ListBox, Popover, ScrollShadow, Select, Spinner, Tooltip, toast } from '@heroui/react';
-import { buttonVariants } from '@heroui/styles';
-import { ChainOfThought, ChatAttachment, ChatAttachmentGroup, ChatAttachmentInput, ChatMessage, HoverCard, PromptInput, TextShimmer } from '@heroui-pro/react';
-import { ChatMessageActions } from '@heroui-pro/react/chat-message-actions';
-import { ChatTool, type ToolPartState } from '@heroui-pro/react/chat-tool';
-import { Markdown, type MarkdownProps } from '@heroui-pro/react/markdown';
+import type { ComponentProps, Dispatch, KeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode, SetStateAction } from 'react';
+import { Focusable, ListBox as AriaListBox, ListBoxItem as AriaListBoxItem, type ListBoxItemRenderProps } from 'react-aria-components';
+import { motion, useReducedMotion } from 'motion/react';
+import { ShimmerText } from '@/components/application/agent-log/agent-log';
+import { ComposerLoader } from '@/components/application/composer-loader/composer-loader';
+import { Button } from '@/components/base/buttons/button';
+import { Tooltip, TooltipTrigger } from '@/components/base/tooltip/tooltip';
+import { Alert } from '@/components/ui/alert';
+import { EmptyState } from '@/components/ui/empty-state';
+import { Markdown, type MarkdownComponents } from '@/components/ui/markdown';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Spinner } from '@/components/ui/spinner';
+import { toast } from '@/components/ui/toast';
+import { cx } from '@/utils/cx';
 import { baseMarkdownComponents } from '../components/markdownComponents';
 import { providerDisplayName, type ProviderKind, type PermissionMode, type SkillCatalogDescriptor } from '@todex/protocol/v2';
 import { ConversationPermissionActions, ConversationPromptInput, ConversationRunStatus, PermissionRequestCard, TurnUsageSummary } from '../components/ConversationRunStatus';
 import { ReferenceComposer, type ReferenceComposerHandle } from '../components/ReferenceComposer';
 import { ComposerAttachmentPreview } from '../components/ComposerAttachmentPreview';
-import { SentAttachmentPreview } from '../components/SentAttachmentPreview';
+import { SentAttachmentList } from '../components/chat/AttachmentTile';
+import {
+  COMPOSER_CONTROL_ICON,
+  ComposerPopover,
+  ComposerRoundButton,
+  ComposerSelect,
+  ComposerSendButton,
+} from '../components/chat/ComposerControls';
+import { CopyGlyph, FeedbackButton } from '../components/chat/MessageActions';
+import { ProcessDisclosure, ProcessStep, ProcessSteps } from '../components/chat/ProcessDisclosure';
+import { ToolCallCard, type ToolCallState } from '../components/chat/ToolCallCard';
 import { activeChatProcessId, buildChatRenderItems, isChatTimelineEntry, isChatToolEntry, latestIncomingEntryIds, sameTimelineEntries, sortChatEntries } from '../components/conversationTimeline';
 import type { ChatRenderItem } from '../components/conversationTimeline';
 import type { BackgroundTask } from '@todex/protocol/conversationRuntime';
@@ -53,7 +89,6 @@ import {
   type TimelineEntry,
 } from '../session/helpers';
 import { selectionInside } from '../lib/selection';
-import type { SentAttachment } from '../session/sentAttachments';
 import { findCapabilityHashTrigger, insertCapabilityReference, normalizeReasoningEffort } from '@todex/protocol/todex';
 import { buildCapabilitySuggestions, capabilityCatalogsPending, type CapabilitySuggestion } from '@todex/protocol/capabilityCatalog';
 import {
@@ -98,6 +133,25 @@ const PASTED_TEXT_MAX_LINES = 5;
 const COMPOSER_IMAGE_ACCEPT = 'image/png,image/jpeg,image/gif,image/webp';
 const COMPOSER_TEXT_ACCEPT = 'text/*,.md,.mdx,.json,.yaml,.yml,.toml,.csv,.tsv,.ts,.tsx,.js,.jsx,.css,.html,.xml,.svg,.sh,.py,.rs,.go,.java,.kt,.swift';
 const SUPPORTED_COMPOSER_IMAGE_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
+/** A row that mounts while a turn runs blurs in like a streaming line (BoardUI AI chat). */
+const ENTRANCE_EASE = [0.25, 0.1, 0.25, 1] as const;
+/** Rows already on screen when a conversation opens stay still; later rows animate. */
+const ENTRANCE_ARM_DELAY_MS = 600;
+
+/** Reasoning effort → its color on the composer's model trigger. */
+const EFFORT_TEXT: Record<string, string> = {
+  none: 'text-effort-none',
+  minimal: 'text-effort-minimal',
+  low: 'text-effort-low',
+  medium: 'text-effort-medium',
+  high: 'text-effort-high',
+  xhigh: 'text-effort-xhigh',
+  max: 'text-effort-xhigh',
+  ultra: 'text-effort-xhigh',
+  ultracode: 'text-effort-xhigh',
+};
+
+const OPTION_ICON = 'size-5 shrink-0 text-foreground-icon-secondary';
 
 function isSupportedComposerImage(mimeType: string): boolean {
   return SUPPORTED_COMPOSER_IMAGE_MIME_TYPES.has(mimeType.trim().toLowerCase());
@@ -149,17 +203,17 @@ function toolKindLabel(kind: ToolCallKind): string {
  * without expanding; arguments, output and errors stay in the body. */
 function toolCardPresentation(entry: TimelineEntry, active: boolean) {
   const tool = describeToolCall(entry.subtitle);
-  const state: ToolPartState = tool.status === 'failed' ? 'output-error'
-    : tool.status === 'completed' || entry.phase === 'completed' || !active ? 'output-available'
-      : 'input-available';
+  const state: ToolCallState = tool.status === 'failed' ? 'failed'
+    : tool.status === 'completed' || entry.phase === 'completed' || !active ? 'completed'
+      : 'running';
+  // A failed call without its own error text surfaces its output as the error.
+  const outputIsError = state === 'failed' && !tool.errorText;
   return {
     label: tool.name || toolKindLabel(tool.kind),
     summary: tool.summary,
     argsText: tool.argsText,
-    // ChatTool hides the result section in the error state, so a failed
-    // call's output is surfaced as its error text.
-    output: state === 'output-error' ? undefined : tool.outputText,
-    errorText: state === 'output-error' ? (tool.errorText ?? tool.outputText) : undefined,
+    output: outputIsError ? undefined : tool.outputText,
+    errorText: state === 'failed' ? (tool.errorText ?? tool.outputText) : undefined,
     state,
   };
 }
@@ -189,66 +243,38 @@ function BackgroundTasksStatus({ tasks, items }: { tasks: readonly BackgroundTas
     return found;
   }, [tasks, items]);
   return (
-    <ChainOfThought isStreaming className="chat-process-trace min-w-0">
-      <ChainOfThought.Trigger className="min-h-7 py-1 text-xs">{t('chat.waitingBackground', { count: tasks.length })}</ChainOfThought.Trigger>
-      <ChainOfThought.Content>
-        <ChainOfThought.Steps>
-          {tasks.map((task) => {
-            const launcher = task.toolUseId ? launchers.get(task.toolUseId) : undefined;
-            const tool = launcher ? toolCardPresentation(launcher, true) : undefined;
-            const startedAt = task.startedAt ? new Date(task.startedAt) : null;
-            const meta = [
-              backgroundTaskKind(task.taskType),
-              startedAt && !Number.isNaN(startedAt.getTime())
-                ? t('chat.backgroundTaskStartedAt', { time: startedAt.toLocaleTimeString(getLocale(), { hour: '2-digit', minute: '2-digit' }) })
-                : '',
-            ].filter(Boolean).join(' · ');
-            return (
-              <ChainOfThought.Step key={task.taskId} label={task.description || tool?.summary || task.taskId}>
-                {meta ? <p className="text-muted text-xs">{meta}</p> : null}
-                {tool ? <ChatTool defaultExpanded={false} state={tool.state} toolName={tool.summary || tool.label} argsText={tool.argsText} output={tool.output} errorText={tool.errorText} /> : null}
-              </ChainOfThought.Step>
-            );
-          })}
-        </ChainOfThought.Steps>
-      </ChainOfThought.Content>
-    </ChainOfThought>
-  );
-}
-
-/// Sent attachments open a read-only preview on click/Enter; content comes
-/// from the receipt (previewUrl / textContent captured at send time).
-function SentAttachmentList({ attachments }: { attachments: SentAttachment[] }) {
-  const t = useT();
-  const [preview, setPreview] = useState<SentAttachment | null>(null);
-  return (
-    <>
-      <ChatAttachmentGroup aria-label={t('chat.sentAttachments')} className="justify-end text-left" role="list">
-        {attachments.map((attachment) => (
-          <ChatAttachment
-            key={attachment.id}
-            mimeType={attachment.mimeType}
-            name={attachment.name}
-            role="listitem"
-            size={attachment.sizeBytes ?? undefined}
-            src={attachment.previewUrl}
-            className="cursor-pointer"
-            tabIndex={0}
-            onClick={() => setPreview(attachment)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' || event.key === ' ') {
-                event.preventDefault();
-                setPreview(attachment);
-              }
-            }}
-          >
-            <ChatAttachment.Preview />
-            <ChatAttachment.Info />
-          </ChatAttachment>
-        ))}
-      </ChatAttachmentGroup>
-      <SentAttachmentPreview attachment={preview} onOpenChange={(open) => { if (!open) setPreview(null); }} />
-    </>
+    <ProcessDisclosure running icon={RiTimerLine} title={t('chat.waitingBackground', { count: tasks.length })}>
+      <ProcessSteps>
+        {tasks.map((task, index) => {
+          const launcher = task.toolUseId ? launchers.get(task.toolUseId) : undefined;
+          const tool = launcher ? toolCardPresentation(launcher, true) : undefined;
+          const startedAt = task.startedAt ? new Date(task.startedAt) : null;
+          const meta = [
+            backgroundTaskKind(task.taskType),
+            startedAt && !Number.isNaN(startedAt.getTime())
+              ? t('chat.backgroundTaskStartedAt', { time: startedAt.toLocaleTimeString(getLocale(), { hour: '2-digit', minute: '2-digit' }) })
+              : '',
+          ].filter(Boolean).join(' · ');
+          return (
+            <ProcessStep key={task.taskId} last={index === tasks.length - 1}>
+              <div className="flex min-w-0 flex-col gap-0.5 py-1">
+                <p className="text-body-regular text-text-secondary wrap-anywhere">{task.description || tool?.summary || task.taskId}</p>
+                {meta ? <p className="text-caption-1-regular text-text-tertiary">{meta}</p> : null}
+                {tool ? (
+                  <ToolCallCard
+                    state={tool.state}
+                    title={tool.summary || tool.label}
+                    argsText={tool.argsText}
+                    output={tool.output}
+                    errorText={tool.errorText}
+                  />
+                ) : null}
+              </div>
+            </ProcessStep>
+          );
+        })}
+      </ProcessSteps>
+    </ProcessDisclosure>
   );
 }
 
@@ -259,6 +285,14 @@ function permissionModeLabel(mode: PermissionMode): string {
     case 'ask': return t('chat.permissionAsk');
     case 'auto': return t('chat.permissionAuto');
     default: return t('chat.permissionFullAccess');
+  }
+}
+
+function permissionModeIcon(mode: PermissionMode): ReactNode {
+  switch (mode) {
+    case 'ask': return <RiGitMergeLine aria-hidden className={cx(OPTION_ICON, '-scale-y-100')} />;
+    case 'auto': return <RiSpeedUpLine aria-hidden className={OPTION_ICON} />;
+    default: return <RiShieldCheckLine aria-hidden className={OPTION_ICON} />;
   }
 }
 
@@ -287,6 +321,7 @@ function isChatReminderEntry(entry: { subtitle: string; title: string }): boolea
     || entry.subtitle.trim() === 'codex.local.start';
 }
 
+/** Context meter in the composer-panel recipe: a 16px ring, details in a tooltip. */
 function ContextUsageIndicator({
   usedTokens,
   contextWindow,
@@ -305,32 +340,49 @@ function ContextUsageIndicator({
   const t = useT();
   const percent = contextWindow ? Math.min(100, Math.max(0, usedTokens / contextWindow * 100)) : null;
   const progress = percent ?? 0;
+  const circumference = 2 * Math.PI * 6;
   return (
-    <Tooltip delay={100}>
-      <Button
-        isIconOnly
-        variant="ghost"
-        className="context-usage-ring min-w-0 p-0"
-        aria-label={percent === null ? t('chat.contextPending') : t('chat.contextUsed', { percent: percent.toFixed(1) })}
-        style={{ background: `conic-gradient(var(--accent) ${progress}%, var(--separator) ${progress}% 100%)` }}
-      >
-        <span />
-      </Button>
-      <Tooltip.Content>
-        <div className="min-w-48 space-y-1 p-1 text-xs">
-          <p className="font-medium">{t('chat.contextTitle')}</p>
-          {percent === null ? <p className="text-muted">{t('chat.contextWaiting')}</p> : (
+    <TooltipTrigger delay={100}>
+      <Focusable>
+        <button
+          type="button"
+          aria-label={percent === null ? t('chat.contextPending') : t('chat.contextUsed', { percent: percent.toFixed(1) })}
+          className="flex size-8 shrink-0 cursor-help items-center justify-center rounded-full outline-none transition-colors duration-150 ease hover:bg-background-primary-hover focus-visible:ring-2 focus-visible:ring-border-focus-ring"
+        >
+          <svg aria-hidden width="16" height="16" viewBox="0 0 16 16" className="-rotate-90">
+            <circle cx="8" cy="8" r="6" fill="none" strokeWidth="2.5" className="stroke-border-button-default" />
+            {progress > 0 ? (
+              <circle
+                cx="8"
+                cy="8"
+                r="6"
+                fill="none"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeDasharray={`${(progress / 100) * circumference} ${circumference}`}
+                className="stroke-foreground-icon-secondary"
+              />
+            ) : null}
+          </svg>
+        </button>
+      </Focusable>
+      <Tooltip placement="top">
+        <div className="flex min-w-48 flex-col gap-1 text-start">
+          <p className="text-caption-1-semibold text-text-primary">{t('chat.contextTitle')}</p>
+          {percent === null ? <p className="text-caption-1-regular text-text-secondary">{t('chat.contextWaiting')}</p> : (
             <>
-              <p>{formatTokenCount(usedTokens)} / {formatTokenCount(contextWindow!)} tokens · {percent.toFixed(1)}%</p>
-              <p className="text-muted">{t('chat.tokensInOut', { input: formatTokenCount(inputTokens), output: formatTokenCount(outputTokens) })}</p>
-              <p className="text-muted">{t('chat.tokensCache', { read: formatTokenCount(cachedInputTokens), write: formatTokenCount(cacheWriteTokens) })}</p>
+              <p className="text-caption-1-regular text-text-primary">{formatTokenCount(usedTokens)} / {formatTokenCount(contextWindow!)} tokens · {percent.toFixed(1)}%</p>
+              <p className="text-caption-1-regular text-text-secondary">{t('chat.tokensInOut', { input: formatTokenCount(inputTokens), output: formatTokenCount(outputTokens) })}</p>
+              <p className="text-caption-1-regular text-text-secondary">{t('chat.tokensCache', { read: formatTokenCount(cachedInputTokens), write: formatTokenCount(cacheWriteTokens) })}</p>
             </>
           )}
         </div>
-      </Tooltip.Content>
-    </Tooltip>
+      </Tooltip>
+    </TooltipTrigger>
   );
 }
+
+const COPY_CONFIRM_MS = 1600;
 
 function AgentMessageActions({
   conversationId,
@@ -350,60 +402,67 @@ function AgentMessageActions({
   const records = entry.turnId ? session.usageRecords.filter(record =>
     (record.conversationId === conversationId || record.conversationId === conversation?.v2ConversationId)
     && record.turnId === entry.turnId) : [];
+  // The copy tooltip is held open to confirm, then dismissed even if the
+  // pointer never left the button.
+  const [copied, setCopied] = useState(false);
+  const [copyTooltipOpen, setCopyTooltipOpen] = useState(false);
+  const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (copyTimer.current) clearTimeout(copyTimer.current);
+  }, []);
+  const copy = () => {
+    void navigator.clipboard.writeText(entry.subtitle)
+      .then(() => {
+        if (copyTimer.current) clearTimeout(copyTimer.current);
+        setCopied(true);
+        setCopyTooltipOpen(true);
+        copyTimer.current = setTimeout(() => {
+          setCopied(false);
+          setCopyTooltipOpen(false);
+        }, COPY_CONFIRM_MS);
+      })
+      .catch(() => toast.danger(t('chat.copyFailed')));
+  };
 
   return (
-    <ChatMessageActions className="mt-1">
-      {/* The actions' `tooltip` prop wraps each button in a focusable
-          role="button" trigger, nesting two controls; a button placed
-          directly in a Tooltip is its own trigger. */}
-      <Tooltip>
-        <ChatMessageActions.Copy
-          aria-label={t('chat.copyReply')}
-          onPress={() => void navigator.clipboard.writeText(entry.subtitle)
-            .then(() => toast.success(t('chat.replyCopied')))
-            .catch(() => toast.danger(t('chat.copyFailed')))}
-        >
-          <RiClipboardLine aria-hidden="true" />
-        </ChatMessageActions.Copy>
-        <Tooltip.Content>{t('chat.copyReply')}</Tooltip.Content>
-      </Tooltip>
-      {readOnly ? null : canFork ? (
-        <Tooltip>
-          <ChatMessage.Action
-            isIconOnly
-            size="sm"
-            variant="ghost"
-            aria-label={t('chat.forkConversation')}
-            onPress={() => session.forkConversation(conversationId)}
-          >
-            <RiGitBranchLine aria-hidden="true" />
-          </ChatMessage.Action>
-          <Tooltip.Content>{t('chat.forkConversation')}</Tooltip.Content>
-        </Tooltip>
-      ) : (
-        // A disabled button gets no hover, so the trigger is the single
-        // focusable element and only borrows the disabled action's look.
-        <Tooltip>
-          <Tooltip.Trigger aria-label={t('chat.forkConversation')} aria-disabled="true" className="rounded-full">
-            <span aria-hidden="true" aria-disabled="true" className={buttonVariants({ variant: 'ghost', size: 'sm', isIconOnly: true, className: 'chat-message__action' })}>
-              <RiGitBranchLine />
-            </span>
-          </Tooltip.Trigger>
-          <Tooltip.Content>{t('chat.forkUnsupported')}</Tooltip.Content>
-        </Tooltip>
+    <div className="flex items-center gap-1.5 pt-0.5">
+      <FeedbackButton
+        label={t('chat.copyReply')}
+        tooltip={copied ? t('chat.replyCopied') : undefined}
+        isTooltipOpen={copyTooltipOpen}
+        onTooltipOpenChange={setCopyTooltipOpen}
+        onPress={copy}
+      >
+        <CopyGlyph copied={copied} />
+      </FeedbackButton>
+      {readOnly ? null : (
+        <FeedbackButton
+          icon={RiGitBranchLine}
+          label={t('chat.forkConversation')}
+          tooltip={canFork ? undefined : t('chat.forkUnsupported')}
+          disabled={!canFork}
+          onPress={() => session.forkConversation(conversationId)}
+        />
       )}
-      <HoverCard>
-        <HoverCard.Trigger>
-          <ChatMessage.Action isIconOnly size="sm" variant="ghost" aria-label={t('chat.replyStats')}>
-            <RiBarChartBoxLine aria-hidden="true" />
-          </ChatMessage.Action>
-        </HoverCard.Trigger>
-        <HoverCard.Content>
-          <HoverCard.Arrow />
-          <TurnUsageSummary records={records} />
-        </HoverCard.Content>
-      </HoverCard>
-    </ChatMessageActions>
+      <FeedbackButton icon={RiBarChartBoxLine} label={t('chat.replyStats')} tooltip={<TurnUsageSummary records={records} />} />
+    </div>
+  );
+}
+
+/** Wraps a timeline row; a row that mounts during a live turn blurs in. */
+function RowEntrance({ enter, className, children, ...props }: { enter: boolean; className?: string; children: ReactNode } & Omit<ComponentProps<'div'>, 'children' | 'className' | 'ref'>) {
+  const reduce = useReducedMotion() ?? false;
+  const [animate] = useState(enter && !reduce);
+  return (
+    <motion.div
+      {...(props as ComponentProps<typeof motion.div>)}
+      initial={animate ? { opacity: 0, y: 6, filter: 'blur(4px)' } : false}
+      animate={animate ? { opacity: 1, y: 0, filter: 'blur(0px)', transitionEnd: { filter: 'none' } } : undefined}
+      transition={{ duration: 0.45, ease: ENTRANCE_EASE }}
+      className={className}
+    >
+      {children}
+    </motion.div>
   );
 }
 
@@ -418,11 +477,13 @@ type ChatTimelineItemProps = {
   request: TodeXSession['pendingRequests'][number] | undefined;
   isActionable: boolean;
   isPendingReply: boolean;
-  markdownComponents: NonNullable<MarkdownProps['components']>;
+  markdownComponents: MarkdownComponents;
   onHydrateGroup: TodeXSession['hydrateProcessGroup'];
   onApprove: TodeXSession['sendApprovalResponse'];
   setExpandedProcessIds: Dispatch<SetStateAction<Set<string>>>;
   setProcessGroupLoad: Dispatch<SetStateAction<Record<string, 'loading' | 'error'>>>;
+  // Excluded from the memo comparison: only read when the row mounts.
+  animateEntrance: boolean;
   // Excluded from the memo comparison: its members are stable useCallbacks,
   // and the stats AgentMessageActions reads self-correct on the next entry
   // update.
@@ -469,6 +530,7 @@ const ChatTimelineItem = memo(function ChatTimelineItem({
   onApprove,
   setExpandedProcessIds,
   setProcessGroupLoad,
+  animateEntrance,
   session,
 }: ChatTimelineItemProps) {
   const t = useT();
@@ -512,105 +574,134 @@ const ChatTimelineItem = memo(function ChatTimelineItem({
           .finally(() => { control.inflight = false; });
       }, HYDRATE_DEBOUNCE_MS);
     };
+    const lastIndex = item.entries.length - 1;
     return (
-      <ChainOfThought
-        isExpanded={groupExpanded}
-        onExpandedChange={(nextExpanded) => {
-          if (nextExpanded && hasStubs) requestDetails();
-          setExpandedProcessIds((current) => {
-            const next = new Set(current);
-            if (nextExpanded) next.add(item.id);
-            else next.delete(item.id);
-            return next;
-          });
-        }}
-        isStreaming={isStreamingGroup}
-        className="chat-process-trace min-w-0"
-      >
-        <ChainOfThought.Trigger
-          className="min-h-7 py-1 text-xs"
+      <RowEntrance enter={animateEntrance}>
+        <ProcessDisclosure
+          icon={RiListCheck3}
+          title={progressGroupLabel(item.entries, isStreamingGroup, groupPendingCount)}
+          running={isStreamingGroup}
+          expanded={groupExpanded}
+          onExpandedChange={(nextExpanded) => {
+            if (nextExpanded && hasStubs) requestDetails();
+            setExpandedProcessIds((current) => {
+              const next = new Set(current);
+              if (nextExpanded) next.add(item.id);
+              else next.delete(item.id);
+              return next;
+            });
+          }}
         >
-          {progressGroupLabel(item.entries, isStreamingGroup, groupPendingCount)}
-        </ChainOfThought.Trigger>
-        {groupExpanded ? <ChainOfThought.Content>
-          {hasStubs ? (
+          {!groupExpanded ? null : hasStubs ? (
             groupLoadState === 'error' ? (
-              <button type="button" className="text-danger cursor-pointer text-xs" onClick={requestDetails}>
+              <button
+                type="button"
+                className="cursor-pointer rounded-md px-1 py-0.5 text-caption-1-regular text-text-error-primary outline-none focus-visible:ring-2 focus-visible:ring-border-focus-ring"
+                onClick={requestDetails}
+              >
                 加载过程记录失败，点按重试
               </button>
             ) : (
-              <p className="text-muted text-xs">正在加载过程记录…</p>
+              <p className="flex items-center gap-1.5 px-1 py-0.5 text-caption-1-regular text-text-tertiary">
+                <Spinner size="xs" />
+                正在加载过程记录…
+              </p>
             )
           ) : (
-            <ChainOfThought.Steps>
+            <ProcessSteps>
               {item.entries.map((entry, index) => {
+                const last = index === lastIndex;
                 if (!isChatToolEntry(entry)) {
                   // The protocol titles every reasoning row "思考中", even after
                   // the turn ends; only the step still streaming is thinking.
+                  const streaming = isStreamingGroup && last;
                   const label = isThinkingProgressEntry(entry)
-                    ? t(isStreamingGroup && index === item.entries.length - 1 ? 'progress.thinking' : 'progress.thought')
+                    ? t(streaming ? 'progress.thinking' : 'progress.thought')
                     : entry.title;
                   return (
-                    <ChainOfThought.Step key={entry.id} label={label}>
-                      <p className="max-w-full overflow-x-auto whitespace-pre-wrap wrap-anywhere text-xs">{entry.subtitle || entry.title}</p>
-                    </ChainOfThought.Step>
+                    <ProcessStep key={entry.id} last={last}>
+                      <div className="flex min-w-0 flex-col gap-0.5 py-1">
+                        <span className="text-body-regular text-text-secondary">{streaming ? <ShimmerText>{label}</ShimmerText> : label}</span>
+                        <p className="max-w-full overflow-x-auto whitespace-pre-wrap wrap-anywhere text-caption-1-regular text-text-tertiary">{entry.subtitle || entry.title}</p>
+                      </div>
+                    </ProcessStep>
                   );
                 }
                 const tool = toolCardPresentation(entry, isStreamingGroup);
                 return (
-                  <ChainOfThought.Step key={entry.id} label={tool.label}>
-                    <ChatTool defaultExpanded={false} state={tool.state} toolName={tool.summary || tool.label} argsText={tool.argsText} output={tool.output} errorText={tool.errorText} />
-                  </ChainOfThought.Step>
+                  <ProcessStep key={entry.id} last={last}>
+                    <ToolCallCard
+                      state={tool.state}
+                      title={tool.summary ? `${tool.label} · ${tool.summary}` : tool.label}
+                      argsText={tool.argsText}
+                      output={tool.output}
+                      errorText={tool.errorText}
+                    />
+                  </ProcessStep>
                 );
               })}
-            </ChainOfThought.Steps>
+            </ProcessSteps>
           )}
-        </ChainOfThought.Content> : null}
-      </ChainOfThought>
+        </ProcessDisclosure>
+      </RowEntrance>
     );
   }
   const entry = item.entry;
   // End-to-end encrypted history this device holds no key for: one quiet
   // line per turn (docs/history-encryption.md §5.3).
   if (entry.detailLocked) {
-    return <p data-message-id={entry.id} role="note" className="text-muted py-1 text-center text-xs">{t('chat.historyLocked')}</p>;
+    return <p data-message-id={entry.id} role="note" className="py-1 text-center text-caption-1-regular text-text-tertiary">{t('chat.historyLocked')}</p>;
   }
   if (isChatToolEntry(entry)) {
     const tool = toolCardPresentation(entry, thinking);
-    return <ChatTool defaultExpanded={false} state={tool.state} toolName={tool.summary ? `${tool.label} · ${tool.summary}` : tool.label} argsText={tool.argsText} output={tool.output} errorText={tool.errorText} triggerPrefix={thinking ? t('chat.toolCalling') : t('chat.toolCalled')} />;
+    return (
+      <RowEntrance enter={animateEntrance}>
+        <ToolCallCard
+          state={tool.state}
+          prefix={(thinking ? t('chat.toolCalling') : t('chat.toolCalled')).trim()}
+          title={tool.summary ? `${tool.label} · ${tool.summary}` : tool.label}
+          argsText={tool.argsText}
+          output={tool.output}
+          errorText={tool.errorText}
+        />
+      </RowEntrance>
+    );
   }
   // Progress narration renders like a normal message; empty detail stubs hide.
   if (entry.category === 'assistant_progress' && !entry.subtitle.trim()) return null;
   const isUser = entry.kind === 'outgoing';
+  const placeholder = entry.subtitle === STREAMING_REPLY_PLACEHOLDER;
   return (
-    <div data-message-id={entry.id} className={`flex gap-3 py-1 ${isUser ? 'justify-end' : 'justify-start'}`}>
-      <div className={`min-w-0 max-w-[85%] ${isUser ? 'text-right' : ''}`}>
-        <div className="text-sm leading-6">
-          {isUser ? <div className="flex flex-col items-end gap-2">
-            {entry.sentAttachments?.length ? (
-              <SentAttachmentList attachments={entry.sentAttachments} />
-            ) : null}
-            {entry.subtitle ? <p className="whitespace-pre-wrap wrap-anywhere">{entry.subtitle === STREAMING_REPLY_PLACEHOLDER ? t('chat.replying') : entry.subtitle}</p> : null}
-          </div> : (
-            <Markdown
-              id={entry.id}
-              components={markdownComponents}
-            >
-              {entry.subtitle === STREAMING_REPLY_PLACEHOLDER ? t('chat.replying') : entry.subtitle}
-            </Markdown>
-          )}
+    <RowEntrance
+      enter={animateEntrance}
+      data-message-id={entry.id}
+      className={cx('flex min-w-0 flex-col gap-2 py-1', isUser ? 'items-end' : 'items-start')}
+    >
+      {isUser ? (
+        <>
+          {entry.sentAttachments?.length ? <SentAttachmentList attachments={entry.sentAttachments} /> : null}
+          {entry.subtitle ? (
+            <div className="w-fit max-w-[85%] rounded-2xl bg-background-primary-default px-3 py-[11px] text-start text-body-regular text-text-primary shadow-card">
+              <p className="whitespace-pre-wrap wrap-anywhere">{placeholder ? t('chat.replying') : entry.subtitle}</p>
+            </div>
+          ) : null}
+        </>
+      ) : placeholder ? (
+        <p className="text-body-regular text-text-secondary"><ShimmerText>{t('chat.replying')}</ShimmerText></p>
+      ) : (
+        <Markdown id={entry.id} components={markdownComponents} className="w-full min-w-0 text-body-regular text-text-primary">
+          {entry.subtitle}
+        </Markdown>
+      )}
+      {entry.kind === 'incoming' && isActionable && !isPendingReply
+        ? <AgentMessageActions conversationId={conversationId} entry={entry} session={session} />
+        : null}
+      {request ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <ConversationPermissionActions request={request} deviceSecret={session.settings.deviceSecret} onSelect={(option, data) => { onApprove(option, request, data); }} />
         </div>
-        {entry.kind === 'incoming' && isActionable && !isPendingReply
-          ? <AgentMessageActions conversationId={conversationId} entry={entry} session={session} />
-          : null}
-        {request ? (
-          <ChatMessage.Actions>
-            <ConversationPermissionActions request={request} deviceSecret={session.settings.deviceSecret} onSelect={(option, data) => { onApprove(option, request, data); }} />
-          </ChatMessage.Actions>
-        ) : null}
-      </div>
-      {isUser ? <ChatMessage.Avatar alt="You" fallback="You" /> : null}
-    </div>
+      ) : null}
+    </RowEntrance>
   );
 }, (prev, next) =>
   chatRowItemEqual(prev.item, next.item)
@@ -783,7 +874,7 @@ export function ChatPanel({ session }: Props) {
     };
   }, []);
   const workspacePath = workspace?.path;
-  const markdownComponents = useMemo<NonNullable<MarkdownProps['components']>>(() => ({
+  const markdownComponents = useMemo<MarkdownComponents>(() => ({
     ...baseMarkdownComponents,
     a: ({ href, children, node: _node, ref: _ref, ...props }) => {
       const target = workspaceLinkTarget(href, workspacePath);
@@ -907,12 +998,24 @@ export function ChatPanel({ session }: Props) {
   useEffect(() => {
     if (atBottomRef.current) scrollToLatest();
   }, [session.timeline]);
+  // Rows on screen when a conversation opens stay still; rows that arrive
+  // later in a live turn blur in (see RowEntrance).
+  const [entranceArmedFor, setEntranceArmedFor] = useState<string | null>(null);
+  useEffect(() => {
+    const id = conversation?.id;
+    if (!id) return;
+    const timer = window.setTimeout(() => setEntranceArmedFor(id), ENTRANCE_ARM_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [conversation?.id]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   if (!conversation || !workspace) {
     return (
-      <div className="flex h-full flex-col items-center justify-center px-8 text-center">
-        <p className="text-sm font-medium">{t('chat.pickConversation')}</p>
-        <p className="text-muted mt-1 max-w-sm text-sm">{t('chat.pickConversationHint')}</p>
-      </div>
+      <EmptyState
+        icon={RiChat3Line}
+        title={t('chat.pickConversation')}
+        description={t('chat.pickConversationHint')}
+        className="h-full px-8"
+      />
     );
   }
 
@@ -1307,49 +1410,71 @@ export function ChatPanel({ session }: Props) {
     }
   };
 
+  // Rows mounting while a turn runs blur in; history reveals and prepends stay still.
+  const animateEntrance = entranceArmedFor === conversation.id && runActive && !historyAnchorRef.current;
+  const attachDisabled = readOnly || executionUnknown || attachments.length >= MAX_COMPOSER_ATTACHMENTS;
+  const canSend = !readOnly && !executionUnknown && submissionStatus !== 'sending'
+    && Boolean(draft.trim() || attachments.length > 0 || selectedSkillAttachments.length > 0);
+  const effortClass = displayedEffortLevel ? EFFORT_TEXT[displayedEffortLevel] : undefined;
+  const focusComposerFromPadding = (event: ReactMouseEvent<HTMLElement>) => {
+    if (event.target === event.currentTarget) {
+      event.preventDefault();
+      composerRef.current?.focus();
+    }
+  };
+  const suggestionItemClass = (active: boolean) => ({ isFocused, isHovered, isDisabled }: ListBoxItemRenderProps) => cx(
+    'composer-suggestion-item grid min-h-10 cursor-pointer grid-cols-[minmax(7rem,auto)_minmax(0,1fr)] items-center gap-3 rounded-2lg px-2.5 py-2 outline-none',
+    'transition-colors duration-150 ease',
+    active && 'composer-suggestion-item--active',
+    (active || isFocused || isHovered) && 'bg-dropdown-item-hover-background',
+    isDisabled && 'cursor-not-allowed opacity-50',
+  );
+  const suggestionCommand = 'min-w-0 truncate text-body-semibold text-text-primary';
+  const suggestionDescription = 'min-w-0 truncate text-caption-1-regular text-text-secondary';
+  const suggestionEmpty = 'px-2 py-1 text-caption-1-regular text-text-tertiary';
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="relative min-h-0 flex-1">
-        <ScrollShadow ref={scrollRef} onScroll={updateScrollPosition} className="h-full px-5 py-5">
+        <ScrollArea
+          viewportRef={scrollRef}
+          onScroll={updateScrollPosition}
+          surface="secondary"
+          className="h-full"
+          contentClassName="px-5 py-5"
+        >
         <div ref={messagesRef} className="mx-auto flex max-w-2xl flex-col gap-3">
-          {readOnly ? (
-            <Alert status="warning">
-              <Alert.Indicator />
-              <Alert.Content>
-                <Alert.Description>{t('history.readOnlyBanner')}</Alert.Description>
-              </Alert.Content>
-            </Alert>
-          ) : null}
+          {readOnly ? <Alert status="warning" description={t('history.readOnlyBanner')} /> : null}
           {earlierHistoryStatus?.loading ? (
-            <p className="text-muted flex items-center justify-center gap-2 py-2 text-xs" role="status">
-              <Spinner size="sm" />
+            <p className="flex items-center justify-center gap-2 py-2 text-caption-1-regular text-text-tertiary" role="status">
+              <Spinner size="xs" />
               {t('chat.loadingEarlier')}
             </p>
           ) : earlierHistoryStatus?.failed && hiddenItemCount === 0 ? (
             <div className="flex items-center justify-center gap-2 py-1" role="alert">
-              <p className="text-danger text-xs">{t('chat.loadEarlierFailed')}</p>
-              <Button size="sm" variant="ghost" onPress={() => requestEarlierHistory(true)}>
+              <p className="text-caption-1-regular text-text-error-primary">{t('chat.loadEarlierFailed')}</p>
+              <Button size="xs" variant="secondary" onClick={() => requestEarlierHistory(true)}>
                 {t('chat.retry')}
               </Button>
             </div>
           ) : earlierHistoryStatus?.capped && hiddenItemCount === 0 ? (
-            <p className="text-muted py-2 text-center text-xs" role="status">{t('chat.earlierHistoryCapped')}</p>
+            <p className="py-2 text-center text-caption-1-regular text-text-tertiary" role="status">{t('chat.earlierHistoryCapped')}</p>
           ) : earlierHistoryStatus?.hasMore || hiddenItemCount > 0 ? (
             <div className="flex justify-center py-1">
-              <Button size="sm" variant="ghost" onPress={() => requestEarlierHistory()}>
+              <Button size="xs" variant="secondary" onClick={() => requestEarlierHistory()}>
                 {t('chat.loadEarlier')}
               </Button>
             </div>
           ) : null}
           {items.length === 0 && !thinking && session.openStatusByConversation[conversation.id] === 'failed' ? (
             <div className="flex flex-col items-center gap-2 py-16" role="alert">
-              <p className="text-danger text-sm">{t('chat.openHistoryFailed')}</p>
-              <Button size="sm" variant="ghost" onPress={() => { void session.recoverConversation(conversation.id); }}>
+              <p className="text-body-regular text-text-error-primary">{t('chat.openHistoryFailed')}</p>
+              <Button size="small" variant="secondary" onClick={() => { void session.recoverConversation(conversation.id); }}>
                 {t('chat.retry')}
               </Button>
             </div>
           ) : items.length === 0 ? (
-            <p className="text-muted py-16 text-center text-sm" role="status">
+            <p className="py-16 text-center text-body-regular text-text-tertiary" role="status">
               {thinking ? t('chat.working')
                 : session.openStatusByConversation[conversation.id] === 'opening' ? t('chat.openingHistory')
                   : session.recoveringConversations[conversation.id] ? t('chat.recovering')
@@ -1378,33 +1503,35 @@ export function ChatPanel({ session }: Props) {
               onApprove={session.sendApprovalResponse}
               setExpandedProcessIds={setExpandedProcessIds}
               setProcessGroupLoad={setProcessGroupLoad}
+              animateEntrance={animateEntrance}
               session={session}
             />
           ))}
           {showTrailingStatus ? (
             backgroundTaskCount > 0 ? <BackgroundTasksStatus tasks={backgroundTasks} items={items} /> : (
-              <p className="text-muted min-h-7 py-1 text-xs" role="status">
-                <TextShimmer>{t('chat.working')}</TextShimmer>
+              <p className="min-h-7 py-1 text-body-regular" role="status">
+                <ShimmerText>{t('chat.working')}</ShimmerText>
               </p>
             )
           ) : null}
         </div>
-        </ScrollShadow>
+        </ScrollArea>
         {isAtBottom ? null : (
           <Button
-            size="sm"
+            size="small"
             variant="secondary"
-            className="absolute right-4 bottom-3 z-10 shadow-md"
-            onPress={() => scrollToLatest('smooth')}
+            leadingIcon={RiArrowDownDoubleLine}
+            className="absolute end-4 bottom-3 z-20 shadow-dropdown"
+            onClick={() => scrollToLatest('smooth')}
           >
-            <RiArrowDownDoubleLine className="size-4" />
             {t('chat.scrollToLatest')}
           </Button>
         )}
       </div>
       {quote ? (
-        <div className="fixed z-50 -translate-x-1/2" style={{ left: quote.left, top: quote.top }}>
-          <Button size="sm" variant="secondary" onPress={() => {
+        // Pressing the button must not collapse the selection it quotes.
+        <div className="fixed z-50 -translate-x-1/2" style={{ left: quote.left, top: quote.top }} onMouseDown={(event) => event.preventDefault()}>
+          <Button size="small" variant="secondary" className="shadow-dropdown" onClick={() => {
             const existing = session.composerAttachments[conversation.id] ?? [];
             const name = uniqueAttachmentName(t('chat.quoteName'), existing, draft);
             session.setConversationAttachments(conversation.id, (current) => [...current, {
@@ -1433,8 +1560,8 @@ export function ChatPanel({ session }: Props) {
           setPreviewAttachment(null);
         }}
       />
-      <div className="border-separator border-t px-5 py-4">
-        <div className="composer-container mx-auto max-w-2xl">
+      <div className="shrink-0 px-4 pt-2 pb-4">
+        <div className="relative mx-auto max-w-2xl">
           <ComputerLiveView session={session} conversationId={conversation.v2ConversationId ?? conversation.id} state={session.conversationRuntimeById[conversation.id]?.desktopComputer} />
           {readOnly ? null : permissionRequests.map(request => <PermissionRequestCard
             key={request.requestId}
@@ -1444,75 +1571,85 @@ export function ChatPanel({ session }: Props) {
             onSelect={(option, data) => { session.sendApprovalResponse(option, request, data); }}
           />)}
           {(slashSuggestions.length > 0 || referenceSuggestions.length > 0 || (mentionActive && referenceSuggestions.length === 0) || capabilityActive) ? (
-            <div ref={suggestionsPopoverRef} className="composer-suggestions-popover">
+            <motion.div
+              ref={suggestionsPopoverRef}
+              initial={{ opacity: 0, scale: 0.97, filter: 'blur(2px)' }}
+              animate={{ opacity: 1, scale: 1, filter: 'blur(0px)', transitionEnd: { filter: 'none' } }}
+              transition={{ duration: 0.15, ease: 'easeOut' }}
+              className="composer-suggestions-popover absolute inset-x-0 bottom-[calc(100%+0.5rem)] z-30 max-h-72 origin-bottom overflow-y-auto rounded-2xl border border-border-button-default bg-background-primary-default p-1.5 shadow-dropdown"
+            >
               {slashSuggestions.length > 0 ? (
-                <ListBox
+                <AriaListBox
                   aria-label={t('chat.commandSuggestions')}
+                  className="flex flex-col gap-0.5 outline-none"
                   onAction={(key) => {
                     const item = slashSuggestions.find((candidate) => candidate.command === String(key));
                     if (item) chooseSlashCommand(item.command);
                   }}
                 >
                   {slashSuggestions.slice(0, 12).map((item, index) => (
-                    <ListBox.Item key={item.command} id={item.command} isDisabled={item.command === '/compact' && (thinking || executionUnknown || submissionStatus === 'sending' || compaction?.status === 'running')} textValue={`${item.command} ${item.description}`} className={`composer-suggestion-item ${index === suggestionIndex ? 'composer-suggestion-item--active' : ''}`}>
-                      <span className="composer-suggestion-command">{item.command}</span>
-                      <span className="composer-suggestion-description">{item.description}</span>
-                    </ListBox.Item>
+                    <AriaListBoxItem key={item.command} id={item.command} isDisabled={item.command === '/compact' && (thinking || executionUnknown || submissionStatus === 'sending' || compaction?.status === 'running')} textValue={`${item.command} ${item.description}`} className={suggestionItemClass(index === suggestionIndex)}>
+                      <span className={suggestionCommand}>{item.command}</span>
+                      <span className={suggestionDescription}>{item.description}</span>
+                    </AriaListBoxItem>
                   ))}
-                </ListBox>
+                </AriaListBox>
               ) : capabilityActive ? (
                 capabilitySuggestions.length > 0 ? (
-                  <ListBox
+                  <AriaListBox
                     aria-label={t('chat.capabilitySuggestions')}
+                    className="flex flex-col gap-0.5 outline-none"
                     onAction={(key) => {
                       const item = capabilitySuggestions.find((candidate) => candidate.id === String(key));
                       if (item && capability) applyCapabilitySuggestion(item, capability);
                     }}
                   >
                     {capabilitySuggestions.map((item, index) => (
-                      <ListBox.Item key={item.id} id={item.id} textValue={`#${item.name} ${item.description}`} className={`composer-suggestion-item ${index === suggestionIndex ? 'composer-suggestion-item--active' : ''}`}>
-                        <span className="composer-suggestion-command">#{item.name}</span>
-                        <span className="composer-suggestion-description">{capabilityDescription(item)}</span>
-                      </ListBox.Item>
+                      <AriaListBoxItem key={item.id} id={item.id} textValue={`#${item.name} ${item.description}`} className={suggestionItemClass(index === suggestionIndex)}>
+                        <span className={suggestionCommand}>#{item.name}</span>
+                        <span className={suggestionDescription}>{capabilityDescription(item)}</span>
+                      </AriaListBoxItem>
                     ))}
-                  </ListBox>
+                  </AriaListBox>
                 ) : (
-                  <p className="text-muted px-2 py-1 text-xs">{capabilityLoading ? t('chat.loadingCapabilities') : t('chat.noCapabilities')}</p>
+                  <p className={suggestionEmpty}>{capabilityLoading ? t('chat.loadingCapabilities') : t('chat.noCapabilities')}</p>
                 )
               ) : referenceSuggestions.length > 0 ? (
                 <>
-                  <ListBox
+                  <AriaListBox
                     aria-label={t('chat.referenceSuggestions')}
+                    className="flex flex-col gap-0.5 outline-none"
                     onAction={(key) => {
                       const item = referenceSuggestions.find((candidate) => candidate.id === String(key));
                       if (item) applyReferenceSuggestion(item);
                     }}
                   >
                     {referenceSuggestions.map((item, index) => (
-                      <ListBox.Item key={item.id} id={item.id} textValue={`${item.label} ${item.description}`} className={`composer-suggestion-item ${index === suggestionIndex ? 'composer-suggestion-item--active' : ''}`}>
-                        <span className="composer-suggestion-command">{item.label}</span>
-                        <span className="composer-suggestion-description">
+                      <AriaListBoxItem key={item.id} id={item.id} textValue={`${item.label} ${item.description}`} className={suggestionItemClass(index === suggestionIndex)}>
+                        <span className={suggestionCommand}>{item.label}</span>
+                        <span className={suggestionDescription}>
                           {item.action.kind === 'capability' ? capabilityDescription(item.action.item) : item.description}
                         </span>
-                      </ListBox.Item>
+                      </AriaListBoxItem>
                     ))}
-                  </ListBox>
-                  {referenceType === 'folder' && entryResults.truncated ? <p className="text-muted px-2 py-1 text-xs">{t('chat.folderSearchHint')}</p> : null}
+                  </AriaListBox>
+                  {referenceType === 'folder' && entryResults.truncated ? <p className={suggestionEmpty}>{t('chat.folderSearchHint')}</p> : null}
                 </>
-              ) : mention ? <p className="text-muted px-2 py-1 text-xs">{referenceEmptyText}</p> : null}
-            </div>
+              ) : mention ? <p className={suggestionEmpty}>{referenceEmptyText}</p> : null}
+            </motion.div>
           ) : null}
           {(session.selectedSkills[conversation.id] ?? []).length > 0 ? (
             <div className="mb-2 flex flex-wrap gap-2">
               {(session.selectedSkills[conversation.id] ?? []).map((skill) => (
                 <Button
                   key={skill.resourceId || `${skill.name}:${skill.path}`}
-                  size="sm"
-                  variant="tertiary"
-                  onPress={() => session.setConversationSelectedSkills(conversation.id, (current) =>
+                  size="xs"
+                  variant="secondary"
+                  trailingIcon={RiCloseLine}
+                  onClick={() => session.setConversationSelectedSkills(conversation.id, (current) =>
                     current.filter((item) => (item.resourceId || item.name) !== (skill.resourceId || skill.name)))}
                 >
-                  Skill · {skill.displayName || skill.name} ×
+                  Skill · {skill.displayName || skill.name}
                 </Button>
               ))}
             </div>
@@ -1548,27 +1685,36 @@ export function ChatPanel({ session }: Props) {
           /> : null}
           <NoticeToast message={hasBlockedImageAttachment ? t('chat.imageSendBlocked') : null}
             description={imageInputSupport.reason} scope={conversation.id} />
-          <ChatAttachmentInput
-            accept={attachmentAccept}
-            disabled={readOnly || executionUnknown || attachments.length >= MAX_COMPOSER_ATTACHMENTS}
+          <input
+            ref={fileInputRef}
+            type="file"
+            hidden
             multiple
-            onFilesSelected={(files) => { void addBrowserFiles(files); }}
+            accept={attachmentAccept}
+            disabled={attachDisabled}
+            onChange={(event) => {
+              const files = Array.from(event.currentTarget.files ?? []);
+              // Reset so picking the same file again still fires a change.
+              event.currentTarget.value = '';
+              if (files.length > 0) void addBrowserFiles(files);
+            }}
+          />
+          <ConversationPromptInput
+            submissionStatus={submissionStatus}
+            value={draft}
+            status={submissionStatus === 'sending' ? 'submitted' : thinking ? 'streaming' : 'ready'}
+            isDisabled={readOnly || executionUnknown}
+            onKeyDownCapture={(event) => {
+              if (event.key === 'Enter' && (isComposingRef.current || isImeCompositionKey(event))) {
+                event.stopPropagation();
+              }
+            }}
+            onValueChange={(value: string) => { setSuggestionIndex(0); session.setConversationChatDraft(conversation.id, value); }}
+            onSubmit={submitComposer}
+            onStop={() => session.stopThinking(conversation.id)}
           >
-            <ConversationPromptInput
-              submissionStatus={submissionStatus}
-              value={draft}
-              status={submissionStatus === 'sending' ? 'submitted' : thinking ? 'streaming' : 'ready'}
-              isDisabled={readOnly || executionUnknown}
-              onKeyDownCapture={(event) => {
-                if (event.key === 'Enter' && (isComposingRef.current || isImeCompositionKey(event))) {
-                  event.stopPropagation();
-                }
-              }}
-              onValueChange={(value: string) => { setSuggestionIndex(0); session.setConversationChatDraft(conversation.id, value); }}
-              onSubmit={submitComposer}
-              onStop={() => session.stopThinking(conversation.id)}
-            >
-              <PromptInput.Shell
+            <ComposerLoader active={thinking && !readOnly} radius={24}>
+              <div
                 data-dragging={isDraggingAttachment || undefined}
                 onDragEnter={(event) => {
                   if (!event.dataTransfer.types.includes('Files')) return;
@@ -1609,15 +1755,15 @@ export function ChatPanel({ session }: Props) {
                     event.stopPropagation();
                   }
                 }}
+                onMouseDown={focusComposerFromPadding}
+                className={cx(
+                  'flex flex-col gap-3 rounded-3xl border border-border-button-default p-2.5',
+                  'transition-[border-color,box-shadow] duration-150 ease focus-within:border-border-button-hover',
+                  'data-[dragging]:border-border-focus-ring data-[dragging]:ring-2 data-[dragging]:ring-border-focus-ring',
+                  readOnly || executionUnknown ? 'cursor-not-allowed' : 'cursor-text',
+                )}
               >
-                <PromptInput.Content
-                  onMouseDown={(event) => {
-                    if (event.target === event.currentTarget) {
-                      event.preventDefault();
-                      composerRef.current?.focus();
-                    }
-                  }}
-                >
+                <div className="px-1.5 pt-1.5" onMouseDown={focusComposerFromPadding}>
                   <ReferenceComposer
                     ref={composerRef}
                     value={draft}
@@ -1650,150 +1796,124 @@ export function ChatPanel({ session }: Props) {
                       if (item) setPreviewAttachment(item);
                     }}
                   />
-                </PromptInput.Content>
-                <PromptInput.Toolbar className="composer-toolbar">
-                  <PromptInput.ToolbarStart className="min-w-0 flex-1">
-                    <Select
-                      className="composer-control"
-                      variant="secondary"
-                      placeholder={t('chat.selectAgent')}
+                </div>
+                <div className="composer-toolbar flex cursor-default items-center justify-between gap-2">
+                  <div className="flex min-w-0 flex-1 items-center gap-1">
+                    <TooltipTrigger delay={200}>
+                      <Focusable>
+                        <button
+                          type="button"
+                          aria-label={t('chat.addAttachment')}
+                          disabled={attachDisabled}
+                          onClick={() => fileInputRef.current?.click()}
+                          className={cx(
+                            'me-1 flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-full p-2 outline-none',
+                            'bg-composer-panel-add-background transition-colors duration-150 ease hover:bg-composer-panel-add-hover-background',
+                            'focus-visible:ring-2 focus-visible:ring-border-focus-ring',
+                            'disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-composer-panel-add-background',
+                          )}
+                        >
+                          <RiAttachment2 aria-hidden className="size-5 text-foreground-icon-primary" />
+                        </button>
+                      </Focusable>
+                      <Tooltip placement="top">
+                        {attachments.length >= MAX_COMPOSER_ATTACHMENTS
+                          ? t('chat.maxAttachmentsTooltip', { max: MAX_COMPOSER_ATTACHMENTS })
+                          : imageInputSupport.supported ? t('chat.addImageOrText') : t('chat.addTextAttachment')}
+                      </Tooltip>
+                    </TooltipTrigger>
+                    <ComposerSelect
+                      label={t('chat.selectAgent')}
+                      icon={<ProviderIcon className={COMPOSER_CONTROL_ICON} provider={agentProvider} />}
+                      text={agentLabel}
                       selectedKey={currentProvider || agentProvider || null}
                       isDisabled={readOnly || !canSwitchAgent}
-                      onSelectionChange={(key) => {
-                        if (typeof key !== 'string' || !key || key === currentProvider) {
+                      options={availableProviders.map((item) => ({
+                        id: item.id,
+                        label: providerDisplayName(item.id, item.displayName),
+                        icon: <ProviderIcon provider={item.id} className="size-5 shrink-0" />,
+                      }))}
+                      onChange={(key) => {
+                        if (!key || key === currentProvider) {
                           return;
                         }
                         session.switchConversationAgent(conversation.id, key as ProviderKind);
                       }}
+                    />
+                    <ComposerPopover
+                      label={t('chat.selectModel')}
+                      dialogLabel={t('chat.modelPopover')}
+                      isDisabled={readOnly || providerModels.length === 0}
+                      triggerClassName="composer-model-control__trigger"
+                      data-effort={displayedEffortLevel}
+                      popoverClassName="w-[min(20.5rem,calc(100vw-2rem))]"
+                      trigger={(
+                        <>
+                          <RiCpuLine aria-hidden className={cx(COMPOSER_CONTROL_ICON, effortClass ?? (displayedReasoningEffort ? 'text-text-accent' : undefined))} />
+                          <span className="composer-control__text">{modelDisplayLabel(currentModel, session.modelCatalog)}</span>
+                          {displayedReasoningEffort ? (
+                            <span className={cx('composer-control__effort text-caption-1-semibold', effortClass ?? 'text-text-accent')}>
+                              · {reasoningEffortLabel(displayedReasoningEffort)}
+                            </span>
+                          ) : null}
+                        </>
+                      )}
                     >
-                      <Label className="hidden">{t('chat.selectAgent')}</Label>
-                      <Select.Trigger className="composer-control__trigger">
-                        <Select.Value><ProviderIcon className="composer-control__icon" provider={agentProvider} /><span className="composer-control__text">{agentLabel}</span></Select.Value>
-                        <Select.Indicator className="composer-control__indicator" />
-                      </Select.Trigger>
-                      <Select.Popover>
-                        <ListBox>
-                          {availableProviders.map((item) => (
-                            <ListBox.Item
-                              key={item.id}
-                              id={item.id}
-                              textValue={providerDisplayName(item.id, item.displayName)}
-                            >
-                              <ProviderIcon provider={item.id} />
-                              {providerDisplayName(item.id, item.displayName)}
-                              <ListBox.ItemIndicator />
-                            </ListBox.Item>
-                          ))}
-                        </ListBox>
-                      </Select.Popover>
-                    </Select>
-                    <Popover>
-                      <Button
-                        className="composer-control composer-model-control__trigger"
-                        size="sm"
-                        variant="secondary"
-                        isDisabled={readOnly || providerModels.length === 0}
-                        aria-label={t('chat.selectModel')}
-                        data-effort={displayedEffortLevel}
-                      >
-                        <RiCpuLine className={`composer-control__icon ${displayedReasoningEffort ? 'text-accent' : ''}`} />
-                        <span className="composer-control__text">{modelDisplayLabel(currentModel, session.modelCatalog)}</span>
-                        {displayedReasoningEffort ? (
-                          <span className="composer-control__effort">
-                            · {reasoningEffortLabel(displayedReasoningEffort)}
-                          </span>
-                        ) : null}
-                      </Button>
-                      <Popover.Content className="composer-model-popover" placement="top start" offset={8}>
-                        <Popover.Dialog className="composer-model-popover__dialog" aria-label={t('chat.modelPopover')}>
-                          <ModelReasoningCard
-                            currentModel={currentModel}
-                            currentModelDescriptor={currentModelDescriptor}
-                            modelCatalog={session.modelCatalog}
-                            providerModels={providerModels}
-                            supportedReasoningEfforts={supportedReasoningEfforts}
-                            currentReasoningEffort={currentReasoningEffort}
-                            displayedReasoningEffort={displayedReasoningEffort}
-                            fastEnabled={fastEnabled}
-                            canToggleFast={agentProvider === 'codex'}
-                            onToggleFast={() => session.toggleFastServiceTier(conversation.id)}
-                            onSelectModel={(modelId) => {
-                              session.applyConversationModelSelection(conversation.id, modelId, null);
-                            }}
-                            onSelectReasoningEffort={(effort) => {
-                              session.applyConversationModelSelection(conversation.id, currentModel, effort);
-                            }}
-                          />
-                        </Popover.Dialog>
-                      </Popover.Content>
-                    </Popover>
-                    <Select
-                      className="composer-control"
-                      variant="secondary"
+                      <ModelReasoningCard
+                        currentModel={currentModel}
+                        currentModelDescriptor={currentModelDescriptor}
+                        modelCatalog={session.modelCatalog}
+                        providerModels={providerModels}
+                        supportedReasoningEfforts={supportedReasoningEfforts}
+                        currentReasoningEffort={currentReasoningEffort}
+                        displayedReasoningEffort={displayedReasoningEffort}
+                        fastEnabled={fastEnabled}
+                        canToggleFast={agentProvider === 'codex'}
+                        onToggleFast={() => session.toggleFastServiceTier(conversation.id)}
+                        onSelectModel={(modelId) => {
+                          session.applyConversationModelSelection(conversation.id, modelId, null);
+                        }}
+                        onSelectReasoningEffort={(effort) => {
+                          session.applyConversationModelSelection(conversation.id, currentModel, effort);
+                        }}
+                      />
+                    </ComposerPopover>
+                    <ComposerSelect
+                      label={t('chat.selectPermission')}
+                      hint={permissionHint}
+                      icon={<RiShieldLine aria-hidden className={COMPOSER_CONTROL_ICON} />}
+                      text={currentPermission ? permissionModeLabel(currentPermission) : canChoosePermission ? t('chat.permissionSelect') : t('chat.permissionUnavailable')}
+                      textTitle={permissionHint}
                       selectedKey={currentPermission}
+                      showIndicator={!fixedPermission}
                       isDisabled={readOnly || thinking || executionUnknown || !canChoosePermission || (fixedPermission && currentPermission !== null)}
-                      onSelectionChange={(key) => {
-                        if (typeof key === 'string' && permissionModes.includes(key as PermissionMode)) {
+                      options={permissionModes.map((mode) => ({ id: mode, label: permissionModeLabel(mode), icon: permissionModeIcon(mode) }))}
+                      onChange={(key) => {
+                        if (permissionModes.includes(key as PermissionMode)) {
                           void session.applyConversationPermissionMode(conversation.id, key as PermissionMode);
                         }
                       }}
-                    >
-                      <Label className="hidden">{t('chat.selectPermission')}</Label>
-                      <Select.Trigger className="composer-control__trigger">
-                        <Select.Value><RiShieldLine className="composer-control__icon" /><span className="composer-control__text" title={permissionHint}>{currentPermission ? permissionModeLabel(currentPermission) : canChoosePermission ? t('chat.permissionSelect') : t('chat.permissionUnavailable')}</span></Select.Value>
-                        {!fixedPermission ? <Select.Indicator className="composer-control__indicator" /> : null}
-                      </Select.Trigger>
-                      <Select.Popover>
-                        <ListBox>
-                          {permissionModes.map((mode) => (
-                            <ListBox.Item key={mode} id={mode} textValue={permissionModeLabel(mode)}>
-                              {permissionModeLabel(mode)}
-                              <ListBox.ItemIndicator />
-                            </ListBox.Item>
-                          ))}
-                        </ListBox>
-                      </Select.Popover>
-                    </Select>
-                    {permissionConfig?.supportsPlan ? <Select
-                      className="composer-control"
-                      variant="secondary"
+                    />
+                    {permissionConfig?.supportsPlan ? <ComposerSelect
+                      label={t('chat.selectWorkMode')}
+                      hint={t('chat.workModeApply')}
+                      icon={<RiListCheck2 aria-hidden className={COMPOSER_CONTROL_ICON} />}
+                      text={conversation.mode === 'plan' ? t('chat.modePlan') : t('chat.modeImplement')}
+                      textTitle={t('chat.workModeApply')}
                       selectedKey={conversation.mode === 'plan' ? 'plan' : 'implement'}
                       isDisabled={readOnly || thinking || executionUnknown}
-                      onSelectionChange={(key) => {
+                      options={[
+                        { id: 'implement', label: t('chat.modeImplement'), icon: <RiCodeSSlashLine aria-hidden className={OPTION_ICON} /> },
+                        { id: 'plan', label: t('chat.modePlan'), icon: <RiRouteLine aria-hidden className={cx(OPTION_ICON, '-scale-y-100')} /> },
+                      ]}
+                      onChange={(key) => {
                         if (key === 'plan' || key === 'implement') {
                           void session.applyConversationWorkMode(conversation.id, key);
                         }
                       }}
-                    >
-                      <Label className="hidden">{t('chat.selectWorkMode')}</Label>
-                      <Select.Trigger className="composer-control__trigger">
-                        <Select.Value><RiListCheck2 className="composer-control__icon" /><span className="composer-control__text" title={t('chat.workModeApply')}>{conversation.mode === 'plan' ? t('chat.modePlan') : t('chat.modeImplement')}</span></Select.Value>
-                        <Select.Indicator className="composer-control__indicator" />
-                      </Select.Trigger>
-                      <Select.Popover>
-                        <ListBox>
-                          <ListBox.Item id="implement" textValue={t('chat.modeImplement')}>{t('chat.modeImplement')}<ListBox.ItemIndicator /></ListBox.Item>
-                          <ListBox.Item id="plan" textValue={t('chat.modePlan')}>{t('chat.modePlan')}<ListBox.ItemIndicator /></ListBox.Item>
-                        </ListBox>
-                      </Select.Popover>
-                    </Select> : null}
-                  </PromptInput.ToolbarStart>
-                  <PromptInput.ToolbarEnd className="gap-2">
-                    <ChatAttachmentInput.Trigger
-                      aria-label={t('chat.addAttachment')}
-                      render={({ isDisabled, onPress }) => (
-                        <Tooltip>
-                          <Button isIconOnly variant="ghost" aria-label={t('chat.addAttachment')} isDisabled={isDisabled} onPress={onPress}>
-                            <RiAttachment2 className="size-4" />
-                          </Button>
-                          <Tooltip.Content>
-                            {attachments.length >= MAX_COMPOSER_ATTACHMENTS
-                              ? t('chat.maxAttachmentsTooltip', { max: MAX_COMPOSER_ATTACHMENTS })
-                              : imageInputSupport.supported ? t('chat.addImageOrText') : t('chat.addTextAttachment')}
-                          </Tooltip.Content>
-                        </Tooltip>
-                      )}
-                    />
+                    /> : null}
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
                     <ContextUsageIndicator
                       usedTokens={contextUsage?.usedTokens ?? 0}
                       contextWindow={currentContextWindow}
@@ -1803,19 +1923,25 @@ export function ChatPanel({ session }: Props) {
                       cacheWriteTokens={contextUsage?.cacheWriteTokens ?? 0}
                     />
                     {thinking && !readOnly ? (
-                      <Button variant="danger-soft" onPress={() => session.stopThinking(conversation.id)}>
-                        <RiStopCircleLine className="size-4" />
-                        {t('chat.stop')}
-                      </Button>
+                      <TooltipTrigger delay={200}>
+                        <Focusable>
+                          <ComposerRoundButton aria-label={t('chat.stop')} onClick={() => session.stopThinking(conversation.id)}>
+                            <RiStopFill aria-hidden className="size-4" />
+                          </ComposerRoundButton>
+                        </Focusable>
+                        <Tooltip placement="top">{t('chat.stop')}</Tooltip>
+                      </TooltipTrigger>
                     ) : null}
-                  </PromptInput.ToolbarEnd>
-                </PromptInput.Toolbar>
-              </PromptInput.Shell>
-            </ConversationPromptInput>
-          </ChatAttachmentInput>
+                    <ComposerSendButton aria-label={t('workbench.send')} disabled={!canSend} onClick={submitComposer}>
+                      <RiArrowUpLine aria-hidden className="size-5" />
+                    </ComposerSendButton>
+                  </div>
+                </div>
+              </div>
+            </ComposerLoader>
+          </ConversationPromptInput>
         </div>
       </div>
     </div>
   );
 }
-

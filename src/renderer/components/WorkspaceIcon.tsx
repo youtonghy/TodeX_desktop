@@ -21,6 +21,7 @@ import {
   RiTerminalBoxLine,
   RiToolsLine,
 } from '@remixicon/react';
+import { cx } from '@/utils/cx';
 
 // Semantic keys stored on WorkspaceRecord.icon so every client (desktop, web,
 // mobile) can map them to its own icon set.
@@ -64,6 +65,14 @@ export const WORKSPACE_RING_STYLES = [
 
 export type WorkspaceStatusKind = 'working' | 'issue' | 'unread';
 
+/** Ring colors: running (emerald), needs attention (yellow), unread (accent),
+ * one step stronger than the sidebar's status dots so thin strokes read. */
+export const WORKSPACE_STATUS_TEXT: Record<WorkspaceStatusKind, string> = {
+  working: 'text-chart-7-active',
+  issue: 'text-chart-8-active',
+  unread: 'text-accent-500',
+};
+
 export function ringStyleKey(style?: string) {
   return WORKSPACE_RING_STYLES.some((choice) => choice.key === style) ? (style as (typeof WORKSPACE_RING_STYLES)[number]['key']) : 'orbit';
 }
@@ -98,9 +107,8 @@ function Beads({ lit }: { lit: boolean }) {
 export function WorkspaceStatusRing({ kind, style, label }: { kind: WorkspaceStatusKind; style?: string; label: string }) {
   const resolved = ringStyleKey(style);
   const working = kind === 'working';
-  const color = working ? 'text-green-500' : kind === 'issue' ? 'text-amber-500' : 'text-blue-500';
   return (
-    <span aria-label={label} className={`pointer-events-none absolute inset-0 ${color}`}>
+    <span aria-label={label} className={cx('pointer-events-none absolute inset-0', WORKSPACE_STATUS_TEXT[kind])}>
       {resolved === 'orbit' ? (
         <>
           <svg viewBox="0 0 24 24" className="absolute inset-0 size-full" fill="none" aria-hidden="true">
@@ -115,14 +123,14 @@ export function WorkspaceStatusRing({ kind, style, label }: { kind: WorkspaceSta
       ) : resolved === 'pulse' ? (
         <span
           aria-hidden="true"
-          className={`absolute inset-0 rounded-full border-[1.5px] border-current ${working ? 'ws-breathe' : 'opacity-80'}`}
+          className={cx('absolute inset-0 rounded-full border-[1.5px] border-current', working ? 'ws-breathe' : 'opacity-80')}
         />
       ) : resolved === 'ellipsis' ? (
         <span aria-hidden="true" className="absolute inset-x-0 -bottom-[1px] flex justify-center gap-[3px]">
           {[0, 0.15, 0.3].map((delay) => (
             <span
               key={delay}
-              className={`size-[3.5px] rounded-full bg-current ${working ? 'ws-dot' : 'opacity-80'}`}
+              className={cx('size-[3.5px] rounded-full bg-current', working ? 'ws-dot' : 'opacity-80')}
               style={working ? { animationDelay: `${delay}s` } : undefined}
             />
           ))}
@@ -139,7 +147,7 @@ export function WorkspaceStatusRing({ kind, style, label }: { kind: WorkspaceSta
       ) : (
         <svg
           viewBox="0 0 24 24"
-          className={`absolute inset-0 size-full ${working ? 'motion-safe:animate-spin [animation-duration:1400ms]' : ''}`}
+          className={cx('absolute inset-0 size-full', working && 'motion-safe:animate-spin [animation-duration:1400ms]')}
           fill="none"
           aria-hidden="true"
         >

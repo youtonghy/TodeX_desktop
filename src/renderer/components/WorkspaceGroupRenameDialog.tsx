@@ -1,6 +1,8 @@
 import { useState } from 'react';
-import { Button, Input, Label, Modal, TextField } from '@heroui/react';
 import { WORKSPACE_GROUP_FIELD_MAX } from '@todex/protocol/todex';
+import { Button } from '@/components/base/buttons/button';
+import { Input } from '@/components/base/input/input';
+import { Modal } from '@/components/ui/modal';
 import { useT } from '../i18n';
 
 /** Names a workspace group. Electron has no window.prompt, so this is a modal. */
@@ -16,25 +18,29 @@ export function WorkspaceGroupRenameDialog({ initialName, onSubmit, onClose }: {
     onClose();
   };
   return (
-    <Modal.Backdrop isOpen onOpenChange={(open) => { if (!open) onClose(); }}>
-      <Modal.Container>
-        <Modal.Dialog className="sm:max-w-sm">
-          <Modal.CloseTrigger />
-          <Modal.Header><Modal.Heading>{t('sidebar.renameGroup')}</Modal.Heading></Modal.Header>
-          <Modal.Body>
-            <form id="workspace-group-rename" onSubmit={(event) => { event.preventDefault(); submit(); }}>
-              <TextField className="w-full" value={name} onChange={setName} autoFocus>
-                <Label>{t('sidebar.groupNameLabel')}</Label>
-                <Input className="w-full" maxLength={WORKSPACE_GROUP_FIELD_MAX} onFocus={(event) => event.currentTarget.select()} />
-              </TextField>
-            </form>
-          </Modal.Body>
-          <Modal.Footer>
-            <Button slot="close" variant="tertiary">{t('common.cancel')}</Button>
-            <Button type="submit" form="workspace-group-rename" isDisabled={!name.trim()}>{t('common.save')}</Button>
-          </Modal.Footer>
-        </Modal.Dialog>
-      </Modal.Container>
-    </Modal.Backdrop>
+    <Modal
+      isOpen
+      onOpenChange={(open) => { if (!open) onClose(); }}
+      title={t('sidebar.renameGroup')}
+      size="sm"
+      footer={(
+        <>
+          <Button variant="secondary" onClick={onClose}>{t('common.cancel')}</Button>
+          <Button type="submit" form="workspace-group-rename" disabled={!name.trim()}>{t('common.save')}</Button>
+        </>
+      )}
+    >
+      <form id="workspace-group-rename" onSubmit={(event) => { event.preventDefault(); submit(); }}>
+        <Input
+          className="w-full"
+          label={t('sidebar.groupNameLabel')}
+          value={name}
+          onChange={setName}
+          autoFocus
+          maxLength={WORKSPACE_GROUP_FIELD_MAX}
+          onFocus={(event) => (event.target as HTMLInputElement).select()}
+        />
+      </form>
+    </Modal>
   );
 }

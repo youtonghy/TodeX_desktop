@@ -1,6 +1,5 @@
 import { useEffect, useRef, useSyncExternalStore, type ReactNode } from 'react';
-import { Resizable } from '@heroui-pro/react/resizable';
-import type { PanelImperativeHandle } from '@heroui-pro/react/resizable';
+import { Resizable, type PanelImperativeHandle } from '@/components/ui/resizable';
 
 /** Width of the conversation rail left behind when the conversation collapses. */
 export const CHAT_RAIL_SIZE = '3rem';
@@ -19,10 +18,11 @@ type Props = {
 };
 
 /**
- * Conversation beside the right panel. AppLayout's own aside caps the main
- * column at 30% and the aside at a fixed max, so the split lives here: the
- * right panel has no max size, and dragging it past the conversation's minimum
- * collapses the conversation to a rail instead of stopping the handle.
+ * Conversation beside the right panel: the right panel has no max size, and
+ * dragging it past the conversation's minimum collapses the conversation to a
+ * rail instead of stopping the handle. The BoardUI grip handle sits in the
+ * 12px gap between the two containers; with the right panel closed it stays
+ * at the frame edge, so the panel can be dragged back open.
  */
 export function ConversationSplit({ autoSaveId, chat, rail, aside, asideOpen, onAsideOpenChange, chatCollapsed, onChatCollapsedChange }: Props) {
   const chatRef = useRef<PanelImperativeHandle>(null);

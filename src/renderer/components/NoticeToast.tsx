@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { toast } from '@heroui/react';
+import { toast } from '@/components/ui/toast';
 
 type NoticeOptions = {
   variant?: 'info' | 'success' | 'warning' | 'danger';
@@ -27,7 +27,6 @@ export function useNoticeToast(message: string | null | undefined, {
       key = toast[variant](message, {
         description, timeout,
         ...(actionLabel ? { actionProps: {
-          size: 'sm' as const,
           isPending: actionPending,
           isDisabled: actionDisabled,
           onPress: () => onActionRef.current?.(),

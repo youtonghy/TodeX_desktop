@@ -1,8 +1,26 @@
-import { RiPushpin2Fill, RiLockLine, RiAddLine, RiFolderReduceLine, RiFoldersLine, RiFolderTransferLine, RiPencilLine, RiEdit2Line, RiErrorWarningLine, RiFolder3Line, RiGitBranchLine, RiDeleteBinLine, RiArrowDownSLine, RiBarChartBoxLine, RiInformationLine, RiKanbanView2, RiPaletteLine, RiPriceTag3Line, RiPuzzle2Line, RiSettings3Line, RiTerminalBoxLine, RiTerminalLine, RiTimeLine, RiUserSettingsLine, RiVipCrownLine } from '@remixicon/react';
-import { Badge, Button, Chip, ColorSwatchPicker, Dropdown, Label, Tooltip } from '@heroui/react';
+import { RiPushpin2Fill, RiLockLine, RiAddLine, RiArrowRightSLine, RiCheckLine, RiFolderReduceLine, RiFoldersLine, RiFolderTransferLine, RiPencilLine, RiEdit2Line, RiErrorWarningLine, RiFolder3Line, RiGitBranchLine, RiDeleteBinLine, RiArrowDownSLine, RiBarChartBoxLine, RiInformationLine, RiKanbanView2, RiPaletteLine, RiPriceTag3Line, RiPuzzle2Line, RiSettings3Line, RiTerminalBoxLine, RiTerminalLine, RiTimeLine, RiUserSettingsLine, RiVipCrownLine } from '@remixicon/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { FocusEvent, MouseEvent } from 'react';
-import { ContextMenu as HeroContextMenu, ChatListView, Sidebar, useSidebar } from '@heroui-pro/react';
+import type { ComponentType, FocusEvent, MouseEvent, ReactNode } from 'react';
+import {
+  Button as AriaButton,
+  Dialog,
+  Focusable,
+  GridList,
+  GridListItem,
+  Pressable,
+  Radio,
+  RadioGroup,
+  SubmenuTrigger,
+  parseColor,
+  type GridListItemRenderProps,
+} from 'react-aria-components';
+import { Chip } from '@/components/base/badges/chip';
+import { Tooltip, TooltipTrigger } from '@/components/base/tooltip/tooltip';
+import { ChevronUpDownSmall } from '@/components/foundations/icons/chevrons';
+import { IconAction } from '@/components/ui/icon-action';
+import { Menu, MenuItem, MenuPopover, MenuSeparator, MenuTrigger } from '@/components/ui/menu';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { cx } from '@/utils/cx';
 import { useSidebarPins } from '../session/useSidebarPins';
 import { useSidebarGroupCollapse } from '../session/useSidebarGroupCollapse';
 import { useKanbanTasks } from '../session/kanbanTasks';
@@ -16,11 +34,18 @@ import { AppIcon } from './AppIcon';
 import { WORKSPACE_ICON_CHOICES, WORKSPACE_RING_STYLES, WorkspaceStatusRing, ringStyleKey, workspaceIconComponent } from './WorkspaceIcon';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { conversationDisplayTitle, formatResetInstant, getConversationStatus, isConversationHighlighted, workspaceDisplayName } from '../session/helpers';
-import { ShortcutHint } from '../lib/shortcuts';
-import { t, useT } from '../i18n';
+import { ShortcutHint, type ShortcutId } from '../lib/shortcuts';
+import { useT } from '../i18n';
 
 type Props = {
   session: TodeXSession;
+  /** Desktop: the full 260px panel (true) or the collapsed icon rail (false). */
+  open: boolean;
+  /** Rendered in the compact-layout drawer: always expanded, flat on the page ground. */
+  mobile?: boolean;
+  /** Closes the compact-layout drawer. */
+  onCloseMobile?: () => void;
+  className?: string;
   onCreateWorkspace: () => void;
   onEditWorkspace: (workspaceId: string) => void;
   onCreateConversation: () => void;
@@ -43,7 +68,46 @@ type ContextMenu = { kind: 'workspace' | 'conversation' | 'group'; id: string; x
 
 type WorkspaceGroupEntry = Extract<WorkspaceSidebarEntry, { kind: 'group' }>;
 
-const STATUS_DOT_CLASS = { working: 'bg-green-500', issue: 'bg-amber-500', unread: 'bg-blue-500' } as const;
+type IconComponent = ComponentType<{ className?: string; 'aria-hidden'?: boolean | 'true' | 'false' }>;
+
+/** Status dots: running (emerald), needs attention (yellow), unread (accent). */
+const STATUS_DOT_CLASS = { working: 'bg-chart-7', issue: 'bg-chart-8', unread: 'bg-accent-500' } as const;
+
+/** Backend health dot on the TodeX mark. */
+const HEALTH_DOT_CLASS = { success: 'bg-chart-7', warning: 'bg-chart-8', danger: 'bg-foreground-icon-error' } as const;
+
+const FOCUS_RING = 'outline-none focus-visible:ring-2 focus-visible:ring-border-focus-ring';
+
+/** Small relative-time / status chip from the BoardUI AI chat sidebar. */
+const CHIP = 'inline-flex shrink-0 items-center justify-center rounded-sm bg-background-tertiary-default px-1 py-px text-caption-1-medium whitespace-nowrap text-text-secondary';
+
+/** Quiet text action ("show more", "reset"): row hover fill, no border. */
+const QUIET_BUTTON = cx(
+  'inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-lg px-2 text-caption-1-regular text-text-tertiary',
+  'transition-colors duration-150 ease hover:bg-background-secondary-hover hover:text-text-primary',
+  FOCUS_RING,
+);
+
+/** Drop indicators: a 3px accent bar on the edge being dropped at, or an
+ * outlined accent tint when dropping onto the row (grouping). */
+const DROP_EDGE = 'after:pointer-events-none after:absolute after:inset-x-2.5 after:z-3 after:h-[3px] after:rounded-full after:bg-accent-500';
+const DROP_CLASS: Record<WorkspaceDropTarget['position'], string> = {
+  before: cx(DROP_EDGE, 'after:-top-[3px]'),
+  after: cx(DROP_EDGE, 'after:-bottom-[3px]'),
+  merge: 'bg-badge-new-background ring-[1.5px] ring-inset ring-accent-500',
+  into: 'bg-badge-new-background ring-[1.5px] ring-inset ring-accent-500',
+};
+
+/** Normalized swatch value: the same `#RRGGBB` form the HeroUI color picker
+ * stored, so saved colors keep matching their swatch. */
+function swatchKey(value: string | null | undefined): string | null {
+  if (!value) return null;
+  try {
+    return parseColor(value).toString('hex');
+  } catch {
+    return null;
+  }
+}
 
 /** Maps the pointer's vertical position within a row (0..1) to a drop: row
  * edges reorder, the middle of a workspace groups, a group header absorbs.
@@ -68,8 +132,206 @@ function sameDropTarget(left: WorkspaceDropTarget | null, right: WorkspaceDropTa
   return left?.kind === right?.kind && left?.id === right?.id && left?.position === right?.position;
 }
 
+/** Label slot that blurs, fades and shrinks away as the rail closes (the
+ * BoardUI dashboard sidebar recipe); icons stay pinned in place. */
+function Collapsible({ collapsed, className, children }: { collapsed: boolean; className?: string; children: ReactNode }) {
+  return (
+    <span
+      className={cx(
+        'flex min-w-0 items-center overflow-hidden transition-[max-width,opacity,filter] duration-300 ease-in-out motion-reduce:transition-none',
+        collapsed ? 'max-w-0 opacity-0 blur-[3px]' : 'max-w-full opacity-100 blur-0',
+        className,
+      )}
+    >
+      {children}
+    </span>
+  );
+}
+
+/** Top-level action row: icon + label, p-2, rounded-2lg. In the rail it
+ * becomes a 36px icon square with a tooltip. */
+function NavRow({ icon: Icon, label, collapsed, pressed, disabled, hint, onPress }: {
+  icon: IconComponent;
+  label: string;
+  collapsed: boolean;
+  pressed?: boolean;
+  disabled?: boolean;
+  hint?: ShortcutId;
+  onPress: () => void;
+}) {
+  return (
+    <TooltipTrigger delay={200} isDisabled={!collapsed || disabled}>
+      <Focusable isDisabled={disabled}>
+        <button
+          type="button"
+          disabled={disabled}
+          aria-pressed={pressed}
+          onClick={onPress}
+          className={cx(
+            'flex h-9 shrink-0 cursor-pointer items-center gap-2 overflow-hidden rounded-2lg p-2 text-start',
+            'transition-[width,background-color] duration-300 ease-in-out motion-reduce:transition-none',
+            FOCUS_RING,
+            collapsed ? 'w-9' : 'w-full',
+            pressed ? 'bg-background-secondary-hover' : 'hover:bg-background-secondary-hover active:bg-background-tertiary-default',
+            'disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent',
+          )}
+        >
+          <Icon aria-hidden className={cx('size-5 shrink-0', pressed ? 'text-foreground-icon-primary' : 'text-foreground-icon-secondary')} />
+          <Collapsible collapsed={collapsed} className="flex-1">
+            <span className={cx('truncate text-body-medium whitespace-nowrap', pressed ? 'text-text-primary' : 'text-text-secondary')}>{label}</span>
+          </Collapsible>
+          {hint && !collapsed ? <ShortcutHint id={hint} className="ms-auto" /> : null}
+        </button>
+      </Focusable>
+      <Tooltip placement="right">{label}</Tooltip>
+    </TooltipTrigger>
+  );
+}
+
+/** Section header: a collapse toggle (chevron, label, count) beside its add action. */
+function SectionHeader({ label, count, collapsed, expandLabel, collapseLabel, onToggle, addLabel, addDisabled, onAdd, hint }: {
+  label: string;
+  count: number;
+  collapsed: boolean;
+  expandLabel: string;
+  collapseLabel: string;
+  onToggle: () => void;
+  addLabel: string;
+  addDisabled?: boolean;
+  onAdd: () => void;
+  hint: ShortcutId;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-1">
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={!collapsed}
+        aria-label={collapsed ? expandLabel : collapseLabel}
+        className={cx(
+          'flex min-w-0 flex-1 cursor-pointer select-none items-center gap-1.5 rounded-2lg px-2 py-1',
+          'transition-colors duration-150 ease hover:bg-background-secondary-hover',
+          FOCUS_RING,
+        )}
+      >
+        <RiArrowDownSLine
+          aria-hidden
+          className={cx('size-4 shrink-0 text-foreground-icon-tertiary transition-transform duration-200 ease', collapsed && '-rotate-90 rtl:rotate-90')}
+        />
+        <span className="truncate text-body-medium text-text-secondary">{label}</span>
+        <span className="text-caption-1-regular text-text-tertiary">({count})</span>
+      </button>
+      <span className="relative inline-flex shrink-0">
+        <IconAction size="xs" icon={RiAddLine} aria-label={addLabel} disabled={addDisabled} onClick={onAdd} />
+        <ShortcutHint id={hint} className="absolute -top-1.5 -end-1.5 z-10" />
+      </span>
+    </div>
+  );
+}
+
+/** "Show more" / "Collapse" paging under a list. */
+function ListPaging({ hasMore, canCollapse, onMore, onCollapse }: { hasMore: boolean; canCollapse: boolean; onMore: () => void; onCollapse: () => void }) {
+  const t = useT();
+  return (
+    <div className="flex items-center justify-between px-1 pt-1">
+      {hasMore ? <button type="button" className={QUIET_BUTTON} onClick={onMore}>{t('sidebar.showMore')}</button> : <span />}
+      {canCollapse ? <button type="button" className={QUIET_BUTTON} onClick={onCollapse}>{t('sidebar.collapse')}</button> : null}
+    </div>
+  );
+}
+
+/** Round color swatches (workspace icon color, conversation label). */
+function SwatchPicker({ label, value, onChange }: { label: string; value: string | null | undefined; onChange: (hex: string) => void }) {
+  return (
+    <RadioGroup aria-label={label} orientation="horizontal" value={swatchKey(value)} onChange={onChange} className="flex flex-wrap gap-1.5 p-0.5">
+      {BACKEND_LABEL_COLORS.map(({ value: color, label: colorLabel }) => (
+        <Radio
+          key={color}
+          value={swatchKey(color) ?? color}
+          aria-label={colorLabel}
+          style={{ backgroundColor: color }}
+          className={({ isSelected, isFocusVisible, isHovered }) => cx(
+            'flex size-6 cursor-pointer items-center justify-center rounded-full outline-none',
+            'ring-offset-2 ring-offset-background-primary-default transition-shadow duration-150 ease',
+            isSelected || isFocusVisible ? 'ring-2 ring-border-focus-ring' : isHovered && 'ring-2 ring-border-button-hover',
+          )}
+        >
+          {({ isSelected }) => (isSelected ? <RiCheckLine aria-hidden className="size-3.5 text-text-white" /> : null)}
+        </Radio>
+      ))}
+    </RadioGroup>
+  );
+}
+
+/** A right-click menu opened at the pointer. Built on a MenuTrigger (not the
+ * kit's ContextMenu) so its submenus get the root menu state they need. */
+function PointMenu({ position, onClose, children }: { position: { x: number; y: number } | null; onClose: () => void; children: ReactNode }) {
+  const last = useRef(position);
+  if (position) last.current = position;
+  const point = position ?? last.current;
+  return (
+    <MenuTrigger isOpen={Boolean(position)} onOpenChange={(open) => { if (!open) onClose(); }}>
+      {/* An anchor only: the menu opens from the pointer, never by pressing it. */}
+      <Pressable isDisabled>
+        <span
+          role="button"
+          tabIndex={-1}
+          aria-hidden="true"
+          className="pointer-events-none fixed size-0"
+          style={{ left: point?.x ?? 0, top: point?.y ?? 0 }}
+        />
+      </Pressable>
+      <MenuPopover placement="bottom start" offset={2}>{children}</MenuPopover>
+    </MenuTrigger>
+  );
+}
+
+const SUBMENU_CHEVRON = <RiArrowRightSLine aria-hidden className="size-4 rtl:-scale-x-100" />;
+
+/** Grid row recipe shared by the workspace, group and conversation lists. The
+ * row carries the fill, focus ring and drop bar; `hidden` folds it away with
+ * the grid-rows 0fr→1fr transition (children of a folded group). */
+function rowClassName({ selected, rail, hidden, drop, dragging, dim, extra }: {
+  selected?: boolean;
+  rail: boolean;
+  hidden?: boolean;
+  drop?: WorkspaceDropTarget['position'] | null;
+  dragging?: boolean;
+  dim?: boolean;
+  extra?: string;
+}) {
+  return ({ isFocusVisible, isHovered, isPressed }: GridListItemRenderProps) => cx(
+    'relative grid w-full cursor-pointer rounded-2lg outline-none',
+    // Folding eases over 300ms; hover fills keep the 150ms color timing.
+    '[transition:grid-template-rows_300ms_ease-in-out,opacity_300ms_ease-in-out,margin_300ms_ease-in-out,background-color_150ms_ease] motion-reduce:transition-none',
+    hidden ? 'mt-0 grid-rows-[0fr] opacity-0' : 'mt-0.5 grid-rows-[1fr] first:mt-0',
+    selected ? 'bg-background-secondary-hover' : isPressed ? 'bg-background-tertiary-default' : isHovered && 'bg-background-secondary-hover',
+    isFocusVisible && 'ring-2 ring-inset ring-border-focus-ring',
+    dim && 'opacity-60',
+    dragging && 'opacity-40',
+    drop && DROP_CLASS[drop],
+    rail && 'w-9',
+    extra,
+  );
+}
+
+/** Inner padding box of a grid row; the wrapper clips it while folding. */
+function RowContent({ rail, indent, title, children }: { rail: boolean; indent?: boolean; title?: string; children: ReactNode }) {
+  return (
+    <div className="min-h-0 overflow-hidden" title={title}>
+      <div className={cx('flex min-w-0 items-center gap-2', rail ? 'justify-center px-0 py-2' : 'px-2 py-1.5', !rail && indent && 'ps-7')}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
 export function AppSidebar({
   session,
+  open,
+  mobile = false,
+  onCloseMobile,
+  className,
   onCreateWorkspace,
   onEditWorkspace,
   onCreateConversation,
@@ -86,9 +348,10 @@ export function AppSidebar({
   onSelectConversation,
 }: Props) {
   const t = useT();
-  const { isMobile, isOpen, setMobileOpen } = useSidebar();
+  const isOpen = mobile || open;
   const { pins, togglePin } = useSidebarPins();
   const kanbanTasks = useKanbanTasks();
+  const insetChrome = window.todexDesktop.app.windowChrome === 'hidden-inset';
 
   const conversationTaskMetaMap = useMemo(() => {
     const map: Record<string, { count: number; pending: number }> = {};
@@ -143,6 +406,10 @@ export function AppSidebar({
       : 'warning';
 
   const [contextMenu, setContextMenu] = useState<ContextMenu>(null);
+  // The menu keeps rendering its last target while it animates out.
+  const lastContextMenuRef = useRef<ContextMenu>(contextMenu);
+  if (contextMenu) lastContextMenuRef.current = contextMenu;
+  const menu = contextMenu ?? lastContextMenuRef.current;
   const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
 
   // Section collapse states
@@ -158,10 +425,10 @@ export function AppSidebar({
     setConversationLimit(5);
   }, [session.activeWorkspaceId]);
 
-  // Icon-rail peek: the collapsed sidebar renders as a 48px icon rail. Hover,
-  // keyboard focus, or an open overlay flips data-state back to expanded while
-  // the [data-peek] CSS keeps a 48px layout footprint via a negative margin, so
-  // the expanded sidebar floats over the main content instead of pushing it.
+  // Icon-rail peek: the collapsed sidebar renders as a 60px icon rail. Hover,
+  // keyboard focus, or an open menu expands it back to 260px while a negative
+  // inline-end margin keeps the rail's layout footprint, so the expanded
+  // sidebar floats over the conversation instead of pushing it.
   const railCollapsed = !isOpen;
   const [hoverPeek, setHoverPeek] = useState(false);
   const [focusPeek, setFocusPeek] = useState(false);
@@ -171,13 +438,15 @@ export function AppSidebar({
   const peeking = railCollapsed
     && !suppressPeekRef.current
     && (hoverPeek || focusPeek || contextMenu !== null || headerMenuOpen);
+  // The rail shows icons only; a peek shows the full sidebar.
+  const rail = railCollapsed && !peeking;
 
-  const scheduleHoverPeek = (open: boolean) => {
+  const scheduleHoverPeek = (next: boolean) => {
     if (peekTimerRef.current !== null) window.clearTimeout(peekTimerRef.current);
     peekTimerRef.current = window.setTimeout(() => {
       peekTimerRef.current = null;
-      setHoverPeek(open);
-    }, open ? 70 : 140);
+      setHoverPeek(next);
+    }, next ? 70 : 140);
   };
 
   const updatePeekSuppression = () => {
@@ -206,7 +475,7 @@ export function AppSidebar({
 
   const railProps = {
     'data-peek': railCollapsed ? 'true' : undefined,
-    ...(peeking ? { 'data-state': 'expanded' as const } : {}),
+    'data-state': rail ? 'collapsed' as const : 'expanded' as const,
     onMouseEnter: () => {
       insideRef.current.pointer = true;
       if (!suppressPeekRef.current) scheduleHoverPeek(true);
@@ -228,6 +497,25 @@ export function AppSidebar({
     },
   };
 
+  // The floating panel (BoardUI sidebar recipe). Collapsed it is a 60px rail
+  // of the same panel; a peek floats the 260px panel over the conversation.
+  const shellClassName = cx(
+    'relative flex h-full shrink-0 flex-col overflow-hidden',
+    mobile
+      ? 'w-full bg-background-full p-3'
+      : cx(
+        'rounded-3xl border border-border-button-white bg-background-secondary-default shadow-sidebar',
+        'transition-[width,margin-inline-end,box-shadow,padding] duration-300 ease-in-out motion-reduce:transition-none',
+        rail ? 'w-15 px-2.75 py-3' : 'w-65 p-3',
+        peeking && 'z-40 -me-50 shadow-xl',
+      ),
+    className,
+  );
+  const surface = mobile ? 'full' : 'secondary';
+  // macOS hidden-inset chrome: the traffic lights sit over the top of the
+  // sidebar, so its top strip is a drag region with room for them.
+  const chromeStrip = insetChrome ? <div aria-hidden="true" className="window-drag -mx-3 -mt-3 h-7 shrink-0" /> : null;
+
   // High-performance timeline lookup map: precomputed once in O(M) time instead of O(N*M) during sorting
   const timelineInfoMap = useMemo(() => {
     const map: Record<string, { latestAt: number; latestEntry?: TodeXSession['timeline'][number]; latestIncomingAt: number }> = {};
@@ -246,20 +534,6 @@ export function AppSidebar({
     }
     return map;
   }, [session.timeline]);
-
-  // Precompute latest activity per workspace in O(C) time
-  const workspaceLastActiveMap = useMemo(() => {
-    const map: Record<string, number> = {};
-    for (let i = 0; i < session.conversations.length; i++) {
-      const c = session.conversations[i];
-      if (!c.workspaceId) continue;
-      const cTime = Math.max(c.updatedAt || 0, c.createdAt || 0, timelineInfoMap[c.id]?.latestAt || 0);
-      if (!map[c.workspaceId] || cTime > map[c.workspaceId]) {
-        map[c.workspaceId] = cTime;
-      }
-    }
-    return map;
-  }, [session.conversations, timelineInfoMap]);
 
   // A workspace surfaces its most urgent conversation status: a running turn
   // beats an unread error, which beats a plain unread marker — the same
@@ -303,6 +577,11 @@ export function AppSidebar({
   const displayedEntries = useMemo(() => workspaceEntries.slice(0, workspaceLimit), [workspaceEntries, workspaceLimit]);
   const workspaceEntriesRef = useRef(workspaceEntries);
   workspaceEntriesRef.current = workspaceEntries;
+  // Children of a folded group stay mounted (they fold away with the
+  // grid-rows transition) but leave keyboard navigation.
+  const foldedWorkspaceKeys = useMemo(() => displayedEntries.flatMap((entry) => (
+    entry.kind === 'group' && collapsedGroups.includes(entry.id) ? entry.workspaces.map((workspace) => workspace.id) : []
+  )), [displayedEntries, collapsedGroups]);
 
   // Persists a regrouped or reordered layout as per-workspace sortOrder/groupId/groupName.
   const applyWorkspaceLayout = useCallback((next: WorkspaceSidebarEntry[]) => {
@@ -378,14 +657,12 @@ export function AppSidebar({
     return () => cleanups.forEach((cleanup) => cleanup());
   }, [displayedEntries, collapsedGroups, applyWorkspaceLayout, newGroupFallbackName]);
 
+  // Losing window focus closes the menu; outside presses close it through
+  // the popover itself.
   useEffect(() => {
     const close = () => setContextMenu(null);
-    window.addEventListener('click', close);
     window.addEventListener('blur', close);
-    return () => {
-      window.removeEventListener('click', close);
-      window.removeEventListener('blur', close);
-    };
+    return () => window.removeEventListener('blur', close);
   }, []);
 
   const openContextMenu = (event: MouseEvent, kind: NonNullable<ContextMenu>['kind'], id: string) => {
@@ -393,14 +670,15 @@ export function AppSidebar({
     event.stopPropagation();
     setContextMenu({ kind, id, x: event.clientX, y: event.clientY });
   };
+  const closeContextMenu = useCallback(() => setContextMenu(null), []);
 
-  const contextGroup = contextMenu?.kind === 'group'
-    ? workspaceEntries.find((entry): entry is WorkspaceGroupEntry => entry.kind === 'group' && entry.id === contextMenu.id)
+  const contextGroup = menu?.kind === 'group'
+    ? workspaceEntries.find((entry): entry is WorkspaceGroupEntry => entry.kind === 'group' && entry.id === menu.id)
     : undefined;
-  const contextWorkspaceGroupId = contextMenu?.kind === 'workspace'
-    ? workspaceEntries.find((entry): entry is WorkspaceGroupEntry => entry.kind === 'group' && entry.workspaces.some((workspace) => workspace.id === contextMenu.id))?.id
+  const contextWorkspaceGroupId = menu?.kind === 'workspace'
+    ? workspaceEntries.find((entry): entry is WorkspaceGroupEntry => entry.kind === 'group' && entry.workspaces.some((workspace) => workspace.id === menu.id))?.id
     : undefined;
-  const contextMoveTargets = contextMenu?.kind === 'workspace'
+  const contextMoveTargets = menu?.kind === 'workspace'
     ? workspaceEntries.filter((entry): entry is WorkspaceGroupEntry => entry.kind === 'group' && entry.id !== contextWorkspaceGroupId)
     : [];
   const runGroupLayout = (next: WorkspaceSidebarEntry[]) => {
@@ -409,17 +687,17 @@ export function AppSidebar({
   };
 
   // Legacy plaintext history is read-only: no rename or fork.
-  const contextReadOnly = contextMenu?.kind === 'conversation'
-    && session.conversations.find((item) => item.id === contextMenu.id)?.legacyPlaintext === true;
+  const contextReadOnly = menu?.kind === 'conversation'
+    && session.conversations.find((item) => item.id === menu.id)?.legacyPlaintext === true;
   const runContextAction = (action: 'rename' | 'edit' | 'fork' | 'pin' | 'delete') => {
-    if (!contextMenu || contextMenu.kind === 'group') return;
+    if (!menu || menu.kind === 'group') return;
     if (action === 'pin') {
-      togglePin(contextMenu.kind, contextMenu.id);
+      togglePin(menu.kind, menu.id);
       setContextMenu(null);
       return;
     }
-    if (contextMenu.kind === 'workspace') {
-      const workspace = session.workspaces.find((item) => item.id === contextMenu.id);
+    if (menu.kind === 'workspace') {
+      const workspace = session.workspaces.find((item) => item.id === menu.id);
       if (!workspace) return;
       if (action === 'rename') {
         const name = window.prompt(t('sidebar.renameWorkspacePrompt'), workspace.name);
@@ -427,7 +705,7 @@ export function AppSidebar({
       } else if (action === 'edit') onEditWorkspace(workspace.id);
       else if (action === 'delete') session.removeWorkspace(workspace.id);
     } else {
-      const conversation = session.conversations.find((item) => item.id === contextMenu.id);
+      const conversation = session.conversations.find((item) => item.id === menu.id);
       if (!conversation) return;
       if (action === 'rename') {
         const title = window.prompt(t('sidebar.renameConversationPrompt'), conversation.title);
@@ -438,14 +716,14 @@ export function AppSidebar({
     setContextMenu(null);
   };
 
-  const renderWorkspaceItem = (workspace: WorkspaceRecord, group: { entry: WorkspaceGroupEntry; last: boolean } | null) => {
+  const renderWorkspaceItem = (workspace: WorkspaceRecord, group: { entry: WorkspaceGroupEntry; last: boolean; folded: boolean } | null) => {
     const isSelected = workspace.id === session.activeWorkspaceId;
     // A group-after drop on an expanded group marks the group's last row.
-    const dropClass = dropTarget?.kind === 'workspace' && dropTarget.id === workspace.id
-      ? `drop-${dropTarget.position}`
-      : group?.last && dropTarget?.kind === 'group' && dropTarget.id === group.entry.id && dropTarget.position === 'after'
-        ? 'drop-after'
-        : '';
+    const drop = dropTarget?.kind === 'workspace' && dropTarget.id === workspace.id
+      ? dropTarget.position
+      : group?.last && !group.folded && dropTarget?.kind === 'group' && dropTarget.id === group.entry.id && dropTarget.position === 'after'
+        ? 'after' as const
+        : null;
     const isMissing = Boolean(workspace.pathMissing);
     const backend = session.backendConnections.find((profile) => profile.id === (workspace.backendConnectionId || session.activeBackendConnectionId));
     const backendLabel = backend ? t('sidebar.backendLabel', { name: backend.name, url: backend.serverUrl }) : t('sidebar.backendRemoved');
@@ -457,388 +735,336 @@ export function AppSidebar({
         : t('sidebar.statusUnread');
     const WorkspaceGlyph = workspaceIconComponent(workspace.icon);
     return (
-      <ChatListView.Item
+      <GridListItem
         key={workspace.id}
         id={workspace.id}
-        className={`sidebar-item ${group ? 'is-group-child' : ''} ${isSelected ? 'is-selected' : ''} ${isMissing ? 'opacity-50 cursor-not-allowed' : ''} ${draggingKey === `workspace:${workspace.id}` ? 'is-dragging' : ''} ${dropClass}`}
         textValue={workspaceDisplayName(workspace)}
-        {...({ title: isMissing ? t('sidebar.workspaceMissingPath') : undefined } as object)}
+        className={rowClassName({
+          selected: isSelected,
+          rail,
+          hidden: group?.folded,
+          drop,
+          dragging: draggingKey === `workspace:${workspace.id}`,
+          extra: isMissing ? 'cursor-not-allowed opacity-50' : undefined,
+        })}
+        inert={group?.folded || undefined}
         data-workspace-id={workspace.id}
         data-workspace-drag={`workspace:${workspace.id}`}
         data-workspace-in-group={group ? 'true' : undefined}
         onContextMenu={(event) => openContextMenu(event, 'workspace', workspace.id)}
       >
-        <ChatListView.ItemContent>
-          <ChatListView.Icon>
-            <span className="relative flex size-5 items-center justify-center">
-              {workspaceStatus ? (
-                <WorkspaceStatusRing kind={workspaceStatus} style={workspace.ringStyle} label={workspaceStatusLabel} />
-              ) : null}
-              <WorkspaceGlyph
-                className={`size-4 ${!workspace.iconColor && isSelected ? 'text-accent' : ''}`}
-                color={workspace.iconColor}
-              />
+        <RowContent rail={rail} indent={Boolean(group)} title={isMissing ? t('sidebar.workspaceMissingPath') : rail ? workspaceDisplayName(workspace) : undefined}>
+          <span className="relative flex size-5 shrink-0 items-center justify-center">
+            {workspaceStatus ? (
+              <WorkspaceStatusRing kind={workspaceStatus} style={workspace.ringStyle} label={workspaceStatusLabel} />
+            ) : null}
+            <WorkspaceGlyph
+              className={cx('size-4', !workspace.iconColor && (isSelected ? 'text-foreground-icon-primary' : 'text-foreground-icon-secondary'))}
+              color={workspace.iconColor}
+            />
+          </span>
+          <span className={cx('flex min-w-0 flex-1 flex-col', rail && 'hidden')}>
+            <span className={cx('flex min-w-0 items-center gap-1 text-body-medium', isSelected ? 'text-text-primary' : isMissing ? 'text-text-tertiary' : 'text-text-secondary')}>
+              <span className="truncate">{workspaceDisplayName(workspace)}</span>
+              {pins.workspace.includes(workspace.id) ? <RiPushpin2Fill className="size-3 shrink-0 text-foreground-icon-tertiary" aria-label={t('sidebar.pinned')} /> : null}
+              {isMissing ? <RiErrorWarningLine className="size-3 shrink-0 text-status-yellow-text" aria-label={t('sidebar.workspaceMissingPath')} /> : null}
             </span>
-          </ChatListView.Icon>
-          <ChatListView.Text className="flex-1">
-            <ChatListView.Title className={isSelected ? 'text-accent font-semibold' : isMissing ? 'text-muted' : ''}>
-              {workspaceDisplayName(workspace)}{pins.workspace.includes(workspace.id) ? <RiPushpin2Fill className="ml-1 inline size-3 text-muted" aria-label={t('sidebar.pinned')} /> : null}{isMissing ? <RiErrorWarningLine className="ml-1 inline size-3 text-warning" aria-label={t('sidebar.workspaceMissingPath')} /> : null}
-            </ChatListView.Title>
-            <ChatListView.Preview>{workspace.path}</ChatListView.Preview>
-          </ChatListView.Text>
-          <Tooltip delay={300}>
-            <Tooltip.Trigger
-              aria-label={backendLabel}
-              className="ml-auto flex size-6 shrink-0 items-center justify-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-accent"
-            >
-              <span aria-hidden="true" className="size-2.5 rounded-full ring-1 ring-foreground/10" style={{ backgroundColor: backendLabelColor(backend) }} />
-            </Tooltip.Trigger>
-            <Tooltip.Content placement="right" className="max-w-xs break-all">
-              {backendLabel}
-            </Tooltip.Content>
-          </Tooltip>
-        </ChatListView.ItemContent>
-      </ChatListView.Item>
+          </span>
+          {rail ? null : (
+            <TooltipTrigger delay={300}>
+              <Focusable>
+                <span
+                  role="img"
+                  tabIndex={-1}
+                  aria-label={backendLabel}
+                  className={cx('ms-auto flex size-6 shrink-0 items-center justify-center rounded-full', FOCUS_RING)}
+                >
+                  <span aria-hidden="true" className="size-2.5 rounded-full ring-1 ring-separator-border" style={{ backgroundColor: backendLabelColor(backend) }} />
+                </span>
+              </Focusable>
+              <Tooltip placement="right" className="max-w-xs break-all">{backendLabel}</Tooltip>
+            </TooltipTrigger>
+          )}
+        </RowContent>
+      </GridListItem>
     );
   };
 
   const renderGroupItems = (entry: WorkspaceGroupEntry) => {
-    const collapsed = collapsedGroups.includes(entry.id);
+    const folded = collapsedGroups.includes(entry.id);
     const name = entry.name || t('sidebar.newGroupName');
     const containsSelected = entry.workspaces.some((workspace) => workspace.id === session.activeWorkspaceId);
     const statuses = entry.workspaces
       .map((workspace) => workspaceStatusMap[workspace.id])
       .filter((status): status is NonNullable<typeof status> => Boolean(status))
       .slice(0, 3);
-    const dropClass = dropTarget?.kind === 'group' && dropTarget.id === entry.id
-      ? dropTarget.position === 'into'
-        ? 'drop-merge'
-        : dropTarget.position === 'after' && !collapsed ? '' : `drop-${dropTarget.position}`
-      : '';
+    const drop = dropTarget?.kind === 'group' && dropTarget.id === entry.id
+      ? dropTarget.position === 'after' && !folded ? null : dropTarget.position
+      : null;
     const header = (
-      <ChatListView.Item
+      <GridListItem
         key={`group:${entry.id}`}
         id={`group:${entry.id}`}
-        className={`sidebar-item sidebar-group-head ${draggingKey === `group:${entry.id}` ? 'is-dragging' : ''} ${dropClass}`}
         textValue={name}
-        aria-label={collapsed ? t('sidebar.expandGroup', { name }) : t('sidebar.collapseGroup', { name })}
+        aria-label={folded ? t('sidebar.expandGroup', { name }) : t('sidebar.collapseGroup', { name })}
+        className={rowClassName({ rail, drop, dragging: draggingKey === `group:${entry.id}` })}
         data-workspace-drag={`group:${entry.id}`}
         onContextMenu={(event) => openContextMenu(event, 'group', entry.id)}
       >
-        <ChatListView.ItemContent>
-          <ChatListView.Icon>
-            <span className="relative flex size-5 items-center justify-center">
-              <RiArrowDownSLine className={`sidebar-group-chevron size-4 text-muted transition-transform duration-200 ${collapsed ? '-rotate-90' : ''}`} />
-              <RiFoldersLine className={`sidebar-group-rail-glyph size-4 ${containsSelected ? 'text-accent' : 'text-muted'}`} />
-            </span>
-          </ChatListView.Icon>
-          <ChatListView.Text className="flex-1">
-            <ChatListView.Title className={`font-semibold ${collapsed && containsSelected ? 'text-accent' : ''}`}>
-              {name}<span className="ml-1 text-[11px] font-normal text-muted">{entry.workspaces.length}</span>
-            </ChatListView.Title>
-          </ChatListView.Text>
-          {collapsed && statuses.length > 0 ? (
-            <span className="ml-auto flex shrink-0 items-center gap-1 pr-2" aria-hidden="true">
-              {statuses.map((status, index) => <span key={index} className={`size-1.5 rounded-full ${STATUS_DOT_CLASS[status]}`} />)}
+        <RowContent rail={rail} title={rail ? name : undefined}>
+          <span className="relative flex size-5 shrink-0 items-center justify-center">
+            {rail ? (
+              <RiFoldersLine aria-hidden className={cx('size-4', containsSelected ? 'text-foreground-icon-primary' : 'text-foreground-icon-secondary')} />
+            ) : (
+              <RiArrowDownSLine aria-hidden className={cx('size-4 text-foreground-icon-tertiary transition-transform duration-200 ease', folded && '-rotate-90 rtl:rotate-90')} />
+            )}
+          </span>
+          <span className={cx('flex min-w-0 flex-1 items-center gap-1', rail && 'hidden')}>
+            <span className={cx('truncate text-body-semibold', folded && containsSelected ? 'text-text-primary' : 'text-text-secondary')}>{name}</span>
+            <span className="text-caption-2-regular text-text-tertiary">{entry.workspaces.length}</span>
+          </span>
+          {folded && statuses.length > 0 && !rail ? (
+            <span className="ms-auto flex shrink-0 items-center gap-1 pe-1" aria-hidden="true">
+              {statuses.map((status, index) => <span key={index} className={cx('size-1.5 rounded-full', STATUS_DOT_CLASS[status])} />)}
             </span>
           ) : null}
-        </ChatListView.ItemContent>
-      </ChatListView.Item>
+        </RowContent>
+      </GridListItem>
     );
-    if (collapsed) return [header];
-    return [header, ...entry.workspaces.map((workspace, index) => renderWorkspaceItem(workspace, { entry, last: index === entry.workspaces.length - 1 }))];
+    return [header, ...entry.workspaces.map((workspace, index) => renderWorkspaceItem(workspace, { entry, last: index === entry.workspaces.length - 1, folded }))];
   };
 
   // Cached data renders immediately; the directory sync only blocks an
   // entirely empty sidebar (first run or cleared storage).
   if (session.directorySyncStatus === 'loading' && session.workspaces.length === 0) {
-    return <Sidebar {...railProps}><Sidebar.Content><p className="sidebar-empty-hint text-muted px-3 py-4 text-sm">{t('sidebar.syncing')}</p></Sidebar.Content></Sidebar>;
+    return (
+      <aside {...railProps} className={shellClassName}>
+        {chromeStrip}
+        {rail ? null : <p className="px-2 py-4 text-body-regular text-text-secondary">{t('sidebar.syncing')}</p>}
+      </aside>
+    );
   }
 
   const identityMenu = (
-    <Dropdown onOpenChange={setHeaderMenuOpen}>
-      <Dropdown.Trigger
+    <MenuTrigger onOpenChange={setHeaderMenuOpen}>
+      <AriaButton
         aria-label={t('sidebar.menu')}
-        className="flex min-w-0 flex-1 items-center gap-2.5 rounded-lg px-3 py-2 text-left hover:bg-surface-secondary active:bg-surface-secondary/70 transition-colors cursor-pointer select-none outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+        className={({ isHovered, isPressed, isFocusVisible }) => cx(
+          'flex min-w-0 cursor-pointer select-none items-center rounded-2lg text-start outline-none',
+          'transition-[width,background-color] duration-300 ease-in-out motion-reduce:transition-none',
+          rail ? 'w-9 justify-center gap-0 p-0.5' : 'w-full gap-2.5 p-1',
+          isPressed ? 'bg-background-tertiary-default' : isHovered && 'bg-background-secondary-hover',
+          isFocusVisible && 'ring-2 ring-border-focus-ring',
+        )}
       >
-        <Badge.Anchor className="shrink-0">
+        <span className="relative shrink-0">
           <AppIcon />
-          <Badge color={healthColor} placement="bottom-right" size="sm" aria-label={session.connectionState === 'open' ? t('sidebar.backendConnected') : t('sidebar.backendDisconnected')} />
-        </Badge.Anchor>
-        <span className="flex min-w-0 flex-1 items-center gap-1.5" data-sidebar="label">
-          <span className="text-foreground truncate text-sm font-semibold tracking-tight">TodeX</span>
-          <Chip size="sm" variant="soft">V2</Chip>
+          <span
+            role="img"
+            aria-label={session.connectionState === 'open' ? t('sidebar.backendConnected') : t('sidebar.backendDisconnected')}
+            className={cx('absolute -end-0.5 -bottom-0.5 size-2.5 rounded-full ring-2', mobile ? 'ring-background-full' : 'ring-background-secondary-default', HEALTH_DOT_CLASS[healthColor])}
+          />
         </span>
-      </Dropdown.Trigger>
-      <Dropdown.Popover>
-        <Dropdown.Menu onAction={(key) => {
+        <Collapsible collapsed={rail} className="flex-1 gap-1.5">
+          <span className="truncate text-body-semibold text-text-primary">TodeX</span>
+          <Chip variant="caption" color="neutral" className="py-0.5">V2</Chip>
+          <ChevronUpDownSmall aria-hidden className="ms-auto size-4 shrink-0 text-foreground-icon-tertiary" />
+        </Collapsible>
+      </AriaButton>
+      <MenuPopover placement="top start" offset={6}>
+        <Menu aria-label={t('sidebar.menu')} onAction={(key) => {
           if (key === 'settings') onOpenSettings();
           if (key === 'capabilities') onOpenCapabilities();
           if (key === 'cli-manager') {
-            if (isMobile) setMobileOpen(false);
+            if (mobile) onCloseMobile?.();
             onOpenCliManager();
           }
           if (key === 'agent-providers') {
-            if (isMobile) setMobileOpen(false);
+            if (mobile) onCloseMobile?.();
             onOpenAgentProviders();
           }
           if (key === 'usage') onOpenUsage();
           if (key === 'quota') onOpenQuota();
           if (key === 'about') onOpenAbout();
         }}>
-          <Dropdown.Item id="settings" textValue={t('app.settings')}><RiSettings3Line className="text-muted size-4 shrink-0" /><Label>{t('app.settings')}</Label></Dropdown.Item>
-          <Dropdown.Item id="capabilities" textValue={t('app.mcpSkillManager')}><RiPuzzle2Line className="text-muted size-4 shrink-0" /><Label>{t('app.mcpSkillManager')}</Label></Dropdown.Item>
-          <Dropdown.Item id="cli-manager" textValue={t('app.cliManager')}><RiTerminalBoxLine className="text-muted size-4 shrink-0" /><Label>{t('app.cliManager')}</Label></Dropdown.Item>
-          <Dropdown.Item id="agent-providers" textValue={t('app.agentProviders')}><RiUserSettingsLine className="text-muted size-4 shrink-0" /><Label>{t('app.agentProviders')}</Label></Dropdown.Item>
-          <Dropdown.Item id="usage" textValue={t('app.usage')}><RiBarChartBoxLine className="text-muted size-4 shrink-0" /><Label>{t('app.usage')}</Label></Dropdown.Item>
-          <Dropdown.Item id="quota" textValue={t('usage.quotaTitle')}><RiVipCrownLine className="text-muted size-4 shrink-0" /><Label>{t('usage.quotaTitle')}</Label></Dropdown.Item>
-          <Dropdown.Item id="about" textValue={t('app.about')}><RiInformationLine className="text-muted size-4 shrink-0" /><Label>{t('app.about')}</Label></Dropdown.Item>
-        </Dropdown.Menu>
-      </Dropdown.Popover>
-    </Dropdown>
+          <MenuItem id="settings" icon={RiSettings3Line} textValue={t('app.settings')}>{t('app.settings')}</MenuItem>
+          <MenuItem id="capabilities" icon={RiPuzzle2Line} textValue={t('app.mcpSkillManager')}>{t('app.mcpSkillManager')}</MenuItem>
+          <MenuItem id="cli-manager" icon={RiTerminalBoxLine} textValue={t('app.cliManager')}>{t('app.cliManager')}</MenuItem>
+          <MenuItem id="agent-providers" icon={RiUserSettingsLine} textValue={t('app.agentProviders')}>{t('app.agentProviders')}</MenuItem>
+          <MenuItem id="usage" icon={RiBarChartBoxLine} textValue={t('app.usage')}>{t('app.usage')}</MenuItem>
+          <MenuItem id="quota" icon={RiVipCrownLine} textValue={t('usage.quotaTitle')}>{t('usage.quotaTitle')}</MenuItem>
+          <MenuItem id="about" icon={RiInformationLine} textValue={t('app.about')}>{t('app.about')}</MenuItem>
+        </Menu>
+      </MenuPopover>
+    </MenuTrigger>
   );
 
+  const menuWorkspace = menu?.kind === 'workspace' ? session.workspaces.find((item) => item.id === menu.id) : undefined;
+
   return (
-    <Sidebar {...railProps}>
-      <Sidebar.Header>
-        <Button
-          className="connection-create-button w-full justify-start px-3"
-          variant="secondary"
-          isDisabled={!session.activeWorkspaceId}
+    <aside {...railProps} className={shellClassName}>
+      {chromeStrip}
+
+      {/* Primary actions */}
+      <nav className="flex shrink-0 flex-col gap-1">
+        <NavRow
+          icon={RiAddLine}
+          label={t('sidebar.newConversation')}
+          collapsed={rail}
+          disabled={!session.activeWorkspaceId}
+          hint="newConversation"
           onPress={onCreateConversation}
-        >
-          <RiAddLine className="size-4" />
-          <span data-sidebar="label">{t('sidebar.newConversation')}</span>
-          <ShortcutHint id="newConversation" className="ml-auto" />
-        </Button>
-        <Button
-          className="w-full justify-start px-3"
-          variant={terminalActive ? 'secondary' : 'ghost'}
-          aria-pressed={terminalActive}
+        />
+        <NavRow
+          icon={RiTerminalLine}
+          label={t('sidebar.terminal')}
+          collapsed={rail}
+          pressed={terminalActive}
+          hint="sshTerminal"
           onPress={() => {
-            if (isMobile) setMobileOpen(false);
+            if (mobile) onCloseMobile?.();
             onOpenTerminal();
           }}
-        >
-          <RiTerminalLine className="size-4" />
-          <span data-sidebar="label">{t('sidebar.terminal')}</span>
-          <ShortcutHint id="sshTerminal" className="ml-auto" />
-        </Button>
-        <Button className="w-full justify-start px-3" variant="ghost" onPress={onOpenKanban}>
-          <RiKanbanView2 className="size-4" />
-          <span data-sidebar="label">{t('sidebar.kanban')}</span>
-          <ShortcutHint id="kanban" className="ml-auto" />
-        </Button>
-      </Sidebar.Header>
+        />
+        <NavRow icon={RiKanbanView2} label={t('sidebar.kanban')} collapsed={rail} hint="kanban" onPress={onOpenKanban} />
+      </nav>
 
-      <Sidebar.Content>
-        {/* Workspace Section */}
-        <Sidebar.Group>
-          {/* The add button sits beside the collapse toggle, not inside it. */}
-          <div className="sidebar-section-head group flex items-center justify-between gap-1">
-            <div
-              role="button"
-              tabIndex={0}
-              onClick={() => setWorkspacesCollapsed((prev) => !prev)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault();
-                  setWorkspacesCollapsed((prev) => !prev);
-                }
-              }}
-              className="flex min-w-0 flex-1 cursor-pointer select-none items-center gap-1.5 rounded-lg px-3 py-1.5 outline-none transition-colors hover:bg-surface-secondary focus-visible:ring-2 focus-visible:ring-accent/40"
-              aria-expanded={!workspacesCollapsed}
-              aria-label={workspacesCollapsed ? t('sidebar.expandWorkspaces') : t('sidebar.collapseWorkspaces')}
-            >
-              <RiArrowDownSLine
-                className={`size-4 text-muted transition-transform duration-200 ${
-                  workspacesCollapsed ? '-rotate-90' : ''
-                }`}
-              />
-              <Sidebar.GroupLabel className="cursor-pointer p-0 font-medium text-foreground text-xs">
-                {t('sidebar.workspaces')}
-              </Sidebar.GroupLabel>
-              <span className="text-[11px] text-muted font-normal">
-                ({ownWorkspaces.length})
-              </span>
-            </div>
-            <span className="relative inline-flex shrink-0 pe-3">
-              <Button
-                isIconOnly
-                size="sm"
-                variant="ghost"
-                aria-label={t('sidebar.newWorkspace')}
-                className="size-6 text-muted hover:text-foreground"
-                onPress={() => onCreateWorkspace()}
-              >
-                <RiAddLine className="size-4" />
-              </Button>
-              <ShortcutHint id="newWorkspace" className="absolute -top-1.5 -right-1.5 z-10" />
-            </span>
-          </div>
+      <ScrollArea
+        surface={surface}
+        className={cx('mt-3 min-h-0 flex-1', rail ? '-mx-2.75' : '-mx-3')}
+        contentClassName={cx('flex flex-col gap-4 pb-2 [scrollbar-width:none]', rail ? 'px-2.75' : 'px-3')}
+      >
+        {/* Workspace section */}
+        <section className="flex flex-col gap-1">
+          {rail ? null : (
+            <SectionHeader
+              label={t('sidebar.workspaces')}
+              count={ownWorkspaces.length}
+              collapsed={workspacesCollapsed}
+              expandLabel={t('sidebar.expandWorkspaces')}
+              collapseLabel={t('sidebar.collapseWorkspaces')}
+              onToggle={() => setWorkspacesCollapsed((prev) => !prev)}
+              addLabel={t('sidebar.newWorkspace')}
+              onAdd={() => onCreateWorkspace()}
+              hint="newWorkspace"
+            />
+          )}
 
           {!workspacesCollapsed && (
             <>
               {ownWorkspaces.length === 0 ? (
-                <p className="sidebar-empty-hint text-muted px-3 py-2 text-xs">{t('sidebar.noWorkspaces')}</p>
+                rail ? null : <p className="px-2 py-1 text-caption-1-regular text-text-tertiary">{t('sidebar.noWorkspaces')}</p>
               ) : (
-              <>
-                <ChatListView
-                  key={`workspaces_${workspaceLimit}`}
-                  aria-label={t('sidebar.workspaces')}
-                  density="compact"
-                  className="sidebar-chat-list"
-                  onAction={(key) => {
-                    if (String(key).startsWith('group:')) {
-                      toggleGroupCollapsed(String(key).slice('group:'.length));
-                      return;
-                    }
-                    const target = session.workspaces.find((item) => item.id === String(key));
-                    if (target?.pathMissing) {
-                      return;
-                    }
-                    session.selectWorkspace(String(key));
-                  }}
-                >
-                  {displayedEntries.flatMap((entry) => (entry.kind === 'group'
-                    ? renderGroupItems(entry)
-                    : [renderWorkspaceItem(entry.workspace, null)]))}
-                </ChatListView>
+                <>
+                  <GridList
+                    key={`workspaces_${workspaceLimit}`}
+                    aria-label={t('sidebar.workspaces')}
+                    className="flex flex-col outline-none"
+                    disabledKeys={foldedWorkspaceKeys}
+                    disabledBehavior="all"
+                    onAction={(key) => {
+                      if (String(key).startsWith('group:')) {
+                        toggleGroupCollapsed(String(key).slice('group:'.length));
+                        return;
+                      }
+                      const target = session.workspaces.find((item) => item.id === String(key));
+                      if (target?.pathMissing) {
+                        return;
+                      }
+                      session.selectWorkspace(String(key));
+                    }}
+                  >
+                    {displayedEntries.flatMap((entry) => (entry.kind === 'group'
+                      ? renderGroupItems(entry)
+                      : [renderWorkspaceItem(entry.workspace, null)]))}
+                  </GridList>
 
-                {workspaceEntries.length > 5 && (
-                  <div className="sidebar-list-more flex items-center justify-between px-2 pt-1">
-                    {workspaceEntries.length > workspaceLimit ? (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="h-7 text-xs text-muted hover:text-foreground font-normal"
-                        onPress={() => setWorkspaceLimit((prev) => prev + 5)}
-                      >
-                        <span>{t('sidebar.showMore')}</span>
-                      </Button>
-                    ) : <span />}
-                    {workspaceLimit > 5 ? (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="h-7 text-xs text-muted hover:text-foreground font-normal"
-                        onPress={() => setWorkspaceLimit(5)}
-                      >
-                        <span>{t('sidebar.collapse')}</span>
-                      </Button>
-                    ) : null}
-                  </div>
-                )}
-              </>
+                  {workspaceEntries.length > 5 && !rail && (
+                    <ListPaging
+                      hasMore={workspaceEntries.length > workspaceLimit}
+                      canCollapse={workspaceLimit > 5}
+                      onMore={() => setWorkspaceLimit((prev) => prev + 5)}
+                      onCollapse={() => setWorkspaceLimit(5)}
+                    />
+                  )}
+                </>
               )}
               {foreignWorkspaceGroups.map((group) => {
                 const backendLabel = group.profile
                   ? t('sidebar.backendLabel', { name: group.profile.name, url: group.profile.serverUrl })
                   : t('sidebar.backendRemoved');
                 return (
-                  <div key={group.profile?.id ?? 'removed'} className="mt-1.5 border-t border-separator/60 pt-1.5">
-                    <div className="flex items-center gap-1.5 px-3 pb-0.5 pt-1">
-                      <span aria-hidden="true" className="size-2.5 shrink-0 rounded-full ring-1 ring-foreground/10" style={{ backgroundColor: backendLabelColor(group.profile) }} />
-                      <span className="text-muted min-w-0 flex-1 truncate text-[11px] font-medium" title={backendLabel}>
+                  <div key={group.profile?.id ?? 'removed'} className="mt-1.5 flex flex-col gap-0.5 border-t border-separator-border pt-1.5">
+                    <div className={cx('flex items-center gap-1.5 px-2 pt-1 pb-0.5', rail && 'hidden')}>
+                      <span aria-hidden="true" className="size-2.5 shrink-0 rounded-full ring-1 ring-separator-border" style={{ backgroundColor: backendLabelColor(group.profile) }} />
+                      <span className="min-w-0 flex-1 truncate text-caption-1-medium text-text-secondary" title={backendLabel}>
                         {group.profile?.name || t('sidebar.backendRemoved')}
                       </span>
-                      <Chip size="sm" variant="soft">{t('sidebar.otherBackend')}</Chip>
+                      <Chip variant="caption" color="neutral" className="py-0.5">{t('sidebar.otherBackend')}</Chip>
                     </div>
-                    <ChatListView
+                    <GridList
                       aria-label={backendLabel}
-                      density="compact"
-                      className="sidebar-chat-list"
+                      className="flex flex-col outline-none"
                       onAction={(key) => session.selectWorkspace(String(key))}
                     >
                       {group.workspaces.map((workspace) => {
                         const WorkspaceGlyph = workspaceIconComponent(workspace.icon);
                         return (
-                          <ChatListView.Item
+                          <GridListItem
                             key={workspace.id}
                             id={workspace.id}
-                            className="sidebar-item"
                             textValue={workspaceDisplayName(workspace)}
+                            className={rowClassName({ rail })}
                           >
-                            <ChatListView.ItemContent>
-                              <ChatListView.Icon>
-                                <span className="relative flex size-5 items-center justify-center">
-                                  <WorkspaceGlyph className="size-4" color={workspace.iconColor} />
-                                </span>
-                              </ChatListView.Icon>
-                              <ChatListView.Text className="flex-1">
-                                <ChatListView.Title>{workspaceDisplayName(workspace)}</ChatListView.Title>
-                                <ChatListView.Preview>{workspace.path}</ChatListView.Preview>
-                              </ChatListView.Text>
-                            </ChatListView.ItemContent>
-                          </ChatListView.Item>
+                            <RowContent rail={rail} title={rail ? workspaceDisplayName(workspace) : undefined}>
+                              <span className="relative flex size-5 shrink-0 items-center justify-center">
+                                <WorkspaceGlyph className={cx('size-4', !workspace.iconColor && 'text-foreground-icon-secondary')} color={workspace.iconColor} />
+                              </span>
+                              <span className={cx('flex min-w-0 flex-1 flex-col', rail && 'hidden')}>
+                                <span className="truncate text-body-medium text-text-secondary">{workspaceDisplayName(workspace)}</span>
+                              </span>
+                            </RowContent>
+                          </GridListItem>
                         );
                       })}
-                    </ChatListView>
+                    </GridList>
                   </div>
                 );
               })}
             </>
           )}
-        </Sidebar.Group>
+        </section>
 
-        {/* Conversation Section */}
-        <Sidebar.Group>
-          {/* The add button sits beside the collapse toggle, not inside it. */}
-          <div className="sidebar-section-head group flex items-center justify-between gap-1">
-            <div
-              role="button"
-              tabIndex={0}
-              onClick={() => setConversationsCollapsed((prev) => !prev)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault();
-                  setConversationsCollapsed((prev) => !prev);
-                }
-              }}
-              className="flex min-w-0 flex-1 cursor-pointer select-none items-center gap-1.5 rounded-lg px-3 py-1.5 outline-none transition-colors hover:bg-surface-secondary focus-visible:ring-2 focus-visible:ring-accent/40"
-              aria-expanded={!conversationsCollapsed}
-              aria-label={conversationsCollapsed ? t('sidebar.expandConversations') : t('sidebar.collapseConversations')}
-            >
-              <RiArrowDownSLine
-                className={`size-4 text-muted transition-transform duration-200 ${
-                  conversationsCollapsed ? '-rotate-90' : ''
-                }`}
-              />
-              <Sidebar.GroupLabel className="cursor-pointer p-0 font-medium text-foreground text-xs">
-                {t('sidebar.conversations')}
-              </Sidebar.GroupLabel>
-              <span className="text-[11px] text-muted font-normal">
-                ({workspaceConversations.length})
-              </span>
-            </div>
-            <span className="relative inline-flex shrink-0 pe-3">
-              <Button
-                isIconOnly
-                size="sm"
-                variant="ghost"
-                aria-label={t('sidebar.newConversationAria')}
-                className="size-6 text-muted hover:text-foreground"
-                isDisabled={!session.activeWorkspaceId}
-                onPress={() => onCreateConversation()}
-              >
-                <RiAddLine className="size-4" />
-              </Button>
-              <ShortcutHint id="newConversation" className="absolute -top-1.5 -right-1.5 z-10" />
-            </span>
-          </div>
+        {/* Conversation section */}
+        <section className="flex flex-col gap-1">
+          {rail ? null : (
+            <SectionHeader
+              label={t('sidebar.conversations')}
+              count={workspaceConversations.length}
+              collapsed={conversationsCollapsed}
+              expandLabel={t('sidebar.expandConversations')}
+              collapseLabel={t('sidebar.collapseConversations')}
+              onToggle={() => setConversationsCollapsed((prev) => !prev)}
+              addLabel={t('sidebar.newConversationAria')}
+              addDisabled={!session.activeWorkspaceId}
+              onAdd={() => onCreateConversation()}
+              hint="newConversation"
+            />
+          )}
 
           {!conversationsCollapsed && (
             workspaceConversations.length === 0 ? (
-              <p className="sidebar-empty-hint text-muted px-3 py-2 text-xs">
-                {session.activeWorkspaceId ? t('sidebar.noConversations') : t('sidebar.selectWorkspace')}
-              </p>
+              rail ? null : (
+                <p className="px-2 py-1 text-caption-1-regular text-text-tertiary">
+                  {session.activeWorkspaceId ? t('sidebar.noConversations') : t('sidebar.selectWorkspace')}
+                </p>
+              )
             ) : (
               <>
-                <ChatListView
+                <GridList
                   key={`${session.activeWorkspaceId || 'no-workspace'}_${conversationLimit}`}
                   aria-label={t('sidebar.conversations')}
-                  density="compact"
-                  className="sidebar-chat-list"
+                  className="flex flex-col outline-none"
                   onAction={(key) => {
                     const conversation = workspaceConversations.find((item) => item.id === String(key));
                     if (conversation) {
@@ -858,272 +1084,238 @@ export function AppSidebar({
                       ? Date.parse(followUps.resumeAt) : NaN;
                     const resetAt = Number.isFinite(backendWait) && backendWait > Date.now() ? backendWait : undefined;
                     const tasksDone = Boolean(taskMeta && taskMeta.pending === 0);
+                    const title = conversationDisplayTitle(conversation, session.timeline);
+                    const running = isConversationHighlighted(conversation, session.activeConversationId, session.turnIds);
                     return (
-                      <ChatListView.Item
+                      <GridListItem
                         key={conversation.id}
                         id={conversation.id}
-                        className={`sidebar-item ${isSelected ? 'is-selected' : ''} ${tasksDone ? 'opacity-60' : ''}`}
-                        textValue={conversationDisplayTitle(conversation, session.timeline)}
+                        textValue={title}
+                        className={rowClassName({ selected: isSelected, rail, dim: tasksDone })}
                         onContextMenu={(event) => openContextMenu(event, 'conversation', conversation.id)}
                       >
-                        <ChatListView.ItemContent>
-                          <ChatListView.Icon>
-                            <span className="relative flex size-5 items-center justify-center">
-                              <ProviderIcon className="size-4" provider={conversation.provider} />
-                              <span
-                                className={`absolute -bottom-0.5 -right-0.5 size-2 rounded-full ring-2 ring-surface ${status?.color || 'hidden'}`}
-                                aria-label={status?.label}
-                              />
-                            </span>
-                          </ChatListView.Icon>
-                          <ChatListView.Text>
-                            <ChatListView.Title className={isSelected ? 'text-accent font-semibold' : tasksDone ? 'text-muted' : ''}>
-                              {conversation.legacyPlaintext ? <span className="mr-1 inline-flex align-middle text-muted" role="img" title={t('history.readOnlyBadge')} aria-label={t('history.readOnlyBadge')}><RiLockLine className="size-3" aria-hidden="true" /></span> : null}{conversationDisplayTitle(conversation, session.timeline)}{pins.conversation.includes(conversation.id) ? <RiPushpin2Fill className="ml-1 inline size-3 text-muted" aria-label={t('sidebar.pinned')} /> : null}{taskMeta ? <Chip className="ml-1 inline-flex h-4 align-middle px-1.5 text-[10px]" color={tasksDone ? 'default' : 'accent'} size="sm" variant="soft" aria-label={t('sidebar.taskCount', { count: taskMeta.count })}>{tasksDone ? t('sidebar.tasksDone') : t('sidebar.tasksPlanning')}</Chip> : null}
-                            </ChatListView.Title>
-                            <ChatListView.Preview>{conversation.preview || t('sidebar.noMessages')}</ChatListView.Preview>
-                          </ChatListView.Text>
-                          <ChatListView.Meta>
-                            {resetAt ? (
-                              <Tooltip delay={300}>
-                                <Tooltip.Trigger
-                                  aria-label={t('controls.waitingReset', { time: formatResetInstant(resetAt) })}
-                                  className="mr-1 inline-flex align-middle"
+                        <RowContent rail={rail} title={rail ? title : undefined}>
+                          <span className="relative flex size-5 shrink-0 items-center justify-center">
+                            <ProviderIcon className={cx('size-4', isSelected ? 'text-foreground-icon-primary' : 'text-foreground-icon-secondary')} provider={conversation.provider} />
+                            <span
+                              className={cx(
+                                'absolute -end-0.5 -bottom-0.5 size-2 rounded-full ring-2',
+                                isSelected ? 'ring-background-secondary-hover' : mobile ? 'ring-background-full' : 'ring-background-secondary-default',
+                                status ? STATUS_DOT_CLASS[status.kind] : 'hidden',
+                              )}
+                              aria-label={status?.label}
+                            />
+                          </span>
+                          <span className={cx('flex min-w-0 flex-1 flex-col', rail && 'hidden')}>
+                            <span className={cx('flex min-w-0 items-center gap-1 text-body-medium', isSelected ? 'text-text-primary' : tasksDone ? 'text-text-tertiary' : 'text-text-secondary')}>
+                              {conversation.legacyPlaintext ? <span className="inline-flex shrink-0 text-foreground-icon-tertiary" role="img" title={t('history.readOnlyBadge')} aria-label={t('history.readOnlyBadge')}><RiLockLine className="size-3" aria-hidden="true" /></span> : null}
+                              <span className="truncate">{title}</span>
+                              {pins.conversation.includes(conversation.id) ? <RiPushpin2Fill className="size-3 shrink-0 text-foreground-icon-tertiary" aria-label={t('sidebar.pinned')} /> : null}
+                              {taskMeta ? (
+                                <span
+                                  aria-label={t('sidebar.taskCount', { count: taskMeta.count })}
+                                  className={cx(CHIP, !tasksDone && 'bg-badge-new-background text-badge-new-text')}
                                 >
-                                  <RiTimeLine className="size-3.5 text-warning" aria-hidden="true" />
-                                </Tooltip.Trigger>
-                                <Tooltip.Content placement="top" className="max-w-xs">
-                                  {t('controls.waitingReset', { time: formatResetInstant(resetAt) })}
-                                </Tooltip.Content>
-                              </Tooltip>
-                            ) : null}
-                            {conversation.labelColor ? (
-                              <span
-                                aria-label={t('sidebar.labelColor')}
-                                className="mr-1 inline-block size-2 rounded-full align-middle"
-                                style={{ backgroundColor: conversation.labelColor }}
-                              />
-                            ) : null}
-                            {isConversationHighlighted(conversation, session.activeConversationId, session.turnIds) ? t('sidebar.running') : ''}
-                          </ChatListView.Meta>
-                        </ChatListView.ItemContent>
-                        {isConversationHighlighted(conversation, session.activeConversationId, session.turnIds) ? (
-                          <span className="sr-only">{t('sidebar.running')}</span>
-                        ) : null}
-                      </ChatListView.Item>
+                                  {tasksDone ? t('sidebar.tasksDone') : t('sidebar.tasksPlanning')}
+                                </span>
+                              ) : null}
+                            </span>
+                          </span>
+                          {rail ? null : (
+                            <span className="flex shrink-0 items-center gap-1">
+                              {resetAt ? (
+                                <TooltipTrigger delay={300}>
+                                  <Focusable>
+                                    <span
+                                      role="img"
+                                      tabIndex={-1}
+                                      aria-label={t('controls.waitingReset', { time: formatResetInstant(resetAt) })}
+                                      className={cx('inline-flex rounded-sm', FOCUS_RING)}
+                                    >
+                                      <RiTimeLine className="size-3.5 text-status-yellow-text" aria-hidden="true" />
+                                    </span>
+                                  </Focusable>
+                                  <Tooltip placement="top" className="max-w-xs">
+                                    {t('controls.waitingReset', { time: formatResetInstant(resetAt) })}
+                                  </Tooltip>
+                                </TooltipTrigger>
+                              ) : null}
+                              {conversation.labelColor ? (
+                                <span
+                                  aria-label={t('sidebar.labelColor')}
+                                  className="inline-block size-2 rounded-full"
+                                  style={{ backgroundColor: conversation.labelColor }}
+                                />
+                              ) : null}
+                              {running ? <span className={CHIP}>{t('sidebar.running')}</span> : null}
+                            </span>
+                          )}
+                          {running ? <span className="sr-only">{t('sidebar.running')}</span> : null}
+                        </RowContent>
+                      </GridListItem>
                     );
                   })}
-                </ChatListView>
+                </GridList>
 
-                {sortedConversations.length > 5 && (
-                  <div className="sidebar-list-more flex items-center justify-between px-2 pt-1">
-                    {sortedConversations.length > conversationLimit ? (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="h-7 text-xs text-muted hover:text-foreground font-normal"
-                        onPress={() => setConversationLimit((prev) => prev + 5)}
-                      >
-                        <span>{t('sidebar.showMore')}</span>
-                      </Button>
-                    ) : <span />}
-                    {conversationLimit > 5 ? (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="h-7 text-xs text-muted hover:text-foreground font-normal"
-                        onPress={() => setConversationLimit(5)}
-                      >
-                        <span>{t('sidebar.collapse')}</span>
-                      </Button>
-                    ) : null}
-                  </div>
+                {sortedConversations.length > 5 && !rail && (
+                  <ListPaging
+                    hasMore={sortedConversations.length > conversationLimit}
+                    canCollapse={conversationLimit > 5}
+                    onMore={() => setConversationLimit((prev) => prev + 5)}
+                    onCollapse={() => setConversationLimit(5)}
+                  />
                 )}
               </>
             )
           )}
-        </Sidebar.Group>
-      </Sidebar.Content>
+        </section>
+      </ScrollArea>
 
-      {contextMenu ? (
-        <HeroContextMenu open onOpenChange={(open) => { if (!open) setContextMenu(null); }}>
-          <div
-            className="fixed z-50 w-44 rounded-xl border border-separator bg-overlay p-1 shadow-overlay"
-            style={{ left: Math.max(8, Math.min(contextMenu.x, window.innerWidth - 184)), top: Math.max(8, Math.min(contextMenu.y, window.innerHeight - 200)) }}
-            onClick={(event) => event.stopPropagation()}
-          >
-            {contextMenu.kind === 'group' ? (
-              <HeroContextMenu.Menu aria-label={t('sidebar.groupMenu')} autoFocus="first" onClose={() => setContextMenu(null)}>
-                <HeroContextMenu.Item id="rename-group" textValue={t('sidebar.renameGroup')} onAction={() => { if (contextGroup) setRenamingGroup({ id: contextGroup.id, name: contextGroup.name }); setContextMenu(null); }}><RiPencilLine className="size-4 text-muted" /><Label>{t('sidebar.renameGroup')}</Label></HeroContextMenu.Item>
-                <HeroContextMenu.Item id="toggle-group" textValue={collapsedGroups.includes(contextMenu.id) ? t('sidebar.unfoldGroup') : t('sidebar.foldGroup')} onAction={() => { toggleGroupCollapsed(contextMenu.id); setContextMenu(null); }}><RiArrowDownSLine className="size-4 text-muted" /><Label>{collapsedGroups.includes(contextMenu.id) ? t('sidebar.unfoldGroup') : t('sidebar.foldGroup')}</Label></HeroContextMenu.Item>
-                <HeroContextMenu.Separator />
-                <HeroContextMenu.Item id="ungroup" textValue={t('sidebar.ungroup')} variant="danger" onAction={() => runGroupLayout(ungroupWorkspaceGroup(workspaceEntries, contextMenu.id))}><RiFoldersLine className="size-4 text-danger" /><Label>{t('sidebar.ungroup')}</Label></HeroContextMenu.Item>
-              </HeroContextMenu.Menu>
-            ) : (
-            <HeroContextMenu.Menu aria-label={contextMenu.kind === 'workspace' ? t('sidebar.workspaceMenu') : t('sidebar.conversationMenu')} autoFocus="first" onClose={() => setContextMenu(null)}>
-              {contextMenu.kind === 'conversation' && !contextReadOnly ? <HeroContextMenu.Item id="fork" textValue="Fork" onAction={() => runContextAction('fork')}><RiGitBranchLine className="size-4 text-muted" /><Label>Fork</Label></HeroContextMenu.Item> : null}
-              {contextReadOnly ? null : <HeroContextMenu.Item id="rename" textValue={t('sidebar.rename')} onAction={() => runContextAction('rename')}><RiPencilLine className="size-4 text-muted" /><Label>{t('sidebar.rename')}</Label></HeroContextMenu.Item>}
-              {contextMenu.kind === 'workspace' ? <HeroContextMenu.Item id="edit" textValue={t('sidebar.edit')} onAction={() => runContextAction('edit')}><RiEdit2Line className="size-4 text-muted" /><Label>{t('sidebar.edit')}</Label></HeroContextMenu.Item> : null}
-              <HeroContextMenu.Item id="pin" textValue={pins[contextMenu.kind].includes(contextMenu.id) ? t('sidebar.unpin') : t('sidebar.pin')} onAction={() => runContextAction('pin')}><RiPushpin2Fill className="size-4 text-muted" /><Label>{pins[contextMenu.kind].includes(contextMenu.id) ? t('sidebar.unpin') : t('sidebar.pin')}</Label></HeroContextMenu.Item>
-              {contextMenu.kind === 'workspace' ? (
-                <HeroContextMenu.SubmenuTrigger>
-                  <HeroContextMenu.Item id="workspace-icon" textValue={t('sidebar.workspaceIcon')}>
-                    <RiPaletteLine className="size-4 text-muted" />
-                    <Label>{t('sidebar.workspaceIcon')}</Label>
-                    <HeroContextMenu.SubmenuIndicator />
-                  </HeroContextMenu.Item>
-                  <HeroContextMenu.Popover className="rounded-xl">
-                    {(() => {
-                      const menuWorkspace = session.workspaces.find((item) => item.id === contextMenu.id);
-                      if (!menuWorkspace) return null;
-                      return (
-                        <div className="flex w-48 flex-col gap-2 p-2">
-                          <div className="grid grid-cols-5 gap-1">
-                            {WORKSPACE_ICON_CHOICES.map(({ key, Icon }) => (
-                              <Button
+      <PointMenu position={contextMenu} onClose={closeContextMenu}>
+        {menu?.kind === 'group' ? (
+          <Menu aria-label={t('sidebar.groupMenu')} autoFocus="first">
+            <MenuItem id="rename-group" icon={RiPencilLine} textValue={t('sidebar.renameGroup')} onAction={() => { if (contextGroup) setRenamingGroup({ id: contextGroup.id, name: contextGroup.name }); setContextMenu(null); }}>{t('sidebar.renameGroup')}</MenuItem>
+            <MenuItem id="toggle-group" icon={RiArrowDownSLine} textValue={collapsedGroups.includes(menu.id) ? t('sidebar.unfoldGroup') : t('sidebar.foldGroup')} onAction={() => { toggleGroupCollapsed(menu.id); setContextMenu(null); }}>{collapsedGroups.includes(menu.id) ? t('sidebar.unfoldGroup') : t('sidebar.foldGroup')}</MenuItem>
+            <MenuSeparator />
+            <MenuItem id="ungroup" icon={RiFoldersLine} tone="danger" textValue={t('sidebar.ungroup')} onAction={() => runGroupLayout(ungroupWorkspaceGroup(workspaceEntries, menu.id))}>{t('sidebar.ungroup')}</MenuItem>
+          </Menu>
+        ) : menu ? (
+          <Menu aria-label={menu.kind === 'workspace' ? t('sidebar.workspaceMenu') : t('sidebar.conversationMenu')} autoFocus="first">
+            {menu.kind === 'conversation' && !contextReadOnly ? <MenuItem id="fork" icon={RiGitBranchLine} textValue="Fork" onAction={() => runContextAction('fork')}>Fork</MenuItem> : null}
+            {contextReadOnly ? null : <MenuItem id="rename" icon={RiPencilLine} textValue={t('sidebar.rename')} onAction={() => runContextAction('rename')}>{t('sidebar.rename')}</MenuItem>}
+            {menu.kind === 'workspace' ? <MenuItem id="edit" icon={RiEdit2Line} textValue={t('sidebar.edit')} onAction={() => runContextAction('edit')}>{t('sidebar.edit')}</MenuItem> : null}
+            <MenuItem id="pin" icon={RiPushpin2Fill} textValue={pins[menu.kind].includes(menu.id) ? t('sidebar.unpin') : t('sidebar.pin')} onAction={() => runContextAction('pin')}>{pins[menu.kind].includes(menu.id) ? t('sidebar.unpin') : t('sidebar.pin')}</MenuItem>
+            {menu.kind === 'workspace' ? (
+              <SubmenuTrigger>
+                <MenuItem id="workspace-icon" icon={RiPaletteLine} textValue={t('sidebar.workspaceIcon')} trailing={SUBMENU_CHEVRON}>{t('sidebar.workspaceIcon')}</MenuItem>
+                <MenuPopover placement="end top" className="min-w-0">
+                  <Dialog aria-label={t('sidebar.workspaceIcon')} className="flex w-52 flex-col gap-2 p-1 outline-none">
+                    {menuWorkspace ? (
+                      <>
+                        <div className="grid grid-cols-5 gap-1">
+                          {WORKSPACE_ICON_CHOICES.map(({ key, Icon }) => (
+                            <IconAction
+                              key={key}
+                              size="sm"
+                              icon={Icon}
+                              aria-label={key}
+                              active={(menuWorkspace.icon ?? 'folder') === key}
+                              onClick={() => {
+                                session.updateWorkspace(menu.id, { icon: key === 'folder' ? undefined : key });
+                                setContextMenu(null);
+                              }}
+                            />
+                          ))}
+                        </div>
+                        <SwatchPicker
+                          label={t('sidebar.iconColor')}
+                          value={menuWorkspace.iconColor}
+                          onChange={(color) => {
+                            session.updateWorkspace(menu.id, { iconColor: color });
+                            setContextMenu(null);
+                          }}
+                        />
+                        <div className="flex items-center gap-2 px-1">
+                          <span className="text-caption-2-medium uppercase text-text-tertiary">{t('sidebar.ringStyle')}</span>
+                          <span className="h-px flex-1 bg-separator-border" />
+                        </div>
+                        <div className="grid grid-cols-5 gap-1">
+                          {WORKSPACE_RING_STYLES.map(({ key, labelKey }) => {
+                            const active = ringStyleKey(menuWorkspace.ringStyle) === key;
+                            return (
+                              <button
                                 key={key}
-                                isIconOnly
-                                size="sm"
-                                variant={(menuWorkspace.icon ?? 'folder') === key ? 'secondary' : 'ghost'}
-                                aria-label={key}
-                                className="rounded-lg"
-                                onPress={() => {
-                                  session.updateWorkspace(contextMenu.id, { icon: key === 'folder' ? undefined : key });
-                                  setContextMenu(null);
-                                }}
-                              >
-                                <Icon className="size-4" />
-                              </Button>
-                            ))}
-                          </div>
-                          <ColorSwatchPicker
-                            aria-label={t('sidebar.iconColor')}
-                            value={menuWorkspace.iconColor ?? undefined}
-                            onChange={(color) => {
-                              session.updateWorkspace(contextMenu.id, { iconColor: color.toString('hex') });
-                              setContextMenu(null);
-                            }}
-                          >
-                            {BACKEND_LABEL_COLORS.map(({ value, label }) => (
-                              <ColorSwatchPicker.Item key={value} color={value} aria-label={label}>
-                                <ColorSwatchPicker.Swatch />
-                                <ColorSwatchPicker.Indicator />
-                              </ColorSwatchPicker.Item>
-                            ))}
-                          </ColorSwatchPicker>
-                          <div className="flex items-center gap-2 px-1">
-                            <span className="text-[10px] font-medium uppercase tracking-wide text-muted">{t('sidebar.ringStyle')}</span>
-                            <span className="h-px flex-1 bg-separator" />
-                          </div>
-                          <div className="grid grid-cols-5 gap-1">
-                            {WORKSPACE_RING_STYLES.map(({ key, labelKey }) => (
-                              <Button
-                                key={key}
-                                isIconOnly
-                                size="sm"
-                                variant={ringStyleKey(menuWorkspace.ringStyle) === key ? 'secondary' : 'ghost'}
+                                type="button"
                                 aria-label={t(labelKey)}
-                                className="rounded-lg"
-                                onPress={() => {
-                                  session.updateWorkspace(contextMenu.id, { ringStyle: key === 'orbit' ? undefined : key });
+                                aria-pressed={active}
+                                className={cx(
+                                  'inline-flex size-7 cursor-pointer items-center justify-center rounded-lg',
+                                  'transition-colors duration-150 ease hover:bg-background-secondary-hover active:bg-background-tertiary-default',
+                                  FOCUS_RING,
+                                  active && 'bg-background-secondary-hover',
+                                )}
+                                onClick={() => {
+                                  session.updateWorkspace(menu.id, { ringStyle: key === 'orbit' ? undefined : key });
                                   setContextMenu(null);
                                 }}
                               >
                                 <span className="relative flex size-5 items-center justify-center">
                                   <WorkspaceStatusRing kind="working" style={key} label={t(labelKey)} />
-                                  <RiFolder3Line className="size-3.5 text-muted" />
+                                  <RiFolder3Line aria-hidden className="size-3.5 text-foreground-icon-secondary" />
                                 </span>
-                              </Button>
-                            ))}
-                          </div>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="justify-start rounded-lg"
-                            onPress={() => {
-                              session.updateWorkspace(contextMenu.id, { icon: undefined, iconColor: undefined, ringStyle: undefined });
-                              setContextMenu(null);
-                            }}
-                          >
-                            {t('sidebar.iconReset')}
-                          </Button>
+                              </button>
+                            );
+                          })}
                         </div>
-                      );
-                    })()}
-                  </HeroContextMenu.Popover>
-                </HeroContextMenu.SubmenuTrigger>
-              ) : null}
-              {contextMoveTargets.length > 0 ? (
-                <HeroContextMenu.SubmenuTrigger>
-                  <HeroContextMenu.Item id="move-to-group" textValue={t('sidebar.moveToGroup')}>
-                    <RiFolderTransferLine className="size-4 text-muted" />
-                    <Label>{t('sidebar.moveToGroup')}</Label>
-                    <HeroContextMenu.SubmenuIndicator />
-                  </HeroContextMenu.Item>
-                  <HeroContextMenu.Popover className="rounded-xl">
-                    <div className="flex w-44 flex-col gap-0.5 p-1">
-                      {contextMoveTargets.map((group) => (
-                        <Button
-                          key={group.id}
-                          size="sm"
-                          variant="ghost"
-                          className="justify-start rounded-lg"
-                          onPress={() => runGroupLayout(moveWorkspaceToGroup(workspaceEntries, contextMenu.id, group.id))}
+                        <button
+                          type="button"
+                          className={cx(QUIET_BUTTON, 'justify-start text-body-medium text-text-secondary')}
+                          onClick={() => {
+                            session.updateWorkspace(menu.id, { icon: undefined, iconColor: undefined, ringStyle: undefined });
+                            setContextMenu(null);
+                          }}
                         >
-                          <RiFoldersLine className="size-4 text-muted" />
-                          <span className="truncate">{group.name || t('sidebar.newGroupName')}</span>
-                        </Button>
-                      ))}
-                    </div>
-                  </HeroContextMenu.Popover>
-                </HeroContextMenu.SubmenuTrigger>
-              ) : null}
-              {contextWorkspaceGroupId ? <HeroContextMenu.Item id="remove-from-group" textValue={t('sidebar.removeFromGroup')} onAction={() => runGroupLayout(removeWorkspaceFromGroup(workspaceEntries, contextMenu.id))}><RiFolderReduceLine className="size-4 text-muted" /><Label>{t('sidebar.removeFromGroup')}</Label></HeroContextMenu.Item> : null}
-              {contextMenu.kind === 'conversation' ? (
-                <HeroContextMenu.SubmenuTrigger>
-                  <HeroContextMenu.Item id="label-color" textValue={t('sidebar.labelColor')}>
-                    <RiPriceTag3Line className="size-4 text-muted" />
-                    <Label>{t('sidebar.labelColor')}</Label>
-                    <HeroContextMenu.SubmenuIndicator />
-                  </HeroContextMenu.Item>
-                  <HeroContextMenu.Popover>
-                    <div className="flex flex-col gap-1 p-2">
-                      <ColorSwatchPicker
-                        aria-label={t('sidebar.labelColor')}
-                        value={session.conversations.find((item) => item.id === contextMenu.id)?.labelColor ?? undefined}
-                        onChange={(color) => {
-                          session.setConversationLabelColor(contextMenu.id, color.toString('hex'));
-                          setContextMenu(null);
-                        }}
+                          {t('sidebar.iconReset')}
+                        </button>
+                      </>
+                    ) : null}
+                  </Dialog>
+                </MenuPopover>
+              </SubmenuTrigger>
+            ) : null}
+            {contextMoveTargets.length > 0 ? (
+              <SubmenuTrigger>
+                <MenuItem id="move-to-group" icon={RiFolderTransferLine} textValue={t('sidebar.moveToGroup')} trailing={SUBMENU_CHEVRON}>{t('sidebar.moveToGroup')}</MenuItem>
+                <MenuPopover placement="end top">
+                  <Menu aria-label={t('sidebar.moveToGroup')}>
+                    {contextMoveTargets.map((group) => (
+                      <MenuItem
+                        key={group.id}
+                        id={group.id}
+                        icon={RiFoldersLine}
+                        textValue={group.name || t('sidebar.newGroupName')}
+                        onAction={() => runGroupLayout(moveWorkspaceToGroup(workspaceEntries, menu.id, group.id))}
                       >
-                        {BACKEND_LABEL_COLORS.map(({ value, label }) => (
-                          <ColorSwatchPicker.Item key={value} color={value} aria-label={label}>
-                            <ColorSwatchPicker.Swatch />
-                            <ColorSwatchPicker.Indicator />
-                          </ColorSwatchPicker.Item>
-                        ))}
-                      </ColorSwatchPicker>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="justify-start"
-                        onPress={() => {
-                          session.setConversationLabelColor(contextMenu.id, undefined);
-                          setContextMenu(null);
-                        }}
-                      >
-                        {t('sidebar.labelClear')}
-                      </Button>
-                    </div>
-                  </HeroContextMenu.Popover>
-                </HeroContextMenu.SubmenuTrigger>
-              ) : null}
-              <HeroContextMenu.Separator />
-              <HeroContextMenu.Item id="delete" textValue={t('common.delete')} variant="danger" onAction={() => runContextAction('delete')}><RiDeleteBinLine className="size-4 text-danger" /><Label>{t('common.delete')}</Label></HeroContextMenu.Item>
-            </HeroContextMenu.Menu>
-            )}
-          </div>
-        </HeroContextMenu>
-      ) : null}
+                        {group.name || t('sidebar.newGroupName')}
+                      </MenuItem>
+                    ))}
+                  </Menu>
+                </MenuPopover>
+              </SubmenuTrigger>
+            ) : null}
+            {contextWorkspaceGroupId ? <MenuItem id="remove-from-group" icon={RiFolderReduceLine} textValue={t('sidebar.removeFromGroup')} onAction={() => runGroupLayout(removeWorkspaceFromGroup(workspaceEntries, menu.id))}>{t('sidebar.removeFromGroup')}</MenuItem> : null}
+            {menu.kind === 'conversation' ? (
+              <SubmenuTrigger>
+                <MenuItem id="label-color" icon={RiPriceTag3Line} textValue={t('sidebar.labelColor')} trailing={SUBMENU_CHEVRON}>{t('sidebar.labelColor')}</MenuItem>
+                <MenuPopover placement="end top" className="min-w-0">
+                  <Dialog aria-label={t('sidebar.labelColor')} className="flex flex-col gap-1 p-1 outline-none">
+                    <SwatchPicker
+                      label={t('sidebar.labelColor')}
+                      value={session.conversations.find((item) => item.id === menu.id)?.labelColor}
+                      onChange={(color) => {
+                        session.setConversationLabelColor(menu.id, color);
+                        setContextMenu(null);
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className={cx(QUIET_BUTTON, 'justify-start text-body-medium text-text-secondary')}
+                      onClick={() => {
+                        session.setConversationLabelColor(menu.id, undefined);
+                        setContextMenu(null);
+                      }}
+                    >
+                      {t('sidebar.labelClear')}
+                    </button>
+                  </Dialog>
+                </MenuPopover>
+              </SubmenuTrigger>
+            ) : null}
+            <MenuSeparator />
+            <MenuItem id="delete" icon={RiDeleteBinLine} tone="danger" textValue={t('common.delete')} onAction={() => runContextAction('delete')}>{t('common.delete')}</MenuItem>
+          </Menu>
+        ) : <Menu aria-label={t('sidebar.conversationMenu')}>{[]}</Menu>}
+      </PointMenu>
 
       {renamingGroup ? (
         <WorkspaceGroupRenameDialog
@@ -1133,11 +1325,9 @@ export function AppSidebar({
         />
       ) : null}
 
-      <Sidebar.Footer>
-        <div className="sidebar-footer-row flex items-center gap-1">
-          {identityMenu}
-        </div>
-      </Sidebar.Footer>
-    </Sidebar>
+      <div className="flex shrink-0 items-center gap-1 pt-3">
+        {identityMenu}
+      </div>
+    </aside>
   );
 }

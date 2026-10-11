@@ -1,4 +1,4 @@
-import { toast } from '@heroui/react';
+import { toast } from '@/components/ui/toast';
 
 export type DesktopAlertButton = {
   text: string;

@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Button, Card, Chip, Spinner, Tooltip, toast } from '@heroui/react';
 import { RiCloseLine, RiFolder3Line, RiRefreshLine, RiServerLine } from '@remixicon/react';
 import { isNotFoundError, type RemoteConnection } from '@todex/protocol/ssh';
 import type { WorkbenchItem } from '../../lib/panels';
@@ -7,6 +6,14 @@ import type { TerminalClientState } from '../../session/helpers';
 import { terminalIdForConversation, terminalStatusLabel } from '../../session/helpers';
 import { useT } from '../../i18n';
 import { errorMessage, formatTimestamp, type SshApi } from './sshShared';
+import { Chip } from '@/components/base/badges/chip';
+import { IconAction } from '@/components/ui/icon-action';
+import { SpinnerIcon } from '@/components/ui/spinner';
+import { toast } from '@/components/ui/toast';
+
+/** BoardUI settings-row recipe: a grouped secondary card of hairline rows. */
+const GROUP = 'flex flex-col rounded-2xl bg-background-secondary-default ps-3';
+const ROW = 'flex min-h-[52px] min-w-0 items-center gap-3 border-b border-separator-border py-2.5 pe-2.5 last:border-b-0';
 
 type Props = {
   api: SshApi;
@@ -56,54 +63,69 @@ export function SshConnectionsTab({ api, scopeKey, workbenchItems, terminalById,
     <div className="flex flex-col gap-6">
       <section className="flex flex-col gap-3">
         <div className="flex items-center justify-between gap-2">
-          <h3 className="text-sm font-semibold">{t('ssh.connections.remoteTitle')}</h3>
-          <Button isIconOnly size="sm" variant="ghost" aria-label={t('ssh.refresh')} isDisabled={loading} onPress={() => void refresh()}>
-            {loading ? <Spinner size="sm" /> : <RiRefreshLine className="size-4" />}
-          </Button>
+          <h3 className="text-body-semibold text-text-primary">{t('ssh.connections.remoteTitle')}</h3>
+          <IconAction
+            icon={loading ? SpinnerIcon : RiRefreshLine}
+            size="sm"
+            aria-label={t('ssh.refresh')}
+            tooltip
+            disabled={loading}
+            aria-busy={loading || undefined}
+            onClick={() => void refresh()}
+          />
         </div>
-        {!loading && connections.length === 0 ? <p className="text-muted text-xs">{t('ssh.connections.remoteEmpty')}</p> : null}
-        {connections.map((connection) => (
-          <Card key={connection.id} className="flex-row items-center gap-3 rounded-lg p-3">
-            <RiFolder3Line className="text-muted size-5 shrink-0" />
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2">
-                <span className="truncate text-sm font-medium">{connection.label}</span>
-                <Chip size="sm" variant="soft">{connection.kind.toUpperCase()}</Chip>
+        {!loading && connections.length === 0 ? <p className="text-caption-1-regular text-text-tertiary">{t('ssh.connections.remoteEmpty')}</p> : null}
+        {connections.length ? (
+          <div className={GROUP}>
+            {connections.map((connection) => (
+              <div key={connection.id} className={ROW}>
+                <RiFolder3Line className="size-5 shrink-0 text-foreground-icon-secondary" />
+                <div className="min-w-0 flex-1">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span className="truncate text-body-medium text-text-primary">{connection.label}</span>
+                    <Chip variant="caption" color="neutral" className="shrink-0">{connection.kind.toUpperCase()}</Chip>
+                  </div>
+                  <p className="truncate text-body-2-regular text-text-secondary">
+                    {connection.homeDirectory} · {t('ssh.connections.lastUsed', { time: formatTimestamp(connection.lastUsedAt) })}
+                  </p>
+                </div>
+                <IconAction
+                  icon={RiCloseLine}
+                  size="sm"
+                  aria-label={t('ssh.connections.close', { label: connection.label })}
+                  tooltip
+                  onClick={() => void closeConnection(connection)}
+                />
               </div>
-              <p className="text-muted truncate text-xs">
-                {connection.homeDirectory} · {t('ssh.connections.lastUsed', { time: formatTimestamp(connection.lastUsedAt) })}
-              </p>
-            </div>
-            <Tooltip delay={200}>
-              <Button isIconOnly size="sm" variant="ghost" aria-label={t('ssh.connections.close', { label: connection.label })} onPress={() => void closeConnection(connection)}>
-                <RiCloseLine className="size-4" />
-              </Button>
-              <Tooltip.Content className="text-xs">{t('ssh.connections.close', { label: connection.label })}</Tooltip.Content>
-            </Tooltip>
-          </Card>
-        ))}
+            ))}
+          </div>
+        ) : null}
       </section>
       <section className="flex flex-col gap-3">
-        <h3 className="text-sm font-semibold">{t('ssh.connections.terminalsTitle')}</h3>
-        {sshTabs.length === 0 ? <p className="text-muted text-xs">{t('ssh.connections.terminalsEmpty')}</p> : null}
-        {sshTabs.map((item) => {
-          const terminal = terminalById[terminalIdForConversation(scopeKey, item.id)];
-          return (
-            <Card key={item.id} className="flex-row items-center gap-3 rounded-lg p-3">
-              <RiServerLine className="text-muted size-5 shrink-0" />
-              <div className="min-w-0 flex-1">
-                <span className="truncate text-sm font-medium">{item.ssh?.host}</span>
-                <p className="text-muted truncate text-xs">{terminal ? terminalStatusLabel(terminal.status) : t('ssh.connections.notStarted')}</p>
-              </div>
-              <Tooltip delay={200}>
-                <Button isIconOnly size="sm" variant="ghost" aria-label={t('ssh.connections.close', { label: item.ssh?.host ?? '' })} onPress={() => onCloseWorkbenchItem(item.id)}>
-                  <RiCloseLine className="size-4" />
-                </Button>
-                <Tooltip.Content className="text-xs">{t('ssh.connections.close', { label: item.ssh?.host ?? '' })}</Tooltip.Content>
-              </Tooltip>
-            </Card>
-          );
-        })}
+        <h3 className="text-body-semibold text-text-primary">{t('ssh.connections.terminalsTitle')}</h3>
+        {sshTabs.length === 0 ? <p className="text-caption-1-regular text-text-tertiary">{t('ssh.connections.terminalsEmpty')}</p> : (
+          <div className={GROUP}>
+            {sshTabs.map((item) => {
+              const terminal = terminalById[terminalIdForConversation(scopeKey, item.id)];
+              return (
+                <div key={item.id} className={ROW}>
+                  <RiServerLine className="size-5 shrink-0 text-foreground-icon-secondary" />
+                  <div className="min-w-0 flex-1">
+                    <span className="block truncate text-body-medium text-text-primary">{item.ssh?.host}</span>
+                    <p className="truncate text-body-2-regular text-text-secondary">{terminal ? terminalStatusLabel(terminal.status) : t('ssh.connections.notStarted')}</p>
+                  </div>
+                  <IconAction
+                    icon={RiCloseLine}
+                    size="sm"
+                    aria-label={t('ssh.connections.close', { label: item.ssh?.host ?? '' })}
+                    tooltip
+                    onClick={() => onCloseWorkbenchItem(item.id)}
+                  />
+                </div>
+              );
+            })}
+          </div>
+        )}
       </section>
     </div>
   );

@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { RiArrowDownSLine, RiArrowUpSLine, RiComputerLine, RiStopCircleLine } from '@remixicon/react';
-import { Button, Chip, toast } from '@heroui/react';
+import { Chip } from '@/components/base/badges/chip';
+import { Button } from '@/components/base/buttons/button';
+import { IconAction } from '@/components/ui/icon-action';
+import { toast } from '@/components/ui/toast';
 import type { DesktopComputerState } from '@todex/protocol/conversationRuntime';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { useT } from '../i18n';
@@ -84,9 +87,9 @@ export function ComputerLiveView({ session, conversationId, state }: {
 
   if (awaiting) {
     return (
-      <div className="border-warning mb-3 flex items-center gap-2 rounded-xl border px-3 py-2">
-        <RiComputerLine className="text-warning size-4 shrink-0" />
-        <p className="text-xs">{t('computerLive.awaitingHost', { device })}</p>
+      <div className="mb-3 flex items-center gap-2 rounded-2xl border border-chart-8 bg-status-yellow-background px-3 py-2">
+        <RiComputerLine className="size-4 shrink-0 text-status-yellow-text" />
+        <p className="text-caption-1-regular text-text-primary">{t('computerLive.awaitingHost', { device })}</p>
       </div>
     );
   }
@@ -105,28 +108,30 @@ export function ComputerLiveView({ session, conversationId, state }: {
 
   const image = frame ?? shot?.dataUrl;
   return (
-    <div className="border-warning mb-3 overflow-hidden rounded-xl border">
+    <div className="mb-3 overflow-hidden rounded-2xl border border-chart-8 bg-background-primary-default">
       <div className="flex items-center gap-2 px-3 py-2">
-        <RiComputerLine className="text-warning size-4 shrink-0" />
+        <RiComputerLine className="size-4 shrink-0 text-status-yellow-text" />
         <div className="min-w-0 flex-1">
-          <p className="truncate text-xs font-medium">{t('computerLive.title', { device })}</p>
-          {latest ? <p className="text-muted truncate text-xs">{latest.summary}{latest.app ? ` · ${latest.app}` : ''}</p> : null}
+          <p className="truncate text-caption-1-medium text-text-primary">{t('computerLive.title', { device })}</p>
+          {latest ? <p className="truncate text-caption-1-regular text-text-tertiary">{latest.summary}{latest.app ? ` · ${latest.app}` : ''}</p> : null}
         </div>
-        {frame ? <Chip size="sm" variant="soft" color="warning">{t('computerLive.live')}</Chip> : null}
-        <Button isIconOnly size="sm" variant="ghost" aria-label={collapsed ? t('computerLive.expand') : t('computerLive.collapse')} onPress={() => setCollapsed(value => !value)}>
-          {collapsed ? <RiArrowUpSLine className="size-4" /> : <RiArrowDownSLine className="size-4" />}
-        </Button>
-        <Button size="sm" variant="danger-soft" isDisabled={stopping} onPress={() => { void stop(); }}>
-          <RiStopCircleLine className="size-4" />
+        {frame ? <Chip variant="caption" color="yellow">{t('computerLive.live')}</Chip> : null}
+        <IconAction
+          icon={collapsed ? RiArrowUpSLine : RiArrowDownSLine}
+          size="sm"
+          aria-label={collapsed ? t('computerLive.expand') : t('computerLive.collapse')}
+          onClick={() => setCollapsed(value => !value)}
+        />
+        <Button size="small" variant="danger" leadingIcon={RiStopCircleLine} disabled={stopping} onClick={() => { void stop(); }}>
           {t('computerLive.stop')}
         </Button>
       </div>
       {collapsed ? null : (
-        <div className="bg-black/80 flex h-60 items-center justify-center">
+        <div className="flex h-60 items-center justify-center bg-background-secondary-default">
           {image ? (
             <img src={image} alt={t(frame ? 'computerLive.frame' : 'computerLive.screenshot')} className="h-full w-full object-contain" />
           ) : (
-            <p className="text-xs text-white/70">{t('computerLive.waiting')}</p>
+            <p className="text-caption-1-regular text-text-secondary">{t('computerLive.waiting')}</p>
           )}
         </div>
       )}

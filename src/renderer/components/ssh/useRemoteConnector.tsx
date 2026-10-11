@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Button, Input, Label, Modal, TextField, toast } from '@heroui/react';
 import { isRemoteAuthFailure, isRemoteHostKeyUnverified, type OpenRemoteConnectionInput, type RemoteConnection } from '@todex/protocol/ssh';
 import type { V2ApiClient } from '@todex/protocol/v2';
 import { useT } from '../../i18n';
+import { Button } from '@/components/base/buttons/button';
+import { Input } from '@/components/base/input/input';
+import { Modal } from '@/components/ui/modal';
+import { toast } from '@/components/ui/toast';
 
 export type RemoteConnectTarget =
   | { kind: 'sftp'; host: string; label: string }
@@ -69,29 +72,31 @@ export function useRemoteConnector(api: () => V2ApiClient) {
   }, [api, askPassword, t]);
 
   const dialog = (
-    <Modal.Backdrop isOpen={Boolean(request)} onOpenChange={(open) => { if (!open) finish(null); }}>
-      <Modal.Container>
-        <Modal.Dialog className="sm:max-w-sm">
-          <Modal.CloseTrigger />
-          <Modal.Header>
-            <Modal.Heading>{t('ssh.remote.passwordTitle', { label: request?.label ?? '' })}</Modal.Heading>
-          </Modal.Header>
-          <Modal.Body>
-            <form id="remote-password-form" onSubmit={(event) => { event.preventDefault(); finish(password); }}>
-              <TextField className="w-full" type="password" value={password} onChange={setPassword} autoFocus>
-                <Label>{t('ssh.remote.password')}</Label>
-                <Input className="w-full" autoComplete="off" />
-              </TextField>
-            </form>
-            <p className="text-muted mt-2 text-xs">{t('ssh.remote.passwordHint')}</p>
-          </Modal.Body>
-          <Modal.Footer>
-            <Button slot="close" variant="tertiary">{t('common.cancel')}</Button>
-            <Button type="submit" form="remote-password-form">{t('ssh.remote.connect')}</Button>
-          </Modal.Footer>
-        </Modal.Dialog>
-      </Modal.Container>
-    </Modal.Backdrop>
+    <Modal
+      isOpen={Boolean(request)}
+      onOpenChange={(open) => { if (!open) finish(null); }}
+      title={t('ssh.remote.passwordTitle', { label: request?.label ?? '' })}
+      size="sm"
+      footer={(
+        <>
+          <Button variant="secondary" onClick={() => finish(null)}>{t('common.cancel')}</Button>
+          <Button type="submit" form="remote-password-form">{t('ssh.remote.connect')}</Button>
+        </>
+      )}
+    >
+      <form id="remote-password-form" onSubmit={(event) => { event.preventDefault(); finish(password); }}>
+        <Input
+          label={t('ssh.remote.password')}
+          hint={t('ssh.remote.passwordHint')}
+          name="remote-password"
+          type="password"
+          autoComplete="off"
+          value={password}
+          onChange={setPassword}
+          autoFocus
+        />
+      </form>
+    </Modal>
   );
 
   return { connect, dialog };

@@ -1,8 +1,6 @@
-import React, { useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps } from 'react';
-import { toast, Button, Description, Form, Input, Kbd, Label, Link, TextArea, TextField } from '@heroui/react';
-import { Check, ChevronLeft, ChevronRight, ShieldExclamation, Terminal, Xmark } from '@gravity-ui/icons';
-import { NativeSelect } from '@heroui-pro/react/native-select';
-import { PromptInput } from '@heroui-pro/react/prompt-input';
+import React, { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentPropsWithRef, type ReactNode } from 'react';
+import { RiArrowLeftSLine, RiArrowRightSLine, RiCheckLine, RiCloseLine, RiExternalLinkLine, RiShieldFlashLine, RiTerminalBoxLine } from '@remixicon/react';
+import { Form } from 'react-aria-components';
 import { AnimatePresence, motion, useReducedMotion, type Variants } from 'motion/react';
 import { usageTotalTokens, type ConversationRuntime } from '@todex/protocol/conversationRuntime';
 import type { ContextCompactionState } from '@todex/protocol/v2';
@@ -10,6 +8,19 @@ import { permissionActions, permissionDeviceGate, permissionRequestSummary, type
 import { DESKTOP_BROWSER_ACTION_KIND, DESKTOP_BROWSER_GRANT_KIND } from '@todex/protocol/agentDesktop';
 import { deviceIdentityFromSecret } from '@todex/protocol/deviceAuth';
 import type { UsageRecord } from '@todex/protocol/mobileParity';
+import { ShimmerText } from '@/components/application/agent-log/agent-log';
+import { Chip } from '@/components/base/badges/chip';
+import { Button } from '@/components/base/buttons/button';
+import { LinkButton } from '@/components/base/buttons/link-button';
+import { CheckboxGlyph } from '@/components/base/checkbox/checkbox-glyph';
+import { Input } from '@/components/base/input/input';
+import { Kbd } from '@/components/base/kbd/kbd';
+import { RadioDot } from '@/components/base/radio/radio';
+import { Select, SelectItem } from '@/components/base/select/select';
+import { Textarea } from '@/components/base/textarea/textarea';
+import { SpinnerIcon } from '@/components/ui/spinner';
+import { toast } from '@/components/ui/toast';
+import { cx } from '@/utils/cx';
 import { hasActiveConversationWork } from './conversationProgress';
 import { useNoticeToast } from './NoticeToast';
 import { getLocale, t, useLocale, useT } from '../i18n';
@@ -74,19 +85,66 @@ export function ConversationRunStatus({ submissionStatus, runtime, compaction, o
     finally { setRecovering(false); }
   };
   return <>
-    {unknown ? <Button className="mb-2" size="sm" variant="secondary" isPending={recovering}
-      onPress={() => { void recover(); }}>{t('runStatus.review')}</Button> : null}
-    {compaction?.status === 'running' ? <div className="text-muted mb-2 text-xs" role="status">{t('runStatus.compacting')}</div> : null}
+    {unknown ? <Button className="mb-2" size="small" variant="secondary" disabled={recovering} aria-busy={recovering || undefined}
+      leadingIcon={recovering ? SpinnerIcon : undefined}
+      onClick={() => { void recover(); }}>{t('runStatus.review')}</Button> : null}
+    {compaction?.status === 'running' ? <div className="mb-2 flex items-center text-caption-1-medium" role="status">
+      <ShimmerText>{t('runStatus.compacting')}</ShimmerText>
+    </div> : null}
   </>;
 }
 
-/** Keep the submission guard at the actual composer boundary, including Enter. */
-export function ConversationPromptInput({ submissionStatus, onSubmit, isDisabled, status, ...props }:
-  ComponentProps<typeof PromptInput> & { submissionStatus?: SubmissionStatus }) {
+type PromptStatus = 'ready' | 'submitted' | 'streaming' | 'error';
+
+type ConversationPromptInputContextValue = {
+  value: string;
+  status: PromptStatus;
+  isDisabled: boolean;
+  /** Submits through the composer's submission guard. */
+  submit: () => void;
+  stop?: () => void;
+  setValue: (value: string) => void;
+};
+
+const ConversationPromptInputContext = createContext<ConversationPromptInputContextValue | null>(null);
+
+/** The composer state for controls inside `ConversationPromptInput` (send / stop buttons, fields). */
+export function useConversationPromptInput() {
+  return useContext(ConversationPromptInputContext);
+}
+
+export type ConversationPromptInputProps = Omit<ComponentPropsWithRef<'div'>, 'onSubmit'> & {
+  submissionStatus?: SubmissionStatus;
+  value?: string;
+  status?: PromptStatus;
+  isDisabled?: boolean;
+  onSubmit?: () => void;
+  onStop?: () => void;
+  onValueChange?: (value: string) => void;
+  children: ReactNode;
+};
+
+/** Keep the submission guard at the actual composer boundary, including Enter.
+ * The root is a plain wrapper; the composer card surface (BoardUI composer
+ * panel recipe) belongs to the shell rendered inside it. */
+export function ConversationPromptInput({ submissionStatus, onSubmit, isDisabled, status, value = '', onStop, onValueChange, className, children, ...props }:
+  ConversationPromptInputProps) {
   const blocked = submissionStatus === 'unknown' || submissionStatus === 'sending';
-  return <PromptInput {...props} status={submissionStatus === 'sending' ? 'submitted' : status}
-    isDisabled={isDisabled || submissionStatus === 'unknown'}
-    onSubmit={() => { if (!blocked) onSubmit?.(); }} />;
+  const resolvedStatus: PromptStatus = submissionStatus === 'sending' ? 'submitted' : status ?? 'ready';
+  const disabled = Boolean(isDisabled || submissionStatus === 'unknown');
+  const context = useMemo<ConversationPromptInputContextValue>(() => ({
+    value,
+    status: resolvedStatus,
+    isDisabled: disabled,
+    submit: () => { if (!blocked) onSubmit?.(); },
+    stop: onStop,
+    setValue: (next) => onValueChange?.(next),
+  }), [value, resolvedStatus, disabled, blocked, onSubmit, onStop, onValueChange]);
+  return <ConversationPromptInputContext.Provider value={context}>
+    <div {...props} data-status={resolvedStatus} data-disabled={disabled || undefined} className={cx('flex w-full min-w-0 flex-col', className)}>
+      {children}
+    </div>
+  </ConversationPromptInputContext.Provider>;
 }
 
 function formatTokenCount(value: number) {
@@ -101,14 +159,14 @@ export function TurnUsageSummary({ records }: { records: readonly UsageRecord[] 
     cacheRead: sum.cacheRead + record.cachedInputTokens, cacheWrite: sum.cacheWrite + record.cacheWriteTokens,
     total: sum.total + usageTotalTokens(record),
   }), { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 });
-  return <div className="min-w-52 space-y-1 p-1 text-xs">
-    <p className="font-medium">{t('runStatus.turnStats')}</p>
+  return <div className="flex min-w-52 flex-col gap-1 p-1 text-caption-1-regular text-text-primary">
+    <p className="text-caption-1-medium">{t('runStatus.turnStats')}</p>
     {records.length ? <>
-      <p className="text-muted">{t('runStatus.models', { models: [...new Set(records.map(record => record.model))].join(listSeparator) })}</p>
-      <p>{t('runStatus.inOut', { input: formatTokenCount(totals.input), output: formatTokenCount(totals.output) })}</p>
-      <p>{t('runStatus.cache', { read: formatTokenCount(totals.cacheRead), write: formatTokenCount(totals.cacheWrite) })}</p>
-      <p>{t('runStatus.total', { total: formatTokenCount(totals.total) })}</p>
-    </> : <p className="text-muted">{t('runStatus.noUsage')}</p>}
+      <p className="text-text-secondary">{t('runStatus.models', { models: [...new Set(records.map(record => record.model))].join(listSeparator) })}</p>
+      <p className="tabular-nums">{t('runStatus.inOut', { input: formatTokenCount(totals.input), output: formatTokenCount(totals.output) })}</p>
+      <p className="tabular-nums">{t('runStatus.cache', { read: formatTokenCount(totals.cacheRead), write: formatTokenCount(totals.cacheWrite) })}</p>
+      <p className="tabular-nums">{t('runStatus.total', { total: formatTokenCount(totals.total) })}</p>
+    </> : <p className="text-text-secondary">{t('runStatus.noUsage')}</p>}
   </div>;
 }
 
@@ -271,28 +329,47 @@ function PermissionResponseForm({ request, form, onSelect }: { request: PendingR
   onSelect: (option: boolean | PermissionOption, data?: PermissionAnswerData) => void }) {
   const t = useT();
   const [values, setValues] = useState<Record<string, string>>({});
-  const inputPrefix = React.useId();
   const options = permissionActions(request);
   const submit = options.find(option => typeof option !== 'boolean' && option.kind === 'answer');
   const update = (id: string, value: string) => setValues(previous => ({ ...previous, [id]: value }));
-  const permissionFieldInput = (field: PermissionField, index: number) => {
+  const permissionFieldInput = (field: PermissionField) => {
     const value = values[field.id] ?? field.initial ?? '';
-    const inputId = `${inputPrefix}-${index}`;
-    return field.choices || field.type === 'boolean' ? <div key={field.id} className="flex min-w-0 flex-col gap-1">
-      <Label htmlFor={inputId}>{field.label}{field.required ? ' *' : ''}</Label>
-      <NativeSelect fullWidth>
-        <NativeSelect.Trigger id={inputId} value={value} required={field.required} onChange={event => update(field.id, event.target.value)}>
-          <NativeSelect.Option value="">{t('runStatus.selectPlaceholder')}</NativeSelect.Option>
-          {field.choices ? field.choices.map((choice, choiceIndex) => <NativeSelect.Option key={choiceIndex} value={String(choiceIndex)}>{choice.label}</NativeSelect.Option>)
-            : <><NativeSelect.Option value="true">{t('runStatus.yes')}</NativeSelect.Option><NativeSelect.Option value="false">{t('runStatus.no')}</NativeSelect.Option></>}
-        </NativeSelect.Trigger>
-      </NativeSelect>
-      {field.description ? <Description>{field.description}</Description> : null}
-    </div> : <TextField key={field.id} className="w-full" value={value} onChange={text => update(field.id, text)} isRequired={field.required}>
-      <Label>{field.label}</Label>
-      {field.multiline ? <TextArea rows={4} /> : <Input type={field.secret ? 'password' : 'text'} inputMode={field.type === 'number' || field.type === 'integer' ? 'decimal' : undefined} autoComplete="off" />}
-      {field.description ? <Description>{field.description}</Description> : null}
-    </TextField>;
+    return field.choices || field.type === 'boolean' ? <Select
+      key={field.id}
+      className="w-full min-w-0"
+      triggerClassName="min-w-0"
+      popoverClassName="w-(--trigger-width)"
+      label={field.label}
+      hint={field.description || undefined}
+      placeholder={t('runStatus.selectPlaceholder')}
+      isRequired={field.required}
+      selectedKey={value || null}
+      onSelectionChange={key => update(field.id, key === null ? '' : String(key))}
+    >
+      {field.choices ? field.choices.map((choice, choiceIndex) => <SelectItem key={choiceIndex} id={String(choiceIndex)} textValue={choice.label}>{choice.label}</SelectItem>)
+        : [<SelectItem key="true" id="true" textValue={t('runStatus.yes')}>{t('runStatus.yes')}</SelectItem>,
+          <SelectItem key="false" id="false" textValue={t('runStatus.no')}>{t('runStatus.no')}</SelectItem>]}
+    </Select> : field.multiline ? <Textarea
+      key={field.id}
+      className="w-full"
+      label={field.label}
+      hint={field.description || undefined}
+      rows={4}
+      value={value}
+      onChange={text => update(field.id, text)}
+      isRequired={field.required}
+    /> : <Input
+      key={field.id}
+      className="w-full"
+      label={field.label}
+      hint={field.description || undefined}
+      type={field.secret ? 'password' : 'text'}
+      inputMode={field.type === 'number' || field.type === 'integer' ? 'decimal' : undefined}
+      autoComplete="off"
+      value={value}
+      onChange={text => update(field.id, text)}
+      isRequired={field.required}
+    />;
   };
   useNoticeToast(form.unsupported ? t('runStatus.unsupportedForm') : null);
   return <Form className="flex w-full min-w-0 flex-col gap-3 py-2" onSubmit={event => {
@@ -302,15 +379,15 @@ function PermissionResponseForm({ request, form, onSelect }: { request: PendingR
     if (answer.error) { toast.danger(answer.error); return; }
     onSelect(submit, answer.data);
   }}>
-    {form.mode === 'url' && form.url ? <div className="space-y-2 text-sm">
-      <Link href={form.url} target="_blank" rel="noopener noreferrer">{t('runStatus.openVerify')}<Link.Icon /></Link>
-      <p className="text-muted">{t('runStatus.verifyHint')}</p>
+    {form.mode === 'url' && form.url ? <div className="flex flex-col items-start gap-1">
+      <LinkButton href={form.url} target="_blank" rel="noopener noreferrer" trailingIcon={RiExternalLinkLine}>{t('runStatus.openVerify')}</LinkButton>
+      <p className="text-body-2-regular text-text-secondary">{t('runStatus.verifyHint')}</p>
     </div> : null}
     {form.fields.map(permissionFieldInput)}
     <div className="flex flex-wrap gap-2">
-      {submit ? <Button size="sm" type="submit" isDisabled={form.unsupported}>{form.mode === 'url' ? t('runStatus.urlDone') : t('runStatus.submitAnswer')}</Button> : null}
+      {submit ? <Button size="small" type="submit" disabled={form.unsupported}>{form.mode === 'url' ? t('runStatus.urlDone') : t('runStatus.submitAnswer')}</Button> : null}
       {options.filter(isRejectOption).map(option => <Button
-        key={typeof option === 'boolean' ? String(option) : option.optionId} type="button" size="sm" variant="danger-soft" onPress={() => onSelect(option)}
+        key={typeof option === 'boolean' ? String(option) : option.optionId} type="button" size="small" variant="danger" onClick={() => onSelect(option)}
       >{rejectLabel(option)}</Button>)}
     </div>
   </Form>;
@@ -333,6 +410,26 @@ const deckFadeVariants: Variants = {
   center: { opacity: 1, transition: { duration: 0.15 } },
   exit: { opacity: 0, transition: { duration: 0.1 } },
 };
+
+/* Answer rows in the BoardUI Questionnaire recipe: bordered radius-2xl rows on
+ * the card surface, lifted when hovered, focused or chosen. */
+const DECK_ROW = 'group flex w-full items-center gap-3 rounded-2xl border border-border-button-default bg-background-primary-default py-[9px] ps-[11px] pe-[15px] text-start outline-none transition-colors duration-150 ease';
+const DECK_ROW_SELECTED = 'border-border-button-hover bg-background-primary-hover';
+/* The cards waiting beneath the current one peek out of the stack. */
+const DECK_GHOST = 'absolute inset-x-0 top-0 bottom-3 origin-bottom rounded-[20px] border border-border-button-default bg-background-primary-default transition-[translate,scale,opacity] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none';
+
+/** The number key that picks a row; one tone further when the row is chosen. */
+function DeckOptionKey({ index, raised }: { index: number; raised: boolean }) {
+  return <span aria-hidden="true" className={cx(
+    'inline-flex min-w-5 shrink-0 items-center justify-center rounded-sm px-[5px] py-0.5 text-body-2-medium text-text-primary',
+    'bg-questionnaire-key-background transition-colors duration-150 ease group-hover:bg-questionnaire-key-hover-background',
+    raised && 'bg-questionnaire-key-hover-background',
+  )}>{index + 1}</span>;
+}
+
+function DeckKey({ children }: { children: ReactNode }) {
+  return <Kbd className="min-w-5 px-1.5 py-0 text-caption-2-semibold">{children}</Kbd>;
+}
 
 const questionPicks = (value: string | undefined) => new Set((value ?? '').split(',').filter(Boolean).map(Number));
 const questionAnswered = (field: PermissionField, values: Record<string, string>, others: Record<string, string>) =>
@@ -441,79 +538,108 @@ function UserInputQuestions({ request, form, onSelect }: { request: PendingReque
 
   const headerOf = (item: PermissionField, position: number) => item.header || t('runStatus.questionNumber', { index: position + 1 });
   const remaining = fields.length - 1 - index;
-  const body = field.choices ? <div className="question-deck__options" role={field.multiple ? 'group' : 'radiogroup'}
+  const mark = (selected: boolean) => field.multiple
+    ? <CheckboxGlyph state={{ isSelected: selected, isIndeterminate: false, isFocusVisible: false, isDisabled: false, isHovered: false }} />
+    : <RadioDot size="sm" selected={selected} />;
+  const body = field.choices ? <div className="flex flex-col gap-2" role={field.multiple ? 'group' : 'radiogroup'}
     aria-labelledby={questionId} data-multiple={field.multiple || undefined}>
-    {field.choices.map((choice, choiceIndex) => <label key={choiceIndex} className="question-deck__option" data-selected={picks.has(choiceIndex) || undefined}>
-      <input className="sr-only" type={field.multiple ? 'checkbox' : 'radio'} name={`${idPrefix}-${field.id}`}
-        checked={picks.has(choiceIndex)} onChange={() => pick(choiceIndex)} />
-      <span className="question-deck__key" aria-hidden="true">{choiceIndex + 1}</span>
-      <span className="question-deck__text">
-        <span className="question-deck__label">{choice.label}</span>
-        {choice.description ? <span className="question-deck__description">{choice.description}</span> : null}
-      </span>
-      <span className="question-deck__mark" aria-hidden="true"><Check /></span>
-    </label>)}
-    {field.other ? <label className="question-deck__option question-deck__option--other" data-selected={otherSelected || undefined}>
-      <span className="question-deck__key" aria-hidden="true">{field.choices.length + 1}</span>
-      <input data-other-answer className="question-deck__other" type="text" autoComplete="off" value={otherText}
+    {field.choices.map((choice, choiceIndex) => {
+      const selected = picks.has(choiceIndex);
+      return <label key={choiceIndex} data-selected={selected || undefined} className={cx(
+        DECK_ROW, 'cursor-pointer select-none hover:bg-background-primary-hover active:bg-background-primary-active',
+        'has-[input:focus-visible]:ring-2 has-[input:focus-visible]:ring-border-focus-ring',
+        selected && DECK_ROW_SELECTED,
+      )}>
+        <input className="sr-only" type={field.multiple ? 'checkbox' : 'radio'} name={`${idPrefix}-${field.id}`}
+          checked={selected} onChange={() => pick(choiceIndex)} />
+        <DeckOptionKey index={choiceIndex} raised={selected} />
+        <span className="flex min-w-0 flex-1 flex-col wrap-anywhere">
+          <span className="text-body-medium text-text-primary">{choice.label}</span>
+          {choice.description ? <span className="text-body-regular text-text-secondary">{choice.description}</span> : null}
+        </span>
+        {mark(selected)}
+      </label>;
+    })}
+    {field.other ? <label data-selected={otherSelected || undefined} className={cx(
+      DECK_ROW, 'cursor-text hover:bg-background-primary-hover',
+      'has-[input:focus]:border-border-button-hover has-[input:focus]:bg-background-primary-hover',
+      otherSelected && DECK_ROW_SELECTED,
+    )}>
+      <DeckOptionKey index={field.choices.length} raised={otherSelected} />
+      <input data-other-answer type="text" autoComplete="off" value={otherText}
+        className="m-0 h-5 min-w-0 flex-1 border-0 bg-transparent p-0 font-sans text-body-regular text-text-primary outline-none placeholder:text-text-tertiary"
         aria-label={t('runStatus.customAnswer')} placeholder={field.multiple ? t('runStatus.customAnswerExtra') : t('runStatus.customAnswerPlaceholder')}
         onFocus={() => selectOther(otherText)}
         onChange={event => { setOthers(previous => ({ ...previous, [field.id]: event.target.value })); selectOther(event.target.value); }} />
-      <span className="question-deck__mark" aria-hidden="true"><Check /></span>
+      {mark(otherSelected)}
     </label> : null}
-  </div> : <TextField className="w-full" aria-labelledby={questionId} value={values[field.id] ?? ''}
-    onChange={text => setValues(previous => ({ ...previous, [field.id]: text }))}>
-    {field.secret ? <Input type="password" autoComplete="off" /> : <TextArea rows={3} placeholder={t('runStatus.freeAnswerPlaceholder')} />}
-  </TextField>;
+  </div> : field.secret ? <Input className="w-full" aria-labelledby={questionId} type="password" autoComplete="off"
+    value={values[field.id] ?? ''} onChange={text => setValues(previous => ({ ...previous, [field.id]: text }))} />
+    : <Textarea className="w-full" aria-labelledby={questionId} rows={3} placeholder={t('runStatus.freeAnswerPlaceholder')}
+      value={values[field.id] ?? ''} onChange={text => setValues(previous => ({ ...previous, [field.id]: text }))} />;
   const multilineAnswer = !field.choices && !field.secret;
 
-  return <div className="question-deck" onKeyDown={onKeyDown}>
-    {fields.length > 1 ? <div className="question-deck__bar">
-      <nav className="question-deck__steps" aria-label={t('runStatus.questionList')}>
-        {fields.map((item, position) => <button key={item.id} type="button" className="question-deck__step"
-          aria-current={position === index ? 'step' : undefined} data-answered={answered[position] || undefined}
-          onClick={() => goTo(position, false)}>
-          {answered[position] ? <Check className="question-deck__step-check" /> : <span className="question-deck__step-dot" />}
-          {headerOf(item, position)}
-        </button>)}
+  return <div className="flex w-full min-w-0 flex-col gap-2.5 py-1" onKeyDown={onKeyDown}>
+    {fields.length > 1 ? <div className="flex items-center gap-2">
+      <nav className="flex min-w-0 flex-1 gap-1.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" aria-label={t('runStatus.questionList')}>
+        {fields.map((item, position) => {
+          const current = position === index;
+          return <button key={item.id} type="button" aria-current={current ? 'step' : undefined} data-answered={answered[position] || undefined}
+            onClick={() => goTo(position, false)}
+            className={cx(
+              'flex shrink-0 cursor-pointer items-center gap-1 rounded-full px-2 py-[5px] text-body-medium whitespace-nowrap outline-none',
+              'transition-colors duration-150 ease focus-visible:ring-2 focus-visible:ring-border-focus-ring',
+              current ? 'bg-pill-tab-blue-selected-background text-accent-500'
+                : cx('hover:bg-pill-tab-blue-hover-background', answered[position] ? 'text-text-primary' : 'text-text-secondary'),
+            )}>
+            {answered[position]
+              ? <RiCheckLine aria-hidden="true" className="size-4 shrink-0 text-status-lime-text" />
+              : <span aria-hidden="true" className={cx('size-1.5 shrink-0 rounded-full bg-current', !current && 'opacity-50')} />}
+            {headerOf(item, position)}
+          </button>;
+        })}
       </nav>
-      <span className="question-deck__count" aria-live="polite">{index + 1} / {fields.length}</span>
+      <span className="shrink-0 text-caption-1-regular text-text-secondary tabular-nums" aria-live="polite">{index + 1} / {fields.length}</span>
     </div> : null}
-    <div className="question-deck__stack">
-      <div className="question-deck__ghost question-deck__ghost--2" data-visible={remaining >= 2 || undefined} aria-hidden="true" />
-      <div className="question-deck__ghost question-deck__ghost--1" data-visible={remaining >= 1 || undefined} aria-hidden="true" />
-      <motion.div ref={viewportRef} className="question-deck__viewport" data-switching={switching || undefined}
+    <div className="relative pb-3">
+      <div aria-hidden="true" className={cx(DECK_GHOST, remaining >= 2 ? 'translate-y-3 scale-[0.93] opacity-45' : 'scale-90 opacity-0')} />
+      <div aria-hidden="true" className={cx(DECK_GHOST, remaining >= 1 ? 'translate-y-1.5 scale-[0.965] opacity-75' : 'scale-90 opacity-0')} />
+      {/* Clip only while cards fly in and out so the resting card keeps its shadow. */}
+      <motion.div ref={viewportRef} className="relative rounded-[20px] data-[switching]:overflow-clip" data-switching={switching || undefined}
         initial={false} animate={height === undefined ? undefined : { height }}
         transition={switching && !reduceMotion ? { duration: 0.34, ease: DECK_EASE } : { duration: 0 }}>
         <AnimatePresence initial={false} mode="popLayout" custom={direction} onExitComplete={() => setSwitching(false)}>
-          <motion.section key={field.id} data-question-index={index} className="question-deck__card" aria-labelledby={questionId}
+          <motion.section key={field.id} data-question-index={index} aria-labelledby={questionId}
+            className="relative rounded-[20px] border border-border-button-default bg-background-primary-default p-3 shadow-card"
             custom={direction} variants={reduceMotion ? deckFadeVariants : deckCardVariants} initial="enter" animate="center" exit="exit">
-            <div className="question-deck__meta">
-              <span className="question-deck__chip">{headerOf(field, index)}</span>
+            <div className="mb-1.5 flex items-center gap-2 text-caption-1-regular text-text-secondary">
+              <Chip variant="caption" color="blue" className="py-0.5">{headerOf(field, index)}</Chip>
               <span>{!field.choices ? t('runStatus.freeAnswer') : field.multiple ? t('runStatus.multiChoice') : t('runStatus.singleChoice')}</span>
             </div>
-            <h3 id={questionId} className="question-deck__question">{field.label}</h3>
+            <h3 id={questionId} className="mb-3 text-body-medium text-pretty wrap-anywhere text-text-primary">{field.label}</h3>
             {body}
-            <p className="question-deck__hint" aria-hidden="true">
-              {choiceCount ? <span><Kbd><Kbd.Content>1</Kbd.Content></Kbd>–<Kbd><Kbd.Content>{choiceCount}</Kbd.Content></Kbd> {t('runStatus.hintChoose')}</span> : null}
-              {fields.length > 1 ? <span><Kbd><Kbd.Abbr keyValue="left" /></Kbd> <Kbd><Kbd.Abbr keyValue="right" /></Kbd> {t('runStatus.hintPage')}</span> : null}
-              <span><Kbd>{multilineAnswer ? <Kbd.Abbr keyValue={isMacLike ? 'command' : 'ctrl'} /> : null}<Kbd.Abbr keyValue="enter" /></Kbd> {last ? t('runStatus.hintSubmit') : t('runStatus.hintNext')}</span>
+            {/* Key hints only help with a keyboard at hand. */}
+            <p className="mt-2.5 flex flex-wrap gap-x-3 gap-y-1 text-caption-1-regular text-text-secondary pointer-coarse:hidden" aria-hidden="true">
+              {choiceCount ? <span className="inline-flex items-center gap-1"><DeckKey>1</DeckKey>–<DeckKey>{choiceCount}</DeckKey> {t('runStatus.hintChoose')}</span> : null}
+              {fields.length > 1 ? <span className="inline-flex items-center gap-1"><DeckKey>←</DeckKey><DeckKey>→</DeckKey> {t('runStatus.hintPage')}</span> : null}
+              <span className="inline-flex items-center gap-1"><DeckKey>{multilineAnswer ? (isMacLike ? '⌘' : 'Ctrl ') : null}↵</DeckKey> {last ? t('runStatus.hintSubmit') : t('runStatus.hintNext')}</span>
             </p>
           </motion.section>
         </AnimatePresence>
       </motion.div>
     </div>
-    <div className="question-deck__footer">
+    <div className="flex flex-wrap items-center justify-between gap-2">
       <div className="flex flex-wrap gap-1">
-        {options.filter(isRejectOption).map(option => <Button key={typeof option === 'boolean' ? String(option) : option.optionId}
-          size="sm" variant="ghost" className="text-danger" onPress={() => onSelect(option)}>{rejectLabel(option)}</Button>)}
+        {options.filter(isRejectOption).map(option => <button key={typeof option === 'boolean' ? String(option) : option.optionId} type="button"
+          className="cursor-pointer rounded-2lg px-2 py-1.5 text-body-medium text-text-error-primary outline-none transition-colors duration-150 ease hover:bg-background-tertiary-error focus-visible:ring-2 focus-visible:ring-border-focus-ring"
+          onClick={() => onSelect(option)}>{rejectLabel(option)}</button>)}
       </div>
-      <div className="ml-auto flex gap-2">
-        {fields.length > 1 ? <Button size="sm" variant="secondary" isDisabled={index === 0} onPress={() => goTo(index - 1)}>
-          <ChevronLeft />{t('runStatus.prevQuestion')}
+      <div className="ms-auto flex gap-2">
+        {fields.length > 1 ? <Button size="small" variant="secondary" disabled={index === 0} leadingIcon={RiArrowLeftSLine} onClick={() => goTo(index - 1)}>
+          {t('runStatus.prevQuestion')}
         </Button> : null}
-        {!last ? <Button size="sm" isDisabled={!answered[index]} onPress={advance}>{t('runStatus.nextQuestion')}<ChevronRight /></Button>
-          : submit ? <Button size="sm" isDisabled={!answered.every(Boolean)} onPress={advance}>{t('runStatus.submitAnswer')}</Button> : null}
+        {!last ? <Button size="small" disabled={!answered[index]} trailingIcon={RiArrowRightSLine} onClick={advance}>{t('runStatus.nextQuestion')}</Button>
+          : submit ? <Button size="small" disabled={!answered.every(Boolean)} onClick={advance}>{t('runStatus.submitAnswer')}</Button> : null}
       </div>
     </div>
   </div>;
@@ -527,7 +653,7 @@ export function ConversationPermissionActions({ request, deviceSecret, onSelect 
     ? deviceIdentityFromSecret(deviceSecret)?.deviceId
     : undefined), [deviceSecret, request]);
   if (!gate.allowed) {
-    return <p className="text-muted text-xs">{gate.deviceNames.length
+    return <p className="text-caption-1-regular text-text-secondary">{gate.deviceNames.length
       ? t('runStatus.answerOnDevice', { devices: gate.deviceNames.join(', ') })
       : t('runStatus.answerOnOtherDevice')}</p>;
   }
@@ -539,13 +665,12 @@ export function ConversationPermissionActions({ request, deviceSecret, onSelect 
     const reject = typeof option === 'boolean' ? !option : option.kind.startsWith('reject') || option.kind === 'abort_turn';
     return <Button
       key={typeof option === 'boolean' ? String(option) : option.optionId}
-      size="sm"
+      size="small"
+      // Allow / reject carry their glyph so they read at a glance; other kinds keep the accent.
       variant={reject ? 'danger' : 'primary'}
-      // Green allow / red reject reads at a glance; other kinds keep the accent.
-      className={allow ? 'bg-success text-success-foreground' : undefined}
-      onPress={() => onSelect(option)}
+      leadingIcon={allow ? RiCheckLine : reject ? RiCloseLine : undefined}
+      onClick={() => onSelect(option)}
     >
-      {allow ? <Check aria-hidden /> : reject ? <Xmark aria-hidden /> : null}
       {permissionOptionLabel(option, t)}
     </Button>;
   })}</div>;
@@ -592,25 +717,25 @@ export function PermissionRequestCard({ request, fallbackTitle, deviceSecret, on
   const heading = summary.command ? t('runStatus.runCommand')
     : summary.tool ? t('runStatus.useTool', { tool: summary.tool })
       : desktopBrowserTitle(request, t) ?? fallbackTitle;
-  return <div className="mb-3 rounded-xl border border-separator p-3">
-    <div className="mb-2 flex items-start gap-2">
-      {summary.command ? <Terminal className="mt-0.5 size-4 shrink-0 text-muted" aria-hidden /> : null}
+  return <div className="mb-3 flex flex-col gap-2 rounded-2xl border border-border-button-default bg-background-primary-default p-3 shadow-xs">
+    <div className="flex items-start gap-2">
+      {summary.command ? <RiTerminalBoxLine className="mt-0.5 size-4 shrink-0 text-foreground-icon-secondary" aria-hidden /> : null}
       <div className="min-w-0 flex-1">
-        <p className="text-xs font-medium">{heading}</p>
-        {summary.description ? <p className="text-muted mt-0.5 text-xs">{summary.description}</p> : null}
+        <p className="text-body-medium text-text-primary">{heading}</p>
+        {summary.description ? <p className="mt-0.5 text-body-2-regular text-text-secondary">{summary.description}</p> : null}
       </div>
-      {summary.tool && summary.command ? <code className="shrink-0 rounded bg-default px-1.5 py-0.5 text-[11px] text-muted">{summary.tool}</code> : null}
+      {summary.tool && summary.command ? <code className="shrink-0 rounded-md bg-background-tertiary-default px-1.5 py-0.5 font-mono text-caption-2-medium text-text-secondary">{summary.tool}</code> : null}
     </div>
-    {summary.reason ? <div className="mb-2 flex items-start gap-1.5 rounded-lg bg-warning/10 px-2 py-1.5 text-xs">
-      <ShieldExclamation className="mt-0.5 size-3.5 shrink-0 text-warning" aria-hidden />
+    {summary.reason ? <div className="flex items-start gap-1.5 rounded-lg bg-status-yellow-background px-2 py-1.5 text-caption-1-regular text-text-primary">
+      <RiShieldFlashLine className="mt-px size-3.5 shrink-0 text-status-yellow-text" aria-hidden />
       <p className="min-w-0 wrap-anywhere">
-        {summary.safetyCheck ? <span className="font-medium text-warning">{t('runStatus.safetyCheck')} · </span> : null}
+        {summary.safetyCheck ? <span className="text-caption-1-semibold text-status-yellow-text">{t('runStatus.safetyCheck')} · </span> : null}
         {summary.reason}
-        {summary.safetyCheck ? <span className="text-muted"> {t('runStatus.safetyCheckHint')}</span> : null}
+        {summary.safetyCheck ? <span className="text-text-secondary"> {t('runStatus.safetyCheckHint')}</span> : null}
       </p>
     </div> : null}
-    {summary.command ? <pre className="mb-2 max-h-60 overflow-auto rounded-lg bg-default px-3 py-2 font-mono text-xs whitespace-pre-wrap wrap-anywhere select-text">{summary.command}</pre> : null}
-    {summary.cwd ? <p className="text-muted mb-2 font-mono text-[11px] wrap-anywhere">{t('runStatus.cwd')}: {summary.cwd}</p> : null}
+    {summary.command ? <pre className="max-h-60 overflow-auto rounded-lg bg-background-secondary-default px-3 py-2 font-mono text-caption-1-regular whitespace-pre-wrap wrap-anywhere text-text-primary select-text">{summary.command}</pre> : null}
+    {summary.cwd ? <p className="font-mono text-caption-2-regular wrap-anywhere text-text-secondary">{t('runStatus.cwd')}: {summary.cwd}</p> : null}
     <ConversationPermissionActions request={request} deviceSecret={deviceSecret} onSelect={onSelect} />
   </div>;
 }

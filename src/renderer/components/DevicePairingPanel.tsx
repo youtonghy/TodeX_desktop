@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { Button, Chip, Spinner } from '@heroui/react';
+import { Chip } from '@/components/base/badges/chip';
+import { Button } from '@/components/base/buttons/button';
 import {
   DevicePairingRetryableError,
   PAIRING_POLL_INTERVAL_MS,
@@ -13,6 +14,9 @@ import { normalizeServerUrl, type BackendConnectionProfile } from '@todex/protoc
 import type { TodeXSession } from '../session/useTodeXSession';
 import { useT } from '../i18n';
 import { useNoticeToast } from './NoticeToast';
+import { SETTINGS_ROW, SettingsCard, SettingsValueField } from './settings/SettingsRows';
+import { Spinner, SpinnerIcon } from './ui/spinner';
+import { cx } from '@/utils/cx';
 
 type Props = { session: TodeXSession; deviceName: string; autoStartNonce?: number };
 type Phase = 'idle' | 'requesting' | 'pending' | 'approved' | 'rejected' | 'expired' | 'cancelled' | 'error';
@@ -26,6 +30,8 @@ type Attempt = {
   expiryTimer?: ReturnType<typeof setTimeout>;
   clockTimer?: ReturnType<typeof setInterval>;
 };
+
+const STATUS_ROW = cx('flex min-h-[52px] items-center justify-between gap-4', SETTINGS_ROW);
 
 type TransportStatus = { protocol: string; fingerprint: string; state: 'verified' | 'unverified' | 'unpaired' };
 
@@ -205,40 +211,60 @@ export function DevicePairingPanel({ session, deviceName, autoStartNonce = 0 }: 
     variant: phase === 'approved' ? 'success' : phase === 'error' ? 'danger' : phase === 'cancelled' ? 'info' : 'warning',
     scope: noticeScope,
   });
+  const requesting = phase === 'requesting';
   return (
-    <section aria-label={t('pair.sectionLabel')} className="border-separator flex flex-col gap-3 rounded-xl border p-4">
+    <section aria-label={t('pair.sectionLabel')} className="flex flex-col gap-3">
       <div>
-        <h4 className="text-sm font-semibold">{t('pair.title')}</h4>
-        <p className="text-muted mt-1 text-xs">{t('pair.hint')}</p>
+        <h3 className="text-headline-medium text-text-primary">{t('pair.title')}</h3>
+        <p className="mt-1 text-body-2-regular text-text-secondary">{t('pair.hint')}</p>
       </div>
       {status ? (
-        <dl aria-label={t('pair.transportStatus')} className="grid grid-cols-[auto_1fr] items-center gap-x-4 gap-y-1 text-xs">
-          <dt className="text-muted">{t('pair.transportProtocol')}</dt>
-          <dd className="font-mono">{status.protocol}</dd>
-          <dt className="text-muted">{t('pair.transportFingerprint')}</dt>
-          <dd className="font-mono">{status.fingerprint}</dd>
-          <dt className="text-muted">{t('pair.transportState')}</dt>
-          <dd>
-            <Chip size="sm" variant="soft" color={status.state === 'verified' ? 'success' : status.state === 'unverified' ? 'warning' : 'default'}>
-              {status.state === 'verified' ? t('pair.transportVerified') : status.state === 'unverified' ? t('pair.transportUnverified') : t('pair.transportUnpaired')}
-            </Chip>
-          </dd>
-        </dl>
+        <SettingsCard>
+          <dl aria-label={t('pair.transportStatus')} className="flex flex-col">
+            <div className={STATUS_ROW}>
+              <dt className="text-body-regular text-text-primary">{t('pair.transportProtocol')}</dt>
+              <dd><SettingsValueField mono>{status.protocol}</SettingsValueField></dd>
+            </div>
+            <div className={STATUS_ROW}>
+              <dt className="shrink-0 text-body-regular text-text-primary">{t('pair.transportFingerprint')}</dt>
+              <dd className="min-w-0"><SettingsValueField mono wrap className="w-auto max-w-80">{status.fingerprint}</SettingsValueField></dd>
+            </div>
+            <div className={STATUS_ROW}>
+              <dt className="text-body-regular text-text-primary">{t('pair.transportState')}</dt>
+              <dd>
+                <Chip variant="caption" color={status.state === 'verified' ? 'lime' : status.state === 'unverified' ? 'yellow' : 'neutral'}>
+                  {status.state === 'verified' ? t('pair.transportVerified') : status.state === 'unverified' ? t('pair.transportUnverified') : t('pair.transportUnpaired')}
+                </Chip>
+              </dd>
+            </div>
+          </dl>
+        </SettingsCard>
       ) : null}
       {phase === 'pending' ? (
-        <div className="flex flex-col gap-2">
-          <p className="text-muted text-xs">{t('pair.code')}</p>
-          <output aria-label={t('pair.code')} className="font-mono text-2xl font-semibold tracking-widest">{verificationCode}</output>
-          <p className="text-muted text-xs">{t('pair.codeFingerprint')} <span className="font-mono">{fingerprint}</span></p>
-          <p role="status" className="text-muted flex items-center gap-2 text-sm"><Spinner size="sm" />{t('pair.waiting')}</p>
-          <p className="text-muted text-xs">{t('pair.remaining', { seconds: remaining })}</p>
-        </div>
+        <SettingsCard>
+          <div className={cx('flex flex-col gap-2', SETTINGS_ROW, 'py-3')}>
+            <p className="text-body-2-regular text-text-secondary">{t('pair.code')}</p>
+            <output aria-label={t('pair.code')} className="font-mono text-title-1-semibold tracking-widest text-text-primary">{verificationCode}</output>
+            <p className="text-body-2-regular text-text-secondary">{t('pair.codeFingerprint')} <span className="font-mono break-all">{fingerprint}</span></p>
+            <p role="status" className="flex items-center gap-2 text-body-regular text-text-secondary"><Spinner size="sm" />{t('pair.waiting')}</p>
+            <p className="text-body-2-regular text-text-tertiary">{t('pair.remaining', { seconds: remaining })}</p>
+          </div>
+        </SettingsCard>
       ) : null}
       <div className="flex gap-2">
-        {phase !== 'pending' ? <Button size="sm" variant="secondary" isPending={phase === 'requesting'} isDisabled={!profile?.serverUrl.trim()} onPress={() => { void start(); }}>
-          {({ isPending }) => <>{isPending ? <Spinner size="sm" color="current" /> : null}{isPending ? t('pair.requesting') : phase === 'idle' ? (paired ? t('pair.repair') : t('pair.title')) : t('pair.reapply')}</>}
-        </Button> : null}
-        {waiting ? <Button size="sm" variant="tertiary" onPress={() => {
+        {phase !== 'pending' ? (
+          <Button
+            size="small"
+            variant="secondary"
+            leadingIcon={requesting ? SpinnerIcon : undefined}
+            aria-busy={requesting || undefined}
+            disabled={requesting || !profile?.serverUrl.trim()}
+            onClick={() => { void start(); }}
+          >
+            {requesting ? t('pair.requesting') : phase === 'idle' ? (paired ? t('pair.repair') : t('pair.title')) : t('pair.reapply')}
+          </Button>
+        ) : null}
+        {waiting ? <Button size="small" variant="secondary" onClick={() => {
           if (active.current) dispose(active.current, true);
           setVerificationCode('');
           setPhase('cancelled');

@@ -1,5 +1,6 @@
-import { StrictMode } from 'react';
+import { StrictMode, useSyncExternalStore } from 'react';
 import { createRoot } from 'react-dom/client';
+import { DirectionProvider } from '@/components/foundations/direction/direction';
 import { App } from './App';
 import { installBrowserDesktopBridge } from './lib/browserDesktop';
 import { installRendererDebugLogging } from './lib/debugLogger';
@@ -7,6 +8,17 @@ import { getLocale, subscribeLocale } from './i18n';
 import { applyAppearance } from './lib/appearance';
 import '@fontsource-variable/inter';
 import './styles/global.css';
+
+/** Keeps BoardUI's text direction, React Aria locale and portalled menus in
+ * step with the in-app language. */
+function Root() {
+  const locale = useSyncExternalStore(subscribeLocale, getLocale);
+  return (
+    <DirectionProvider locale={locale}>
+      <App />
+    </DirectionProvider>
+  );
+}
 
 async function boot() {
   // Dev-only demo preview: `?demo` serves fixture data instead of a backend.
@@ -35,7 +47,7 @@ async function boot() {
 
   createRoot(root).render(
     <StrictMode>
-      <App />
+      <Root />
     </StrictMode>,
   );
 }

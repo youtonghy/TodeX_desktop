@@ -1,8 +1,25 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronRight, Thunderbolt, ThunderboltFill } from '@gravity-ui/icons';
-import { Dropdown, EmptyState, SearchField, Tooltip, useFilter } from '@heroui/react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type Ref } from 'react';
+import { RiArrowDownSLine, RiArrowRightSLine, RiCloseCircleFill, RiFlashlightFill, RiFlashlightLine, RiSearchLine } from '@remixicon/react';
+import { motion, useReducedMotion } from 'motion/react';
+import {
+  Button as AriaButton,
+  Menu as AriaMenu,
+  MenuItem as AriaMenuItem,
+  MenuTrigger as AriaMenuTrigger,
+  Popover as AriaPopover,
+  useFilter,
+  type Key,
+  type MenuItemProps as AriaMenuItemProps,
+} from 'react-aria-components';
 import type { ProviderModelDescriptor } from '@todex/protocol/v2';
 import { normalizeReasoningEffort } from '@todex/protocol/todex';
+import { MENU_POPOVER_SURFACE } from '@/components/base/dropdown/menu-styles';
+import { InputBase, TextField } from '@/components/base/input/input';
+import { RadioDot } from '@/components/base/radio/radio';
+import { EmptyState } from '@/components/ui/empty-state';
+import { IconAction } from '@/components/ui/icon-action';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { cx } from '@/utils/cx';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { reasoningEffortLabel, modelDisplayLabel } from '../session/helpers';
 
@@ -34,6 +51,68 @@ const FAMILY_LABELS: Record<string, string> = {
   zhipu: 'Zhipu',
 };
 
+/* The effort slider follows the BoardUI EffortSlider geometry: the 21px thumb
+ * travels edge to edge, so stop centers run from half a thumb in on the left
+ * to half a thumb in on the right. */
+const THUMB_WIDTH = 21;
+const THUMB_INSET = THUMB_WIDTH / 2;
+
+const stopPosition = (fraction: number) => `calc(${THUMB_INSET}px + (100% - ${THUMB_WIDTH}px) * ${fraction})`;
+
+const MENU_ITEM_SELECTOR = '[role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"]';
+
+/** A model / family row in the BoardUI model-picker recipe: rounded-2lg,
+ *  lifted on hover and focus, radio dot for the chosen entry. */
+function ModelMenuItem({ className, children, trailing, ref, ...props }: Omit<AriaMenuItemProps, 'children' | 'className'> & {
+  className?: string;
+  children: ReactNode;
+  trailing?: ReactNode;
+  ref?: Ref<HTMLDivElement>;
+}) {
+  return (
+    <AriaMenuItem
+      {...props}
+      ref={ref}
+      className={({ isFocused, isHovered, isSelected }) => cx(
+        'flex w-full shrink-0 cursor-pointer items-center gap-2 rounded-2lg px-2 py-1.5 text-start text-body-medium text-text-primary outline-none',
+        'transition-colors duration-150 ease',
+        (isFocused || isHovered || isSelected) && 'bg-background-primary-hover',
+        className,
+      )}
+    >
+      {({ isSelected }) => (
+        <>
+          <span className="min-w-0 flex-1 wrap-anywhere">{children}</span>
+          <RadioDot size="sm" selected={isSelected} />
+          {trailing}
+        </>
+      )}
+    </AriaMenuItem>
+  );
+}
+
+function ModelMenu({ label, selectedKeys, onAction, children }: {
+  label: string;
+  selectedKeys: Iterable<Key>;
+  onAction: (key: Key) => void;
+  children: ReactNode;
+}) {
+  return (
+    <ScrollArea className="max-h-56">
+      <AriaMenu
+        aria-label={label}
+        autoFocus={false}
+        selectionMode="single"
+        selectedKeys={selectedKeys}
+        onAction={onAction}
+        className="flex w-full flex-col gap-0.5 outline-none"
+      >
+        {children}
+      </AriaMenu>
+    </ScrollArea>
+  );
+}
+
 interface ModelReasoningCardProps {
   currentModel: string;
   currentModelDescriptor?: ProviderModelDescriptor;
@@ -63,6 +142,7 @@ export function ModelReasoningCard({
   onSelectModel,
   onSelectReasoningEffort,
 }: ModelReasoningCardProps) {
+  const reduceMotion = useReducedMotion();
   const trackRef = useRef<HTMLDivElement>(null);
   const menuScopeRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -143,17 +223,15 @@ export function ModelReasoningCard({
   const familyItemRefs = useRef(new Map<string, HTMLElement>());
 
   const focusVersionItem = useCallback((fromEnd = false) => {
-    const items = menuScopeRef.current?.querySelectorAll<HTMLElement>(
-      '.composer-model-card__versions [role="menuitemradio"], .composer-model-card__versions [role="menuitem"], .composer-model-card__versions [role="menuitemcheckbox"]',
-    );
+    const items = menuScopeRef.current
+      ?.querySelector('[data-model-pane="versions"]')
+      ?.querySelectorAll<HTMLElement>(MENU_ITEM_SELECTOR);
     if (!items?.length) return;
     (fromEnd ? items[items.length - 1] : items[0]).focus();
   }, []);
 
   const focusFirstMenuItem = useCallback((fromEnd = false) => {
-    const items = menuScopeRef.current?.querySelectorAll<HTMLElement>(
-      '[role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"]',
-    );
+    const items = menuScopeRef.current?.querySelectorAll<HTMLElement>(MENU_ITEM_SELECTOR);
     if (!items?.length) return;
     (fromEnd ? items[items.length - 1] : items[0]).focus();
   }, []);
@@ -188,20 +266,20 @@ export function ModelReasoningCard({
     [supportedReasoningEfforts, currentReasoningEffort, onSelectReasoningEffort, totalSteps]
   );
 
+  const indexAtPointer = (clientX: number) => {
+    const track = trackRef.current;
+    if (!track) return null;
+    const rect = track.getBoundingClientRect();
+    const availableWidth = rect.width - THUMB_INSET * 2;
+    if (availableWidth <= 0) return null;
+    const clampedX = Math.max(0, Math.min(availableWidth, clientX - rect.left - THUMB_INSET));
+    return Math.round((clampedX / availableWidth) * (totalSteps - 1));
+  };
+
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (totalSteps <= 1) return;
-    const track = trackRef.current;
-    if (!track) return;
-
-    const rect = track.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const inset = 14;
-    const availableWidth = rect.width - inset * 2;
-    if (availableWidth <= 0) return;
-
-    const clampedX = Math.max(0, Math.min(availableWidth, x - inset));
-    const fraction = clampedX / availableWidth;
-    const nextIndex = Math.round(fraction * (totalSteps - 1));
+    const nextIndex = indexAtPointer(e.clientX);
+    if (nextIndex === null) return;
     updateEffortByIndex(nextIndex);
 
     (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
@@ -210,18 +288,8 @@ export function ModelReasoningCard({
 
   const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!isDragging || totalSteps <= 1) return;
-    const track = trackRef.current;
-    if (!track) return;
-
-    const rect = track.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const inset = 14;
-    const availableWidth = rect.width - inset * 2;
-    if (availableWidth <= 0) return;
-
-    const clampedX = Math.max(0, Math.min(availableWidth, x - inset));
-    const fraction = clampedX / availableWidth;
-    const nextIndex = Math.round(fraction * (totalSteps - 1));
+    const nextIndex = indexAtPointer(e.clientX);
+    if (nextIndex === null) return;
     updateEffortByIndex(nextIndex);
   };
 
@@ -253,71 +321,90 @@ export function ModelReasoningCard({
     }
   };
 
-  const thumbPositionStyle =
-    totalSteps <= 1
-      ? '50%'
-      : `calc(14px + (100% - 28px) * ${currentIndex / (totalSteps - 1)})`;
+  const fraction = totalSteps <= 1 ? 0.5 : currentIndex / (totalSteps - 1);
+  // The fill reaches the thumb's trailing edge, so it lands flush against it.
+  const fillWidthStyle = totalSteps <= 1 ? '100%' : `calc(${fraction} * (100% - ${THUMB_WIDTH}px) + ${THUMB_WIDTH}px)`;
 
-  const fillWidthStyle =
-    totalSteps <= 1
-      ? '100%'
-      : currentIndex === totalSteps - 1
-        ? '100%'
-        : `calc(14px + (100% - 28px) * ${currentIndex / (totalSteps - 1)})`;
+  const selectModel = (key: Key) => onSelectModel(String(key));
+  const modelRow = (item: ProviderModelDescriptor) => (
+    <ModelMenuItem key={item.id} id={item.id} textValue={item.displayName}>
+      {item.displayName}
+    </ModelMenuItem>
+  );
 
   return (
-    <div className="composer-model-card" data-effort={effortLevel}>
+    <div className="composer-model-card flex flex-col gap-3 px-3 pt-2.5 pb-3" data-effort={effortLevel}>
       {/* Top row: Fast toggle & Model + Reasoning Trigger */}
-      <div className="composer-model-card__header">
+      <div className="relative flex min-h-8 items-center justify-center">
         {canToggleFast ? (
-          <div className="composer-model-card__fast-wrapper">
-            <Tooltip delay={200}>
-              <button
-                type="button"
-                className={`composer-model-card__fast-btn ${fastEnabled ? 'is-active' : ''}`}
-                onClick={onToggleFast}
-                aria-label={fastEnabled ? '关闭 Fast 模式' : '启用 Fast 模式'}
-              >
-                {fastEnabled ? (
-                  <ThunderboltFill className="size-4" aria-hidden="true" />
-                ) : (
-                  <Thunderbolt className="size-4" aria-hidden="true" />
-                )}
-              </button>
-              <Tooltip.Content>{fastEnabled ? '关闭 Fast' : '启用 Fast'}</Tooltip.Content>
-            </Tooltip>
-          </div>
+          <IconAction
+            icon={fastEnabled ? RiFlashlightFill : RiFlashlightLine}
+            size="md"
+            aria-label={fastEnabled ? '关闭 Fast 模式' : '启用 Fast 模式'}
+            tooltip={fastEnabled ? '关闭 Fast' : '启用 Fast'}
+            tooltipPlacement="top"
+            onClick={onToggleFast}
+            className={cx(
+              'absolute start-0 top-1/2 z-10 -translate-y-1/2',
+              fastEnabled && 'bg-pill-tab-blue-selected-background text-accent-500 hover:bg-pill-tab-blue-hover-background hover:text-accent-500',
+            )}
+          />
         ) : null}
 
-        {/* Model dropdown trigger */}
-        <Dropdown
-          className="composer-model-card__select"
-          isOpen={isPickerOpen}
-          onOpenChange={handlePickerOpenChange}
-        >
-          <Dropdown.Trigger className="composer-model-card__trigger" aria-label="选择模型">
-            <span className="composer-model-card__value">
-              <span className="composer-model-card__model-title">{modelDisplayName}</span>
+        {/* Model menu trigger */}
+        <AriaMenuTrigger isOpen={isPickerOpen} onOpenChange={handlePickerOpenChange}>
+          <AriaButton
+            aria-label="选择模型"
+            className={cx(
+              'flex min-w-0 max-w-full cursor-pointer items-center justify-center gap-0.5 rounded-xl py-1 ps-2 pe-1 outline-none',
+              'transition-colors duration-150 ease hover:bg-background-primary-hover data-[pressed]:bg-background-primary-active',
+              'focus-visible:ring-2 focus-visible:ring-border-focus-ring',
+              canToggleFast && 'max-w-[calc(100%-5rem)]',
+            )}
+          >
+            <span className="flex min-w-0 items-baseline gap-1.5 px-0.5 text-headline-semibold">
+              <span className="truncate text-text-primary">{modelDisplayName}</span>
               {effortLabel ? (
-                <span className="composer-model-card__effort-badge">{effortLabel}</span>
+                <motion.span
+                  key={effortLabel}
+                  initial={reduceMotion ? false : { opacity: 0, filter: 'blur(4px)' }}
+                  animate={{ opacity: 1, filter: 'blur(0px)' }}
+                  transition={{ duration: 0.35, ease: 'easeOut' }}
+                  className="shrink-0 whitespace-nowrap text-(--effort-color)"
+                >
+                  {effortLabel}
+                </motion.span>
               ) : null}
             </span>
-            <ChevronRight className="composer-model-card__chevron" aria-hidden="true" />
-          </Dropdown.Trigger>
-          <Dropdown.Popover className="composer-model-card__dropdown" placement="bottom" offset={8}>
-            <SearchField
-              autoFocus
+            <RiArrowDownSLine
+              aria-hidden="true"
+              className={cx(
+                'size-[18px] shrink-0 text-foreground-icon-secondary transition-transform duration-200 ease',
+                isPickerOpen && 'rotate-180',
+              )}
+            />
+          </AriaButton>
+          <AriaPopover
+            placement="bottom"
+            offset={8}
+            className={cx(MENU_POPOVER_SURFACE, 'flex w-96 min-w-[min(13rem,calc(100vw-2rem))] flex-col overflow-hidden p-1.5')}
+          >
+            <TextField
               aria-label="搜索模型"
-              className="composer-model-card__search"
-              variant="secondary"
+              size="small"
+              type="search"
               value={modelSearch}
               onChange={setModelSearch}
+              className="shrink-0 border-b border-separator-border px-0.5 pt-0.5 pb-1.5"
             >
-              <SearchField.Group>
-                <SearchField.SearchIcon />
-                <SearchField.Input
+              <div className="relative w-full">
+                <InputBase
                   ref={searchInputRef}
+                  autoFocus
+                  leadingIcon={RiSearchLine}
                   placeholder="搜索模型…"
+                  fieldClassName={cx(modelSearch && 'pe-8')}
+                  className="[&::-webkit-search-cancel-button]:hidden"
                   onKeyDown={(event) => {
                     if (event.key === 'ArrowDown') {
                       event.preventDefault();
@@ -325,56 +412,49 @@ export function ModelReasoningCard({
                     } else if (event.key === 'ArrowUp') {
                       event.preventDefault();
                       focusFirstMenuItem(true);
+                    } else if (event.key === 'Escape' && modelSearch) {
+                      // First Escape clears the query, the next one closes the menu.
+                      event.preventDefault();
+                      event.stopPropagation();
+                      setModelSearch('');
                     }
                   }}
                 />
-                <SearchField.ClearButton aria-label="清除搜索" />
-              </SearchField.Group>
-            </SearchField>
-            <div ref={menuScopeRef} className="composer-model-card__menu-scope">
+                {modelSearch ? (
+                  <button
+                    type="button"
+                    aria-label="清除搜索"
+                    onClick={() => {
+                      setModelSearch('');
+                      searchInputRef.current?.focus();
+                    }}
+                    className="absolute end-2 top-1/2 flex -translate-y-1/2 cursor-pointer items-center rounded-full text-foreground-icon-tertiary outline-none transition-colors duration-150 ease hover:text-foreground-icon-secondary focus-visible:ring-2 focus-visible:ring-border-focus-ring"
+                  >
+                    <RiCloseCircleFill aria-hidden="true" className="size-4" />
+                  </button>
+                ) : null}
+              </div>
+            </TextField>
+            <div ref={menuScopeRef} className="flex min-h-0 flex-col pt-1.5">
               {filteredModels ? (
                 filteredModels.length === 0 ? (
-                  <EmptyState className="composer-model-card__empty">未找到匹配的模型</EmptyState>
+                  <EmptyState size="sm" title="未找到匹配的模型" />
                 ) : (
-                  <Dropdown.Menu
-                    className="composer-model-card__listbox"
-                    aria-label="选择模型"
-                    autoFocus={false}
-                    selectionMode="single"
-                    selectedKeys={selectedKeys}
-                    onAction={(key) => onSelectModel(String(key))}
-                  >
-                    {filteredModels.map((item) => (
-                      <Dropdown.Item key={item.id} id={item.id} textValue={item.displayName} className="composer-model-card__list-item">
-                        <span className="composer-model-card__option-name">{item.displayName}</span>
-                        <Dropdown.ItemIndicator />
-                      </Dropdown.Item>
-                    ))}
-                  </Dropdown.Menu>
+                  <ModelMenu label="选择模型" selectedKeys={selectedKeys} onAction={selectModel}>
+                    {filteredModels.map(modelRow)}
+                  </ModelMenu>
                 )
               ) : providerModels.length === 0 ? (
-                <EmptyState className="composer-model-card__empty">未找到匹配的模型</EmptyState>
+                <EmptyState size="sm" title="未找到匹配的模型" />
               ) : (
                 familyGroups.length === 0 ? (
-                  <Dropdown.Menu
-                    className="composer-model-card__listbox"
-                    aria-label="选择模型"
-                    autoFocus={false}
-                    selectionMode="single"
-                    selectedKeys={selectedKeys}
-                    onAction={(key) => onSelectModel(String(key))}
-                  >
-                    {providerModels.map((item) => (
-                      <Dropdown.Item key={item.id} id={item.id} textValue={item.displayName} className="composer-model-card__list-item">
-                        <span className="composer-model-card__option-name">{item.displayName}</span>
-                        <Dropdown.ItemIndicator />
-                      </Dropdown.Item>
-                    ))}
-                  </Dropdown.Menu>
+                  <ModelMenu label="选择模型" selectedKeys={selectedKeys} onAction={selectModel}>
+                    {providerModels.map(modelRow)}
+                  </ModelMenu>
                 ) : (
-                  <div className="composer-model-card__split">
+                  <div className="flex min-h-0 flex-1">
                     <div
-                      className="composer-model-card__families"
+                      className="me-1 w-38 shrink-0 border-e border-separator-border pe-1"
                       onKeyDown={(event) => {
                         if (event.key !== 'ArrowRight') return;
                         const target = event.target as HTMLElement;
@@ -388,11 +468,8 @@ export function ModelReasoningCard({
                         }
                       }}
                     >
-                      <Dropdown.Menu
-                        className="composer-model-card__listbox"
-                        aria-label="模型系列"
-                        autoFocus={false}
-                        selectionMode="single"
+                      <ModelMenu
+                        label="模型系列"
                         selectedKeys={familyPaneSelectedKeys}
                         onAction={(key) => {
                           const id = String(key);
@@ -400,14 +477,9 @@ export function ModelReasoningCard({
                           else onSelectModel(id);
                         }}
                       >
-                        {ungroupedModels.map((item) => (
-                          <Dropdown.Item key={item.id} id={item.id} textValue={item.displayName} className="composer-model-card__list-item">
-                            <span className="composer-model-card__option-name">{item.displayName}</span>
-                            <Dropdown.ItemIndicator />
-                          </Dropdown.Item>
-                        ))}
+                        {ungroupedModels.map(modelRow)}
                         {familyGroups.map((group) => (
-                          <Dropdown.Item
+                          <ModelMenuItem
                             key={group.family}
                             id={`family:${group.family}`}
                             ref={(el) => {
@@ -416,22 +488,22 @@ export function ModelReasoningCard({
                             }}
                             textValue={familyLabel(group.family)}
                             shouldCloseOnSelect={false}
-                            className={`composer-model-card__list-item ${group.family === activeGroup?.family ? 'is-active' : ''}`}
+                            className={group.family === activeGroup?.family ? 'bg-background-primary-hover' : undefined}
                             onHoverStart={() => setActiveFamily(group.family)}
                             onFocusChange={(focused) => {
                               if (focused) setActiveFamily(group.family);
                             }}
+                            trailing={<RiArrowRightSLine aria-hidden="true" className="size-4 shrink-0 text-foreground-icon-secondary" />}
                           >
-                            <span className="composer-model-card__option-name">{familyLabel(group.family)}</span>
-                            <Dropdown.ItemIndicator />
-                            <ChevronRight className="composer-model-card__option-chevron" aria-hidden="true" />
-                          </Dropdown.Item>
+                            {familyLabel(group.family)}
+                          </ModelMenuItem>
                         ))}
-                      </Dropdown.Menu>
+                      </ModelMenu>
                     </div>
                     {activeGroup ? (
                       <div
-                        className="composer-model-card__versions"
+                        data-model-pane="versions"
+                        className="min-w-0 flex-1"
                         onKeyDown={(event) => {
                           if (event.key === 'ArrowLeft') {
                             event.preventDefault();
@@ -440,47 +512,39 @@ export function ModelReasoningCard({
                           }
                         }}
                       >
-                        <Dropdown.Menu
+                        <ModelMenu
                           key={activeGroup.family}
-                          className="composer-model-card__listbox"
-                          aria-label={`${familyLabel(activeGroup.family)} 版本`}
-                          autoFocus={false}
-                          selectionMode="single"
+                          label={`${familyLabel(activeGroup.family)} 版本`}
                           selectedKeys={selectedKeys}
-                          onAction={(key) => onSelectModel(String(key))}
+                          onAction={selectModel}
                         >
                           {activeGroup.items.map((item) => (
-                            <Dropdown.Item
-                              key={item.id}
-                              id={item.id}
-                              textValue={item.displayName}
-                              className="composer-model-card__list-item"
-                            >
-                              <span className="composer-model-card__option-name">
-                                {item.id === activeGroup.family ? '最新' : item.displayName}
-                                {item.id === activeGroup.family && item.description ? (
-                                  <span className="composer-model-card__option-detail">{item.description}</span>
-                                ) : null}
-                              </span>
-                              <Dropdown.ItemIndicator />
-                            </Dropdown.Item>
+                            <ModelMenuItem key={item.id} id={item.id} textValue={item.displayName}>
+                              {item.id === activeGroup.family ? '最新' : item.displayName}
+                              {item.id === activeGroup.family && item.description ? (
+                                <span className="ms-1.5 text-body-2-regular text-text-secondary">{item.description}</span>
+                              ) : null}
+                            </ModelMenuItem>
                           ))}
-                        </Dropdown.Menu>
+                        </ModelMenu>
                       </div>
                     ) : null}
                   </div>
                 )
               )}
             </div>
-          </Dropdown.Popover>
-        </Dropdown>
+          </AriaPopover>
+        </AriaMenuTrigger>
       </div>
 
-      {/* Bottom row: Stepped Slider */}
+      {/* Bottom row: stepped effort slider (BoardUI EffortSlider recipe) */}
       {totalSteps > 0 ? (
         <div
           ref={trackRef}
-          className={`composer-model-card__track ${isDragging ? 'is-dragging' : ''}`}
+          className={cx(
+            'relative h-[27px] w-full cursor-pointer touch-none rounded-lg bg-background-secondary-default select-none',
+            'outline-none focus-visible:ring-2 focus-visible:ring-border-focus-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background-primary-default',
+          )}
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
@@ -494,44 +558,46 @@ export function ModelReasoningCard({
           aria-valuenow={currentIndex}
           aria-valuetext={effortLabel ?? 'default'}
         >
-          {/* Active green fill */}
+          {/* Fill tinted by the current effort level */}
           <div
-            className="composer-model-card__fill"
-            style={{
-              width: fillWidthStyle,
-              borderRadius: currentIndex === totalSteps - 1 ? '9999px' : '9999px 0 0 9999px',
-            }}
+            className={cx(
+              'composer-model-card__fill pointer-events-none absolute inset-y-0 left-0 rounded-lg bg-(--effort-color)',
+              !isDragging && 'transition-[width,background-color,box-shadow] duration-150 ease-out',
+            )}
+            style={{ width: fillWidthStyle }}
           />
 
-          {/* Stepped discrete dots */}
-          <div className="composer-model-card__marks" aria-hidden="true">
-            {supportedReasoningEfforts.map((effort, index) => {
-              const pos =
-                totalSteps === 1
-                  ? '50%'
-                  : `calc(14px + (100% - 28px) * ${index / (totalSteps - 1)})`;
-              const isPast = index < currentIndex;
-              return (
-                <span
-                  key={effort}
-                  className={`composer-model-card__dot ${isPast ? 'is-past' : 'is-future'}`}
-                  style={{ left: pos }}
-                />
-              );
-            })}
+          {/* Tick marks on the stops: under the fill they turn white, past the
+              thumb they fade to 30%. */}
+          <div className="pointer-events-none absolute inset-0 z-1" aria-hidden="true">
+            {supportedReasoningEfforts.map((effort, index) => (
+              <span
+                key={effort}
+                className={cx(
+                  'absolute top-[7px] h-[13px] w-[3px] -translate-x-1/2 rounded-[2px] transition-[background-color,opacity] duration-150 ease-out',
+                  index < currentIndex ? 'bg-text-white/60' : 'bg-foreground-icon-tertiary',
+                  index > currentIndex && 'opacity-30',
+                )}
+                style={{ left: totalSteps === 1 ? '50%' : stopPosition(index / (totalSteps - 1)) }}
+              />
+            ))}
           </div>
 
-          {/* Tactile pure white thumb */}
+          {/* Thumb */}
           <div
-            className="composer-model-card__thumb"
-            style={{ left: thumbPositionStyle }}
             aria-hidden="true"
+            className={cx(
+              'pointer-events-none absolute top-0 z-2 h-[27px] w-[21px] -translate-x-1/2 rounded-[7px]',
+              'border border-border-checkbox-default bg-background-primary-default shadow-xs',
+              !isDragging && 'transition-[left] duration-150 ease-out',
+            )}
+            style={{ left: totalSteps <= 1 ? '50%' : stopPosition(fraction) }}
           />
         </div>
       ) : (
-        <div className="composer-model-card__no-effort">
+        <p className="py-1.5 text-center text-caption-1-regular text-text-secondary">
           当前模型不支持调整思考强度
-        </div>
+        </p>
       )}
     </div>
   );
