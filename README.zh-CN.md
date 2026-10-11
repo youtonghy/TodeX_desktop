@@ -11,7 +11,7 @@
 正式打包版本支持 GitHub Release 自动更新，详见[自动更新与发布配置](docs/automatic-updates.md)。
 
 <p align="center">
-  <strong>基于 Electron、React 19 与 HeroUI Pro 构建的原生 macOS 桌面客户端，连接 <code>todex-agentd</code>。</strong>
+  <strong>基于 Electron、React 19 与 BoardUI 构建的原生 macOS 桌面客户端，连接 <code>todex-agentd</code>。</strong>
 </p>
 
 <p align="center">
@@ -25,7 +25,7 @@
 
 **TodeX Desktop** 是连接 [`todex-agentd`](../TodeX_backend) 后端服务的桌面客户端，为 macOS 开发者提供沉浸式编程工作台。
 
-桌面端采用 **Electron 44**、**React 19**、**Vite 7**、**Tailwind CSS v4** 和 **HeroUI Pro** 构建，设计了专为宽屏优化的经典三栏工作台布局。它与 Web 客户端共享核心通信协议库（`@todex/protocol`，来自 [`TodeX_protocol`](../TodeX_protocol)），同时充分利用桌面端原生能力，如系统原生目录选择器以及多标签页开发者工作台。
+桌面端采用 **Electron 44**、**React 19**、**Vite 7**、**Tailwind CSS v4** 和 **BoardUI** 构建，设计了专为宽屏优化的经典三栏工作台布局。它与 Web 客户端共享核心通信协议库（`@todex/protocol`，来自 [`TodeX_protocol`](../TodeX_protocol)），同时充分利用桌面端原生能力，如系统原生目录选择器以及多标签页开发者工作台。
 
 ---
 
@@ -85,7 +85,7 @@
 |  |  |                   |  |  输入框建议与附件)      |  |  Skills, MCPs)     |  |  |
 |  |  +-------------------+  +------------------------+  +--------------------+  |  |
 |  |  +-----------------------------------------------------------------------+  |  |
-|  |  |                   HeroUI React & HeroUI Pro UI 组件库                 |  |  |
+|  |  |                 BoardUI 组件（以源码形式纳入项目）                    |  |  |
 |  |  +-----------------------------------------------------------------------+  |  |
 |  +-----------------------------------------------------------------------------+  |
 |                                         |                                         |
@@ -107,7 +107,7 @@
 | 维度 | 移动端 (`Todex_mobile`) | 桌面端 (`TodeX_desktop`) |
 | :--- | :--- | :--- |
 | **基础框架** | Swift + UIKit | Electron 44 + React 19 (Vite) |
-| **UI 组件库** | UIKit（Liquid Glass） | `@heroui/react` + `@heroui-pro/react` (Tailwind v4) |
+| **UI 组件库** | UIKit（Liquid Glass） | BoardUI + React Aria (Tailwind v4) |
 | **界面布局** | 移动端堆叠导航（Stack Navigation） | 三栏可调节桌面工作台布局 |
 | **协议层实现** | Swift 实现（`TodexCore`） | `@todex/protocol` 路径别名映射至 `../TodeX_protocol/src` |
 | **本地持久化** | iOS Keychain / 本地持久化 | Electron `userData` JSON 文件（`todex.desktop.*`）；设备密钥与历史密钥由系统钥匙串（safeStorage）加密 |
@@ -122,16 +122,15 @@
 - **Node.js**：22.0.0 或更高版本
 - **pnpm**：11.0.0 或更高版本
 - **TodeX 后端**：正在运行的 `todex-agentd` 实例（默认 `http://127.0.0.1:7345`）
-- **HeroUI Pro 凭据**：安装 `@heroui-pro/react` 时需要配置授权 Token。
+- **BoardUI Pro 密钥（可选）**：BoardUI 组件以源码形式提交在仓库中，安装依赖不需要密钥。只有添加 BoardUI Pro 组件时才需要，从 `BOARDUI_KEY` 读取。
 
-### 1. 配置 HeroUI Pro Token
+### 1. 检出共享协议库
 
-在运行 `pnpm install` 前，确保在当前 Shell 环境中设置了 Token 变量：
+渲染进程从相邻目录 `../TodeX_protocol` 引入 `@todex/protocol`。之后如需添加 BoardUI 组件：
 
 ```bash
-export HEROUI_AUTH_TOKEN="你的_heroui_key"
-# 或者使用已有的 HEROUI_KEY 变量：
-export HEROUI_AUTH_TOKEN="$HEROUI_KEY"
+pnpm dlx @collectui/bdui add <组件名> -p src/renderer                    # 免费组件
+pnpm dlx @collectui/bdui add <组件名> -p src/renderer --key "$BOARDUI_KEY" # Pro 组件
 ```
 
 > [!WARNING]
@@ -195,8 +194,6 @@ Windows 与 macOS 安装包目前没有代码签名，首次运行时可能需�
 SmartScreen 或 Gatekeeper。由于桌面端直接共享移动端协议源码，构建时会把移动端
 仓库的 `main` 分支检出到相邻目录，并将验证时解析出的提交固定用于全部平台。如果
 该仓库是私有仓库，需要配置具有只读权限的 `PROTOCOL_REPO_TOKEN` Actions Secret。
-此外，发布工作流需要配置 `HEROUI_AUTH_TOKEN` Actions Secret，才能在全新的 Runner
-上安装 HeroUI Pro 依赖。
 
 ---
 

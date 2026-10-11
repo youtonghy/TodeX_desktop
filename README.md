@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <strong>Native macOS desktop client for <code>todex-agentd</code> built with Electron, React 19, and HeroUI Pro.</strong>
+  <strong>Native macOS desktop client for <code>todex-agentd</code> built with Electron, React 19, and BoardUI.</strong>
 </p>
 
 <p align="center">
@@ -23,7 +23,7 @@
 
 **TodeX Desktop** is a desktop client for [`todex-agentd`](../TodeX_backend), delivering a coding workspace environment on macOS.
 
-Built with **Electron 44**, **React 19**, **Vite 7**, **Tailwind CSS v4**, and **HeroUI Pro**, TodeX Desktop features a 3-pane layout optimized for wide screens. It shares the transport and protocol library (`@todex/protocol`, from [`TodeX_protocol`](../TodeX_protocol)) with the web client, while leveraging native desktop capabilities like local file pickers and multi-tab developer workbenches.
+Built with **Electron 44**, **React 19**, **Vite 7**, **Tailwind CSS v4**, and **BoardUI**, TodeX Desktop features a 3-pane layout optimized for wide screens. It shares the transport and protocol library (`@todex/protocol`, from [`TodeX_protocol`](../TodeX_protocol)) with the web client, while leveraging native desktop capabilities like local file pickers and multi-tab developer workbenches.
 
 ---
 
@@ -83,7 +83,7 @@ Built with **Electron 44**, **React 19**, **Vite 7**, **Tailwind CSS v4**, and *
 |  |  |   Conversations)  |  |   Approvals, Inputs)   |  |   Skills, MCPs)    |  |  |
 |  |  +-------------------+  +------------------------+  +--------------------+  |  |
 |  |  +-----------------------------------------------------------------------+  |  |
-|  |  |                   HeroUI React & HeroUI Pro Components                |  |  |
+|  |  |                 BoardUI components (source-owned)                     |  |  |
 |  |  +-----------------------------------------------------------------------+  |  |
 |  +-----------------------------------------------------------------------------+  |
 |                                         |                                         |
@@ -105,7 +105,7 @@ Built with **Electron 44**, **React 19**, **Vite 7**, **Tailwind CSS v4**, and *
 | Dimension | Mobile Client (`Todex_mobile`) | Desktop Client (`TodeX_desktop`) |
 | :--- | :--- | :--- |
 | **Framework** | Swift + UIKit | Electron 44 + React 19 (Vite) |
-| **UI Components** | UIKit (Liquid Glass) | `@heroui/react` + `@heroui-pro/react` (Tailwind v4) |
+| **UI Components** | UIKit (Liquid Glass) | BoardUI + React Aria (Tailwind v4) |
 | **Layout** | Mobile Stack Navigation | 3-Pane Resizable Desktop Layout |
 | **Protocol Layer** | Swift port (`TodexCore`) | `@todex/protocol` alias mapped to `../TodeX_protocol/src` |
 | **Local Storage** | iOS Keychain / local persistence | Electron `userData` JSON (`todex.desktop.*`); device and history keys sealed with the OS keychain (safeStorage) |
@@ -120,16 +120,16 @@ Built with **Electron 44**, **React 19**, **Vite 7**, **Tailwind CSS v4**, and *
 - **Node.js**: 22.0.0 or higher
 - **pnpm**: 11.0.0 or higher
 - **TodeX Backend**: Running instance of `todex-agentd` (default `http://127.0.0.1:7345`)
-- **HeroUI Pro Auth**: `@heroui-pro/react` requires a license token during package installation.
+- **BoardUI Pro key (optional)**: BoardUI components are committed as source, so installing dependencies needs no key. Only adding a BoardUI Pro component needs one, read from `BOARDUI_KEY`.
 
-### 1. Configure HeroUI Pro Token
+### 1. Check Out the Shared Protocol
 
-Before running `pnpm install`, ensure the HeroUI token is available in your shell environment:
+The renderer imports `@todex/protocol` from a sibling `../TodeX_protocol` checkout.
+To add BoardUI components later:
 
 ```bash
-export HEROUI_AUTH_TOKEN="your_heroui_key"
-# Alternatively if using HEROUI_KEY:
-export HEROUI_AUTH_TOKEN="$HEROUI_KEY"
+pnpm dlx @collectui/bdui add <name> -p src/renderer                    # free components
+pnpm dlx @collectui/bdui add <name> -p src/renderer --key "$BOARDUI_KEY" # Pro components
 ```
 
 > [!WARNING]
@@ -199,8 +199,7 @@ The build checks out the mobile
 repository's `main` branch beside this repository because the desktop client shares
 its protocol source, then pins the resolved commit across every platform. If that
 repository is private, configure a `PROTOCOL_REPO_TOKEN` Actions secret with read
-access. The workflow also requires a `HEROUI_AUTH_TOKEN` Actions secret so a fresh
-runner can install the HeroUI Pro dependency.
+access.
 
 ---
 

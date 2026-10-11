@@ -68,8 +68,6 @@ jobs:
     timeout-minutes: 30
     outputs:
       protocol_sha: ${{ steps.protocol.outputs.sha }}
-    env:
-      HEROUI_KEY: ${{ secrets.HEROUI_AUTH_TOKEN }}
     defaults:
       run:
         working-directory: TodeX_desktop
@@ -104,29 +102,6 @@ jobs:
         shell: bash
         run: |
           pnpm install --frozen-lockfile --ignore-scripts
-          if [ -z "$HEROUI_KEY" ]; then
-            echo "HEROUI_AUTH_TOKEN secret is not configured; HeroUI Pro cannot be installed." >&2
-            exit 1
-          fi
-          if [ "$RUNNER_OS" = "Windows" ]; then
-            mv pnpm-workspace.yaml pnpm-workspace.yaml.ci
-            trap 'mv -f pnpm-workspace.yaml.ci pnpm-workspace.yaml' EXIT
-          fi
-          for attempt in 1 2 3; do
-            if npx -y hpsetup@latest "$HEROUI_KEY"; then
-              break
-            fi
-            if [ "$attempt" -eq 3 ]; then
-              echo "hpsetup failed after 3 attempts." >&2
-              exit 1
-            fi
-            echo "hpsetup attempt ${attempt} failed; retrying in 10s..." >&2
-            sleep 10
-          done
-          if [ "$RUNNER_OS" = "Windows" ]; then
-            mv -f pnpm-workspace.yaml.ci pnpm-workspace.yaml
-            trap - EXIT
-          fi
           pnpm rebuild
 
       - name: Validate application
@@ -159,8 +134,6 @@ jobs:
     defaults:
       run:
         working-directory: TodeX_desktop
-    env:
-      HEROUI_KEY: ${{ secrets.HEROUI_AUTH_TOKEN }}
     steps:
       - name: Checkout desktop
         uses: actions/checkout@v6
@@ -187,29 +160,6 @@ jobs:
         shell: bash
         run: |
           pnpm install --frozen-lockfile --ignore-scripts
-          if [ -z "$HEROUI_KEY" ]; then
-            echo "HEROUI_AUTH_TOKEN secret is not configured; HeroUI Pro cannot be installed." >&2
-            exit 1
-          fi
-          if [ "$RUNNER_OS" = "Windows" ]; then
-            mv pnpm-workspace.yaml pnpm-workspace.yaml.ci
-            trap 'mv -f pnpm-workspace.yaml.ci pnpm-workspace.yaml' EXIT
-          fi
-          for attempt in 1 2 3; do
-            if npx -y hpsetup@latest "$HEROUI_KEY"; then
-              break
-            fi
-            if [ "$attempt" -eq 3 ]; then
-              echo "hpsetup failed after 3 attempts." >&2
-              exit 1
-            fi
-            echo "hpsetup attempt ${attempt} failed; retrying in 10s..." >&2
-            sleep 10
-          done
-          if [ "$RUNNER_OS" = "Windows" ]; then
-            mv -f pnpm-workspace.yaml.ci pnpm-workspace.yaml
-            trap - EXIT
-          fi
           pnpm rebuild
 
       - name: Require macOS signing certificate

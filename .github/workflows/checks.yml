@@ -22,8 +22,6 @@ jobs:
     name: Typecheck and build
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    env:
-      HEROUI_KEY: ${{ secrets.HEROUI_AUTH_TOKEN }}
     steps:
       - name: Checkout desktop
         uses: actions/checkout@v6
@@ -51,11 +49,6 @@ jobs:
         shell: bash
         run: |
           pnpm install --frozen-lockfile --ignore-scripts
-          if [ -z "$HEROUI_KEY" ]; then
-            echo "HEROUI_AUTH_TOKEN secret is not configured; HeroUI Pro cannot be installed." >&2
-            exit 1
-          fi
-          npx -y hpsetup@latest "$HEROUI_KEY"
           pnpm rebuild
 
       - name: Check Electron
