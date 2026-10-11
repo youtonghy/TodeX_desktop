@@ -228,7 +228,7 @@ export interface DashboardSidebarProps extends Omit<HTMLAttributes<HTMLElement>,
   onCollapsedChange?: (collapsed: boolean) => void;
   /** Names of the collapse button. `expanded` is the state the button reports
    *  and toggles when it differs from the drawn one (a rail peeking open). */
-  collapseButton?: { expandLabel: string; collapseLabel: string; expanded?: boolean };
+  collapseButton?: { expandLabel: string; collapseLabel: string; expanded?: boolean } | false;
   /** Expanded width fills its container below `lg` instead of the fixed
    *  260px (e.g. the landing page, where the sidebar isn't in a drawer).
    *  Collapsed width stays the fixed 60px rail at every breakpoint — the
@@ -291,7 +291,7 @@ export function DashboardSidebar({
   const searchFieldRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const collapsed = mobile ? false : (collapsedProp ?? collapsedState);
-  const expanded = collapseButton?.expanded ?? !collapsed;
+  const expanded = (collapseButton && collapseButton.expanded) ?? !collapsed;
   const state: DashboardSidebarState = { collapsed, mobile, flat };
 
   const setSearchActive = useCallback((next: boolean) => {
@@ -475,7 +475,7 @@ export function DashboardSidebar({
             >
               <RiCloseLine className="size-5" aria-hidden />
             </button>
-          ) : (
+          ) : collapseButton === false ? null : (
             <button
               type="button"
               aria-label={

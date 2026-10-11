@@ -965,7 +965,8 @@ export function AppSidebar({
       closeLabel={t('sidebar.closeSidebar')}
       collapsed={rail}
       onCollapsedChange={(collapsed) => onOpenChange?.(!collapsed)}
-      collapseButton={{ expandLabel: t('app.expandSidebar'), collapseLabel: t('app.collapseSidebar'), expanded: isOpen }}
+      // The app header's sidebar toggle is the only collapse control.
+      collapseButton={false}
       chrome={chromeStrip}
       header={({ collapsed, suppressHover, onHoverSuppressionEnd }) => (
         <DashboardUserMenu
