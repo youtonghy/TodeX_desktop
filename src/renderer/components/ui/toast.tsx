@@ -1,6 +1,7 @@
 import { useSyncExternalStore, type ReactNode } from 'react';
 import { Notification, NotificationViewport, type NotificationStatus } from '@/components/base/notification/notification';
 import { useT } from '@/i18n';
+import { addNotification, type FeedStatus } from '@/session/notificationFeed';
 
 /**
  * App-wide toasts on the BoardUI Notification card. `toast.success(...)`
@@ -41,6 +42,14 @@ const STATUS: Record<ToastVariant, NotificationStatus> = {
   danger: 'error',
 };
 
+const FEED_STATUS: Record<ToastVariant, FeedStatus> = {
+  default: 'neutral',
+  info: 'information',
+  success: 'success',
+  warning: 'neutral',
+  danger: 'error',
+};
+
 let items: ToastItem[] = [];
 let counter = 0;
 const listeners = new Set<() => void>();
@@ -54,6 +63,15 @@ function show(variant: ToastVariant, title: ReactNode, options: ToastOptions = {
   counter += 1;
   const key = `toast-${counter}`;
   emit([...items, { ...options, key, title, variant, closing: false }]);
+  // Every notice also lands in the sidebar's notification history.
+  if (typeof title === 'string') {
+    addNotification({
+      kind: 'system',
+      status: FEED_STATUS[variant],
+      title,
+      description: typeof options.description === 'string' ? options.description : '',
+    });
+  }
   return key;
 }
 

@@ -1337,6 +1337,19 @@ export const zhCN = {
 
   // notify
   'notify.completedFallback': '任务已完成，点击查看回复。',
+  'notify.center': '通知',
+  'notify.tabAll': '全部',
+  'notify.tabConversations': '对话',
+  'notify.tabSystem': '系统',
+  'notify.unreadCount': '{count} 条未读',
+  'notify.noUnread': '没有未读通知',
+  'notify.markAllRead': '全部标为已读',
+  'notify.empty': '暂时没有通知',
+  'notify.emptyHint': '后台完成的对话和应用提醒会出现在这里。',
+  'notify.unread': '未读',
+  'notify.category': '通知分类',
+  'notify.openConversation': '打开对话',
+  'notify.justNow': '刚刚',
 
   // piExt
   'piExt.catalogError': 'Pi 命令目录加载失败，请刷新目录后重试。草稿已保留。',

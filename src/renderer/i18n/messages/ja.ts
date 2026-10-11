@@ -1337,6 +1337,19 @@ export const ja: Messages = {
 
   // notify
   'notify.completedFallback': 'タスクが完了しました。返信を確認してください。',
+  'notify.center': '通知',
+  'notify.tabAll': 'すべて',
+  'notify.tabConversations': '会話',
+  'notify.tabSystem': 'システム',
+  'notify.unreadCount': '未読 {count} 件',
+  'notify.noUnread': '未読の通知はありません',
+  'notify.markAllRead': 'すべて既読にする',
+  'notify.empty': 'すべて確認済みです。',
+  'notify.emptyHint': '完了した会話やアプリのお知らせがここに表示されます。',
+  'notify.unread': '未読',
+  'notify.category': '通知のカテゴリ',
+  'notify.openConversation': '会話を開く',
+  'notify.justNow': 'たった今',
 
   // piExt
   'piExt.catalogError': 'Pi コマンドカタログの読み込みに失敗しました。カタログを更新して再試行してください。下書きは保持されています。',

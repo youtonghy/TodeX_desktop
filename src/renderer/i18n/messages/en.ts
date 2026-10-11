@@ -1337,6 +1337,19 @@ export const en: Messages = {
 
   // notify
   'notify.completedFallback': 'Task finished. Tap to view the reply.',
+  'notify.center': 'Notifications',
+  'notify.tabAll': 'All',
+  'notify.tabConversations': 'Conversations',
+  'notify.tabSystem': 'System',
+  'notify.unreadCount': '{count} unread',
+  'notify.noUnread': 'No unread notifications',
+  'notify.markAllRead': 'Mark all read',
+  'notify.empty': 'You’re all caught up.',
+  'notify.emptyHint': 'Finished conversations and app notices appear here.',
+  'notify.unread': 'Unread',
+  'notify.category': 'Notification category',
+  'notify.openConversation': 'Open conversation',
+  'notify.justNow': 'Just now',
 
   // piExt
   'piExt.catalogError': 'Failed to load the Pi command catalog. Refresh the catalog and retry. Your draft is kept.',

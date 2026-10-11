@@ -124,6 +124,7 @@ export function DashboardUserMenu({
   "aria-label": ariaLabel,
   menuLabel,
   onOpenChange,
+  panelClassName,
   children,
 }: {
   collapsed?: boolean;
@@ -141,6 +142,8 @@ export function DashboardUserMenu({
   /** Accessible name of the panel. */
   menuLabel: string;
   onOpenChange?: (isOpen: boolean) => void;
+  /** Overrides the panel's width / padding (e.g. a wider notification center). */
+  panelClassName?: string;
   /** Panel contents; the function form receives a `close` callback. */
   children: ReactNode | ((close: () => void) => ReactNode);
 }) {
@@ -208,6 +211,7 @@ export function DashboardUserMenu({
           "transition duration-150 ease-out",
           "data-[entering]:opacity-0 data-[entering]:scale-95 data-[entering]:blur-[2px]",
           "data-[exiting]:opacity-0 data-[exiting]:scale-95 data-[exiting]:blur-[2px]",
+          panelClassName,
         )}
       >
         <AriaDialog aria-label={menuLabel} className="flex flex-col outline-none">

@@ -1337,6 +1337,19 @@ export const ko: Messages = {
 
   // notify
   'notify.completedFallback': '작업이 완료되었습니다. 눌러서 답변을 확인하세요.',
+  'notify.center': '알림',
+  'notify.tabAll': '전체',
+  'notify.tabConversations': '대화',
+  'notify.tabSystem': '시스템',
+  'notify.unreadCount': '읽지 않음 {count}개',
+  'notify.noUnread': '읽지 않은 알림이 없습니다',
+  'notify.markAllRead': '모두 읽음으로 표시',
+  'notify.empty': '모두 확인했습니다.',
+  'notify.emptyHint': '완료된 대화와 앱 알림이 여기에 표시됩니다.',
+  'notify.unread': '읽지 않음',
+  'notify.category': '알림 분류',
+  'notify.openConversation': '대화 열기',
+  'notify.justNow': '방금',
 
   // piExt
   'piExt.catalogError': 'Pi 명령 카탈로그를 불러오지 못했습니다. 카탈로그를 새로 고친 후 다시 시도하세요. 초안은 유지됩니다.',

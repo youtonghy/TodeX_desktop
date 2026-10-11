@@ -15,6 +15,9 @@ import {
 } from 'react-aria-components';
 import { DashboardSidebar, type DashboardNavItem } from '@/components/application/dashboard/dashboard-sidebar';
 import { Announcement } from '@/components/base/announcement/announcement';
+import { NotificationCenter, type NotificationCenterItem } from '@/components/application/notification-center/notification-center';
+import { markAllNotificationsRead, markNotificationRead, useNotificationFeed } from '../session/notificationFeed';
+import { getLocale, translate } from '../i18n';
 import { DashboardTeamMenu, type DashboardTeamMenuGroup } from '@/components/application/dashboard/dashboard-team-menu';
 import {
   DashboardUserMenu,
@@ -281,6 +284,18 @@ function RowContent({ rail, indent, title, children }: { rail: boolean; indent?:
 }
 
 const DOCS_URL = 'https://todex.dev/docs';
+
+/** "5 分钟前" / "2 hours ago"; a minute or less reads as just now. */
+function relativeTime(at: number): string {
+  const seconds = Math.round((at - Date.now()) / 1000);
+  if (seconds > -60) return translate(getLocale(), 'notify.justNow');
+  const format = new Intl.RelativeTimeFormat(getLocale(), { numeric: 'auto' });
+  const minutes = Math.round(seconds / 60);
+  if (minutes > -60) return format.format(minutes, 'minute');
+  const hours = Math.round(minutes / 60);
+  if (hours > -24) return format.format(hours, 'hour');
+  return format.format(Math.round(hours / 24), 'day');
+}
 const DOCS_DISMISSED_KEY = 'todex.sidebar.docsDismissed';
 
 export function AppSidebar({
@@ -376,6 +391,20 @@ export function AppSidebar({
   // The identity (top) and TodeX (team card) panels keep a peeking rail open.
   const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
   const [teamMenuOpen, setTeamMenuOpen] = useState(false);
+  // Notification history (finished conversations, app notices) for the header panel.
+  const feed = useNotificationFeed();
+  const unreadNotifications = feed.filter((item) => !item.read).length;
+  const notificationItems: NotificationCenterItem[] = feed.map((item) => ({
+    id: item.id,
+    category: item.kind === 'conversation' ? 'mentions' : 'system',
+    group: '',
+    title: item.title,
+    description: item.description,
+    timestamp: relativeTime(item.at),
+    unread: !item.read,
+    status: item.status,
+    actions: item.kind === 'conversation' && item.conversationId ? [{ id: 'open', label: t('notify.openConversation') }] : undefined,
+  }));
   // The docs card stays closed once dismissed.
   const [docsDismissed, setDocsDismissed] = useState(() => {
     try { return window.localStorage.getItem(DOCS_DISMISSED_KEY) === '1'; } catch { return false; }
@@ -987,50 +1016,43 @@ export function AppSidebar({
           onHoverSuppressionEnd={onHoverSuppressionEnd}
           avatar={identityMark}
           name="TodeX"
-          badge={<Chip variant="caption" color="neutral" className="py-0.5">V2</Chip>}
+          badge={(
+            <span className="flex items-center gap-1.5">
+              <Chip variant="caption" color="neutral" className="py-0.5">V2</Chip>
+              {unreadNotifications ? <span aria-label={t('notify.unreadCount', { count: unreadNotifications })} className="size-2 rounded-full bg-accent-500" /> : null}
+            </span>
+          )}
           aria-label={`TodeX · ${connectionLabel}`}
-          menuLabel={t('settings.backendConnections')}
+          menuLabel={t('notify.center')}
+          panelClassName="w-[400px] p-0 rounded-3xl border-0 bg-transparent shadow-none"
           onOpenChange={setHeaderMenuOpen}
         >
           {(close) => (
-            <>
-              <DashboardUserMenuSection label={t('settings.backendConnections')}>
-                {session.backendConnections.length > 0 ? session.backendConnections.map((profile) => {
-                  const active = profile.id === session.activeBackendConnectionId;
-                  return (
-                    <DashboardUserMenuRow
-                      key={profile.id}
-                      avatar={<span aria-hidden="true" className="size-5 shrink-0 rounded-full ring-1 ring-inset ring-separator-border" style={{ backgroundColor: backendLabelColor(profile) }} />}
-                      label={profile.name}
-                      description={active ? connectionLabel : undefined}
-                      trailing={active ? <span aria-hidden="true" className={cx('size-2 shrink-0 rounded-full', HEALTH_DOT_CLASS[healthColor])} /> : undefined}
-                      isSelected={active}
-                      title={t('sidebar.backendLabel', { name: profile.name, url: profile.serverUrl })}
-                    />
-                  );
-                }) : (
-                  <DashboardUserMenuRow
-                    avatar={<span aria-hidden="true" className={cx('size-2 shrink-0 rounded-full', HEALTH_DOT_CLASS[healthColor])} />}
-                    label={connectionLabel}
-                  />
-                )}
-              </DashboardUserMenuSection>
-              <DashboardUserMenuDivider />
-              <DashboardUserMenuActions>
-                <Button
-                  variant="secondary"
-                  size="small"
-                  leadingIcon={RiSettings3Line}
-                  className="flex-1"
-                  onClick={() => {
-                    close();
-                    onOpenSettings();
-                  }}
-                >
-                  {t('app.settings')}
-                </Button>
-              </DashboardUserMenuActions>
-            </>
+            <NotificationCenter
+              className="max-w-none"
+              title={t('notify.center')}
+              emptyMessage={t('notify.empty')}
+              notifications={notificationItems}
+              labels={{
+                tabs: { all: t('notify.tabAll'), mentions: t('notify.tabConversations'), system: t('notify.tabSystem') },
+                unread: (count) => t('notify.unreadCount', { count }),
+                noUnread: t('notify.noUnread'),
+                markAllRead: t('notify.markAllRead'),
+                emptyHint: t('notify.emptyHint'),
+                unreadDot: t('notify.unread'),
+                category: t('notify.category'),
+              }}
+              onMarkAllRead={markAllNotificationsRead}
+              onItemRead={markNotificationRead}
+              onAction={(id) => {
+                const item = feed.find((entry) => entry.id === id);
+                if (!item?.workspaceId || !item.conversationId) return;
+                close();
+                if (mobile) onCloseMobile?.();
+                session.selectConversation(item.workspaceId, item.conversationId);
+                onSelectConversation?.();
+              }}
+            />
           )}
         </DashboardUserMenu>
       )}

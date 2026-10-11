@@ -6,6 +6,7 @@ import {
   shouldNotifyCompletion,
   useCompletionNotifications,
 } from './completionNotifications';
+import { addNotification } from './notificationFeed';
 import { bindSentAttachmentEvents, prepareSentAttachments, projectSentAttachments, pruneSentAttachmentRecords, type SentAttachmentRecord } from './sentAttachments';
 import { configureKanbanSync, syncKanbanTasksFromBackend, type KanbanTaskSchedule } from './kanbanTasks';
 import { t } from '../i18n';
@@ -4629,6 +4630,20 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     setLastError('');
   }, [backendConnections, conversations, workspaces]);
 
+  /** A turn that finished out of sight goes to the notification history. */
+  const recordCompletion = (localId: string, state: { timeline: TimelineEntry[] }) => {
+    const conversation = conversationsRef.current.find((item) => item.id === localId);
+    const workspace = workspacesRef.current.find((item) => item.id === conversation?.workspaceId);
+    addNotification({
+      kind: 'conversation',
+      status: 'success',
+      title: conversation?.title?.trim() || workspace?.name?.trim() || 'TodeX',
+      description: completionNotificationBody(state.timeline),
+      workspaceId: conversation?.workspaceId,
+      conversationId: localId,
+    });
+  };
+
   notifyTurnCompletedRef.current = (localId, state, turnId) => {
     const viewingConversation = activeConversationRef.current === localId
       && document.visibilityState === 'visible'
@@ -4637,9 +4652,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       enabled: completionNotificationsState.completionNotifications,
       supported: completionNotificationsState.completionNotificationsSupported,
       viewingConversation,
-    })) return;
+    })) {
+      if (!viewingConversation) recordCompletion(localId, state);
+      return;
+    }
     const conversation = conversationsRef.current.find((item) => item.id === localId);
     const workspace = workspacesRef.current.find((item) => item.id === conversation?.workspaceId);
+    recordCompletion(localId, state);
     postCompletionNotification({
       title: conversation?.title?.trim() || workspace?.name?.trim() || 'TodeX',
       body: completionNotificationBody(state.timeline),
