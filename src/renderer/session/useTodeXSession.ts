@@ -34,7 +34,7 @@ import {
   useState,
   type SetStateAction,
 } from 'react';
-import type { ConversationReplay, ProviderDescriptor, ProviderKind, ConversationManifest, PromptContentRef, PromptSkillRef, SkillCatalogDescriptor, ProviderModelDescriptor, ProviderCommandDescriptor, ContextCompactionState, SubagentRun, MemoryEntry } from '@todex/protocol/v2';
+import type { ConversationReplay, ProviderDescriptor, ProviderKind, PermissionMode, ConversationManifest, PromptContentRef, PromptSkillRef, SkillCatalogDescriptor, ProviderModelDescriptor, ProviderCommandDescriptor, ContextCompactionState, SubagentRun, MemoryEntry } from '@todex/protocol/v2';
 import { contextCompactionStatus } from '@todex/protocol/v2';
 import { HISTORY_ENCRYPTION_CAPABILITY, normalizeConversationEvent } from '@todex/protocol/v2';
 import { verifyTransportPolicy, type SecureSocket } from '@todex/protocol/secureTransport';
@@ -6481,6 +6481,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const kanbanScheduleSettings = useCallback((
     workspaceId: string,
     conversationId?: string,
+    // Choices made in the schedule dialog; anything unset falls back to the
+    // provider's remembered composer selection.
+    overrides?: { provider?: string; model?: string; permissionMode?: string },
   ): Pick<KanbanTaskSchedule, 'provider' | 'providerProfile' | 'model' | 'reasoningEffort' | 'permissionMode' | 'workMode'> | null => {
     const workspace = workspacesRef.current.find((item) => item.id === workspaceId);
     if (!workspace) return null;
@@ -6498,6 +6501,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       };
     }
     const agent = resolveCreateConversationAgent({
+      requestedProvider: overrides?.provider,
       providers: v2ProvidersRef.current,
       conversations: conversationsRef.current,
       activeConversationId: activeConversationRef.current,
@@ -6505,11 +6509,15 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     });
     if (!agent) return null;
     const backendConnectionId = workspace.backendConnectionId ?? null;
-    const remembered = resolveRememberedProviderSelection(backendConnectionId, agent.provider);
+    const remembered = resolveRememberedProviderSelection(backendConnectionId, agent.provider, overrides?.model);
+    const permissionConfig = v2ProvidersRef.current.find((item) => item.id === agent.provider)?.capabilities.permissionConfig;
     const runModes = rememberedRunModes(
       providerModelPreferencesRef.current[providerModelPreferenceKey(backendConnectionId, agent.provider)],
-      v2ProvidersRef.current.find((item) => item.id === agent.provider)?.capabilities.permissionConfig,
+      permissionConfig,
     );
+    if (overrides?.permissionMode && permissionConfig?.modes?.includes(overrides.permissionMode as PermissionMode)) {
+      runModes.permissionMode = overrides.permissionMode as PermissionMode;
+    }
     return {
       provider: agent.provider,
       providerProfile: agent.providerProfile,

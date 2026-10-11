@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { RiFolder3Line } from '@remixicon/react';
+import { providerDisplayName, type PermissionMode, type ProviderKind } from '@todex/protocol/v2';
 import { ProjectBoard } from '@/components/application/project-board/project-board';
 import { findTaskConversation, type LatestEntries, type WorkspaceTasks } from '@/components/application/project-board/project-board-data';
 import type { TaskBoardHandlers } from '@/components/application/project-board/task-actions';
@@ -9,7 +10,8 @@ import { Select, SelectItem } from '@/components/base/select/select';
 import { Textarea } from '@/components/base/textarea/textarea';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Modal } from '@/components/ui/modal';
-import { conversationDisplayTitle, type ConversationRecord } from '../session/helpers';
+import { ProviderIcon } from '../components/ProviderIcon';
+import { conversationDisplayTitle, modelDisplayLabel, type ConversationRecord } from '../session/helpers';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { useT } from '../i18n';
 import {
@@ -31,6 +33,10 @@ import {
 
 type Props = { session: TodeXSession; onOpenConversation: () => void };
 
+const PERMISSION_MODES: readonly PermissionMode[] = ['ask', 'auto', 'full-access'];
+// Model select key for "let the agent pick", when it lists no models.
+const DEFAULT_MODEL_KEY = '__default__';
+
 /** Arms a task schedule. The time is wall-clock in the backend's zone, which
  * is where it runs; the send settings are snapshotted now, as the backend
  * cannot ask this device for them later. */
@@ -47,6 +53,31 @@ function ScheduleTaskDialog({ session, task, onClose }: {
   const [text, setText] = useState('');
   const [error, setError] = useState('');
   const [openedFor, setOpenedFor] = useState<string | null>(null);
+  // New-conversation send settings, seeded from the agent's remembered choices.
+  const [provider, setProvider] = useState('');
+  const [model, setModel] = useState('');
+  const [permissionMode, setPermissionMode] = useState('');
+
+  const availableProviders = session.v2Providers.filter((item) => item.available);
+  const providerDescriptor = availableProviders.find((item) => item.id === provider);
+  const liveModels = provider ? session.providerModels[provider as ProviderKind] : undefined;
+  const providerModels = liveModels?.length ? liveModels : providerDescriptor?.models ?? [];
+  const modelOptions = model && !providerModels.some((item) => item.id === model)
+    ? [{ id: model }, ...providerModels]
+    : providerModels;
+  const permissionModes = (providerDescriptor?.capabilities.permissionConfig?.modes ?? [])
+    .filter((mode) => PERMISSION_MODES.includes(mode));
+  const permissionLabel = (mode: PermissionMode) => (
+    mode === 'ask' ? t('chat.permissionAsk') : mode === 'auto' ? t('chat.permissionAuto') : t('chat.permissionFullAccess')
+  );
+
+  /** Loads the agent's defaults, keeping explicit choices that still apply. */
+  const applyAgent = (workspaceId: string, overrides?: { provider?: string; model?: string; permissionMode?: string }) => {
+    const settings = session.kanbanScheduleSettings(workspaceId, undefined, overrides);
+    setProvider(settings?.provider ?? '');
+    setModel(settings?.model ?? '');
+    setPermissionMode(settings?.permissionMode ?? '');
+  };
 
   // Sendable targets: linked conversations that exist on the backend.
   const targets = (task ? kanbanTaskConversationIds(task) : [])
@@ -68,6 +99,11 @@ function ScheduleTaskDialog({ session, task, onClose }: {
     setAt(previous?.at ?? (zone ? kanbanBackendLocalTime(zone, Date.now() + 60 * 60_000).slice(0, 14) + '00' : ''));
     setText(previous?.text ?? kanbanTaskDraftText(task));
     setError('');
+    applyAgent(task.workspaceId, previous?.action === 'start' ? {
+      provider: previous.provider,
+      model: previous.model,
+      permissionMode: previous.permissionMode,
+    } : undefined);
   } else if (!task && openedFor !== null) {
     setOpenedFor(null);
   }
@@ -87,7 +123,11 @@ function ScheduleTaskDialog({ session, task, onClose }: {
       setError(t('kanban.scheduleNoConversations'));
       return;
     }
-    const settings = session.kanbanScheduleSettings(task.workspaceId, target?.id);
+    const settings = session.kanbanScheduleSettings(task.workspaceId, target?.id, action === 'start' ? {
+      provider: provider || undefined,
+      model: model || undefined,
+      permissionMode: permissionMode || undefined,
+    } : undefined);
     if (!settings) {
       setError(t('kanban.scheduleNoAgent'));
       return;
@@ -145,7 +185,67 @@ function ScheduleTaskDialog({ session, task, onClose }: {
             </SelectItem>
           ))}
         </Select>
-      ) : null}
+      ) : (
+        <>
+          <Select
+            label={t('kanban.scheduleAgent')}
+            className="w-full"
+            popoverClassName="w-(--trigger-width)"
+            selectedKey={provider || null}
+            isDisabled={availableProviders.length === 0}
+            placeholder={t('kanban.scheduleNoAgent')}
+            onSelectionChange={(key) => {
+              if (task && key && key !== provider) applyAgent(task.workspaceId, { provider: String(key) });
+            }}
+          >
+            {availableProviders.map((item) => (
+              <SelectItem key={item.id} id={item.id} textValue={providerDisplayName(item.id, item.displayName)}>
+                <ProviderIcon provider={item.id} className="size-5 shrink-0" />
+                {providerDisplayName(item.id, item.displayName)}
+              </SelectItem>
+            ))}
+          </Select>
+          <div className="grid grid-cols-2 gap-4">
+            <Select
+              label={t('kanban.scheduleModel')}
+              className="w-full min-w-0"
+              popoverClassName="w-(--trigger-width)"
+              selectedKey={model || DEFAULT_MODEL_KEY}
+              isDisabled={modelOptions.length === 0}
+              onSelectionChange={(key) => {
+                if (task && key && key !== DEFAULT_MODEL_KEY) applyAgent(task.workspaceId, {
+                  provider: provider || undefined,
+                  model: String(key),
+                  permissionMode: permissionMode || undefined,
+                });
+              }}
+            >
+              {modelOptions.length === 0 ? (
+                <SelectItem id={DEFAULT_MODEL_KEY} textValue={t('kanban.scheduleModelDefault')}>{t('kanban.scheduleModelDefault')}</SelectItem>
+              ) : modelOptions.map((item) => (
+                <SelectItem key={item.id} id={item.id} textValue={modelDisplayLabel(item.id, session.modelCatalog)}>
+                  {modelDisplayLabel(item.id, session.modelCatalog)}
+                </SelectItem>
+              ))}
+            </Select>
+            <Select
+              label={t('kanban.schedulePermission')}
+              className="w-full min-w-0"
+              popoverClassName="w-(--trigger-width)"
+              selectedKey={permissionMode || null}
+              isDisabled={permissionModes.length === 0}
+              placeholder={t('chat.permissionUnavailable')}
+              onSelectionChange={(key) => {
+                if (key && permissionModes.includes(key as PermissionMode)) setPermissionMode(String(key));
+              }}
+            >
+              {permissionModes.map((mode) => (
+                <SelectItem key={mode} id={mode} textValue={permissionLabel(mode)}>{permissionLabel(mode)}</SelectItem>
+              ))}
+            </Select>
+          </div>
+        </>
+      )}
       <Input
         label={t('kanban.scheduleAt')}
         name="schedule-at"
