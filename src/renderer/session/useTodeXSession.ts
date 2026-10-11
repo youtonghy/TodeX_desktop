@@ -6483,7 +6483,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     conversationId?: string,
     // Choices made in the schedule dialog; anything unset falls back to the
     // provider's remembered composer selection.
-    overrides?: { provider?: string; model?: string; permissionMode?: string },
+    overrides?: { provider?: string; model?: string; reasoningEffort?: string; permissionMode?: string },
   ): Pick<KanbanTaskSchedule, 'provider' | 'providerProfile' | 'model' | 'reasoningEffort' | 'permissionMode' | 'workMode'> | null => {
     const workspace = workspacesRef.current.find((item) => item.id === workspaceId);
     if (!workspace) return null;
@@ -6509,7 +6509,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     });
     if (!agent) return null;
     const backendConnectionId = workspace.backendConnectionId ?? null;
-    const remembered = resolveRememberedProviderSelection(backendConnectionId, agent.provider, overrides?.model);
+    const remembered = resolveRememberedProviderSelection(backendConnectionId, agent.provider, overrides?.model, overrides?.reasoningEffort);
     const permissionConfig = v2ProvidersRef.current.find((item) => item.id === agent.provider)?.capabilities.permissionConfig;
     const runModes = rememberedRunModes(
       providerModelPreferencesRef.current[providerModelPreferenceKey(backendConnectionId, agent.provider)],

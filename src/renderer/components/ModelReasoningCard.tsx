@@ -52,6 +52,19 @@ const FAMILY_LABELS: Record<string, string> = {
   zhipu: 'Zhipu',
 };
 
+/** Reasoning effort → its color on a model trigger (composer, schedule dialog). */
+export const EFFORT_TEXT: Record<string, string> = {
+  none: 'text-effort-none',
+  minimal: 'text-effort-minimal',
+  low: 'text-effort-low',
+  medium: 'text-effort-medium',
+  high: 'text-effort-high',
+  xhigh: 'text-effort-xhigh',
+  max: 'text-effort-xhigh',
+  ultra: 'text-effort-xhigh',
+  ultracode: 'text-effort-xhigh',
+};
+
 /* The effort slider follows the BoardUI EffortSlider geometry: the 21px thumb
  * travels edge to edge, so stop centers run from half a thumb in on the left
  * to half a thumb in on the right. */

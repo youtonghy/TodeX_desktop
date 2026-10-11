@@ -57,7 +57,7 @@ import { ToolCallCard, type ToolCallState } from '../components/chat/ToolCallCar
 import { activeChatProcessId, buildChatRenderItems, isChatTimelineEntry, isChatToolEntry, latestIncomingEntryIds, sameTimelineEntries, sortChatEntries } from '../components/conversationTimeline';
 import type { ChatRenderItem } from '../components/conversationTimeline';
 import type { BackgroundTask } from '@todex/protocol/conversationRuntime';
-import { ModelReasoningCard } from '../components/ModelReasoningCard';
+import { EFFORT_TEXT, ModelReasoningCard } from '../components/ModelReasoningCard';
 import { ProviderIcon } from '../components/ProviderIcon';
 import type { TodeXSession } from '../session/useTodeXSession';
 import {
@@ -141,19 +141,6 @@ const SUPPORTED_COMPOSER_IMAGE_MIME_TYPES = new Set(['image/png', 'image/jpeg', 
 const ENTRANCE_EASE = [0.25, 0.1, 0.25, 1] as const;
 /** Rows already on screen when a conversation opens stay still; later rows animate. */
 const ENTRANCE_ARM_DELAY_MS = 600;
-
-/** Reasoning effort → its color on the composer's model trigger. */
-const EFFORT_TEXT: Record<string, string> = {
-  none: 'text-effort-none',
-  minimal: 'text-effort-minimal',
-  low: 'text-effort-low',
-  medium: 'text-effort-medium',
-  high: 'text-effort-high',
-  xhigh: 'text-effort-xhigh',
-  max: 'text-effort-xhigh',
-  ultra: 'text-effort-xhigh',
-  ultracode: 'text-effort-xhigh',
-};
 
 const OPTION_ICON = 'size-5 shrink-0 text-foreground-icon-secondary';
 

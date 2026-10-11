@@ -1,17 +1,24 @@
-import { useMemo, useState } from 'react';
-import { RiFolder3Line } from '@remixicon/react';
+import { useId, useMemo, useState } from 'react';
+import { RiCpuLine, RiFolder3Line } from '@remixicon/react';
+import { Button as AriaButton, Dialog as AriaDialog, DialogTrigger as AriaDialogTrigger, Popover as AriaPopover } from 'react-aria-components';
+import { normalizeReasoningEffort } from '@todex/protocol/todex';
 import { providerDisplayName, type PermissionMode, type ProviderKind } from '@todex/protocol/v2';
 import { ProjectBoard } from '@/components/application/project-board/project-board';
 import { findTaskConversation, type LatestEntries, type WorkspaceTasks } from '@/components/application/project-board/project-board-data';
 import type { TaskBoardHandlers } from '@/components/application/project-board/task-actions';
 import { Button } from '@/components/base/buttons/button';
 import { Input } from '@/components/base/input/input';
+import { Label } from '@/components/base/input/label';
 import { Select, SelectItem } from '@/components/base/select/select';
 import { Textarea } from '@/components/base/textarea/textarea';
+import { COMPOSER_POPOVER } from '@/components/chat/ComposerControls';
+import { ChevronDownSmall } from '@/components/foundations/icons/chevrons';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Modal } from '@/components/ui/modal';
+import { EFFORT_TEXT, ModelReasoningCard } from '../components/ModelReasoningCard';
 import { ProviderIcon } from '../components/ProviderIcon';
-import { conversationDisplayTitle, modelDisplayLabel, type ConversationRecord } from '../session/helpers';
+import { cx } from '@/utils/cx';
+import { conversationDisplayTitle, modelDisplayLabel, reasoningEffortLabel, type ConversationRecord } from '../session/helpers';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { useT } from '../i18n';
 import {
@@ -34,8 +41,6 @@ import {
 type Props = { session: TodeXSession; onOpenConversation: () => void };
 
 const PERMISSION_MODES: readonly PermissionMode[] = ['ask', 'auto', 'full-access'];
-// Model select key for "let the agent pick", when it lists no models.
-const DEFAULT_MODEL_KEY = '__default__';
 
 /** Arms a task schedule. The time is wall-clock in the backend's zone, which
  * is where it runs; the send settings are snapshotted now, as the backend
@@ -56,15 +61,22 @@ function ScheduleTaskDialog({ session, task, onClose }: {
   // New-conversation send settings, seeded from the agent's remembered choices.
   const [provider, setProvider] = useState('');
   const [model, setModel] = useState('');
+  const [reasoningEffort, setReasoningEffort] = useState<string | null>(null);
+  const modelLabelId = useId();
   const [permissionMode, setPermissionMode] = useState('');
 
   const availableProviders = session.v2Providers.filter((item) => item.available);
   const providerDescriptor = availableProviders.find((item) => item.id === provider);
   const liveModels = provider ? session.providerModels[provider as ProviderKind] : undefined;
   const providerModels = liveModels?.length ? liveModels : providerDescriptor?.models ?? [];
-  const modelOptions = model && !providerModels.some((item) => item.id === model)
-    ? [{ id: model }, ...providerModels]
-    : providerModels;
+  const modelDescriptor = providerModels.find((item) => item.id === model);
+  const supportedEfforts = modelDescriptor?.supportedReasoningEfforts ?? [];
+  // Unset effort lets the agent apply its own default, as in the composer.
+  const displayedEffort = reasoningEffort
+    ?? modelDescriptor?.defaultReasoningEffort
+    ?? (supportedEfforts.includes('medium') ? 'medium' : supportedEfforts[0])
+    ?? null;
+  const effortLevel = normalizeReasoningEffort(displayedEffort) ?? undefined;
   const permissionModes = (providerDescriptor?.capabilities.permissionConfig?.modes ?? [])
     .filter((mode) => PERMISSION_MODES.includes(mode));
   const permissionLabel = (mode: PermissionMode) => (
@@ -72,10 +84,11 @@ function ScheduleTaskDialog({ session, task, onClose }: {
   );
 
   /** Loads the agent's defaults, keeping explicit choices that still apply. */
-  const applyAgent = (workspaceId: string, overrides?: { provider?: string; model?: string; permissionMode?: string }) => {
+  const applyAgent = (workspaceId: string, overrides?: { provider?: string; model?: string; reasoningEffort?: string; permissionMode?: string }) => {
     const settings = session.kanbanScheduleSettings(workspaceId, undefined, overrides);
     setProvider(settings?.provider ?? '');
     setModel(settings?.model ?? '');
+    setReasoningEffort(settings?.reasoningEffort ?? null);
     setPermissionMode(settings?.permissionMode ?? '');
   };
 
@@ -102,6 +115,7 @@ function ScheduleTaskDialog({ session, task, onClose }: {
     applyAgent(task.workspaceId, previous?.action === 'start' ? {
       provider: previous.provider,
       model: previous.model,
+      reasoningEffort: previous.reasoningEffort,
       permissionMode: previous.permissionMode,
     } : undefined);
   } else if (!task && openedFor !== null) {
@@ -126,6 +140,7 @@ function ScheduleTaskDialog({ session, task, onClose }: {
     const settings = session.kanbanScheduleSettings(task.workspaceId, target?.id, action === 'start' ? {
       provider: provider || undefined,
       model: model || undefined,
+      reasoningEffort: reasoningEffort ?? undefined,
       permissionMode: permissionMode || undefined,
     } : undefined);
     if (!settings) {
@@ -206,28 +221,55 @@ function ScheduleTaskDialog({ session, task, onClose }: {
             ))}
           </Select>
           <div className="grid grid-cols-2 gap-4">
-            <Select
-              label={t('kanban.scheduleModel')}
-              className="w-full min-w-0"
-              popoverClassName="w-(--trigger-width)"
-              selectedKey={model || DEFAULT_MODEL_KEY}
-              isDisabled={modelOptions.length === 0}
-              onSelectionChange={(key) => {
-                if (task && key && key !== DEFAULT_MODEL_KEY) applyAgent(task.workspaceId, {
-                  provider: provider || undefined,
-                  model: String(key),
-                  permissionMode: permissionMode || undefined,
-                });
-              }}
-            >
-              {modelOptions.length === 0 ? (
-                <SelectItem id={DEFAULT_MODEL_KEY} textValue={t('kanban.scheduleModelDefault')}>{t('kanban.scheduleModelDefault')}</SelectItem>
-              ) : modelOptions.map((item) => (
-                <SelectItem key={item.id} id={item.id} textValue={modelDisplayLabel(item.id, session.modelCatalog)}>
-                  {modelDisplayLabel(item.id, session.modelCatalog)}
-                </SelectItem>
-              ))}
-            </Select>
+            <div className="flex min-w-0 flex-col gap-1">
+              <Label id={modelLabelId}>{t('kanban.scheduleModel')}</Label>
+              <AriaDialogTrigger>
+                <AriaButton
+                  aria-labelledby={modelLabelId}
+                  isDisabled={providerModels.length === 0}
+                  className={cx(
+                    'group flex w-full cursor-pointer items-center justify-between gap-1.5 rounded-2lg px-2.5 py-2',
+                    'border border-border-button-default bg-background-primary-default text-body-medium text-text-primary shadow-xs',
+                    'transition-[background-color,border-color] duration-200 ease',
+                    'hover:border-border-button-hover hover:bg-background-primary-hover',
+                    'outline-none focus-visible:ring-2 focus-visible:ring-border-focus-ring focus-visible:ring-offset-2',
+                    'disabled:cursor-not-allowed disabled:bg-background-primary-disabled disabled:text-text-tertiary disabled:shadow-none',
+                  )}
+                >
+                  <span className="flex min-w-0 items-center gap-1.5">
+                    <RiCpuLine aria-hidden className={cx('size-4 shrink-0', effortLevel ? EFFORT_TEXT[effortLevel] : 'text-foreground-icon-secondary')} />
+                    <span className="truncate">{model ? modelDisplayLabel(model, session.modelCatalog) : t('kanban.scheduleModelDefault')}</span>
+                    {displayedEffort ? (
+                      <span className={cx('shrink-0 text-caption-1-semibold', effortLevel ? EFFORT_TEXT[effortLevel] : 'text-text-accent')}>
+                        · {reasoningEffortLabel(displayedEffort)}
+                      </span>
+                    ) : null}
+                  </span>
+                  <ChevronDownSmall className="size-4 shrink-0 text-text-secondary transition-transform duration-200 ease group-aria-expanded:rotate-180" />
+                </AriaButton>
+                <AriaPopover placement="bottom start" offset={4} className={cx(COMPOSER_POPOVER, 'w-[min(20.5rem,calc(100vw-2rem))] overflow-hidden')}>
+                  <AriaDialog aria-label={t('chat.modelPopover')} className="outline-none">
+                    <ModelReasoningCard
+                      currentModel={model}
+                      currentModelDescriptor={modelDescriptor}
+                      modelCatalog={session.modelCatalog}
+                      providerModels={providerModels}
+                      supportedReasoningEfforts={supportedEfforts}
+                      currentReasoningEffort={reasoningEffort}
+                      displayedReasoningEffort={displayedEffort}
+                      onSelectModel={(modelId) => {
+                        if (task) applyAgent(task.workspaceId, {
+                          provider: provider || undefined,
+                          model: modelId,
+                          permissionMode: permissionMode || undefined,
+                        });
+                      }}
+                      onSelectReasoningEffort={setReasoningEffort}
+                    />
+                  </AriaDialog>
+                </AriaPopover>
+              </AriaDialogTrigger>
+            </div>
             <Select
               label={t('kanban.schedulePermission')}
               className="w-full min-w-0"
