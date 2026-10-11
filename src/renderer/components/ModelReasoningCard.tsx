@@ -5,7 +5,8 @@ import {
   Button as AriaButton,
   Menu as AriaMenu,
   MenuItem as AriaMenuItem,
-  MenuTrigger as AriaMenuTrigger,
+  Dialog as AriaDialog,
+  DialogTrigger as AriaDialogTrigger,
   Popover as AriaPopover,
   useFilter,
   type Key,
@@ -152,10 +153,14 @@ export function ModelReasoningCard({
   const [activeFamily, setActiveFamily] = useState<string | null>(null);
   const { contains } = useFilter({ sensitivity: 'base' });
 
-  // Focus the search input once the popover content is mounted so typing
-  // filters immediately.
+  // Focus the search input once the picker's focus scope is in place, so
+  // typing filters immediately. Focusing it any earlier (autoFocus during the
+  // commit) looks like focus escaping the outer panel, whose focus trap pulls
+  // it back and ends up closing both popovers.
   useEffect(() => {
-    if (isPickerOpen) searchInputRef.current?.focus();
+    if (!isPickerOpen) return;
+    const frame = requestAnimationFrame(() => searchInputRef.current?.focus());
+    return () => cancelAnimationFrame(frame);
   }, [isPickerOpen]);
 
   // Models tagged with a `family` show in a two-pane layout: the left pane
@@ -325,7 +330,12 @@ export function ModelReasoningCard({
   // The fill reaches the thumb's trailing edge, so it lands flush against it.
   const fillWidthStyle = totalSteps <= 1 ? '100%' : `calc(${fraction} * (100% - ${THUMB_WIDTH}px) + ${THUMB_WIDTH}px)`;
 
-  const selectModel = (key: Key) => onSelectModel(String(key));
+  // The picker is a dialog (search plus menus), so picking closes it here.
+  const pickModel = (id: string) => {
+    onSelectModel(id);
+    setPickerOpen(false);
+  };
+  const selectModel = (key: Key) => pickModel(String(key));
   const modelRow = (item: ProviderModelDescriptor) => (
     <ModelMenuItem key={item.id} id={item.id} textValue={item.displayName}>
       {item.displayName}
@@ -351,8 +361,10 @@ export function ModelReasoningCard({
           />
         ) : null}
 
-        {/* Model menu trigger */}
-        <AriaMenuTrigger isOpen={isPickerOpen} onOpenChange={handlePickerOpenChange}>
+        {/* Model picker: a nested dialog popover (search field plus menus).
+            A MenuTrigger here opened on pointer down and fought the outer
+            panel's focus scope, so the release closed both popovers. */}
+        <AriaDialogTrigger isOpen={isPickerOpen} onOpenChange={handlePickerOpenChange}>
           <AriaButton
             aria-label="选择模型"
             className={cx(
@@ -389,6 +401,7 @@ export function ModelReasoningCard({
             offset={8}
             className={cx(MENU_POPOVER_SURFACE, 'flex w-96 min-w-[min(13rem,calc(100vw-2rem))] flex-col overflow-hidden p-1.5')}
           >
+            <AriaDialog aria-label="选择模型" className="flex min-h-0 flex-col outline-none">
             <TextField
               aria-label="搜索模型"
               size="small"
@@ -400,7 +413,6 @@ export function ModelReasoningCard({
               <div className="relative w-full">
                 <InputBase
                   ref={searchInputRef}
-                  autoFocus
                   leadingIcon={RiSearchLine}
                   placeholder="搜索模型…"
                   fieldClassName={cx(modelSearch && 'pe-8')}
@@ -474,7 +486,7 @@ export function ModelReasoningCard({
                         onAction={(key) => {
                           const id = String(key);
                           if (id.startsWith('family:')) setActiveFamily(id.slice(7));
-                          else onSelectModel(id);
+                          else pickModel(id);
                         }}
                       >
                         {ungroupedModels.map(modelRow)}
@@ -533,8 +545,9 @@ export function ModelReasoningCard({
                 )
               )}
             </div>
+            </AriaDialog>
           </AriaPopover>
-        </AriaMenuTrigger>
+        </AriaDialogTrigger>
       </div>
 
       {/* Bottom row: stepped effort slider (BoardUI EffortSlider recipe) */}
