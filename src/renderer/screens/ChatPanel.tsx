@@ -27,7 +27,9 @@ import { Focusable, ListBox as AriaListBox, ListBoxItem as AriaListBoxItem, type
 import { motion, useReducedMotion } from 'motion/react';
 import { ShimmerText } from '@/components/application/agent-log/agent-log';
 import { ComposerLoader } from '@/components/application/composer-loader/composer-loader';
+import { AgentLimitsCard } from '@/components/application/agent-limits/agent-limits-card';
 import { Button } from '@/components/base/buttons/button';
+import { Dropdown, DropdownPopover, DropdownTrigger } from '@/components/base/dropdown/dropdown';
 import { Tooltip, TooltipTrigger } from '@/components/base/tooltip/tooltip';
 import { Alert } from '@/components/ui/alert';
 import { EmptyState } from '@/components/ui/empty-state';
@@ -37,7 +39,7 @@ import { Spinner } from '@/components/ui/spinner';
 import { toast } from '@/components/ui/toast';
 import { cx } from '@/utils/cx';
 import { baseMarkdownComponents } from '../components/markdownComponents';
-import { providerDisplayName, type ProviderKind, type PermissionMode, type SkillCatalogDescriptor } from '@todex/protocol/v2';
+import { providerDisplayName, type ProviderKind, type ProviderQuotaSnapshot, type PermissionMode, type SkillCatalogDescriptor } from '@todex/protocol/v2';
 import { ConversationPermissionActions, ConversationPromptInput, ConversationRunStatus, PermissionRequestCard, TurnUsageSummary } from '../components/ConversationRunStatus';
 import { ReferenceComposer, type ReferenceComposerHandle } from '../components/ReferenceComposer';
 import { ComposerAttachmentPreview } from '../components/ComposerAttachmentPreview';
@@ -89,6 +91,8 @@ import {
   type TimelineEntry,
 } from '../session/helpers';
 import { selectionInside } from '../lib/selection';
+import { quotaLimits, quotaMessage } from '../session/quota';
+import { backendApi } from '../session/helpers';
 import { findCapabilityHashTrigger, insertCapabilityReference, normalizeReasoningEffort } from '@todex/protocol/todex';
 import { buildCapabilitySuggestions, capabilityCatalogsPending, type CapabilitySuggestion } from '@todex/protocol/capabilityCatalog';
 import {
@@ -321,8 +325,17 @@ function isChatReminderEntry(entry: { subtitle: string; title: string }): boolea
     || entry.subtitle.trim() === 'codex.local.start';
 }
 
-/** Context meter in the composer-panel recipe: a 16px ring, details in a tooltip. */
+// Plan quota per provider, shared by every composer for a minute so opening
+// the context popover does not refetch on each click.
+const QUOTA_CACHE_MS = 60_000;
+let quotaCache: { at: number; providers: Record<string, ProviderQuotaSnapshot> } | null = null;
+
+/** Context meter in the composer-panel recipe: a 16px ring that opens the
+ * BoardUI agent-limits card with the conversation's context window and the
+ * current agent's plan limits. */
 function ContextUsageIndicator({
+  session,
+  provider,
   usedTokens,
   contextWindow,
   inputTokens,
@@ -330,6 +343,8 @@ function ContextUsageIndicator({
   cachedInputTokens,
   cacheWriteTokens,
 }: {
+  session: TodeXSession;
+  provider?: string;
   usedTokens: number;
   contextWindow?: number;
   inputTokens: number;
@@ -338,47 +353,80 @@ function ContextUsageIndicator({
   cacheWriteTokens: number;
 }) {
   const t = useT();
+  const [open, setOpen] = useState(false);
+  const [quota, setQuota] = useState<ProviderQuotaSnapshot | null | undefined>(undefined);
   const percent = contextWindow ? Math.min(100, Math.max(0, usedTokens / contextWindow * 100)) : null;
   const progress = percent ?? 0;
   const circumference = 2 * Math.PI * 6;
+
+  useEffect(() => {
+    if (!open || !provider) return;
+    let cancelled = false;
+    const pick = (providers: Record<string, ProviderQuotaSnapshot>) => { if (!cancelled) setQuota(providers[provider] ?? null); };
+    if (quotaCache && Date.now() - quotaCache.at < QUOTA_CACHE_MS) {
+      pick(quotaCache.providers);
+    } else {
+      backendApi(session.settings).getProviderQuotas()
+        .then((response) => {
+          quotaCache = { at: Date.now(), providers: response.providers ?? {} };
+          pick(quotaCache.providers);
+        })
+        .catch(() => { if (!cancelled) setQuota(null); });
+    }
+    return () => { cancelled = true; };
+  }, [open, provider, session.settings.serverUrl, session.settings.deviceSecret]);
+
+  const descriptor = session.v2Providers.find((item) => item.id === provider);
   return (
-    <TooltipTrigger delay={100}>
-      <Focusable>
-        <button
-          type="button"
-          aria-label={percent === null ? t('chat.contextPending') : t('chat.contextUsed', { percent: percent.toFixed(1) })}
-          className="flex size-8 shrink-0 cursor-help items-center justify-center rounded-full outline-none transition-colors duration-150 ease hover:bg-background-primary-hover focus-visible:ring-2 focus-visible:ring-border-focus-ring"
-        >
-          <svg aria-hidden width="16" height="16" viewBox="0 0 16 16" className="-rotate-90">
-            <circle cx="8" cy="8" r="6" fill="none" strokeWidth="2.5" className="stroke-border-button-default" />
-            {progress > 0 ? (
-              <circle
-                cx="8"
-                cy="8"
-                r="6"
-                fill="none"
-                strokeWidth="2.5"
-                strokeLinecap="round"
-                strokeDasharray={`${(progress / 100) * circumference} ${circumference}`}
-                className="stroke-foreground-icon-secondary"
-              />
-            ) : null}
-          </svg>
-        </button>
-      </Focusable>
-      <Tooltip placement="top">
-        <div className="flex min-w-48 flex-col gap-1 text-start">
-          <p className="text-caption-1-semibold text-text-primary">{t('chat.contextTitle')}</p>
-          {percent === null ? <p className="text-caption-1-regular text-text-secondary">{t('chat.contextWaiting')}</p> : (
+    <Dropdown isOpen={open} onOpenChange={setOpen}>
+      <DropdownTrigger
+        aria-label={percent === null ? t('chat.contextPending') : t('chat.contextUsed', { percent: percent.toFixed(1) })}
+        className="flex size-8 shrink-0 items-center justify-center rounded-full transition-colors duration-150 ease hover:bg-background-primary-hover"
+      >
+        <svg aria-hidden width="16" height="16" viewBox="0 0 16 16" className="-rotate-90">
+          <circle cx="8" cy="8" r="6" fill="none" strokeWidth="2.5" className="stroke-border-button-default" />
+          {progress > 0 ? (
+            <circle
+              cx="8"
+              cy="8"
+              r="6"
+              fill="none"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeDasharray={`${(progress / 100) * circumference} ${circumference}`}
+              className="stroke-foreground-icon-secondary"
+            />
+          ) : null}
+        </svg>
+      </DropdownTrigger>
+      <DropdownPopover aria-label={t('chat.contextTitle')} placement="top end" offset={8} className="w-[360px] p-1.5">
+        <AgentLimitsCard
+          title={(
             <>
-              <p className="text-caption-1-regular text-text-primary">{formatTokenCount(usedTokens)} / {formatTokenCount(contextWindow!)} tokens · {percent.toFixed(1)}%</p>
-              <p className="text-caption-1-regular text-text-secondary">{t('chat.tokensInOut', { input: formatTokenCount(inputTokens), output: formatTokenCount(outputTokens) })}</p>
-              <p className="text-caption-1-regular text-text-secondary">{t('chat.tokensCache', { read: formatTokenCount(cachedInputTokens), write: formatTokenCount(cacheWriteTokens) })}</p>
+              {provider ? <ProviderIcon provider={provider} className="size-4" /> : null}
+              <span className="truncate text-body-medium text-text-primary">{descriptor?.displayName ?? (provider ? providerDisplayName(provider) : t('chat.contextTitle'))}</span>
+              {percent === null ? <span className="ms-auto shrink-0 text-caption-1-regular text-text-tertiary">{t('chat.contextWaiting')}</span> : null}
             </>
           )}
-        </div>
-      </Tooltip>
-    </TooltipTrigger>
+          context={contextWindow ? {
+            max: contextWindow,
+            segments: [
+              { label: t('usage.quotaContextUsed'), tokens: usedTokens },
+              // Turn token counters, listed for reference but not part of the window.
+              { label: t('usage.inputLabel'), tokens: inputTokens, deferred: true },
+              { label: t('usage.outputLabel'), tokens: outputTokens, deferred: true },
+              { label: t('usage.cacheReadLabel'), tokens: cachedInputTokens, deferred: true },
+              { label: t('usage.cacheWriteLabel'), tokens: cacheWriteTokens, deferred: true },
+            ],
+          } : undefined}
+          defaultExpanded
+          plan={quota?.planType ?? undefined}
+          limits={quota ? quotaLimits(quota) : []}
+          emptyMessage={quota === undefined ? t('usage.quotaLoading') : quota ? quotaMessage(quota) : t('usage.quotaUnsupported')}
+          labels={{ context: t('chat.contextTitle'), limits: t('usage.quotaPlanLimits'), free: t('usage.quotaContextFree') }}
+        />
+      </DropdownPopover>
+    </Dropdown>
   );
 }
 
@@ -1915,6 +1963,8 @@ export function ChatPanel({ session }: Props) {
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
                     <ContextUsageIndicator
+                      session={session}
+                      provider={conversation.provider}
                       usedTokens={contextUsage?.usedTokens ?? 0}
                       contextWindow={currentContextWindow}
                       inputTokens={contextUsage?.inputTokens ?? 0}

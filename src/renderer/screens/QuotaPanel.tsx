@@ -2,14 +2,14 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { RiRefreshLine, RiVipCrownLine } from '@remixicon/react';
 import { Button } from '@/components/base/buttons/button';
 import { EmptyState } from '@/components/ui/empty-state';
-import { AgentLimitsCard, type AgentLimitsCardProps, type UsageLimit } from '@/components/application/agent-limits/agent-limits-card';
+import { AgentLimitsCard, type AgentLimitsCardProps } from '@/components/application/agent-limits/agent-limits-card';
 import { SpinnerIcon } from '@/components/ui/spinner';
-import type { ProviderQuotaSnapshot, QuotaWindow } from '@todex/protocol/v2';
+import type { ProviderQuotaSnapshot } from '@todex/protocol/v2';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { ProviderIcon } from '../components/ProviderIcon';
 import { getLocale, t, useT } from '../i18n';
-import type { MessageKey } from '../i18n';
 import { backendApi } from '../session/helpers';
+import { quotaLimits, quotaMessage } from '../session/quota';
 
 type Props = {
   session: TodeXSession;
@@ -24,44 +24,6 @@ type Props = {
 const QUOTA_REFRESH_MS = 60_000;
 const QUOTA_PROVIDER_ORDER = ['codex', 'claude-code', 'antigravity'];
 const QUOTA_HIDDEN_PROVIDERS = new Set(['devin']);
-const QUOTA_WINDOW_KEYS: Record<string, MessageKey> = {
-  primary: 'usage.quotaWindow.primary',
-  secondary: 'usage.quotaWindow.secondary',
-  five_hour: 'usage.quotaWindow.five_hour',
-  seven_day: 'usage.quotaWindow.seven_day',
-  'gemini-weekly': 'usage.quotaWindow.gemini_weekly',
-  'gemini-5h': 'usage.quotaWindow.gemini_5h',
-  '3p-weekly': 'usage.quotaWindow.third_party_weekly',
-  '3p-5h': 'usage.quotaWindow.third_party_5h',
-};
-
-function quotaWindowLabel(window: QuotaWindow): string {
-  const key = QUOTA_WINDOW_KEYS[window.id];
-  if (key) return t(key);
-  return window.id;
-}
-
-function formatQuotaTime(unixSeconds: number): string {
-  return new Date(unixSeconds * 1000).toLocaleString(getLocale(), {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
-
-/** Quota window as an agent-limits plan row; the bar turns amber at 75% and red at 90%. */
-function quotaLimit(window: QuotaWindow): UsageLimit {
-  const percent = typeof window.usedPercent === 'number' ? Math.min(100, Math.max(0, window.usedPercent)) : null;
-  return {
-    label: quotaWindowLabel(window),
-    used: (percent ?? 0) / 100,
-    resets: window.resetsAt ? t('usage.quotaResets', { time: formatQuotaTime(window.resetsAt) }) : '',
-    valueLabel: percent === null ? '—' : undefined,
-    color: percent !== null && percent >= 90 ? 'var(--color-foreground-icon-error)' : percent !== null && percent >= 75 ? 'var(--color-chart-8)' : undefined,
-  };
-}
-
 /** One provider on the BoardUI agent-limits card: its plan windows, plus the
  * current conversation's context window when that conversation runs on it. */
 function QuotaCard({ snapshot, displayName, context }: {
@@ -69,15 +31,8 @@ function QuotaCard({ snapshot, displayName, context }: {
   displayName: string;
   context?: AgentLimitsCardProps['context'];
 }) {
-  const windows = (snapshot.windows ?? []).filter((window) => window && typeof window.id === 'string');
   const fetchedAt = typeof snapshot.fetchedAt === 'number' ? new Date(snapshot.fetchedAt).toLocaleTimeString(getLocale(), { hour: '2-digit', minute: '2-digit' }) : null;
-  const message = snapshot.state === 'ok'
-    ? t('usage.quotaNoWindows')
-    : snapshot.state === 'unsupported'
-      ? t('usage.quotaUnsupported')
-      : snapshot.state === 'idle'
-        ? t('usage.quotaIdle')
-        : t('usage.quotaError', { reason: snapshot.reason ?? '—' });
+  const message = quotaMessage(snapshot);
   return (
     <AgentLimitsCard
       title={(
@@ -89,7 +44,7 @@ function QuotaCard({ snapshot, displayName, context }: {
       )}
       context={context}
       plan={snapshot.planType ?? undefined}
-      limits={snapshot.state === 'ok' ? windows.map(quotaLimit) : []}
+      limits={quotaLimits(snapshot)}
       emptyMessage={message}
       labels={{ context: t('usage.quotaContext'), limits: t('usage.quotaPlanLimits'), free: t('usage.quotaContextFree') }}
     />
