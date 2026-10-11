@@ -24,6 +24,30 @@ const journals = new Map<string, Journal>(
 );
 let workspaces = [...fixtures.demoWorkspaces];
 let kanbanTasks = [...fixtures.demoKanbanTasks];
+let cleanupPolicy = { enabled: false, maxAgeDays: null as number | null, maxTotalBytes: null as number | null };
+
+/** Stable fake size per conversation: events plus an id-derived base. */
+function demoConversationBytes(journal: Journal): number {
+  const seed = [...journal.manifest.id].reduce((sum, char) => sum + char.charCodeAt(0), 0);
+  return 40_000 + (seed % 97) * 23_000 + journal.events.length * 1_800;
+}
+
+function demoCleanupPolicy() {
+  return { policy: cleanupPolicy, lastRun: null, nextRunAt: cleanupPolicy.enabled ? new Date(Date.now() + 3_600_000).toISOString() : null };
+}
+
+function demoDelete(ids: string[]) {
+  const deleted: string[] = [];
+  let freedBytes = 0;
+  for (const id of ids) {
+    const journal = journals.get(id);
+    if (!journal) continue;
+    freedBytes += demoConversationBytes(journal);
+    journals.delete(id);
+    deleted.push(id);
+  }
+  return { deleted, skipped: [], freedBytes };
+}
 let agentDesktop = { ...fixtures.demoAgentDesktop };
 const sockets = new Set<DemoSocket>();
 
@@ -117,6 +141,12 @@ function route(request: SecureRequest): SecureResponse {
         return json({ conversations: [...journals.values()].map((journal) => journal.manifest) });
       case '/v2/kanban/tasks':
         return json({ tasks: kanbanTasks });
+      case '/v2/history/storage': {
+        const conversations = [...journals.values()].map((journal) => ({ ...journal.manifest, bytes: demoConversationBytes(journal) }));
+        return json({ totalBytes: conversations.reduce((sum, entry) => sum + entry.bytes, 0), count: conversations.length, measuredAt: now, conversations });
+      }
+      case '/v2/history/cleanup-policy':
+        return json(demoCleanupPolicy());
       case '/v2/agent-desktop':
         return json(agentDesktop);
       case '/v2/agent-browser/profiles':
@@ -155,6 +185,23 @@ function route(request: SecureRequest): SecureResponse {
   if (path === '/v2/kanban/tasks' && method === 'PUT') {
     if (Array.isArray(body.tasks)) kanbanTasks = body.tasks as typeof kanbanTasks;
     return json({ tasks: kanbanTasks });
+  }
+  if (path === '/v2/history/cleanup' && method === 'POST') {
+    return json(demoDelete(Array.isArray(body.conversationIds) ? body.conversationIds.map(String) : []));
+  }
+  if (path === '/v2/history/cleanup-policy' && method === 'PUT') {
+    cleanupPolicy = {
+      enabled: body.enabled === true,
+      maxAgeDays: typeof body.maxAgeDays === 'number' ? body.maxAgeDays : null,
+      maxTotalBytes: typeof body.maxTotalBytes === 'number' ? body.maxTotalBytes : null,
+    };
+    return json(demoCleanupPolicy());
+  }
+  if (path === '/v2/history/cleanup-policy/run' && method === 'POST') {
+    const cutoff = cleanupPolicy.maxAgeDays == null ? null : Date.now() - cleanupPolicy.maxAgeDays * 86_400_000;
+    const expired = [...journals.values()].filter((journal) => cutoff != null && Date.parse(journal.manifest.updatedAt) < cutoff);
+    const result = demoDelete(expired.map((journal) => journal.manifest.id));
+    return json({ ...result, lastRun: { at: now, trigger: 'manual', deleted: result.deleted.length, freedBytes: result.freedBytes, error: null } });
   }
   if (path === '/v2/conversations' && method === 'POST') {
     const id = crypto.randomUUID();

@@ -7241,6 +7241,38 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     await Promise.all([...new Set([provider, ...affected])].map((kind) => refreshCapabilityCatalog(kind)));
   }, [activeWorkspace?.path, capabilityCatalogs, refreshCapabilityCatalog, settings.deviceSecret, settings.defaultWorkspacePath, settings.encryptionProtocol, settings.encryptionPublicKey, settings.transportVerified, settings.serverUrl]);
 
+  /** Per-conversation disk usage on the active backend, titles decrypted. */
+  const getHistoryStorage = useCallback(async () => {
+    const response = await backendApi(settings).getHistoryStorage();
+    const backendId = activeBackendConnectionIdRef.current;
+    return { ...response, conversations: withDecryptedTitles(backendId, response.conversations) as typeof response.conversations };
+  }, [settings.deviceSecret, settings.encryptionProtocol, settings.encryptionPublicKey, settings.transportVerified, settings.serverUrl]);
+
+  /** Drops local records of conversations the backend already deleted. */
+  const forgetDeletedConversations = useCallback((v2ConversationIds: string[]) => {
+    const deleted = new Set(v2ConversationIds);
+    if (deleted.size === 0) return;
+    for (const id of deleted) unsubscribeV2Conversation(id);
+    const removed = conversationsRef.current.filter((item) => item.v2ConversationId && deleted.has(item.v2ConversationId));
+    const removedIds = new Set(removed.map((item) => item.id));
+    if (removedIds.has(activeConversationRef.current)) {
+      const active = removed.find((item) => item.id === activeConversationRef.current);
+      const nextActive = conversationsRef.current.find(
+        (item) => item.workspaceId === active?.workspaceId && !removedIds.has(item.id) && item.archived !== true,
+      );
+      setActiveConversationId(nextActive?.id ?? '');
+    }
+    setConversations((current) => current.filter((item) => !removedIds.has(item.id)));
+  }, [unsubscribeV2Conversation]);
+
+  /** Deletes backend conversations for good (unlike removeConversation,
+   * which archives) and drops their local records right away. */
+  const purgeConversations = useCallback(async (v2ConversationIds: string[]) => {
+    const result = await backendApi(settings).cleanupConversations(v2ConversationIds);
+    forgetDeletedConversations(result.deleted);
+    return result;
+  }, [forgetDeletedConversations, settings.deviceSecret, settings.encryptionProtocol, settings.encryptionPublicKey, settings.transportVerified, settings.serverUrl]);
+
   const refreshMcpServer = useCallback((conversationId: string, resourceId: string) => {
     const conversation = conversationsRef.current.find((item) => item.id === conversationId) ?? null;
     const v2Id = conversation?.v2ConversationId;
@@ -8868,6 +8900,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     renameConversation,
     forkConversation,
     removeConversation,
+    purgeConversations,
+    forgetDeletedConversations,
+    getHistoryStorage,
     setConversationLabelColor,
     requestNativeThreadList,
     submitChat,

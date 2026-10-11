@@ -1,4 +1,4 @@
-import { RiPushpin2Fill, RiLockLine, RiAddLine, RiArrowRightSLine, RiCheckLine, RiFolderReduceLine, RiFoldersLine, RiFolderTransferLine, RiPencilLine, RiEdit2Line, RiErrorWarningLine, RiFolder3Line, RiFolderOpenLine, RiGitBranchLine, RiDeleteBinLine, RiArrowDownSLine, RiBarChartBoxLine, RiBookOpenLine, RiInformationLine, RiKanbanView2, RiPaletteLine, RiPriceTag3Line, RiPuzzle2Line, RiSettings3Line, RiTerminalBoxLine, RiTerminalLine, RiTimeLine, RiUserSettingsLine, RiVipCrownLine } from '@remixicon/react';
+import { RiPushpin2Fill, RiLockLine, RiAddLine, RiArrowRightSLine, RiCheckLine, RiFolderReduceLine, RiFoldersLine, RiFolderTransferLine, RiPencilLine, RiEdit2Line, RiErrorWarningLine, RiFolder3Line, RiFolderOpenLine, RiGitBranchLine, RiDeleteBinLine, RiArrowDownSLine, RiBarChartBoxLine, RiBookOpenLine, RiBrush3Line, RiInformationLine, RiKanbanView2, RiPaletteLine, RiPriceTag3Line, RiPuzzle2Line, RiSettings3Line, RiTerminalBoxLine, RiTerminalLine, RiTimeLine, RiUserSettingsLine, RiVipCrownLine } from '@remixicon/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { MouseEvent, ReactNode } from 'react';
 import {
@@ -68,6 +68,7 @@ type Props = {
   onOpenCapabilities: () => void;
   onOpenCliManager: () => void;
   onOpenAgentProviders: () => void;
+  onOpenCleanup: () => void;
   onOpenUsage: () => void;
   onOpenQuota: () => void;
   onOpenAbout: () => void;
@@ -314,6 +315,7 @@ export function AppSidebar({
   onOpenCapabilities,
   onOpenCliManager,
   onOpenAgentProviders,
+  onOpenCleanup,
   onOpenUsage,
   onOpenQuota,
   onOpenAbout,
@@ -1000,6 +1002,15 @@ export function AppSidebar({
           onSelect: () => {
             if (mobile) onCloseMobile?.();
             onOpenAgentProviders();
+          },
+        },
+        {
+          id: 'cleanup',
+          icon: RiBrush3Line,
+          label: t('app.cleanup'),
+          onSelect: () => {
+            if (mobile) onCloseMobile?.();
+            onOpenCleanup();
           },
         },
       ],

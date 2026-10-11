@@ -44,6 +44,7 @@ const QuotaPanel = lazy(() => import('./screens/QuotaPanel').then((module) => ({
 const AboutPanel = lazy(() => import('./screens/AboutPanel').then((module) => ({ default: module.AboutPanel })));
 const CliManagerPanel = lazy(() => import('./screens/CliManagerPanel').then((module) => ({ default: module.CliManagerPanel })));
 const AgentProvidersPanel = lazy(() => import('./screens/AgentProvidersPanel').then((module) => ({ default: module.AgentProvidersPanel })));
+const CleanupPanel = lazy(() => import('./screens/CleanupPanel').then((module) => ({ default: module.CleanupPanel })));
 const KanbanPanel = lazy(() => import('./screens/KanbanPanel').then((module) => ({ default: module.KanbanPanel })));
 const SshPanel = lazy(() => import('./screens/SshPanel').then((module) => ({ default: module.SshPanel })));
 
@@ -221,14 +222,14 @@ export function App() {
     if (isWorkbenchTab(next)) {
       setWorkbenchTab(next);
     }
-    if (next !== 'settings' && next !== 'usage' && next !== 'quota' && next !== 'about' && next !== 'cli-manager' && next !== 'agent-providers') {
+    if (next !== 'settings' && next !== 'usage' && next !== 'quota' && next !== 'about' && next !== 'cli-manager' && next !== 'agent-providers' && next !== 'cleanup') {
       persistAsideOpen(true);
     }
   }, [persistAsideOpen, scopeKey, setPanelTarget, setWorkbenchTab]);
   openPanelHandlerRef.current = openPanel;
 
   useEffect(() => {
-    setPanel(current => current && ['settings', 'usage', 'quota', 'about', 'cli-manager', 'agent-providers', 'kanban', 'ssh'].includes(current) ? current : null);
+    setPanel(current => current && ['settings', 'usage', 'quota', 'about', 'cli-manager', 'agent-providers', 'cleanup', 'kanban', 'ssh'].includes(current) ? current : null);
     setSlashCommand(undefined);
   }, [scopeKey]);
 
@@ -366,7 +367,8 @@ export function App() {
   const aboutOpen = panel === 'about';
   const cliManagerOpen = panel === 'cli-manager';
   const agentProvidersOpen = panel === 'agent-providers';
-  const modalPanel = settingsOpen || usageOpen || quotaOpen || aboutOpen || cliManagerOpen || agentProvidersOpen;
+  const cleanupOpen = panel === 'cleanup';
+  const modalPanel = settingsOpen || usageOpen || quotaOpen || aboutOpen || cliManagerOpen || agentProvidersOpen || cleanupOpen;
   const subagentRuns = session.activeConversation
     ? session.subagentsByConversation[session.activeConversation.id] ?? []
     : [];
@@ -522,6 +524,7 @@ export function App() {
       onOpenCapabilities={() => setCapabilitiesOpen(true)}
       onOpenCliManager={() => { persistAsideOpen(false); setPanel('cli-manager'); }}
       onOpenAgentProviders={() => { persistAsideOpen(false); setPanel('agent-providers'); }}
+      onOpenCleanup={() => { persistAsideOpen(false); setPanel('cleanup'); }}
       onOpenUsage={() => setPanel('usage')}
       onOpenQuota={() => setPanel('quota')}
       onOpenAbout={() => setPanel('about')}
@@ -631,6 +634,9 @@ export function App() {
       </Modal>
       <Modal isOpen={agentProvidersOpen} onOpenChange={closePanel('agent-providers')} title={t('app.agentProviders')} size="3xl" className="max-h-[92vh]" bodyClassName="overflow-y-auto">
         <Suspense fallback={panelFallback}><AgentProvidersPanel session={session} /></Suspense>
+      </Modal>
+      <Modal isOpen={cleanupOpen} onOpenChange={closePanel('cleanup')} title={t('app.cleanup')} size="3xl" className="max-h-[92vh]" bodyClassName="overflow-y-auto">
+        <Suspense fallback={panelFallback}><CleanupPanel session={session} /></Suspense>
       </Modal>
       <Modal isOpen={capabilitiesOpen} onOpenChange={setCapabilitiesOpen} title={t('app.mcpSkillManager')} size="2xl" className="max-h-[90vh]" bodyClassName="overflow-y-auto">
         <Suspense fallback={panelFallback}><CapabilitiesPanel inDialog workspacePath={session.activeWorkspace?.path ?? session.settings.defaultWorkspacePath} providers={session.v2Providers} catalogs={session.capabilityCatalogs} onRefresh={(provider) => void session.refreshCapabilityCatalog(provider)} conversationId={session.activeConversation?.id} selectedSkills={session.activeConversation ? session.selectedSkills[session.activeConversation.id] ?? [] : []} canInvoke={Boolean(session.activeConversation?.v2ConversationId)} onToggleSkill={(skill, provider) => session.activeConversation && session.toggleCatalogSkill(session.activeConversation.id, skill, provider)} onPreviewSkill={(skill, provider) => session.previewSkillResource(provider, skill.resourceId)} onLoadMcpConfig={(server) => session.getMcpServerConfig(server.provider, server.resourceId)} onDeleteMcp={(server) => session.deleteMcpServer(server.provider, server.resourceId)} /></Suspense>
