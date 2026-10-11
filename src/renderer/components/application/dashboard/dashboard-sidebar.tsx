@@ -251,6 +251,8 @@ export interface DashboardSidebarProps extends Omit<HTMLAttributes<HTMLElement>,
   children?: (state: DashboardSidebarState) => ReactNode;
   /** Rows pinned above the footer. */
   secondaryItems?: DashboardNavItem[];
+  /** Card above the secondary rows (e.g. an Announcement); hidden on the rail. */
+  announcement?: ReactNode;
   /** The team card, usually a `DashboardTeamMenu`. */
   footer?: (state: DashboardSidebarState) => ReactNode;
 }
@@ -273,6 +275,7 @@ export function DashboardSidebar({
   search,
   children,
   secondaryItems = [],
+  announcement,
   footer,
   ...asideProps
 }: DashboardSidebarProps = {}) {
@@ -578,6 +581,7 @@ export function DashboardSidebar({
       </ScrollArea>
 
       <div className="flex w-full shrink-0 flex-col gap-3 pt-3">
+        {announcement && !collapsed ? announcement : null}
         {/* Secondary nav */}
         {secondaryItems.length > 0 ? (
           <nav className="flex w-full flex-col gap-1">

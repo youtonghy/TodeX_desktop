@@ -1,4 +1,4 @@
-import { RiPushpin2Fill, RiLockLine, RiAddLine, RiArrowRightSLine, RiCheckLine, RiFolderReduceLine, RiFoldersLine, RiFolderTransferLine, RiPencilLine, RiEdit2Line, RiErrorWarningLine, RiFolder3Line, RiGitBranchLine, RiDeleteBinLine, RiArrowDownSLine, RiBarChartBoxLine, RiInformationLine, RiKanbanView2, RiPaletteLine, RiPriceTag3Line, RiPuzzle2Line, RiSettings3Line, RiTerminalBoxLine, RiTerminalLine, RiTimeLine, RiUserSettingsLine, RiVipCrownLine } from '@remixicon/react';
+import { RiPushpin2Fill, RiLockLine, RiAddLine, RiArrowRightSLine, RiCheckLine, RiFolderReduceLine, RiFoldersLine, RiFolderTransferLine, RiPencilLine, RiEdit2Line, RiErrorWarningLine, RiFolder3Line, RiGitBranchLine, RiDeleteBinLine, RiArrowDownSLine, RiBarChartBoxLine, RiBookOpenLine, RiInformationLine, RiKanbanView2, RiPaletteLine, RiPriceTag3Line, RiPuzzle2Line, RiSettings3Line, RiTerminalBoxLine, RiTerminalLine, RiTimeLine, RiUserSettingsLine, RiVipCrownLine } from '@remixicon/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { FocusEvent, MouseEvent, ReactNode } from 'react';
 import {
@@ -14,6 +14,7 @@ import {
   type GridListItemRenderProps,
 } from 'react-aria-components';
 import { DashboardSidebar, type DashboardNavItem } from '@/components/application/dashboard/dashboard-sidebar';
+import { Announcement } from '@/components/base/announcement/announcement';
 import { DashboardTeamMenu, type DashboardTeamMenuGroup } from '@/components/application/dashboard/dashboard-team-menu';
 import {
   DashboardUserMenu,
@@ -279,6 +280,9 @@ function RowContent({ rail, indent, title, children }: { rail: boolean; indent?:
   );
 }
 
+const DOCS_URL = 'https://todex.dev/docs';
+const DOCS_DISMISSED_KEY = 'todex.sidebar.docsDismissed';
+
 export function AppSidebar({
   session,
   open,
@@ -372,6 +376,14 @@ export function AppSidebar({
   // The identity (top) and TodeX (team card) panels keep a peeking rail open.
   const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
   const [teamMenuOpen, setTeamMenuOpen] = useState(false);
+  // The docs card stays closed once dismissed.
+  const [docsDismissed, setDocsDismissed] = useState(() => {
+    try { return window.localStorage.getItem(DOCS_DISMISSED_KEY) === '1'; } catch { return false; }
+  });
+  const dismissDocs = () => {
+    setDocsDismissed(true);
+    try { window.localStorage.setItem(DOCS_DISMISSED_KEY, '1'); } catch { /* the card returns next launch */ }
+  };
 
   // Quick search: filters the workspace and conversation lists by name.
   const [searchQuery, setSearchQuery] = useState('');
@@ -1035,6 +1047,18 @@ export function AppSidebar({
         onActiveChange: setSearchActive,
       }}
       secondaryItems={secondaryItems}
+      announcement={docsDismissed ? null : (
+        <Announcement
+          icon={RiBookOpenLine}
+          title={t('sidebar.docsTitle')}
+          description={t('sidebar.docsDescription')}
+          actionLabel={t('sidebar.docsAction')}
+          onAction={() => window.open(DOCS_URL, '_blank', 'noopener')}
+          dismissible
+          closeLabel={t('common.dismiss')}
+          onClose={dismissDocs}
+        />
+      )}
       footer={({ collapsed, flat }) => (
         <DashboardTeamMenu
           collapsed={collapsed}
