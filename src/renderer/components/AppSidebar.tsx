@@ -1,6 +1,6 @@
 import { RiPushpin2Fill, RiLockLine, RiAddLine, RiArrowRightSLine, RiCheckLine, RiFolderReduceLine, RiFoldersLine, RiFolderTransferLine, RiPencilLine, RiEdit2Line, RiErrorWarningLine, RiFolder3Line, RiGitBranchLine, RiDeleteBinLine, RiArrowDownSLine, RiBarChartBoxLine, RiBookOpenLine, RiInformationLine, RiKanbanView2, RiPaletteLine, RiPriceTag3Line, RiPuzzle2Line, RiSettings3Line, RiTerminalBoxLine, RiTerminalLine, RiTimeLine, RiUserSettingsLine, RiVipCrownLine } from '@remixicon/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { FocusEvent, MouseEvent, ReactNode } from 'react';
+import type { MouseEvent, ReactNode } from 'react';
 import {
   Dialog,
   Focusable,
@@ -388,9 +388,6 @@ export function AppSidebar({
   const lastContextMenuRef = useRef<ContextMenu>(contextMenu);
   if (contextMenu) lastContextMenuRef.current = contextMenu;
   const menu = contextMenu ?? lastContextMenuRef.current;
-  // The identity (top) and TodeX (team card) panels keep a peeking rail open.
-  const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
-  const [teamMenuOpen, setTeamMenuOpen] = useState(false);
   // Notification history (finished conversations, app notices) for the header panel.
   const feed = useNotificationFeed();
   const unreadNotifications = feed.filter((item) => !item.read).length;
@@ -433,107 +430,32 @@ export function AppSidebar({
     setConversationLimit(5);
   }, [session.activeWorkspaceId]);
 
-  // Icon-rail peek: the collapsed sidebar renders as a 60px icon rail. Hover,
-  // keyboard focus, or an open menu expands it back to 260px while a negative
-  // inline-end margin keeps the rail's layout footprint, so the expanded
-  // sidebar floats over the conversation instead of pushing it.
-  const railCollapsed = !isOpen;
-  const [hoverPeek, setHoverPeek] = useState(false);
-  const [focusPeek, setFocusPeek] = useState(false);
-  const insideRef = useRef({ pointer: false, focus: false });
-  const suppressPeekRef = useRef(false);
-  const peekTimerRef = useRef<number | null>(null);
-  const peeking = railCollapsed
-    && !suppressPeekRef.current
-    && (hoverPeek || focusPeek || contextMenu !== null || headerMenuOpen || teamMenuOpen);
-  // The rail shows icons only; a peek shows the full sidebar.
-  const rail = railCollapsed && !peeking;
+  // Two modes only: the full 260px panel or the 60px icon rail. The rail
+  // never widens on hover, focus or an open menu; the app header's toggle
+  // (or the rail's search button) switches modes.
+  const rail = !isOpen;
 
-  const scheduleHoverPeek = (next: boolean) => {
-    if (peekTimerRef.current !== null) window.clearTimeout(peekTimerRef.current);
-    peekTimerRef.current = window.setTimeout(() => {
-      peekTimerRef.current = null;
-      setHoverPeek(next);
-    }, next ? 70 : 140);
-  };
-
-  const updatePeekSuppression = () => {
-    if (!insideRef.current.pointer && !insideRef.current.focus) {
-      suppressPeekRef.current = false;
-    }
-  };
-
-  // Collapsing while the pointer or focus is already inside must not pop the
-  // sidebar back open — require one clean exit before hover peeking re-arms.
-  const wasOpenRef = useRef(isOpen);
-  useEffect(() => {
-    if (wasOpenRef.current && !isOpen) {
-      suppressPeekRef.current = insideRef.current.pointer || insideRef.current.focus;
-      if (peekTimerRef.current !== null) window.clearTimeout(peekTimerRef.current);
-      peekTimerRef.current = null;
-      setHoverPeek(false);
-      setFocusPeek(false);
-    }
-    wasOpenRef.current = isOpen;
-  }, [isOpen]);
-
-  useEffect(() => () => {
-    if (peekTimerRef.current !== null) window.clearTimeout(peekTimerRef.current);
-  }, []);
-
-  // The rail has no room for the field: closing it drops the search.
+  // The rail has no room for the field: collapsing drops the search.
   useEffect(() => {
     if (!rail) return;
     setSearchActive(false);
     setSearchQuery('');
   }, [rail]);
 
-  // Mod+L opens the quick search (a collapsed rail peeks open around it). It
+  // Mod+L opens the quick search, expanding a collapsed sidebar for it. It
   // is left to text fields and the terminal, where Ctrl+L clears the screen.
   useAppShortcuts({
     quickSearch: () => {
       // A closed compact-layout drawer is inert; nothing in it can take focus.
       if (asideRef.current?.closest('[inert]')) return;
-      if (railCollapsed) {
-        suppressPeekRef.current = false;
-        setFocusPeek(true);
-      }
+      if (rail) onOpenChange?.(true);
       setSearchActive(true);
     },
   });
 
-  const railProps = {
-    ref: asideRef,
-    'data-peek': railCollapsed ? 'true' : undefined,
-    'data-state': rail ? 'collapsed' as const : 'expanded' as const,
-    onMouseEnter: () => {
-      insideRef.current.pointer = true;
-      if (!suppressPeekRef.current) scheduleHoverPeek(true);
-    },
-    onMouseLeave: () => {
-      insideRef.current.pointer = false;
-      scheduleHoverPeek(false);
-      updatePeekSuppression();
-    },
-    onFocus: () => {
-      insideRef.current.focus = true;
-      if (!suppressPeekRef.current) setFocusPeek(true);
-    },
-    onBlur: (event: FocusEvent<HTMLElement>) => {
-      if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
-      insideRef.current.focus = false;
-      setFocusPeek(false);
-      updatePeekSuppression();
-    },
-  };
-
-  // The floating panel (BoardUI sidebar recipe). Collapsed it is a 60px rail
-  // of the same panel; a peek floats the 260px panel over the conversation
-  // while a negative inline-end margin keeps the rail's footprint.
   const shellClassName = cx(
     'relative',
-    !mobile && 'transition-[width,margin-inline-end,box-shadow,padding] duration-300 ease-in-out motion-reduce:transition-none',
-    peeking && 'z-40 -me-50 shadow-xl',
+    !mobile && 'transition-[width,padding] duration-300 ease-in-out motion-reduce:transition-none',
     className,
   );
   // macOS hidden-inset chrome: the traffic lights sit over the top of the
@@ -998,7 +920,8 @@ export function AppSidebar({
 
   return (
     <DashboardSidebar
-      {...railProps}
+      ref={asideRef}
+      data-state={rail ? 'collapsed' : 'expanded'}
       className={shellClassName}
       mobile={mobile}
       flat={mobile}
@@ -1025,7 +948,6 @@ export function AppSidebar({
           aria-label={`TodeX · ${connectionLabel}`}
           menuLabel={t('notify.center')}
           panelClassName="w-[400px] p-0 rounded-3xl border-0 bg-transparent shadow-none"
-          onOpenChange={setHeaderMenuOpen}
         >
           {(close) => (
             <NotificationCenter
@@ -1092,7 +1014,6 @@ export function AppSidebar({
           menuLabel={t('sidebar.menu')}
           groups={teamMenuGroups}
           footer={{ label: 'TodeX', meta: `v${__TODEX_BUILD_VERSION__}` }}
-          onOpenChange={setTeamMenuOpen}
         />
       )}
     >
