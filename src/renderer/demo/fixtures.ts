@@ -487,3 +487,37 @@ export const demoAgentDesktop: AgentDesktopSettings = {
     permissions: { screen: true, accessibility: true },
   },
 };
+
+/** A small project tree for the Files pane, keyed by directory path relative
+ * to the workspace root; `/` marks a directory. */
+const DEMO_TREE: Record<string, string[]> = {
+  '': ['.github/', 'src/', 'public/', 'scripts/', '.env.example', '.gitignore', 'package.json', 'pnpm-lock.yaml', 'README.md', 'tsconfig.json', 'vite.config.ts'],
+  '.github': ['workflows/'],
+  '.github/workflows': ['ci.yml'],
+  src: ['checkout/', 'components/', 'styles/', 'App.tsx', 'main.tsx'],
+  'src/checkout': ['CheckoutForm.tsx', 'PaymentForm.tsx', 'messages.ts', 'schema.ts', 'schema.test.ts'],
+  'src/components': ['Button.tsx', 'Card.tsx', 'icons/'],
+  'src/components/icons': [],
+  'src/styles': ['global.css', 'tokens.css'],
+  public: ['favicon.svg', 'hero.avif', 'terms.pdf'],
+  scripts: ['release.sh', 'seed.ts'],
+};
+
+export function demoWorkspaceEntries(cwd: string) {
+  const root = DEMO_ROOT.replace(/\/$/, '');
+  const relative = cwd.replace(/\/$/, '').startsWith(root) ? cwd.replace(/\/$/, '').slice(root.length).replace(/^\/+/, '') : null;
+  const lumen = relative?.match(/^lumen-web\/?(.*)$/);
+  const items = lumen ? DEMO_TREE[lumen[1]] : undefined;
+  return {
+    entries: (items ?? []).map((item) => ({
+      name: item.replace(/\/$/, ''),
+      path: item.replace(/\/$/, ''),
+      kind: item.endsWith('/') ? 'directory' as const : 'file' as const,
+    })),
+  };
+}
+
+export function demoWorkspaceFile(path: string) {
+  const name = path.split('/').pop() ?? path;
+  return { name, path, mimeType: 'text/plain', sizeBytes: 120, text: `// ${name}\n// 演示文件内容\n` };
+}

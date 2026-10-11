@@ -31,6 +31,8 @@ export type FileSource = {
   /** Open / Open With / Reveal act on this machine's filesystem. */
   canUseSystemShell: boolean;
   list: (directory: string) => Promise<FileSourceEntry[]>;
+  /** Most entries one listing returns, when the source caps it. */
+  listLimit?: number;
   read: (path: string) => Promise<FileSourceFile>;
   save: (path: string, text: string, expectedText: string) => Promise<{ saved: boolean }>;
   joinPath: (directory: string, name: string) => string;
@@ -46,9 +48,15 @@ function absoluteEntryPath(cwd: string, relativePath: string): string {
   return `${cwd.replace(/[\\/]$/, '')}/${relativePath.replace(/^[/\\]+/, '').replace(/[/\\]+/g, '/')}`;
 }
 
-function sortEntries<T extends FileSourceEntry>(entries: T[]): T[] {
-  return [...entries].sort((left, right) => Number(right.kind === 'directory') - Number(left.kind === 'directory') || left.name.localeCompare(right.name));
+const NAME_COLLATOR = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+
+/** Directories first, then natural name order (`file2` before `file10`). */
+export function sortFileEntries<T extends FileSourceEntry>(entries: T[]): T[] {
+  return [...entries].sort((left, right) => Number(right.kind === 'directory') - Number(left.kind === 'directory') || NAME_COLLATOR.compare(left.name, right.name));
 }
+
+/** Entries a workspace listing returns at most; a full page may be cut off. */
+export const WORKSPACE_LIST_LIMIT = 100;
 
 export function workspaceFileSource(api: () => V2ApiClient, rootPath: string, canUseSystemShell: boolean): FileSource {
   return {
@@ -56,10 +64,11 @@ export function workspaceFileSource(api: () => V2ApiClient, rootPath: string, ca
     label: rootPath.split(/[/\\]/).filter(Boolean).pop() || rootPath || 'workspace',
     rootPath,
     canAddReference: true,
+    listLimit: WORKSPACE_LIST_LIMIT,
     canUseSystemShell,
     list: async (directory) => {
-      const snapshot = await api().listWorkspaceEntries(directory, '', 100);
-      return sortEntries(snapshot.entries.map((entry) => ({ ...entry, path: absoluteEntryPath(directory, entry.path) })));
+      const snapshot = await api().listWorkspaceEntries(directory, '', WORKSPACE_LIST_LIMIT);
+      return sortFileEntries(snapshot.entries.map((entry) => ({ ...entry, path: absoluteEntryPath(directory, entry.path) })));
     },
     read: (path) => api().readWorkspaceFile(path),
     save: (path, text, expectedText) => api().saveWorkspaceFile(path, text, expectedText),

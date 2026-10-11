@@ -125,6 +125,10 @@ function route(request: SecureRequest): SecureResponse {
         return json(fixtures.demoGitWorkspace(query.get('workspacePath') ?? ''));
       case '/v2/git/status':
         return json(fixtures.demoGitStatus(query.get('workspacePath') ?? ''));
+      case '/v2/workspace/entries':
+        return json(fixtures.demoWorkspaceEntries(query.get('cwd') ?? ''));
+      case '/v2/workspace/file':
+        return json(fixtures.demoWorkspaceFile(query.get('path') ?? ''));
       case '/v2/git/scan':
         return json(fixtures.demoGitScan(query.get('workspacePath') ?? ''));
       default:

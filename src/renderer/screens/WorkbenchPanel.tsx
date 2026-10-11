@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ButtonHTMLAttributes, ComponentType, MouseEvent as ReactMouseEvent, ReactNode, RefObject } from 'react';
-import { RiAppsLine, RiCloseLine, RiDeleteBinLine, RiDownload2Line, RiEdit2Line, RiFolderAddLine, RiLinksLine, RiLink, RiServerLine, RiTerminalBoxLine, RiTerminalWindowLine, RiUpload2Line, RiGitBranchLine, RiAddLine, RiArrowLeftDoubleLine, RiArrowRightDoubleLine, RiExternalLinkLine, RiFileTextLine, RiFolder3Line, RiFolderOpenLine, RiGlobalLine, RiFocus3Line, RiLayoutColumnLine, RiLayoutRowLine, RiRefreshLine, RiStopCircleLine } from '@remixicon/react';
+import { RiAppsLine, RiCloseLine, RiDeleteBinLine, RiDownload2Line, RiEdit2Line, RiFolderAddLine, RiLinksLine, RiLink, RiServerLine, RiTerminalBoxLine, RiTerminalWindowLine, RiUpload2Line, RiGitBranchLine, RiAddLine, RiArrowLeftDoubleLine, RiArrowRightDoubleLine, RiExternalLinkLine, RiBracesLine, RiFileCodeLine, RiFileLine, RiFilePdf2Line, RiFileSettingsLine, RiFileTextLine, RiFileZipLine, RiImageLine, RiLockLine, RiMarkdownLine, RiFolder3Line, RiFolderOpenLine, RiGlobalLine, RiFocus3Line, RiLayoutColumnLine, RiLayoutRowLine, RiRefreshLine, RiStopCircleLine } from '@remixicon/react';
 import { Focusable, Pressable } from 'react-aria-components';
 import type { Key, Selection } from 'react-aria-components';
 import { Badge } from '@/components/base/badges/badge';
@@ -28,7 +28,7 @@ import { useNativeViewHost } from '../components/nativeViewHost';
 import { rememberSessionSshExecTabs, sessionSshExecTabsFor, useSshExecClear, visibleSshExecs } from '../session/sshExecTabs';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { useRemoteConnector } from '../components/ssh/useRemoteConnector';
-import { normalizeRemoteFilesBinding, remoteFileSource, remoteFilesBinding, workspaceFileSource, type FileSource, type FileSourceEntry, type RemoteFilesBinding } from '../session/fileSources';
+import { normalizeRemoteFilesBinding, remoteFileSource, remoteFilesBinding, workspaceFileSource, type FileSource, type FileSourceEntry, type RemoteFilesBinding, sortFileEntries } from '../session/fileSources';
 import {
   DEFAULT_TERMINAL_COLS,
   DEFAULT_TERMINAL_ROWS,
@@ -1083,6 +1083,26 @@ function GitDiffPane({ session }: { session: TodeXSession }) {
   );
 }
 
+const FILE_ICONS: Array<[RegExp, IconComponent]> = [
+  [/\.(tsx?|jsx?|mjs|cjs|rs|go|py|rb|java|kt|swift|c|cc|cpp|h|hpp|cs|php|vue|svelte|css|scss|less|html?|sql|lua|dart|zig)$/i, RiFileCodeLine],
+  [/\.(json|jsonc|json5)$/i, RiBracesLine],
+  [/(\.(ya?ml|toml|ini|conf|cfg|properties)|^\.env.*|^\.(git|npm|prettier|eslint|editor)[a-z]*rc?$|^\.gitignore$)$/i, RiFileSettingsLine],
+  [/\.(lock|lockb)$|^pnpm-lock\.yaml$/i, RiLockLine],
+  [/\.mdx?$/i, RiMarkdownLine],
+  [/\.(png|jpe?g|gif|svg|webp|ico|avif|bmp|tiff?)$/i, RiImageLine],
+  [/\.(sh|bash|zsh|fish|ps1|bat|cmd)$/i, RiTerminalBoxLine],
+  [/\.(zip|tar|gz|tgz|bz2|xz|7z|rar)$/i, RiFileZipLine],
+  [/\.pdf$/i, RiFilePdf2Line],
+  [/\.(txt|log|csv|tsv|rst)$/i, RiFileTextLine],
+];
+
+/** The tree icon for a file, by its name. */
+function fileIcon(name: string): IconComponent {
+  // Lock files first: `pnpm-lock.yaml` would otherwise read as config.
+  if (/\.(lock|lockb)$|^pnpm-lock\.yaml$/i.test(name)) return RiLockLine;
+  return FILE_ICONS.find(([pattern]) => pattern.test(name))?.[1] ?? RiFileLine;
+}
+
 type FileTreeEntry = FileSourceEntry & {
   children?: FileTreeEntry[];
 };
@@ -1133,6 +1153,19 @@ function FilesPane({ session, target, onTargetChange, remote, onRemoteRebind }: 
   const [selected, setSelected] = useState('');
   const [focused, setFocused] = useState('');
   const [expandedKeys, setExpandedKeys] = useState<Set<Key>>(new Set());
+  // Directories whose listing is in flight (their placeholder row spins).
+  const [loadingDirs, setLoadingDirs] = useState<Set<string>>(new Set());
+  // A narrow pane stacks the tree over the preview: side by side, the tree
+  // column shrank to icons only.
+  const splitRef = useRef<HTMLDivElement>(null);
+  const [stacked, setStacked] = useState(false);
+  useEffect(() => {
+    const node = splitRef.current;
+    if (!node) return;
+    const observer = new ResizeObserver(([entry]) => setStacked(entry.contentRect.width < 560));
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
   const [file, setFile] = useState<PreviewFile | null>(null);
   const [fileLoading, setFileLoading] = useState(false);
   const fileRequestRef = useRef(0);
@@ -1232,9 +1265,10 @@ function FilesPane({ session, target, onTargetChange, remote, onRemoteRebind }: 
 
   const loadDirectory = useCallback(async (directory: string, quiet = false): Promise<boolean> => {
     setLoading(true);
+    setLoadingDirs((current) => new Set(current).add(directory));
     if (!quiet) setError('');
     try {
-      const children = await source.list(directory);
+      const children = sortFileEntries(await source.list(directory));
       setEntries((current) => directory === currentPath ? children : replaceFileTreeChildren(current, directory, children));
       setExpandedKeys((current) => new Set([...current, directory]));
       return true;
@@ -1243,6 +1277,11 @@ function FilesPane({ session, target, onTargetChange, remote, onRemoteRebind }: 
       return false;
     } finally {
       setLoading(false);
+      setLoadingDirs((current) => {
+        const next = new Set(current);
+        next.delete(directory);
+        return next;
+      });
     }
   }, [currentPath, source]);
 
@@ -1417,18 +1456,54 @@ function FilesPane({ session, target, onTargetChange, remote, onRemoteRebind }: 
     onRemoteRebind?.(remoteFilesBinding(connection));
   };
 
-  const renderEntry = (entry: FileTreeEntry): ReactNode => (
+  // A row under a branch that is loading, empty or cut off. Disabled, so it
+  // never takes selection or focus.
+  const noteRow = (id: string, label: string, busy = false) => (
     <TreeViewItem
-      key={entry.path}
-      icon={entry.kind === 'directory' || entry.children ? RiFolder3Line : entry.kind === 'symlink' ? RiLinksLine : RiFileTextLine}
-      expandedIcon={entry.kind === 'directory' || entry.children ? RiFolderOpenLine : undefined}
-      id={entry.path}
-      label={entry.name}
-      onContextMenu={canUseSystemShell ? (event) => openEntryContextMenu(event, entry.path) : undefined}
-    >
-      {entry.children?.map(renderEntry)}
-    </TreeViewItem>
+      key={id}
+      id={id}
+      label={label}
+      icon={null}
+      isDisabled
+      className="cursor-default text-text-tertiary"
+      trailingContent={busy ? <Spinner size="sm" aria-hidden /> : undefined}
+    />
   );
+
+  // Children of a directory row. One not listed yet gets a loading row, so
+  // it shows a disclosure chevron and lists itself when expanded.
+  const directoryChildren = (path: string, children: FileTreeEntry[] | undefined): ReactNode => {
+    if (!children) return noteRow(`${path}\u0000loading`, t('workbench.treeLoading'), true);
+    if (children.length === 0) {
+      return loadingDirs.has(path)
+        ? noteRow(`${path}\u0000loading`, t('workbench.treeLoading'), true)
+        : noteRow(`${path}\u0000empty`, t('workbench.treeEmpty'));
+    }
+    return [
+      ...children.map(renderEntry),
+      ...(source.listLimit && children.length >= source.listLimit
+        ? [noteRow(`${path}\u0000more`, t('workbench.treeTruncated', { count: source.listLimit }))]
+        : []),
+    ];
+  };
+
+  const renderEntry = (entry: FileTreeEntry): ReactNode => {
+    const directory = entry.kind === 'directory' || Boolean(entry.children);
+    return (
+      <TreeViewItem
+        key={entry.path}
+        icon={directory ? RiFolder3Line : entry.kind === 'symlink' ? RiLinksLine : fileIcon(entry.name)}
+        expandedIcon={directory ? RiFolderOpenLine : undefined}
+        id={entry.path}
+        label={entry.name}
+        // Dotfiles recede, as in most file managers.
+        className={entry.name.startsWith('.') ? 'text-text-secondary' : undefined}
+        onContextMenu={canUseSystemShell ? (event) => openEntryContextMenu(event, entry.path) : undefined}
+      >
+        {directory ? directoryChildren(entry.path, entry.children) : null}
+      </TreeViewItem>
+    );
+  };
 
   const toggleTree = () => {
     if (treePanelRef.current?.isCollapsed()) treePanelRef.current.expand();
@@ -1515,13 +1590,20 @@ function FilesPane({ session, target, onTargetChange, remote, onRemoteRebind }: 
           />
         </div>
       ) : null}
-      <Resizable autoSaveId="todex.files-pane" className="min-h-0 flex-1" onLayoutChange={() => setTreeCollapsed(Boolean(treePanelRef.current?.isCollapsed()))}>
+      <div ref={splitRef} className="flex min-h-0 flex-1">
+      <Resizable
+        key={stacked ? 'stacked' : 'side'}
+        autoSaveId={stacked ? 'todex.files-pane.stacked' : 'todex.files-pane.v2'}
+        orientation={stacked ? 'vertical' : 'horizontal'}
+        className="min-h-0 flex-1"
+        onLayoutChange={() => setTreeCollapsed(Boolean(treePanelRef.current?.isCollapsed()))}
+      >
         <Resizable.Panel
           id="file-tree"
           handleRef={treePanelRef}
-          defaultSize="30%"
-          minSize="18%"
-          maxSize="50%"
+          defaultSize={stacked ? '45%' : '260px'}
+          minSize={stacked ? '120px' : '200px'}
+          maxSize={stacked ? '80%' : '60%'}
           collapsedSize="0px"
           collapsible
           onCollapse={() => setTreeCollapsed(true)}
@@ -1547,7 +1629,15 @@ function FilesPane({ session, target, onTargetChange, remote, onRemoteRebind }: 
                 if (hasFileOperations) setFocused(key);
                 void handleAction(key);
               }}
-              onExpandedChange={setExpandedKeys}
+              onExpandedChange={(keys) => {
+                // Expanding a directory that was never listed lists it.
+                for (const key of keys) {
+                  if (expandedKeys.has(key)) continue;
+                  const entry = findFileTreeEntry(entries, String(key));
+                  if (entry?.kind === 'directory' && !entry.children) void loadDirectory(entry.path);
+                }
+                setExpandedKeys(keys);
+              }}
             >
               <TreeViewItem
                 key={currentPath || 'root'}
@@ -1557,13 +1647,13 @@ function FilesPane({ session, target, onTargetChange, remote, onRemoteRebind }: 
                 label={rootName}
                 onContextMenu={canUseSystemShell && currentPath ? (event) => openEntryContextMenu(event, currentPath) : undefined}
               >
-                {entries.map(renderEntry)}
+                {currentPath ? directoryChildren(currentPath, loadingDirs.has(currentPath) && entries.length === 0 ? undefined : entries) : null}
               </TreeViewItem>
             </TreeView>
           </ScrollArea>
         </Resizable.Panel>
         <Resizable.Handle aria-label={t('workbench.resizeTree')} />
-        <Resizable.Panel defaultSize="70%" minSize="50%" className="min-h-0">
+        <Resizable.Panel defaultSize={stacked ? '55%' : '70%'} minSize={stacked ? '120px' : '240px'} className="min-h-0">
           <ScrollArea
             surface="secondary"
             className="h-full overflow-hidden rounded-2xl bg-background-secondary-default"
@@ -1574,6 +1664,7 @@ function FilesPane({ session, target, onTargetChange, remote, onRemoteRebind }: 
           </ScrollArea>
         </Resizable.Panel>
       </Resizable>
+      </div>
       <ContextMenu position={contextMenu} onClose={closeContextMenu}>
         <Menu aria-label={t('workbench.fileMenu')}>
           <MenuItem id="open" icon={RiExternalLinkLine} textValue={t('workbench.open')} onAction={() => void runFileContextAction('open')}>{t('workbench.open')}</MenuItem>
