@@ -1079,9 +1079,14 @@ export const ja: Messages = {
   'cap.attachable': '次のメッセージに添付できます',
   'cap.detach': '添付を解除',
   'cap.attach': '次のメッセージに添付',
-  'cap.refreshTools': 'ツールを更新',
-  'cap.call': '呼び出し',
-  'cap.noTools': 'ツールはまだ一覧されていません。更新すると Backend が検出します。',
+  'cap.loadingMcp': 'MCP 設定を読み込み中…',
+  'cap.mcpConfigFailed': 'MCP 設定を読み込めません',
+  'cap.deleteMcp': '削除',
+  'cap.deleteMcpTitle': 'MCP サーバーを削除しますか？',
+  'cap.deleteMcpBody': '{path} から「{name}」の設定を削除します。元に戻せません。',
+  'cap.deleteMcpFailed': 'MCP サーバーを削除できません',
+  'cap.mcpDeleted': '{name} を削除しました',
+  'cap.mcpNativeManaged': 'このサーバーは Provider が管理しています。Provider 側の設定から削除してください。',
 
   // usage
   'usage.title': '使用統計',

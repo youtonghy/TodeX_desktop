@@ -62,16 +62,8 @@ export function AsidePanel({ session, panel, slashCommand, onBack }: Props) {
           }
         }}
         onPreviewSkill={(skill, provider) => session.previewSkillResource(provider, skill.resourceId)}
-        onRefreshMcp={(resourceId) => {
-          if (conversation) {
-            session.refreshMcpServer(conversation.id, resourceId);
-          }
-        }}
-        onCallMcp={(resourceId, toolName) => {
-          if (conversation) {
-            session.callMcpTool(conversation.id, resourceId, toolName);
-          }
-        }}
+        onLoadMcpConfig={(server) => session.getMcpServerConfig(server.provider, server.resourceId)}
+        onDeleteMcp={(server) => session.deleteMcpServer(server.provider, server.resourceId)}
       />
       </div>
     );

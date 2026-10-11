@@ -1079,9 +1079,14 @@ export const en: Messages = {
   'cap.attachable': 'Can be attached to the next message',
   'cap.detach': 'Detach',
   'cap.attach': 'Attach to next message',
-  'cap.refreshTools': 'Refresh tools',
-  'cap.call': 'Call',
-  'cap.noTools': 'No tools listed yet. Refresh to let the Backend discover them.',
+  'cap.loadingMcp': 'Loading MCP config…',
+  'cap.mcpConfigFailed': 'Could not read the MCP config',
+  'cap.deleteMcp': 'Delete',
+  'cap.deleteMcpTitle': 'Delete MCP server?',
+  'cap.deleteMcpBody': 'This removes the “{name}” entry from {path}. This can\'t be undone.',
+  'cap.deleteMcpFailed': 'Could not delete the MCP server',
+  'cap.mcpDeleted': 'Deleted {name}',
+  'cap.mcpNativeManaged': 'This server is managed by the provider. Remove it from the provider\'s own config.',
 
   // usage
   'usage.title': 'Usage statistics',

@@ -1079,9 +1079,14 @@ export const ko: Messages = {
   'cap.attachable': '다음 메시지에 첨부할 수 있습니다',
   'cap.detach': '첨부 해제',
   'cap.attach': '다음 메시지에 첨부',
-  'cap.refreshTools': '도구 새로고침',
-  'cap.call': '호출',
-  'cap.noTools': '아직 나열된 도구가 없습니다. 새로고침하면 Backend가 검색합니다.',
+  'cap.loadingMcp': 'MCP 설정을 불러오는 중…',
+  'cap.mcpConfigFailed': 'MCP 설정을 읽을 수 없습니다',
+  'cap.deleteMcp': '삭제',
+  'cap.deleteMcpTitle': 'MCP 서버를 삭제할까요?',
+  'cap.deleteMcpBody': '{path}에서 “{name}” 설정을 삭제합니다. 되돌릴 수 없습니다.',
+  'cap.deleteMcpFailed': 'MCP 서버를 삭제할 수 없습니다',
+  'cap.mcpDeleted': '{name} 삭제됨',
+  'cap.mcpNativeManaged': '이 서버는 Provider가 관리합니다. Provider 자체 설정에서 삭제하세요.',
 
   // usage
   'usage.title': '사용 통계',

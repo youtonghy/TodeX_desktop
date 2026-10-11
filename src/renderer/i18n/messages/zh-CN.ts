@@ -1079,9 +1079,14 @@ export const zhCN = {
   'cap.attachable': '可附加到下一条对话中',
   'cap.detach': '取消附加',
   'cap.attach': '附加到下一条消息',
-  'cap.refreshTools': '刷新工具',
-  'cap.call': '调用',
-  'cap.noTools': '尚未列出工具。刷新后由 Backend 发现。',
+  'cap.loadingMcp': '正在读取 MCP 配置…',
+  'cap.mcpConfigFailed': '无法读取 MCP 配置',
+  'cap.deleteMcp': '删除',
+  'cap.deleteMcpTitle': '删除 MCP Server？',
+  'cap.deleteMcpBody': '将从 {path} 中删除「{name}」的配置，此操作无法撤销。',
+  'cap.deleteMcpFailed': '无法删除 MCP Server',
+  'cap.mcpDeleted': '已删除 {name}',
+  'cap.mcpNativeManaged': '该 MCP 由 Provider 自行管理，请在其配置中删除。',
 
   // usage
   'usage.title': '使用统计',

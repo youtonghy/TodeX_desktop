@@ -7219,6 +7219,28 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     return result.content;
   }, [activeWorkspace?.path, settings.deviceSecret, settings.defaultWorkspacePath, settings.encryptionProtocol, settings.encryptionPublicKey, settings.transportVerified, settings.serverUrl]);
 
+  const getMcpServerConfig = useCallback(async (provider: ProviderKind, resourceId: string) => {
+    const workspacePath = activeWorkspace?.path || settings.defaultWorkspacePath;
+    if (!workspacePath) {
+      throw new Error(t('sess.pickWorkspaceFirst'));
+    }
+    return backendApi(settings).getMcpServerConfig(provider, workspacePath, resourceId);
+  }, [activeWorkspace?.path, settings.deviceSecret, settings.defaultWorkspacePath, settings.encryptionProtocol, settings.encryptionPublicKey, settings.transportVerified, settings.serverUrl]);
+
+  const deleteMcpServer = useCallback(async (provider: ProviderKind, resourceId: string) => {
+    const workspacePath = activeWorkspace?.path || settings.defaultWorkspacePath;
+    if (!workspacePath) {
+      throw new Error(t('sess.pickWorkspaceFirst'));
+    }
+    await backendApi(settings).deleteMcpServer(provider, workspacePath, resourceId);
+    // Resource ids hash the entry and its file, so every provider reading
+    // that file lists the same id; reload each of them.
+    const affected = (Object.entries(capabilityCatalogs) as Array<[ProviderKind, CatalogState | undefined]>)
+      .filter(([, entry]) => entry?.mcp?.servers.some((server) => server.resourceId === resourceId))
+      .map(([kind]) => kind);
+    await Promise.all([...new Set([provider, ...affected])].map((kind) => refreshCapabilityCatalog(kind)));
+  }, [activeWorkspace?.path, capabilityCatalogs, refreshCapabilityCatalog, settings.deviceSecret, settings.defaultWorkspacePath, settings.encryptionProtocol, settings.encryptionPublicKey, settings.transportVerified, settings.serverUrl]);
+
   const refreshMcpServer = useCallback((conversationId: string, resourceId: string) => {
     const conversation = conversationsRef.current.find((item) => item.id === conversationId) ?? null;
     const v2Id = conversation?.v2ConversationId;
@@ -8866,6 +8888,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     refreshCapabilityCatalog,
     toggleCatalogSkill,
     previewSkillResource,
+    getMcpServerConfig,
+    deleteMcpServer,
     refreshMcpServer,
     callMcpTool,
     fetchWorkspaceDirectorySnapshot: (path?: string) => fetchWorkspaceDirectorySnapshot(settings, path),
