@@ -18,7 +18,7 @@ import { Modal } from '@/components/ui/modal';
 import { EFFORT_TEXT, ModelReasoningCard } from '../components/ModelReasoningCard';
 import { ProviderIcon } from '../components/ProviderIcon';
 import { cx } from '@/utils/cx';
-import { conversationDisplayTitle, modelDisplayLabel, reasoningEffortLabel, type ConversationRecord } from '../session/helpers';
+import { conversationDisplayTitle, isNoneWorkspaceId, modelDisplayLabel, reasoningEffortLabel, type ConversationRecord } from '../session/helpers';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { useT } from '../i18n';
 import {
@@ -310,7 +310,8 @@ export function KanbanPanel({ session, onOpenConversation }: Props) {
   const [schedulingTaskId, setSchedulingTaskId] = useState<string | null>(null);
   const schedulingTask = allTasks.find((task) => task.id === schedulingTaskId && !task.deletedAt) ?? null;
   // Columns list workspaces in the same manual order as the sidebar.
-  const orderedWorkspaces = useMemo(() => [...session.workspaces].sort(
+  // Tasks need a registered workspace, so the built-in None one is left out.
+  const orderedWorkspaces = useMemo(() => session.workspaces.filter((workspace) => !isNoneWorkspaceId(workspace.id)).sort(
     (a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || (a.createdAt - b.createdAt) || a.id.localeCompare(b.id),
   ), [session.workspaces]);
   const groups = useMemo<WorkspaceTasks[]>(() => orderedWorkspaces.map((workspace) => ({

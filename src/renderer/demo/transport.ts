@@ -338,7 +338,7 @@ function route(request: SecureRequest): SecureResponse {
       case '/v2/transport-policy':
         return json({ requiredProtocol: 'none' });
       case '/v2/version':
-        return json({ name: 'todex-agentd', version: '2.2.0', data_dir: '/home/demo/.todex-agent', workspace_root: fixtures.DEMO_ROOT });
+        return json({ name: 'todex-agentd', version: '2.2.0', data_dir: '/home/demo/.todex-agent', workspace_root: fixtures.DEMO_ROOT, scratch_workspace_root: '/home/demo/.todex-agent/workspace' });
       case '/v2/providers':
         return json({ providers: fixtures.demoProviders });
       case '/v2/providers/models':
@@ -494,7 +494,10 @@ function route(request: SecureRequest): SecureResponse {
       id,
       provider: (typeof body.provider === 'string' ? body.provider : 'claude-code') as ProviderKind,
       ownerId: 'local',
-      workspace: typeof body.workspace === 'string' ? body.workspace : fixtures.demoWorkspaces[0].path,
+      workspace: body.scratchWorkspace === true
+        ? `/home/demo/.todex-agent/workspace/${id}`
+        : typeof body.workspace === 'string' ? body.workspace : fixtures.demoWorkspaces[0].path,
+      ...(body.scratchWorkspace === true ? { scratchWorkspace: true } : {}),
       ...(typeof body.workspaceId === 'string' ? { workspaceId: body.workspaceId } : {}),
       title: typeof body.title === 'string' ? body.title : '新对话',
       status: 'idle',

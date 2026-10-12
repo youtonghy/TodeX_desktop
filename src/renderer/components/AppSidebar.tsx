@@ -46,7 +46,7 @@ import { WorkspaceGroupRenameDialog } from './WorkspaceGroupRenameDialog';
 import { AppIcon } from './AppIcon';
 import { WORKSPACE_ICON_CHOICES, WORKSPACE_RING_STYLES, WorkspaceStatusRing, ringStyleKey, workspaceIconComponent } from './WorkspaceIcon';
 import type { TodeXSession } from '../session/useTodeXSession';
-import { connectionStateLabel, conversationDisplayTitle, formatResetInstant, getConversationStatus, healthLabelOf, isConversationHighlighted, workspaceDisplayName } from '../session/helpers';
+import { connectionStateLabel, conversationDisplayTitle, formatResetInstant, getConversationStatus, healthLabelOf, isConversationHighlighted, isNoneWorkspaceId, workspaceDisplayName } from '../session/helpers';
 import { ShortcutHint, shortcutKeys, useAppShortcuts, type ShortcutId } from '../lib/shortcuts';
 import { useT } from '../i18n';
 
@@ -344,9 +344,13 @@ export function AppSidebar({
 
   const workspaceConversations = useMemo(() => (
     session.conversations.filter(
-      (conversation) => conversation.workspaceId === session.activeWorkspaceId && !conversation.archived,
+      (conversation) => conversation.workspaceId === session.activeWorkspaceId && !conversation.archived
+        // None is shared by every backend; list only the active one's conversations.
+        && (!isNoneWorkspaceId(conversation.workspaceId)
+          || !conversation.backendConnectionId
+          || conversation.backendConnectionId === session.activeBackendConnectionId),
     )
-  ), [session.activeWorkspaceId, session.conversations]);
+  ), [session.activeBackendConnectionId, session.activeWorkspaceId, session.conversations]);
 
   // Workspaces cached under other backend profiles are read-only and render in
   // their own sections; only the active backend's workspaces are editable here.
@@ -504,7 +508,8 @@ export function AppSidebar({
   }, [session, timelineInfoMap]);
 
   // Workspaces use an explicit manual order and never move when a conversation updates.
-  const sortedWorkspaces = useMemo(() => [...ownWorkspaces].sort((a, b) => Number(pins.workspace.includes(b.id)) - Number(pins.workspace.includes(a.id)) || (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || (a.createdAt - b.createdAt) || a.id.localeCompare(b.id)), [ownWorkspaces, pins.workspace]);
+  // The built-in None workspace always leads the list.
+  const sortedWorkspaces = useMemo(() => [...ownWorkspaces].sort((a, b) => Number(isNoneWorkspaceId(b.id)) - Number(isNoneWorkspaceId(a.id)) || Number(pins.workspace.includes(b.id)) - Number(pins.workspace.includes(a.id)) || (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || (a.createdAt - b.createdAt) || a.id.localeCompare(b.id)), [ownWorkspaces, pins.workspace]);
 
   // Conversations order by the last finished/stopped turn, so a running
   // conversation no longer re-sorts while it streams. Items that have never
@@ -676,6 +681,8 @@ export function AppSidebar({
     setContextMenu(null);
   };
 
+  // The built-in None workspace keeps only pin and icon actions.
+  const contextIsNone = menu?.kind === 'workspace' && isNoneWorkspaceId(menu.id);
   // Legacy plaintext history is read-only: no rename or fork.
   const contextReadOnly = menu?.kind === 'conversation'
     && session.conversations.find((item) => item.id === menu.id)?.legacyPlaintext === true;
@@ -739,7 +746,7 @@ export function AppSidebar({
         })}
         inert={group?.folded || undefined}
         data-workspace-id={workspace.id}
-        data-workspace-drag={`workspace:${workspace.id}`}
+        data-workspace-drag={isNoneWorkspaceId(workspace.id) ? undefined : `workspace:${workspace.id}`}
         data-workspace-in-group={group ? 'true' : undefined}
         onContextMenu={(event) => openContextMenu(event, 'workspace', workspace.id)}
       >
@@ -853,7 +860,7 @@ export function AppSidebar({
           draggingKey === `workspace:${workspace.id}` && 'opacity-40',
         )}
         data-workspace-id={workspace.id}
-        data-workspace-drag={`workspace:${workspace.id}`}
+        data-workspace-drag={isNoneWorkspaceId(workspace.id) ? undefined : `workspace:${workspace.id}`}
         data-workspace-in-group={group ? 'true' : undefined}
         onContextMenu={(event) => openContextMenu(event, 'workspace', workspace.id)}
         leading={(
@@ -1437,8 +1444,8 @@ export function AppSidebar({
         ) : menu ? (
           <Menu aria-label={menu.kind === 'workspace' ? t('sidebar.workspaceMenu') : t('sidebar.conversationMenu')} autoFocus="first">
             {menu.kind === 'conversation' && !contextReadOnly ? <MenuItem id="fork" icon={RiGitBranchLine} textValue="Fork" onAction={() => runContextAction('fork')}>Fork</MenuItem> : null}
-            {contextReadOnly ? null : <MenuItem id="rename" icon={RiPencilLine} textValue={t('sidebar.rename')} onAction={() => runContextAction('rename')}>{t('sidebar.rename')}</MenuItem>}
-            {menu.kind === 'workspace' ? <MenuItem id="edit" icon={RiEdit2Line} textValue={t('sidebar.edit')} onAction={() => runContextAction('edit')}>{t('sidebar.edit')}</MenuItem> : null}
+            {contextReadOnly || contextIsNone ? null : <MenuItem id="rename" icon={RiPencilLine} textValue={t('sidebar.rename')} onAction={() => runContextAction('rename')}>{t('sidebar.rename')}</MenuItem>}
+            {menu.kind === 'workspace' && !contextIsNone ? <MenuItem id="edit" icon={RiEdit2Line} textValue={t('sidebar.edit')} onAction={() => runContextAction('edit')}>{t('sidebar.edit')}</MenuItem> : null}
             <MenuItem id="pin" icon={RiPushpin2Fill} textValue={pins[menu.kind].includes(menu.id) ? t('sidebar.unpin') : t('sidebar.pin')} onAction={() => runContextAction('pin')}>{pins[menu.kind].includes(menu.id) ? t('sidebar.unpin') : t('sidebar.pin')}</MenuItem>
             {menu.kind === 'workspace' ? (
               <SubmenuTrigger>
@@ -1518,7 +1525,7 @@ export function AppSidebar({
                 </MenuPopover>
               </SubmenuTrigger>
             ) : null}
-            {contextMoveTargets.length > 0 ? (
+            {contextMoveTargets.length > 0 && !contextIsNone ? (
               <SubmenuTrigger>
                 <MenuItem id="move-to-group" icon={RiFolderTransferLine} textValue={t('sidebar.moveToGroup')} trailing={SUBMENU_CHEVRON}>{t('sidebar.moveToGroup')}</MenuItem>
                 <MenuPopover placement="end top">
@@ -1566,8 +1573,12 @@ export function AppSidebar({
                 </MenuPopover>
               </SubmenuTrigger>
             ) : null}
-            <MenuSeparator />
-            <MenuItem id="delete" icon={RiDeleteBinLine} tone="danger" textValue={t('common.delete')} onAction={() => runContextAction('delete')}>{t('common.delete')}</MenuItem>
+            {contextIsNone ? null : (
+              <>
+                <MenuSeparator />
+                <MenuItem id="delete" icon={RiDeleteBinLine} tone="danger" textValue={t('common.delete')} onAction={() => runContextAction('delete')}>{t('common.delete')}</MenuItem>
+              </>
+            )}
           </Menu>
         ) : <Menu aria-label={t('sidebar.conversationMenu')}>{[]}</Menu>}
       </PointMenu>

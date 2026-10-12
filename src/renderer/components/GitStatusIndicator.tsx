@@ -4,6 +4,7 @@ import { Tooltip, TooltipTrigger } from '@/components/base/tooltip/tooltip';
 import { Spinner } from '@/components/ui/spinner';
 import { cx } from '@/utils/cx';
 import { ShortcutHint } from '../lib/shortcuts';
+import { filesWorkspaceForConversation } from '../session/helpers';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { useGitStatus } from '../session/useGitStatus';
 import { useGitRepositories } from '../session/useGitRepositories';
@@ -40,7 +41,7 @@ function hasChanges(repo: GitRepositoryItem) {
 
 export function useConversationGitStatus(session: TodeXSession, gitOpen: boolean, enabled = true) {
   const conversation = session.activeConversation;
-  const workspace = session.workspaces.find(item => item.id === conversation?.workspaceId);
+  const workspace = filesWorkspaceForConversation(session.workspaces.find(item => item.id === conversation?.workspaceId), conversation);
   const connected = enabled && session.connectionState === 'open' && Boolean(workspace?.path)
     && (!workspace?.backendConnectionId || workspace.backendConnectionId === session.activeBackendConnectionId);
   const workspacePath = workspace?.path || '';

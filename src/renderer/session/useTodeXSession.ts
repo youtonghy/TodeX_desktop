@@ -331,6 +331,11 @@ import {
   type UsageRecord,
   normalizeUsageRecords,
   createDefaultConversation,
+  createNoneWorkspace,
+  isNoneWorkspaceId,
+  NONE_WORKSPACE_ID,
+  withNoneWorkspace,
+  workspaceForConversation,
   conversationsForWorkspaceSnapshot,
   forkConversationRecord,
   isDefaultConversationTitle,
@@ -1210,7 +1215,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       const storedProfiles = (storedBackendConnections as unknown[]).map(normalizeBackendConnectionProfile).filter((profile): profile is BackendConnectionProfile => Boolean(profile));
       const hydratedProfiles = storedProfiles.length ? await Promise.all(storedProfiles.map(async (profile) => ({ ...profile, deviceSecret: (await loadSecretOrReport(`${DEVICE_SECRET_STORAGE_KEY}.${profile.id}`)) || (profile.id === 'default-backend' ? nextSettings.deviceSecret : '') }))) : [];
       const profiles = hydratedProfiles.length ? hydratedProfiles : [profileFromSettings(nextSettings)];
-      const normalizedWorkspaces = storedWorkspaces.map((workspace) => ({
+      const normalizedWorkspaces = withNoneWorkspace(storedWorkspaces, () => createNoneWorkspace(nextSettings)).map((workspace) => ({
         ...workspace,
         reasoningEffort: normalizeReasoningEffort(workspace.reasoningEffort),
         threadId: '',
@@ -1423,7 +1428,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     async (snapshot: WorkspaceRecord[] = workspacesRef.current) => {
       try {
         const activeSnapshot = snapshot.filter((workspace) =>
-          !workspace.backendConnectionId || workspace.backendConnectionId === activeBackendConnectionId,
+          !isNoneWorkspaceId(workspace.id)
+          && (!workspace.backendConnectionId || workspace.backendConnectionId === activeBackendConnectionId),
         );
         const body = JSON.stringify({ workspaces: prepareWorkspaceSyncPayload(activeSnapshot) });
         const response = await backendFetch(settings, {
@@ -1453,7 +1459,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       if (workspaceBackendSyncTimerRef.current) {
         clearTimeout(workspaceBackendSyncTimerRef.current);
       }
-      const payload = prepareWorkspaceSyncPayload(snapshot);
+      const payload = prepareWorkspaceSyncPayload(snapshot.filter((workspace) => !isNoneWorkspaceId(workspace.id)));
       workspaceBackendSyncTimerRef.current = setTimeout(() => {
         workspaceBackendSyncTimerRef.current = null;
         void syncWorkspacesToBackend(payload);
@@ -1483,7 +1489,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       const remoteRejections = parseWorkspaceSyncRejected(syncBody);
       notifyRejectedWorkspaces(remoteRejections);
       const missingKeys = new Set(remoteRejections.map((item) => normalizeWorkspacePath(item.path)));
-      const localWorkspaces = workspacesRef.current;
+      // The None workspace is local-only: keep it out of the merge.
+      const noneWorkspaces = workspacesRef.current.filter((workspace) => isNoneWorkspaceId(workspace.id));
+      const localWorkspaces = workspacesRef.current.filter((workspace) => !isNoneWorkspaceId(workspace.id));
       const localActiveWorkspaces = localWorkspaces.filter((workspace) =>
         !workspace.backendConnectionId || workspace.backendConnectionId === activeBackendConnectionId,
       );
@@ -1536,8 +1544,11 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
               'idle',
           }))
         : localActiveWorkspaces;
-      const nextWorkspaces = [...otherWorkspaces, ...nextActiveWorkspaces.map((workspace) => flagWorkspaceMissing(workspace, missingKeys))]
-        .sort((left, right) => right.updatedAt - left.updatedAt);
+      const nextWorkspaces = [
+        ...[...otherWorkspaces, ...nextActiveWorkspaces.map((workspace) => flagWorkspaceMissing(workspace, missingKeys))]
+          .sort((left, right) => right.updatedAt - left.updatedAt),
+        ...noneWorkspaces,
+      ];
 
       if (nextWorkspaces.length > 0) {
         const remappedConversations = remapWorkspaceScopedRecords(
@@ -1678,10 +1689,24 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     });
   }, [activeConversationId, activeWorkspaceId, hydrated]);
 
-  const activeWorkspace = useMemo(
-    () => workspaces.find((item) => item.id === activeWorkspaceId) ?? null,
-    [activeWorkspaceId, workspaces],
-  );
+  const activeWorkspace = useMemo(() => {
+    const workspace = workspaces.find((item) => item.id === activeWorkspaceId) ?? null;
+    return workspace && isNoneWorkspaceId(workspace.id)
+      ? workspaceForConversation(workspace, conversations.find((item) => item.id === activeConversationId))
+      : workspace;
+  }, [activeConversationId, activeWorkspaceId, conversations, workspaces]);
+
+  // The None workspace's own path is the backend's scratch root, so model and
+  // command discovery work before its first conversation folder exists.
+  const scratchWorkspaceRoot = serverVersion?.scratch_workspace_root ?? '';
+  useEffect(() => {
+    setWorkspaces((current) => {
+      const none = current.find((item) => isNoneWorkspaceId(item.id));
+      return none && none.path !== scratchWorkspaceRoot
+        ? current.map((item) => item === none ? { ...none, path: scratchWorkspaceRoot } : item)
+        : current;
+    });
+  }, [hydrated, scratchWorkspaceRoot]);
 
   const refreshCapabilityCatalog = useCallback(async (provider: ProviderKind) => {
     const workspacePath = activeWorkspace?.path || settings.defaultWorkspacePath;
@@ -2242,7 +2267,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     const workspace = conversation
       ? workspacesRef.current.find((item) => item.id === conversation.workspaceId) ?? null
       : null;
-    return workspace && conversation ? { workspace, conversation } : null;
+    return workspace && conversation ? { workspace: workspaceForConversation(workspace, conversation), conversation } : null;
   }, []);
 
   const pendingRequests = useMemo<PendingRequest[]>(() => {
@@ -3882,6 +3907,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
             version: probe.version.version,
             data_dir: probe.version.dataDir || '',
             workspace_root: probe.version.workspaceRoot || '',
+            scratch_workspace_root: probe.version.scratchWorkspaceRoot || '',
             historyEncryption: probe.version.historyEncryption,
           });
         }
@@ -3898,6 +3924,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           version: probe.version.version,
           data_dir: probe.version.dataDir || '',
           workspace_root: probe.version.workspaceRoot || '',
+          scratch_workspace_root: probe.version.scratchWorkspaceRoot || '',
           historyEncryption: probe.version.historyEncryption,
         });
       }
@@ -4669,6 +4696,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
 
   const removeWorkspace = useCallback(
     (workspaceId: string) => {
+      if (isNoneWorkspaceId(workspaceId)) {
+        return;
+      }
       const removedWorkspace = workspaces.find((workspace) => workspace.id === workspaceId);
       if (removedWorkspace) {
         // A tombstone keeps the merge-based sync from resurrecting the
@@ -4746,6 +4776,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   );
 
   const renameWorkspace = useCallback((workspaceId: string, name: string) => {
+    if (isNoneWorkspaceId(workspaceId)) {
+      return;
+    }
     const nextName = name.trim();
     if (!nextName) {
       desktopAlert(t('alert.nameRequired'), t('alert.workspaceNameBody'));
@@ -4756,7 +4789,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
 
   const forkWorkspace = useCallback((workspaceId: string) => {
     const workspace = workspaces.find((item) => item.id === workspaceId);
-    if (!workspace) {
+    if (!workspace || isNoneWorkspaceId(workspace.id)) {
       desktopAlert(t('alert.workspaceNotFound'), t('alert.workspaceNotFoundBody'));
       return null;
     }
@@ -6114,7 +6147,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     }
 
     const backendProfile = backendConnections.find((item) => item.id === options?.backendConnectionId) ?? backendConnections.find((item) => item.id === workspace.backendConnectionId);
-    const backendConnectionId = backendProfile?.id ?? workspace.backendConnectionId ?? null;
+    // None spans every backend, so its conversations belong to the active one.
+    const backendConnectionId = backendProfile?.id
+      ?? workspace.backendConnectionId
+      ?? (isNoneWorkspaceId(workspace.id) ? activeBackendConnectionId || null : null);
     const rememberedSelection = resolveRememberedProviderSelection(backendConnectionId, agent.provider);
     const runModes = rememberedRunModes(
       providerModelPreferencesRef.current[providerModelPreferenceKey(backendConnectionId, agent.provider)],
@@ -6153,7 +6189,29 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     setActiveWorkspaceId(workspace.id);
     setActiveConversationId(placeholder.id);
     return placeholder;
-  }, [backendConnections, isUnusedConversation, resolveRememberedProviderSelection]);
+  }, [activeBackendConnectionId, backendConnections, isUnusedConversation, resolveRememberedProviderSelection]);
+
+  // None conversations always run through a provider, which creates their
+  // folder. The generic default draft has no provider (it would take the
+  // legacy local path in the scratch root), so swap an unused one for a
+  // provider draft once the backend's agents are known.
+  useEffect(() => {
+    const conversation = conversations.find((item) => item.id === activeConversationId);
+    if (
+      !conversation
+      || !isNoneWorkspaceId(conversation.workspaceId)
+      || isV2Conversation(conversation)
+      || !isUnusedConversation(conversation)
+      || !v2Providers.some((provider) => provider.available)
+    ) {
+      return;
+    }
+    if (!createConversation(NONE_WORKSPACE_ID, { fresh: true })) {
+      return;
+    }
+    conversationsRef.current = conversationsRef.current.filter((item) => item.id !== conversation.id);
+    setConversations((current) => current.filter((item) => item.id !== conversation.id));
+  }, [activeConversationId, conversations, createConversation, isUnusedConversation, v2Providers]);
 
   /** Open a backend-validated worktree as a separate workspace/conversation. */
   const openGitWorktree = useCallback((path: string, sourceConversationId: string): {
@@ -6558,7 +6616,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
 
       const backendProfile = backendConnections.find((item) => item.id === conversation.backendConnectionId)
         ?? backendConnections.find((item) => item.id === workspace.backendConnectionId);
-      const backendConnectionId = backendProfile?.id ?? workspace.backendConnectionId ?? null;
+      const backendConnectionId = backendProfile?.id
+        ?? workspace.backendConnectionId
+        ?? (isNoneWorkspaceId(workspace.id) ? activeBackendConnectionId || null : null);
       const title = conversation.title.trim();
       const isDefaultTitle = isDefaultConversationTitle(title);
       const firstMessageTitle = firstMessageText.trim().slice(0, 18);
@@ -6567,7 +6627,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         const api = backendApi(backendProfile ?? settings);
         const created = await api.createConversation({
           provider: provider.id,
-          workspace: workspace.path,
+          // None: the backend creates this conversation's own folder.
+          ...(isNoneWorkspaceId(workspace.id) ? { scratchWorkspace: true } : { workspace: workspace.path }),
           title: isDefaultTitle ? firstMessageTitle || undefined : title || undefined,
           providerProfile: conversation.providerProfile && provider.profiles.includes(conversation.providerProfile)
             ? conversation.providerProfile
@@ -6621,7 +6682,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         pendingV2ConversationCreatesRef.current.delete(conversationId);
       }
     }
-  }, [backendConnections, getConversationContext, recoverConversation, settings.deviceSecret, settings.encryptionProtocol, settings.encryptionPublicKey, settings.transportVerified, settings.serverUrl, subscribeV2Conversation]);
+  }, [activeBackendConnectionId, backendConnections, getConversationContext, recoverConversation, settings.deviceSecret, settings.encryptionProtocol, settings.encryptionPublicKey, settings.transportVerified, settings.serverUrl, subscribeV2Conversation]);
 
   const sendV2Prompt = useCallback(
     async (

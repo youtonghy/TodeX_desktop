@@ -115,6 +115,9 @@ export type ServerVersion = {
   version: string;
   data_dir: string;
   workspace_root: string;
+  /** Parent of the None workspace's per-conversation folders; empty on
+   * backends that predate it. */
+  scratch_workspace_root: string;
   /** `1` when the backend serves end-to-end encrypted history. */
   historyEncryption?: number;
 };
@@ -149,6 +152,9 @@ export type WorkspaceDirectorySnapshot = {
 export type ConversationRecord = {
   id: string;
   workspaceId: string;
+  /** Folder the backend created for a conversation in the None workspace
+   * (manifest `scratchWorkspace`); it replaces the workspace path. */
+  workspacePath?: string;
   backendConnectionId?: string | null;
   title: string;
   preview?: string;
@@ -677,6 +683,68 @@ export function getConversationStatus(
 
 export function sessionIdForConversation(workspace: WorkspaceRecord, conversation: ConversationRecord): string {
   return conversation.sessionId || workspace.sessionId || createSessionId(workspace.name);
+}
+
+/** Built-in "None" workspace. Each of its conversations works in a folder the
+ * backend creates under `scratch_workspace_root`; the record's own path is
+ * that root (used for discovery before the first message). It is never
+ * synced to the backend workspace list and cannot be edited or removed. */
+export const NONE_WORKSPACE_ID = 'workspace-none';
+
+export function isNoneWorkspaceId(workspaceId: string | null | undefined): boolean {
+  return workspaceId === NONE_WORKSPACE_ID;
+}
+
+export function createNoneWorkspace(
+  settings: Pick<ConnectionSettings, 'tenantId' | 'defaultModel' | 'approvalPolicy' | 'sandboxMode'>,
+): WorkspaceRecord {
+  return {
+    id: NONE_WORKSPACE_ID,
+    name: 'None',
+    path: '',
+    backendConnectionId: null,
+    sessionId: createSessionId('none'),
+    tenantId: settings.tenantId,
+    threadId: '',
+    model: settings.defaultModel,
+    reasoningEffort: null,
+    approvalPolicy: settings.approvalPolicy,
+    approvalsReviewer: null,
+    sandboxMode: settings.sandboxMode,
+    serviceTier: null,
+    permissionProfile: null,
+    personality: null,
+    localAdapterState: 'idle',
+    createdAt: 0,
+    updatedAt: 0,
+  };
+}
+
+/** `workspaces` with exactly one None record, kept last so the default
+ * selection stays on a real workspace. */
+export function withNoneWorkspace(workspaces: WorkspaceRecord[], fallback: () => WorkspaceRecord): WorkspaceRecord[] {
+  const none = workspaces.find((workspace) => isNoneWorkspaceId(workspace.id));
+  const rest = workspaces.filter((workspace) => !isNoneWorkspaceId(workspace.id));
+  return [...rest, none ? { ...none, backendConnectionId: null, pathMissing: undefined } : fallback()];
+}
+
+/** The workspace a conversation actually runs in: a None conversation that
+ * already has its backend folder uses that folder as the path. */
+export function workspaceForConversation(workspace: WorkspaceRecord, conversation: ConversationRecord | null | undefined): WorkspaceRecord {
+  return isNoneWorkspaceId(workspace.id) && conversation?.workspacePath
+    ? { ...workspace, path: conversation.workspacePath }
+    : workspace;
+}
+
+/** Like workspaceForConversation, but a None conversation without its folder
+ * yet has no files of its own: undefined instead of the scratch root. */
+export function filesWorkspaceForConversation(
+  workspace: WorkspaceRecord | undefined,
+  conversation: ConversationRecord | null | undefined,
+): WorkspaceRecord | undefined {
+  if (!workspace) return undefined;
+  if (isNoneWorkspaceId(workspace.id) && !conversation?.workspacePath) return undefined;
+  return workspaceForConversation(workspace, conversation);
 }
 
 export function commandWorkspaceForConversation(workspace: WorkspaceRecord, conversation: ConversationRecord): WorkspaceRecord {
@@ -2367,6 +2435,7 @@ export function conversationFromManifest(
   return {
     id: manifest.id,
     workspaceId,
+    ...(manifest.scratchWorkspace ? { workspacePath: manifest.workspace } : {}),
     title: manifest.title || providerDisplayName(manifest.provider),
     preview: '',
     nativeStatus: manifest.status,
@@ -2418,10 +2487,10 @@ export function mergeManifestConversations(
     changed = true;
   }
   for (const manifest of manifests) {
-    const workspace = (manifest.workspaceId
-      ? scopedWorkspaces.find((item) => item.id === manifest.workspaceId)
-      : undefined)
-      ?? scopedWorkspaces.find((item) => item.path === manifest.workspace);
+    const workspace = manifest.scratchWorkspace
+      ? scopedWorkspaces.find((item) => isNoneWorkspaceId(item.id))
+      : (manifest.workspaceId ? scopedWorkspaces.find((item) => item.id === manifest.workspaceId) : undefined)
+        ?? scopedWorkspaces.find((item) => item.path === manifest.workspace);
     if (!workspace) {
       continue;
     }
@@ -2444,6 +2513,7 @@ export function mergeManifestConversations(
         && existing.providerProfile === manifest.providerProfile
         && existing.v2ConversationId === manifest.id
         && existing.workspaceId === workspace.id
+        && (!manifest.scratchWorkspace || existing.workspacePath === manifest.workspace)
         && existing.lastSequence === lastSequence
         && existing.updatedAt === updatedAt;
       if (!same) {
@@ -2458,12 +2528,15 @@ export function mergeManifestConversations(
           providerProfile: manifest.providerProfile,
           v2ConversationId: manifest.id,
           workspaceId: workspace.id,
+          ...(manifest.scratchWorkspace ? { workspacePath: manifest.workspace } : {}),
           lastSequence,
           updatedAt,
         };
       }
     } else {
-      next.unshift(conversationFromManifest(manifest, workspace.id));
+      const record = conversationFromManifest(manifest, workspace.id);
+      // The None workspace spans backends; its conversations carry their own.
+      next.unshift(manifest.scratchWorkspace ? { ...record, backendConnectionId } : record);
       changed = true;
     }
   }
