@@ -520,6 +520,11 @@ export function App() {
         session.createConversation(session.activeWorkspaceId);
         setPanel(null);
       }}
+      onCreateScheduledConversation={async (workspaceId, at) => {
+        const record = await session.createScheduledConversation(workspaceId, at);
+        if (record) setPanel(null);
+        return Boolean(record);
+      }}
       onOpenSettings={() => setPanel('settings')}
       onOpenCapabilities={() => setCapabilitiesOpen(true)}
       onOpenCliManager={() => { persistAsideOpen(false); setPanel('cli-manager'); }}

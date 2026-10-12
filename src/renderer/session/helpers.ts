@@ -16,7 +16,7 @@ import type {
   ServerEvent,
   WorkspaceRecord,
 } from '@todex/protocol/todex';
-import type { ConversationEvent, ConversationManifest, ProviderDescriptor, ProviderKind, ProviderModelDescriptor } from '@todex/protocol/v2';
+import type { ConversationEvent, ConversationManifest, ConversationSchedule, ProviderDescriptor, ProviderKind, ProviderModelDescriptor } from '@todex/protocol/v2';
 
 export type ResolvedSessionConfig = {
   model?: import('@todex/protocol/v2').ResolvedConfigValue<string>;
@@ -50,7 +50,7 @@ export function buildConversationCancelMessage(conversationId: string, turnId: s
 export function isStaleCancelResult(result: Record<string, unknown>): boolean {
   return result.cancelled === false;
 }
-import { providerDisplayName } from '@todex/protocol/v2';
+import { parseConversationSchedule, providerDisplayName } from '@todex/protocol/v2';
 import { ConnectionError, ConnectionErrorType, type ConnectionFailureCode } from '@todex/protocol/connectionError';
 import { matchesMessage, t, type MessageKey } from '../i18n';
 
@@ -163,6 +163,9 @@ export type ConversationRecord = {
   /** Stored before history became end-to-end encrypted: read-only (the
    * backend rejects writes with HISTORY_READ_ONLY). */
   legacyPlaintext?: boolean;
+  /** Scheduled conversation (manifest `schedule`): the backend holds what is
+   * sent to it until `at`. */
+  schedule?: ConversationSchedule;
   sessionId: string;
   threadId: string;
   localAdapterState?: LocalAdapterState;
@@ -2290,6 +2293,12 @@ export function providerHasBackendQueueControl(providers: readonly ProviderDescr
     && providers.find((provider) => provider.id === providerId)?.capabilities.backendQueueControl === true;
 }
 
+/** The backend can hold the queue until a set time (`conversation.schedule`). */
+export function providerSupportsScheduledConversations(providers: readonly ProviderDescriptor[], providerId: string | undefined): boolean {
+  return providerHasBackendQueue(providers, providerId)
+    && providers.find((provider) => provider.id === providerId)?.capabilities.scheduledConversations === true;
+}
+
 export function hasBackendQueue(providers: readonly ProviderDescriptor[], conversation: ConversationRecord | null | undefined): boolean {
   return Boolean(conversation?.v2ConversationId && providerHasBackendQueue(providers, conversation.provider));
 }
@@ -2442,6 +2451,7 @@ export function conversationFromManifest(
     nativeStatus: manifest.status,
     archived: Boolean(manifest.archivedAt),
     ...(manifest.legacyPlaintext ? { legacyPlaintext: true } : {}),
+    ...(parseConversationSchedule(manifest.schedule) ? { schedule: parseConversationSchedule(manifest.schedule) } : {}),
     sessionId: `v2_${manifest.id}`,
     threadId: '',
     localAdapterState: 'idle',
@@ -2455,6 +2465,16 @@ export function conversationFromManifest(
     createdAt,
     updatedAt,
   };
+}
+
+export function sameConversationSchedule(left?: ConversationSchedule, right?: ConversationSchedule): boolean {
+  return left?.at === right?.at && Boolean(left?.interrupted) === Boolean(right?.interrupted);
+}
+
+/** A schedule still holding what is sent (not interrupted by a restart). */
+export function activeConversationSchedule(conversation: Pick<ConversationRecord, 'schedule'> | null | undefined): ConversationSchedule | undefined {
+  const schedule = conversation?.schedule;
+  return schedule && !schedule.interrupted ? schedule : undefined;
 }
 
 export function mergeManifestConversations(
@@ -2506,7 +2526,9 @@ export function mergeManifestConversations(
       const title = manifest.title || providerDisplayName(manifest.provider);
       const archived = Boolean(manifest.archivedAt);
       const legacyPlaintext = manifest.legacyPlaintext === true;
+      const schedule = parseConversationSchedule(manifest.schedule);
       const same = existing.title === title
+        && sameConversationSchedule(existing.schedule, schedule)
         && existing.archived === archived
         && Boolean(existing.legacyPlaintext) === legacyPlaintext
         && existing.nativeStatus === manifest.status
@@ -2524,6 +2546,7 @@ export function mergeManifestConversations(
           title,
           archived,
           legacyPlaintext: legacyPlaintext || undefined,
+          schedule,
           nativeStatus: manifest.status,
           provider: manifest.provider,
           providerProfile: manifest.providerProfile,

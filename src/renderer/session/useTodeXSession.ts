@@ -21,7 +21,7 @@ import {
   type AgentBrowserFrame,
 } from '@todex/protocol/agentDesktop';
 import { parseFollowUpQueue, type ConversationRuntime, type FollowUpQueueState } from '@todex/protocol/conversationRuntime';
-import { followUpQueueFrame } from '@todex/protocol/conversationCommands';
+import { conversationScheduleFrame, followUpQueueFrame } from '@todex/protocol/conversationCommands';
 import { conversationTranscriptMarkdown, fetchConversationTranscriptTail, transcriptEntries } from '@todex/protocol/conversationExport';
 import { canonicalConversationEventType, type ConversationEvent } from '@todex/protocol/v2';
 import { ConversationEventBatcher } from '@todex/protocol/frameBatch';
@@ -35,7 +35,7 @@ import {
   type SetStateAction,
 } from 'react';
 import type { ConversationReplay, ProviderDescriptor, ProviderKind, PermissionMode, ConversationManifest, PromptContentRef, PromptSkillRef, SkillCatalogDescriptor, ProviderModelDescriptor, ProviderCommandDescriptor, ContextCompactionState, SubagentRun, MemoryEntry } from '@todex/protocol/v2';
-import { contextCompactionStatus } from '@todex/protocol/v2';
+import { contextCompactionStatus, parseConversationSchedule } from '@todex/protocol/v2';
 import { HISTORY_ENCRYPTION_CAPABILITY, normalizeConversationEvent } from '@todex/protocol/v2';
 import { verifyTransportPolicy, type SecureSocket } from '@todex/protocol/secureTransport';
 import { TRANSPORT_V2_WS_CLOSE_CODE, TransportCryptoError } from '@todex/protocol/secureChannel';
@@ -310,8 +310,10 @@ import {
   conversationFromManifest,
   mergeManifestConversations,
   isV2Conversation,
+  activeConversationSchedule,
   hasBackendQueue,
   providerHasBackendQueue,
+  providerSupportsScheduledConversations,
   providerHasBackendQueueControl,
   conversationImageInputSupport,
   canSwitchConversationAgent,
@@ -6533,59 +6535,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     };
   }, [promptContentFromAttachments, promptSkillsFromAttachments, settings.defaultModel]);
 
-  /** Send settings a kanban schedule snapshots: those of the target
-   * conversation, or the agent and run modes a new conversation in the
-   * workspace would get. Null when there is nothing to send with. */
-  const kanbanScheduleSettings = useCallback((
-    workspaceId: string,
-    conversationId?: string,
-    // Choices made in the schedule dialog; anything unset falls back to the
-    // provider's remembered composer selection.
-    overrides?: { provider?: string; model?: string; reasoningEffort?: string; permissionMode?: string },
-  ): Pick<KanbanTaskSchedule, 'provider' | 'providerProfile' | 'model' | 'reasoningEffort' | 'permissionMode' | 'workMode'> | null => {
-    const workspace = workspacesRef.current.find((item) => item.id === workspaceId);
-    if (!workspace) return null;
-    const codexModel = (provider: string | undefined, model: string | undefined) => (
-      (provider === 'codex' ? model || workspace.model || settings.defaultModel : model) || undefined
-    );
-    if (conversationId) {
-      const conversation = conversationsRef.current.find((item) => item.id === conversationId);
-      if (!conversation?.v2ConversationId) return null;
-      return {
-        model: codexModel(conversation.provider, conversation.model),
-        reasoningEffort: conversation.reasoningEffort || undefined,
-        permissionMode: conversationPermissionMode(conversation, workspace, v2ProvidersRef.current) ?? undefined,
-        workMode: conversation.mode === 'plan' ? 'plan' : 'implement',
-      };
-    }
-    const agent = resolveCreateConversationAgent({
-      requestedProvider: overrides?.provider,
-      providers: v2ProvidersRef.current,
-      conversations: conversationsRef.current,
-      activeConversationId: activeConversationRef.current,
-      workspaceId,
-    });
-    if (!agent) return null;
-    const backendConnectionId = workspace.backendConnectionId ?? null;
-    const remembered = resolveRememberedProviderSelection(backendConnectionId, agent.provider, overrides?.model, overrides?.reasoningEffort);
-    const permissionConfig = v2ProvidersRef.current.find((item) => item.id === agent.provider)?.capabilities.permissionConfig;
-    const runModes = rememberedRunModes(
-      providerModelPreferencesRef.current[providerModelPreferenceKey(backendConnectionId, agent.provider)],
-      permissionConfig,
-    );
-    if (overrides?.permissionMode && permissionConfig?.modes?.includes(overrides.permissionMode as PermissionMode)) {
-      runModes.permissionMode = overrides.permissionMode as PermissionMode;
-    }
-    return {
-      provider: agent.provider,
-      providerProfile: agent.providerProfile,
-      model: codexModel(agent.provider, remembered.model),
-      reasoningEffort: remembered.reasoningEffort || undefined,
-      permissionMode: runModes.permissionMode,
-      workMode: runModes.mode,
-    };
-  }, [resolveRememberedProviderSelection, settings.defaultModel]);
-
   const materializeV2Conversation = useCallback(async (
     conversationId: string,
     firstMessageText: string,
@@ -6740,6 +6689,18 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       const backendQueued = hasBackendQueue(v2ProvidersRef.current, conversation);
       const backendWait = backendQueued && conversation.v2ConversationId
         ? backendRateLimitState(conversationRecoveryRef.current?.get(conversation.v2ConversationId)?.followUps) : null;
+      // A scheduled conversation's backend holds everything sent to it until
+      // its time, behind the same queue.
+      const schedule = backendQueued ? activeConversationSchedule(conversation) : undefined;
+      if (schedule) {
+        const queued = await queueV2FollowUpRef.current(conversation.id,
+          { id: createRequestId('queued'), text, attachments, skills });
+        if (!queued) {
+          restoreSubmission();
+          return false;
+        }
+        return true;
+      }
       if (backendWait?.waiting) {
         const queued = await queueV2FollowUpRef.current(conversation.id,
           { id: createRequestId('queued'), text, attachments, skills });
@@ -7052,6 +7013,56 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       return false;
     }
   }, [sendProtocolCommand, setLastError]);
+
+  /** Holds the conversation's backend queue until `at` (ISO instant), or
+   * cancels its schedule with null. */
+  const scheduleConversation = useCallback(async (conversationId: string, at: string | null) => {
+    const conversation = conversationsRef.current.find((item) => item.id === conversationId);
+    const v2Id = conversation?.v2ConversationId;
+    if (!conversation || !v2Id) return false;
+    try {
+      const result = await sendProtocolCommand({ id: createRequestId('schedule'), ...conversationScheduleFrame(v2Id, at) });
+      if (result.queue !== undefined) conversationRecoveryRef.current?.adoptFollowUpQueue(v2Id, parseFollowUpQueue(result.queue));
+      const schedule = parseConversationSchedule(result.schedule);
+      const apply = (items: ConversationRecord[]) => items.map((item) => item.id === conversationId ? { ...item, schedule } : item);
+      conversationsRef.current = apply(conversationsRef.current);
+      setConversations(apply);
+      return true;
+    } catch (error) {
+      setLastError(error instanceof Error ? error.message : t('sess.requestFailed', { method: 'conversation.schedule' }));
+      return false;
+    }
+  }, [sendProtocolCommand, setLastError]);
+
+  /** Sends a scheduled conversation's held messages now: resuming its queue
+   * ends the schedule on the backend. */
+  const sendScheduledNow = useCallback(async (conversationId: string) => {
+    if (!await editFollowUpQueue(conversationId, 'resume')) return false;
+    const apply = (items: ConversationRecord[]) => items.map((item) => item.id === conversationId ? { ...item, schedule: undefined } : item);
+    conversationsRef.current = apply(conversationsRef.current);
+    setConversations(apply);
+    return true;
+  }, [editFollowUpQueue]);
+
+  /** Creates a conversation on the backend right away and schedules it: what
+   * is sent to it waits there until `at`. Resolves the opened record, or
+   * null with the reason reported. */
+  const createScheduledConversation = useCallback(async (
+    workspaceId: string,
+    at: string,
+    options?: { title?: string },
+  ): Promise<ConversationRecord | null> => {
+    const created = createConversation(workspaceId, { fresh: true, ...(options?.title ? { title: options.title } : {}) });
+    if (!created) return null;
+    if (!providerSupportsScheduledConversations(v2ProvidersRef.current, created.provider)) {
+      setLastError(t('sess.scheduleNeedsUpgrade'));
+      return null;
+    }
+    const record = await materializeV2Conversation(created.id, options?.title ?? '');
+    if (!record?.v2ConversationId) return null;
+    if (!await scheduleConversation(record.id, at)) return null;
+    return conversationsRef.current.find((item) => item.id === record.id) ?? record;
+  }, [createConversation, materializeV2Conversation, scheduleConversation, setLastError]);
 
   useEffect(() => {
     refreshFollowUpQueueRef.current = refreshFollowUpQueue;
@@ -8908,6 +8919,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     setSelectedRequestId,
     chatDrafts,
     editFollowUpQueue,
+    scheduleConversation,
+    sendScheduledNow,
+    createScheduledConversation,
     controlConversation,
     controlStatusByConversation,
     composerAttachments,
@@ -8973,7 +8987,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     forkWorkspace,
     removeWorkspace,
     createConversation,
-    kanbanScheduleSettings,
     materializeConversation: materializeV2Conversation,
     switchConversationAgent,
     selectConversation,

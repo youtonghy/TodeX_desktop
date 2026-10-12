@@ -427,21 +427,6 @@ export function setKanbanTaskConversations(id: string, conversationIds: string[]
   }));
 }
 
-/** Arms (or replaces) the task's schedule; the backend runs it at `at`. */
-export function setKanbanTaskSchedule(
-  id: string,
-  schedule: Omit<KanbanTaskSchedule, 'id' | 'status'>,
-): void {
-  const next: KanbanTaskSchedule = {
-    ...schedule,
-    id: `sched-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
-    status: 'pending',
-  };
-  commit(tasks.map((task) => (
-    task.id === id && !task.deletedAt ? { ...task, schedule: next, updatedAt: Date.now() } : task
-  )));
-}
-
 /** Cancels a pending schedule. It stays on the task as `cancelled`: a
  * dropped field would read as a client that does not know schedules. */
 export function cancelKanbanTaskSchedule(id: string): void {

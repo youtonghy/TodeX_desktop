@@ -47,6 +47,10 @@ export function useTaskActions(task: KanbanTask, handlers: TaskBoardHandlers, op
   // One conversation per task; a task split into subtasks talks through them.
   const hasSubtasks = allTasks.some((item) => item.parentId === task.id && !item.deletedAt);
   const canStart = kanbanTaskCanStartConversation(task, allTasks);
+  // A scheduled conversation is the task's conversation, created now and
+  // sent by the backend later.
+  const canSchedule = canStart
+    && session.v2Providers.some((provider) => provider.available && provider.capabilities.scheduledConversations === true);
 
   const run = (key: Key) => {
     const value = String(key);
@@ -58,8 +62,7 @@ export function useTaskActions(task: KanbanTask, handlers: TaskBoardHandlers, op
     } else if (action === 'new') {
       if (canStart) onStartConversation(task);
     } else if (action === 'schedule') {
-      if (hasSubtasks) return;
-      onSchedule(task);
+      if (canSchedule) onSchedule(task);
     } else if (action === 'cancel-schedule') {
       cancelKanbanTaskSchedule(task.id);
     } else if (action === 'draft' && argument) {
@@ -99,7 +102,7 @@ export function useTaskActions(task: KanbanTask, handlers: TaskBoardHandlers, op
           </MenuItem>
         ))}
       </MenuSection>
-      {canStart || linked.length || !hasSubtasks || staleCount ? <MenuSeparator /> : null}
+      {canStart || linked.length || task.schedule?.status === 'pending' || staleCount ? <MenuSeparator /> : null}
       {canStart ? (
         <MenuItem id="new" textValue={t('kanban.newConversation')}>{t('kanban.newConversation')}</MenuItem>
       ) : null}
@@ -130,9 +133,9 @@ export function useTaskActions(task: KanbanTask, handlers: TaskBoardHandlers, op
           </MenuPopover>
         </SubmenuTrigger>
       ) : null}
-      {hasSubtasks ? null : (
+      {canSchedule ? (
         <MenuItem id="schedule" textValue={t('kanban.schedule')}>{t('kanban.schedule')}</MenuItem>
-      )}
+      ) : null}
       {task.schedule?.status === 'pending' ? (
         <MenuItem id="cancel-schedule" textValue={t('kanban.scheduleCancel')}>{t('kanban.scheduleCancel')}</MenuItem>
       ) : null}
@@ -145,5 +148,5 @@ export function useTaskActions(task: KanbanTask, handlers: TaskBoardHandlers, op
     </>
   );
 
-  return { run, items, canStart, hasSubtasks, ...linkedState };
+  return { run, items, canStart, canSchedule, hasSubtasks, ...linkedState };
 }

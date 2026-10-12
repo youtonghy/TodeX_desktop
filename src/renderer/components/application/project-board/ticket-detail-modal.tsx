@@ -231,7 +231,7 @@ function TicketDetailBody({ task, workspaces, handlers, editTitle, onOpenTask, o
   const [scrollFade, setScrollFade] = useState(0);
   const startTitleEdit = () => { setTitleDraft(task.title); setEditingTitle(true); };
   const actions = useTaskActions(task, handlers, { onRename: startTitleEdit });
-  const { groups, staleCount, linked, run, canStart, hasSubtasks } = actions;
+  const { groups, staleCount, linked, run, canStart, canSchedule, hasSubtasks } = actions;
   const { session, conversations, onOpenConversation, onStartConversation, onSchedule } = handlers;
   // A subtask's description is the prompt its conversation starts with.
   const descriptionLabel = parent ? t("kanban.promptLabel") : t("kanban.descLabel");
@@ -379,13 +379,17 @@ function TicketDetailBody({ task, workspaces, handlers, editTitle, onOpenTask, o
                       />
                     )}
                     <DueDateProperty task={task} />
-                    {hasSubtasks ? null : (
+                    {/* Schedules from before scheduled conversations still show
+                        (and run); new ones are scheduled conversations. */}
+                    {task.schedule && task.schedule.status !== "cancelled" ? (
+                      <span className={PROPERTY_PILL}>
+                        <TaskScheduleLine schedule={task.schedule} className="text-body-medium" />
+                      </span>
+                    ) : canSchedule ? (
                       <button type="button" className={PROPERTY_PILL} onClick={() => onSchedule(task)}>
-                        {task.schedule && task.schedule.status !== "cancelled"
-                          ? <TaskScheduleLine schedule={task.schedule} className="text-body-medium" />
-                          : <><RiTimerLine className="size-[18px] shrink-0 text-foreground-icon-secondary" aria-hidden /><span className="text-text-tertiary">{t("kanban.schedule")}</span></>}
+                        <RiTimerLine className="size-[18px] shrink-0 text-foreground-icon-secondary" aria-hidden /><span className="text-text-tertiary">{t("kanban.schedule")}</span>
                       </button>
-                    )}
+                    ) : null}
                   </div>
                 </div>
 

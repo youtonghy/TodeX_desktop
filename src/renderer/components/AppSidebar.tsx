@@ -1,4 +1,4 @@
-import { RiPushpin2Fill, RiLockLine, RiAddLine, RiArrowRightSLine, RiCheckLine, RiFolderReduceLine, RiFoldersLine, RiFolderTransferLine, RiPencilLine, RiEdit2Line, RiErrorWarningLine, RiFolder3Line, RiFolderOpenLine, RiGitBranchLine, RiDeleteBinLine, RiArrowDownSLine, RiBarChartBoxLine, RiBookOpenLine, RiBrush3Line, RiInformationLine, RiKanbanView2, RiPaletteLine, RiPriceTag3Line, RiPuzzle2Line, RiSettings3Line, RiTerminalBoxLine, RiTerminalLine, RiTimeLine, RiUserSettingsLine, RiVipCrownLine } from '@remixicon/react';
+import { RiPushpin2Fill, RiLockLine, RiAddLine, RiArrowRightSLine, RiCheckLine, RiFolderReduceLine, RiFoldersLine, RiFolderTransferLine, RiPencilLine, RiEdit2Line, RiErrorWarningLine, RiFolder3Line, RiFolderOpenLine, RiGitBranchLine, RiDeleteBinLine, RiArrowDownSLine, RiBarChartBoxLine, RiBookOpenLine, RiBrush3Line, RiInformationLine, RiKanbanView2, RiPaletteLine, RiPriceTag3Line, RiPuzzle2Line, RiSettings3Line, RiTerminalBoxLine, RiTerminalLine, RiTimeLine, RiTimerLine, RiUserSettingsLine, RiVipCrownLine } from '@remixicon/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { MouseEvent, ReactNode } from 'react';
 import {
@@ -42,6 +42,8 @@ import type { BackendConnectionProfile } from '../session/backendColors';
 import { groupWorkspaceEntries, moveWorkspaceEntry, moveWorkspaceToGroup, newWorkspaceGroupId, removeWorkspaceFromGroup, renameWorkspaceGroup, ungroupWorkspaceGroup, workspaceLayoutPatches } from '@todex/protocol/todex';
 import type { WorkspaceDragSource, WorkspaceDropTarget, WorkspaceRecord, WorkspaceSidebarEntry } from '@todex/protocol/todex';
 import { ProviderIcon } from './ProviderIcon';
+import { ConversationScheduleIcon } from './ConversationSchedule';
+import { ScheduleConversationDialog } from './ScheduleConversationDialog';
 import { WorkspaceGroupRenameDialog } from './WorkspaceGroupRenameDialog';
 import { AppIcon } from './AppIcon';
 import { WORKSPACE_ICON_CHOICES, WORKSPACE_RING_STYLES, WorkspaceStatusRing, ringStyleKey, workspaceIconComponent } from './WorkspaceIcon';
@@ -64,6 +66,8 @@ type Props = {
   onCreateWorkspace: () => void;
   onEditWorkspace: (workspaceId: string) => void;
   onCreateConversation: () => void;
+  /** Creates a conversation in the workspace that sends at `at` (ISO). */
+  onCreateScheduledConversation: (workspaceId: string, at: string) => Promise<boolean>;
   onOpenSettings: () => void;
   onOpenCapabilities: () => void;
   onOpenCliManager: () => void;
@@ -311,6 +315,7 @@ export function AppSidebar({
   onCreateWorkspace,
   onEditWorkspace,
   onCreateConversation,
+  onCreateScheduledConversation,
   onOpenSettings,
   onOpenCapabilities,
   onOpenCliManager,
@@ -392,6 +397,8 @@ export function AppSidebar({
     : connectionStateLabel(session.connectionState);
 
   const [contextMenu, setContextMenu] = useState<ContextMenu>(null);
+  const [schedulingWorkspaceId, setSchedulingWorkspaceId] = useState<string | null>(null);
+  const canSchedule = session.v2Providers.some((provider) => provider.available && provider.capabilities.scheduledConversations === true);
   // The menu keeps rendering its last target while it animates out.
   const lastContextMenuRef = useRef<ContextMenu>(contextMenu);
   if (contextMenu) lastContextMenuRef.current = contextMenu;
@@ -686,8 +693,13 @@ export function AppSidebar({
   // Legacy plaintext history is read-only: no rename or fork.
   const contextReadOnly = menu?.kind === 'conversation'
     && session.conversations.find((item) => item.id === menu.id)?.legacyPlaintext === true;
-  const runContextAction = (action: 'rename' | 'edit' | 'fork' | 'pin' | 'delete') => {
+  const runContextAction = (action: 'rename' | 'edit' | 'fork' | 'pin' | 'delete' | 'schedule') => {
     if (!menu || menu.kind === 'group') return;
+    if (action === 'schedule') {
+      setSchedulingWorkspaceId(menu.id);
+      setContextMenu(null);
+      return;
+    }
     if (action === 'pin') {
       togglePin(menu.kind, menu.id);
       setContextMenu(null);
@@ -955,6 +967,13 @@ export function AppSidebar({
       disabled: !session.activeWorkspaceId,
       onClick: onCreateConversation,
       hint: <ShortcutHint id="newConversation" />,
+    },
+    {
+      key: 'new-scheduled-conversation',
+      label: t('schedule.create'),
+      icon: RiTimerLine,
+      disabled: !session.activeWorkspaceId || !canSchedule,
+      onClick: () => setSchedulingWorkspaceId(session.activeWorkspaceId),
     },
     {
       key: 'terminal',
@@ -1400,6 +1419,7 @@ export function AppSidebar({
                                   </Tooltip>
                                 </TooltipTrigger>
                               ) : null}
+                              {conversation.schedule ? <ConversationScheduleIcon schedule={conversation.schedule} /> : null}
                               {conversation.labelColor ? (
                                 <span
                                   aria-label={t('sidebar.labelColor')}
@@ -1433,6 +1453,12 @@ export function AppSidebar({
       </div>
       )}
 
+      <ScheduleConversationDialog
+        isOpen={schedulingWorkspaceId !== null}
+        mode="create"
+        onConfirm={(at) => (schedulingWorkspaceId ? onCreateScheduledConversation(schedulingWorkspaceId, at) : Promise.resolve(false))}
+        onClose={() => setSchedulingWorkspaceId(null)}
+      />
       <PointMenu position={contextMenu} onClose={closeContextMenu}>
         {menu?.kind === 'group' ? (
           <Menu aria-label={t('sidebar.groupMenu')} autoFocus="first">
@@ -1445,6 +1471,7 @@ export function AppSidebar({
           <Menu aria-label={menu.kind === 'workspace' ? t('sidebar.workspaceMenu') : t('sidebar.conversationMenu')} autoFocus="first">
             {menu.kind === 'conversation' && !contextReadOnly ? <MenuItem id="fork" icon={RiGitBranchLine} textValue="Fork" onAction={() => runContextAction('fork')}>Fork</MenuItem> : null}
             {contextReadOnly || contextIsNone ? null : <MenuItem id="rename" icon={RiPencilLine} textValue={t('sidebar.rename')} onAction={() => runContextAction('rename')}>{t('sidebar.rename')}</MenuItem>}
+            {menu.kind === 'workspace' && canSchedule ? <MenuItem id="schedule" icon={RiTimerLine} textValue={t('schedule.create')} onAction={() => runContextAction('schedule')}>{t('schedule.create')}</MenuItem> : null}
             {menu.kind === 'workspace' && !contextIsNone ? <MenuItem id="edit" icon={RiEdit2Line} textValue={t('sidebar.edit')} onAction={() => runContextAction('edit')}>{t('sidebar.edit')}</MenuItem> : null}
             <MenuItem id="pin" icon={RiPushpin2Fill} textValue={pins[menu.kind].includes(menu.id) ? t('sidebar.unpin') : t('sidebar.pin')} onAction={() => runContextAction('pin')}>{pins[menu.kind].includes(menu.id) ? t('sidebar.unpin') : t('sidebar.pin')}</MenuItem>
             {menu.kind === 'workspace' ? (
