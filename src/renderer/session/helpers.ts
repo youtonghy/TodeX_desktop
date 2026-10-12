@@ -1290,6 +1290,7 @@ export function conversationDisplayTitle(
     'devin',
     'opencode',
     'antigravity',
+    'deepseek harness',
     conversation.provider ? providerDisplayName(conversation.provider).toLowerCase() : '',
   ]);
   if (!genericTitles.has(title.toLowerCase()) && !isDefaultConversationTitle(title)) {

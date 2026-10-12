@@ -118,6 +118,7 @@ export const demoProviders: ProviderDescriptor[] = [
   provider('pi', 'Pi', true),
   provider('opencode', 'OpenCode', false, 'opencode is not installed'),
   provider('antigravity', 'Antigravity', false, "executable 'agy' was not found"),
+  provider('deepseek-harness', 'DeepSeek Harness', false, "executable 'dsh' was not found"),
 ];
 
 // --- Conversation journals ---------------------------------------------------
