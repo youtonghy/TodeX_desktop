@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { RiDeleteBin6Line, RiDownload2Line, RiDownloadCloud2Line, RiRefreshLine, RiServerLine, RiSettings3Line } from '@remixicon/react';
+import { RiDeleteBin6Line, RiDownload2Line, RiDownloadCloud2Line, RiFileList3Line, RiRefreshLine, RiServerLine, RiSettings3Line } from '@remixicon/react';
 import { Chip, type ChipProps } from '@/components/base/badges/chip';
 import { Button } from '@/components/base/buttons/button';
 import { Card } from '@/components/ui/card';
@@ -16,6 +16,7 @@ import {
   type ManagedCliProvider,
 } from '@todex/protocol/v2';
 import { CliSettingsModal } from '../components/cli/CliSettingsModal';
+import { InstructionPresetsModal } from '../components/cli/InstructionPresetsModal';
 import { hasCliSettings } from '../lib/cliSettings';
 import { ProviderIcon } from '../components/ProviderIcon';
 import { NoticeToast } from '../components/NoticeToast';
@@ -130,6 +131,7 @@ export function CliManagerPanel({ session }: { session: TodeXSession }) {
   };
 
   const [settingsProvider, setSettingsProvider] = useState<CliSettingsProvider | null>(null);
+  const [presetsOpen, setPresetsOpen] = useState(false);
   const [removingIntegration, setRemovingIntegration] = useState(false);
   // TodeX keeps a PreToolUse hook and its MCP servers in Antigravity's global
   // config (shared with the Antigravity app); this takes them out again.
@@ -157,6 +159,7 @@ export function CliManagerPanel({ session }: { session: TodeXSession }) {
           <h2 className="truncate text-headline-semibold text-text-primary">{activeBackend?.name || t('cli.currentBackend')}</h2>
           <p className="truncate text-caption-1-regular text-text-secondary" title={session.settings.serverUrl}>{session.settings.serverUrl}</p>
         </div>
+        <Button size="small" variant="secondary" leadingIcon={RiFileList3Line} onClick={() => setPresetsOpen(true)}>{t('instructionPresets.open')}</Button>
         <IconAction icon={RiRefreshLine} size="md" aria-label={t('cli.refreshAria')} disabled={loading} onClick={() => void refresh()} />
       </div>
 
@@ -246,6 +249,7 @@ export function CliManagerPanel({ session }: { session: TodeXSession }) {
         </div>
       )}
       <CliSettingsModal provider={settingsProvider} onClose={() => setSettingsProvider(null)} api={api} />
+      <InstructionPresetsModal isOpen={presetsOpen} onClose={() => setPresetsOpen(false)} api={api} />
     </div>
   );
 }

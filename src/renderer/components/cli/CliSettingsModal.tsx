@@ -33,8 +33,10 @@ import {
   type OptionValue,
   type SettingsObject,
 } from '@/lib/cliSettings';
+import { CliInstructionsPanel, useCliInstructions } from './CliInstructionsTab';
 
-type TabId = 'form' | 'env' | 'raw';
+type TabId = 'form' | 'env' | 'raw' | 'agents';
+const TAB_IDS: TabId[] = ['form', 'env', 'raw', 'agents'];
 type EnvRow = { key: number; name: string; value: string; revealed: boolean };
 
 const key = (value: string) => value as MessageKey;
@@ -77,6 +79,7 @@ function CliSettingsEditor({ schema, api, onClose }: { schema: CliSettingsSchema
   const [tab, setTab] = useState<TabId>('form');
   const [saving, setSaving] = useState(false);
   const nextEnvKey = useRef(0);
+  const instructions = useCliInstructions(provider, api);
 
   const toEnvRows = (settings: SettingsObject) => (envPath ? envRows(settings, envPath) : []).map((row) => ({ ...row, key: nextEnvKey.current++, revealed: false }));
 
@@ -112,9 +115,21 @@ function CliSettingsEditor({ schema, api, onClose }: { schema: CliSettingsSchema
   const fileName = doc?.path.split(/[\\/]/).pop() || doc?.path || '';
   const envInvalid = env.some((row) => row.name.trim() !== '' && !ENV_NAME.test(row.name.trim()));
   const editingRaw = tab === 'raw';
-  const canSave = Boolean(doc) && !saving && (editingRaw ? rawDirty && !rawError : formDirty && !envInvalid);
+  const editingAgents = tab === 'agents';
+  const canSave = editingAgents
+    ? instructions.canSave
+    : Boolean(doc) && !saving && (editingRaw ? rawDirty && !rawError : formDirty && !envInvalid);
+  // Edits left unsaved on a tab other than the one shown.
+  const unsavedElsewhere = editingAgents
+    ? (formDirty || rawDirty) && 'cliSettings.settingsUnsaved'
+    : (editingRaw ? formDirty : rawDirty) ? (editingRaw ? 'cliSettings.formUnsaved' : 'cliSettings.rawUnsaved')
+      : instructions.dirty && 'cliSettings.agentsUnsaved';
 
   const save = async () => {
+    if (editingAgents) {
+      await instructions.save();
+      return;
+    }
     if (!doc) return;
     setSaving(true);
     try {
@@ -163,12 +178,14 @@ function CliSettingsEditor({ schema, api, onClose }: { schema: CliSettingsSchema
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
-      <p className="truncate text-body-2-regular text-text-secondary" dir="ltr" title={doc.path}>{doc.path}</p>
-      <Tabs selectedKey={tab} onSelectionChange={(next) => setTab(next === 'env' || next === 'raw' ? next : 'form')} className="min-h-0 flex-1 gap-0">
+      {/* The AGENTS.md tab names its own file. */}
+      <p className={cx('truncate text-body-2-regular text-text-secondary', editingAgents && 'invisible')} dir="ltr" title={doc.path}>{doc.path}</p>
+      <Tabs selectedKey={tab} onSelectionChange={(next) => setTab(TAB_IDS.find((id) => id === next) ?? 'form')} className="min-h-0 flex-1 gap-0">
         <TabList aria-label={t('cliSettings.tabsLabel')}>
           <Tab id="form" isDisabled={!saved}>{t('cliSettings.tabForm')}</Tab>
           {envPath ? <Tab id="env" isDisabled={!saved} count={env.length || undefined}>{t('cliSettings.tabEnv')}</Tab> : null}
           <Tab id="raw">{t('cliSettings.tabRaw')}</Tab>
+          <Tab id="agents">AGENTS.md</Tab>
         </TabList>
         <ScrollArea surface="full" className="-mx-6 flex-1" contentClassName="px-6 pt-4 pb-4">
           <TabPanel id="form" className="flex flex-col gap-5">
@@ -221,14 +238,17 @@ function CliSettingsEditor({ schema, api, onClose }: { schema: CliSettingsSchema
               />
             )}
           </TabPanel>
+          <TabPanel id="agents">
+            <CliInstructionsPanel state={instructions} />
+          </TabPanel>
         </ScrollArea>
       </Tabs>
       <div className="flex shrink-0 flex-wrap items-center justify-end gap-2.5 border-t border-separator-border pt-4 pb-6">
-        {(editingRaw ? formDirty : rawDirty) ? (
-          <span className="me-auto text-body-2-regular text-text-secondary">{t(editingRaw ? 'cliSettings.formUnsaved' : 'cliSettings.rawUnsaved')}</span>
+        {unsavedElsewhere ? (
+          <span className="me-auto text-body-2-regular text-text-secondary">{t(unsavedElsewhere)}</span>
         ) : null}
-        <Button variant="secondary" onClick={onClose} disabled={saving}>{t('common.close')}</Button>
-        <Button onClick={() => void save()} disabled={!canSave} aria-busy={saving || undefined}>{t('common.save')}</Button>
+        <Button variant="secondary" onClick={onClose} disabled={saving || instructions.busy}>{t('common.close')}</Button>
+        <Button onClick={() => void save()} disabled={!canSave} aria-busy={(editingAgents ? instructions.busy : saving) || undefined}>{t('common.save')}</Button>
       </div>
     </div>
   );

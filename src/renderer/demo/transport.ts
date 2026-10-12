@@ -83,6 +83,82 @@ function demoCliSettingsDocument(file: DemoSettingsFile) {
   return { path: file.path, format: file.format, exists: true, revision, text: file.text, settings: file.settings };
 }
 
+type DemoInstructionPreset = { id: string; name: string; text: string; revision: number; updatedAt: number };
+const demoInstructionFiles: Record<string, { path: string; text: string | null; presetId?: string; written?: string }> = {
+  'claude-code': { path: '/home/demo/.claude/CLAUDE.md', text: '# Personal rules\n\n- Answer in Chinese.\n- Prefer pnpm.\n' },
+  codex: { path: '/home/demo/.codex/AGENTS.md', text: null },
+  pi: { path: '/home/demo/.pi/agent/AGENTS.md', text: null },
+};
+let demoInstructionPresets: DemoInstructionPreset[] = [
+  { id: 'demo-preset-team', name: 'Team defaults', text: '# Team defaults\n\n- Run the tests before committing.\n- Keep commits small.\n', revision: 1, updatedAt: Date.now() },
+];
+
+const demoRevision = (text: string | null) => (text === null ? 'missing' : [...text].reduce((hash, char) => (hash * 31 + char.charCodeAt(0)) >>> 0, 7).toString(16));
+
+function demoInstructionsDocument(provider: string) {
+  const file = demoInstructionFiles[provider];
+  const revision = demoRevision(file.text);
+  return { path: file.path, exists: file.text !== null, revision, text: file.text ?? '', presetId: file.presetId, drifted: Boolean(file.presetId) && file.written !== revision };
+}
+
+function demoPresetView(preset: DemoInstructionPreset) {
+  return { ...preset, usedBy: Object.keys(demoInstructionFiles).filter((provider) => demoInstructionFiles[provider].presetId === preset.id) };
+}
+
+function demoInstructionsRoute(method: string, path: string, body: Record<string, unknown>): SecureResponse | undefined {
+  const conflict = () => json({ error: { code: 'CONFLICT', message: 'changed on disk' } }, 409);
+  const fileMatch = path.match(/^\/v2\/providers\/(claude-code|codex|pi)\/instructions(\/source)?$/);
+  if (fileMatch) {
+    const [, provider, source] = fileMatch;
+    const file = demoInstructionFiles[provider];
+    if (method === 'GET' && !source) return json(demoInstructionsDocument(provider));
+    if (method !== 'PUT') return undefined;
+    if (body.revision !== demoRevision(file.text)) return conflict();
+    if (!source) {
+      file.text = String(body.text);
+      file.presetId = undefined;
+    } else if (typeof body.presetId === 'string') {
+      const preset = demoInstructionPresets.find((item) => item.id === body.presetId);
+      if (!preset) return json({ error: { code: 'NOT_FOUND', message: 'instruction preset not found' } }, 404);
+      file.text = preset.text;
+      file.presetId = preset.id;
+      file.written = demoRevision(preset.text);
+    } else {
+      file.presetId = undefined;
+    }
+    return json(demoInstructionsDocument(provider));
+  }
+  if (path === '/v2/instruction-presets') {
+    if (method === 'GET') return json({ presets: demoInstructionPresets.map(demoPresetView) });
+    if (method === 'POST') {
+      const preset = { id: `demo-preset-${Date.now()}`, name: String(body.name).trim(), text: String(body.text), revision: 1, updatedAt: Date.now() };
+      demoInstructionPresets.push(preset);
+      return json(demoPresetView(preset), 201);
+    }
+    return undefined;
+  }
+  const presetMatch = path.match(/^\/v2\/instruction-presets\/([^/]+)$/);
+  const preset = presetMatch ? demoInstructionPresets.find((item) => item.id === decodeURIComponent(presetMatch[1])) : undefined;
+  if (!presetMatch) return undefined;
+  if (!preset) return json({ error: { code: 'NOT_FOUND', message: 'instruction preset not found' } }, 404);
+  if (method === 'DELETE') {
+    demoInstructionPresets = demoInstructionPresets.filter((item) => item !== preset);
+    for (const file of Object.values(demoInstructionFiles)) if (file.presetId === preset.id) file.presetId = undefined;
+    return { status: 204, headers: {}, body: new Uint8Array() };
+  }
+  if (method !== 'PUT') return undefined;
+  if (body.revision !== preset.revision) return conflict();
+  const textChanged = preset.text !== body.text;
+  Object.assign(preset, { name: String(body.name).trim(), text: String(body.text), revision: preset.revision + 1, updatedAt: Date.now() });
+  const sync = textChanged ? Object.entries(demoInstructionFiles).filter(([, file]) => file.presetId === preset.id).map(([provider, file]) => {
+    if (demoRevision(file.text) !== file.written) return { provider, status: 'drifted' };
+    file.text = preset.text;
+    file.written = demoRevision(file.text);
+    return { provider, status: 'updated' };
+  }) : [];
+  return json({ preset: demoPresetView(preset), sync });
+}
+
 function demoCleanupPolicy() {
   return { policy: cleanupPolicy, lastRun: null, nextRunAt: cleanupPolicy.enabled ? new Date(Date.now() + 3_600_000).toISOString() : null };
 }
@@ -330,6 +406,8 @@ function route(request: SecureRequest): SecureResponse {
   if (path.startsWith('/v2/catalog/')) return catalogRoute(method, path, provider, readBody(request));
   const settingsFile = demoCliSettings[path.match(/^\/v2\/providers\/([^/]+)\/settings$/)?.[1] ?? ''];
   if (settingsFile && method === 'GET') return json(demoCliSettingsDocument(settingsFile));
+  const instructionsResponse = demoInstructionsRoute(method, path, readBody(request));
+  if (instructionsResponse) return instructionsResponse;
 
   if (method === 'GET') {
     switch (path) {
