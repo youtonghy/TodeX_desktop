@@ -1875,6 +1875,7 @@ export const zhCN = {
   'color.yellow': '黄色',
 
   // conn
+  'conn.backendStarting': '等待后端完成加载',
   'conn.checking': '检测中',
   'conn.checkingWithLatency': '检测中 · {latency}',
   'conn.closed': '已断开',
@@ -2014,6 +2015,7 @@ export const zhCN = {
   'sess.forkUnsupported': '当前 Agent 未提供已验证的原生分叉能力。',
   'sess.gitDiffFailed': 'gitDiffToRemote 请求失败',
   'sess.guardianWarning': '需要粘贴 guardian denied action 的原始事件 JSON。',
+  'sess.backendStartTimeout': '后端 2 分钟内未完成加载，请确认后端正在运行后重试。',
   'sess.healthCheckFailed': '健康检查失败',
   'sess.healthCheckTimeout': '健康检查超时',
   'sess.imageAttachmentName': '图片 {count}',
@@ -2149,7 +2151,6 @@ export const zhCN = {
   'transport.cannotConfirmPolicy': '无法确认后端加密要求，请检查后端状态后重试。',
   'transport.invalidPolicy': '后端加密要求响应无效。',
   'transport.notVerified': '加密连接未通过验证（后端没有用配对时的密钥应答）。请在 设置 → 设备验证 中重新配对此后端后重新连接。',
-  'transport.policyTimeout': '确认后端加密要求超时，请检查连接后重试。',
   'transport.policyUnreachable': '无法连接后端以确认加密要求，将自动重试。',
   'transport.encryptionRequired': '远程后端只接受加密连接，而此设备尚未与它配对。请在 设置 → 设备验证 中发起配对，在后端 TUI 核对验证码并批准，加密公钥会自动固定。',
   'transport.repairRequired': '后端现在要求 {protocol} 加密，与本机配对时固定的密钥不一致。请在 设置 → 设备验证 中重新配对此后端。',

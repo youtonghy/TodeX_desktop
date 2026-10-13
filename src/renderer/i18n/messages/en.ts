@@ -1875,6 +1875,7 @@ export const en: Messages = {
   'color.yellow': 'Yellow',
 
   // conn
+  'conn.backendStarting': 'Waiting for the backend to finish loading',
   'conn.checking': 'Checking',
   'conn.checkingWithLatency': 'Checking · {latency}',
   'conn.closed': 'Disconnected',
@@ -2014,6 +2015,7 @@ export const en: Messages = {
   'sess.forkUnsupported': 'The current Agent does not provide a verified native fork capability.',
   'sess.gitDiffFailed': 'gitDiffToRemote request failed',
   'sess.guardianWarning': 'Paste the original guardian denied action event JSON.',
+  'sess.backendStartTimeout': 'The backend did not finish loading within 2 minutes. Check that it is running, then retry.',
   'sess.healthCheckFailed': 'Health check failed',
   'sess.healthCheckTimeout': 'Health check timed out',
   'sess.imageAttachmentName': 'Image {count}',
@@ -2149,7 +2151,6 @@ export const en: Messages = {
   'transport.cannotConfirmPolicy': 'Could not confirm the backend encryption requirement. Check the backend status and retry.',
   'transport.invalidPolicy': 'Invalid backend encryption requirement response.',
   'transport.notVerified': 'The encrypted connection could not be verified (the backend did not answer with the paired key). Re-pair this backend in Settings → Device verification, then reconnect.',
-  'transport.policyTimeout': 'Confirming the backend encryption requirement timed out. Check the connection and retry.',
   'transport.policyUnreachable': 'Cannot reach the backend to confirm encryption requirements; retrying automatically.',
   'transport.encryptionRequired': 'This remote backend only accepts encrypted connections, and this device is not paired with it yet. Start device verification in Settings → Device verification, compare the code in the backend TUI and approve; the encryption key is pinned automatically.',
   'transport.repairRequired': 'The backend now requires {protocol} encryption, which does not match the key pinned when this device was paired. Re-pair this backend in Settings → Device verification.',

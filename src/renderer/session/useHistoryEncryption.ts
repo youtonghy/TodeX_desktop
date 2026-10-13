@@ -100,6 +100,8 @@ const TITLE_CONCURRENCY = 4;
 /** Pushed updates arrive in bursts (one per grant batch): they are folded
  * into one state read and one unlock. */
 const UPDATE_DEBOUNCE_MS = 300;
+/** How long a history command waits for a connecting socket. */
+const CONNECT_WAIT_MS = 15_000;
 
 export function useHistoryEncryption({ activeBackendId, connected, supported, sendCommand, onUnlocked }: {
   activeBackendId: string;
@@ -139,16 +141,42 @@ export function useHistoryEncryption({ activeBackendId, connected, supported, se
     setView((previous) => (previous.backendId === backendId ? { ...previous, accessRevoked: true } : previous));
   }, []);
 
+  /** Resolved when the verified socket opens; history pages fetched over
+   * HTTP can need wraps while it is still connecting. */
+  const connectedWaiters = useRef(new Set<() => void>());
+  useEffect(() => {
+    if (!connected) return;
+    for (const resolve of connectedWaiters.current) resolve();
+    connectedWaiters.current.clear();
+  }, [connected]);
+
+  const waitForConnected = useCallback(async () => {
+    if (live.current.connected) return true;
+    let resolve = () => {};
+    const opened = new Promise<boolean>((done) => { resolve = () => done(true); });
+    connectedWaiters.current.add(resolve);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timedOut = new Promise<boolean>((done) => { timer = setTimeout(() => done(false), CONNECT_WAIT_MS); });
+    try {
+      return await Promise.race([opened, timedOut]);
+    } finally {
+      clearTimeout(timer);
+      connectedWaiters.current.delete(resolve);
+    }
+  }, []);
+
   const send = useCallback(async (frame: HistoryCommandFrame) => {
-    if (!live.current.connected) throw new Error(t('history.notConnected'));
     const backendId = live.current.activeBackendId;
+    if (!await waitForConnected()) throw new Error(t('history.notConnected'));
+    // The socket that opened belongs to another backend.
+    if (backendId !== live.current.activeBackendId) throw new Error(t('history.otherBackend'));
     try {
       return await live.current.sendCommand({ id: createRequestId('history'), ...frame }, 30_000);
     } catch (error) {
       if (isAccessRevoked(error)) markRevoked(backendId, true);
       throw error;
     }
-  }, [markRevoked]);
+  }, [markRevoked, waitForConnected]);
 
   /** Wraps are fetched over the active backend's socket only. */
   const sendFor = useCallback((backendId: string) => (frame: HistoryCommandFrame) => {

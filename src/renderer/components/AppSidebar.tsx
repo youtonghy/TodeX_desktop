@@ -399,7 +399,9 @@ export function AppSidebar({
   // "Backend online · 42 ms" while connected, the connection state otherwise.
   const connectionLabel = session.connectionState === 'open'
     ? healthLabelOf(session.connectionHealth)
-    : connectionStateLabel(session.connectionState);
+    : session.backendStarting
+      ? t('conn.backendStarting')
+      : connectionStateLabel(session.connectionState);
 
   const [contextMenu, setContextMenu] = useState<ContextMenu>(null);
   const [schedulingWorkspaceId, setSchedulingWorkspaceId] = useState<string | null>(null);

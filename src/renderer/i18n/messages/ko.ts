@@ -1875,6 +1875,7 @@ export const ko: Messages = {
   'color.yellow': '노랑',
 
   // conn
+  'conn.backendStarting': 'Backend 로딩이 끝나기를 기다리는 중',
   'conn.checking': '확인 중',
   'conn.checkingWithLatency': '확인 중 · {latency}',
   'conn.closed': '연결 끊김',
@@ -2014,6 +2015,7 @@ export const ko: Messages = {
   'sess.forkUnsupported': '현재 Agent는 검증된 네이티브 분기 기능을 제공하지 않습니다.',
   'sess.gitDiffFailed': 'gitDiffToRemote 요청 실패',
   'sess.guardianWarning': 'guardian denied action의 원본 이벤트 JSON을 붙여넣어야 합니다.',
+  'sess.backendStartTimeout': 'Backend가 2분 안에 로딩을 마치지 못했습니다. 실행 중인지 확인한 후 다시 시도하세요.',
   'sess.healthCheckFailed': '상태 확인 실패',
   'sess.healthCheckTimeout': '상태 확인 시간 초과',
   'sess.imageAttachmentName': '이미지 {count}',
@@ -2149,7 +2151,6 @@ export const ko: Messages = {
   'transport.cannotConfirmPolicy': 'Backend 암호화 요구 사항을 확인할 수 없습니다. Backend 상태를 확인한 후 다시 시도하세요.',
   'transport.invalidPolicy': 'Backend 암호화 요구 사항 응답이 유효하지 않습니다.',
   'transport.notVerified': '암호화 연결을 검증하지 못했습니다(Backend가 페어링한 키로 응답하지 않음). 설정 → 기기 인증에서 이 Backend를 다시 페어링한 후 다시 연결하세요.',
-  'transport.policyTimeout': 'Backend 암호화 요구 사항 확인 시간이 초과되었습니다. 연결을 확인한 후 다시 시도하세요.',
   'transport.policyUnreachable': '암호화 요구 사항을 확인하기 위해 Backend에 연결할 수 없습니다. 자동으로 다시 시도합니다.',
   'transport.encryptionRequired': '원격 Backend는 암호화 연결만 허용하지만 이 기기는 아직 페어링되지 않았습니다. 설정 → 기기 인증에서 인증을 시작하고 Backend TUI에서 코드를 대조해 승인하세요. 암호화 키는 자동으로 고정됩니다.',
   'transport.repairRequired': 'Backend가 이제 {protocol} 암호화를 요구하며, 이 기기를 페어링할 때 고정한 키와 일치하지 않습니다. 설정 → 기기 인증에서 이 Backend를 다시 페어링하세요.',

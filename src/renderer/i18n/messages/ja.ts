@@ -1875,6 +1875,7 @@ export const ja: Messages = {
   'color.yellow': 'イエロー',
 
   // conn
+  'conn.backendStarting': 'Backend の読み込み完了を待っています',
   'conn.checking': '確認中',
   'conn.checkingWithLatency': '確認中 · {latency}',
   'conn.closed': '切断',
@@ -2014,6 +2015,7 @@ export const ja: Messages = {
   'sess.forkUnsupported': '現在の Agent は検証済みのネイティブ分岐機能を提供していません。',
   'sess.gitDiffFailed': 'gitDiffToRemote リクエストに失敗しました',
   'sess.guardianWarning': 'guardian denied action の元イベント JSON を貼り付ける必要があります。',
+  'sess.backendStartTimeout': 'Backend が 2 分以内に読み込みを完了しませんでした。実行中か確認してから再試行してください。',
   'sess.healthCheckFailed': 'ヘルスチェックに失敗しました',
   'sess.healthCheckTimeout': 'ヘルスチェックがタイムアウトしました',
   'sess.imageAttachmentName': '画像 {count}',
@@ -2149,7 +2151,6 @@ export const ja: Messages = {
   'transport.cannotConfirmPolicy': 'Backend の暗号化要件を確認できません。Backend の状態を確認して再試行してください。',
   'transport.invalidPolicy': 'Backend の暗号化要件の応答が無効です。',
   'transport.notVerified': '暗号化接続を検証できませんでした（Backend がペアリング時の鍵で応答しませんでした）。設定 → デバイス認証 でこの Backend を再ペアリングしてから再接続してください。',
-  'transport.policyTimeout': 'Backend の暗号化要件の確認がタイムアウトしました。接続を確認して再試行してください。',
   'transport.policyUnreachable': '暗号化要件を確認するため Backend に接続できません。自動で再試行します。',
   'transport.encryptionRequired': 'リモートの Backend は暗号化接続のみ受け付けますが、このデバイスはまだペアリングされていません。設定 → デバイス認証 で認証を開始し、Backend の TUI でコードを照合して承認してください。暗号化鍵は自動で固定されます。',
   'transport.repairRequired': 'Backend は現在 {protocol} 暗号化を要求しており、このデバイスのペアリング時に固定した鍵と一致しません。設定 → デバイス認証 でこの Backend を再ペアリングしてください。',

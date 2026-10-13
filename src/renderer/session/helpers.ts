@@ -578,6 +578,12 @@ export const SOCKET_LIVENESS_TIMEOUT_MS = 15_000;
 export const SOCKET_LIVENESS_MAX_FAILURES = 3;
 /** How long a new encrypted socket may take to answer its verification ping. */
 export const SOCKET_VERIFICATION_TIMEOUT_MS = 10_000;
+/** A starting backend accepts connections but answers nothing until its
+ * state (conversation recovery included) is loaded. The connect's first
+ * request, the transport-policy read, waits this long for it. */
+export const BACKEND_READY_TIMEOUT_MS = 120_000;
+/** Shorter waits are not worth announcing. */
+export const BACKEND_READY_NOTICE_DELAY_MS = 1500;
 
 /** requestAnimationFrame stops firing while the window is hidden or occluded,
  * which freezes protocol frame processing even though the socket stays alive.
@@ -2107,7 +2113,7 @@ export function describeTransportFailure(error: unknown): TransportFailure | nul
       case 'invalid':
         return { message: t('transport.invalidPolicy'), retryable: false, code: 'protocol_mismatch' };
       case 'timeout':
-        return { message: t('transport.policyTimeout'), retryable: true, code: 'backend_unreachable' };
+        return { message: t('sess.backendStartTimeout'), retryable: true, code: 'backend_unreachable' };
       case 'unreachable':
         return { message: t('transport.policyUnreachable'), retryable: true, code: 'backend_unreachable' };
       default:

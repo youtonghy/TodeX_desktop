@@ -359,6 +359,8 @@ import {
   SOCKET_WATCHDOG_INTERVAL_MS,
   SOCKET_LIVENESS_TIMEOUT_MS,
   SOCKET_VERIFICATION_TIMEOUT_MS,
+  BACKEND_READY_NOTICE_DELAY_MS,
+  BACKEND_READY_TIMEOUT_MS,
   SOCKET_LIVENESS_MAX_FAILURES,
   MAX_COMPOSER_ATTACHMENTS,
   scheduleMessageTask,
@@ -521,6 +523,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const workspaceTombstonesRef = useRef<WorkspaceTombstone[]>([]);
   const workspaceMissingNotifiedRef = useRef(new Set<string>());
   const healthProbeSeqRef = useRef(0);
+  /** The connect attempt waiting for a starting backend to answer; health
+   * probes would only time out against it meanwhile. */
+  const backendReadyWaitRef = useRef<AbortController | null>(null);
+  const [backendStarting, setBackendStarting] = useState(false);
   const loadedNativeThreadHistoryRef = useRef(new Map<string, number>());
   const unmaterializedNativeThreadIdsRef = useRef(new Set<string>());
 
@@ -3763,7 +3769,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   }, [settings]);
 
   const checkConnectionHealth = useCallback(async () => {
-    if (transportFailureRef.current) return;
+    if (transportFailureRef.current || backendReadyWaitRef.current) return;
     const probeId = healthProbeSeqRef.current + 1;
     healthProbeSeqRef.current = probeId;
     const startedAt = Date.now();
@@ -3782,7 +3788,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         signal: controller.signal,
       });
       const latencyMs = Date.now() - startedAt;
-      if (healthProbeSeqRef.current !== probeId || transportFailureRef.current) {
+      if (healthProbeSeqRef.current !== probeId || transportFailureRef.current || backendReadyWaitRef.current) {
         return;
       }
       if (!response.ok) {
@@ -3795,7 +3801,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         error: '',
       });
     } catch (error) {
-      if (healthProbeSeqRef.current !== probeId || transportFailureRef.current) {
+      if (healthProbeSeqRef.current !== probeId || transportFailureRef.current || backendReadyWaitRef.current) {
         return;
       }
       const isAbort = error instanceof Error && error.name === 'AbortError';
@@ -3874,13 +3880,26 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       }
 
       const profile = { ...settings, serverUrl: inspected.origin };
+      // A starting backend accepts the connection but answers only once it
+      // has loaded, so the policy read, the first request, waits for that
+      // instead of timing out; the steps after it then answer promptly.
+      backendReadyWaitRef.current = attempt;
+      const startingNotice = setTimeout(() => {
+        if (isAttemptCurrent()) setBackendStarting(true);
+      }, BACKEND_READY_NOTICE_DELAY_MS);
       try {
-        await verifyTransportPolicy(profile, { signal: attempt.signal });
+        await verifyTransportPolicy(profile, { signal: attempt.signal, timeoutMs: BACKEND_READY_TIMEOUT_MS });
       } catch (error) {
         if (!isAttemptCurrent()) return;
         failTransport(describeTransportFailure(error)
           ?? { message: t('transport.cannotConfirmPolicy'), retryable: true, code: 'backend_unreachable' });
         return;
+      } finally {
+        clearTimeout(startingNotice);
+        if (backendReadyWaitRef.current === attempt) {
+          backendReadyWaitRef.current = null;
+          setBackendStarting(false);
+        }
       }
       if (!isAttemptCurrent()) return;
       const transport = backendTransport(profile);
@@ -8901,6 +8920,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     activeConversationId,
     connectionState,
     connectionHealth,
+    backendStarting,
     remoteModelCatalog,
     modelCatalog,
     modelCatalogStatus,
