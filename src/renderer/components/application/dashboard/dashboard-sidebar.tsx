@@ -80,6 +80,8 @@ export interface DashboardNavItem {
   isSelected?: boolean;
   /** Toggle rows report the selected state with `aria-pressed` instead of `aria-current`. */
   toggle?: boolean;
+  /** Disclosure rows report whether the rows they reveal are open (`aria-expanded`). */
+  expanded?: boolean;
   disabled?: boolean;
   /** Trailing counter: strings and numbers render as a `Badge`, nodes as they are. */
   badge?: ReactNode;
@@ -99,7 +101,7 @@ function NavItem({
   isSelected: boolean;
   collapsed: boolean;
 }) {
-  const { icon: Icon, label, href, onClick, toggle, disabled = false, badge, hint } = item;
+  const { icon: Icon, label, href, onClick, toggle, expanded, disabled = false, badge, hint } = item;
   const className = cx(
     "flex items-center justify-between overflow-hidden rounded-2lg p-2 text-start",
     "outline-none focus-visible:ring-2 focus-visible:ring-border-focus-ring",
@@ -168,6 +170,7 @@ function NavItem({
       onClick={onClick}
       aria-current={!toggle && isSelected ? "page" : undefined}
       aria-pressed={toggle ? isSelected : undefined}
+      aria-expanded={expanded}
       aria-label={label}
       className={className}
     >

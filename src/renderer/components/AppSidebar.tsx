@@ -1,4 +1,4 @@
-import { RiPushpin2Fill, RiLockLine, RiAddLine, RiArrowRightSLine, RiCheckLine, RiFolderReduceLine, RiFoldersLine, RiFolderTransferLine, RiPencilLine, RiEdit2Line, RiErrorWarningLine, RiFolder3Line, RiFolderOpenLine, RiGitBranchLine, RiDeleteBinLine, RiArrowDownSLine, RiBarChartBoxLine, RiBookOpenLine, RiBrush3Line, RiInformationLine, RiKanbanView2, RiPaletteLine, RiPriceTag3Line, RiPuzzle2Line, RiSettings3Line, RiTerminalBoxLine, RiTerminalLine, RiTimeLine, RiTimerLine, RiUserSettingsLine, RiVipCrownLine } from '@remixicon/react';
+import { RiPushpin2Fill, RiLockLine, RiAddLine, RiArrowRightSLine, RiCheckLine, RiFolderReduceLine, RiFoldersLine, RiFolderTransferLine, RiPencilLine, RiEdit2Line, RiErrorWarningLine, RiFolder3Line, RiFolderOpenLine, RiGitBranchLine, RiDeleteBinLine, RiArrowDownSLine, RiBarChartBoxLine, RiBookOpenLine, RiBrush3Line, RiInformationLine, RiKanbanView2, RiMoreLine, RiPaletteLine, RiPriceTag3Line, RiPuzzle2Line, RiSettings3Line, RiTerminalBoxLine, RiTerminalLine, RiTimeLine, RiTimerLine, RiUserSettingsLine, RiVipCrownLine } from '@remixicon/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { MouseEvent, ReactNode } from 'react';
 import {
@@ -37,6 +37,7 @@ import { cx } from '@/utils/cx';
 import { useSidebarPins } from '../session/useSidebarPins';
 import { useSidebarGroupCollapse } from '../session/useSidebarGroupCollapse';
 import { useKanbanTasks } from '../session/kanbanTasks';
+import { setFeaturesMoreOpen, useFeatureModes, useFeaturesMoreOpen, type FeatureId } from '../session/featureToggles';
 import { BACKEND_LABEL_COLORS, backendLabelColor } from '../session/backendColors';
 import type { BackendConnectionProfile } from '../session/backendColors';
 import { groupWorkspaceEntries, moveWorkspaceEntry, moveWorkspaceToGroup, newWorkspaceGroupId, removeWorkspaceFromGroup, renameWorkspaceGroup, ungroupWorkspaceGroup, workspaceLayoutPatches } from '@todex/protocol/todex';
@@ -333,7 +334,11 @@ export function AppSidebar({
   const t = useT();
   const isOpen = mobile || open;
   const { pins, togglePin } = useSidebarPins();
-  const kanbanTasks = useKanbanTasks();
+  const features = useFeatureModes();
+  const featuresMoreOpen = useFeaturesMoreOpen();
+  const allKanbanTasks = useKanbanTasks();
+  // A disabled task board leaves no trace in the conversation list either.
+  const kanbanTasks = features.kanban === 'off' ? [] : allKanbanTasks;
   const insetChrome = window.todexDesktop.app.windowChrome === 'hidden-inset';
 
   const conversationTaskMetaMap = useMemo(() => {
@@ -398,7 +403,7 @@ export function AppSidebar({
 
   const [contextMenu, setContextMenu] = useState<ContextMenu>(null);
   const [schedulingWorkspaceId, setSchedulingWorkspaceId] = useState<string | null>(null);
-  const canSchedule = session.v2Providers.some((provider) => provider.available && provider.capabilities.scheduledConversations === true);
+  const canSchedule = features.scheduledConversations !== 'off' && session.v2Providers.some((provider) => provider.available && provider.capabilities.scheduledConversations === true);
   // The menu keeps rendering its last target while it animates out.
   const lastContextMenuRef = useRef<ContextMenu>(contextMenu);
   if (contextMenu) lastContextMenuRef.current = contextMenu;
@@ -959,7 +964,7 @@ export function AppSidebar({
   // entirely empty sidebar (first run or cleared storage).
   const syncing = session.directorySyncStatus === 'loading' && session.workspaces.length === 0;
 
-  const primaryItems: DashboardNavItem[] = [
+  const newConversationItems: DashboardNavItem[] = [
     {
       key: 'new-conversation',
       label: t('sidebar.newConversation'),
@@ -968,7 +973,11 @@ export function AppSidebar({
       onClick: onCreateConversation,
       hint: <ShortcutHint id="newConversation" />,
     },
+  ];
+  // Optional features: shown in the nav, folded under "More", or off.
+  const featureItems: Array<DashboardNavItem & { feature: FeatureId }> = [
     {
+      feature: 'scheduledConversations',
       key: 'new-scheduled-conversation',
       label: t('schedule.create'),
       icon: RiTimerLine,
@@ -976,6 +985,7 @@ export function AppSidebar({
       onClick: () => setSchedulingWorkspaceId(session.activeWorkspaceId),
     },
     {
+      feature: 'terminal',
       key: 'terminal',
       label: t('sidebar.terminal'),
       icon: RiTerminalLine,
@@ -988,6 +998,7 @@ export function AppSidebar({
       hint: <ShortcutHint id="sshTerminal" />,
     },
     {
+      feature: 'kanban',
       key: 'kanban',
       label: t('sidebar.kanban'),
       icon: RiKanbanView2,
@@ -999,6 +1010,25 @@ export function AppSidebar({
       },
       hint: <ShortcutHint id="kanban" />,
     },
+  ];
+  const foldedItems = featureItems.filter((item) => features[item.feature] === 'folded');
+  const moreStandsIn = !featuresMoreOpen && foldedItems.some((item) => item.isSelected);
+  const primaryItems: DashboardNavItem[] = [
+    ...newConversationItems,
+    ...featureItems.filter((item) => features[item.feature] === 'shown'),
+    ...(foldedItems.length > 0 ? [
+      {
+        key: 'more-features',
+        label: t('sidebar.moreFeatures'),
+        icon: RiMoreLine,
+        // A collapsed "More" stands in for the open folded feature it hides.
+        isSelected: moreStandsIn,
+        expanded: featuresMoreOpen,
+        onClick: () => setFeaturesMoreOpen(!featuresMoreOpen),
+        hint: <RiArrowDownSLine aria-hidden className={cx('size-4 transition-transform duration-200 ease', moreStandsIn ? 'text-text-white' : 'text-foreground-icon-tertiary', !featuresMoreOpen && '-rotate-90 rtl:rotate-90')} />,
+      },
+      ...(featuresMoreOpen ? foldedItems : []),
+    ] : []),
   ];
 
   const secondaryItems: DashboardNavItem[] = [

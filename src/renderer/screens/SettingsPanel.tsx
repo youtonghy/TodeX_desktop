@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ComponentType, type ReactNode, type Ref } from 'react';
 import { Radio, RadioGroup, Tab, TabList, TabPanel, Tabs } from 'react-aria-components';
-import { RiComputerLine, RiNotification3Line, RiPaletteLine, RiServerLine, RiSettings3Line, RiShieldKeyholeLine } from '@remixicon/react';
+import { RiApps2Line, RiComputerLine, RiNotification3Line, RiPaletteLine, RiServerLine, RiSettings3Line, RiShieldKeyholeLine } from '@remixicon/react';
 import { normalizeServerUrl } from '@todex/protocol/todex';
 import { Chip } from '@/components/base/badges/chip';
 import { Button } from '@/components/base/buttons/button';
@@ -15,6 +15,7 @@ import { DevicePairingPanel } from '../components/DevicePairingPanel';
 import { HistoryEncryptionPanel } from '../components/HistoryEncryptionPanel';
 import { AgentDesktopSettings, type AgentDesktopPage } from '../components/AgentDesktopSettings';
 import { AppearanceSettings } from '../components/AppearanceSettings';
+import { FeatureSettings } from '../components/FeatureSettings';
 import { SettingsCard, SettingsGroup, SettingsRow } from '../components/settings/SettingsRows';
 import { ScrollArea } from '../components/ui/scroll-area';
 import { toast } from '../components/ui/toast';
@@ -22,7 +23,7 @@ import type { TodeXSession } from '../session/useTodeXSession';
 import { UNPAIRED_TRANSPORT, connectionStateLabel, healthLabelOf, settingsFromProfile } from '../session/helpers';
 import { LOCALE_LABELS, SUPPORTED_LOCALES, getLocalePreference, isLocale, setLocalePreference, useT, type LocalePreference } from '../i18n';
 
-type SettingsSection = 'general' | 'appearance' | 'connection' | 'security' | 'notifications' | 'agent';
+type SettingsSection = 'general' | 'features' | 'appearance' | 'connection' | 'security' | 'notifications' | 'agent';
 
 type Props = {
   session: TodeXSession;
@@ -60,6 +61,7 @@ export function SettingsPanel({ session, historyRecoverySetup = false, repairPai
 
   const sections: Array<{ id: SettingsSection; label: string; icon: ComponentType<{ className?: string; 'aria-hidden'?: boolean | 'true' | 'false' }> }> = [
     { id: 'general', label: t('settings.general'), icon: RiSettings3Line },
+    { id: 'features', label: t('settings.features'), icon: RiApps2Line },
     { id: 'appearance', label: t('settings.appearance'), icon: RiPaletteLine },
     { id: 'connection', label: t('settings.connection'), icon: RiServerLine },
     { id: 'security', label: t('settings.security'), icon: RiShieldKeyholeLine },
@@ -156,6 +158,10 @@ export function SettingsPanel({ session, historyRecoverySetup = false, repairPai
               </SettingsRow>
             </SettingsCard>
           </SettingsGroup>
+        </SettingsPage>
+
+        <SettingsPage id="features" title={titleOf('features')}>
+          <FeatureSettings />
         </SettingsPage>
 
         <SettingsPage id="appearance" title={titleOf('appearance')}>

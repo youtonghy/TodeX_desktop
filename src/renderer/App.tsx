@@ -33,6 +33,7 @@ import type { RemoteFilesBinding } from './session/fileSources';
 import { ShortcutHint, useAppShortcuts, useShortcutHintTracking } from './lib/shortcuts';
 import { useT } from './i18n';
 import { useAppearance } from './lib/appearance';
+import { useFeatureModes } from './session/featureToggles';
 
 // Secondary surfaces load on demand so the main bundle stays small.
 const SettingsPanel = lazy(() => import('./screens/SettingsPanel').then((module) => ({ default: module.SettingsPanel })));
@@ -163,6 +164,13 @@ export function App() {
   const sshActive = panel === 'ssh';
   // The task board, like the terminal, takes the conversation's place in the shell.
   const kanbanActive = panel === 'kanban';
+  const features = useFeatureModes();
+  const terminalEnabled = features.terminal !== 'off';
+  const kanbanEnabled = features.kanban !== 'off';
+  // Turning a feature off leaves its view, however it was opened.
+  useEffect(() => {
+    if ((panel === 'ssh' && !terminalEnabled) || (panel === 'kanban' && !kanbanEnabled)) setPanel(null);
+  }, [panel, terminalEnabled, kanbanEnabled]);
   const scopeKey = !session.hydrated || !session.workbenchSharingHydrated ? ''
     : sshActive ? sshWorkbenchScopeKey(session.activeBackendConnectionId || session.settings.serverUrl)
       : workbenchScopeKey(
@@ -320,6 +328,7 @@ export function App() {
       setGitOpen((open) => !open);
     },
     kanban: () => {
+      if (!kanbanEnabled) return;
       if (panel === 'kanban') {
         setPanel(null);
         return;
@@ -327,7 +336,9 @@ export function App() {
       setPanel('kanban');
       persistAsideOpen(false);
     },
-    sshTerminal: toggleSshView,
+    sshTerminal: () => {
+      if (terminalEnabled) toggleSshView();
+    },
     newConversation: () => {
       if (!session.activeWorkspaceId) return;
       session.createConversation(session.activeWorkspaceId);
