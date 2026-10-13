@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, nativeTheme, safeStorage, session, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, safeStorage, session, shell } from 'electron';
 import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
@@ -440,6 +440,10 @@ function installSessionPolicy(): void {
   );
 }
 
+function windowState(window: BrowserWindow): { maximized: boolean; fullScreen: boolean } {
+  return { maximized: window.isMaximized(), fullScreen: window.isFullScreen() };
+}
+
 function createWindow(): BrowserWindow {
   const window = new BrowserWindow({
     width: 1280,
@@ -451,6 +455,9 @@ function createWindow(): BrowserWindow {
     // macOS keeps its traffic-light buttons overlaid on the page instead of a
     // separate title bar, so the window reads as one unified surface.
     ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset' as const } : {}),
+    // Linux draws its own control bar (title, app menu, window buttons) in the
+    // renderer instead of the window manager's title bar and the menu bar.
+    ...(process.platform === 'linux' ? { frame: false } : {}),
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#12151c' : '#f4f7f8',
     webPreferences: {
       preload: join(__dirname, '../preload/index.cjs'),
@@ -470,6 +477,13 @@ function createWindow(): BrowserWindow {
       event.preventDefault();
       window.webContents.send('app:close-request');
     });
+  }
+
+  if (process.platform === 'linux') {
+    const sendState = () => window.webContents.send('window:state', windowState(window));
+    for (const name of ['maximize', 'unmaximize', 'enter-full-screen', 'leave-full-screen'] as const) {
+      window.on(name as 'maximize', sendState);
+    }
   }
 
   window.webContents.setWindowOpenHandler(({ url }) => {
@@ -851,6 +865,36 @@ app.whenReady().then(() => {
 
   ipcMain.on('window:close', (event) => {
     BrowserWindow.fromWebContents(event.sender)?.close();
+  });
+
+  // Controls of the renderer-drawn title bar (Linux frameless windows).
+  ipcMain.on('window:minimize', (event) => {
+    BrowserWindow.fromWebContents(event.sender)?.minimize();
+  });
+
+  ipcMain.on('window:toggleMaximize', (event) => {
+    const window = BrowserWindow.fromWebContents(event.sender);
+    if (!window) return;
+    if (window.isFullScreen()) window.setFullScreen(false);
+    else if (window.isMaximized()) window.unmaximize();
+    else window.maximize();
+  });
+
+  // The application menu (edit, view, window, updates) has no menu bar on a
+  // frameless window; the control bar's menu button pops it up instead.
+  ipcMain.on('window:popupMenu', (event, x: unknown, y: unknown) => {
+    const window = BrowserWindow.fromWebContents(event.sender);
+    const menu = Menu.getApplicationMenu();
+    if (!window || !menu) return;
+    const at = typeof x === 'number' && typeof y === 'number' && Number.isFinite(x) && Number.isFinite(y)
+      ? { x: Math.round(x), y: Math.round(y) }
+      : {};
+    menu.popup({ window, ...at });
+  });
+
+  handleIpc('window:getState', (event) => {
+    const window = BrowserWindow.fromWebContents(event.sender);
+    return window ? windowState(window) : { maximized: false, fullScreen: false };
   });
 
   handleIpc('theme:shouldUseDark', () => nativeTheme.shouldUseDarkColors);

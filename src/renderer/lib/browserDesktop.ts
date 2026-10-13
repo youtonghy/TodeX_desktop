@@ -71,6 +71,11 @@ export function installBrowserDesktopBridge(): void {
         window.addEventListener('keydown', onKeyDown);
         return () => window.removeEventListener('keydown', onKeyDown);
       },
+      minimize: () => undefined,
+      toggleMaximize: () => undefined,
+      popupMenu: () => undefined,
+      windowState: async () => ({ maximized: false, fullScreen: false }),
+      onWindowState: () => () => undefined,
       windowChrome: 'native' as const,
     },
     locale: {

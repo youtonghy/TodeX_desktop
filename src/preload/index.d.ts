@@ -24,7 +24,14 @@ export type TodeXDesktopApi = {
     focus: () => void;
     closeWindow: () => void;
     onCloseRequest: (listener: () => void) => () => void;
-    windowChrome: 'hidden-inset' | 'native';
+    /** Window controls for the renderer-drawn title bar (`windowChrome: 'custom'`). */
+    minimize: () => void;
+    toggleMaximize: () => void;
+    popupMenu: (x?: number, y?: number) => void;
+    windowState: () => Promise<{ maximized: boolean; fullScreen: boolean }>;
+    onWindowState: (listener: (state: { maximized: boolean; fullScreen: boolean }) => void) => () => void;
+    /** `custom`: frameless window whose title bar the renderer draws (Linux). */
+    windowChrome: 'hidden-inset' | 'custom' | 'native';
   };
   locale: {
     set: (locale: string) => void;

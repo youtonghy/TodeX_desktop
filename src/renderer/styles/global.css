@@ -144,14 +144,14 @@ body {
   background-color: var(--color-background-secondary-default) !important;
 }
 
-/* Hidden title bar (macOS): the window controls overlay the page, so the
-   top strips are drag regions while their controls stay clickable. */
-:root[data-window-chrome='hidden-inset'] .window-drag {
+/* Hidden title bar (macOS) or app-drawn title bar (Linux): the top strips are
+   drag regions while their controls stay clickable. */
+:root:is([data-window-chrome='hidden-inset'], [data-window-chrome='custom']) .window-drag {
   -webkit-app-region: drag;
 }
 
-:root[data-window-chrome='hidden-inset'] .window-drag :is(button, a, input, select, textarea, [role='button'], [role='combobox'], [role='listbox'], [role='menu'], [role='tab'], [role='separator']),
-:root[data-window-chrome='hidden-inset'] .window-no-drag {
+:root:is([data-window-chrome='hidden-inset'], [data-window-chrome='custom']) .window-drag :is(button, a, input, select, textarea, [role='button'], [role='combobox'], [role='listbox'], [role='menu'], [role='tab'], [role='separator']),
+:root:is([data-window-chrome='hidden-inset'], [data-window-chrome='custom']) .window-no-drag {
   -webkit-app-region: no-drag;
 }
 

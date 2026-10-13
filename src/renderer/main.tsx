@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { DirectionProvider } from '@/components/foundations/direction/direction';
 import { TemplateCopyProvider } from '@/components/foundations/template-copy/template-copy';
 import { App } from './App';
+import { WindowControlBar } from './components/WindowControlBar';
 import { installBrowserDesktopBridge } from './lib/browserDesktop';
 import { installRendererDebugLogging } from './lib/debugLogger';
 import { getLocale, subscribeLocale, t } from './i18n';
@@ -31,7 +32,13 @@ function Root() {
   return (
     <DirectionProvider locale={locale}>
       <TemplateCopyProvider translate={translate}>
-        <App />
+        {window.todexDesktop.app.windowChrome === 'custom' ? (
+          // Frameless Linux window: the app draws its own title bar above.
+          <div className="flex h-full flex-col bg-background-full">
+            <WindowControlBar />
+            <div className="min-h-0 flex-1"><App /></div>
+          </div>
+        ) : <App />}
       </TemplateCopyProvider>
     </DirectionProvider>
   );

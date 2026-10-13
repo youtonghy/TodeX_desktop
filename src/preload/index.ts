@@ -1,5 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron';
 
+type WindowState = { maximized: boolean; fullScreen: boolean };
+
 export type GitRepositorySummary = {
   path: string;
   name: string;
@@ -61,7 +63,25 @@ const api = {
         ipcRenderer.removeListener('app:close-request', handler);
       };
     },
-    windowChrome: (process.platform === 'darwin' ? 'hidden-inset' : 'native') as 'hidden-inset' | 'native',
+    minimize: () => {
+      ipcRenderer.send('window:minimize');
+    },
+    toggleMaximize: () => {
+      ipcRenderer.send('window:toggleMaximize');
+    },
+    /** Pops up the native application menu at window-relative (x, y). */
+    popupMenu: (x?: number, y?: number) => {
+      ipcRenderer.send('window:popupMenu', x, y);
+    },
+    windowState: () => ipcRenderer.invoke('window:getState') as Promise<WindowState>,
+    onWindowState: (listener: (state: WindowState) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, state: WindowState) => listener(state);
+      ipcRenderer.on('window:state', handler);
+      return () => {
+        ipcRenderer.removeListener('window:state', handler);
+      };
+    },
+    windowChrome: (process.platform === 'darwin' ? 'hidden-inset' : process.platform === 'linux' ? 'custom' : 'native') as 'hidden-inset' | 'custom' | 'native',
   },
   locale: {
     set: (locale: string) => {
