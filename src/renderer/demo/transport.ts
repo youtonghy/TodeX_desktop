@@ -644,6 +644,9 @@ class DemoSocket implements SecureSocket {
     } else if (message.type === 'conversation.prompt') {
       const journal = journals.get(String(payload.conversationId));
       if (journal) result = { conversationId: journal.manifest.id, turnId: playCannedTurn(journal, String(payload.text ?? '')) };
+    } else if (message.type === 'conversation.warm') {
+      // The demo has no agent processes to start.
+      result = { conversationId: String(payload.conversationId ?? ''), warmed: false, reason: 'demo' };
     }
     if (message.id) this.emit({ type: 'server.result', id: message.id, payload: result });
   }

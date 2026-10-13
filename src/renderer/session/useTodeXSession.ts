@@ -14,6 +14,7 @@ import { migrateLegacyFollowUps, restoreQueuedFollowUps, type LegacyAddResult, t
 import { backendRateLimitState } from './sessionRateLimit';
 import { LegacyEventRecovery } from './legacyEventRecovery';
 import { ConversationRecovery, isConversationRuntimeBusy, type ConversationOpenStatus, type EarlierHistoryResult } from './conversationRecovery';
+import { CONVERSATION_WARM_ID_PREFIX, isConversationWarmRequestId, shouldWarmConversation } from './conversationWarm';
 import {
   AGENT_BROWSER_UNWATCH_ID_PREFIX,
   AGENT_BROWSER_WATCH_ID_PREFIX,
@@ -3417,6 +3418,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       if (messageType !== 'conversation.event') conversationEventBatcherRef.current?.flush();
       if (messageType === 'server.result') {
         const id = typeof parsed.id === 'string' ? parsed.id : '';
+        // Warming is fire-and-forget; nothing waits for its result.
+        if (isConversationWarmRequestId(id)) return;
         const payload = parsed.payload && typeof parsed.payload === 'object' && !Array.isArray(parsed.payload)
           ? parsed.payload as Record<string, unknown> : {};
         const subscribedConversationId = pendingV2SubscribeRef.current.get(id);
@@ -3445,6 +3448,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           console.warn('Agent browser watch request failed', message);
           return;
         }
+        // Warming is best-effort, and older backends do not know the command.
+        if (isConversationWarmRequestId(requestId)) return;
         const failedSubscribe = pendingV2SubscribeRef.current.get(requestId);
         if (failedSubscribe) {
           pendingV2SubscribeRef.current.delete(requestId);
@@ -3646,6 +3651,24 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   subscribeV2ConversationRef.current = subscribeV2Conversation;
 
   rawProtocolSenderRef.current = (message) => Boolean(sendRawProtocolFrame(message));
+
+  // Pre-start the open conversation's agent process so its first prompt starts
+  // faster: on opening it, and on every verified connection to its backend.
+  const conversationWarmSentAtRef = useRef(new Map<string, number>());
+  const activeConversationConnected = connectionState === 'open' && connectedBackendIdRef.current === activeBackendConnectionId;
+  useEffect(() => {
+    const conversation = activeConversation;
+    const v2Id = conversation?.v2ConversationId;
+    if (!activeConversationConnected || !conversation || !v2Id || conversation.archived === true) return;
+    const runtime = conversationRecoveryRef.current?.get(v2Id);
+    const busy = Boolean(runtime && isConversationRuntimeBusy(runtime)) || conversationHasPendingWork(conversation.id);
+    const now = Date.now();
+    if (!shouldWarmConversation(v2Id, now, conversationWarmSentAtRef.current, busy)) return;
+    const sent = sendRawProtocolFrame({ id: createRequestId(CONVERSATION_WARM_ID_PREFIX), type: 'conversation.warm', payload: { conversationId: v2Id } });
+    if (sent) conversationWarmSentAtRef.current.set(v2Id, now);
+    // Busy state is sampled when the conversation opens or the connection is
+    // (re)established; it is deliberately not a dependency.
+  }, [activeConversation?.id, activeConversation?.v2ConversationId, activeConversationConnected, connectionEpoch, sendRawProtocolFrame]);
 
   const sendProtocolCommand = useCallback((message: ProtocolCommand, timeoutMs = 15_000) =>
     protocolCommandsRef.current!.request(message, timeoutMs), []);
@@ -3973,6 +3996,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           const watchFrame = JSON.stringify({ id: createRequestId(AGENT_BROWSER_WATCH_ID_PREFIX), type: 'agentBrowser.watch', payload: { conversationId: watched } });
           sendSocketText(socket, watchFrame);
         }
+        // The backend may have restarted meanwhile: the warm effect, rerun by
+        // the connection epoch, warms the open conversation again.
+        conversationWarmSentAtRef.current.clear();
         pendingV2SubscribeRef.current.clear();
         reconnectAttemptRef.current = 0;
         lastFailureRetryableRef.current = true;
