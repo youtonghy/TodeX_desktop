@@ -88,6 +88,9 @@ export interface ToolCallCardProps {
   active?: boolean;
   /** Trailing content in the header (duration, status chip). */
   meta?: ReactNode;
+  /** Always-visible line under the header, outside its button, for notices
+   * that carry their own actions. */
+  footer?: ReactNode;
   argsText?: string;
   output?: string;
   errorText?: string;
@@ -109,6 +112,7 @@ export function ToolCallCard({
   prefix,
   active,
   meta,
+  footer,
   argsText,
   output,
   errorText,
@@ -164,6 +168,7 @@ export function ToolCallCard({
           />
         ) : null}
       </button>
+      {footer ? <div className="ps-6">{footer}</div> : null}
       <AnimatePresence initial={false}>
         {expanded ? (
           <motion.div

@@ -39,6 +39,10 @@ export interface ProcessDisclosureProps {
   icon?: IconComponent;
   /** Shimmers the title while the work is still running. */
   running?: boolean;
+  /** Trailing content in the header, before the chevron. */
+  meta?: ReactNode;
+  /** Always-visible line under the header, outside its button. */
+  footer?: ReactNode;
   /** Controlled open state; leave out to let the disclosure keep its own. */
   expanded?: boolean;
   defaultExpanded?: boolean;
@@ -52,6 +56,8 @@ export function ProcessDisclosure({
   title,
   icon: Icon,
   running = false,
+  meta,
+  footer,
   expanded: controlled,
   defaultExpanded = false,
   onExpandedChange,
@@ -78,6 +84,7 @@ export function ProcessDisclosure({
         <span className="min-w-0 flex-1 text-body-medium text-text-secondary">
           <ProcessTitle label={title} running={running} reduce={reduce} />
         </span>
+        {meta}
         <RiArrowDownSLine
           aria-hidden
           className={cx(
@@ -86,6 +93,7 @@ export function ProcessDisclosure({
           )}
         />
       </button>
+      {footer ? <div className="ps-6">{footer}</div> : null}
       <AnimatePresence initial={false}>
         {open ? (
           <motion.div

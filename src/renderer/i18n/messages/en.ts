@@ -463,6 +463,8 @@ export const en: Messages = {
   'chat.addImageOrText': 'Add an image or text attachment',
   'chat.addTextAttachment': 'Add a text attachment',
   'chat.stop': 'Stop',
+  'chat.stopTurn': 'Stop this turn',
+  'chat.toolSilent': 'No new output for {minutes, plural, one {# minute} other {# minutes}}; the command may still be running',
   'chat.pendingApproval': 'Awaiting approval',
   'chat.workProcess': 'Work progress',
   'chat.thinking': 'Thinking',

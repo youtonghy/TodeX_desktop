@@ -463,6 +463,8 @@ export const zhCN = {
   'chat.addImageOrText': '添加图片或文本附件',
   'chat.addTextAttachment': '添加文本附件',
   'chat.stop': '停止',
+  'chat.stopTurn': '停止本轮',
+  'chat.toolSilent': '已 {minutes} 分钟无新输出，命令可能仍在运行',
   'chat.pendingApproval': '等待批准',
   'chat.workProcess': '工作过程',
   'chat.thinking': '正在思考',

@@ -1254,6 +1254,8 @@ export type TimelineEntry = {
   /** Sequence of the event that created this row; with `sequence` it bounds
    * the journal range a folded row was built from. */
   firstSequence?: number;
+  /** Time of the event that created this row (`at` is the newest one). */
+  firstAt?: number;
   workspaceId?: string;
   conversationId?: string;
   requestId?: string;

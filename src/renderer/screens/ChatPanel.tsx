@@ -55,6 +55,7 @@ import {
 import { CopyGlyph, FeedbackButton } from '../components/chat/MessageActions';
 import { ProcessDisclosure, ProcessStep, ProcessSteps } from '../components/chat/ProcessDisclosure';
 import { ToolCallCard, type ToolCallState } from '../components/chat/ToolCallCard';
+import { ToolElapsed, ToolSilentNotice } from '../components/chat/ToolRunStatus';
 import { activeChatProcessId, buildChatRenderItems, isChatTimelineEntry, isChatToolEntry, latestIncomingEntryIds, sameTimelineEntries, sortChatEntries } from '../components/conversationTimeline';
 import type { ChatRenderItem } from '../components/conversationTimeline';
 import type { BackgroundTask } from '@todex/protocol/conversationRuntime';
@@ -207,6 +208,15 @@ function toolCardPresentation(entry: TimelineEntry, active: boolean) {
     output: outputIsError ? undefined : tool.outputText,
     errorText: state === 'failed' ? (tool.errorText ?? tool.outputText) : undefined,
     state,
+  };
+}
+
+/** Elapsed time in the header and, after a quiet spell, the "no output"
+ * notice with a stop action, for a tool row or the folded group holding it. */
+function toolRunSlots(entry: TimelineEntry, running: boolean, onStop: (() => void) | undefined) {
+  return {
+    meta: <ToolElapsed startedAt={entry.firstAt} endedAt={entry.at} running={running} />,
+    footer: running ? <ToolSilentNotice lastEventAt={entry.at} running onStop={onStop} /> : undefined,
   };
 }
 
@@ -506,6 +516,8 @@ type ChatTimelineItemProps = {
   item: ChatRenderItem;
   conversationId: string;
   thinking: boolean;
+  /** The turn can be stopped from here (not a read-only conversation). */
+  canStop: boolean;
   isStreamingGroup: boolean;
   groupExpanded: boolean;
   groupLoadState: 'loading' | 'error' | undefined;
@@ -554,6 +566,7 @@ const ChatTimelineItem = memo(function ChatTimelineItem({
   item,
   conversationId,
   thinking,
+  canStop,
   isStreamingGroup,
   groupExpanded,
   groupLoadState,
@@ -570,6 +583,7 @@ const ChatTimelineItem = memo(function ChatTimelineItem({
   session,
 }: ChatTimelineItemProps) {
   const t = useT();
+  const onStop = canStop ? () => session.stopThinking(conversationId) : undefined;
   // Folded-group detail fetches are debounced and single-flight per group:
   // rapid toggles coalesce into one request, and a started request keeps
   // running after the group folds again so the content is already merged
@@ -611,12 +625,20 @@ const ChatTimelineItem = memo(function ChatTimelineItem({
       }, HYDRATE_DEBOUNCE_MS);
     };
     const lastIndex = item.entries.length - 1;
+    // A folded group hides its steps; its header carries the running tool's
+    // elapsed time and quiet notice instead.
+    const lastEntry = item.entries[lastIndex];
+    const foldedRun = !groupExpanded && lastEntry && isChatToolEntry(lastEntry)
+      && toolCardPresentation(lastEntry, isStreamingGroup).state === 'running'
+      ? toolRunSlots(lastEntry, true, onStop) : undefined;
     return (
       <RowEntrance enter={animateEntrance}>
         <ProcessDisclosure
           icon={RiListCheck3}
           title={progressGroupLabel(item.entries, isStreamingGroup, groupPendingCount)}
           running={isStreamingGroup}
+          meta={foldedRun?.meta}
+          footer={foldedRun?.footer}
           expanded={groupExpanded}
           onExpandedChange={(nextExpanded) => {
             if (nextExpanded && hasStubs) requestDetails();
@@ -664,10 +686,13 @@ const ChatTimelineItem = memo(function ChatTimelineItem({
                   );
                 }
                 const tool = toolCardPresentation(entry, isStreamingGroup);
+                const run = toolRunSlots(entry, tool.state === 'running', onStop);
                 return (
                   <ProcessStep key={entry.id} last={last}>
                     <ToolCallCard
                       state={tool.state}
+                      meta={run.meta}
+                      footer={run.footer}
                       title={tool.summary ? `${tool.label} · ${tool.summary}` : tool.label}
                       argsText={tool.argsText}
                       output={tool.output}
@@ -690,10 +715,13 @@ const ChatTimelineItem = memo(function ChatTimelineItem({
   }
   if (isChatToolEntry(entry)) {
     const tool = toolCardPresentation(entry, thinking);
+    const run = toolRunSlots(entry, tool.state === 'running', onStop);
     return (
       <RowEntrance enter={animateEntrance}>
         <ToolCallCard
           state={tool.state}
+          meta={run.meta}
+          footer={run.footer}
           prefix={(thinking ? t('chat.toolCalling') : t('chat.toolCalled')).trim()}
           title={tool.summary ? `${tool.label} · ${tool.summary}` : tool.label}
           argsText={tool.argsText}
@@ -743,6 +771,7 @@ const ChatTimelineItem = memo(function ChatTimelineItem({
   chatRowItemEqual(prev.item, next.item)
   && prev.conversationId === next.conversationId
   && prev.thinking === next.thinking
+  && prev.canStop === next.canStop
   && prev.isStreamingGroup === next.isStreamingGroup
   && prev.groupExpanded === next.groupExpanded
   && prev.groupLoadState === next.groupLoadState
@@ -1523,6 +1552,7 @@ export function ChatPanel({ session }: Props) {
               item={item}
               conversationId={conversation.id}
               thinking={thinking}
+              canStop={thinking && !readOnly}
               isStreamingGroup={item.type === 'executionGroup' && thinking && backgroundTaskCount === 0 && item.id === latestProcessGroupId}
               groupExpanded={item.type === 'executionGroup' && expandedProcessIds.has(item.id)}
               groupLoadState={item.type === 'executionGroup' ? processGroupLoad[item.id] : undefined}
