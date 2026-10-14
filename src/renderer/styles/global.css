@@ -132,10 +132,14 @@ body {
   font-family: var(--font-sans);
 }
 
-/* Thin, token-colored scrollbars everywhere. */
-* {
-  scrollbar-width: thin;
-  scrollbar-color: var(--color-border-button-hover) transparent;
+/* Thin, token-colored scrollbars everywhere. Layered as base so utilities
+   such as `[scrollbar-width:none]` can still hide them: an unlayered rule
+   would outrank every Tailwind utility. */
+@layer base {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-border-button-hover) transparent;
+  }
 }
 
 .xterm,

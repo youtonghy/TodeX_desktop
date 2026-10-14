@@ -399,7 +399,7 @@ export function DashboardSidebar({
         surface={flat ? "full" : "secondary"}
         fadeBottom
         className="-m-2 w-[calc(100%+16px)] flex-1"
-        contentClassName="flex flex-col gap-3 p-2 [scrollbar-width:none]"
+        contentClassName="flex flex-col gap-3 overflow-x-hidden p-2 [scrollbar-width:none]"
       >
         {/* Workspace switcher / collapse control */}
         <div
