@@ -720,6 +720,8 @@ function ModelsField({
       <AriaSelect
         className="group flex w-full flex-col gap-1"
         selectionMode="multiple"
+        // Open with no options too: the add/fetch row lives in the popover.
+        allowsEmptyCollection
         value={ids}
         onChange={(keys) => onChange([...keys].map(String))}
         placeholder={t('ap.modelsHint')}
