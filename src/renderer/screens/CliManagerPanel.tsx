@@ -23,6 +23,8 @@ import { NoticeToast } from '../components/NoticeToast';
 import { t, useT, type MessageKey } from '../i18n';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { backendApi } from '../session/helpers';
+import { usePanelBackend } from '../session/panelBackend';
+import { BackendSelect } from '@/components/ui/backend-select';
 
 type ChipColor = NonNullable<ChipProps['color']>;
 
@@ -53,7 +55,9 @@ export function CliManagerPanel({ session }: { session: TodeXSession }) {
   const [submittingProvider, setSubmittingProvider] = useState<ManagedCliProvider>();
   const requestGeneration = useRef(0);
   const backendGeneration = useRef(0);
-  const api = useCallback(() => backendApi(session.settings), [session.settings.deviceSecret, session.settings.encryptionProtocol, session.settings.encryptionPublicKey, session.settings.transportVerified, session.settings.serverUrl]);
+  const backend = usePanelBackend(session);
+  const { settings } = backend;
+  const api = useCallback(() => backendApi(settings), [settings.deviceSecret, settings.encryptionProtocol, settings.encryptionPublicKey, settings.transportVerified, settings.serverUrl]);
 
   const refresh = useCallback(async (quiet = false) => {
     const generation = ++requestGeneration.current;
@@ -147,7 +151,7 @@ export function CliManagerPanel({ session }: { session: TodeXSession }) {
     }
   };
 
-  const activeBackend = session.backendConnections.find((item) => item.id === session.activeBackendConnectionId);
+  const activeBackend = backend.profile;
 
   return (
     <div className="flex flex-col gap-4 py-1">
@@ -157,8 +161,9 @@ export function CliManagerPanel({ session }: { session: TodeXSession }) {
         </div>
         <div className="min-w-0 flex-1">
           <h2 className="truncate text-headline-semibold text-text-primary">{activeBackend?.name || t('cli.currentBackend')}</h2>
-          <p className="truncate text-caption-1-regular text-text-secondary" title={session.settings.serverUrl}>{session.settings.serverUrl}</p>
+          <p className="truncate text-caption-1-regular text-text-secondary" title={settings.serverUrl}>{settings.serverUrl}</p>
         </div>
+        <BackendSelect profiles={session.backendConnections} linkStates={session.backendLinkStatus} selectedId={backend.backendId} onChange={backend.setBackendId} />
         <Button size="small" variant="secondary" leadingIcon={RiFileList3Line} onClick={() => setPresetsOpen(true)}>{t('instructionPresets.open')}</Button>
         <IconAction icon={RiRefreshLine} size="md" aria-label={t('cli.refreshAria')} disabled={loading} onClick={() => void refresh()} />
       </div>
@@ -193,7 +198,7 @@ export function CliManagerPanel({ session }: { session: TodeXSession }) {
                       <dt className="text-text-secondary">{t('cli.latestVersion')}</dt><dd className="truncate text-caption-1-medium text-text-primary tabular-nums">{cli.latestVersion || t('cli.notFetched')}</dd>
                     </dl>
                     <NoticeToast message={error && error !== operation?.error ? t('cli.namedError', { name: cli.name, error }) : null}
-                      variant="danger" scope={session.activeBackendConnectionId} />
+                      variant="danger" scope={backend.backendId} />
                   </div>
                 </div>
                 {cli.kind === 'managed' || showRemoveIntegration || settingsId ? (

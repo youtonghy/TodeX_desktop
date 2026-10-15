@@ -16,6 +16,8 @@ import { NativeHistoryTab } from '../components/cleanup/NativeHistoryTab';
 import { ProviderIcon } from '../components/ProviderIcon';
 import { useT } from '../i18n';
 import { backendApi } from '../session/helpers';
+import { usePanelBackend, type PanelBackend } from '../session/panelBackend';
+import { BackendSelect } from '@/components/ui/backend-select';
 import type { TodeXSession } from '../session/useTodeXSession';
 
 const ACTIVE_STATUSES = new Set(['running', 'waiting_permission']);
@@ -30,9 +32,9 @@ const NATIVE_IDS = new Set<string>(NATIVE_TABS.map((item) => item.id));
 
 type TabKey = 'todex' | NativeHistoryProvider;
 
-/** TodeX's own conversations on the active backend: usage, the backend's
+/** TodeX's own conversations on the picked backend: usage, the backend's
  * automatic cleanup policy, and manual (multi-)selection cleanup. */
-function TodexHistoryTab({ session }: { session: TodeXSession }) {
+function TodexHistoryTab({ session, backend }: { session: TodeXSession; backend: PanelBackend }) {
   const t = useT();
   const [entries, setEntries] = useState<ConversationStorageEntry[]>([]);
   const [totalBytes, setTotalBytes] = useState(0);
@@ -41,13 +43,14 @@ function TodexHistoryTab({ session }: { session: TodeXSession }) {
   const [policy, setPolicy] = useState<HistoryCleanupPolicyResponse>();
   const generation = useRef(0);
   const { getHistoryStorage, purgeConversations, forgetDeletedConversations } = session;
-  const api = useCallback(() => backendApi(session.settings), [session.settings.deviceSecret, session.settings.encryptionProtocol, session.settings.encryptionPublicKey, session.settings.transportVerified, session.settings.serverUrl]);
+  const { backendId, settings } = backend;
+  const api = useCallback(() => backendApi(settings), [settings.deviceSecret, settings.encryptionProtocol, settings.encryptionPublicKey, settings.transportVerified, settings.serverUrl]);
 
   const refresh = useCallback(async () => {
     const current = ++generation.current;
     setLoading(true);
     try {
-      const [storage, nextPolicy] = await Promise.all([getHistoryStorage(), api().getHistoryCleanupPolicy()]);
+      const [storage, nextPolicy] = await Promise.all([getHistoryStorage(backendId), api().getHistoryCleanupPolicy()]);
       if (current !== generation.current) return;
       setEntries(storage.conversations);
       setTotalBytes(storage.totalBytes);
@@ -58,7 +61,7 @@ function TodexHistoryTab({ session }: { session: TodeXSession }) {
     } finally {
       if (current === generation.current) setLoading(false);
     }
-  }, [api, getHistoryStorage]);
+  }, [api, backendId, getHistoryStorage]);
 
   useEffect(() => {
     setEntries([]);
@@ -104,7 +107,7 @@ function TodexHistoryTab({ session }: { session: TodeXSession }) {
         onSave={async (next) => setPolicy(await api().updateHistoryCleanupPolicy(next))}
         onRun={async () => {
           const result = await api().runHistoryCleanupPolicy();
-          forgetDeletedConversations(result.deleted);
+          forgetDeletedConversations(result.deleted, backendId);
           reportCleanupResult(result, { cleaned: 'cleanup.cleaned', skipped: 'cleanup.skipped' });
           await refresh();
         }}
@@ -116,7 +119,7 @@ function TodexHistoryTab({ session }: { session: TodeXSession }) {
         confirmTitle={(count) => t('cleanup.confirmSelectedTitle', { count })}
         confirmBody={(size) => t('cleanup.confirmSelectedBody', { size: size ?? '' })}
         onClean={async (ids) => {
-          reportCleanupResult(await purgeConversations(ids), { cleaned: 'cleanup.cleaned', skipped: 'cleanup.skipped' });
+          reportCleanupResult(await purgeConversations(ids, backendId), { cleaned: 'cleanup.cleaned', skipped: 'cleanup.skipped' });
           await refresh();
         }}
       />
@@ -129,19 +132,24 @@ function TodexHistoryTab({ session }: { session: TodeXSession }) {
 export function CleanupPanel({ session }: { session: TodeXSession }) {
   const t = useT();
   const [tab, setTab] = useState<TabKey>('todex');
+  const backend = usePanelBackend(session);
   return (
     <Tabs selectedKey={tab} onSelectionChange={(key) => setTab(NATIVE_IDS.has(String(key)) ? String(key) as NativeHistoryProvider : 'todex')} className="gap-4 py-1">
-      <TabList aria-label={t('app.cleanup')}>
-        <Tab id="todex">{t('cleanup.tabTodex')}</Tab>
-        {NATIVE_TABS.map((item) => (
-          <Tab key={item.id} id={item.id}>
-            <span className="flex items-center gap-1.5"><ProviderIcon provider={item.id} className="size-4" />{item.label}</span>
-          </Tab>
-        ))}
-      </TabList>
-      <TabPanel id="todex"><TodexHistoryTab session={session} /></TabPanel>
+      <div className="flex min-w-0 items-center gap-3">
+        <TabList aria-label={t('app.cleanup')} className="min-w-0 flex-1">
+          <Tab id="todex">{t('cleanup.tabTodex')}</Tab>
+          {NATIVE_TABS.map((item) => (
+            <Tab key={item.id} id={item.id}>
+              <span className="flex items-center gap-1.5"><ProviderIcon provider={item.id} className="size-4" />{item.label}</span>
+            </Tab>
+          ))}
+        </TabList>
+        <BackendSelect profiles={session.backendConnections} linkStates={session.backendLinkStatus} selectedId={backend.backendId} onChange={backend.setBackendId} />
+      </div>
+      {/* Keyed by backend so a switch starts from that backend's own data. */}
+      <TabPanel id="todex"><TodexHistoryTab key={backend.backendId} session={session} backend={backend} /></TabPanel>
       {NATIVE_TABS.map((item) => (
-        <TabPanel key={item.id} id={item.id}><NativeHistoryTab session={session} provider={item.id} label={item.label} /></TabPanel>
+        <TabPanel key={item.id} id={item.id}><NativeHistoryTab key={backend.backendId} backend={backend} provider={item.id} label={item.label} /></TabPanel>
       ))}
     </Tabs>
   );

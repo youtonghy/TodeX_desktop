@@ -1,7 +1,7 @@
 "use client";
 
 import { useDirection } from "@/components/foundations/direction/direction";
-import { useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Focusable as AriaFocusable } from "react-aria-components";
 import { AnimatePresence, motion, useIsPresent, useReducedMotion } from "motion/react";
@@ -415,7 +415,7 @@ function StatusColumn({ column, context, onAdd }: {
  * with sortable cards and cross-column drag and drop, a detail sheet per
  * task, and the create-task dialog. Data comes from the kanban store.
  */
-export function ProjectBoard({ groups, workspaces, total, handlers, defaultWorkspaceId, onBack }: {
+export function ProjectBoard({ groups, workspaces, total, handlers, defaultWorkspaceId, toolbar, onBack }: {
   /** Workspaces in sidebar order with their (sorted) tasks. */
   groups: readonly WorkspaceTasks[];
   /** Every workspace in sidebar order, for filters, moves and new tasks. */
@@ -423,6 +423,8 @@ export function ProjectBoard({ groups, workspaces, total, handlers, defaultWorks
   total: number;
   handlers: TaskBoardHandlers;
   defaultWorkspaceId?: string;
+  /** Extra controls at the start of the toolbar (the backend filter). */
+  toolbar?: ReactNode;
   onBack: () => void;
 }) {
   const t = useT();
@@ -603,6 +605,7 @@ export function ProjectBoard({ groups, workspaces, total, handlers, defaultWorks
           <p className="truncate text-body-regular text-text-secondary">{t("kanban.subtitle")}</p>
         </div>
         <div className="flex flex-wrap items-center justify-start gap-2.5 sm:justify-end">
+          {toolbar}
           <ProjectBoardControls
             sort={sort} onSort={setSort}
             workspaceId={filter} onWorkspace={setWorkspaceFilter} workspaces={workspaces}

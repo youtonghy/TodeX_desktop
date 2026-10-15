@@ -340,7 +340,8 @@ export type TerminalOutputEntry = {
  * `ssh -tt <host>` on the backend machine (`terminal.start` with `ssh`). */
 export type TerminalTarget =
   | { kind: 'workspace'; workspace: WorkspaceRecord; conversation: ConversationRecord }
-  | { kind: 'ssh'; host: string };
+  /** SSH terminals run `ssh -tt <host>` on the backend picked in the SSH view. */
+  | { kind: 'ssh'; host: string; backendConnectionId: string };
 
 export type TerminalClientState = {
   terminalId: string;

@@ -57,6 +57,9 @@ type Props = {
   closeRequestRef?: RefObject<() => boolean>;
   /** SSH view scope: tabs are opened from the SSH view, not the + menu. */
   sshMode?: boolean;
+  /** Backend the SSH terminals and remote file tabs run on (default: the
+   * focused backend). */
+  sshBackendId?: string;
   /** Ordered queue; ids increase monotonically. */
   requests?: WorkbenchRequest[];
   /** Every request with an id up to and including this one was applied. */
@@ -206,13 +209,15 @@ function placeholderFiles(): Record<string, { title: string; language: string; b
   };
 }
 
-export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = session.activeConversation?.id || '', shown = true, onTargetConsumed, closeRequestRef, sshMode = false, requests, onRequestsHandled, onItemsChange }: Props) {
+export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = session.activeConversation?.id || '', shown = true, onTargetConsumed, closeRequestRef, sshMode = false, sshBackendId: sshBackendProp, requests, onRequestsHandled, onItemsChange }: Props) {
   const t = useT();
   const storageKey = `${SETTINGS_STORAGE_KEY}.workbenchTabs.v1:${scopeKey}`;
   const [items, setItems] = useState<WorkbenchItem[]>([]);
   const [activeId, setActiveId] = useState('');
   const [restored, setRestored] = useState(false);
   const [axis, setAxis] = useState<WorkbenchTabAxis>('vertical');
+  const sshBackendId = sshBackendProp || session.activeBackendConnectionId;
+  const sshSettings = session.settingsForBackend(sshBackendId);
   const requestedTargetRef = useRef(target);
   const openedTargetRef = useRef<{ target: OpenPanelOptions; tab: WorkbenchTab } | null>(null);
   requestedTargetRef.current = target;
@@ -316,18 +321,18 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
     const item = items.find((entry) => entry.id === id);
     const terminal = item?.type === 'terminal' ? session.terminalById[terminalIdForConversation(scopeKey, id)] : undefined;
     if (item && terminal && (terminal.status === 'running' || terminal.status === 'starting' || terminal.status === 'stopping')) {
-      session.stopTerminalSession(terminalIdForConversation(scopeKey, id), item.ssh ? session.settings.tenantId : session.activeWorkspace?.tenantId || session.settings.tenantId);
+      session.stopTerminalSession(terminalIdForConversation(scopeKey, id), item.ssh ? sshSettings.tenantId : session.activeWorkspace?.tenantId || session.settings.tenantId);
     }
     if (item?.remote) {
       const { connectionId, label } = item.remote;
-      void v2Api(session).closeRemoteConnection(connectionId).catch((reason) => {
+      void backendApi(sshSettings).closeRemoteConnection(connectionId).catch((reason) => {
         // Already dropped by the backend (idle timeout or restart) is fine.
         if (isNotFoundError(reason)) return;
         toast.danger(t('ssh.remote.closeFailed', { label, error: reason instanceof Error ? reason.message : String(reason) }));
       });
     }
     removeTab(id);
-  }, [items, removeTab, scopeKey, session, t]);
+  }, [items, removeTab, scopeKey, session, sshSettings, t]);
 
   const updateRemoteBinding = useCallback((id: string, remote: RemoteFilesBinding) => {
     setItems(current => current.map(item => item.id === id ? { ...item, remote, title: remote.label } : item));
@@ -552,11 +557,12 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
                 terminalId={terminalIdForConversation(scopeKey, item.id)}
                 workspaceTarget={workspaceTerminalTarget}
                 sshHost={item.ssh?.host}
+                sshBackendId={sshBackendId}
                 autoConnect={!item.ssh || freshSshTabsRef.current.has(item.id)}
               />
             ) : null}
             {item.type === 'browser' ? <BrowserPane itemId={item.id} isActive={item.id === active?.id} workspacePath={session.activeWorkspace?.path} session={session} target={item.type === tab && item.id === active?.id && (target?.filePath || target?.url) ? target : item.target} onTargetChange={next => updateTabTarget(item.id, next)} /> : null}
-            {item.type === 'files' ? <FilesPane session={session} remote={item.remote} onRemoteRebind={next => updateRemoteBinding(item.id, next)} target={item.type === tab && item.id === active?.id && (target?.filePath || target?.url) ? target : item.target} onTargetChange={next => updateTabTarget(item.id, next)} /> : null}
+            {item.type === 'files' ? <FilesPane session={session} remote={item.remote} remoteBackendId={sshBackendId} onRemoteRebind={next => updateRemoteBinding(item.id, next)} target={item.type === tab && item.id === active?.id && (target?.filePath || target?.url) ? target : item.target} onTargetChange={next => updateTabTarget(item.id, next)} /> : null}
             {item.type === 'git-diff' ? <GitDiffPane session={session} /> : null}
             {item.type === 'ssh-exec' && item.sshExec ? <SshExecPane conversationId={item.sshExec.conversationId} runs={session.conversationRuntimeById[item.sshExec.conversationId]?.sshExecs ?? NO_SSH_EXECS} isActive={item.id === active?.id} /> : null}
             {item.type === 'agent-browser' && item.agentBrowser ? <AgentBrowserLiveView session={session} isActive={shown && item.id === active?.id} conversationId={item.agentBrowser.conversationId} /> : null}
@@ -585,27 +591,31 @@ function SshExecTabIcon({ conversationId, runs = NO_SSH_EXECS, className }: { co
   );
 }
 
-function TerminalPane({ session, terminalId, isActive, workspaceTarget, sshHost, autoConnect = true }: {
+function TerminalPane({ session, terminalId, isActive, workspaceTarget, sshHost, sshBackendId = '', autoConnect = true }: {
   session: TodeXSession;
   terminalId: string;
   isActive: boolean;
   workspaceTarget: TerminalTarget | null;
   /** Set for SSH tabs: the terminal runs `ssh -tt <host>` on the backend. */
   sshHost?: string;
+  /** Backend an SSH tab runs on. */
+  sshBackendId?: string;
   /** False for restored SSH tabs: they reattach to a live session but only
    * start `ssh` (and its password/host-key prompts) on an explicit Connect. */
   autoConnect?: boolean;
 }) {
   const t = useT();
   const target = useMemo<TerminalTarget | null>(
-    () => (sshHost ? { kind: 'ssh', host: sshHost } : workspaceTarget),
-    [sshHost, workspaceTarget],
+    () => (sshHost ? { kind: 'ssh', host: sshHost, backendConnectionId: sshBackendId } : workspaceTarget),
+    [sshBackendId, sshHost, workspaceTarget],
   );
   const workspace = target?.kind === 'workspace' ? target.workspace : null;
   const isSsh = target?.kind === 'ssh';
   const targetKey = !target ? '' : target.kind === 'ssh' ? `ssh:${target.host}` : target.conversation.id;
-  const tenantId = workspace?.tenantId || session.settings.tenantId;
-  const backendIdentity = workspace?.backendConnectionId || session.activeBackendConnectionId || session.settings.serverUrl;
+  const tenantId = workspace?.tenantId || (isSsh ? session.settingsForBackend(sshBackendId).tenantId : session.settings.tenantId);
+  const backendIdentity = (isSsh ? sshBackendId : workspace?.backendConnectionId) || session.activeBackendConnectionId || session.settings.serverUrl;
+  // An SSH tab follows its own backend's connection, not the focused one's.
+  const connectionState = isSsh ? session.backendLinkStatus[sshBackendId]?.state ?? 'idle' : session.connectionState;
   const autoStartAttempts = useRef(new Set<string>());
   const manualStopRef = useRef(false);
   const reconnectTimerRef = useRef<number | null>(null);
@@ -637,7 +647,7 @@ function TerminalPane({ session, terminalId, isActive, workspaceTarget, sshHost,
   }, [terminal?.cols, terminal?.rows]);
 
   useEffect(() => {
-    if (!target || !terminalId || session.connectionState !== 'open') {
+    if (!target || !terminalId || connectionState !== 'open') {
       return;
     }
     const current = terminalByIdRef.current[terminalId];
@@ -668,7 +678,7 @@ function TerminalPane({ session, terminalId, isActive, workspaceTarget, sshHost,
     autoConnect,
     isSsh,
     targetKey,
-    session.connectionState,
+    connectionState,
     session.requestTerminalStatus,
     session.startTerminalSession,
     terminalId,
@@ -693,7 +703,7 @@ function TerminalPane({ session, terminalId, isActive, workspaceTarget, sshHost,
   // usually a deliberate `exit` or a failed login, and retrying would loop
   // through password or host-key prompts; the Reconnect button restarts them.
   useEffect(() => {
-    if (!target || isSsh || !terminalId || session.connectionState !== 'open' || manualStopRef.current) {
+    if (!target || isSsh || !terminalId || connectionState !== 'open' || manualStopRef.current) {
       return;
     }
     if (terminal?.status !== 'error' && terminal?.status !== 'exited') {
@@ -746,7 +756,7 @@ function TerminalPane({ session, terminalId, isActive, workspaceTarget, sshHost,
         statusCheckTimerRef.current = null;
       }
     };
-  }, [target, isSsh, session.connectionState, session.requestTerminalStatus, session.startTerminalSession, terminal?.status, terminal?.stopRequested, terminalId, workspace]);
+  }, [target, isSsh, connectionState, session.requestTerminalStatus, session.startTerminalSession, terminal?.status, terminal?.stopRequested, terminalId, workspace]);
 
   const handleTerminalData = useCallback((data: string) => {
     const current = terminalByIdRef.current[terminalId];
@@ -816,7 +826,7 @@ function TerminalPane({ session, terminalId, isActive, workspaceTarget, sshHost,
         )}
         <div className="flex shrink-0 items-center gap-2">
           <Chip variant="caption" color="soft">
-            {session.connectionState === 'open'
+            {connectionState === 'open'
               ? session.connectionHealth.latencyMs === null ? t('workbench.detecting') : latencyLabelOf(session.connectionHealth.latencyMs)
               : t('workbench.disconnected')}
           </Chip>
@@ -824,7 +834,7 @@ function TerminalPane({ session, terminalId, isActive, workspaceTarget, sshHost,
             <ExpandableAction
               icon={RiRefreshLine}
               label={t('ssh.terminal.reconnect')}
-              disabled={session.connectionState !== 'open'}
+              disabled={connectionState !== 'open'}
               onClick={reconnectSsh}
               aria-label={t('ssh.terminal.reconnect')}
             />
@@ -1128,8 +1138,10 @@ type FileOperationDialog =
   | { kind: 'rename'; path: string }
   | { kind: 'delete'; path: string; isDirectory: boolean };
 
-function FilesPane({ session, target, onTargetChange, remote, onRemoteRebind }: {
+function FilesPane({ session, target, onTargetChange, remote, remoteBackendId, onRemoteRebind }: {
   session: TodeXSession;
+  /** Backend a remote binding's connection lives on. */
+  remoteBackendId?: string;
   target?: OpenPanelOptions;
   onTargetChange?: (target: OpenPanelOptions) => void;
   /** Bind the pane to a remote SFTP/FTP connection instead of the workspace. */
@@ -1139,7 +1151,9 @@ function FilesPane({ session, target, onTargetChange, remote, onRemoteRebind }: 
   const t = useT();
   const targetChangeRef = useRef(onTargetChange);
   targetChangeRef.current = onTargetChange;
-  const { serverUrl, deviceSecret, encryptionProtocol, encryptionPublicKey, transportVerified } = session.settings;
+  // Remote tabs talk to the SSH view's backend; workspace files to the focused one.
+  const filesBackendId = remote && remoteBackendId ? remoteBackendId : session.activeBackendConnectionId;
+  const { serverUrl, deviceSecret, encryptionProtocol, encryptionPublicKey, transportVerified } = session.settingsForBackend(filesBackendId);
   const api = useCallback(() => backendApi({ serverUrl, deviceSecret, encryptionProtocol, encryptionPublicKey, transportVerified }), [deviceSecret, encryptionProtocol, encryptionPublicKey, serverUrl, transportVerified]);
   const workspacePath = session.activeWorkspace?.path || '';
   // shell.openPath/showItemInFolder act on the desktop's own filesystem, so
@@ -1148,7 +1162,7 @@ function FilesPane({ session, target, onTargetChange, remote, onRemoteRebind }: 
     () => (remote ? remoteFileSource(api, remote) : workspaceFileSource(api, workspacePath, isLoopbackUrl(serverUrl))),
     [api, remote, serverUrl, workspacePath],
   );
-  const remoteConnector = useRemoteConnector(api, session.activeBackendConnectionId);
+  const remoteConnector = useRemoteConnector(api, filesBackendId);
   const [entries, setEntries] = useState<FileTreeEntry[]>([]);
   const [selected, setSelected] = useState('');
   const [focused, setFocused] = useState('');

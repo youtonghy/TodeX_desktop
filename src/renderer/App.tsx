@@ -187,6 +187,15 @@ export function App() {
   // The SSH view swaps the main content but keeps sidebar and Workbench; its
   // Workbench tabs (SSH terminals, remote files) live in a per-backend scope.
   const sshActive = panel === 'ssh';
+  // Backend the SSH view acts on: picked there, else the focused backend
+  // (also each time the view opens again).
+  const [sshBackendPick, setSshBackendPick] = useState('');
+  useEffect(() => {
+    if (!sshActive) setSshBackendPick('');
+  }, [sshActive]);
+  const sshBackendId = sshBackendPick && session.backendConnections.some((profile) => profile.id === sshBackendPick)
+    ? sshBackendPick
+    : session.activeBackendConnectionId;
   // The task board, like the terminal, takes the conversation's place in the shell.
   const kanbanActive = panel === 'kanban';
   const features = useFeatureModes();
@@ -197,7 +206,7 @@ export function App() {
     if ((panel === 'ssh' && !terminalEnabled) || (panel === 'kanban' && !kanbanEnabled)) setPanel(null);
   }, [panel, terminalEnabled, kanbanEnabled]);
   const scopeKey = !session.hydrated || !session.workbenchSharingHydrated ? ''
-    : sshActive ? sshWorkbenchScopeKey(session.activeBackendConnectionId || session.settings.serverUrl)
+    : sshActive ? sshWorkbenchScopeKey(sshBackendId || session.settings.serverUrl)
       : workbenchScopeKey(
         session.workbenchSharing,
         session.activeWorkspace?.backendConnectionId || session.activeBackendConnectionId || session.settings.serverUrl,
@@ -459,7 +468,7 @@ export function App() {
           />
         ) : (
           <WorkbenchPanel key={scopeKey} scopeKey={scopeKey} shown={asideShown} session={session} tab={workbenchTab} target={panelTarget} onTabChange={changeWorkbenchTab} onTargetConsumed={consumePanelTarget} closeRequestRef={workbenchCloseRef}
-            sshMode={sshActive} requests={workbenchRequests} onRequestsHandled={workbenchRequestsHandled} onItemsChange={sshActive ? setWorkbenchItems : undefined} />
+            sshMode={sshActive} sshBackendId={sshActive ? sshBackendId : undefined} requests={workbenchRequests} onRequestsHandled={workbenchRequestsHandled} onItemsChange={sshActive ? setWorkbenchItems : undefined} />
         )}
       </PanelBoundary>
     )
@@ -524,6 +533,8 @@ export function App() {
       <PanelBoundary>
         <SshPanel
           session={session}
+          backendId={sshBackendId}
+          onBackendChange={setSshBackendPick}
           scopeKey={scopeKey}
           workbenchItems={workbenchItems}
           onOpenSshTerminal={openSshTerminal}

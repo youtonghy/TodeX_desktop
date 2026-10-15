@@ -9,6 +9,8 @@ import { ConnectionError } from '@todex/protocol/connectionError';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { useT } from '../i18n';
 import { backendApi } from '../session/helpers';
+import { usePanelBackend, type PanelBackend } from '../session/panelBackend';
+import { BackendScopeRow } from './settings/BackendScopeRow';
 import { AgentBrowserSettings } from './AgentBrowserSettings';
 import { ComputerUseSettings } from './ComputerUseSettings';
 import { SettingsCard, SettingsEntry, SettingsNote, SettingsRow, SettingsSubpage } from './settings/SettingsRows';
@@ -21,7 +23,7 @@ type ChipColor = 'success' | 'warning' | 'default' | 'danger';
 const CHIP_COLORS = { success: 'lime', warning: 'yellow', default: 'neutral', danger: 'rose' } as const;
 
 /**
- * Agent desktop tools for the active backend. The agent browser and
+ * Agent desktop tools for the picked backend. The agent browser and
  * Computer Use both run on the backend's computer; this app only watches
  * them, so everything here is backend state.
  *
@@ -35,10 +37,27 @@ export function AgentDesktopSettings({ session, page = null, onPageChange = () =
   page?: AgentDesktopPage | null;
   onPageChange?: (page: AgentDesktopPage | null) => void;
 }) {
+  const backend = usePanelBackend(session);
+  // Tool pages belong to the backend picked on the overview.
+  return (
+    <div className="flex flex-col gap-6">
+      {page ? null : <BackendScopeRow session={session} backend={backend} />}
+      <BackendDesktopSettings key={backend.backendId} session={session} backend={backend} page={page} onPageChange={onPageChange} />
+    </div>
+  );
+}
+
+function BackendDesktopSettings({ session, backend, page, onPageChange }: {
+  session: TodeXSession;
+  backend: PanelBackend;
+  page: AgentDesktopPage | null;
+  onPageChange: (page: AgentDesktopPage | null) => void;
+}) {
   const t = useT();
+  const transport = backend.settings;
   const api = useMemo(
-    () => backendApi(session.settings),
-    [session.settings.deviceSecret, session.settings.encryptionProtocol, session.settings.encryptionPublicKey, session.settings.transportVerified, session.settings.serverUrl],
+    () => backendApi(transport),
+    [transport.deviceSecret, transport.encryptionProtocol, transport.encryptionPublicKey, transport.transportVerified, transport.serverUrl],
   );
   // `null`: the backend predates desktop tools.
   const [settings, setSettings] = useState<Settings | null | undefined>(undefined);
@@ -122,7 +141,7 @@ export function AgentDesktopSettings({ session, page = null, onPageChange = () =
           description={settings.browser ? t('agentBrowser.settingsHint', { host: settings.browser.host }) : undefined}
           onBack={back}
         >
-          <AgentBrowserSettings session={session} api={api} settings={settings} onSettings={setSettings} />
+          <AgentBrowserSettings session={session} backendId={backend.backendId} api={api} settings={settings} onSettings={setSettings} />
         </SettingsSubpage>
       );
     }

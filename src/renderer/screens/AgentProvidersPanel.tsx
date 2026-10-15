@@ -58,6 +58,8 @@ import {
 } from '../lib/agentProviders';
 import { useT } from '../i18n';
 import type { TodeXSession } from '../session/useTodeXSession';
+import { usePanelBackend } from '../session/panelBackend';
+import { BackendSelect } from '@/components/ui/backend-select';
 import { backendApi } from '../session/helpers';
 
 type EditorState =
@@ -90,7 +92,15 @@ export function AgentProvidersPanel({ session }: { session: TodeXSession }) {
   const [editor, setEditor] = useState<EditorState>(null);
   const requestGeneration = useRef(0);
   const importInput = useRef<HTMLInputElement>(null);
-  const api = useCallback(() => backendApi(session.settings), [session.settings.deviceSecret, session.settings.encryptionProtocol, session.settings.encryptionPublicKey, session.settings.transportVerified, session.settings.serverUrl]);
+  const backend = usePanelBackend(session);
+  const { settings } = backend;
+  const api = useCallback(() => backendApi(settings), [settings.deviceSecret, settings.encryptionProtocol, settings.encryptionPublicKey, settings.transportVerified, settings.serverUrl]);
+
+  // Another backend's agents replace this one's, not merge into them.
+  useEffect(() => {
+    setAgents({});
+    setEditor(null);
+  }, [backend.backendId]);
 
   const refresh = useCallback(async (quiet = false) => {
     const generation = ++requestGeneration.current;
@@ -115,10 +125,10 @@ export function AgentProvidersPanel({ session }: { session: TodeXSession }) {
   // Only agents installed on the backend's machine; until the provider list
   // arrives every managed agent stays listed so the panel is never empty.
   const installedAgents = useMemo(() => {
-    const providers = session.v2Providers;
+    const { providers } = backend;
     if (!providers.length) return MANAGED_PROVIDER_AGENTS;
     return MANAGED_PROVIDER_AGENTS.filter((id) => providers.some((item) => item.id === id && item.available));
-  }, [session.v2Providers]);
+  }, [backend.providers]);
 
   // A selected agent that is not installed falls back to the first one that is.
   useEffect(() => {
@@ -196,7 +206,7 @@ export function AgentProvidersPanel({ session }: { session: TodeXSession }) {
     });
   };
 
-  const activeBackend = session.backendConnections.find((item) => item.id === session.activeBackendConnectionId);
+  const activeBackend = backend.profile;
   const additiveAgent = agent === 'pi' || agent === 'opencode';
   const additive = bucket?.mode === 'additive';
   const live = bucket?.live;
@@ -210,7 +220,7 @@ export function AgentProvidersPanel({ session }: { session: TodeXSession }) {
   const renderEditor = () => editor ? (
     <ProviderEditor
       key={editor.kind === 'edit' ? editor.profile.id : editor.kind === 'adopt' ? `adopt:${editor.nodeId}` : 'new'}
-      session={session}
+      settings={settings}
       agent={agent}
       editor={editor}
       unmanagedNodes={unmanagedNodes}
@@ -240,8 +250,9 @@ export function AgentProvidersPanel({ session }: { session: TodeXSession }) {
         </div>
         <div className="min-w-0 flex-1">
           <h2 className="truncate text-headline-semibold text-text-primary">{activeBackend?.name || t('cli.currentBackend')}</h2>
-          <p className="truncate text-caption-1-regular text-text-secondary" title={session.settings.serverUrl}>{session.settings.serverUrl}</p>
+          <p className="truncate text-caption-1-regular text-text-secondary" title={settings.serverUrl}>{settings.serverUrl}</p>
         </div>
+        <BackendSelect profiles={session.backendConnections} linkStates={session.backendLinkStatus} selectedId={backend.backendId} onChange={backend.setBackendId} />
         <IconAction icon={RiRefreshLine} size="md" aria-label={t('ap.refresh')} disabled={loading} onClick={() => void refresh()} />
       </div>
 
@@ -423,7 +434,7 @@ function downloadJson(fileName: string, value: unknown) {
 }
 
 function ProviderEditor({
-  session,
+  settings,
   agent,
   editor,
   unmanagedNodes,
@@ -431,7 +442,8 @@ function ProviderEditor({
   onCancel,
   onSave,
 }: {
-  session: TodeXSession;
+  /** Transport of the backend the panel acts on. */
+  settings: Parameters<typeof backendApi>[0];
   agent: ManagedProviderAgent;
   editor: Exclude<EditorState, null>;
   unmanagedNodes: Record<string, unknown>;
@@ -477,7 +489,7 @@ function ProviderEditor({
   // The backend resolves masked secrets against the stored profile or the
   // live additive node of the same id, so this works pre-save in all modes.
   const fetchEditorModels = async () => {
-    const client = backendApi(session.settings);
+    const client = backendApi(settings);
     const response = await client.previewAgentProviderModels(
       agent,
       id.trim() || 'preview',

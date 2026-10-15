@@ -681,6 +681,14 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     () => (focusProfile ? settingsFromProfile(focusProfile, preferences) : preferences),
     [focusProfile, preferences],
   );
+  // The same for every backend, for panels that act on a backend picked
+  // there rather than the focused one.
+  const settingsByBackend = useMemo(() => {
+    const map: Record<string, ConnectionSettings> = {};
+    for (const profile of backendConnections) map[profile.id] = settingsFromProfile(profile, preferences);
+    return map;
+  }, [backendConnections, preferences]);
+  const settingsForBackend = useCallback((backendId: string) => settingsByBackend[backendId] ?? settings, [settings, settingsByBackend]);
   const connectionRoutingRef = useRef(settings);
   connectionRoutingRef.current = settings;
   const focusLink = linkStatusByBackend[activeBackendConnectionId] ?? IDLE_BACKEND_LINK;
@@ -3063,7 +3071,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       const host = known.ssh.host;
       window.setTimeout(() => {
         appendTerminalOutput(terminalId, terminalOutputLine('system', t('sess.sshPasswordFallback')));
-        startTerminalSessionRef.current?.({ kind: 'ssh', host }, {
+        startTerminalSessionRef.current?.({ kind: 'ssh', host, backendConnectionId: known.backendConnectionId ?? '' }, {
           terminalId, cwd: '', shell: '', rows: known.rows, cols: known.cols, preserveOutput: true, interactive: true,
         });
       }, 0);
@@ -4574,6 +4582,15 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     [appendTimeline, autoConnectEnabled, connectBackend, sendRawProtocolFrame],
   );
 
+  /** Backend a terminal runs on: an SSH terminal's picked backend, else its
+   * conversation's. */
+  const terminalBackendId = (target: TerminalTarget) => (target.kind === 'ssh'
+    ? target.backendConnectionId || activeBackendConnectionIdRef.current
+    : ownerBackendId(target.conversation, target.workspace, noWorkspaceBackendIdRef.current));
+  /** Tenant of a terminal: its workspace's, else its backend's. */
+  const terminalTenantId = (target: TerminalTarget) => (target.kind === 'workspace' && target.workspace.tenantId)
+    || settingsForBackend(terminalBackendId(target)).tenantId;
+
   const seedTerminalState = useCallback((target: TerminalTarget, patch: Partial<TerminalClientState> = {}, notice?: TerminalOutputEntry) => {
     const workspace = target.kind === 'workspace' ? target.workspace : null;
     const terminalId = patch.terminalId?.trim() || terminalIdForConversation(
@@ -4586,11 +4603,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         ...(target.kind === 'ssh' ? { ssh: { host: target.host } } : {}),
         workspaceId: workspace?.id ?? '',
         conversationId: target.kind === 'workspace' ? target.conversation.id : '',
-        // SSH terminals run on the backend focused when they start.
-        backendConnectionId: target.kind === 'workspace'
-          ? ownerBackendId(target.conversation, target.workspace, noWorkspaceBackendIdRef.current)
-          : activeBackendConnectionIdRef.current,
-        tenantId: workspace?.tenantId || settings.tenantId,
+        backendConnectionId: terminalBackendId(target),
+        tenantId: terminalTenantId(target),
         cwd: workspace?.path ?? '',
         shell: '',
         rows: DEFAULT_TERMINAL_ROWS,
@@ -4610,7 +4624,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       });
     });
     return terminalId;
-  }, [settings.tenantId]);
+  }, [settingsForBackend]);
 
   const sendTerminalStart = useCallback((
     target: TerminalTarget,
@@ -4620,7 +4634,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   ) => {
     const sent = sendProtocolMessage('terminal.start', target.kind === 'ssh' ? {
       terminalId,
-      tenantId: settings.tenantId,
+      tenantId: terminalTenantId(target),
       cwd: '',
       ssh: { host: target.host, ...(password ? { password } : {}) },
       rows,
@@ -4633,7 +4647,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       shell: shell || undefined,
       rows,
       cols,
-    }, createRequestId('terminal-start'));
+    }, createRequestId('terminal-start'), undefined, terminalBackendId(target));
     if (!sent) {
       setTerminalById((current) => {
         const existing = current[terminalId];
@@ -4657,7 +4671,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       return false;
     }
     return true;
-  }, [sendProtocolMessage, settings.tenantId]);
+  }, [sendProtocolMessage, settingsForBackend]);
 
   const startTerminalSession = useCallback((target: TerminalTarget, options: TerminalStartOptions) => {
     const workspace = target.kind === 'workspace' ? target.workspace : null;
@@ -4686,8 +4700,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     if (target.kind === 'ssh' && !options.interactive) {
       // A saved password signs in through the backend's askpass helper; the
       // keychain lookup is asynchronous, so the start is sent once it settles.
-      const backendId = terminalByIdRef.current[terminalId]?.backendConnectionId ?? activeBackendConnectionIdRef.current;
-      void loadSshPassword(backendId, target.host).then((password) => {
+      void loadSshPassword(terminalBackendId(target), target.host).then((password) => {
         if (password) {
           setTerminalById((current) => {
             const existing = current[terminalId];
@@ -4775,14 +4788,14 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const requestTerminalStatus = useCallback((target: TerminalTarget, terminalId?: string) => {
     const resolvedTerminalId = seedTerminalState(target, { terminalId });
     return sendProtocolMessage('terminal.status', target.kind === 'ssh' ? {
-      tenantId: settings.tenantId,
+      tenantId: terminalTenantId(target),
       terminalId: resolvedTerminalId,
     } : {
       tenantId: target.workspace.tenantId || settings.tenantId,
       workspaceId: target.workspace.id,
       terminalId: resolvedTerminalId,
-    }, createRequestId('terminal-status'));
-  }, [seedTerminalState, sendProtocolMessage, settings.tenantId]);
+    }, createRequestId('terminal-status'), undefined, terminalBackendId(target));
+  }, [seedTerminalState, sendProtocolMessage, settings.tenantId, settingsForBackend]);
 
   const clearTerminalOutput = useCallback((terminalId: string) => {
     setTerminalById((current) => {
@@ -7668,18 +7681,21 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   }, [activeWorkspace?.path, capabilityCatalogs, refreshCapabilityCatalog, settings.deviceSecret, settings.defaultWorkspacePath, settings.encryptionProtocol, settings.encryptionPublicKey, settings.transportVerified, settings.serverUrl]);
 
   /** Per-conversation disk usage on the active backend, titles decrypted. */
-  const getHistoryStorage = useCallback(async () => {
-    const response = await backendApi(settings).getHistoryStorage();
-    const backendId = activeBackendConnectionIdRef.current;
+  /** History storage of a backend (the focused one by default). */
+  const getHistoryStorage = useCallback(async (backendId = activeBackendConnectionIdRef.current) => {
+    const response = await backendApi(settingsForBackend(backendId)).getHistoryStorage();
     return { ...response, conversations: withDecryptedTitles(backendId, response.conversations) as typeof response.conversations };
-  }, [settings.deviceSecret, settings.encryptionProtocol, settings.encryptionPublicKey, settings.transportVerified, settings.serverUrl]);
+  }, [settingsForBackend]);
 
-  /** Drops local records of conversations the backend already deleted. */
-  const forgetDeletedConversations = useCallback((v2ConversationIds: string[]) => {
+  /** Drops local records of conversations a backend (the focused one by
+   * default) already deleted. */
+  const forgetDeletedConversations = useCallback((v2ConversationIds: string[], backendId = activeBackendConnectionIdRef.current) => {
     const deleted = new Set(v2ConversationIds);
     if (deleted.size === 0) return;
     for (const id of deleted) unsubscribeV2Conversation(id);
-    const removed = conversationsRef.current.filter((item) => item.v2ConversationId && deleted.has(item.v2ConversationId));
+    const removed = conversationsRef.current.filter((item) => (
+      item.v2ConversationId && deleted.has(item.v2ConversationId) && backendIdForConversation(item.id) === backendId
+    ));
     const removedIds = new Set(removed.map((item) => item.id));
     if (removedIds.has(activeConversationRef.current)) {
       const active = removed.find((item) => item.id === activeConversationRef.current);
@@ -7693,11 +7709,11 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
 
   /** Deletes backend conversations for good (unlike removeConversation,
    * which archives) and drops their local records right away. */
-  const purgeConversations = useCallback(async (v2ConversationIds: string[]) => {
-    const result = await backendApi(settings).cleanupConversations(v2ConversationIds);
-    forgetDeletedConversations(result.deleted);
+  const purgeConversations = useCallback(async (v2ConversationIds: string[], backendId = activeBackendConnectionIdRef.current) => {
+    const result = await backendApi(settingsForBackend(backendId)).cleanupConversations(v2ConversationIds);
+    forgetDeletedConversations(result.deleted, backendId);
     return result;
-  }, [forgetDeletedConversations, settings.deviceSecret, settings.encryptionProtocol, settings.encryptionPublicKey, settings.transportVerified, settings.serverUrl]);
+  }, [forgetDeletedConversations, settingsForBackend]);
 
   const capabilityManager = useMemo<CapabilityManager>(() => ({
     createSkill: (provider, input) => mutateCapabilityCatalog(provider, (api, workspace) => api.createSkill(provider, workspace, input)),
@@ -9234,6 +9250,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     hydrated,
     directorySyncStatus,
     settings,
+    /** Preferences plus a given backend's transport (the focused backend's
+     * when the id is unknown). */
+    settingsForBackend,
     setSettings,
     backendConnections,
     /** The backend serving the visible conversation or workspace. */
@@ -9305,6 +9324,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     memorySettingsByConversation,
     terminalById,
     v2Providers,
+    v2ProvidersByBackend,
     v2Conversations,
     capabilityCatalogs,
     providerModels,

@@ -14,7 +14,7 @@ import type {
 } from '@todex/protocol/v2';
 import { useT } from '../../i18n';
 import { backendApi } from '../../session/helpers';
-import type { TodeXSession } from '../../session/useTodeXSession';
+import type { PanelBackend } from '../../session/panelBackend';
 import {
   CleanupPolicyCard,
   formatDateTime,
@@ -79,7 +79,7 @@ function TranscriptModal({ transcript, loading, onClose }: {
  * (plus Claude Code's own retention setting), and the session list with a
  * transcript view. Sessions TodeX conversations resume, and running ones,
  * cannot be removed. */
-export function NativeHistoryTab({ session, provider, label }: { session: TodeXSession; provider: NativeHistoryProvider; label: string }) {
+export function NativeHistoryTab({ backend, provider, label }: { backend: PanelBackend; provider: NativeHistoryProvider; label: string }) {
   const t = useT();
   const [info, setInfo] = useState<NativeHistoryProviderInfo>();
   const [sessions, setSessions] = useState<NativeHistorySession[]>([]);
@@ -91,7 +91,8 @@ export function NativeHistoryTab({ session, provider, label }: { session: TodeXS
   const [transcript, setTranscript] = useState<NativeHistoryTranscript | null>(null);
   const [transcriptLoading, setTranscriptLoading] = useState(false);
   const generation = useRef(0);
-  const api = useCallback(() => backendApi(session.settings), [session.settings.deviceSecret, session.settings.encryptionProtocol, session.settings.encryptionPublicKey, session.settings.transportVerified, session.settings.serverUrl]);
+  const { settings } = backend;
+  const api = useCallback(() => backendApi(settings), [settings.deviceSecret, settings.encryptionProtocol, settings.encryptionPublicKey, settings.transportVerified, settings.serverUrl]);
 
   const refresh = useCallback(async () => {
     const current = ++generation.current;
@@ -145,7 +146,7 @@ export function NativeHistoryTab({ session, provider, label }: { session: TodeXS
     }
   };
 
-  const displayName = session.v2Providers.find((item) => item.id === provider)?.displayName ?? label;
+  const displayName = backend.providers.find((item) => item.id === provider)?.displayName ?? label;
   const items: HistoryListItem[] = sessions.map((entry) => {
     const title = entry.title?.trim() || t('cleanup.untitledSession');
     const where = entry.cwd ? pathName(entry.cwd) : t('cleanup.unknownWorkspace');

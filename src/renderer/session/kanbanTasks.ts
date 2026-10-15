@@ -133,19 +133,16 @@ function emitTimeZone() {
 function setTimeZone(link: KanbanSyncLink, next: KanbanTimeZone | null) {
   if (link.timeZone?.name === next?.name && link.timeZone?.offsetMinutes === next?.offsetMinutes) return;
   link.timeZone = next;
-  if (syncLinks.get(focusBackendId) === link) emitTimeZone();
+  emitTimeZone();
 }
 
-function focusTimeZone(): KanbanTimeZone | null {
-  return syncLinks.get(focusBackendId)?.timeZone ?? null;
-}
-
-/** The focused backend's time zone, or null before its first sync. */
-export function useKanbanTimeZone(): KanbanTimeZone | null {
+/** A backend's time zone (the focused backend's by default), or null before
+ * its first sync. */
+export function useKanbanTimeZone(backendId?: string): KanbanTimeZone | null {
   return useSyncExternalStore((listener) => {
     timeZoneListeners.add(listener);
     return () => { timeZoneListeners.delete(listener); };
-  }, focusTimeZone);
+  }, () => syncLinks.get(backendId || focusBackendId)?.timeZone ?? null);
 }
 
 /** The focused backend and how workspaces map to backends. */
@@ -162,7 +159,7 @@ export function configureKanbanSync(backendConnectionId: string, config: Backend
   if (!config) {
     if (previous?.pushTimer) clearTimeout(previous.pushTimer);
     syncLinks.delete(backendConnectionId);
-    if (backendConnectionId === focusBackendId) emitTimeZone();
+    emitTimeZone();
     return;
   }
   const next: KanbanSyncConfig = {
@@ -182,7 +179,7 @@ export function configureKanbanSync(backendConnectionId: string, config: Backend
   if (!changed) return;
   if (previous?.pushTimer) clearTimeout(previous.pushTimer);
   syncLinks.set(backendConnectionId, { config: next, supported: true, pushTimer: null, pushInFlight: false, pushAgain: false, timeZone: null });
-  if (backendConnectionId === focusBackendId) emitTimeZone();
+  emitTimeZone();
   void syncKanbanTasksFromBackend(backendConnectionId);
 }
 

@@ -9,8 +9,10 @@ import { useT } from '../i18n';
 /** Picks the time a scheduled conversation sends at. The time is wall-clock
  * in the backend's zone, which is where it runs; `onConfirm` gets the ISO
  * instant and resolves whether it was applied. */
-export function ScheduleConversationDialog({ isOpen, mode, initialAt, onConfirm, onClose }: {
+export function ScheduleConversationDialog({ isOpen, mode, initialAt, backendId, onConfirm, onClose }: {
   isOpen: boolean;
+  /** Backend the conversation runs on (default: the focused one). */
+  backendId?: string;
   mode: 'create' | 'reschedule';
   /** ISO instant to start from when rescheduling. */
   initialAt?: string;
@@ -18,7 +20,7 @@ export function ScheduleConversationDialog({ isOpen, mode, initialAt, onConfirm,
   onClose: () => void;
 }) {
   const t = useT();
-  const zone = useKanbanTimeZone();
+  const zone = useKanbanTimeZone(backendId);
   const [at, setAt] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);

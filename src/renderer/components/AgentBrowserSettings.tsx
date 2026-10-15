@@ -17,8 +17,10 @@ import { toast } from './ui/toast';
  * (download, progress, problems) and the per-workspace browser profiles,
  * which keep cookies and storage apart and can be switched or deleted.
  */
-export function AgentBrowserSettings({ session, api, settings, onSettings }: {
+export function AgentBrowserSettings({ session, backendId, api, settings, onSettings }: {
   session: TodeXSession;
+  /** Backend these settings live on. */
+  backendId: string;
   api: V2ApiClient;
   settings: AgentDesktopSettings;
   onSettings: (settings: AgentDesktopSettings) => void;
@@ -50,7 +52,8 @@ export function AgentBrowserSettings({ session, api, settings, onSettings }: {
 
   if (!status) return <p className="text-body-regular text-text-secondary">{t('agentBrowser.legacyBackend')}</p>;
   const chromium = status.chromium;
-  const workspace = session.activeWorkspace;
+  // The open workspace counts only when it lives on that backend.
+  const workspace = backendId === session.activeBackendConnectionId ? session.activeWorkspace : null;
   const workspaceKey = workspace ? (workspace.id || workspace.path) : '';
   const current = workspaceKey ? profiles.workspaces[workspaceKey] : undefined;
   const usedBy = (profileId: string) => Object.entries(profiles.workspaces)

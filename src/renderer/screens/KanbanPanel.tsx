@@ -5,8 +5,9 @@ import type { LatestEntries, WorkspaceTasks } from '@/components/application/pro
 import type { TaskBoardHandlers } from '@/components/application/project-board/task-actions';
 import { Button } from '@/components/base/buttons/button';
 import { EmptyState } from '@/components/ui/empty-state';
+import { ALL_BACKENDS, BackendSelect } from '@/components/ui/backend-select';
 import { ScheduleConversationDialog } from '../components/ScheduleConversationDialog';
-import { isNoneWorkspaceId } from '../session/helpers';
+import { isNoneWorkspaceId, workspaceDisplayName } from '../session/helpers';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { useT } from '../i18n';
 import {
@@ -29,15 +30,34 @@ export function KanbanPanel({ session, onOpenConversation }: Props) {
   const allTasks = useKanbanTasks();
   const [schedulingTaskId, setSchedulingTaskId] = useState<string | null>(null);
   const schedulingTask = allTasks.find((task) => task.id === schedulingTaskId && !task.deletedAt) ?? null;
+  // Every backend's workspaces, or one backend's.
+  const [backendFilter, setBackendFilter] = useState(ALL_BACKENDS);
+  const filteredBackend = session.backendConnections.some((profile) => profile.id === backendFilter) ? backendFilter : ALL_BACKENDS;
+  const backendOf = (workspace: { backendConnectionId?: string | null }) => workspace.backendConnectionId ?? session.activeBackendConnectionId;
   // Columns list workspaces in the same manual order as the sidebar.
   // Tasks need a registered workspace, so the built-in None one is left out.
-  const orderedWorkspaces = useMemo(() => session.workspaces.filter((workspace) => !isNoneWorkspaceId(workspace.id)).sort(
-    (a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || (a.createdAt - b.createdAt) || a.id.localeCompare(b.id),
-  ), [session.workspaces]);
+  // Same-named workspaces on different backends carry the backend's name,
+  // as in the sidebar.
+  const orderedWorkspaces = useMemo(() => {
+    const listed = session.workspaces.filter((workspace) => !isNoneWorkspaceId(workspace.id)
+      && (filteredBackend === ALL_BACKENDS || backendOf(workspace) === filteredBackend)).sort(
+      (a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || (a.createdAt - b.createdAt) || a.id.localeCompare(b.id),
+    );
+    const seen = new Map<string, number>();
+    for (const workspace of listed) seen.set(workspaceDisplayName(workspace), (seen.get(workspaceDisplayName(workspace)) ?? 0) + 1);
+    return listed.map((workspace) => {
+      const backend = session.backendConnections.find((profile) => profile.id === backendOf(workspace));
+      return (seen.get(workspaceDisplayName(workspace)) ?? 0) > 1 && backend
+        ? { ...workspace, name: `${workspaceDisplayName(workspace)} · ${backend.name}` }
+        : workspace;
+    });
+  }, [session.workspaces, session.backendConnections, session.activeBackendConnectionId, filteredBackend]);
   const groups = useMemo<WorkspaceTasks[]>(() => orderedWorkspaces.map((workspace) => ({
     workspace,
-    tasks: kanbanTasksForWorkspace(allTasks, workspace.id, workspace.backendConnectionId ?? session.activeBackendConnectionId),
+    tasks: kanbanTasksForWorkspace(allTasks, workspace.id, backendOf(workspace)),
   })), [orderedWorkspaces, allTasks, session.activeBackendConnectionId]);
+  const hasWorkspaces = session.workspaces.some((workspace) => !isNoneWorkspaceId(workspace.id));
+  const schedulingWorkspace = schedulingTask ? session.workspaces.find((workspace) => workspace.id === schedulingTask.workspaceId) : undefined;
   const total = groups.reduce((count, group) => count + group.tasks.length, 0);
   const conversations = useMemo(
     () => session.conversations.filter((conversation) => !conversation.archived).sort((a, b) => b.updatedAt - a.updatedAt),
@@ -101,7 +121,8 @@ export function KanbanPanel({ session, onOpenConversation }: Props) {
 
   return (
     <div className="flex h-full min-h-0 flex-col px-3 pt-1 pb-3 sm:px-6 sm:pb-5">
-      {orderedWorkspaces.length === 0 ? (
+      {/* A backend filter with no workspaces still shows the board, so the filter stays reachable. */}
+      {!hasWorkspaces ? (
         <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4">
           <EmptyState icon={RiFolder3Line} title={t('kanban.noWorkspaces')} description={t('kanban.noWorkspacesHint')}>
             <Button size="small" variant="secondary" onClick={onOpenConversation}>{t('kanban.backToChat')}</Button>
@@ -114,12 +135,22 @@ export function KanbanPanel({ session, onOpenConversation }: Props) {
           total={total}
           handlers={handlers}
           defaultWorkspaceId={session.activeWorkspaceId}
+          toolbar={(
+            <BackendSelect
+              profiles={session.backendConnections}
+              linkStates={session.backendLinkStatus}
+              selectedId={filteredBackend}
+              onChange={setBackendFilter}
+              allLabel={t('kanban.allBackends')}
+            />
+          )}
           onBack={onOpenConversation}
         />
       )}
       <ScheduleConversationDialog
         isOpen={Boolean(schedulingTask)}
         mode="create"
+        backendId={schedulingWorkspace ? backendOf(schedulingWorkspace) : undefined}
         onConfirm={(at) => (schedulingTask ? scheduleTaskConversation(schedulingTask, at) : Promise.resolve(false))}
         onClose={() => setSchedulingTaskId(null)}
       />

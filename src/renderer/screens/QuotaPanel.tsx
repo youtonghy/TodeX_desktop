@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { RiRefreshLine, RiVipCrownLine } from '@remixicon/react';
 import { Button } from '@/components/base/buttons/button';
 import { EmptyState } from '@/components/ui/empty-state';
@@ -9,6 +9,8 @@ import type { TodeXSession } from '../session/useTodeXSession';
 import { ProviderIcon } from '../components/ProviderIcon';
 import { getLocale, t, useT } from '../i18n';
 import { backendApi } from '../session/helpers';
+import { usePanelBackend } from '../session/panelBackend';
+import { BackendSelect } from '@/components/ui/backend-select';
 import { quotaLimits, quotaMessage } from '../session/quota';
 
 type Props = {
@@ -56,20 +58,31 @@ export function QuotaPanel({ session }: Props) {
   const [snapshots, setSnapshots] = useState<Record<string, ProviderQuotaSnapshot>>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const backend = usePanelBackend(session);
+  const { settings } = backend;
+  const generation = useRef(0);
 
   const refresh = useCallback(async () => {
+    const current = ++generation.current;
     setLoading(true);
     try {
-      const api = backendApi(session.settings);
+      const api = backendApi(settings);
       const response = await api.getProviderQuotas();
+      if (current !== generation.current) return;
       setSnapshots(response.providers ?? {});
       setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      if (current === generation.current) setError(err instanceof Error ? err.message : String(err));
     } finally {
-      setLoading(false);
+      if (current === generation.current) setLoading(false);
     }
-  }, [session.settings.serverUrl, session.settings.deviceSecret]);
+  }, [settings.serverUrl, settings.deviceSecret, settings.encryptionProtocol, settings.encryptionPublicKey, settings.transportVerified]);
+
+  // Another backend's quotas replace this one's.
+  useEffect(() => {
+    setSnapshots({});
+    setError(null);
+  }, [backend.backendId]);
 
   useEffect(() => {
     void refresh();
@@ -89,8 +102,9 @@ export function QuotaPanel({ session }: Props) {
     return entries;
   }, [snapshots]);
 
-  // The current conversation's context window rides on its provider's card.
-  const conversation = session.activeConversation;
+  // The current conversation's context window rides on its provider's card
+  // when that conversation runs on the picked backend.
+  const conversation = backend.backendId === session.activeBackendConnectionId ? session.activeConversation : null;
   const contextUsage = conversation ? session.contextUsageByConversation[conversation.id] : undefined;
   const contextProvider = conversation?.provider;
   const context: AgentLimitsCardProps['context'] = contextUsage?.contextWindow
@@ -98,14 +112,15 @@ export function QuotaPanel({ session }: Props) {
     : undefined;
 
   const displayName = (provider: string) => {
-    const descriptor = session.v2Providers.find((item) => item.id === provider);
+    const descriptor = backend.providers.find((item) => item.id === provider);
     return descriptor?.displayName ?? provider;
   };
 
   return (
     <div className="flex flex-col gap-5 py-1">
       <div className="flex items-center justify-between gap-3">
-        <p className="text-body-regular text-text-secondary">{t('usage.quotaHint')}</p>
+        <p className="min-w-0 flex-1 text-body-regular text-text-secondary">{t('usage.quotaHint')}</p>
+        <BackendSelect profiles={session.backendConnections} linkStates={session.backendLinkStatus} selectedId={backend.backendId} onChange={backend.setBackendId} />
         <Button
           size="small"
           variant="secondary"

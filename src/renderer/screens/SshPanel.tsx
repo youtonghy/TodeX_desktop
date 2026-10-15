@@ -18,11 +18,15 @@ import { IconAction } from '@/components/ui/icon-action';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Spinner, SpinnerIcon } from '@/components/ui/spinner';
 import { toast } from '@/components/ui/toast';
+import { BackendSelect } from '@/components/ui/backend-select';
 
 type SshTab = 'hosts' | 'keys' | 'connections';
 
 type Props = {
   session: TodeXSession;
+  /** Backend the view lists and connects on. */
+  backendId: string;
+  onBackendChange: (backendId: string) => void;
   /** Workbench scope of the SSH view; terminal ids derive from it. */
   scopeKey: string;
   workbenchItems: WorkbenchItem[];
@@ -37,11 +41,11 @@ type Props = {
  * panel under the SSH scope. Everything listed here lives on the machine
  * running the backend.
  */
-export function SshPanel({ session, scopeKey, workbenchItems, onOpenSshTerminal, onOpenRemoteFiles, onCloseWorkbenchItem }: Props) {
+export function SshPanel({ session, backendId, onBackendChange, scopeKey, workbenchItems, onOpenSshTerminal, onOpenRemoteFiles, onCloseWorkbenchItem }: Props) {
   const t = useT();
-  const { serverUrl, deviceSecret, encryptionProtocol, encryptionPublicKey, transportVerified } = session.settings;
+  const { serverUrl, deviceSecret, encryptionProtocol, encryptionPublicKey, transportVerified } = session.settingsForBackend(backendId);
   const api = useCallback(() => backendApi({ serverUrl, deviceSecret, encryptionProtocol, encryptionPublicKey, transportVerified }), [deviceSecret, encryptionProtocol, encryptionPublicKey, serverUrl, transportVerified]);
-  const remoteConnector = useRemoteConnector(api, session.activeBackendConnectionId);
+  const remoteConnector = useRemoteConnector(api, backendId);
   const [tab, setTab] = useState<SshTab>('hosts');
   const [hosts, setHosts] = useState<SshHostsResponse | null>(null);
   const [keys, setKeys] = useState<SshKeysResponse | null>(null);
@@ -49,7 +53,7 @@ export function SshPanel({ session, scopeKey, workbenchItems, onOpenSshTerminal,
   const [unsupported, setUnsupported] = useState(false);
   const [loadError, setLoadError] = useState('');
   const generationRef = useRef(0);
-  const activeBackend = session.backendConnections.find((item) => item.id === session.activeBackendConnectionId);
+  const activeBackend = session.backendConnections.find((item) => item.id === backendId);
 
   const reloadHosts = useCallback(async () => {
     const generation = generationRef.current;
@@ -110,6 +114,7 @@ export function SshPanel({ session, scopeKey, workbenchItems, onOpenSshTerminal,
           <h2 className="truncate text-headline-semibold text-text-primary">{t('ssh.title')}</h2>
           <p className="truncate text-caption-1-regular text-text-secondary" title={backendLabel}>{t('ssh.machineNote', { backend: backendLabel })}</p>
         </div>
+        <BackendSelect profiles={session.backendConnections} linkStates={session.backendLinkStatus} selectedId={backendId} onChange={onBackendChange} />
         <IconAction
           icon={loading ? SpinnerIcon : RiRefreshLine}
           size="sm"
@@ -139,7 +144,7 @@ export function SshPanel({ session, scopeKey, workbenchItems, onOpenSshTerminal,
               {hosts ? (
                 <SshHostsTab
                   api={api}
-                  backendId={session.activeBackendConnectionId}
+                  backendId={backendId}
                   askPassword={remoteConnector.askPassword}
                   rememberPassword={remoteConnector.rememberPassword}
                   hosts={hosts.hosts}
