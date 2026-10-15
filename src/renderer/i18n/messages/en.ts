@@ -20,6 +20,7 @@ export const en: Messages = {
 
   // app
   'app.loading': 'Loading…',
+  'app.panelFailed': "This panel couldn't load",
   'app.storageQuota': 'Browser storage is full; some preferences may not be saved.',
   'app.openSidebar': 'Open navigation sidebar',
   'app.collapseSidebar': 'Collapse sidebar',

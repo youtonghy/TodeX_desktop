@@ -20,6 +20,7 @@ export const ko: Messages = {
 
   // app
   'app.loading': '불러오는 중…',
+  'app.panelFailed': '이 패널을 불러오지 못했습니다',
   'app.storageQuota': '브라우저 저장 공간이 부족하여 일부 설정이 저장되지 않을 수 있습니다.',
   'app.openSidebar': '탐색 사이드바 열기',
   'app.collapseSidebar': '사이드바 접기',

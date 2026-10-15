@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { Component, lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { RiAddLine, RiFolderAddLine, RiExpandLeftLine, RiExpandRightLine, RiGithubLine, RiLayoutLeftLine, RiLayoutRightLine, RiRobot2Line } from '@remixicon/react';
 import { motion, useReducedMotion } from 'motion/react';
 import { Dialog, Modal as AriaModal, ModalOverlay } from 'react-aria-components';
@@ -7,6 +7,7 @@ import { Input } from '@/components/base/input/input';
 import { Button } from '@/components/base/buttons/button';
 import { Select, SelectItem } from '@/components/base/select/select';
 import { useDirection } from '@/components/foundations/direction/direction';
+import { Alert } from '@/components/ui/alert';
 import { IconAction } from '@/components/ui/icon-action';
 import { Modal } from '@/components/ui/modal';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -55,6 +56,28 @@ function PanelFallback() {
   return <div className="flex h-full min-h-24 items-center justify-center text-body-regular text-text-secondary">{t('app.loading')}</div>;
 }
 const panelFallback = <PanelFallback />;
+
+function PanelError({ error }: { error: unknown }) {
+  const t = useT();
+  return (
+    <div className="p-4">
+      <Alert status="danger" title={t('app.panelFailed')} description={error instanceof Error ? error.message : String(error)} />
+    </div>
+  );
+}
+
+/** A panel that fails to load or render shows its error in place instead of
+ * unmounting the whole app (a blank window). */
+class PanelErrorBoundary extends Component<{ children: ReactNode }, { error: unknown }> {
+  state: { error: unknown } = { error: null };
+  static getDerivedStateFromError(error: unknown) { return { error }; }
+  componentDidCatch(error: unknown) { console.error('[panel] render failed', error); }
+  render() { return this.state.error ? <PanelError error={this.state.error} /> : this.props.children; }
+}
+
+function PanelBoundary({ children }: { children: ReactNode }) {
+  return <PanelErrorBoundary><PanelBoundary>{children}</PanelBoundary></PanelErrorBoundary>;
+}
 
 /** The compact-layout drawer motion from the BoardUI AI chat shell. */
 const DRAWER_EASE = [0.42, 0, 0.58, 1] as const;
@@ -391,7 +414,7 @@ export function App() {
 
   const asideContent = (
     !scopeKey || !layout.hydrated ? null : (
-      <Suspense fallback={panelFallback}>
+      <PanelBoundary>
         {overlayPanel ? (
           <AsidePanel
             session={session}
@@ -403,7 +426,7 @@ export function App() {
           <WorkbenchPanel key={scopeKey} scopeKey={scopeKey} shown={asideShown} session={session} tab={workbenchTab} target={panelTarget} onTabChange={changeWorkbenchTab} onTargetConsumed={consumePanelTarget} closeRequestRef={workbenchCloseRef}
             sshMode={sshActive} requests={workbenchRequests} onRequestsHandled={workbenchRequestsHandled} onItemsChange={sshActive ? setWorkbenchItems : undefined} />
         )}
-      </Suspense>
+      </PanelBoundary>
     )
   );
   // macOS hidden-inset chrome: with the sidebar in its drawer the traffic
@@ -459,11 +482,11 @@ export function App() {
   );
   const mainContent = (
     kanbanActive ? (
-      <Suspense fallback={panelFallback}>
+      <PanelBoundary>
         <KanbanPanel session={session} onOpenConversation={() => setPanel(null)} />
-      </Suspense>
+      </PanelBoundary>
     ) : sshActive ? (
-      <Suspense fallback={panelFallback}>
+      <PanelBoundary>
         <SshPanel
           session={session}
           scopeKey={scopeKey}
@@ -472,7 +495,7 @@ export function App() {
           onOpenRemoteFiles={openRemoteFiles}
           onCloseWorkbenchItem={closeWorkbenchItem}
         />
-      </Suspense>
+      </PanelBoundary>
     ) : session.historyEncryption.recoveryNoticeVisible ? (
       <div className="flex h-full min-h-0 w-full min-w-0 flex-col">
         <div className="shrink-0 px-5 pt-3">
@@ -635,28 +658,28 @@ export function App() {
       {/* A fixed height keeps the dialog still when switching sections; each
           category page scrolls on its own beside the category list. */}
       <Modal isOpen={settingsOpen} onOpenChange={closePanel('settings')} title={t('app.settings')} size="4xl" className="h-[min(90vh,48rem)]" bodyClassName="flex min-h-0 flex-col overflow-hidden px-0 pb-0">
-        <Suspense fallback={panelFallback}><SettingsPanel session={session} historyRecoverySetup={historyRecoverySetup} repairPairing={repairPairing} /></Suspense>
+        <PanelBoundary><SettingsPanel session={session} historyRecoverySetup={historyRecoverySetup} repairPairing={repairPairing} /></PanelBoundary>
       </Modal>
       <Modal isOpen={usageOpen} onOpenChange={closePanel('usage')} title={t('app.usage')} size="3xl" className="max-h-[92vh]" bodyClassName="overflow-y-auto">
-        <Suspense fallback={panelFallback}><UsagePanel session={session} /></Suspense>
+        <PanelBoundary><UsagePanel session={session} /></PanelBoundary>
       </Modal>
       <Modal isOpen={quotaOpen} onOpenChange={closePanel('quota')} title={t('usage.quotaTitle')} size="2xl" className="max-h-[90vh]" bodyClassName="overflow-y-auto">
-        <Suspense fallback={panelFallback}><QuotaPanel session={session} /></Suspense>
+        <PanelBoundary><QuotaPanel session={session} /></PanelBoundary>
       </Modal>
       <Modal isOpen={aboutOpen} onOpenChange={closePanel('about')} title={t('app.about')} size="2xl" className="max-h-[90vh]" bodyClassName="overflow-y-auto">
-        <Suspense fallback={panelFallback}><AboutPanel session={session} /></Suspense>
+        <PanelBoundary><AboutPanel session={session} /></PanelBoundary>
       </Modal>
       <Modal isOpen={cliManagerOpen} onOpenChange={closePanel('cli-manager')} title={t('app.cliManager')} size="3xl" className="max-h-[92vh]" bodyClassName="overflow-y-auto">
-        <Suspense fallback={panelFallback}><CliManagerPanel session={session} /></Suspense>
+        <PanelBoundary><CliManagerPanel session={session} /></PanelBoundary>
       </Modal>
       <Modal isOpen={agentProvidersOpen} onOpenChange={closePanel('agent-providers')} title={t('app.agentProviders')} size="3xl" className="max-h-[92vh]" bodyClassName="overflow-y-auto">
-        <Suspense fallback={panelFallback}><AgentProvidersPanel session={session} /></Suspense>
+        <PanelBoundary><AgentProvidersPanel session={session} /></PanelBoundary>
       </Modal>
       <Modal isOpen={cleanupOpen} onOpenChange={closePanel('cleanup')} title={t('app.cleanup')} size="3xl" className="max-h-[92vh]" bodyClassName="overflow-y-auto">
-        <Suspense fallback={panelFallback}><CleanupPanel session={session} /></Suspense>
+        <PanelBoundary><CleanupPanel session={session} /></PanelBoundary>
       </Modal>
       <Modal isOpen={capabilitiesOpen} onOpenChange={setCapabilitiesOpen} title={t('app.mcpSkillManager')} size="2xl" className="max-h-[90vh]" bodyClassName="overflow-y-auto">
-        <Suspense fallback={panelFallback}><CapabilitiesPanel inDialog workspacePath={session.activeWorkspace?.path ?? session.settings.defaultWorkspacePath} providers={session.v2Providers} catalogs={session.capabilityCatalogs} onRefresh={(provider) => void session.refreshCapabilityCatalog(provider)} conversationId={session.activeConversation?.id} selectedSkills={session.activeConversation ? session.selectedSkills[session.activeConversation.id] ?? [] : []} canInvoke={Boolean(session.activeConversation?.v2ConversationId)} onToggleSkill={(skill, provider) => session.activeConversation && session.toggleCatalogSkill(session.activeConversation.id, skill, provider)} onPreviewSkill={(skill, provider) => session.previewSkillResource(provider, skill.resourceId)} onLoadMcpConfig={(server) => session.getMcpServerConfig(server.provider, server.resourceId)} manager={session.capabilityManager} /></Suspense>
+        <PanelBoundary><CapabilitiesPanel inDialog workspacePath={session.activeWorkspace?.path ?? session.settings.defaultWorkspacePath} providers={session.v2Providers} catalogs={session.capabilityCatalogs} onRefresh={(provider) => void session.refreshCapabilityCatalog(provider)} conversationId={session.activeConversation?.id} selectedSkills={session.activeConversation ? session.selectedSkills[session.activeConversation.id] ?? [] : []} canInvoke={Boolean(session.activeConversation?.v2ConversationId)} onToggleSkill={(skill, provider) => session.activeConversation && session.toggleCatalogSkill(session.activeConversation.id, skill, provider)} onPreviewSkill={(skill, provider) => session.previewSkillResource(provider, skill.resourceId)} onLoadMcpConfig={(server) => session.getMcpServerConfig(server.provider, server.resourceId)} manager={session.capabilityManager} /></PanelBoundary>
       </Modal>
       <GitActionsModal key={session.activeConversation?.id} session={session} isOpen={gitOpen} onOpenChange={setGitOpen} />
       {createOpen ? <CreateWorkspaceModal

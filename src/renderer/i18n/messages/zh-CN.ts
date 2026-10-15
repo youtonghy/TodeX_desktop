@@ -20,6 +20,7 @@ export const zhCN = {
 
   // app
   'app.loading': '加载中…',
+  'app.panelFailed': '此面板加载失败',
   'app.storageQuota': '浏览器存储空间不足，部分偏好可能无法保存。',
   'app.openSidebar': '打开导航侧栏',
   'app.collapseSidebar': '折叠侧栏',

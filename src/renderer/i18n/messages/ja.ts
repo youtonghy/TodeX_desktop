@@ -20,6 +20,7 @@ export const ja: Messages = {
 
   // app
   'app.loading': '読み込み中…',
+  'app.panelFailed': 'このパネルを読み込めませんでした',
   'app.storageQuota': 'ブラウザのストレージ容量が不足しています。一部の設定が保存されない場合があります。',
   'app.openSidebar': 'ナビゲーションサイドバーを開く',
   'app.collapseSidebar': 'サイドバーを折りたたむ',
