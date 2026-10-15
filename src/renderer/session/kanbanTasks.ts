@@ -57,17 +57,26 @@ export type KanbanSyncConfig = BackendTransportProfile & {
 let tasks: KanbanTask[] = [];
 let loading: Promise<void> | null = null;
 const listeners = new Set<() => void>();
-// Zone of the connected backend, which runs schedules in its own local time.
-let timeZone: KanbanTimeZone | null = null;
 const timeZoneListeners = new Set<() => void>();
 
-let syncConfig: KanbanSyncConfig | null = null;
-// A 404 marks a backend older than the sync endpoints; stay local-only until
-// the configuration changes instead of retrying every poll cycle.
-let syncSupported = true;
-let pushTimer: ReturnType<typeof setTimeout> | null = null;
-let pushInFlight = false;
-let pushAgain = false;
+/** Sync state of one connected backend; every connected backend syncs the
+ * tasks of its own workspaces. */
+type KanbanSyncLink = {
+  config: KanbanSyncConfig;
+  // A 404 marks a backend older than the sync endpoints; stay local-only
+  // until the configuration changes instead of retrying every poll cycle.
+  supported: boolean;
+  pushTimer: ReturnType<typeof setTimeout> | null;
+  pushInFlight: boolean;
+  pushAgain: boolean;
+  // Zone of the backend, which runs schedules in its own local time.
+  timeZone: KanbanTimeZone | null;
+};
+const syncLinks = new Map<string, KanbanSyncLink>();
+// The backend the UI focuses (its zone is shown), and which backend owns a
+// workspace, so tasks without a backend tag sync with their workspace's.
+let focusBackendId = '';
+let workspaceBackendOf: (workspaceId: string) => string | null = () => null;
 
 function emit() {
   for (const listener of listeners) listener();
@@ -93,8 +102,12 @@ function subscribe(listener: () => void) {
   };
 }
 
+function taskBackendId(task: KanbanTask): string {
+  return task.backendConnectionId || workspaceBackendOf(task.workspaceId) || focusBackendId;
+}
+
 function tasksForConnection(connectionId: string): KanbanTask[] {
-  return tasks.filter((task) => !task.backendConnectionId || task.backendConnectionId === connectionId);
+  return tasks.filter((task) => taskBackendId(task) === connectionId);
 }
 
 function commit(next: KanbanTask[], options?: { push?: boolean }) {
@@ -113,70 +126,100 @@ export function useKanbanTasks(): KanbanTask[] {
   return useSyncExternalStore(subscribe, getKanbanTasks);
 }
 
-function setTimeZone(next: KanbanTimeZone | null) {
-  if (timeZone?.name === next?.name && timeZone?.offsetMinutes === next?.offsetMinutes) return;
-  timeZone = next;
+function emitTimeZone() {
   for (const listener of timeZoneListeners) listener();
 }
 
-/** The connected backend's time zone, or null before the first sync. */
+function setTimeZone(link: KanbanSyncLink, next: KanbanTimeZone | null) {
+  if (link.timeZone?.name === next?.name && link.timeZone?.offsetMinutes === next?.offsetMinutes) return;
+  link.timeZone = next;
+  if (syncLinks.get(focusBackendId) === link) emitTimeZone();
+}
+
+function focusTimeZone(): KanbanTimeZone | null {
+  return syncLinks.get(focusBackendId)?.timeZone ?? null;
+}
+
+/** The focused backend's time zone, or null before its first sync. */
 export function useKanbanTimeZone(): KanbanTimeZone | null {
   return useSyncExternalStore((listener) => {
     timeZoneListeners.add(listener);
     return () => { timeZoneListeners.delete(listener); };
-  }, () => timeZone);
+  }, focusTimeZone);
 }
 
-export function configureKanbanSync(config: KanbanSyncConfig | null): void {
-  const previous = syncConfig;
-  syncConfig = config;
+/** The focused backend and how workspaces map to backends. */
+export function configureKanbanRouting(focusId: string, workspaceBackend: (workspaceId: string) => string | null): void {
+  workspaceBackendOf = workspaceBackend;
+  if (focusBackendId === focusId) return;
+  focusBackendId = focusId;
+  emitTimeZone();
+}
+
+/** Starts (or, with null, stops) syncing one backend's tasks. */
+export function configureKanbanSync(backendConnectionId: string, config: BackendTransportProfile | null): void {
+  const previous = syncLinks.get(backendConnectionId);
   if (!config) {
-    setTimeZone(null);
+    if (previous?.pushTimer) clearTimeout(previous.pushTimer);
+    syncLinks.delete(backendConnectionId);
+    if (backendConnectionId === focusBackendId) emitTimeZone();
     return;
   }
+  const next: KanbanSyncConfig = {
+    serverUrl: config.serverUrl,
+    deviceSecret: config.deviceSecret,
+    encryptionProtocol: config.encryptionProtocol,
+    encryptionPublicKey: config.encryptionPublicKey,
+    transportVerified: config.transportVerified,
+    backendConnectionId,
+  };
   const changed = !previous
-    || previous.serverUrl !== config.serverUrl
-    || previous.deviceSecret !== config.deviceSecret
-    || previous.encryptionProtocol !== config.encryptionProtocol
-    || previous.encryptionPublicKey !== config.encryptionPublicKey
-    || previous.transportVerified !== config.transportVerified
-    || previous.backendConnectionId !== config.backendConnectionId;
-  if (changed) {
-    syncSupported = true;
-    setTimeZone(null);
-    void syncKanbanTasksFromBackend();
-  }
+    || previous.config.serverUrl !== next.serverUrl
+    || previous.config.deviceSecret !== next.deviceSecret
+    || previous.config.encryptionProtocol !== next.encryptionProtocol
+    || previous.config.encryptionPublicKey !== next.encryptionPublicKey
+    || previous.config.transportVerified !== next.transportVerified;
+  if (!changed) return;
+  if (previous?.pushTimer) clearTimeout(previous.pushTimer);
+  syncLinks.set(backendConnectionId, { config: next, supported: true, pushTimer: null, pushInFlight: false, pushAgain: false, timeZone: null });
+  if (backendConnectionId === focusBackendId) emitTimeZone();
+  void syncKanbanTasksFromBackend(backendConnectionId);
 }
 
-export async function syncKanbanTasksFromBackend(): Promise<void> {
-  const config = syncConfig;
-  if (!config || !syncSupported) return;
+/** Pulls one backend's tasks (or every connected backend's). */
+export async function syncKanbanTasksFromBackend(backendConnectionId?: string): Promise<void> {
+  if (backendConnectionId === undefined) {
+    await Promise.all([...syncLinks.keys()].map((id) => syncKanbanTasksFromBackend(id)));
+    return;
+  }
+  const link = syncLinks.get(backendConnectionId);
+  if (!link?.supported) return;
   try {
-    const response = await backendFetch(config, {
+    const response = await backendFetch(link.config, {
       method: 'GET',
       path: '/v2/kanban/tasks',
       headers: { accept: 'application/json' },
     });
     if (response.status === 404) {
-      syncSupported = false;
+      link.supported = false;
       return;
     }
     if (!response.ok) {
       throw new Error(`kanban task sync returned ${response.status}`);
     }
-    applyRemoteResponse(await response.json(), config);
+    applyRemoteResponse(await response.json(), link);
     // Upload local additions and tombstones the backend does not know yet.
-    scheduleKanbanBackendPush();
+    scheduleKanbanBackendPush(link);
   } catch (error) {
     console.warn('kanban task sync failed', error);
   }
 }
 
-function applyRemoteResponse(body: unknown, config: KanbanSyncConfig): void {
-  // A response for a connection switched away from meanwhile only merges
-  // its (connection-tagged) tasks; the zone belongs to the current one.
-  if (syncConfig === config) setTimeZone(parseKanbanTimeZone(body));
-  applyRemoteTasks(parseKanbanSyncResponse(body), config.backendConnectionId);
+function applyRemoteResponse(body: unknown, link: KanbanSyncLink): void {
+  // A response for a link replaced meanwhile only merges its
+  // (connection-tagged) tasks; the zone belongs to the current one.
+  if (syncLinks.get(link.config.backendConnectionId) === link) setTimeZone(link, parseKanbanTimeZone(body));
+  applyRemoteTasks(parseKanbanSyncResponse(body), link.config.backendConnectionId);
 }
 
 function applyRemoteTasks(remote: KanbanTask[], backendConnectionId: string): void {
@@ -186,46 +229,51 @@ function applyRemoteTasks(remote: KanbanTask[], backendConnectionId: string): vo
   commit(next, { push: false });
 }
 
-function scheduleKanbanBackendPush() {
-  if (!syncConfig || !syncSupported) return;
-  if (pushTimer) clearTimeout(pushTimer);
-  pushTimer = setTimeout(() => {
-    pushTimer = null;
-    void pushKanbanTasksToBackend();
+/** Debounced push to one backend, or to every connected backend (each only
+ * uploads its own tasks). */
+function scheduleKanbanBackendPush(link?: KanbanSyncLink) {
+  if (!link) {
+    for (const each of syncLinks.values()) scheduleKanbanBackendPush(each);
+    return;
+  }
+  if (!link.supported) return;
+  if (link.pushTimer) clearTimeout(link.pushTimer);
+  link.pushTimer = setTimeout(() => {
+    link.pushTimer = null;
+    void pushKanbanTasksToBackend(link);
   }, WORKSPACE_SYNC_DEBOUNCE_MS);
 }
 
-async function pushKanbanTasksToBackend(): Promise<void> {
-  const config = syncConfig;
-  if (!config || !syncSupported) return;
-  if (pushInFlight) {
-    pushAgain = true;
+async function pushKanbanTasksToBackend(link: KanbanSyncLink): Promise<void> {
+  if (!link.supported || syncLinks.get(link.config.backendConnectionId) !== link) return;
+  if (link.pushInFlight) {
+    link.pushAgain = true;
     return;
   }
-  pushInFlight = true;
+  link.pushInFlight = true;
   try {
-    const body = JSON.stringify({ tasks: prepareKanbanSyncPayload(tasksForConnection(config.backendConnectionId)) });
-    const response = await backendFetch(config, {
+    const body = JSON.stringify({ tasks: prepareKanbanSyncPayload(tasksForConnection(link.config.backendConnectionId)) });
+    const response = await backendFetch(link.config, {
       method: 'PUT',
       path: '/v2/kanban/tasks',
       body,
       headers: { 'content-type': 'application/json', accept: 'application/json' },
     });
     if (response.status === 404) {
-      syncSupported = false;
+      link.supported = false;
       return;
     }
     if (!response.ok) {
       throw new Error(`kanban task sync returned ${response.status}`);
     }
-    applyRemoteResponse(await response.json(), config);
+    applyRemoteResponse(await response.json(), link);
   } catch (error) {
     console.warn('kanban task sync failed', error);
   } finally {
-    pushInFlight = false;
-    if (pushAgain) {
-      pushAgain = false;
-      scheduleKanbanBackendPush();
+    link.pushInFlight = false;
+    if (link.pushAgain) {
+      link.pushAgain = false;
+      scheduleKanbanBackendPush(link);
     }
   }
 }
@@ -266,7 +314,7 @@ export function addKanbanTask(
   const task: KanbanTask = {
     id: `task-${now.toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
     workspaceId,
-    backendConnectionId: syncConfig?.backendConnectionId ?? null,
+    backendConnectionId: workspaceBackendOf(workspaceId) || focusBackendId || null,
     title: name,
     description,
     dueDate,

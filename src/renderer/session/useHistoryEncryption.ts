@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   HISTORY_ACCESS_REVOKED,
   HISTORY_CLIENT_UPGRADE_REQUIRED,
@@ -33,14 +33,23 @@ import { t } from '../i18n';
 import { deleteHistorySeed, loadHistorySeed, saveHistorySeed } from '../lib/historyKeyStore';
 
 // End-to-end encrypted conversation history (TodeX_backend
-// docs/history-encryption.md) for the active backend. History is always
+// docs/history-encryption.md) for every connected backend. History is always
 // encrypted: this device's history key is created and registered on every
-// (re)connect, every history path is decrypted before projection, and the
-// settings actions cover the recovery key, grants and restoring revoked
-// devices. State changes are pushed (`history.encryption.updated`); the state
-// is also re-read on every (re)connect and when settings open.
+// (re)connect of each backend, every history path is decrypted before
+// projection, and the settings actions cover the recovery key, grants and
+// restoring revoked devices. State changes are pushed
+// (`history.encryption.updated`); the state is also re-read on every
+// (re)connect and when settings open.
 
-type CommandSender = (message: { id: string; type: string; payload: Record<string, unknown> }, timeoutMs?: number) => Promise<Record<string, unknown>>;
+type CommandSender = (backendId: string, message: { id: string; type: string; payload: Record<string, unknown> }, timeoutMs?: number) => Promise<Record<string, unknown>>;
+
+/** Connection facts of one backend the history hook depends on. */
+export type HistoryBackendLink = {
+  /** The verified socket of this backend is open. */
+  connected: boolean;
+  /** `/v2/version` reports `historyEncryption: 1`; `undefined` until known. */
+  supported: boolean | undefined;
+};
 
 export type HistoryEncryptionView = {
   backendId: string;
@@ -103,31 +112,37 @@ const UPDATE_DEBOUNCE_MS = 300;
 /** How long a history command waits for a connecting socket. */
 const CONNECT_WAIT_MS = 15_000;
 
-export function useHistoryEncryption({ activeBackendId, connected, supported, sendCommand, onUnlocked }: {
-  activeBackendId: string;
-  /** The verified socket of the active backend is open. */
-  connected: boolean;
-  /** `/v2/version` reports `historyEncryption: 1`; `undefined` until known. */
-  supported: boolean | undefined;
+export function useHistoryEncryption({ backends, focusBackendId, sendCommand, onUnlocked }: {
+  backends: Readonly<Record<string, HistoryBackendLink>>;
+  /** The backend the visible conversation belongs to: notices follow it. */
+  focusBackendId: string;
   sendCommand: CommandSender;
   /** Keys arrived (grant, recovery import): locked rows of these
    * conversations (all when omitted) may now open. */
   onUnlocked: (conversationIds?: readonly string[]) => void;
 }) {
-  const [view, setView] = useState<HistoryEncryptionView>({ backendId: activeBackendId, status: 'idle' });
+  const [views, setViews] = useState<Record<string, HistoryEncryptionView>>({});
   const [grantRuns, setGrantRuns] = useState<Record<string, HistoryGrantRun>>({});
   const [titleRevision, setTitleRevision] = useState(0);
   const [dismissedRecoveryNotices, setDismissedRecoveryNotices] = useState(readDismissedRecoveryNotices);
   const grantRunsRef = useRef(grantRuns);
   grantRunsRef.current = grantRuns;
-  const live = useRef({ activeBackendId, connected, supported, sendCommand, onUnlocked, view });
-  live.current = { activeBackendId, connected, supported, sendCommand, onUnlocked, view };
+  const live = useRef({ backends, sendCommand, onUnlocked, views });
+  live.current = { backends, sendCommand, onUnlocked, views };
   const decryptors = useRef(new Map<string, { decryptor: HistoryDecryptor; ready: Promise<void> }>());
   const liveChains = useRef(new Map<string, Promise<void>>());
   const titles = useRef(new Map<string, string | null>());
   const grantControllers = useRef(new Map<string, AbortController>());
   /** Backends that revoked this device. */
   const revokedBackends = useRef(new Set<string>());
+
+  const setView = useCallback((backendId: string, update: (previous: HistoryEncryptionView) => HistoryEncryptionView) => {
+    setViews((current) => {
+      const previous = current[backendId] ?? { backendId, status: 'idle' };
+      const next = update(previous);
+      return next === previous ? current : { ...current, [backendId]: next };
+    });
+  }, []);
 
   /** A revoked device keeps no unwrapped keys and fetches no wraps: its
    * encrypted rows project locked. */
@@ -138,56 +153,55 @@ export function useHistoryEncryption({ activeBackendId, connected, supported, se
     decryptors.current.get(backendId)?.decryptor.clear();
     decryptors.current.delete(backendId);
     titles.current.clear();
-    setView((previous) => (previous.backendId === backendId ? { ...previous, accessRevoked: true } : previous));
-  }, []);
+    setView(backendId, (previous) => ({ ...previous, accessRevoked: true }));
+  }, [setView]);
 
-  /** Resolved when the verified socket opens; history pages fetched over
-   * HTTP can need wraps while it is still connecting. */
-  const connectedWaiters = useRef(new Set<() => void>());
+  /** Resolved when the backend's verified socket opens; history pages
+   * fetched over HTTP can need wraps while it is still connecting. */
+  const connectedWaiters = useRef(new Map<string, Set<() => void>>());
   useEffect(() => {
-    if (!connected) return;
-    for (const resolve of connectedWaiters.current) resolve();
-    connectedWaiters.current.clear();
-  }, [connected]);
+    for (const [backendId, waiters] of connectedWaiters.current) {
+      if (!backends[backendId]?.connected) continue;
+      for (const resolve of waiters) resolve();
+      connectedWaiters.current.delete(backendId);
+    }
+  }, [backends]);
 
-  const waitForConnected = useCallback(async () => {
-    if (live.current.connected) return true;
+  const waitForConnected = useCallback(async (backendId: string) => {
+    if (live.current.backends[backendId]?.connected) return true;
     let resolve = () => {};
     const opened = new Promise<boolean>((done) => { resolve = () => done(true); });
-    connectedWaiters.current.add(resolve);
+    let waiters = connectedWaiters.current.get(backendId);
+    if (!waiters) {
+      waiters = new Set();
+      connectedWaiters.current.set(backendId, waiters);
+    }
+    waiters.add(resolve);
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timedOut = new Promise<boolean>((done) => { timer = setTimeout(() => done(false), CONNECT_WAIT_MS); });
     try {
       return await Promise.race([opened, timedOut]);
     } finally {
       clearTimeout(timer);
-      connectedWaiters.current.delete(resolve);
+      connectedWaiters.current.get(backendId)?.delete(resolve);
     }
   }, []);
 
-  const send = useCallback(async (frame: HistoryCommandFrame) => {
-    const backendId = live.current.activeBackendId;
-    if (!await waitForConnected()) throw new Error(t('history.notConnected'));
-    // The socket that opened belongs to another backend.
-    if (backendId !== live.current.activeBackendId) throw new Error(t('history.otherBackend'));
+  /** History commands travel over the owning backend's own socket. */
+  const send = useCallback(async (backendId: string, frame: HistoryCommandFrame) => {
+    if (!await waitForConnected(backendId)) throw new Error(t('history.notConnected'));
     try {
-      return await live.current.sendCommand({ id: createRequestId('history'), ...frame }, 30_000);
+      return await live.current.sendCommand(backendId, { id: createRequestId('history'), ...frame }, 30_000);
     } catch (error) {
       if (isAccessRevoked(error)) markRevoked(backendId, true);
       throw error;
     }
   }, [markRevoked, waitForConnected]);
 
-  /** Wraps are fetched over the active backend's socket only. */
-  const sendFor = useCallback((backendId: string) => (frame: HistoryCommandFrame) => {
-    if (backendId !== live.current.activeBackendId) return Promise.reject(new Error(t('history.otherBackend')));
-    return send(frame);
-  }, [send]);
-
   const decryptorFor = useCallback((backendId: string) => {
     let entry = decryptors.current.get(backendId);
     if (!entry) {
-      const fetchWraps = historyWrapsFetcher(sendFor(backendId));
+      const fetchWraps = historyWrapsFetcher((frame) => send(backendId, frame));
       const decryptor = new HistoryDecryptor({
         fetchWraps: async (request) => {
           if (revokedBackends.current.has(backendId)) return {};
@@ -210,7 +224,7 @@ export function useHistoryEncryption({ activeBackendId, connected, supported, se
       decryptors.current.set(backendId, entry);
     }
     return entry;
-  }, [sendFor]);
+  }, [send]);
 
   /** Decrypts a history page before projection; pages without ciphertext
    * pass through untouched. */
@@ -268,7 +282,7 @@ export function useHistoryEncryption({ activeBackendId, connected, supported, se
    * new ones became readable so lists re-merge. */
   const decryptManifestTitles = useCallback(async (backendId: string, manifests: ConversationManifest[]): Promise<void> => {
     const todo = manifests.filter((manifest) => manifest.titleEnc && !manifest.title && !titles.current.has(titleKey(backendId, manifest)));
-    if (!todo.length || backendId !== live.current.activeBackendId || !live.current.connected) return;
+    if (!todo.length || !live.current.backends[backendId]?.connected) return;
     const { decryptor, ready } = decryptorFor(backendId);
     await ready;
     let decrypted = 0;
@@ -288,21 +302,20 @@ export function useHistoryEncryption({ activeBackendId, connected, supported, se
 
   /** Reads the backend state and, when `register`, makes sure this device's
    * history key exists and is registered (§3.3). */
-  const refresh = useCallback(async (register = false) => {
-    const backendId = live.current.activeBackendId;
-    const current = () => live.current.activeBackendId === backendId;
+  const refresh = useCallback(async (backendId: string, register = false) => {
+    const link = live.current.backends[backendId];
     // Nothing to ask before the socket is up; an old backend never is asked.
-    if (!live.current.connected || live.current.supported === undefined) return;
-    if (!live.current.supported) {
-      setView({ backendId, status: 'unavailable' });
+    if (!link?.connected || link.supported === undefined) return;
+    if (!link.supported) {
+      setView(backendId, () => ({ backendId, status: 'unavailable' }));
       return;
     }
-    setView((previous) => ({ ...(previous.backendId === backendId ? previous : { backendId }), backendId, status: 'loading' }));
+    setView(backendId, (previous) => ({ ...previous, status: 'loading' }));
     let state: HistoryEncryptionState;
     try {
-      state = parseHistoryEncryptionState(await send(historyCommands.get()));
+      state = parseHistoryEncryptionState(await send(backendId, historyCommands.get()));
     } catch (error) {
-      if (current()) setView({ backendId, status: 'unavailable', error: error instanceof Error ? error.message : t('history.stateFailed') });
+      setView(backendId, () => ({ backendId, status: 'unavailable', error: error instanceof Error ? error.message : t('history.stateFailed') }));
       return;
     }
     let localRid: string | undefined;
@@ -326,7 +339,7 @@ export function useHistoryEncryption({ activeBackendId, connected, supported, se
         seed.fill(0);
         if (register && !revoked && state.myRid !== localRid) {
           try {
-            await send(historyCommands.register(publicKey));
+            await send(backendId, historyCommands.register(publicKey));
           } catch (error) {
             // A revoked key can never be registered again (CONFLICT): this
             // device continues with a fresh key, which needs a new grant
@@ -337,47 +350,60 @@ export function useHistoryEncryption({ activeBackendId, connected, supported, se
             decryptor.setSeeds([fresh.secretKey]);
             fresh.secretKey.fill(0);
             localRid = ridOf(fresh.publicKey);
-            await send(historyCommands.register(fresh.publicKey));
+            await send(backendId, historyCommands.register(fresh.publicKey));
           }
-          state = parseHistoryEncryptionState(await send(historyCommands.get()));
+          state = parseHistoryEncryptionState(await send(backendId, historyCommands.get()));
         }
       }
     } catch (error) {
       if (isAccessRevoked(error)) revoked = true;
       else keyError = error instanceof Error ? error.message : t('history.keyFailed');
     }
-    if (current()) setView({ backendId, status: 'ready', state, localRid, keyError, accessRevoked: revoked });
-  }, [decryptorFor, markRevoked, send]);
+    setView(backendId, () => ({ backendId, status: 'ready', state, localRid, keyError, accessRevoked: revoked }));
+  }, [decryptorFor, markRevoked, send, setView]);
 
-  // Register on every (re)connect: history is always encrypted, so a write
-  // needs this device's key among the recipients.
+  // Register on every (re)connect of each backend: history is always
+  // encrypted, so a write needs this device's key among the recipients.
+  // Backend → the `supported` value it was registered with; a socket that
+  // learns support later (the version read lags the probe) registers again.
+  const registeredLinks = useRef(new Map<string, boolean>());
   useEffect(() => {
-    if (!connected || supported === undefined) return;
-    void refresh(true);
-  }, [activeBackendId, connected, refresh, supported]);
+    for (const [backendId, link] of Object.entries(backends)) {
+      const ready = link.connected && link.supported !== undefined;
+      if (!ready) {
+        registeredLinks.current.delete(backendId);
+        continue;
+      }
+      if (registeredLinks.current.get(backendId) === link.supported) continue;
+      registeredLinks.current.set(backendId, link.supported!);
+      void refresh(backendId, true);
+    }
+    for (const backendId of [...registeredLinks.current.keys()]) {
+      if (!backends[backendId]) registeredLinks.current.delete(backendId);
+    }
+  }, [backends, refresh]);
 
   /** A write failed with HISTORY_KEY_REQUIRED: registers this device's key
-   * again, once at a time. */
-  const reregistering = useRef<Promise<void> | null>(null);
-  const keyRequired = useCallback(() => {
-    if (reregistering.current) return reregistering.current;
-    const run = refresh(true).finally(() => { reregistering.current = null; });
-    reregistering.current = run;
+   * with that backend again, once at a time. */
+  const reregistering = useRef(new Map<string, Promise<void>>());
+  const keyRequired = useCallback((backendId: string) => {
+    const running = reregistering.current.get(backendId);
+    if (running) return running;
+    const run = refresh(backendId, true).finally(() => { reregistering.current.delete(backendId); });
+    reregistering.current.set(backendId, run);
     return run;
   }, [refresh]);
 
   /** Runs a settings action that answers with the encryption state. */
-  const applyState = useCallback(async (frame: HistoryCommandFrame) => {
-    const state = parseHistoryEncryptionState(await send(frame));
-    const backendId = live.current.activeBackendId;
+  const applyState = useCallback(async (backendId: string, frame: HistoryCommandFrame) => {
+    const state = parseHistoryEncryptionState(await send(backendId, frame));
     if (state.myAccess) markRevoked(backendId, state.myAccess === 'revoked');
-    setView((previous) => (previous.backendId === backendId
-      ? { ...previous, status: 'ready', state, ...(state.myAccess ? { accessRevoked: state.myAccess === 'revoked' } : {}) } : previous));
+    setView(backendId, (previous) => ({ ...previous, status: 'ready', state, ...(state.myAccess ? { accessRevoked: state.myAccess === 'revoked' } : {}) }));
     return state;
-  }, [markRevoked, send]);
+  }, [markRevoked, send, setView]);
 
-  const ownSeed = useCallback(async () => {
-    const seed = await loadHistorySeed(live.current.activeBackendId);
+  const ownSeed = useCallback(async (backendId: string) => {
+    const seed = await loadHistorySeed(backendId);
     if (!seed) throw new Error(t('history.deviceKeyMissing'));
     return seed;
   }, []);
@@ -391,55 +417,60 @@ export function useHistoryEncryption({ activeBackendId, connected, supported, se
   // Pushed `history.encryption.updated` frames: every one re-reads the state
   // (registering once a revoked device is restored); wraps that arrived for
   // this device unlock the conversations they cover.
-  const waitingGrants = useRef(new Set<string>());
-  const pendingUpdate = useRef<{ backendId: string; unlock: Set<string> | 'all' | null; timer: ReturnType<typeof setTimeout> } | null>(null);
-  const flushUpdate = useCallback(() => {
-    const pending = pendingUpdate.current;
-    pendingUpdate.current = null;
-    if (!pending || pending.backendId !== live.current.activeBackendId) return;
+  const waitingGrants = useRef(new Map<string, Set<string>>());
+  const pendingUpdates = useRef(new Map<string, { unlock: Set<string> | 'all' | null; timer: ReturnType<typeof setTimeout> }>());
+  const flushUpdate = useCallback((backendId: string) => {
+    const pending = pendingUpdates.current.get(backendId);
+    pendingUpdates.current.delete(backendId);
+    if (!pending || !live.current.backends[backendId]) return;
     if (pending.unlock) unlocked(pending.unlock === 'all' ? undefined : [...pending.unlock]);
-    void refresh(true);
+    void refresh(backendId, true);
   }, [refresh, unlocked]);
   const receiveUpdate = useCallback((backendId: string, payload: unknown) => {
-    if (backendId !== live.current.activeBackendId) return;
+    if (!live.current.backends[backendId]) return;
     const update = parseHistoryEncryptionUpdate(payload);
     if (!update) return;
-    const localRids = [live.current.view.localRid, ...(decryptors.current.get(backendId)?.decryptor.recipientIds ?? [])];
+    const localRids = [live.current.views[backendId]?.localRid, ...(decryptors.current.get(backendId)?.decryptor.recipientIds ?? [])];
     const { unlock } = historyUpdateReaction(update, localRids);
     // Unlocked here already; the state read must not unlock it again.
-    if (unlock && update.reason === 'grant.fulfilled' && update.grantId) waitingGrants.current.delete(update.grantId);
-    let pending = pendingUpdate.current;
-    if (pending && pending.backendId !== backendId) { clearTimeout(pending.timer); pending = null; }
+    if (unlock && update.reason === 'grant.fulfilled' && update.grantId) waitingGrants.current.get(backendId)?.delete(update.grantId);
+    const pending = pendingUpdates.current.get(backendId);
     const merged = !unlock ? pending?.unlock ?? null
       : unlock === 'all' || pending?.unlock === 'all' ? 'all'
       : new Set([...(pending?.unlock ?? []), ...unlock]);
     if (pending) clearTimeout(pending.timer);
-    pendingUpdate.current = { backendId, unlock: merged, timer: setTimeout(flushUpdate, UPDATE_DEBOUNCE_MS) };
+    pendingUpdates.current.set(backendId, { unlock: merged, timer: setTimeout(() => flushUpdate(backendId), UPDATE_DEBOUNCE_MS) });
   }, [flushUpdate]);
   useEffect(() => () => {
-    if (pendingUpdate.current) clearTimeout(pendingUpdate.current.timer);
-    pendingUpdate.current = null;
+    for (const pending of pendingUpdates.current.values()) clearTimeout(pending.timer);
+    pendingUpdates.current.clear();
   }, []);
 
   // A grant this device waited for shows up fulfilled in a state read (an
   // update missed while disconnected): rows locked so far may open.
-  const ownPendingGrants = view.state?.grants
-    .filter((grant) => grant.status === 'pending' && grant.rid === view.localRid)
-    .map((grant) => grant.grantId).join(',') ?? '';
   useEffect(() => {
-    const state = view.state;
-    if (!state || !view.localRid) return;
-    const fulfilled = state.grants.some((grant) => grant.status === 'fulfilled' && waitingGrants.current.has(grant.grantId));
-    waitingGrants.current = new Set(ownPendingGrants ? ownPendingGrants.split(',') : []);
+    let fulfilled = false;
+    for (const [backendId, view] of Object.entries(views)) {
+      const state = view.state;
+      if (!state || !view.localRid) continue;
+      const waiting = waitingGrants.current.get(backendId);
+      if (waiting && state.grants.some((grant) => grant.status === 'fulfilled' && waiting.has(grant.grantId))) fulfilled = true;
+      waitingGrants.current.set(backendId, new Set(state.grants
+        .filter((grant) => grant.status === 'pending' && grant.rid === view.localRid)
+        .map((grant) => grant.grantId)));
+    }
     if (fulfilled) unlocked();
-  }, [ownPendingGrants, unlocked, view.localRid, view.state]);
+  }, [unlocked, views]);
 
-  const actions = useMemo(() => ({
-    refresh: () => refresh(false),
-    revoke: (rid: string) => applyState(historyCommands.revoke(rid)),
+  /** Settings actions of one backend; stable per backend id so panels can
+   * depend on them. */
+  const actionsByBackend = useRef(new Map<string, ReturnType<typeof createActions>>());
+  const createActions = (backendId: string) => ({
+    refresh: () => refresh(backendId, false),
+    revoke: (rid: string) => applyState(backendId, historyCommands.revoke(rid)),
     /** Lifts another device's revocation; it registers a fresh key and
      * needs a new grant for older history. */
-    restoreDevice: (deviceId: string) => applyState(historyCommands.restoreDevice(deviceId)),
+    restoreDevice: (deviceId: string) => applyState(backendId, historyCommands.restoreDevice(deviceId)),
     /** A fresh recovery key, shown to the user before anything is uploaded. */
     createRecoveryDraft: (): RecoveryKeyDraft => {
       const { secretKey } = generateHistoryRecipientKeyPair();
@@ -448,20 +479,20 @@ export function useHistoryEncryption({ activeBackendId, connected, supported, se
     /** Uploads only the recovery public key; the seed is zeroed here. */
     confirmRecoveryKey: async (draft: RecoveryKeyDraft) => {
       try {
-        await send(historyCommands.setRecovery(historyRecipientKeyPairFromSeed(draft.seed).publicKey));
+        await send(backendId, historyCommands.setRecovery(historyRecipientKeyPairFromSeed(draft.seed).publicKey));
       } finally {
         draft.seed.fill(0);
       }
-      await refresh(false);
+      await refresh(backendId, false);
     },
     requestGrant: async () => {
-      const result = await send(historyCommands.requestGrant());
-      await refresh(false);
+      const result = await send(backendId, historyCommands.requestGrant());
+      await refresh(backendId, false);
       return typeof result.grantId === 'string' ? result.grantId : '';
     },
     dismissGrant: async (grantId: string) => {
-      await send(historyCommands.dismissGrant(grantId));
-      await refresh(false);
+      await send(backendId, historyCommands.dismissGrant(grantId));
+      await refresh(backendId, false);
     },
     /** Re-wraps every key this device holds for the grant's device; resumes
      * from where an interrupted run stopped. */
@@ -476,7 +507,7 @@ export function useHistoryEncryption({ activeBackendId, connected, supported, se
       const start: HistoryRewrapProgress = previous?.cursor ? previous : { processed: 0, added: 0, skipped: 0 };
       const update = (run: HistoryGrantRun) => setGrantRuns((runs) => ({ ...runs, [grant.grantId]: run }));
       update({ running: true, progress: start });
-      const seed = await ownSeed().catch((error: unknown) => {
+      const seed = await ownSeed(backendId).catch((error: unknown) => {
         grantControllers.current.delete(grant.grantId);
         update({ running: false, progress: start, error: error instanceof Error ? error.message : t('history.keyFailed') });
         throw error;
@@ -484,7 +515,7 @@ export function useHistoryEncryption({ activeBackendId, connected, supported, se
       let last = start;
       try {
         const result = await rewrapHistoryKeys({
-          send, sourceSeed: seed, targetPublicKey, grantId: grant.grantId,
+          send: (frame) => send(backendId, frame), sourceSeed: seed, targetPublicKey, grantId: grant.grantId,
           cursor: start.cursor, signal: controller.signal,
           onProgress: (progress) => {
             last = { processed: start.processed + progress.processed, added: start.added + progress.added, skipped: start.skipped + progress.skipped, ...(progress.cursor ? { cursor: progress.cursor } : {}) };
@@ -493,7 +524,7 @@ export function useHistoryEncryption({ activeBackendId, connected, supported, se
         });
         last = { processed: start.processed + result.processed, added: start.added + result.added, skipped: start.skipped + result.skipped };
         update({ running: false, progress: last });
-        await refresh(false);
+        await refresh(backendId, false);
       } catch (error) {
         const aborted = error instanceof DOMException && error.name === 'AbortError';
         update({ running: false, progress: last, error: aborted ? t('history.grantPaused') : error instanceof Error ? error.message : t('history.grantFailed') });
@@ -510,17 +541,17 @@ export function useHistoryEncryption({ activeBackendId, connected, supported, se
       const recoverySeed = parseRecoveryKey(input);
       try {
         const rid = ridOf(historyRecipientKeyPairFromSeed(recoverySeed).publicKey);
-        if (!live.current.view.state?.recipients.some((item) => item.kind === 'recovery' && item.rid === rid)) {
+        if (!live.current.views[backendId]?.state?.recipients.some((item) => item.kind === 'recovery' && item.rid === rid)) {
           throw new Error(t('history.recoveryUnknown'));
         }
-        const seed = await ownSeed();
+        const seed = await ownSeed(backendId);
         let publicKey: Uint8Array;
         try {
           publicKey = historyRecipientKeyPairFromSeed(seed).publicKey;
         } finally {
           seed.fill(0);
         }
-        const result = await rewrapHistoryKeys({ send, sourceSeed: recoverySeed, targetPublicKey: publicKey, onProgress });
+        const result = await rewrapHistoryKeys({ send: (frame) => send(backendId, frame), sourceSeed: recoverySeed, targetPublicKey: publicKey, onProgress });
         unlocked();
         return result;
       } finally {
@@ -530,20 +561,35 @@ export function useHistoryEncryption({ activeBackendId, connected, supported, se
     /** Replaces this device's history key (lost or unreadable). History
      * wrapped for the old key needs a new grant or the recovery key. */
     resetDeviceKey: async () => {
-      const backendId = live.current.activeBackendId;
       await deleteHistorySeed(backendId);
       const entry = decryptors.current.get(backendId);
       entry?.decryptor.clear();
       decryptors.current.delete(backendId);
-      await refresh(true);
+      await refresh(backendId, true);
     },
-    unlocked,
-  }), [applyState, ownSeed, refresh, send, unlocked]);
+  });
+  // The callbacks above are stable (useCallback with stable deps), so a
+  // backend's action set is built once.
+  const actionsFor = (backendId: string) => {
+    let actions = actionsByBackend.current.get(backendId);
+    if (!actions) {
+      actions = createActions(backendId);
+      actionsByBackend.current.set(backendId, actions);
+    }
+    return actions;
+  };
 
   /** Forgets everything held for a removed backend profile. */
   const forgetBackend = useCallback(async (backendId: string) => {
     decryptors.current.get(backendId)?.decryptor.clear();
     decryptors.current.delete(backendId);
+    actionsByBackend.current.delete(backendId);
+    registeredLinks.current.delete(backendId);
+    setViews((current) => {
+      if (!(backendId in current)) return current;
+      const { [backendId]: _removed, ...rest } = current;
+      return rest;
+    });
     setDismissedRecoveryNotices((current) => {
       if (!current.includes(backendId)) return current;
       const next = current.filter((id) => id !== backendId);
@@ -553,10 +599,9 @@ export function useHistoryEncryption({ activeBackendId, connected, supported, se
     await deleteHistorySeed(backendId);
   }, []);
 
-  /** Hides the "no recovery key" notice for this backend (the settings
-   * section keeps the warning). */
-  const dismissRecoveryNotice = useCallback(() => {
-    const backendId = live.current.activeBackendId;
+  /** Hides the "no recovery key" notice for a backend (its settings page
+   * keeps the warning). */
+  const dismissRecoveryNotice = useCallback((backendId: string) => {
     setDismissedRecoveryNotices((current) => {
       if (current.includes(backendId)) return current;
       const next = [...current, backendId];
@@ -565,23 +610,28 @@ export function useHistoryEncryption({ activeBackendId, connected, supported, se
     });
   }, []);
 
-  const activeView = view.backendId === activeBackendId ? view : { backendId: activeBackendId, status: 'idle' as const };
-  const activeState = activeView.state;
+  const viewOf = (backendId: string): HistoryEncryptionView => views[backendId] ?? { backendId, status: 'idle' };
   /** No active recovery recipient: losing every device loses the history. */
-  const recoveryMissing = Boolean(activeState && !activeView.accessRevoked
-    && !activeState.recipients.some((item) => item.kind === 'recovery' && !item.revokedAt));
+  const recoveryMissingOf = (backendId: string) => {
+    const view = viewOf(backendId);
+    return Boolean(view.state && !view.accessRevoked
+      && !view.state.recipients.some((item) => item.kind === 'recovery' && !item.revokedAt));
+  };
+  const focusView = viewOf(focusBackendId);
   return {
-    view: activeView,
-    recoveryMissing,
-    /** The non-blocking "no recovery key" notice should show. */
-    recoveryNoticeVisible: recoveryMissing && !dismissedRecoveryNotices.includes(activeBackendId),
-    dismissRecoveryNotice,
+    /** State of the focused backend (the visible conversation's). */
+    view: focusView,
+    /** The non-blocking "no recovery key" notice should show for the
+     * focused backend. */
+    recoveryNoticeVisible: recoveryMissingOf(focusBackendId) && !dismissedRecoveryNotices.includes(focusBackendId),
+    dismissRecoveryNotice: () => dismissRecoveryNotice(focusBackendId),
+    /** This device's history access was revoked on the focused backend. */
+    revoked: Boolean(focusView.accessRevoked),
+    /** The backend writes history end-to-end encrypted. */
+    e2eFor: (backendId: string) => viewOf(backendId).state?.mode === 'e2e',
+    /** Backends whose state was read and which revoked this device. */
+    revokedBackendIds: Object.values(views).filter((view) => view.accessRevoked).map((view) => view.backendId),
     keyRequired,
-    /** The active backend writes history end-to-end encrypted. */
-    e2e: activeView.state?.mode === 'e2e',
-    /** This device's history access was revoked on the active backend. */
-    revoked: Boolean(activeView.accessRevoked),
-    grantRuns,
     titleRevision,
     decryptPage,
     receiveSocketEvent,
@@ -589,8 +639,16 @@ export function useHistoryEncryption({ activeBackendId, connected, supported, se
     decryptManifestTitles,
     receiveUpdate,
     forgetBackend,
-    ...actions,
+    unlocked,
+    /** Everything the settings page of one backend shows and does. */
+    forBackend: (backendId: string) => ({
+      view: viewOf(backendId),
+      recoveryMissing: recoveryMissingOf(backendId),
+      grantRuns,
+      ...actionsFor(backendId),
+    }),
   };
 }
 
 export type HistoryEncryptionSession = ReturnType<typeof useHistoryEncryption>;
+export type HistoryEncryptionBackend = ReturnType<HistoryEncryptionSession['forBackend']>;

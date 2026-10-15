@@ -352,27 +352,24 @@ export function AppSidebar({
     return map;
   }, [kanbanTasks]);
 
+  // Every backend stays connected, so None lists the conversations of all of them.
   const workspaceConversations = useMemo(() => (
     session.conversations.filter(
-      (conversation) => conversation.workspaceId === session.activeWorkspaceId && !conversation.archived
-        // None is shared by every backend; list only the active one's conversations.
-        && (!isNoneWorkspaceId(conversation.workspaceId)
-          || !conversation.backendConnectionId
-          || conversation.backendConnectionId === session.activeBackendConnectionId),
+      (conversation) => conversation.workspaceId === session.activeWorkspaceId && !conversation.archived,
     )
-  ), [session.activeBackendConnectionId, session.activeWorkspaceId, session.conversations]);
+  ), [session.activeWorkspaceId, session.conversations]);
 
-  // Workspaces cached under other backend profiles are read-only and render in
-  // their own sections; only the active backend's workspaces are editable here.
+  // Workspaces of every configured backend are live and editable here; only
+  // those left behind by a removed backend profile render read-only below.
   const ownWorkspaces = useMemo(() => session.workspaces.filter(
-    (workspace) => !workspace.backendConnectionId || workspace.backendConnectionId === session.activeBackendConnectionId,
-  ), [session.workspaces, session.activeBackendConnectionId]);
+    (workspace) => !workspace.backendConnectionId || session.backendConnections.some((profile) => profile.id === workspace.backendConnectionId),
+  ), [session.workspaces, session.backendConnections]);
 
   const foreignWorkspaceGroups = useMemo(() => {
     const groups = new Map<string, { profile: BackendConnectionProfile | undefined; workspaces: WorkspaceRecord[] }>();
     for (const workspace of session.workspaces) {
       const profileId = workspace.backendConnectionId;
-      if (!profileId || profileId === session.activeBackendConnectionId) continue;
+      if (!profileId || session.backendConnections.some((profile) => profile.id === profileId)) continue;
       const group = groups.get(profileId) ?? {
         profile: session.backendConnections.find((item) => item.id === profileId),
         workspaces: [],
@@ -384,7 +381,7 @@ export function AppSidebar({
       group.workspaces.sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || (a.createdAt - b.createdAt) || a.id.localeCompare(b.id));
     }
     return [...groups.values()].sort((a, b) => (a.profile?.name ?? '').localeCompare(b.profile?.name ?? ''));
-  }, [session.backendConnections, session.workspaces, session.activeBackendConnectionId]);
+  }, [session.backendConnections, session.workspaces]);
 
   // Display names shared by several workspaces; only those rows show the
   // backend dot so same-named workspaces on different backends stay apart.
@@ -404,17 +401,26 @@ export function AppSidebar({
   const [draggingKey, setDraggingKey] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<WorkspaceDropTarget | null>(null);
   const [renamingGroup, setRenamingGroup] = useState<{ id: string; name: string } | null>(null);
+  // Other configured backends that are not connected right now.
+  const offlineBackends = session.backendConnections.filter((profile) => (
+    profile.id !== session.activeBackendConnectionId && profile.serverUrl.trim()
+    && session.backendLinkStatus[profile.id]?.state !== 'open'
+  )).length;
   const healthColor = session.connectionState !== 'open'
     ? 'danger'
-    : session.connectionHealth.latencyMs !== null && session.connectionHealth.latencyMs <= 100
+    : offlineBackends === 0 && session.connectionHealth.latencyMs !== null && session.connectionHealth.latencyMs <= 100
       ? 'success'
       : 'warning';
-  // "Backend online · 42 ms" while connected, the connection state otherwise.
-  const connectionLabel = session.connectionState === 'open'
+  // "Backend online · 42 ms" while connected, the connection state otherwise;
+  // other backends that are down are counted after it.
+  const focusConnectionLabel = session.connectionState === 'open'
     ? healthLabelOf(session.connectionHealth)
     : session.backendStarting
       ? t('conn.backendStarting')
       : connectionStateLabel(session.connectionState);
+  const connectionLabel = offlineBackends > 0
+    ? `${focusConnectionLabel} · ${t('sidebar.backendsOffline', { n: offlineBackends })}`
+    : focusConnectionLabel;
 
   const [contextMenu, setContextMenu] = useState<ContextMenu>(null);
   const [schedulingWorkspaceId, setSchedulingWorkspaceId] = useState<string | null>(null);
@@ -1326,7 +1332,6 @@ export function AppSidebar({
                       <span className="min-w-0 flex-1 truncate text-caption-1-medium text-text-secondary" title={backendLabel}>
                         {group.profile?.name || t('sidebar.backendRemoved')}
                       </span>
-                      <Chip variant="caption" color="neutral" className="py-0.5">{t('sidebar.otherBackend')}</Chip>
                     </div>
                     <GridList
                       aria-label={backendLabel}

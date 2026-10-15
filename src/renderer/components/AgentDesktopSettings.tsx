@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from 'react';
-import { RiArrowLeftSLine, RiArrowRightSLine, RiComputerLine, RiGlobalLine } from '@remixicon/react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { RiComputerLine, RiGlobalLine } from '@remixicon/react';
 import { Chip } from '@/components/base/badges/chip';
 import { Button } from '@/components/base/buttons/button';
 import { Switch } from '@/components/base/switch/switch';
@@ -11,8 +11,7 @@ import { useT } from '../i18n';
 import { backendApi } from '../session/helpers';
 import { AgentBrowserSettings } from './AgentBrowserSettings';
 import { ComputerUseSettings } from './ComputerUseSettings';
-import { SettingsCard, SettingsNote, SettingsRow } from './settings/SettingsRows';
-import { IconAction } from './ui/icon-action';
+import { SettingsCard, SettingsEntry, SettingsNote, SettingsRow, SettingsSubpage } from './settings/SettingsRows';
 import { toast } from './ui/toast';
 
 /** A tool with its own settings page; `null` is the settings overview. */
@@ -157,20 +156,20 @@ export function AgentDesktopSettings({ session, page = null, onPageChange = () =
       </SettingsCard>
       <SettingsCard className="overflow-hidden ps-0">
         <SettingsEntry
-          page="browser"
+          data-agent-desktop-page="browser"
           icon={RiGlobalLine}
           title={t('agentBrowser.title')}
           description={t('agentDesktop.browserEntry')}
-          status={enabled ? browser : undefined}
+          trailing={enabled && browser ? <SummaryChip summary={browser} /> : undefined}
           isDisabled={!enabled}
           onPress={() => onPageChange('browser')}
         />
         <SettingsEntry
-          page="computer"
+          data-agent-desktop-page="computer"
           icon={RiComputerLine}
           title={t('computerSettings.title')}
           description={t('agentDesktop.computerEntry')}
-          status={enabled ? computer : undefined}
+          trailing={enabled && computer ? <SummaryChip summary={computer} /> : undefined}
           isDisabled={!enabled}
           onPress={() => onPageChange('computer')}
         />
@@ -208,61 +207,6 @@ function computerSummary(settings: Settings, t: ReturnType<typeof useT>): Summar
     : { label: t('agentDesktop.statusNeedsPermission'), color: 'warning' };
 }
 
-/** A row in the overview that opens a tool's own settings page. */
-function SettingsEntry({ page, icon: Icon, title, description, status, isDisabled, onPress }: {
-  page: AgentDesktopPage;
-  icon: ComponentType<{ className?: string; 'aria-hidden'?: boolean | 'true' | 'false' }>;
-  title: string;
-  description: string;
-  status?: Summary;
-  isDisabled: boolean;
-  onPress: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      data-agent-desktop-page={page}
-      disabled={isDisabled}
-      onClick={onPress}
-      className={cx(
-        'group flex w-full cursor-pointer items-center gap-3 ps-3 text-start',
-        'outline-none transition-colors duration-150 ease hover:bg-background-secondary-hover focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-border-focus-ring',
-        'disabled:cursor-default disabled:opacity-50 disabled:hover:bg-transparent',
-      )}
-    >
-      <Icon aria-hidden className="size-5 shrink-0 text-foreground-icon-secondary" />
-      <span className="flex min-h-[52px] min-w-0 flex-1 items-center gap-4 border-b border-separator-border py-2.5 pe-2.5 group-last:border-b-0">
-        <span className="flex min-w-0 flex-1 flex-col">
-          <span className="text-body-regular text-text-primary">{title}</span>
-          <span className="text-body-2-regular text-text-secondary">{description}</span>
-        </span>
-        <span className="flex shrink-0 items-center gap-2">
-          {status ? <Chip variant="caption" color={CHIP_COLORS[status.color]}>{status.label}</Chip> : null}
-          <RiArrowRightSLine className="size-4 text-foreground-icon-tertiary rtl:-scale-x-100" aria-hidden />
-        </span>
-      </span>
-    </button>
-  );
-}
-
-/** A tool's own settings page, shown in place of the settings overview. */
-function SettingsSubpage({ title, description, onBack, children }: {
-  title: string;
-  description?: string;
-  onBack: () => void;
-  children: ReactNode;
-}) {
-  const t = useT();
-  return (
-    <div className="flex flex-col gap-6">
-      <div className="flex items-start gap-2">
-        <IconAction icon={RiArrowLeftSLine} size="sm" className="-ms-1.5 shrink-0" iconClassName="size-5 rtl:-scale-x-100" aria-label={t('settings.back')} onClick={onBack} />
-        <div className="min-w-0 pt-0.5">
-          <h3 className="text-headline-medium text-text-primary">{title}</h3>
-          {description ? <p className="mt-1 text-body-regular text-text-secondary">{description}</p> : null}
-        </div>
-      </div>
-      {children}
-    </div>
-  );
+function SummaryChip({ summary }: { summary: Summary }) {
+  return <Chip variant="caption" color={CHIP_COLORS[summary.color]}>{summary.label}</Chip>;
 }

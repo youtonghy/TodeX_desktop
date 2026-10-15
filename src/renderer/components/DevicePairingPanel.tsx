@@ -18,12 +18,11 @@ import { SETTINGS_ROW, SettingsCard, SettingsValueField } from './settings/Setti
 import { Spinner, SpinnerIcon } from './ui/spinner';
 import { cx } from '@/utils/cx';
 
-type Props = { session: TodeXSession; deviceName: string; autoStartNonce?: number };
+type Props = { session: TodeXSession; backendId: string; deviceName: string; autoStartNonce?: number };
 type Phase = 'idle' | 'requesting' | 'pending' | 'approved' | 'rejected' | 'expired' | 'cancelled' | 'error';
 type Attempt = {
   profileId: string;
   serverUrl: string;
-  settingsServerUrl: string;
   controller: AbortController;
   request?: DevicePairingRequest;
   pollTimer?: ReturnType<typeof setTimeout>;
@@ -54,9 +53,9 @@ function transportStatus(profile: BackendConnectionProfile): TransportStatus {
 /** Keep every asynchronous response attached to the profile that requested it.
  * Approval writes the device secret and the verified transport pin in one
  * profile update; nothing is persisted before that. */
-export function DevicePairingPanel({ session, deviceName, autoStartNonce = 0 }: Props) {
+export function DevicePairingPanel({ session, backendId, deviceName, autoStartNonce = 0 }: Props) {
   const t = useT();
-  const profile = session.backendConnections.find(item => item.id === session.activeBackendConnectionId);
+  const profile = session.backendConnections.find(item => item.id === backendId);
   const latest = useRef(session);
   latest.current = session;
   const active = useRef<Attempt | null>(null);
@@ -84,7 +83,7 @@ export function DevicePairingPanel({ session, deviceName, autoStartNonce = 0 }: 
     setFingerprint('');
     setError('');
     return () => { if (active.current) dispose(active.current, true); };
-  }, [profile?.id, profile?.serverUrl, session.settings.serverUrl]);
+  }, [profile?.id, profile?.serverUrl]);
 
   // A re-pair request (e.g. from a refused connection) bumps the nonce.
   const lastAutoStart = useRef(autoStartNonce);
@@ -97,8 +96,6 @@ export function DevicePairingPanel({ session, deviceName, autoStartNonce = 0 }: 
   const isCurrent = (attempt: Attempt) => {
     const current = latest.current;
     return active.current === attempt && !attempt.controller.signal.aborted
-      && current.activeBackendConnectionId === attempt.profileId
-      && current.settings.serverUrl === attempt.settingsServerUrl
       && current.backendConnections.some(item => item.id === attempt.profileId && item.serverUrl === attempt.serverUrl);
   };
 
@@ -116,8 +113,7 @@ export function DevicePairingPanel({ session, deviceName, autoStartNonce = 0 }: 
     }
     const device = deviceIdentityFromSecret(deviceSecret)!;
     const attempt: Attempt = {
-      profileId: profile.id, serverUrl: profile.serverUrl,
-      settingsServerUrl: session.settings.serverUrl, controller: new AbortController(),
+      profileId: profile.id, serverUrl: profile.serverUrl, controller: new AbortController(),
     };
     active.current = attempt;
     setPhase('requesting');
@@ -162,9 +158,7 @@ export function DevicePairingPanel({ session, deviceName, autoStartNonce = 0 }: 
             // The approval verified this device and the transport key the
             // code authenticated: pin both in one update, then connect.
             const current = latest.current;
-            if (!(current.activeBackendConnectionId === attempt.profileId
-              && current.backendConnections.some(item => item.id === attempt.profileId && item.serverUrl === attempt.serverUrl)
-              && current.settings.serverUrl === attempt.serverUrl)) {
+            if (!current.backendConnections.some(item => item.id === attempt.profileId && item.serverUrl === attempt.serverUrl)) {
               return;
             }
             current.onDevicePairingApproved(attempt.profileId, {
@@ -201,7 +195,7 @@ export function DevicePairingPanel({ session, deviceName, autoStartNonce = 0 }: 
   const waiting = phase === 'requesting' || phase === 'pending';
   const status = profile ? transportStatus(profile) : null;
   const paired = Boolean(deviceIdentityFromSecret(profile?.deviceSecret)) || status?.state !== 'unpaired';
-  const noticeScope = `${profile?.id}:${profile?.serverUrl}:${session.settings.serverUrl}`;
+  const noticeScope = `${profile?.id}:${profile?.serverUrl}`;
   const phaseMessage = phase === 'approved' ? t('pair.approved')
     : phase === 'rejected' ? t('pair.rejected')
     : phase === 'expired' ? t('pair.expired')

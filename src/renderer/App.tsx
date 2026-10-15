@@ -762,7 +762,8 @@ function CreateWorkspaceModal({
             leadingIcon={workspace ? undefined : RiAddLine}
             onClick={async () => {
               let validatedPath = path;
-              if (session.connectionState === 'open') {
+              // Every backend keeps its own connection: validate against the chosen one.
+              if (session.backendLinkStatus[workspace?.backendConnectionId ?? backendId]?.state === 'open') {
                 try {
                   validatedPath = (await fetchWorkspaceDirectorySnapshot(directorySettings, path)).current;
                 } catch (error) {
@@ -773,8 +774,7 @@ function CreateWorkspaceModal({
               if (workspace) {
                 session.updateWorkspace(workspace.id, { name: name.trim() || validatedPath, path: validatedPath });
               } else {
-                session.setActiveBackendConnectionId(backendId);
-                session.createWorkspace(name.trim() || validatedPath, validatedPath);
+                session.createWorkspace(name.trim() || validatedPath, validatedPath, backendId);
               }
               onOpenChange(false);
             }}

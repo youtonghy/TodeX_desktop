@@ -6,7 +6,7 @@ import { Textarea } from '@/components/base/textarea/textarea';
 import { cx } from '@/utils/cx';
 import { encodeQrCode } from '@todex/protocol/qrCode';
 import type { HistoryRecipient, HistoryRevokedDevice, HistoryRewrapProgress } from '@todex/protocol/historyEncryption';
-import type { HistoryEncryptionSession, RecoveryKeyDraft } from '../session/useHistoryEncryption';
+import type { HistoryEncryptionBackend, RecoveryKeyDraft } from '../session/useHistoryEncryption';
 import { useT } from '../i18n';
 import { SETTINGS_ROW, SettingsCard, SettingsGroup, SettingsNote } from './settings/SettingsRows';
 import { ConfirmDialog, Modal } from './ui/modal';
@@ -15,7 +15,7 @@ import { Spinner, SpinnerIcon } from './ui/spinner';
 import { toast } from './ui/toast';
 
 type Props = {
-  history: HistoryEncryptionSession;
+  history: HistoryEncryptionBackend;
   /** Opened from the "no recovery key" notice: scroll here and start
    * setting one up as soon as the state allows it. */
   autoStartRecovery?: boolean;
@@ -41,7 +41,7 @@ function progressText(t: ReturnType<typeof useT>, progress: HistoryRewrapProgres
   return t('history.progress', { processed: progress.processed, added: progress.added, skipped: progress.skipped });
 }
 
-/** History encryption for the active backend (always end-to-end): recipients,
+/** History encryption of one backend (always end-to-end): recipients,
  * recovery key, access requests from new devices, revoked devices and
  * recovery import. */
 export function HistoryEncryptionPanel({ history, autoStartRecovery = false }: Props) {

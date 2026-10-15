@@ -1,4 +1,5 @@
 import { normalizeBackendLabelColor, type BackendConnectionProfile } from './backendColors';
+import { ownerBackendId, resolveNoWorkspaceBackendId, tagLegacyBackendRecords } from './backendRouting';
 import { useWorkbenchSharing } from './useWorkbenchSharing';
 import {
   completionNotificationBody,
@@ -8,7 +9,7 @@ import {
 } from './completionNotifications';
 import { addNotification } from './notificationFeed';
 import { bindSentAttachmentEvents, prepareSentAttachments, projectSentAttachments, pruneSentAttachmentRecords, type SentAttachmentRecord } from './sentAttachments';
-import { configureKanbanSync, syncKanbanTasksFromBackend, type KanbanTaskSchedule } from './kanbanTasks';
+import { configureKanbanRouting, configureKanbanSync, syncKanbanTasksFromBackend, type KanbanTaskSchedule } from './kanbanTasks';
 import { t } from '../i18n';
 import { migrateLegacyFollowUps, restoreQueuedFollowUps, type LegacyAddResult, type LegacyFollowUps, type LegacyQueueTarget } from './queuedFollowUps';
 import { backendRateLimitState } from './sessionRateLimit';
@@ -119,6 +120,7 @@ import {
   DEVICE_SECRET_STORAGE_KEY,
   DEVICE_ORIGIN_STORAGE_KEY,
   BACKEND_CONNECTIONS_STORAGE_KEY,
+  NO_WORKSPACE_BACKEND_STORAGE_KEY,
   JSON_SAVE_DEBOUNCE_MS,
   SESSION_CURSOR_SAVE_DEBOUNCE_MS,
   WORKSPACE_SYNC_DEBOUNCE_MS,
@@ -420,6 +422,56 @@ type BackendContinuation = {
   timer?: ReturnType<typeof setTimeout>;
 };
 
+/** One backend profile's `/v2/ws` connection. Every profile with a server
+ * URL keeps its own, so conversations on all backends stay live at once. */
+type BackendLink = {
+  socket: SecureSocket | null;
+  attempt: AbortController | null;
+  /** The encrypted handshake (or plaintext open) finished. */
+  verified: boolean;
+  /** A definitive transport failure: health probes stop overwriting it. */
+  transportFailure: boolean;
+  /** Bumped when the socket closes; frames of older sockets are dropped. */
+  generation: number;
+  commands: ProtocolCommands;
+  /** v2 ids subscribed on this socket, in request order (eviction order). */
+  subscriptions: Set<string>;
+  /** subscribe requestId -> v2 id, so a rejected subscribe frees its slot. */
+  pendingSubscribes: Map<string, string>;
+  reconnectAttempt: number;
+  backlogStreak: SocketBacklogStreak | null;
+  reconnectTimer: ReturnType<typeof setTimeout> | null;
+  watchdogFailures: number;
+  /** The user disconnected it: no automatic reconnect until Connect. */
+  manualDisconnect: boolean;
+  lastFailureRetryable: boolean;
+  /** The connect attempt waiting for a starting backend to answer; health
+   * probes would only time out against it meanwhile. */
+  readyWait: AbortController | null;
+  healthProbeSeq: number;
+  /** Its workspaces were pulled since the socket opened; local edits may be
+   * pushed back. */
+  workspaceReady: boolean;
+  workspaceSyncTimer: ReturnType<typeof setTimeout> | null;
+  /** Frames of this socket still waiting in the shared decode queue. */
+  pendingFrames: number;
+};
+
+/** What the UI shows about one backend's connection. */
+export type BackendLinkStatus = {
+  state: ConnectionState;
+  /** Bumped each time the socket opens; discovery retries failed providers. */
+  epoch: number;
+  health: ConnectionHealth;
+  serverVersion: ServerVersion | null;
+  /** Waiting for a starting backend to finish loading. */
+  starting: boolean;
+  /** Last connection failure of this backend ('' once it connects). */
+  error: string;
+};
+
+const IDLE_BACKEND_LINK: BackendLinkStatus = { state: 'idle', epoch: 0, health: defaultConnectionHealth, serverVersion: null, starting: false, error: '' };
+
 type ProviderModelCatalog = Partial<Record<ProviderKind, ProviderModelDescriptor[]>>;
 // Stable fallbacks for a backend whose catalogs have not loaded yet, so the
 // derived views keep their identity across renders.
@@ -443,17 +495,30 @@ export type { CatalogState };
 export function useTodeXSession(openPanel: OpenPanelFn) {
   const workbenchSharingState = useWorkbenchSharing();
   const completionNotificationsState = useCompletionNotifications();
-  const socketRef = useRef<SecureSocket | null>(null);
   /** Live agent browser views: conversation → frame listeners. The socket
    * watches a conversation while it has listeners (re-sent on reconnect). */
   const agentBrowserWatchersRef = useRef(new Map<string, Set<(frame: AgentBrowserFrame) => void>>());
-  const connectionAttemptRef = useRef<AbortController | null>(null);
-  const socketVerifiedRef = useRef(false);
-  const transportFailureRef = useRef(false);
-  const rawProtocolSenderRef = useRef<(message: ProtocolCommand) => boolean>(() => false);
-  const protocolCommandsRef = useRef<ProtocolCommands | null>(null);
-  if (!protocolCommandsRef.current) protocolCommandsRef.current = new ProtocolCommands((message) => rawProtocolSenderRef.current(message));
-  useEffect(() => () => protocolCommandsRef.current?.dispose(), []);
+  // Every backend profile's connection, by profile id.
+  const linksRef = useRef(new Map<string, BackendLink>());
+  // Set during render so links created earlier send through the current code.
+  const rawProtocolSenderRef = useRef<(backendId: string, message: ProtocolCommand) => boolean>(() => false);
+  const linkFor = (backendId: string): BackendLink => {
+    let link = linksRef.current.get(backendId);
+    if (!link) {
+      link = {
+        socket: null, attempt: null, verified: false, transportFailure: false, generation: 0,
+        commands: new ProtocolCommands((message) => rawProtocolSenderRef.current(backendId, message)),
+        subscriptions: new Set(), pendingSubscribes: new Map(), reconnectAttempt: 0, backlogStreak: null,
+        reconnectTimer: null, watchdogFailures: 0, manualDisconnect: false, lastFailureRetryable: true,
+        readyWait: null, healthProbeSeq: 0, workspaceReady: false, workspaceSyncTimer: null, pendingFrames: 0,
+      };
+      linksRef.current.set(backendId, link);
+    }
+    return link;
+  };
+  useEffect(() => () => {
+    for (const link of linksRef.current.values()) link.commands.dispose();
+  }, []);
   const activeWorkspaceRef = useRef('');
   const activeConversationRef = useRef('');
   const workspacesRef = useRef<WorkspaceRecord[]>([]);
@@ -485,11 +550,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const conversationHasPendingWork = (localId: string) => thinkingConversationsRef.current[localId] === true
     || pendingV2SubmissionsRef.current.has(localId)
     || (heldFollowUpsRef.current.get(localId)?.length ?? 0) > 0;
-  // v2 ids we have asked the current socket to subscribe to, in request order;
-  // the tail is the eviction candidate when the budget is reached.
-  const v2SubscriptionsRef = useRef(new Set<string>());
-  // subscribe requestId -> v2 id, so a rejected subscribe frees its slot again.
-  const pendingV2SubscribeRef = useRef(new Map<string, string>());
   // Set during render (like rawProtocolSenderRef) so earlier effects can reach it.
   const subscribeV2ConversationRef = useRef<(v2ConversationId: string, options?: { afterSequence?: number; limit?: number }) => boolean>(() => false);
   const pendingGitDiffsRef = useRef(new Map<string, PendingGitDiff>());
@@ -509,58 +569,79 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const modelDiscoveryRef = useRef<DiscoveryProgress>(emptyDiscoveryProgress(''));
   const commandDiscoveryRef = useRef<DiscoveryProgress>(emptyDiscoveryProgress(''));
   const capabilityRetryEpochRef = useRef(0);
-  const socketGenerationRef = useRef(0);
-  const autoConnectAttemptedRef = useRef(false);
   const legacyRecoveryRef = useRef(new LegacyEventRecovery<ServerEvent>());
   const sessionCursorsRef = useRef(new Map<string, number>());
-  const reconnectAttemptRef = useRef(0);
-  const socketBacklogStreakRef = useRef<SocketBacklogStreak | null>(null);
-  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const socketWatchdogFailuresRef = useRef(0);
-  const manualDisconnectRef = useRef(false);
-  const workspaceBackendReadyRef = useRef(false);
-  const workspaceBackendSkipNextSaveRef = useRef(false);
-  const workspaceBackendSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Backends whose own sync just wrote the workspace list: their next save
+  // would only echo it back.
+  const workspaceBackendSkipNextSaveRef = useRef(new Set<string>());
   const workspaceTombstonesRef = useRef<WorkspaceTombstone[]>([]);
   const workspaceMissingNotifiedRef = useRef(new Set<string>());
-  const healthProbeSeqRef = useRef(0);
-  /** The connect attempt waiting for a starting backend to answer; health
-   * probes would only time out against it meanwhile. */
-  const backendReadyWaitRef = useRef<AbortController | null>(null);
-  const [backendStarting, setBackendStarting] = useState(false);
   const loadedNativeThreadHistoryRef = useRef(new Map<string, number>());
   const unmaterializedNativeThreadIdsRef = useRef(new Set<string>());
 
   const [hydrated, setHydrated] = useState(false);
+  // A fresh install waits for the first Connect; afterwards every backend
+  // with a server URL connects on its own.
   const [autoConnectEnabled, setAutoConnectEnabled] = useState(false);
-  const [settings, setSettings] = useState<ConnectionSettings>(defaultSettings);
+  // App-wide preferences. Their transport fields only seed the first backend
+  // profile of an older install; `settings` below carries the focused
+  // backend's transport instead.
+  const [preferences, setPreferences] = useState<ConnectionSettings>(defaultSettings);
   const [backendConnections, setBackendConnections] = useState<BackendConnectionProfile[]>([]);
-  const [activeBackendConnectionId, setActiveBackendConnectionId] = useState('default-backend');
-  const activeBackendConnectionIdRef = useRef(activeBackendConnectionId);
-  activeBackendConnectionIdRef.current = activeBackendConnectionId;
-  // Backend the single `/v2/ws` socket was last opened against; a switch to a
-  // workspace on another backend must move the socket along with it.
-  const connectedBackendIdRef = useRef<string | null>(null);
-  const connectionRoutingRef = useRef({ settings, backendConnections });
-  connectionRoutingRef.current = { settings, backendConnections };
+  const backendConnectionsRef = useRef(backendConnections);
+  backendConnectionsRef.current = backendConnections;
+  // The backend new None-workspace conversations start on; empty means the
+  // first backend added.
+  const [noWorkspaceBackendPreference, setNoWorkspaceBackendPreference] = useState('');
+  const noWorkspaceBackendId = resolveNoWorkspaceBackendId(backendConnections, noWorkspaceBackendPreference);
+  const noWorkspaceBackendIdRef = useRef(noWorkspaceBackendId);
+  noWorkspaceBackendIdRef.current = noWorkspaceBackendId;
+  const [linkStatusByBackend, setLinkStatusByBackend] = useState<Record<string, BackendLinkStatus>>({});
+  const patchLinkStatus = useCallback((backendId: string, patch: Partial<BackendLinkStatus> | ((current: BackendLinkStatus) => Partial<BackendLinkStatus>)) => {
+    setLinkStatusByBackend((current) => {
+      const previous = current[backendId] ?? IDLE_BACKEND_LINK;
+      const changes = typeof patch === 'function' ? patch(previous) : patch;
+      const next = { ...previous, ...changes };
+      if ((Object.keys(next) as (keyof BackendLinkStatus)[]).every((key) => next[key] === previous[key])) return current;
+      return { ...current, [backendId]: next };
+    });
+  }, []);
+  const profileFor = (backendId: string) => backendConnectionsRef.current.find((item) => item.id === backendId);
   // History reads follow the backend that owns the conversation, so a load
   // still in flight when the user switches away keeps reading the right
   // journal, and the next visit continues from where it stopped.
   const v2ApiForConversation = useCallback((conversationId: string) => {
-    const { settings: activeSettings, backendConnections: profiles } = connectionRoutingRef.current;
-    const backendId = backendIdForConversation(conversationId);
-    const profile = backendId !== activeBackendConnectionIdRef.current
-      ? profiles.find((item) => item.id === backendId)
-      : undefined;
-    const target = profile ?? activeSettings;
-    return backendApi(target, { historyEncryption: true });
+    const profile = profileFor(backendIdForConversation(conversationId));
+    // A removed backend's history is not read from another backend.
+    if (!profile) throw new Error(t('sidebar.backendRemoved'));
+    return backendApi(profile, { historyEncryption: true });
   }, []);
-  /** Backend profile owning a conversation (the active one when untagged). */
+  /** Backend profile owning a conversation (the no-workspace backend for an
+   * untagged None-workspace draft). */
   function backendIdForConversation(conversationId: string): string {
     const conversation = conversationsRef.current.find((item) => item.v2ConversationId === conversationId || item.id === conversationId);
-    return conversation?.backendConnectionId
-      ?? workspacesRef.current.find((item) => item.id === conversation?.workspaceId)?.backendConnectionId
-      ?? activeBackendConnectionIdRef.current;
+    const workspace = workspacesRef.current.find((item) => item.id === conversation?.workspaceId);
+    return ownerBackendId(conversation, workspace, noWorkspaceBackendIdRef.current);
+  }
+  /** Backend a protocol frame is for, read from what it addresses: a
+   * conversation, a codex session, a workspace or a terminal. Anything else
+   * goes to the focused backend. */
+  function backendIdForPayload(payload: Record<string, unknown> | undefined): string {
+    const text = (key: string) => (typeof payload?.[key] === 'string' ? payload[key] as string : '');
+    const conversationId = text('conversationId');
+    if (conversationId) return backendIdForConversation(conversationId);
+    const sessionId = text('codexSessionId') || text('sessionId');
+    if (sessionId) {
+      const conversation = conversationsRef.current.find((item) => item.sessionId === sessionId);
+      if (conversation) return backendIdForConversation(conversation.id);
+      const workspace = workspacesRef.current.find((item) => item.sessionId === sessionId);
+      if (workspace) return ownerBackendId(null, workspace, noWorkspaceBackendIdRef.current);
+    }
+    const terminal = terminalByIdRef.current[text('terminalId')];
+    if (terminal?.backendConnectionId) return terminal.backendConnectionId;
+    const workspace = workspacesRef.current.find((item) => item.id === text('workspaceId'));
+    if (workspace) return ownerBackendId(null, workspace, noWorkspaceBackendIdRef.current);
+    return activeBackendConnectionIdRef.current;
   }
   // End-to-end encrypted history: every page is decrypted before it reaches
   // the projection (set once the hook below has run).
@@ -575,14 +656,34 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const [workspaces, setWorkspaces] = useState<WorkspaceRecord[]>([]);
   const [workspaceTombstones, setWorkspaceTombstones] = useState<WorkspaceTombstone[]>([]);
   const [conversations, setConversations] = useState<ConversationRecord[]>([]);
-  const [directorySyncStatus, setDirectorySyncStatus] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [directorySyncByBackend, setDirectorySyncByBackend] = useState<Record<string, 'loading' | 'ready' | 'error'>>({});
   const [activeWorkspaceId, setActiveWorkspaceId] = useState('');
   const [activeConversationId, setActiveConversationId] = useState('');
-  const [connectionState, setConnectionState] = useState<ConnectionState>('idle');
-  // Bumped each time the socket opens; discovery effects use it to retry
-  // providers that failed while the backend was unreachable.
-  const [connectionEpoch, setConnectionEpoch] = useState(0);
-  const [connectionHealth, setConnectionHealth] = useState<ConnectionHealth>(defaultConnectionHealth);
+  // The focused backend serves the visible conversation (or workspace). It
+  // only decides what the UI shows and where workspace-less panels act;
+  // every backend stays connected regardless.
+  const activeBackendConnectionId = ownerBackendId(
+    conversations.find((item) => item.id === activeConversationId),
+    workspaces.find((item) => item.id === activeWorkspaceId),
+    noWorkspaceBackendId,
+  ) || 'default-backend';
+  const activeBackendConnectionIdRef = useRef(activeBackendConnectionId);
+  activeBackendConnectionIdRef.current = activeBackendConnectionId;
+  const focusProfile = backendConnections.find((item) => item.id === activeBackendConnectionId);
+  // Preferences plus the focused backend's transport, for everything that
+  // talks to "the current backend" (discovery, panels, file pickers).
+  const settings = useMemo(
+    () => (focusProfile ? settingsFromProfile(focusProfile, preferences) : preferences),
+    [focusProfile, preferences],
+  );
+  const connectionRoutingRef = useRef(settings);
+  connectionRoutingRef.current = settings;
+  const focusLink = linkStatusByBackend[activeBackendConnectionId] ?? IDLE_BACKEND_LINK;
+  const connectionState = focusLink.state;
+  const connectionEpoch = focusLink.epoch;
+  const connectionHealth = focusLink.health;
+  const serverVersion = focusLink.serverVersion;
+  const backendStarting = focusLink.starting;
   const [remoteModelCatalog, setRemoteModelCatalog] = useState<CodexModelCatalogItem[]>([]);
   const [modelCatalogStatus, setModelCatalogStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
   const [modelCatalogError, setModelCatalogError] = useState('');
@@ -594,7 +695,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     setLastError(t('history.readOnlyError'));
     return true;
   };
-  const [serverVersion, setServerVersion] = useState<ServerVersion | null>(null);
   const [events, setEvents] = useState<ServerEvent[]>([]);
   const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
   const [sentAttachmentRecords, setSentAttachmentRecords] = useState<SentAttachmentRecord[]>([]);
@@ -637,13 +737,24 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   // Agent, model and command catalogs are per backend: every workspace reads
   // the catalog of its own backend, and switching back does not refetch blind.
   const [v2ProvidersByBackend, setV2ProvidersByBackend] = useState<Record<string, ProviderDescriptor[]>>({});
-  const [v2Conversations, setV2Conversations] = useState<ConversationManifest[]>([]);
+  // Conversation manifests as each backend last listed them.
+  const [v2ConversationsByBackend, setV2ConversationsByBackend] = useState<Record<string, ConversationManifest[]>>({});
+  const v2Conversations = useMemo(() => Object.values(v2ConversationsByBackend).flat(), [v2ConversationsByBackend]);
+  const setBackendManifests = useCallback((backendId: string, manifests: ConversationManifest[]) => {
+    setV2ConversationsByBackend((current) => (current[backendId] === manifests ? current : { ...current, [backendId]: manifests }));
+  }, []);
   const [capabilityCatalogs, setCapabilityCatalogs] = useState<Partial<Record<ProviderKind, CatalogState>>>({});
   const [providerModelsByBackend, setProviderModelsByBackend] = useState<Record<string, ProviderModelCatalog>>({});
   const [providerImageInput, setProviderImageInput] = useState<Record<string, { status: 'loading' | 'ready' | 'error'; imageInput?: boolean; reason?: string }>>({});
   const [providerModelPreferences, setProviderModelPreferences] = useState<ProviderModelPreferences>({});
   const [providerCommandsByBackend, setProviderCommandsByBackend] = useState<Record<string, Partial<Record<ProviderKind, ProviderCommandDescriptor[]>>>>({});
   const v2Providers = v2ProvidersByBackend[activeBackendConnectionId] ?? EMPTY_PROVIDERS;
+  const v2ProvidersByBackendRef = useRef(v2ProvidersByBackend);
+  v2ProvidersByBackendRef.current = v2ProvidersByBackend;
+  /** Agents of the backend serving a conversation. */
+  const providersForConversation = (conversation: { id: string } | null | undefined): ProviderDescriptor[] => (
+    (conversation ? v2ProvidersByBackendRef.current[backendIdForConversation(conversation.id)] : undefined) ?? v2ProvidersRef.current
+  );
   const providerModels = providerModelsByBackend[activeBackendConnectionId] ?? EMPTY_PROVIDER_MODELS;
   const providerCommands = providerCommandsByBackend[activeBackendConnectionId] ?? EMPTY_PROVIDER_COMMANDS;
   const setBackendProviders = useCallback((backendId: string, providers: ProviderDescriptor[]) => {
@@ -734,43 +845,51 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     });
   }, [contextUsageByConversation]);
 
+  // The transport fields of every profile; list effects restart when one
+  // backend is re-pointed or re-paired.
+  const backendEndpointsKey = useMemo(() => JSON.stringify(backendConnections.map((profile) => [
+    profile.id, profile.serverUrl, profile.deviceSecret, profile.encryptionProtocol, profile.encryptionPublicKey, profile.transportVerified,
+  ])), [backendConnections]);
+  const directorySyncStatus = directorySyncByBackend[activeBackendConnectionId] ?? (hydrated ? 'ready' : 'loading');
+
+  // Every backend's agents and conversation list, refreshed over HTTP.
   useEffect(() => {
-    if (!hydrated || !settings.serverUrl.trim()) {
-      if (hydrated) setDirectorySyncStatus('ready');
-      return;
-    }
-    const api = backendApi(settings);
-    const backendId = activeBackendConnectionId;
-    let active = true;
-    setDirectorySyncStatus('loading');
-    void Promise.all([api.listProviders(), api.listConversations()])
-      .then(([providers, conversations]) => {
-        if (!active) return;
-        setBackendProviders(backendId, providers.providers);
-        setV2Conversations(conversations.conversations);
-        setConversations((current) => mergeManifestConversations(current, withDecryptedTitles(backendId, conversations.conversations), workspacesRef.current, backendId));
-        setDirectorySyncStatus('ready');
-      })
-      .catch(() => {
-        if (!active) return;
-        // Keep this backend's last known agent catalog; the status flags the failure.
-        setDirectorySyncStatus('error');
-        setV2Conversations([]);
+    if (!hydrated) return;
+    const stops: Array<() => void> = [];
+    for (const profile of backendConnectionsRef.current) {
+      if (!profile.serverUrl.trim()) continue;
+      const api = backendApi(profile);
+      const backendId = profile.id;
+      let active = true;
+      setDirectorySyncByBackend((current) => ({ ...current, [backendId]: 'loading' }));
+      void Promise.all([api.listProviders(), api.listConversations()])
+        .then(([providers, conversations]) => {
+          if (!active) return;
+          setBackendProviders(backendId, providers.providers);
+          setBackendManifests(backendId, conversations.conversations);
+          setConversations((current) => mergeManifestConversations(current, withDecryptedTitles(backendId, conversations.conversations), workspacesRef.current, backendId));
+          setDirectorySyncByBackend((current) => ({ ...current, [backendId]: 'ready' }));
+        })
+        .catch(() => {
+          if (!active) return;
+          // Keep this backend's last known agent catalog; the status flags the failure.
+          setDirectorySyncByBackend((current) => ({ ...current, [backendId]: 'error' }));
+          setBackendManifests(backendId, []);
+        });
+      const refreshTimer = setInterval(() => {
+        void api.listConversations().then((response) => {
+          if (!active) return;
+          setBackendManifests(backendId, response.conversations);
+          setConversations((current) => mergeManifestConversations(current, withDecryptedTitles(backendId, response.conversations), workspacesRef.current, backendId));
+        }).catch(() => undefined);
+      }, 15000);
+      stops.push(() => {
+        active = false;
+        clearInterval(refreshTimer);
       });
-    const refreshTimer = setInterval(() => {
-      void api.listConversations().then((response) => {
-        if (!active) return;
-        setV2Conversations(response.conversations);
-        setConversations((current) => mergeManifestConversations(current, withDecryptedTitles(backendId, response.conversations), workspacesRef.current, backendId));
-      }).catch(() => undefined);
-    }, 15000);
-    // The main connection below is the single `/v2/ws` socket; providers and
-    // conversations lists are plain HTTP refreshes, no side channel needed.
-    return () => {
-      active = false;
-      clearInterval(refreshTimer);
-    };
-  }, [activeBackendConnectionId, hydrated, setBackendProviders, settings.deviceSecret, settings.encryptionProtocol, settings.encryptionPublicKey, settings.transportVerified, settings.serverUrl]);
+    }
+    return () => stops.forEach((stop) => stop());
+  }, [backendEndpointsKey, hydrated, setBackendManifests, setBackendProviders]);
 
   // Each manifest refresh re-checks running conversations: a lazily loaded
   // runtime whose turn started below its window (or whose earlier search
@@ -1042,8 +1161,14 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     scheduleJsonSave(SESSION_CURSORS_STORAGE_KEY, cursors, SESSION_CURSOR_SAVE_DEBOUNCE_MS);
   }, [scheduleJsonSave]);
 
-  const getSessionCursorSnapshot = useCallback(() => {
-    const cursors = sessionCursorsRef.current;
+  /** Legacy session cursors to resume on one backend's socket: sessions of
+   * its own conversations, and sessions no conversation claims. */
+  const getSessionCursorSnapshot = useCallback((backendId: string) => {
+    const owners = new Map<string, string>();
+    for (const conversation of conversationsRef.current) {
+      if (conversation.sessionId) owners.set(conversation.sessionId, backendIdForConversation(conversation.id));
+    }
+    const cursors = new Map([...sessionCursorsRef.current].filter(([sessionId]) => (owners.get(sessionId) ?? backendId) === backendId));
     if (cursors.size <= MAX_TRANSPORT_HELLO_SESSION_CURSORS) {
       return Object.fromEntries(cursors.entries());
     }
@@ -1086,49 +1211,44 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     return Object.fromEntries(selected.entries());
   }, []);
 
-  const closeSocket = useCallback((manual = true) => {
+  const closeSocket = useCallback((backendId: string, manual = true) => {
+    const link = linksRef.current.get(backendId);
+    if (!link) return;
     // Events this socket already delivered are valid; project them before
     // its generation ends.
     conversationEventBatcherRef.current?.flush();
-    socketGenerationRef.current += 1;
-    connectionAttemptRef.current?.abort();
-    connectionAttemptRef.current = null;
-    socketVerifiedRef.current = false;
-    healthProbeSeqRef.current += 1;
-    protocolCommandsRef.current?.disconnect();
+    link.generation += 1;
+    link.attempt?.abort();
+    link.attempt = null;
+    link.verified = false;
+    link.healthProbeSeq += 1;
+    link.commands.disconnect();
     if (manual) {
-      manualDisconnectRef.current = true;
-      setAutoConnectEnabled(false);
-      setConnectionState('closed');
+      link.manualDisconnect = true;
+      patchLinkStatus(backendId, { state: 'closed' });
     }
-    if (reconnectTimerRef.current) {
-      clearTimeout(reconnectTimerRef.current);
-      reconnectTimerRef.current = null;
+    if (link.reconnectTimer) {
+      clearTimeout(link.reconnectTimer);
+      link.reconnectTimer = null;
     }
-    if (workspaceBackendSyncTimerRef.current) {
-      clearTimeout(workspaceBackendSyncTimerRef.current);
-      workspaceBackendSyncTimerRef.current = null;
+    if (link.workspaceSyncTimer) {
+      clearTimeout(link.workspaceSyncTimer);
+      link.workspaceSyncTimer = null;
     }
-    workspaceBackendReadyRef.current = false;
-    if (socketRef.current) {
+    link.workspaceReady = false;
+    if (link.socket) {
       try {
-        socketRef.current.close();
+        link.socket.close();
       } catch {
         // ignore
       }
-      socketRef.current = null;
+      link.socket = null;
     }
-    pendingServerEventsRef.current = [];
-    if (pendingServerEventFrameRef.current !== null) {
-      cancelMessageTask(pendingServerEventFrameRef.current);
-      pendingServerEventFrameRef.current = null;
-    }
-    pendingSocketFramesRef.current = [];
-    if (pendingSocketFrameDrainRef.current !== null) {
-      cancelMessageTask(pendingSocketFrameDrainRef.current);
-      pendingSocketFrameDrainRef.current = null;
-    }
-  }, []);
+    // Queued frames of this socket are dropped with it; other backends'
+    // frames stay queued.
+    pendingSocketFramesRef.current = pendingSocketFramesRef.current.filter((frame) => frame.backendId !== backendId);
+    link.pendingFrames = 0;
+  }, [patchLinkStatus]);
 
   const updateSentAttachmentRecords = useCallback((next: SentAttachmentRecord[]) => {
     const pruned = pruneSentAttachmentRecords(next);
@@ -1194,6 +1314,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         storedWorkspaceTombstones,
         storedDeviceSecret,
         storedDeviceOrigin,
+        storedNoWorkspaceBackend,
       ] = await Promise.all([
         loadJson<PersistedSettings | null>(SETTINGS_STORAGE_KEY, null),
         loadJson<WorkspaceRecord[]>(WORKSPACES_STORAGE_KEY, []),
@@ -1210,6 +1331,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         loadJson<unknown>(WORKSPACE_TOMBSTONES_STORAGE_KEY, []),
         loadSecretOrReport(DEVICE_SECRET_STORAGE_KEY),
         loadSecretOrReport(DEVICE_ORIGIN_STORAGE_KEY),
+        loadJson<unknown>(NO_WORKSPACE_BACKEND_STORAGE_KEY, ''),
       ]);
 
       if (!alive) {
@@ -1284,24 +1406,29 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           .filter((entry): entry is [string, number] => typeof entry[1] === 'number' && Number.isFinite(entry[1]) && entry[1] > 0),
       );
 
-      const normalizedTombstones = (Array.isArray(storedWorkspaceTombstones) ? storedWorkspaceTombstones : [])
+      const loadedTombstones = (Array.isArray(storedWorkspaceTombstones) ? storedWorkspaceTombstones : [])
         .map(normalizeWorkspaceTombstone)
         .filter((item): item is WorkspaceTombstone => Boolean(item))
         .slice(0, MAX_WORKSPACE_TOMBSTONES);
-      workspaceTombstonesRef.current = normalizedTombstones;
-      // Restore the backend that owns the restored workspace; otherwise the
-      // profile the persisted settings point at, so the two cannot disagree.
+      // Untagged records predate parallel connections and belonged to the
+      // backend that was active then: the one owning the restored workspace,
+      // otherwise the profile the persisted settings point at.
       const restoredWorkspace = normalizedWorkspaces.find((workspace) => workspace.id === firstWorkspaceId);
-      const workspaceProfile = profiles.find((profile) => profile.id === restoredWorkspace?.backendConnectionId);
-      const activeProfile = workspaceProfile
+      const legacyProfile = profiles.find((profile) => profile.id === restoredWorkspace?.backendConnectionId)
         ?? profiles.find((profile) => profile.serverUrl === nextSettings.serverUrl)
         ?? profiles[0];
-      setSettings(workspaceProfile ? settingsFromProfile(workspaceProfile, nextSettings) : nextSettings);
+      const tagged = tagLegacyBackendRecords({
+        workspaces: normalizedWorkspaces,
+        conversations: normalizedConversations,
+        tombstones: loadedTombstones,
+      }, legacyProfile?.id ?? '');
+      workspaceTombstonesRef.current = tagged.tombstones;
+      setPreferences(nextSettings);
       setBackendConnections(profiles);
-      setActiveBackendConnectionId(activeProfile?.id ?? 'default-backend');
-      setWorkspaces(normalizedWorkspaces);
-      setWorkspaceTombstones(normalizedTombstones);
-      setConversations(normalizedConversations);
+      setNoWorkspaceBackendPreference(typeof storedNoWorkspaceBackend === 'string' ? storedNoWorkspaceBackend : '');
+      setWorkspaces(tagged.workspaces);
+      setWorkspaceTombstones(tagged.tombstones);
+      setConversations(tagged.conversations);
       setTimeline(storedTimeline.slice(0, MAX_TIMELINE_ITEMS));
       const attachmentRecords = pruneSentAttachmentRecords(Array.isArray(storedSentAttachments) ? storedSentAttachments : []);
       sentAttachmentRecordsRef.current = attachmentRecords;
@@ -1314,13 +1441,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       setProviderModelPreferences(normalizedProviderModelPreferences);
       setActiveWorkspaceId(firstWorkspaceId);
       setActiveConversationId(firstConversationId);
-      setAutoConnectEnabled(Boolean(storedSettings?.serverUrl?.trim()));
+      setAutoConnectEnabled(hydratedProfiles.length > 0 || Boolean(storedSettings?.serverUrl?.trim()));
       setHydrated(true);
     })();
 
     return () => {
       alive = false;
-      closeSocket(false);
+      for (const backendId of linksRef.current.keys()) closeSocket(backendId, false);
     };
   }, [closeSocket, reportSecretStoreError]);
 
@@ -1386,6 +1513,12 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
 
   useEffect(() => {
     if (hydrated) {
+      void saveJson(NO_WORKSPACE_BACKEND_STORAGE_KEY, noWorkspaceBackendPreference);
+    }
+  }, [hydrated, noWorkspaceBackendPreference]);
+
+  useEffect(() => {
+    if (hydrated) {
       void saveJson(PROVIDER_MODEL_PREFERENCES_STORAGE_KEY, providerModelPreferences);
     }
   }, [hydrated, providerModelPreferences]);
@@ -1400,48 +1533,53 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   // `pathMissing` (greyed out in the sidebar) and toasted once per path until
   // it syncs cleanly again.
   const flagWorkspaceMissing = useCallback(
-    (workspace: WorkspaceRecord, missingKeys: Set<string>) => {
-      const inScope = !workspace.backendConnectionId || workspace.backendConnectionId === activeBackendConnectionId;
-      const pathMissing = (inScope && missingKeys.has(normalizeWorkspacePath(workspace.path))) || undefined;
+    (workspace: WorkspaceRecord, missingKeys: Set<string>, backendId: string) => {
+      if (workspace.backendConnectionId !== backendId) return workspace;
+      const pathMissing = missingKeys.has(normalizeWorkspacePath(workspace.path)) || undefined;
       return workspace.pathMissing === pathMissing ? workspace : { ...workspace, pathMissing };
     },
-    [activeBackendConnectionId],
+    [],
   );
 
-  const notifyRejectedWorkspaces = useCallback((rejections: WorkspaceSyncRejection[]) => {
-    const keys = new Set(rejections.map((item) => normalizeWorkspacePath(item.path)));
-    const fresh = rejections.filter((item) => !workspaceMissingNotifiedRef.current.has(normalizeWorkspacePath(item.path)));
-    workspaceMissingNotifiedRef.current = keys;
+  // Paths already reported missing, per backend.
+  const notifyRejectedWorkspaces = useCallback((backendId: string, rejections: WorkspaceSyncRejection[]) => {
+    const keys = new Set(rejections.map((item) => `${backendId}\n${normalizeWorkspacePath(item.path)}`));
+    const fresh = rejections.filter((item) => !workspaceMissingNotifiedRef.current.has(`${backendId}\n${normalizeWorkspacePath(item.path)}`));
+    workspaceMissingNotifiedRef.current = new Set([
+      ...[...workspaceMissingNotifiedRef.current].filter((key) => !key.startsWith(`${backendId}\n`)),
+      ...keys,
+    ]);
     if (fresh.length > 0) {
       setLastError(t('sess.workspacePathMissing', { paths: fresh.map((item) => item.path).join(', ') }));
     }
   }, []);
 
   const applyWorkspaceSyncRejections = useCallback(
-    (rejections: WorkspaceSyncRejection[]) => {
-      notifyRejectedWorkspaces(rejections);
+    (backendId: string, rejections: WorkspaceSyncRejection[]) => {
+      notifyRejectedWorkspaces(backendId, rejections);
       const missingKeys = new Set(rejections.map((item) => normalizeWorkspacePath(item.path)));
       setWorkspaces((current) => {
-        const flagged = current.map((workspace) => flagWorkspaceMissing(workspace, missingKeys));
+        const flagged = current.map((workspace) => flagWorkspaceMissing(workspace, missingKeys, backendId));
         if (flagged.every((workspace, index) => workspace === current[index])) {
           return current;
         }
-        workspaceBackendSkipNextSaveRef.current = true;
+        workspaceBackendSkipNextSaveRef.current.add(backendId);
         return flagged;
       });
     },
     [flagWorkspaceMissing, notifyRejectedWorkspaces],
   );
 
+  /** Push the workspaces of one backend to it. */
   const syncWorkspacesToBackend = useCallback(
-    async (snapshot: WorkspaceRecord[] = workspacesRef.current) => {
+    async (backendId: string, snapshot: WorkspaceRecord[] = workspacesRef.current) => {
+      const profile = profileFor(backendId);
+      if (!profile) return false;
       try {
-        const activeSnapshot = snapshot.filter((workspace) =>
-          !isNoneWorkspaceId(workspace.id)
-          && (!workspace.backendConnectionId || workspace.backendConnectionId === activeBackendConnectionId),
-        );
-        const body = JSON.stringify({ workspaces: prepareWorkspaceSyncPayload(activeSnapshot) });
-        const response = await backendFetch(settings, {
+        const scoped = snapshot.filter((workspace) =>
+          !isNoneWorkspaceId(workspace.id) && workspace.backendConnectionId === backendId);
+        const body = JSON.stringify({ workspaces: prepareWorkspaceSyncPayload(scoped) });
+        const response = await backendFetch(profile, {
           method: 'PUT',
           path: '/v2/workspaces',
           headers: { 'content-type': 'application/json', accept: 'application/json' },
@@ -1453,37 +1591,42 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           throw new Error(message ? `workspace sync failed: ${message}` : `workspace sync returned ${response.status}`);
         }
         const payload = await response.json().catch(() => null);
-        applyWorkspaceSyncRejections(parseWorkspaceSyncRejected(payload));
+        applyWorkspaceSyncRejections(backendId, parseWorkspaceSyncRejected(payload));
         return true;
       } catch (error) {
         setLastError(error instanceof Error ? error.message : t('sess.workspaceSyncFailed'));
         return false;
       }
     },
-    [activeBackendConnectionId, applyWorkspaceSyncRejections, settings],
+    [applyWorkspaceSyncRejections],
   );
 
   const scheduleWorkspaceBackendSave = useCallback(
-    (snapshot: WorkspaceRecord[]) => {
-      if (workspaceBackendSyncTimerRef.current) {
-        clearTimeout(workspaceBackendSyncTimerRef.current);
+    (backendId: string, snapshot: WorkspaceRecord[]) => {
+      const link = linksRef.current.get(backendId);
+      if (!link) return;
+      if (link.workspaceSyncTimer) {
+        clearTimeout(link.workspaceSyncTimer);
       }
-      const payload = prepareWorkspaceSyncPayload(snapshot.filter((workspace) => !isNoneWorkspaceId(workspace.id)));
-      workspaceBackendSyncTimerRef.current = setTimeout(() => {
-        workspaceBackendSyncTimerRef.current = null;
-        void syncWorkspacesToBackend(payload);
+      const payload = snapshot.filter((workspace) => !isNoneWorkspaceId(workspace.id) && workspace.backendConnectionId === backendId);
+      link.workspaceSyncTimer = setTimeout(() => {
+        link.workspaceSyncTimer = null;
+        void syncWorkspacesToBackend(backendId, payload);
       }, WORKSPACE_SYNC_DEBOUNCE_MS);
     },
     [syncWorkspacesToBackend],
   );
 
-  /** Pull the backend's workspaces into the local list. The conversation list
+  /** Pull one backend's workspaces into the local list. Its conversation list
    * is fetched too unless `listConversations` is false: the periodic sync
    * leaves it to the manifest refresh, which polls it on its own timer. */
-  const syncWorkspacesFromBackend = useCallback(async ({ listConversations = true }: { listConversations?: boolean } = {}) => {
-    workspaceBackendReadyRef.current = false;
+  const syncWorkspacesFromBackend = useCallback(async (backendId: string, { listConversations = true }: { listConversations?: boolean } = {}) => {
+    const profile = profileFor(backendId);
+    const link = linksRef.current.get(backendId);
+    if (!profile || !link) return false;
+    link.workspaceReady = false;
     try {
-      const response = await backendFetch(settings, {
+      const response = await backendFetch(profile, {
         method: 'GET',
         path: '/v2/workspaces',
         headers: { accept: 'application/json' },
@@ -1496,23 +1639,15 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       const syncBody = await response.json().catch(() => null);
       const remoteWorkspaces = parseWorkspaceSyncResponse(syncBody);
       const remoteRejections = parseWorkspaceSyncRejected(syncBody);
-      notifyRejectedWorkspaces(remoteRejections);
+      notifyRejectedWorkspaces(backendId, remoteRejections);
       const missingKeys = new Set(remoteRejections.map((item) => normalizeWorkspacePath(item.path)));
       // The None workspace is local-only: keep it out of the merge.
-      const noneWorkspaces = workspacesRef.current.filter((workspace) => isNoneWorkspaceId(workspace.id));
-      const localWorkspaces = workspacesRef.current.filter((workspace) => !isNoneWorkspaceId(workspace.id));
-      const localActiveWorkspaces = localWorkspaces.filter((workspace) =>
-        !workspace.backendConnectionId || workspace.backendConnectionId === activeBackendConnectionId,
-      );
-      const otherWorkspaces = localWorkspaces.filter((workspace) =>
-        Boolean(workspace.backendConnectionId) && workspace.backendConnectionId !== activeBackendConnectionId,
-      );
-      const scopedTombstones = workspaceTombstonesRef.current.filter((item) =>
-        !item.backendConnectionId || item.backendConnectionId === activeBackendConnectionId,
-      );
+      const localScopedWorkspaces = workspacesRef.current.filter((workspace) =>
+        !isNoneWorkspaceId(workspace.id) && workspace.backendConnectionId === backendId);
+      const scopedTombstones = workspaceTombstonesRef.current.filter((item) => item.backendConnectionId === backendId);
       const taggedRemoteWorkspaces = remoteWorkspaces.map((workspace) => ({
         ...workspace,
-        backendConnectionId: activeBackendConnectionId || null,
+        backendConnectionId: backendId,
       }));
       // Tombstoned deletions must not be merged back. While the backend still
       // stores such a record, re-issue the DELETE with the remote id so it is
@@ -1524,7 +1659,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         if (keptRemoteWorkspaces.includes(remote)) {
           continue;
         }
-        void backendFetch(settings, {
+        void backendFetch(profile, {
           method: 'DELETE',
           path: `/v2/workspaces/${encodeURIComponent(remote.id)}`,
         }).catch(() => {});
@@ -1532,8 +1667,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       // Prune tombstones once the backend no longer stores a matching record.
       if (workspaceTombstonesRef.current.length > 0) {
         const surviving = workspaceTombstonesRef.current.filter((item) => {
-          const inScope = !item.backendConnectionId || item.backendConnectionId === activeBackendConnectionId;
-          if (!inScope) {
+          if (item.backendConnectionId !== backendId) {
             return true;
           }
           return remoteWorkspaces.some((remote) => workspaceMatchesTombstone(remote, item));
@@ -1543,39 +1677,56 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           setWorkspaceTombstones(surviving);
         }
       }
-      const nextActiveWorkspaces = remoteWorkspaces.length > 0
-        ? mergeWorkspaceRecords(localActiveWorkspaces, keptRemoteWorkspaces).map((workspace) => ({
+      const nextScopedWorkspaces = remoteWorkspaces.length > 0
+        ? mergeWorkspaceRecords(localScopedWorkspaces, keptRemoteWorkspaces).map((workspace) => ({
             ...workspace,
+            backendConnectionId: backendId,
             threadId: '',
             localAdapterState:
-              localActiveWorkspaces.find((item) => item.id === workspace.id || item.path === workspace.path)?.localAdapterState ??
+              localScopedWorkspaces.find((item) => item.id === workspace.id || item.path === workspace.path)?.localAdapterState ??
               workspace.localAdapterState ??
               'idle',
           }))
-        : localActiveWorkspaces;
+        : localScopedWorkspaces;
+      // Other backends' workspaces come from the latest list, so their
+      // concurrent syncs are kept.
+      const current = workspacesRef.current;
       const nextWorkspaces = [
-        ...[...otherWorkspaces, ...nextActiveWorkspaces.map((workspace) => flagWorkspaceMissing(workspace, missingKeys))]
-          .sort((left, right) => right.updatedAt - left.updatedAt),
-        ...noneWorkspaces,
+        ...[
+          ...current.filter((workspace) => !isNoneWorkspaceId(workspace.id) && workspace.backendConnectionId !== backendId),
+          ...nextScopedWorkspaces.map((workspace) => flagWorkspaceMissing(workspace, missingKeys, backendId)),
+        ].sort((left, right) => right.updatedAt - left.updatedAt),
+        ...current.filter((workspace) => isNoneWorkspaceId(workspace.id)),
       ];
 
       if (nextWorkspaces.length > 0) {
         const remappedConversations = remapWorkspaceScopedRecords(
           conversationsRef.current,
-          localActiveWorkspaces,
-          nextActiveWorkspaces,
+          localScopedWorkspaces,
+          nextScopedWorkspaces,
         );
         const nextConversations = conversationsForWorkspaceSnapshot(nextWorkspaces, remappedConversations);
         const remappedActive = remapWorkspaceScopedRecords(
           [{ workspaceId: activeWorkspaceRef.current }],
-          localActiveWorkspaces,
-          nextActiveWorkspaces,
+          localScopedWorkspaces,
+          nextScopedWorkspaces,
         )[0]?.workspaceId ?? activeWorkspaceRef.current;
-        workspaceBackendSkipNextSaveRef.current = true;
-        setWorkspaces(nextWorkspaces);
+        workspaceBackendSkipNextSaveRef.current.add(backendId);
+        workspacesRef.current = nextWorkspaces;
+        conversationsRef.current = nextConversations;
+        // Splice this backend's scope into the latest list, so updates queued
+        // meanwhile (another backend's sync, rejection flags) are kept.
+        const scoped = nextWorkspaces.filter((workspace) => !isNoneWorkspaceId(workspace.id) && workspace.backendConnectionId === backendId);
+        setWorkspaces((latest) => [
+          ...[
+            ...latest.filter((workspace) => !isNoneWorkspaceId(workspace.id) && workspace.backendConnectionId !== backendId),
+            ...scoped,
+          ].sort((left, right) => right.updatedAt - left.updatedAt),
+          ...latest.filter((workspace) => isNoneWorkspaceId(workspace.id)),
+        ]);
         setConversations(nextConversations);
-        setTimeline((current) => remapWorkspaceScopedRecords(current, localActiveWorkspaces, nextActiveWorkspaces));
-        setMentionHistory((current) => remapWorkspaceScopedRecords(current, localActiveWorkspaces, nextActiveWorkspaces));
+        setTimeline((current) => remapWorkspaceScopedRecords(current, localScopedWorkspaces, nextScopedWorkspaces));
+        setMentionHistory((current) => remapWorkspaceScopedRecords(current, localScopedWorkspaces, nextScopedWorkspaces));
         if (remappedActive !== activeWorkspaceRef.current) {
           setActiveWorkspaceId(remappedActive);
         }
@@ -1588,60 +1739,67 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         }
       }
 
-      workspaceBackendReadyRef.current = true;
+      link.workspaceReady = true;
       if (listConversations) {
         try {
-          const conversationResponse = await backendApi(settings).listConversations();
-          setV2Conversations(conversationResponse.conversations);
-          setConversations((current) => mergeManifestConversations(current, withDecryptedTitles(activeBackendConnectionId, conversationResponse.conversations), nextWorkspaces, activeBackendConnectionId));
+          const conversationResponse = await backendApi(profile).listConversations();
+          setBackendManifests(backendId, conversationResponse.conversations);
+          setConversations((current) => mergeManifestConversations(current, withDecryptedTitles(backendId, conversationResponse.conversations), workspacesRef.current, backendId));
         } catch (error) {
           setLastError(error instanceof Error ? error.message : t('sess.conversationDirSyncFailed'));
         }
       }
-      if (!workspaceSyncPayloadEquals(keptRemoteWorkspaces, nextActiveWorkspaces)) {
-        void syncWorkspacesToBackend(nextActiveWorkspaces);
+      if (!workspaceSyncPayloadEquals(keptRemoteWorkspaces, nextScopedWorkspaces)) {
+        void syncWorkspacesToBackend(backendId, nextScopedWorkspaces);
       }
       return true;
     } catch (error) {
-      workspaceBackendReadyRef.current = true;
+      link.workspaceReady = true;
       setLastError(error instanceof Error ? error.message : t('sess.workspaceSyncFailed'));
       return false;
     }
-  }, [activeBackendConnectionId, flagWorkspaceMissing, notifyRejectedWorkspaces, settings, syncWorkspacesToBackend]);
+  }, [flagWorkspaceMissing, notifyRejectedWorkspaces, setBackendManifests, syncWorkspacesToBackend]);
 
+  // Kanban tasks follow their workspace's backend; the focused backend's
+  // zone is the one shown.
   useEffect(() => {
-    if (!hydrated || connectionState !== 'open') {
-      if (connectionState !== 'open') configureKanbanSync(null);
-      return;
-    }
-    configureKanbanSync({
-      serverUrl: settings.serverUrl,
-      deviceSecret: settings.deviceSecret,
-      encryptionProtocol: settings.encryptionProtocol,
-      encryptionPublicKey: settings.encryptionPublicKey,
-      transportVerified: settings.transportVerified,
-      backendConnectionId: activeBackendConnectionId,
+    configureKanbanRouting(activeBackendConnectionId, (workspaceId) => {
+      const workspace = workspacesRef.current.find((item) => item.id === workspaceId);
+      return workspace ? ownerBackendId(null, workspace, noWorkspaceBackendIdRef.current) || null : null;
     });
+  }, [activeBackendConnectionId]);
+
+  // Every open backend syncs its workspaces and kanban tasks periodically.
+  const openBackendIdsKey = Object.entries(linkStatusByBackend)
+    .filter(([, status]) => status.state === 'open').map(([backendId]) => backendId).sort().join('\n');
+  useEffect(() => {
+    if (!hydrated) return;
+    const openIds = new Set(openBackendIdsKey ? openBackendIdsKey.split('\n') : []);
+    for (const profile of backendConnectionsRef.current) {
+      configureKanbanSync(profile.id, openIds.has(profile.id) ? profile : null);
+    }
+    if (!openIds.size) return;
     const timer = setInterval(() => {
-      void syncWorkspacesFromBackend({ listConversations: false });
-      void syncKanbanTasksFromBackend();
+      for (const backendId of openIds) {
+        void syncWorkspacesFromBackend(backendId, { listConversations: false });
+        void syncKanbanTasksFromBackend(backendId);
+      }
     }, 15000);
     return () => clearInterval(timer);
-  }, [activeBackendConnectionId, connectionState, hydrated, settings.deviceSecret, settings.encryptionProtocol, settings.encryptionPublicKey, settings.transportVerified, settings.serverUrl, syncWorkspacesFromBackend]);
+  }, [backendEndpointsKey, hydrated, openBackendIdsKey, syncWorkspacesFromBackend]);
 
   useEffect(() => {
     if (!hydrated) {
       return;
     }
     scheduleJsonSave(WORKSPACES_STORAGE_KEY, workspaces);
-    if (workspaceBackendSkipNextSaveRef.current) {
-      workspaceBackendSkipNextSaveRef.current = false;
-      return;
+    const skipped = workspaceBackendSkipNextSaveRef.current;
+    for (const [backendId, link] of linksRef.current) {
+      if (skipped.delete(backendId)) continue;
+      if (link.workspaceReady && link.socket && link.verified) scheduleWorkspaceBackendSave(backendId, workspaces);
     }
-    if (connectionState === 'open' && workspaceBackendReadyRef.current) {
-      scheduleWorkspaceBackendSave(workspaces);
-    }
-  }, [connectionState, hydrated, scheduleJsonSave, scheduleWorkspaceBackendSave, workspaces]);
+    skipped.clear();
+  }, [hydrated, scheduleJsonSave, scheduleWorkspaceBackendSave, workspaces]);
 
   useEffect(() => {
     if (!hydrated) {
@@ -1705,9 +1863,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       : workspace;
   }, [activeConversationId, activeWorkspaceId, conversations, workspaces]);
 
-  // The None workspace's own path is the backend's scratch root, so model and
+  // The None workspace's own path is its backend's scratch root, so model and
   // command discovery work before its first conversation folder exists.
-  const scratchWorkspaceRoot = serverVersion?.scratch_workspace_root ?? '';
+  const scratchWorkspaceRoot = linkStatusByBackend[noWorkspaceBackendId]?.serverVersion?.scratch_workspace_root ?? '';
   useEffect(() => {
     setWorkspaces((current) => {
       const none = current.find((item) => isNoneWorkspaceId(item.id));
@@ -2041,7 +2199,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         // A daemon that holds the queue handles rate limits itself — for every
         // client and with no window open — and reports them only through its
         // queue snapshot, so its error text is not parsed.
-        const backendQueued = hasBackendQueue(v2ProvidersRef.current, conversationsRef.current.find((item) => item.id === localId));
+        const backendQueued = hasBackendQueue(providersForConversation(conversationsRef.current.find((item) => item.id === localId)), conversationsRef.current.find((item) => item.id === localId));
         if (submission && turnId && submission.turnId === turnId) {
           if (type === 'turn.failed' && backendQueued) {
             void awaitBackendContinuation(localId, turnId, submission,
@@ -2166,27 +2324,64 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     setLastError(t('sess.sendRestoredDraft'));
   }, [recoverConversation, restorePendingSubmission, setConversationThinking, updateSentAttachmentRecords, setLastError]);
 
-  // Runtime caches are only invalid when the active profile itself is
-  // re-pointed or re-paired. Switching to another profile keeps every
-  // backend's conversation state, so the other workspaces do not reload.
-  const runtimeEndpointRef = useRef<{ backendId: string; serverUrl: string; deviceSecret: string } | null>(null);
+  // Runtime caches are only invalid when a profile is re-pointed or
+  // re-paired (or removed). Its socket closes, queued commands addressed to
+  // the old endpoint are dropped, and projections reopen from the journal;
+  // changing focus between backends keeps everything.
+  const runtimeEndpointsRef = useRef<Map<string, string> | null>(null);
+  const [runtimeRevision, setRuntimeRevision] = useState(0);
   useEffect(() => {
-    const previous = runtimeEndpointRef.current;
-    runtimeEndpointRef.current = { backendId: activeBackendConnectionId, serverUrl: settings.serverUrl, deviceSecret: settings.deviceSecret };
-    // Queued commands were addressed to the previous endpoint and must not
-    // flush onto the next socket.
-    protocolCommandsRef.current?.dispose();
-    if (previous && previous.backendId !== activeBackendConnectionId) return;
-    conversationEventBatcherRef.current?.discard();
-    conversationRecoveryRef.current?.reset();
-    legacyRecoveryRef.current = new LegacyEventRecovery<ServerEvent>();
-    setConversationRuntimeById({});
-    setRecoveringConversations({});
-    setOpenStatusByConversation({});
-    setEarlierHistory({});
-    projectedRuntimeListsRef.current.clear();
-    settledV2TurnsRef.current.clear();
-  }, [activeBackendConnectionId, settings.serverUrl, settings.deviceSecret, settings.encryptionProtocol, settings.encryptionPublicKey, settings.transportVerified]);
+    if (!hydrated) return;
+    const previous = runtimeEndpointsRef.current;
+    const next = new Map(backendConnections.map((profile) => [profile.id, JSON.stringify([
+      normalizeServerUrl(profile.serverUrl), profile.deviceSecret, profile.encryptionProtocol, profile.encryptionPublicKey, profile.transportVerified,
+    ])]));
+    runtimeEndpointsRef.current = next;
+    if (!previous) return;
+    const changed = [...previous].filter(([backendId, endpoint]) => next.get(backendId) !== endpoint).map(([backendId]) => backendId);
+    if (!changed.length) return;
+    for (const backendId of changed) {
+      const link = linksRef.current.get(backendId);
+      if (!link) continue;
+      closeSocket(backendId, false);
+      link.commands.dispose();
+      if (next.has(backendId)) {
+        // Connects again on Connect or once pairing completes.
+        patchLinkStatus(backendId, { state: 'idle', error: '', health: defaultConnectionHealth, serverVersion: null, starting: false });
+      } else {
+        linksRef.current.delete(backendId);
+        setLinkStatusByBackend(({ [backendId]: _removed, ...rest }) => rest);
+      }
+    }
+    // Only the conversations of the changed backends reopen from the journal.
+    const changedIds = new Set(changed);
+    conversationEventBatcherRef.current?.flush();
+    const recovery = conversationRecoveryRef.current;
+    const released: string[] = [];
+    for (const v2Id of recovery?.loadedConversationIds() ?? []) {
+      if (!changedIds.has(backendIdForConversation(v2Id))) continue;
+      recovery?.release(v2Id);
+      const localId = conversationsRef.current.find((item) => item.v2ConversationId === v2Id || item.id === v2Id)?.id;
+      if (localId) released.push(localId);
+      for (const key of [...settledV2TurnsRef.current.keys()]) {
+        if (key.startsWith(`${v2Id}:`)) settledV2TurnsRef.current.delete(key);
+      }
+    }
+    if (released.length) {
+      const withoutReleased = <T,>(current: Record<string, T>) => {
+        if (!released.some((id) => id in current)) return current;
+        const next = { ...current };
+        for (const id of released) delete next[id];
+        return next;
+      };
+      for (const id of released) projectedRuntimeListsRef.current.delete(id);
+      setConversationRuntimeById(withoutReleased);
+      setRecoveringConversations(withoutReleased);
+      setOpenStatusByConversation(withoutReleased);
+      setEarlierHistory(withoutReleased);
+    }
+    setRuntimeRevision((value) => value + 1);
+  }, [backendConnections, closeSocket, hydrated, patchLinkStatus]);
 
   useEffect(() => {
     if (!hydrated || !activeConversation?.v2ConversationId || !settings.serverUrl.trim()) return;
@@ -2203,7 +2398,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         limit: 200,
       });
     }
-  }, [activeConversation?.id, activeConversation?.v2ConversationId, hydrated, openConversation, settings.serverUrl, settings.deviceSecret, settings.encryptionProtocol, settings.encryptionPublicKey, settings.transportVerified]);
+  }, [activeConversation?.id, activeConversation?.v2ConversationId, hydrated, openConversation, runtimeRevision, settings.serverUrl, settings.deviceSecret, settings.encryptionProtocol, settings.encryptionPublicKey, settings.transportVerified]);
 
   // Only recently viewed conversations keep their projected history in
   // memory. Older ones, and runtimes live frames created for conversations
@@ -3379,7 +3574,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       () => sessionCursorsRef.current.get(sessionId) ?? 0,
       projectLegacyEvent,
       (next) => { sessionCursorsRef.current.set(sessionId, next); persistSessionCursors(); },
-      (after) => rawProtocolSenderRef.current({ id: createRequestId('resume'), type: 'session.resume', payload: { sessionCursors: { [sessionId]: after } } }),
+      (after) => rawProtocolSenderRef.current(
+        backendIdForPayload({ sessionId }),
+        { id: createRequestId('resume'), type: 'session.resume', payload: { sessionCursors: { [sessionId]: after } } },
+      ),
     );
   }, [persistSessionCursors, projectLegacyEvent]);
 
@@ -3404,8 +3602,18 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     scheduleServerEventDrain();
   }, [scheduleServerEventDrain]);
 
+  /** Connection failures of a background backend stay on its own status (the
+   * sidebar and Settings show them); the focused backend's also reach the
+   * shared error notice. */
+  const reportLinkError = useCallback((backendId: string, message: string) => {
+    patchLinkStatus(backendId, { error: message });
+    if (backendId === activeBackendConnectionIdRef.current) setLastError(message);
+  }, [patchLinkStatus]);
+
   const decodeSocketFrame = useCallback((frame: PendingSocketFrame) => {
-    if (frame.generation !== socketGenerationRef.current) {
+    const { backendId } = frame;
+    const link = linksRef.current.get(backendId);
+    if (!link || frame.generation !== link.generation) {
       return;
     }
 
@@ -3422,8 +3630,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         if (isConversationWarmRequestId(id)) return;
         const payload = parsed.payload && typeof parsed.payload === 'object' && !Array.isArray(parsed.payload)
           ? parsed.payload as Record<string, unknown> : {};
-        const subscribedConversationId = pendingV2SubscribeRef.current.get(id);
-        pendingV2SubscribeRef.current.delete(id);
+        const subscribedConversationId = link.pendingSubscribes.get(id);
+        link.pendingSubscribes.delete(id);
         if (subscribedConversationId && payload.hasMore === true) {
           // The capped backfill stopped short of the high-water mark. A loaded
           // conversation pages the rest over HTTP; an unopened one loads its
@@ -3433,7 +3641,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
             void conversationRecoveryRef.current.recover(subscribedConversationId, conversation.workspaceId, conversation.lastSequence ?? 0);
           }
         }
-        protocolCommandsRef.current?.resolve(id, payload);
+        link.commands.resolve(id, payload);
         return;
       }
       if (messageType === 'server.error' && parsed.id !== undefined) {
@@ -3450,26 +3658,26 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         }
         // Warming is best-effort, and older backends do not know the command.
         if (isConversationWarmRequestId(requestId)) return;
-        const failedSubscribe = pendingV2SubscribeRef.current.get(requestId);
+        const failedSubscribe = link.pendingSubscribes.get(requestId);
         if (failedSubscribe) {
-          pendingV2SubscribeRef.current.delete(requestId);
-          v2SubscriptionsRef.current.delete(failedSubscribe);
+          link.pendingSubscribes.delete(requestId);
+          link.subscriptions.delete(failedSubscribe);
         }
         // A subscription task that died server-side already released its slot;
         // drop the local marker so a later subscribe is not deduped away.
         const endedConversationId = typeof payload?.conversationId === 'string' ? payload.conversationId : '';
-        if (endedConversationId) v2SubscriptionsRef.current.delete(endedConversationId);
+        if (endedConversationId) link.subscriptions.delete(endedConversationId);
         // A busy conversation's prompt may still join the backend queue;
         // sendV2Prompt reports the conflict itself when it cannot.
-        const callerReports = code === 'CONFLICT' && protocolCommandsRef.current?.typeOf(requestId) === 'conversation.prompt';
+        const callerReports = code === 'CONFLICT' && link.commands.typeOf(requestId) === 'conversation.prompt';
         // No recipient to encrypt the write for: register this device again.
-        if (code === HISTORY_KEY_REQUIRED) void historyEncryptionRef.current?.keyRequired();
-        protocolCommandsRef.current?.reject(requestId, message, code);
+        if (code === HISTORY_KEY_REQUIRED) void historyEncryptionRef.current?.keyRequired(backendId);
+        link.commands.reject(requestId, message, code);
         if (!callerReports) setLastError(message);
         return;
       }
       if (messageType === HISTORY_ENCRYPTION_UPDATED) {
-        historyEncryptionRef.current?.receiveUpdate(connectedBackendIdRef.current ?? activeBackendConnectionIdRef.current, parsed.payload);
+        historyEncryptionRef.current?.receiveUpdate(backendId, parsed.payload);
         return;
       }
       if (messageType === 'agentBrowser.frame') {
@@ -3480,15 +3688,19 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       if (messageType === 'conversation.event') {
         const raw = (parsed.payload ?? parsed) as Record<string, unknown>;
         const rawConversationId = typeof raw.conversationId === 'string' ? raw.conversationId : '';
-        const backendId = connectedBackendIdRef.current ?? activeBackendConnectionIdRef.current;
         const generation = frame.generation;
         // Encrypted payloads are opened before normalization; per
         // conversation the arrival order is kept even when a wrap is fetched.
         const deliver = (opened: Record<string, unknown>) => {
-          if (generation !== socketGenerationRef.current) return;
+          if (generation !== linksRef.current.get(backendId)?.generation) return;
           const event = normalizeConversationEvent(opened);
           if (!event) throw new Error(t('sess.invalidConversationEvent'));
-          const conversation = conversationsRef.current.find((item) => item.v2ConversationId === event.conversationId || item.id === event.conversationId);
+          // Only this backend's conversations take its events, even if
+          // another backend reuses an id.
+          const conversation = conversationsRef.current.find((item) => (
+            (item.v2ConversationId === event.conversationId || item.id === event.conversationId)
+            && backendIdForConversation(item.id) === backendId
+          ));
           if (conversation) conversationEventBatcherRef.current!.push(event.conversationId, conversation.workspaceId, event);
         };
         const history = historyEncryptionRef.current;
@@ -3520,6 +3732,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         if (!frame) {
           break;
         }
+        const owner = linksRef.current.get(frame.backendId);
+        if (owner) owner.pendingFrames = Math.max(0, owner.pendingFrames - 1);
         decodeSocketFrame(frame);
         processed += 1;
         if (Date.now() - startedAt >= SOCKET_FRAME_DECODE_BUDGET_MS) {
@@ -3534,32 +3748,38 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   }, [decodeSocketFrame]);
 
   const enqueueSocketFrame = useCallback((frame: PendingSocketFrame) => {
-    if (pendingSocketFramesRef.current.length >= MAX_PENDING_SOCKET_FRAMES) {
-      // The renderer fell too far behind the socket. Drop the backlog and
-      // reconnect like any transient drop: resubscribing replays each
-      // conversation from its cursor, and gaps recover over REST.
-      closeSocket(false);
+    const link = linksRef.current.get(frame.backendId);
+    if (!link) return;
+    if (link.pendingFrames >= MAX_PENDING_SOCKET_FRAMES) {
+      // The renderer fell too far behind this backend's socket. Drop its
+      // backlog and reconnect it like any transient drop (other backends keep
+      // theirs): resubscribing replays each conversation from its cursor, and
+      // gaps recover over REST.
+      closeSocket(frame.backendId, false);
       // Back off across repeated drops: markVerified zeroes the attempt
       // counter on every successful reconnect.
-      const streak = nextSocketBacklogStreak(socketBacklogStreakRef.current, Date.now());
-      socketBacklogStreakRef.current = streak;
-      reconnectAttemptRef.current = Math.max(reconnectAttemptRef.current, streak.count - 1);
-      lastFailureRetryableRef.current = true;
-      setConnectionState('closed');
-      setLastError(t('sess.socketBacklog'));
+      const streak = nextSocketBacklogStreak(link.backlogStreak, Date.now());
+      link.backlogStreak = streak;
+      link.reconnectAttempt = Math.max(link.reconnectAttempt, streak.count - 1);
+      link.lastFailureRetryable = true;
+      patchLinkStatus(frame.backendId, { state: 'closed' });
+      reportLinkError(frame.backendId, t('sess.socketBacklog'));
       return;
     }
     pendingSocketFramesRef.current.push(frame);
+    link.pendingFrames += 1;
     scheduleSocketFrameDrain();
-  }, [closeSocket, scheduleSocketFrameDrain, setLastError]);
+  }, [closeSocket, patchLinkStatus, reportLinkError, scheduleSocketFrameDrain]);
 
-  /** Raw `{id, type, payload}` frame on the unified /v2/ws socket: the secure
-   * socket checks the 8 MiB frame limit before sealing, then sends. Returns
-   * null when the frame never left (socket closed) and throws ConnectionError
-   * on oversize payloads. */
-  const sendRawProtocolFrame = useCallback((message: { id: string; type: string; payload: Record<string, unknown> }) => {
-    const socket = socketRef.current;
-    if (!socket?.ready || !socketVerifiedRef.current) {
+  /** Raw `{id, type, payload}` frame on a backend's /v2/ws socket (the one
+   * the frame addresses when no backend is named): the secure socket checks
+   * the 8 MiB frame limit before sealing, then sends. Returns null when the
+   * frame never left (socket closed) and throws ConnectionError on oversize
+   * payloads. */
+  const sendRawProtocolFrame = useCallback((message: { id: string; type: string; payload: Record<string, unknown> }, backendId = backendIdForPayload(message.payload)) => {
+    const link = linksRef.current.get(backendId);
+    const socket = link?.socket;
+    if (!link || !socket?.ready || !link.verified) {
       return null;
     }
     let frame: string;
@@ -3592,27 +3812,28 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     };
   }, [sendRawProtocolFrame]);
 
-  const unsubscribeV2Conversation = useCallback((v2ConversationId: string) => {
-    if (!v2SubscriptionsRef.current.delete(v2ConversationId)) return;
+  const unsubscribeV2Conversation = useCallback((v2ConversationId: string, backendId = backendIdForConversation(v2ConversationId)) => {
+    if (!linksRef.current.get(backendId)?.subscriptions.delete(v2ConversationId)) return;
     sendRawProtocolFrame({
       id: createRequestId('unsub'),
       type: 'conversation.unsubscribe',
       payload: { conversationId: v2ConversationId },
-    });
+    }, backendId);
   }, [sendRawProtocolFrame]);
 
-  /** Send `conversation.subscribe` within the per-socket budget. When the
-   * budget is full, the oldest background subscription is unsubscribed first;
-   * the active conversation is never evicted. Returns false when the frame
-   * could not be sent or no slot could be freed. */
+  /** Send `conversation.subscribe` on the owning backend's socket within its
+   * budget. When the budget is full, the oldest background subscription is
+   * unsubscribed first; the active conversation is never evicted. Returns
+   * false when the frame could not be sent or no slot could be freed. */
   const subscribeV2Conversation = useCallback((
     v2ConversationId: string,
     options?: { afterSequence?: number; limit?: number },
   ): boolean => {
-    // Mid-switch the socket still belongs to the previous backend; the
-    // reconnect subscribes the new backend's conversations once it opens.
-    if (connectedBackendIdRef.current !== activeBackendConnectionIdRef.current) return false;
-    const subscribed = v2SubscriptionsRef.current;
+    const backendId = backendIdForConversation(v2ConversationId);
+    const link = linksRef.current.get(backendId);
+    // Not connected yet: the connection subscribes it once it opens.
+    if (!link?.verified) return false;
+    const subscribed = link.subscriptions;
     if (subscribed.has(v2ConversationId)) {
       // Refresh recency so active conversations are not evicted first.
       subscribed.delete(v2ConversationId);
@@ -3625,7 +3846,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     while (subscribed.size >= V2_WS_SUBSCRIPTION_BUDGET) {
       const evict = [...subscribed].find((id) => id !== activeV2Id);
       if (!evict) return false;
-      unsubscribeV2Conversation(evict);
+      unsubscribeV2Conversation(evict, backendId);
     }
     const requestId = createRequestId('sub');
     const sent = sendRawProtocolFrame({
@@ -3642,20 +3863,22 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         backfillLimit: V2_SUBSCRIBE_BACKFILL_LIMIT,
         historyEncryption: HISTORY_ENCRYPTION_CAPABILITY,
       },
-    });
+    }, backendId);
     if (!sent) return false;
     subscribed.add(v2ConversationId);
-    pendingV2SubscribeRef.current.set(requestId, v2ConversationId);
+    link.pendingSubscribes.set(requestId, v2ConversationId);
     return true;
   }, [sendRawProtocolFrame, unsubscribeV2Conversation]);
   subscribeV2ConversationRef.current = subscribeV2Conversation;
 
-  rawProtocolSenderRef.current = (message) => Boolean(sendRawProtocolFrame(message));
+  rawProtocolSenderRef.current = (backendId, message) => Boolean(sendRawProtocolFrame(message, backendId));
 
   // Pre-start the open conversation's agent process so its first prompt starts
   // faster: on opening it, and on every verified connection to its backend.
   const conversationWarmSentAtRef = useRef(new Map<string, number>());
-  const activeConversationConnected = connectionState === 'open' && connectedBackendIdRef.current === activeBackendConnectionId;
+  const activeConversationBackendId = activeConversation ? backendIdForConversation(activeConversation.id) : '';
+  const activeConversationLink = linkStatusByBackend[activeConversationBackendId] ?? IDLE_BACKEND_LINK;
+  const activeConversationConnected = activeConversationLink.state === 'open';
   useEffect(() => {
     const conversation = activeConversation;
     const v2Id = conversation?.v2ConversationId;
@@ -3668,16 +3891,31 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     if (sent) conversationWarmSentAtRef.current.set(v2Id, now);
     // Busy state is sampled when the conversation opens or the connection is
     // (re)established; it is deliberately not a dependency.
-  }, [activeConversation?.id, activeConversation?.v2ConversationId, activeConversationConnected, connectionEpoch, sendRawProtocolFrame]);
+  }, [activeConversation?.id, activeConversation?.v2ConversationId, activeConversationConnected, activeConversationLink.epoch, sendRawProtocolFrame]);
 
-  const sendProtocolCommand = useCallback((message: ProtocolCommand, timeoutMs = 15_000) =>
-    protocolCommandsRef.current!.request(message, timeoutMs), []);
+  /** A command on a backend's socket; without a backend it goes to the one
+   * owning the conversation the command names (else the focused backend). */
+  const sendProtocolCommand = useCallback((message: ProtocolCommand, timeoutMs = 15_000, backendId = backendIdForPayload(message.payload)) => (
+    profileFor(backendId)
+      ? linkFor(backendId).commands.request(message, timeoutMs)
+      : Promise.reject(new ProtocolCommandError(t('sidebar.backendRemoved'), 'not-sent', message.id))
+  ), []);
 
+  // History encryption runs per backend over each backend's own socket.
+  // Keyed by content so health probes do not re-run its effects.
+  const historyLinksKey = JSON.stringify(backendConnections.map((profile) => {
+    const status = linkStatusByBackend[profile.id];
+    return [profile.id, status?.state === 'open', status?.serverVersion ? status.serverVersion.historyEncryption === 1 : null];
+  }));
+  const stableHistoryLinks = useMemo(() => Object.fromEntries(
+    (JSON.parse(historyLinksKey) as [string, boolean, boolean | null][]).map(([backendId, connected, supported]) => [
+      backendId, { connected, supported: supported ?? undefined },
+    ]),
+  ), [historyLinksKey]);
   const historyEncryption = useHistoryEncryption({
-    activeBackendId: activeBackendConnectionId,
-    connected: connectionState === 'open' && connectedBackendIdRef.current === activeBackendConnectionId,
-    supported: serverVersion ? serverVersion.historyEncryption === 1 : undefined,
-    sendCommand: sendProtocolCommand,
+    backends: stableHistoryLinks,
+    focusBackendId: activeBackendConnectionId,
+    sendCommand: (backendId, message, timeoutMs) => sendProtocolCommand(message, timeoutMs, backendId),
     // Keys arrived: drop the projections (of the named conversations, or
     // all) that hold locked rows and reopen the visible conversation so it
     // decrypts now.
@@ -3701,16 +3939,21 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     if (historyRevoked) setLastError(t('history.accessRevoked'));
   }, [historyRevoked]);
 
-  // Encrypted manifest titles (§3.2): decrypt what is new, then re-merge the
-  // listed manifests once more titles are readable.
-  const { decryptManifestTitles: decryptTitles, titleRevision: decryptedTitleRevision, view: historyView } = historyEncryption;
+  // Encrypted manifest titles (§3.2): decrypt what is new on each backend,
+  // then re-merge the listed manifests once more titles are readable.
+  const { decryptManifestTitles: decryptTitles, titleRevision: decryptedTitleRevision } = historyEncryption;
   useEffect(() => {
-    if (historyView.status !== 'ready') return;
-    void decryptTitles(activeBackendConnectionId, v2Conversations);
-  }, [activeBackendConnectionId, decryptTitles, historyView.status, v2Conversations]);
+    for (const [backendId, manifests] of Object.entries(v2ConversationsByBackend)) {
+      if (!stableHistoryLinks[backendId]?.connected) continue;
+      void decryptTitles(backendId, manifests);
+    }
+  }, [decryptTitles, stableHistoryLinks, v2ConversationsByBackend]);
   useEffect(() => {
     if (!decryptedTitleRevision) return;
-    setConversations((current) => mergeManifestConversations(current, withDecryptedTitles(activeBackendConnectionId, v2Conversations), workspacesRef.current, activeBackendConnectionId));
+    setConversations((current) => Object.entries(v2ConversationsByBackend).reduce(
+      (merged, [backendId, manifests]) => mergeManifestConversations(merged, withDecryptedTitles(backendId, manifests), workspacesRef.current, backendId),
+      current,
+    ));
   }, [decryptedTitleRevision]);
 
   const controlConversation = useCallback(async (conversationId: string, control: LiveConversationControl): Promise<boolean> => {
@@ -3750,15 +3993,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     }
   }, [recoverConversation, sendProtocolCommand]);
 
-  const flushQueuedProtocolCommands = useCallback(() => protocolCommandsRef.current?.flush(), []);
-
-  const sendSessionResume = useCallback((sessionCursors: Record<string, number>) => {
+  const sendSessionResume = useCallback((backendId: string, sessionCursors: Record<string, number>) => {
     try {
       sendRawProtocolFrame({
         id: createRequestId('resume'),
         type: 'session.resume',
         payload: { sessionCursors },
-      });
+      }, backendId);
     } catch (error: unknown) {
       setLastError(error instanceof ConnectionError ? error.userMessage : t('sess.resumeFailed'));
     }
@@ -3771,11 +4012,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     [appendTimeline],
   );
 
-  const refreshServerVersion = useCallback(async () => {
+  const refreshServerVersion = useCallback(async (backendId: string) => {
+    const profile = profileFor(backendId);
+    if (!profile) return;
     try {
       // Signed so the daemon also returns its data and workspace paths;
       // tunnelled like every other call when a key is pinned.
-      const response = await backendFetch(settings, {
+      const response = await backendFetch(profile, {
         method: 'GET',
         path: '/v2/version',
         headers: { accept: 'application/json' },
@@ -3784,115 +4027,109 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         throw new Error(`version endpoint returned ${response.status}`);
       }
       const json = (await response.json()) as ServerVersion;
-      setServerVersion(json);
+      patchLinkStatus(backendId, { serverVersion: json });
     } catch (error) {
-      setServerVersion(null);
-      setLastError(error instanceof Error ? error.message : 'failed to fetch /v2/version');
+      patchLinkStatus(backendId, { serverVersion: null });
+      reportLinkError(backendId, error instanceof Error ? error.message : 'failed to fetch /v2/version');
     }
-  }, [settings]);
+  }, [patchLinkStatus, reportLinkError]);
 
-  const checkConnectionHealth = useCallback(async () => {
-    if (transportFailureRef.current || backendReadyWaitRef.current) return;
-    const probeId = healthProbeSeqRef.current + 1;
-    healthProbeSeqRef.current = probeId;
+  const checkConnectionHealth = useCallback(async (backendId: string) => {
+    const profile = profileFor(backendId);
+    const link = linksRef.current.get(backendId);
+    if (!profile?.serverUrl.trim() || !link || link.transportFailure || link.readyWait) return;
+    const probeId = link.healthProbeSeq + 1;
+    link.healthProbeSeq = probeId;
+    const stale = () => link.healthProbeSeq !== probeId || link.transportFailure || Boolean(link.readyWait)
+      || linksRef.current.get(backendId) !== link;
     const startedAt = Date.now();
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), CONNECTION_HEALTH_TIMEOUT_MS);
 
-    setConnectionHealth((current) => ({
-      ...current,
-      status: current.status === 'online' ? 'online' : 'checking',
-      error: '',
+    patchLinkStatus(backendId, (current) => ({
+      health: { ...current.health, status: current.health.status === 'online' ? 'online' : 'checking', error: '' },
     }));
 
     try {
-      const response = await fetch(buildHttpUrl(settings.serverUrl, '/health'), {
+      const response = await fetch(buildHttpUrl(profile.serverUrl, '/health'), {
         cache: 'no-store',
         signal: controller.signal,
       });
       const latencyMs = Date.now() - startedAt;
-      if (healthProbeSeqRef.current !== probeId || transportFailureRef.current || backendReadyWaitRef.current) {
+      if (stale()) {
         return;
       }
       if (!response.ok) {
         throw new Error(`health endpoint returned ${response.status}`);
       }
-      setConnectionHealth({
-        status: 'online',
-        latencyMs,
-        lastCheckedAt: Date.now(),
-        error: '',
-      });
+      patchLinkStatus(backendId, { health: { status: 'online', latencyMs, lastCheckedAt: Date.now(), error: '' } });
     } catch (error) {
-      if (healthProbeSeqRef.current !== probeId || transportFailureRef.current || backendReadyWaitRef.current) {
+      if (stale()) {
         return;
       }
       const isAbort = error instanceof Error && error.name === 'AbortError';
-      setConnectionHealth({
+      patchLinkStatus(backendId, { health: {
         status: 'offline',
         latencyMs: null,
         lastCheckedAt: Date.now(),
         error: isAbort ? t('sess.healthCheckTimeout') : error instanceof Error ? error.message : t('sess.healthCheckFailed'),
-      });
+      } });
     } finally {
       clearTimeout(timeoutId);
     }
-  }, [settings.serverUrl]);
+  }, [patchLinkStatus]);
 
+  // Every connected (or connecting) backend is probed on its own.
   useEffect(() => {
     if (!hydrated) {
       return;
     }
-
-    setConnectionHealth(defaultConnectionHealth);
-    void checkConnectionHealth();
-
-    const intervalId = setInterval(() => {
-      void checkConnectionHealth();
-    }, CONNECTION_HEALTH_INTERVAL_MS);
-
+    const probeAll = () => {
+      for (const backendId of linksRef.current.keys()) void checkConnectionHealth(backendId);
+    };
+    probeAll();
+    const intervalId = setInterval(probeAll, CONNECTION_HEALTH_INTERVAL_MS);
     return () => {
       clearInterval(intervalId);
     };
-  }, [checkConnectionHealth, hydrated]);
+  }, [backendEndpointsKey, checkConnectionHealth, hydrated]);
 
-  const lastFailureRetryableRef = useRef(true);
-
-  const connect = useCallback(() => {
-    manualDisconnectRef.current = false;
-    autoConnectAttemptedRef.current = true;
+  /** Open (or reopen) one backend's socket. */
+  const connectBackend = useCallback((backendId: string) => {
+    const link = linkFor(backendId);
+    link.manualDisconnect = false;
     setAutoConnectEnabled(true);
-    closeSocket(false);
-    const generation = socketGenerationRef.current;
-    const backendId = activeBackendConnectionIdRef.current;
-    connectedBackendIdRef.current = backendId;
+    closeSocket(backendId, false);
+    const generation = link.generation;
     const attempt = new AbortController();
-    connectionAttemptRef.current = attempt;
-    transportFailureRef.current = false;
-    const isAttemptCurrent = () => socketGenerationRef.current === generation
-      && connectionAttemptRef.current === attempt && !attempt.signal.aborted;
+    link.attempt = attempt;
+    link.transportFailure = false;
+    const isAttemptCurrent = () => linksRef.current.get(backendId) === link && link.generation === generation
+      && link.attempt === attempt && !attempt.signal.aborted;
+    const setHealth = (health: Partial<ConnectionHealth>) => patchLinkStatus(backendId, (current) => ({ health: { ...current.health, ...health } }));
     const failTransport = (failure: TransportFailure) => {
-      if (connectionAttemptRef.current !== attempt) return;
+      if (link.attempt !== attempt) return;
       // A definitive failure stops the reconnect loop and keeps the health
       // poll from overwriting the message; a retryable one only reports.
-      transportFailureRef.current = !failure.retryable;
-      closeSocket(false);
-      lastFailureRetryableRef.current = failure.retryable;
-      setConnectionState('error');
-      setLastError(failure.message);
-      setConnectionHealth({ status: 'offline', latencyMs: null, lastCheckedAt: Date.now(), error: failure.message, code: failure.code });
+      link.transportFailure = !failure.retryable;
+      closeSocket(backendId, false);
+      link.lastFailureRetryable = failure.retryable;
+      patchLinkStatus(backendId, { state: 'error' });
+      reportLinkError(backendId, failure.message);
+      patchLinkStatus(backendId, { health: { status: 'offline', latencyMs: null, lastCheckedAt: Date.now(), error: failure.message, code: failure.code } });
     };
-    setLastError('');
-    setConnectionState('connecting');
-    setConnectionHealth((current) => ({ ...current, status: 'checking', error: '', code: '' }));
+    const profile = profileFor(backendId);
+    patchLinkStatus(backendId, { state: 'connecting', error: '' });
+    if (backendId === activeBackendConnectionIdRef.current) setLastError('');
+    setHealth({ status: 'checking', error: '', code: '' });
 
     void (async () => {
-      const inspected = inspectServerUrl(settings.serverUrl);
+      const inspected = inspectServerUrl(profile?.serverUrl ?? '');
       if (inspected.error) {
-        lastFailureRetryableRef.current = inspected.error.retryable;
-        setConnectionState('error');
-        setLastError(inspected.error.userMessage);
-        setConnectionHealth({
+        link.lastFailureRetryable = inspected.error.retryable;
+        patchLinkStatus(backendId, { state: 'error' });
+        reportLinkError(backendId, inspected.error.userMessage);
+        setHealth({
           status: 'offline',
           latencyMs: null,
           lastCheckedAt: Date.now(),
@@ -3902,16 +4139,16 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         return;
       }
 
-      const profile = { ...settings, serverUrl: inspected.origin };
+      const transportProfile = { ...profile!, serverUrl: inspected.origin };
       // A starting backend accepts the connection but answers only once it
       // has loaded, so the policy read, the first request, waits for that
       // instead of timing out; the steps after it then answer promptly.
-      backendReadyWaitRef.current = attempt;
+      link.readyWait = attempt;
       const startingNotice = setTimeout(() => {
-        if (isAttemptCurrent()) setBackendStarting(true);
+        if (isAttemptCurrent()) patchLinkStatus(backendId, { starting: true });
       }, BACKEND_READY_NOTICE_DELAY_MS);
       try {
-        await verifyTransportPolicy(profile, { signal: attempt.signal, timeoutMs: BACKEND_READY_TIMEOUT_MS });
+        await verifyTransportPolicy(transportProfile, { signal: attempt.signal, timeoutMs: BACKEND_READY_TIMEOUT_MS });
       } catch (error) {
         if (!isAttemptCurrent()) return;
         failTransport(describeTransportFailure(error)
@@ -3919,15 +4156,23 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         return;
       } finally {
         clearTimeout(startingNotice);
-        if (backendReadyWaitRef.current === attempt) {
-          backendReadyWaitRef.current = null;
-          setBackendStarting(false);
+        if (link.readyWait === attempt) {
+          link.readyWait = null;
+          patchLinkStatus(backendId, { starting: false });
         }
       }
       if (!isAttemptCurrent()) return;
-      const transport = backendTransport(profile);
+      const transport = backendTransport(transportProfile);
       const probe = await probeBackendConnection({ serverUrl: inspected.origin, transport });
       if (!isAttemptCurrent()) return;
+      const probedVersion = probe.version ? {
+        name: probe.version.name,
+        version: probe.version.version,
+        data_dir: probe.version.dataDir || '',
+        workspace_root: probe.version.workspaceRoot || '',
+        scratch_workspace_root: probe.version.scratchWorkspaceRoot || '',
+        historyEncryption: probe.version.historyEncryption,
+      } : null;
       if (!probe.ok || probe.error) {
         const error = probe.error ?? ConnectionError.unreachable('backend probe failed');
         const transportFailure = describeTransportFailure(error);
@@ -3935,26 +4180,17 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           failTransport(transportFailure);
           return;
         }
-        lastFailureRetryableRef.current = error.retryable;
-        setConnectionState('error');
-        setLastError(error.userMessage);
-        setConnectionHealth({
+        link.lastFailureRetryable = error.retryable;
+        patchLinkStatus(backendId, { state: 'error' });
+        reportLinkError(backendId, error.userMessage);
+        setHealth({
           status: 'offline',
           latencyMs: null,
           lastCheckedAt: Date.now(),
           error: error.userMessage,
           code: error.code,
         });
-        if (probe.version) {
-          setServerVersion({
-            name: probe.version.name,
-            version: probe.version.version,
-            data_dir: probe.version.dataDir || '',
-            workspace_root: probe.version.workspaceRoot || '',
-            scratch_workspace_root: probe.version.scratchWorkspaceRoot || '',
-            historyEncryption: probe.version.historyEncryption,
-          });
-        }
+        if (probedVersion) patchLinkStatus(backendId, { serverVersion: probedVersion });
         if (probe.providers.length) {
           setBackendProviders(backendId, probe.providers);
         }
@@ -3962,51 +4198,44 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       }
 
       setBackendProviders(backendId, probe.providers);
-      if (probe.version) {
-        setServerVersion({
-          name: probe.version.name,
-          version: probe.version.version,
-          data_dir: probe.version.dataDir || '',
-          workspace_root: probe.version.workspaceRoot || '',
-          scratch_workspace_root: probe.version.scratchWorkspaceRoot || '',
-          historyEncryption: probe.version.historyEncryption,
-        });
-      }
-      setConnectionHealth({
+      if (probedVersion) patchLinkStatus(backendId, { serverVersion: probedVersion });
+      patchLinkStatus(backendId, { health: {
         status: 'checking',
         latencyMs: null,
         lastCheckedAt: Date.now(),
         error: '',
         code: '',
-      });
+      } });
 
       let verification: SocketVerification | null = null;
       let verified = false;
       let cryptoFailed = false;
       let socket: SecureSocket;
-      const isSocketCurrent = () => isAttemptCurrent() && socketRef.current === socket;
+      const isSocketCurrent = () => isAttemptCurrent() && link.socket === socket;
       const markVerified = () => {
         if (!isSocketCurrent() || !socket.ready) return;
         verified = true;
-        socketVerifiedRef.current = true;
+        link.verified = true;
         // Server-side subscriptions are per-socket; this socket starts empty.
-        v2SubscriptionsRef.current.clear();
+        link.subscriptions.clear();
+        link.pendingSubscribes.clear();
         // So are live browser views: watch again what is still on screen.
         for (const watched of agentBrowserWatchersRef.current.keys()) {
+          if (backendIdForConversation(watched) !== backendId) continue;
           const watchFrame = JSON.stringify({ id: createRequestId(AGENT_BROWSER_WATCH_ID_PREFIX), type: 'agentBrowser.watch', payload: { conversationId: watched } });
           sendSocketText(socket, watchFrame);
         }
         // The backend may have restarted meanwhile: the warm effect, rerun by
         // the connection epoch, warms the open conversation again.
-        conversationWarmSentAtRef.current.clear();
-        pendingV2SubscribeRef.current.clear();
-        reconnectAttemptRef.current = 0;
-        lastFailureRetryableRef.current = true;
-        setConnectionState('open');
-        setConnectionEpoch((current) => current + 1);
-        sendSessionResume(getSessionCursorSnapshot());
-        void checkConnectionHealth();
-        void refreshServerVersion();
+        for (const v2Id of [...conversationWarmSentAtRef.current.keys()]) {
+          if (backendIdForConversation(v2Id) === backendId) conversationWarmSentAtRef.current.delete(v2Id);
+        }
+        link.reconnectAttempt = 0;
+        link.lastFailureRetryable = true;
+        patchLinkStatus(backendId, (current) => ({ state: 'open', epoch: current.epoch + 1, error: '' }));
+        sendSessionResume(backendId, getSessionCursorSnapshot(backendId));
+        void checkConnectionHealth(backendId);
+        void refreshServerVersion(backendId);
         // Only the open conversation replays history eagerly. Other
         // conversations subscribe at their known high-water mark and
         // recover on demand (open, or a live event exposing a gap), so a
@@ -4014,35 +4243,31 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         const foregroundConversation = conversationsRef.current.find(
           (item) => item.id === activeConversationRef.current,
         );
+        const ownsForeground = Boolean(foregroundConversation) && backendIdForConversation(foregroundConversation!.id) === backendId;
         // Returning to a backend continues its history where it stopped:
         // a loaded conversation catches up from its cursor, an unloaded one
         // opens lazily from the journal tail.
-        if (foregroundConversation?.v2ConversationId) {
+        if (ownsForeground && foregroundConversation?.v2ConversationId) {
           void openConversation(foregroundConversation.id);
         }
         // Prompt submissions whose ACK was lost are reconciled against the
         // journal: delivered ones resume tracking, the rest return to drafts.
         for (const [pendingId, pending] of pendingV2SubmissionsRef.current) {
-          if (pending.phase === 'unknown') void reconcilePendingSubmission(pendingId);
+          if (pending.phase === 'unknown' && backendIdForConversation(pendingId) === backendId) void reconcilePendingSubmission(pendingId);
         }
         void (async () => {
-          await syncWorkspacesFromBackend();
+          await syncWorkspacesFromBackend(backendId);
           if (!isSocketCurrent()) return;
-          const backendId = activeBackendConnectionIdRef.current;
-          const candidates = conversationsRef.current.filter((conversation) => {
-            if (!conversation.v2ConversationId || conversation.archived === true) return false;
-            // Manifest-imported conversations are untagged; their workspace
-            // names the backend that owns them.
-            const ownerId = conversation.backendConnectionId
-              ?? workspacesRef.current.find((item) => item.id === conversation.workspaceId)?.backendConnectionId;
-            return !ownerId || ownerId === backendId;
-          });
+          const candidates = conversationsRef.current.filter((conversation) => (
+            Boolean(conversation.v2ConversationId) && conversation.archived !== true
+            && backendIdForConversation(conversation.id) === backendId
+          ));
           // The foreground conversation must keep its live subscription even
           // when the list exceeds the server's per-socket subscription cap.
           candidates.sort((left, right) =>
             Number(right.id === foregroundConversation?.id) - Number(left.id === foregroundConversation?.id));
           for (const conversation of candidates) {
-            if (v2SubscriptionsRef.current.size >= V2_WS_SUBSCRIPTION_BUDGET) break;
+            if (link.subscriptions.size >= V2_WS_SUBSCRIPTION_BUDGET) break;
             const v2ConversationId = conversation.v2ConversationId as string;
             try {
               // Conversations whose last recovery was cut short resume here.
@@ -4064,13 +4289,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
             }
           }
         })();
-        flushQueuedProtocolCommands();
+        link.commands.flush();
       };
       const failVerification = (error: unknown) => {
         // The verifier's verdict is authoritative even when the socket
         // already closed mid-handshake; only a newer connection attempt or
         // our own abort may supersede it.
-        if (connectionAttemptRef.current !== attempt) return;
+        if (link.attempt !== attempt) return;
         if (error instanceof DOMException && error.name === 'AbortError') return;
         const failure = describeTransportFailure(error)
           ?? { message: t('transport.notVerified'), retryable: false, code: 'protocol_mismatch' as const };
@@ -4078,9 +4303,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           if (!isSocketCurrent()) return;
           // Transient drop mid-handshake: supersede this socket so its
           // onClose no-ops, then let the reconnect effect retry.
-          closeSocket(false);
-          lastFailureRetryableRef.current = true;
-          setConnectionState('closed');
+          closeSocket(backendId, false);
+          link.lastFailureRetryable = true;
+          patchLinkStatus(backendId, { state: 'closed' });
           return;
         }
         socket.close();
@@ -4111,7 +4336,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
               verification?.handleMessage(text);
               return;
             }
-            enqueueSocketFrame({ data: text, generation });
+            enqueueSocketFrame({ data: text, backendId, generation });
           },
           onError: (error) => {
             if (!isSocketCurrent()) return;
@@ -4123,42 +4348,37 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
             const message = socket.encrypted && !verified
               ? t('transport.notVerified')
               : ConnectionError.websocketFailed(inspected.origin).userMessage;
-            lastFailureRetryableRef.current = true;
-            setConnectionState('error');
-            setLastError(message);
-            setConnectionHealth((current) => ({
-              ...current,
-              status: 'offline',
-              error: message,
-              code: 'websocket_failed',
-            }));
+            link.lastFailureRetryable = true;
+            patchLinkStatus(backendId, { state: 'error' });
+            reportLinkError(backendId, message);
+            setHealth({ status: 'offline', error: message, code: 'websocket_failed' });
           },
           onClose: (event) => {
             if (!isSocketCurrent()) return;
             verification?.fail();
-            socketVerifiedRef.current = false;
-            socketRef.current = null;
+            link.verified = false;
+            link.socket = null;
             attempt.abort();
-            protocolCommandsRef.current?.disconnect();
+            link.commands.disconnect();
             if (cryptoFailed || event.code === TRANSPORT_V2_WS_CLOSE_CODE) {
               // A transport crypto failure: reconnect with a fresh handshake
               // and tell the user how to recover if it keeps happening.
               const failure = describeTransportFailure(new TransportCryptoError('socket closed')) as TransportFailure;
-              lastFailureRetryableRef.current = true;
-              setConnectionState('error');
-              setLastError(failure.message);
-              setConnectionHealth((current) => ({ ...current, status: 'offline', error: failure.message, code: failure.code }));
+              link.lastFailureRetryable = true;
+              patchLinkStatus(backendId, { state: 'error' });
+              reportLinkError(backendId, failure.message);
+              setHealth({ status: 'offline', error: failure.message, code: failure.code });
               return;
             }
             if (socket.encrypted && !verified) {
               // A drop before the encrypted handshake finishes is transient;
               // keep auto-reconnect alive instead of latching an error.
-              lastFailureRetryableRef.current = true;
-              setConnectionState('closed');
-              setLastError(t('transport.notVerified'));
+              link.lastFailureRetryable = true;
+              patchLinkStatus(backendId, { state: 'closed' });
+              reportLinkError(backendId, t('transport.notVerified'));
               return;
             }
-            setConnectionState((current) => (current === 'open' || current === 'connecting' ? 'closed' : current));
+            patchLinkStatus(backendId, (current) => ({ state: current.state === 'open' || current.state === 'connecting' ? 'closed' : current.state }));
           },
         });
       } catch (error) {
@@ -4167,109 +4387,120 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           ?? { message: error instanceof Error ? error.message : t('transport.invalidKey'), retryable: false, code: 'encryption_required' });
         return;
       }
-      socketRef.current = socket;
+      link.socket = socket;
     })().catch((error: unknown) => {
       if (!isAttemptCurrent()) return;
-      lastFailureRetryableRef.current = true;
-      setConnectionState('error');
+      link.lastFailureRetryable = true;
+      patchLinkStatus(backendId, { state: 'error' });
       const message = error instanceof Error ? error.message : t('sess.backendConnectFailed');
-      setLastError(message);
-      setConnectionHealth({ status: 'offline', latencyMs: null, lastCheckedAt: Date.now(), error: message, code: 'backend_unreachable' });
+      reportLinkError(backendId, message);
+      setHealth({ status: 'offline', latencyMs: null, lastCheckedAt: Date.now(), error: message, code: 'backend_unreachable' });
     });
-  }, [checkConnectionHealth, closeSocket, enqueueSocketFrame, flushQueuedProtocolCommands, getSessionCursorSnapshot, openConversation, reconcilePendingSubmission, refreshServerVersion, sendSessionResume, setBackendProviders, settings, subscribeV2Conversation, syncWorkspacesFromBackend]);
+  }, [checkConnectionHealth, closeSocket, enqueueSocketFrame, getSessionCursorSnapshot, openConversation, patchLinkStatus, reconcilePendingSubmission, refreshServerVersion, reportLinkError, sendSessionResume, setBackendProviders, subscribeV2Conversation, syncWorkspacesFromBackend]);
 
+  /** Connect a backend (the focused one when none is named). */
+  const connect = useCallback((backendId = activeBackendConnectionIdRef.current) => connectBackend(backendId), [connectBackend]);
+  /** Disconnect a backend (the focused one when none is named); `manual`
+   * keeps it disconnected until Connect. */
+  const disconnect = useCallback((backendId = activeBackendConnectionIdRef.current, manual = true) => closeSocket(backendId, manual), [closeSocket]);
+
+  // Each backend reconnects on its own after a retryable drop, with jittered
+  // backoff so backends that dropped together do not retry in lockstep.
   useEffect(() => {
-    if (!hydrated || !autoConnectEnabled || manualDisconnectRef.current) {
+    if (!hydrated || !autoConnectEnabled) {
       return;
     }
-    if (connectionState !== 'closed' && connectionState !== 'error') {
-      return;
+    for (const [backendId, status] of Object.entries(linkStatusByBackend)) {
+      const link = linksRef.current.get(backendId);
+      if (!link || link.manualDisconnect || link.reconnectTimer) continue;
+      if (status.state !== 'closed' && status.state !== 'error') continue;
+      if (!link.lastFailureRetryable) continue;
+      const delay = nextReconnectDelayMs(link.reconnectAttempt);
+      link.reconnectAttempt += 1;
+      link.reconnectTimer = setTimeout(() => {
+        link.reconnectTimer = null;
+        // A definitive failure may land after this timer was scheduled (the
+        // encrypted-socket verifier can reject after the socket closes).
+        if (linksRef.current.get(backendId) === link && !link.manualDisconnect && link.lastFailureRetryable) {
+          connectBackend(backendId);
+        }
+      }, delay);
     }
-    if (!lastFailureRetryableRef.current) {
-      return;
+  }, [autoConnectEnabled, connectBackend, hydrated, linkStatusByBackend]);
+  useEffect(() => () => {
+    for (const link of linksRef.current.values()) {
+      if (link.reconnectTimer) clearTimeout(link.reconnectTimer);
+      link.reconnectTimer = null;
     }
-    if (reconnectTimerRef.current) {
-      clearTimeout(reconnectTimerRef.current);
-    }
-    const delay = nextReconnectDelayMs(reconnectAttemptRef.current);
-    reconnectAttemptRef.current += 1;
-    reconnectTimerRef.current = setTimeout(() => {
-      reconnectTimerRef.current = null;
-      // A definitive failure may land after this timer was scheduled (the
-      // encrypted-socket verifier can reject after the socket closes).
-      if (!manualDisconnectRef.current && lastFailureRetryableRef.current) {
-        connect();
-      }
-    }, delay);
-    return () => {
-      if (reconnectTimerRef.current) {
-        clearTimeout(reconnectTimerRef.current);
-        reconnectTimerRef.current = null;
-      }
-    };
-  }, [autoConnectEnabled, connect, connectionState, hydrated]);
+  }, []);
 
   // Backstop for the event-driven reconnect above: a socket can die without a
   // usable close event (sleep/wake, renderer churn, missed state transitions),
-  // and state latches like manualDisconnectRef can silently suppress retries.
-  // The watchdog reconnects whenever the socket is observably dead, and pings
+  // and state latches like manualDisconnect can silently suppress retries.
+  // The watchdog reconnects whenever a socket is observably dead, and pings
   // an open socket so a half-open TCP connection is also detected.
+  const linkStatusRef = useRef(linkStatusByBackend);
+  linkStatusRef.current = linkStatusByBackend;
   useEffect(() => {
     if (!hydrated || !autoConnectEnabled) return;
     const tick = () => {
-      if (manualDisconnectRef.current) return;
-      const socket = socketRef.current;
-      if (!socket || socket.closed) {
-        socketVerifiedRef.current = false;
-        socketWatchdogFailuresRef.current = 0;
-        setConnectionState((current) => (current === 'open' ? 'closed' : current));
-        if (!lastFailureRetryableRef.current || connectionState === 'connecting') return;
-        connect();
-        return;
+      for (const [backendId, link] of linksRef.current) {
+        if (link.manualDisconnect) continue;
+        const socket = link.socket;
+        if (!socket || socket.closed) {
+          link.verified = false;
+          link.watchdogFailures = 0;
+          const state = linkStatusRef.current[backendId]?.state;
+          if (state === 'open') patchLinkStatus(backendId, { state: 'closed' });
+          // Never connected, or waiting for Connect after a re-point.
+          if (!state || state === 'idle' || state === 'connecting' || !link.lastFailureRetryable) continue;
+          connectBackend(backendId);
+          continue;
+        }
+        if (!socket.ready || !link.verified) continue;
+        const livenessProbe = socket;
+        void sendProtocolCommand({ id: createRequestId('watchdog'), type: 'server.ping', payload: {} }, SOCKET_LIVENESS_TIMEOUT_MS, backendId)
+          .then(() => {
+            link.watchdogFailures = 0;
+          })
+          .catch(() => {
+            if (link.socket !== livenessProbe) return;
+            link.watchdogFailures += 1;
+            if (link.watchdogFailures < SOCKET_LIVENESS_MAX_FAILURES) return;
+            link.watchdogFailures = 0;
+            closeSocket(backendId, false);
+            patchLinkStatus(backendId, { state: 'closed' });
+          });
       }
-      if (!socket.ready || !socketVerifiedRef.current) return;
-      const livenessProbe = socket;
-      void sendProtocolCommand({ id: createRequestId('watchdog'), type: 'server.ping', payload: {} }, SOCKET_LIVENESS_TIMEOUT_MS)
-        .then(() => {
-          socketWatchdogFailuresRef.current = 0;
-        })
-        .catch(() => {
-          if (socketRef.current !== livenessProbe) return;
-          socketWatchdogFailuresRef.current += 1;
-          if (socketWatchdogFailuresRef.current < SOCKET_LIVENESS_MAX_FAILURES) return;
-          socketWatchdogFailuresRef.current = 0;
-          closeSocket(false);
-          setConnectionState('closed');
-        });
     };
     const intervalId = setInterval(tick, SOCKET_WATCHDOG_INTERVAL_MS);
     return () => clearInterval(intervalId);
-  }, [autoConnectEnabled, closeSocket, connect, connectionState, hydrated, sendProtocolCommand]);
+  }, [autoConnectEnabled, closeSocket, connectBackend, hydrated, patchLinkStatus, sendProtocolCommand]);
 
+  // At startup every backend with a server URL connects. Backends added or
+  // re-pointed later connect on Connect, or once pairing completes.
+  const autoConnectStartedRef = useRef(false);
   useEffect(() => {
-    if (!hydrated || !autoConnectEnabled || autoConnectAttemptedRef.current) {
+    if (!hydrated || !autoConnectEnabled || autoConnectStartedRef.current) {
       return;
     }
+    autoConnectStartedRef.current = true;
+    for (const profile of backendConnectionsRef.current) {
+      if (profile.serverUrl.trim() && !linksRef.current.has(profile.id)) connectBackend(profile.id);
+    }
+  }, [autoConnectEnabled, connectBackend, hydrated]);
 
-    autoConnectAttemptedRef.current = true;
-    connect();
-  }, [autoConnectEnabled, connect, hydrated]);
-
+  // Pairing approved a backend: connect it once the profile carrying the new
+  // credentials has been committed.
+  const pairingConnectPendingRef = useRef(new Set<string>());
   useEffect(() => {
-    if (!pairingConnectPendingRef.current) return;
-    pairingConnectPendingRef.current = false;
-    connect();
-  }, [connect]);
-
-  // Selecting a workspace or conversation on another backend switches the
-  // active profile; move the socket there. Editing the active profile's URL
-  // does not reconnect by itself — that still goes through Settings.
-  useEffect(() => {
-    if (!hydrated || !autoConnectEnabled || manualDisconnectRef.current) return;
-    const connectedBackendId = connectedBackendIdRef.current;
-    if (!connectedBackendId || connectedBackendId === activeBackendConnectionId) return;
-    connect();
-  }, [activeBackendConnectionId, autoConnectEnabled, connect, hydrated]);
+    if (!pairingConnectPendingRef.current.size) return;
+    const pending = [...pairingConnectPendingRef.current];
+    pairingConnectPendingRef.current.clear();
+    for (const backendId of pending) {
+      if (profileFor(backendId)) connectBackend(backendId);
+    }
+  }, [backendConnections, connectBackend]);
 
   const sendProtocolMessage = useCallback(
     (
@@ -4277,12 +4508,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       payload: Record<string, unknown>,
       requestId = createRequestId('msg'),
       target?: TimelineTarget,
+      backendId = target?.conversationId ? backendIdForConversation(target.conversationId) : backendIdForPayload(payload),
     ) => {
-      const socket = socketRef.current;
-      if (!socket?.ready || !socketVerifiedRef.current) {
-        if (autoConnectEnabled && !manualDisconnectRef.current) {
+      const link = linksRef.current.get(backendId);
+      if (!link?.socket?.ready || !link.verified) {
+        if (autoConnectEnabled && profileFor(backendId)?.serverUrl.trim() && !link?.manualDisconnect) {
           setLastError(t('sess.reconnecting'));
-          connect();
+          connectBackend(backendId);
         } else {
           setLastError(t('sess.connectBackendFirst'));
         }
@@ -4291,7 +4523,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
 
       let message: { id: string; type: string; payload: Record<string, unknown> } | null;
       try {
-        message = sendRawProtocolFrame({ id: requestId, type, payload });
+        message = sendRawProtocolFrame({ id: requestId, type, payload }, backendId);
       } catch (error: unknown) {
         setLastError(
           error instanceof ConnectionError ? error.userMessage : t('sess.sendFailed'),
@@ -4311,7 +4543,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       }
       return true;
     },
-    [appendTimeline, autoConnectEnabled, connect, sendRawProtocolFrame],
+    [appendTimeline, autoConnectEnabled, connectBackend, sendRawProtocolFrame],
   );
 
   const seedTerminalState = useCallback((target: TerminalTarget, patch: Partial<TerminalClientState> = {}, notice?: TerminalOutputEntry) => {
@@ -4326,6 +4558,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         ...(target.kind === 'ssh' ? { ssh: { host: target.host } } : {}),
         workspaceId: workspace?.id ?? '',
         conversationId: target.kind === 'workspace' ? target.conversation.id : '',
+        // SSH terminals run on the backend focused when they start.
+        backendConnectionId: target.kind === 'workspace'
+          ? ownerBackendId(target.conversation, target.workspace, noWorkspaceBackendIdRef.current)
+          : activeBackendConnectionIdRef.current,
         tenantId: workspace?.tenantId || settings.tenantId,
         cwd: workspace?.path ?? '',
         shell: '',
@@ -4557,7 +4793,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   }, [sendProtocolMessage, settings.tenantId]);
 
   const createWorkspace = useCallback(
-    (nameDraft: string, pathDraft: string) => {
+    (nameDraft: string, pathDraft: string, backendConnectionId = activeBackendConnectionIdRef.current) => {
       const path = pathDraft.trim();
       if (!path) {
         desktopAlert(t('alert.missingDirectory'), t('alert.missingDirectoryBody'));
@@ -4572,7 +4808,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         id,
         name,
         path,
-        backendConnectionId: activeBackendConnectionId,
+        backendConnectionId,
         sessionId,
         tenantId: settings.tenantId,
         threadId,
@@ -4607,7 +4843,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       settings.defaultReasoningEffort,
       settings.sandboxMode,
       settings.tenantId,
-      activeBackendConnectionId,
     ],
   );
 
@@ -4627,46 +4862,70 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     }));
   }, []);
 
+  /** Updates app-wide preferences; changed transport fields re-point the
+   * focused backend's profile (they belong to a backend, not the app). */
+  const setSettings = useCallback((value: SetStateAction<ConnectionSettings>) => {
+    const current = connectionRoutingRef.current;
+    const next = typeof value === 'function' ? value(current) : value;
+    setPreferences(next);
+    const patch: Partial<BackendConnectionProfile> = {};
+    if (next.serverUrl !== current.serverUrl) patch.serverUrl = next.serverUrl;
+    if (next.deviceSecret !== current.deviceSecret) patch.deviceSecret = next.deviceSecret;
+    if (next.tenantId !== current.tenantId) patch.tenantId = next.tenantId;
+    if (next.encryptionProtocol !== current.encryptionProtocol) patch.encryptionProtocol = next.encryptionProtocol;
+    if (next.encryptionPublicKey !== current.encryptionPublicKey) patch.encryptionPublicKey = next.encryptionPublicKey;
+    if (next.transportVerified !== current.transportVerified) patch.transportVerified = next.transportVerified;
+    const focusId = activeBackendConnectionIdRef.current;
+    if (Object.keys(patch).length && profileFor(focusId)) updateBackendConnection(focusId, patch);
+  }, [updateBackendConnection]);
+
   // Device pairing approved the device and the transport key it verified:
-  // one profile update pins both, then the connection starts once the
-  // settings carrying them have been committed (see the effect after the
-  // auto-connect effect).
-  const pairingConnectPendingRef = useRef(false);
+  // one profile update pins both, then the backend connects once the profile
+  // carrying them has been committed (see the pairing effect).
   const onDevicePairingApproved = useCallback((
     profileId: string,
     credentials: Pick<BackendConnectionProfile, 'deviceSecret' | 'encryptionProtocol' | 'encryptionPublicKey' | 'transportVerified'>,
   ) => {
     updateBackendConnection(profileId, credentials);
-    if (activeBackendConnectionIdRef.current !== profileId) return;
-    setSettings((current) => ({ ...current, ...credentials }));
-    pairingConnectPendingRef.current = true;
+    pairingConnectPendingRef.current.add(profileId);
   }, [updateBackendConnection]);
 
   const addBackendConnection = useCallback((profile?: Partial<BackendConnectionProfile>) => {
     const id = createRequestId('backend');
     // A new backend never inherits the current device key or transport pin.
-    const next: BackendConnectionProfile = { ...profileFromSettings(settings, t('session.newBackend'), id), ...UNPAIRED_TRANSPORT, ...profile, id, createdAt: Date.now(), updatedAt: Date.now() };
+    const next: BackendConnectionProfile = { ...profileFromSettings(connectionRoutingRef.current, t('session.newBackend'), id), ...UNPAIRED_TRANSPORT, ...profile, id, createdAt: Date.now(), updatedAt: Date.now() };
     setBackendConnections((current) => [...current, next]);
-    setActiveBackendConnectionId(id);
-    setSettings((current) => settingsFromProfile(next, current));
     return next;
-  }, [settings]);
+  }, []);
 
+  /** Removes a backend profile: its connection closes, and its device key
+   * and history keys are forgotten. The last backend cannot be removed. */
   const removeBackendConnection = useCallback((id: string) => {
-    if (backendConnections.length <= 1) return;
+    const profiles = backendConnectionsRef.current;
+    if (profiles.length <= 1 || !profiles.some((profile) => profile.id === id)) return;
+    closeSocket(id, true);
+    linksRef.current.get(id)?.commands.dispose();
+    linksRef.current.delete(id);
+    configureKanbanSync(id, null);
+    setLinkStatusByBackend(({ [id]: _removed, ...rest }) => rest);
+    setV2ConversationsByBackend(({ [id]: _removed, ...rest }) => rest);
+    setDirectorySyncByBackend(({ [id]: _removed, ...rest }) => rest);
     void removeSecret(`${DEVICE_SECRET_STORAGE_KEY}.${id}`).catch((error) => {
       setLastError(error instanceof Error ? error.message : t('sess.credentialClearFailed'));
     });
     void historyEncryptionRef.current?.forgetBackend(id).catch((error: unknown) => {
       setLastError(error instanceof Error ? error.message : t('history.keyFailed'));
     });
-    const next = backendConnections.filter((profile) => profile.id !== id);
-    setBackendConnections(next);
-    if (activeBackendConnectionId === id && next[0]) {
-      setActiveBackendConnectionId(next[0].id);
-      setSettings((current) => settingsFromProfile(next[0], current));
-    }
-  }, [activeBackendConnectionId, backendConnections]);
+    setBackendConnections((current) => current.filter((profile) => profile.id !== id));
+    // A None-workspace backend that is gone falls back to the first added.
+    setNoWorkspaceBackendPreference((current) => (current === id ? '' : current));
+  }, [closeSocket]);
+
+  /** Picks the backend new None-workspace conversations start on. */
+  const setNoWorkspaceBackendId = useCallback((id: string) => {
+    if (!backendConnectionsRef.current.some((profile) => profile.id === id)) return;
+    setNoWorkspaceBackendPreference(id);
+  }, []);
 
   const selectWorkspace = useCallback((workspaceId: string) => {
     const workspace = workspaces.find((item) => item.id === workspaceId);
@@ -4674,11 +4933,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       return;
     }
     setActiveWorkspaceId(workspaceId);
-    const profile = backendConnections.find((item) => item.id === workspace.backendConnectionId);
-    if (profile) {
-      setActiveBackendConnectionId(profile.id);
-      setSettings((current) => settingsFromProfile(profile, current));
-    }
     const conversation = conversations.find((item) => item.workspaceId === workspaceId);
     if (conversation) {
       setActiveConversationId(conversation.id);
@@ -4688,21 +4942,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       setActiveConversationId(nextConversation.id);
     }
     setLastError('');
-  }, [backendConnections, conversations, workspaces]);
+  }, [conversations, workspaces]);
 
   const selectConversation = useCallback((workspaceId: string, conversationId: string) => {
-    const conversation = conversations.find((item) => item.id === conversationId);
-    const workspace = workspaces.find((item) => item.id === workspaceId);
-    const profileId = conversation?.backendConnectionId ?? workspace?.backendConnectionId;
-    const profile = backendConnections.find((item) => item.id === profileId);
-    if (profile) {
-      setActiveBackendConnectionId(profile.id);
-      setSettings((current) => settingsFromProfile(profile, current));
-    }
     setActiveWorkspaceId(workspaceId);
     setActiveConversationId(conversationId);
     setLastError('');
-  }, [backendConnections, conversations, workspaces]);
+  }, []);
 
   /** A turn that finished out of sight goes to the notification history. */
   const recordCompletion = (localId: string, state: { timeline: TimelineEntry[] }) => {
@@ -4753,7 +4999,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         const tombstone: WorkspaceTombstone = {
           id: removedWorkspace.id,
           path: removedWorkspace.path,
-          backendConnectionId: removedWorkspace.backendConnectionId ?? activeBackendConnectionId ?? null,
+          backendConnectionId: removedWorkspace.backendConnectionId ?? activeBackendConnectionId,
           deletedAt: Date.now(),
         };
         const nextTombstones = [
@@ -4764,12 +5010,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         workspaceTombstonesRef.current = nextTombstones;
         setWorkspaceTombstones(nextTombstones);
       }
-      if (
-        connectionState === 'open' &&
-        removedWorkspace &&
-        (!removedWorkspace.backendConnectionId || removedWorkspace.backendConnectionId === activeBackendConnectionId)
-      ) {
-        void backendFetch(settings, {
+      const ownerProfile = profileFor(removedWorkspace?.backendConnectionId ?? activeBackendConnectionId);
+      if (removedWorkspace && ownerProfile && linkStatusRef.current[ownerProfile.id]?.state === 'open') {
+        void backendFetch(ownerProfile, {
           method: 'DELETE',
           path: `/v2/workspaces/${encodeURIComponent(workspaceId)}`,
         }).then((response) => {
@@ -4819,7 +5062,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         setActiveConversationId(conversations.find((conversation) => conversation.workspaceId === next?.id)?.id ?? '');
       }
     },
-    [activeBackendConnectionId, activeWorkspaceId, connectionState, conversations, settings, unsubscribeV2Conversation, workspaces],
+    [activeBackendConnectionId, activeWorkspaceId, conversations, unsubscribeV2Conversation, workspaces],
   );
 
   const renameWorkspace = useCallback((workspaceId: string, name: string) => {
@@ -5785,7 +6028,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   ): Promise<boolean> => {
     const context = getConversationContext(conversationId);
     if (!context) return false;
-    const config = conversationPermissionCapabilities(context.conversation, v2ProvidersRef.current);
+    const config = conversationPermissionCapabilities(context.conversation, providersForConversation(context.conversation));
     if (!config?.modes?.includes(mode)) {
       setLastError(t('sess.permissionModeUnsupported'));
       return false;
@@ -5810,7 +6053,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   ): Promise<boolean> => {
     const context = getConversationContext(conversationId);
     if (!context) return false;
-    const config = conversationPermissionCapabilities(context.conversation, v2ProvidersRef.current);
+    const config = conversationPermissionCapabilities(context.conversation, providersForConversation(context.conversation));
     if (mode === 'plan' && !config?.supportsPlan) {
       setLastError(t('sess.workModeUnsupported'));
       return false;
@@ -6045,10 +6288,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       workspaceId: context.workspace.id,
       conversationId: context.conversation.id,
     });
-    if (connectionState === 'open') {
+    if (linkStatusRef.current[backendIdForConversation(context.conversation.id)]?.state === 'open') {
       requestTerminalStatus(target);
     }
-  }, [connectionState, getConversationContext, requestTerminalStatus, seedTerminalState]);
+  }, [getConversationContext, requestTerminalStatus, seedTerminalState]);
 
   const requestSkillList = useCallback(async (conversationId = activeConversationRef.current, forceReload = false) => {
     const context = getConversationContext(conversationId);
@@ -6177,10 +6420,18 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       desktopAlert(t('alert.workspaceNotFound'), t('alert.workspaceNotFoundBody'));
       return null;
     }
+    const backendProfile = backendConnections.find((item) => item.id === options?.backendConnectionId) ?? backendConnections.find((item) => item.id === workspace.backendConnectionId);
+    // None spans every backend: its new conversations start on the backend
+    // chosen for it in Settings.
+    const backendConnectionId = backendProfile?.id
+      ?? workspace.backendConnectionId
+      ?? (isNoneWorkspaceId(workspace.id) ? noWorkspaceBackendIdRef.current || null : null);
+    // The agents the conversation's own backend offers.
+    const providers = (backendConnectionId ? v2ProvidersByBackendRef.current[backendConnectionId] : undefined) ?? v2ProvidersRef.current;
     const agent = resolveCreateConversationAgent({
       requestedProvider: options?.provider,
       requestedProfile: options?.providerProfile,
-      providers: v2ProvidersRef.current,
+      providers,
       conversations: conversationsRef.current,
       activeConversationId: activeConversationRef.current,
       workspaceId: workspace.id,
@@ -6193,15 +6444,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       return null;
     }
 
-    const backendProfile = backendConnections.find((item) => item.id === options?.backendConnectionId) ?? backendConnections.find((item) => item.id === workspace.backendConnectionId);
-    // None spans every backend, so its conversations belong to the active one.
-    const backendConnectionId = backendProfile?.id
-      ?? workspace.backendConnectionId
-      ?? (isNoneWorkspaceId(workspace.id) ? activeBackendConnectionId || null : null);
     const rememberedSelection = resolveRememberedProviderSelection(backendConnectionId, agent.provider);
     const runModes = rememberedRunModes(
       providerModelPreferencesRef.current[providerModelPreferenceKey(backendConnectionId, agent.provider)],
-      v2ProvidersRef.current.find((item) => item.id === agent.provider)?.capabilities.permissionConfig,
+      providers.find((item) => item.id === agent.provider)?.capabilities.permissionConfig,
     );
     const existing = options?.fresh ? undefined : conversationsRef.current.find((item) =>
       item.workspaceId === workspaceId
@@ -6236,7 +6482,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     setActiveWorkspaceId(workspace.id);
     setActiveConversationId(placeholder.id);
     return placeholder;
-  }, [activeBackendConnectionId, backendConnections, isUnusedConversation, resolveRememberedProviderSelection]);
+  }, [backendConnections, isUnusedConversation, resolveRememberedProviderSelection]);
 
   // None conversations always run through a provider, which creates their
   // folder. The generic default draft has no provider (it would take the
@@ -6290,7 +6536,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     if (!workspace) {
       // createWorkspace owns the normal defaults and sidebar selection. Publish
       // its records to refs immediately so a second click cannot create duplicates.
-      const created = createWorkspace(displayNameFromPath(targetPath), targetPath);
+      const created = createWorkspace(displayNameFromPath(targetPath), targetPath, backendId);
       if (!created) return null;
       workspace = { ...created.workspace, backendConnectionId: backendId,
         model: sourceWorkspace.model, reasoningEffort: sourceWorkspace.reasoningEffort,
@@ -6411,7 +6657,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     const { workspace, conversation } = context;
     if (refuseReadOnlyWrite(conversation)) return null;
     if (conversation.v2ConversationId) {
-      const provider = v2ProvidersRef.current.find((item) => item.id === conversation.provider);
+      const provider = providersForConversation(conversation).find((item) => item.id === conversation.provider);
       if (!provider?.capabilities.controlActions?.includes('fork')) {
         setLastError(t('sess.forkUnsupported'));
         return null;
@@ -6426,8 +6672,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
             conversationId: conversation.v2ConversationId, title: t('sess.forkTitle', { title: conversation.title || t('sess.conversation') }),
           } }, 45_000);
           if (typeof result.conversationId !== 'string') throw new Error(t('sess.forkNoId'));
-          const api = backendApi(settings);
-          const created = await api.getConversation(result.conversationId);
+          // The fork lives on the source conversation's backend.
+          const created = await v2ApiForConversation(conversation.id).getConversation(result.conversationId);
           const record = { ...conversationFromManifest(created, workspace.id), backendConnectionId: conversation.backendConnectionId,
             model: conversation.model, reasoningEffort: conversation.reasoningEffort,
             permissionMode: conversation.permissionMode, mode: conversation.mode };
@@ -6599,20 +6845,19 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       if (conversation.v2ConversationId) {
         return conversation;
       }
-      const provider = v2ProvidersRef.current.find(
+      const backendConnectionId = conversation.backendConnectionId
+        || workspace.backendConnectionId
+        || (isNoneWorkspaceId(workspace.id) ? noWorkspaceBackendIdRef.current || null : null);
+      const backendProfile = backendConnectionId ? profileFor(backendConnectionId) : undefined;
+      const providers = (backendConnectionId ? v2ProvidersByBackendRef.current[backendConnectionId] : undefined) ?? v2ProvidersRef.current;
+      const provider = providers.find(
         (item) => item.id === conversation.provider && item.available,
       );
       if (!provider) {
-        const descriptor = v2ProvidersRef.current.find((item) => item.id === conversation.provider);
+        const descriptor = providers.find((item) => item.id === conversation.provider);
         desktopAlert(t('alert.agentUnavailable'), descriptor?.unavailableReason || t('alert.agentUnavailableBody'));
         return null;
       }
-
-      const backendProfile = backendConnections.find((item) => item.id === conversation.backendConnectionId)
-        ?? backendConnections.find((item) => item.id === workspace.backendConnectionId);
-      const backendConnectionId = backendProfile?.id
-        ?? workspace.backendConnectionId
-        ?? (isNoneWorkspaceId(workspace.id) ? activeBackendConnectionId || null : null);
       const title = conversation.title.trim();
       const isDefaultTitle = isDefaultConversationTitle(title);
       const firstMessageTitle = firstMessageText.trim().slice(0, 18);
@@ -6651,10 +6896,12 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         ];
         conversationsRef.current = replaceConversation(conversationsRef.current);
         setConversations(replaceConversation);
-        setV2Conversations((current) => [
-          created,
-          ...current.filter((item) => item.id !== created.id),
-        ]);
+        if (backendConnectionId) {
+          setV2ConversationsByBackend((current) => ({
+            ...current,
+            [backendConnectionId]: [created, ...(current[backendConnectionId] ?? []).filter((item) => item.id !== created.id)],
+          }));
+        }
         void recoverConversation(record.id);
         subscribeV2Conversation(created.id, { afterSequence: 0, limit: 200 });
         return record;
@@ -6699,12 +6946,12 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         return false;
       }
 
-      const permissionMode = conversationPermissionMode(conversation, workspace, v2ProvidersRef.current);
+      const permissionMode = conversationPermissionMode(conversation, workspace, providersForConversation(conversation));
       if (!permissionMode) {
         setLastError(t('sess.permissionSelectRequired'));
         return false;
       }
-      const permissionConfig = conversationPermissionCapabilities(conversation, v2ProvidersRef.current);
+      const permissionConfig = conversationPermissionCapabilities(conversation, providersForConversation(conversation));
       if (conversation.mode === 'plan' && !permissionConfig?.supportsPlan) {
         setLastError(t('sess.planModeUnsupported'));
         return false;
@@ -6731,7 +6978,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       // single gate holds it until the reset passes. The daemon reports its
       // wait in the queue snapshot and takes the prompt into its queue, behind
       // the continuation it starts at `resumeAt`.
-      const backendQueued = hasBackendQueue(v2ProvidersRef.current, conversation);
+      const backendQueued = hasBackendQueue(providersForConversation(conversation), conversation);
       const backendWait = backendQueued && conversation.v2ConversationId
         ? backendRateLimitState(conversationRecoveryRef.current?.get(conversation.v2ConversationId)?.followUps) : null;
       // A scheduled conversation's backend holds everything sent to it until
@@ -6757,11 +7004,12 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           reset: Number.isFinite(backendWait.resumeAt) ? formatResetInstant(backendWait.resumeAt) : '—' }), workspace.id, conversation.id));
         return true;
       }
-      const socket = socketRef.current;
-      if (!socket?.ready || !socketVerifiedRef.current) {
-        if (autoConnectEnabled && !manualDisconnectRef.current) {
+      const promptBackendId = backendIdForConversation(conversation.id);
+      const promptLink = linksRef.current.get(promptBackendId);
+      if (!promptLink?.socket?.ready || !promptLink.verified) {
+        if (autoConnectEnabled && !promptLink?.manualDisconnect) {
           setLastError(t('sess.reconnecting'));
-          connect();
+          connectBackend(promptBackendId);
         } else {
           setLastError(t('sess.connectBackendFirst'));
         }
@@ -6769,7 +7017,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         return false;
       }
       if (attachments.some((attachment) => attachment.kind === 'image')) {
-        const imageSupport = conversationImageInputSupport(conversation, v2ProvidersRef.current, {
+        const imageSupport = conversationImageInputSupport(conversation, providersForConversation(conversation), {
           models: conversation.provider
             ? providerModelsFor(conversation.backendConnectionId ?? workspace.backendConnectionId, conversation.provider)
             : undefined,
@@ -6872,7 +7120,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         // window, or on another device): hand the prompt to its queue under
         // the same id instead of reporting the conflict.
         if (error instanceof ProtocolCommandError && error.code === 'CONFLICT' && !isFirstPrompt
-          && hasBackendQueue(v2ProvidersRef.current, conversation)) {
+          && hasBackendQueue(providersForConversation(conversation), conversation)) {
           pendingV2SubmissionsRef.current.delete(conversation.id);
           setSubmissionStatusByConversation((current) => ({ ...current, [conversation.id]: undefined }));
           const queued = await queueV2FollowUpRef.current(conversation.id, { id: requestId, text, attachments, skills });
@@ -6899,7 +7147,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         }
       }
     },
-    [updateSentAttachmentRecords, appendTimeline, awaitBackendContinuation, getConversationContext, materializeV2Conversation, reconcilePendingSubmission, v2PromptFields, sendProtocolCommand, setConversationAttachments, setConversationChatDraft, setConversationSelectedSkills, setConversationThinking, updateConversation, autoConnectEnabled, connect],
+    [updateSentAttachmentRecords, appendTimeline, awaitBackendContinuation, getConversationContext, materializeV2Conversation, reconcilePendingSubmission, v2PromptFields, sendProtocolCommand, setConversationAttachments, setConversationChatDraft, setConversationSelectedSkills, setConversationThinking, updateConversation, autoConnectEnabled, connectBackend],
   );
 
   /** Adds one message to the backend queue (`conversation.queue.add`) and
@@ -6915,7 +7163,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     const v2Id = context?.conversation.v2ConversationId;
     if (!context || !v2Id) return { error: new Error(t('sess.sendFailedShort')) };
     const { workspace, conversation } = context;
-    const permissionMode = conversationPermissionMode(conversation, workspace, v2ProvidersRef.current);
+    const permissionMode = conversationPermissionMode(conversation, workspace, providersForConversation(conversation));
     if (!permissionMode) return { error: new Error(t('sess.permissionSelectRequired')) };
     const attachments = liveComposerAttachments(item.text, item.attachments);
     let fields: Record<string, unknown>;
@@ -7010,7 +7258,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       setLastError(t('sess.queueUnsupported'));
       return false;
     }
-    const providers = v2ProvidersRef.current;
+    const providers = providersForConversation(conversation);
     if (!providers.some((provider) => provider.id === conversation.provider)) {
       setLastError(t('sess.connectBackendFirst'));
       return false;
@@ -7035,7 +7283,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const refreshFollowUpQueue = useCallback(async (conversationId: string) => {
     const conversation = conversationsRef.current.find((item) => item.id === conversationId);
     const v2Id = conversation?.v2ConversationId;
-    if (!conversation || !v2Id || !hasBackendQueue(v2ProvidersRef.current, conversation)) return;
+    if (!conversation || !v2Id || !hasBackendQueue(providersForConversation(conversation), conversation)) return;
     try {
       const result = await sendProtocolCommand({ id: createRequestId('queue-list'), ...followUpQueueFrame('list', v2Id) });
       conversationRecoveryRef.current?.adoptFollowUpQueue(v2Id, parseFollowUpQueue(result.queue));
@@ -7099,7 +7347,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   ): Promise<ConversationRecord | null> => {
     const created = createConversation(workspaceId, { fresh: true, ...(options?.title ? { title: options.title } : {}) });
     if (!created) return null;
-    if (!providerSupportsScheduledConversations(v2ProvidersRef.current, created.provider)) {
+    if (!providerSupportsScheduledConversations(providersForConversation(created), created.provider)) {
       setLastError(t('sess.scheduleNeedsUpgrade'));
       return null;
     }
@@ -7138,11 +7386,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       resolve: (conversationId): LegacyQueueTarget => {
         const conversation = conversationsRef.current.find((item) => item.id === conversationId);
         if (!conversation || conversation.legacyPlaintext) return { kind: 'gone' };
-        const ownerId = conversation.backendConnectionId
-          ?? workspacesRef.current.find((item) => item.id === conversation.workspaceId)?.backendConnectionId;
-        if (!conversation.v2ConversationId || (ownerId && ownerId !== activeBackendConnectionIdRef.current)
-          || !providerHasBackendQueue(v2ProvidersRef.current, conversation.provider)) return { kind: 'wait' };
-        return { kind: 'ready', control: providerHasBackendQueueControl(v2ProvidersRef.current, conversation.provider) };
+        // Each backend's queue is migrated once that backend is connected.
+        if (!conversation.v2ConversationId || linkStatusRef.current[backendIdForConversation(conversation.id)]?.state !== 'open'
+          || !providerHasBackendQueue(providersForConversation(conversation), conversation.provider)) return { kind: 'wait' };
+        return { kind: 'ready', control: providerHasBackendQueueControl(providersForConversation(conversation), conversation.provider) };
       },
       add: async (conversationId, item, paused): Promise<LegacyAddResult> => {
         const result = await addFollowUp(conversationId, item, paused);
@@ -7183,14 +7430,14 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
 
       const { workspace, conversation } = context;
       const attachments = liveComposerAttachments(text, rawAttachments);
-      const permissionMode = conversationPermissionMode(conversation, workspace, v2ProvidersRef.current);
+      const permissionMode = conversationPermissionMode(conversation, workspace, providersForConversation(conversation));
       const preset = PERMISSION_PRESETS.find((item) => item.id === (permissionMode === 'ask' ? 'default' : permissionMode === 'auto' ? 'auto-review' : permissionMode));
       if (!preset) {
         setLastError(t('sess.permissionSelectSupported'));
         return false;
       }
       const workMode = conversation.mode ?? mode;
-      if (workMode === 'plan' && !conversationPermissionCapabilities(conversation, v2ProvidersRef.current)?.supportsPlan) {
+      if (workMode === 'plan' && !conversationPermissionCapabilities(conversation, providersForConversation(conversation))?.supportsPlan) {
         setLastError(t('sess.planModeUnsupported'));
         return false;
       }
@@ -7518,7 +7765,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const openPermissionsMenu = useCallback((conversationId = activeConversationRef.current) => {
     const context = getConversationContext(conversationId);
     if (!context) return;
-    const config = conversationPermissionCapabilities(context.conversation, v2ProvidersRef.current);
+    const config = conversationPermissionCapabilities(context.conversation, providersForConversation(context.conversation));
     const selected = conversationPermissionMode(context.conversation, context.workspace, v2ProvidersRef.current);
     const labels = { ask: t('chat.permissionAsk'), auto: t('chat.permissionAuto'), 'full-access': t('chat.permissionFullAccess') };
     desktopAlert(
@@ -7810,7 +8057,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           return;
         }
         if (lower === 'compact' || lower === 'retry' || lower === 'resume') {
-          const provider = v2ProvidersRef.current.find((item) => item.id === conversation.provider);
+          const provider = providersForConversation(conversation).find((item) => item.id === conversation.provider);
           const nativeAction = provider?.capabilities.controlActions?.includes(lower) === true;
           // Some providers expose these as catalog commands instead of control
           // actions (e.g. Claude /compact runs as a literal prompt).
@@ -7832,7 +8079,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           // before it existed fall back to the text this device decrypted.
           const v2Id = conversation.v2ConversationId;
           const retryFields = async (): Promise<Record<string, unknown> | null> => {
-            if (lower !== 'retry' || !historyEncryptionRef.current?.e2e) return {};
+            if (lower !== 'retry' || !historyEncryptionRef.current?.e2eFor(backendIdForConversation(conversation.id))) return {};
             const timeline = conversationRecoveryRef.current?.get(v2Id)?.timeline ?? [];
             const sequence = historyRetrySequence(timeline);
             if (sequence === null) return null;
@@ -8487,7 +8734,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           return;
         }
         const workspace = workspacesRef.current.find((item) => item.id === conversation.workspaceId) ?? null;
-        if (!workspace) {
+        // Only through its own backend's open socket: a closed one would
+        // otherwise be reconnected out of its backoff.
+        if (!workspace || linkStatusRef.current[backendIdForConversation(conversation.id)]?.state !== 'open') {
           return;
         }
         if (sendWorkspaceCommand(workspace, 'codex.local.stop', { force: false }, conversation)) {
@@ -8555,7 +8804,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     }
     const { workspace, conversation } = context;
     if (attachments.some((attachment) => attachment.kind === 'image')) {
-      const imageSupport = conversationImageInputSupport(conversation, v2ProvidersRef.current, {
+      const imageSupport = conversationImageInputSupport(conversation, providersForConversation(conversation), {
         models: conversation.provider
           ? providerModelsFor(conversation.backendConnectionId ?? workspace.backendConnectionId, conversation.provider)
           : undefined,
@@ -8601,8 +8850,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     // there; sendV2Prompt routes it.
     if (isThinking) {
       // A provider with its own native queue (and no backend queue) keeps it.
-      const nativeQueue = v2ProvidersRef.current.find(item => item.id === conversation.provider)?.capabilities.followUpQueue === true;
-      if (conversation.v2ConversationId && nativeQueue && !providerHasBackendQueue(v2ProvidersRef.current, conversation.provider)
+      const nativeQueue = providersForConversation(conversation).find(item => item.id === conversation.provider)?.capabilities.followUpQueue === true;
+      if (conversation.v2ConversationId && nativeQueue && !providerHasBackendQueue(providersForConversation(conversation), conversation.provider)
         && !liveAttachments.length && !skills.length) {
         void controlConversation(conversationId, { action: 'queueAdd', itemId: createRequestId('queue'), text })
           .then(accepted => { if (accepted) clearSubmittedComposer(); });
@@ -8935,8 +9184,12 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     settings,
     setSettings,
     backendConnections,
+    /** The backend serving the visible conversation or workspace. */
     activeBackendConnectionId,
-    setActiveBackendConnectionId,
+    /** Connection status of every backend, by profile id. */
+    backendLinkStatus: linkStatusByBackend,
+    noWorkspaceBackendId,
+    setNoWorkspaceBackendId,
     updateBackendConnection,
     addBackendConnection,
     removeBackendConnection,
@@ -9023,7 +9276,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     activeWorkspace,
     activeConversation,
     connect,
-    closeSocket,
+    disconnect,
     onDevicePairingApproved,
     createWorkspace,
     openGitWorktree,
@@ -9104,7 +9357,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     setSkillListVisible,
     toggleSelectedSkill,
     autoConnectEnabled,
-    setAutoConnectEnabled,
     openPanel,
   };
 }

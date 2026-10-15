@@ -1,5 +1,8 @@
 import type { ComponentType, ElementType, ReactNode, Ref } from 'react';
+import { RiArrowLeftSLine, RiArrowRightSLine } from '@remixicon/react';
 import { cx } from '@/utils/cx';
+import { useT } from '../../i18n';
+import { IconAction } from '../ui/icon-action';
 
 /**
  * Row chrome for the settings pages, after the BoardUI settings modal
@@ -124,6 +127,66 @@ export function SettingsValueField({ icon: Icon, children, muted = false, mono =
       >
         {children}
       </span>
+    </div>
+  );
+}
+
+/** A card row that opens its own settings page (shown in place of the
+ * overview); `leading` is an icon or any small element. */
+export function SettingsEntry({ icon: Icon, leading, title, description, trailing, isDisabled = false, onPress, ...data }: {
+  icon?: IconComponent;
+  leading?: ReactNode;
+  title: ReactNode;
+  description?: ReactNode;
+  trailing?: ReactNode;
+  isDisabled?: boolean;
+  onPress: () => void;
+} & { [key: `data-${string}`]: string }) {
+  return (
+    <button
+      type="button"
+      {...data}
+      disabled={isDisabled}
+      onClick={onPress}
+      className={cx(
+        'group flex w-full cursor-pointer items-center gap-3 ps-3 text-start',
+        'outline-none transition-colors duration-150 ease hover:bg-background-secondary-hover focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-border-focus-ring',
+        'disabled:cursor-default disabled:opacity-50 disabled:hover:bg-transparent',
+      )}
+    >
+      {Icon ? <Icon aria-hidden className="size-5 shrink-0 text-foreground-icon-secondary" /> : leading}
+      <span className="flex min-h-[52px] min-w-0 flex-1 items-center gap-4 border-b border-separator-border py-2.5 pe-2.5 group-last:border-b-0">
+        <span className="flex min-w-0 flex-1 flex-col">
+          <span className="truncate text-body-regular text-text-primary">{title}</span>
+          {description != null ? <span className="truncate text-body-2-regular text-text-secondary">{description}</span> : null}
+        </span>
+        <span className="flex shrink-0 items-center gap-2">
+          {trailing}
+          <RiArrowRightSLine className="size-4 text-foreground-icon-tertiary rtl:-scale-x-100" aria-hidden />
+        </span>
+      </span>
+    </button>
+  );
+}
+
+/** A settings page shown in place of its overview, with a back button. */
+export function SettingsSubpage({ title, description, onBack, children }: {
+  title: ReactNode;
+  description?: ReactNode;
+  onBack: () => void;
+  children: ReactNode;
+}) {
+  const t = useT();
+  return (
+    <div className="flex flex-col gap-6">
+      <div className="flex items-start gap-2">
+        <IconAction icon={RiArrowLeftSLine} size="sm" className="-ms-1.5 shrink-0" iconClassName="size-5 rtl:-scale-x-100" aria-label={t('settings.back')} onClick={onBack} />
+        <div className="min-w-0 pt-0.5">
+          <h3 className="text-headline-medium text-text-primary">{title}</h3>
+          {description ? <p className="mt-1 text-body-regular text-text-secondary">{description}</p> : null}
+        </div>
+      </div>
+      {children}
     </div>
   );
 }
