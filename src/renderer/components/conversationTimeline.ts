@@ -75,9 +75,12 @@ export type ChatRenderItem =
 
 /** Steps that fold into the collapsed trace. `assistant_progress` narration is
  * deliberately excluded: progress text reads like a message and stays visible
- * as a standalone line, while still splitting adjacent tool runs. */
+ * as a standalone line, while still splitting adjacent tool runs. A summary
+ * replay's progress stub has no text yet (often an empty provider envelope,
+ * e.g. Pi's per-message start), so it folds with the steps around it and
+ * hydrates with them; only real narration splits the trace once loaded. */
 function isFoldedStepEntry(entry: TimelineEntry): boolean {
-  return isStepProgressEntry(entry) && entry.category !== 'assistant_progress';
+  return isStepProgressEntry(entry) && (entry.category !== 'assistant_progress' || entry.detailStub === true);
 }
 
 /** Consecutive steps fold into one trace; text between two runs starts a new
