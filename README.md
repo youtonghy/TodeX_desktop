@@ -176,7 +176,7 @@ The desktop window will launch at 1280×800.
 
 Desktop packages are created manually from **Actions > Release desktop packages**.
 Enter a stable semantic version such as `1.2.3`; after validation, the workflow
-injects it into the application metadata and About screen, then publishes Windows
+injects it into the application metadata and About page in Settings, then publishes Windows
 x64 and ARM64 NSIS installers, a macOS Apple Silicon DMG, a Linux x64 AppImage,
 and SHA-256 checksums to the `v1.2.3` GitHub Release.
 

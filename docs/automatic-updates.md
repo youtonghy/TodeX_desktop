@@ -2,9 +2,11 @@
 
 只有打包后的应用、严格稳定版本 `X.Y.Z`（不含 `0.0.0`），且编译注入版本与应用包版本一致时启用。开发运行、未注入版本的本地包、预发布版本均不会访问更新服务。Linux 必须直接运行 AppImage；解包目录不会启用更新。
 
-应用启动 15 秒后，以及之后每 6 小时，检查 `youtonghy/TodeX_desktop` 的最新稳定 GitHub Release。发现更高版本后自动下载，由 electron-updater 校验 SHA-512 和平台签名。更新在正常退出应用时安装，不强制中断会话或重启。macOS 关闭窗口不等于退出，请使用应用的退出菜单。
+应用启动 15 秒后、之后每 6 小时，以及从睡眠唤醒且距上次检查超过 1 小时时，检查 `youtonghy/TodeX_desktop` 的最新稳定 GitHub Release。默认发现更高版本后在后台自动下载，由 electron-updater 校验 SHA-512 和平台签名；下载完成后弹出一次“新版本已就绪”提示，可立即“重启并更新”。不重启时，更新在正常退出应用时安装。macOS 关闭窗口不等于退出，请使用应用的退出菜单。
 
-原生菜单 **更新 → 检查更新…** 可立即检查并显示结果。检查或下载失败保留当前版本，下次检查重试；已成功下载的版本保留到退出，不重复下载或降级。这些逻辑仅存在于 Electron 主进程，无需修改 web 共用界面。
+**设置 → 关于 → 软件更新** 显示当前版本、检查状态、下载进度和错误，提供“检查更新”“下载更新”“重启并更新”，以及“自动下载更新”开关（存于主进程 store 的 `updates.autoDownload`，默认开启；关闭后只检查、不自动下载）。原生菜单 **更新 → 检查更新…** 会打开这一页并立即检查。不支持自动更新的构建（开发版、非 AppImage 的 Linux）在这里说明原因，按钮置灰。
+
+检查或下载失败保留当前版本，状态页可重试，下次定时检查也会重试；已成功下载的版本保留到退出，不重复下载或降级。更新状态机在 Electron 主进程（`src/main/updatePolicy.ts`），通过 `updates:*` IPC 推送到界面；web 客户端没有自更新，“关于”页不显示更新卡片。
 
 Linux 下安装更新会删除运行中的 AppImage，并在同目录写入带新版本号的文件，因此启动器入口若仍指向旧路径就会失效（`TryExec` 失效时桌面环境会隐藏整个入口）。应用在启动时把 `~/.local/share/applications/todex.desktop` 重写为指向当前 AppImage（不写 `TryExec`），在更新换名后立即同步，并清理仍指向已删除 TodeX AppImage 的旧入口；图标安装到 hicolor 主题目录。
 
@@ -20,6 +22,6 @@ macOS 自动更新要求 Developer ID Application 签名。仓库 Actions secret
 
 macOS 发布流程在缺少签名证书时明确失败，不发布无法自动更新的包。本地开发打包仍可无证书构建。旧的无签名安装包需要手动安装一次新的签名版本，之后才能自动更新。Windows 当前仍可发布未签名 NSIS 包；Linux 使用 AppImage 更新。
 
-运行 `pnpm run test:updates` 验证版本门禁、版本比较、并发检查、下载失败重试和已暂存更新。真实升级需要两个已发布版本及对应平台运行环境；本地单元测试和构建不代表已完成跨平台安装验证。
+运行 `pnpm run test:updates` 验证版本门禁、版本比较、更新状态流转、并发检查、手动/自动下载、下载进度、失败重试和已暂存更新。真实升级需要两个已发布版本及对应平台运行环境；本地单元测试和构建不代表已完成跨平台安装验证。
 
 参考：[electron-builder 自动更新文档](https://github.com/electron-userland/electron-builder/blob/master/website/docs/features/auto-update.md)。

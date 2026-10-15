@@ -1,4 +1,4 @@
-import { RiPushpin2Fill, RiLockLine, RiAddLine, RiArrowRightSLine, RiCheckLine, RiFolderReduceLine, RiFoldersLine, RiFolderTransferLine, RiPencilLine, RiEdit2Line, RiErrorWarningLine, RiFolder3Line, RiFolderOpenLine, RiGitBranchLine, RiDeleteBinLine, RiArrowDownSLine, RiBarChartBoxLine, RiBookOpenLine, RiBrush3Line, RiInformationLine, RiKanbanView2, RiMoreLine, RiPaletteLine, RiPriceTag3Line, RiPuzzle2Line, RiSettings3Line, RiTerminalBoxLine, RiTerminalLine, RiTimeLine, RiTimerLine, RiUserSettingsLine, RiVipCrownLine } from '@remixicon/react';
+import { RiPushpin2Fill, RiLockLine, RiAddLine, RiArrowRightSLine, RiCheckLine, RiFolderReduceLine, RiFoldersLine, RiFolderTransferLine, RiPencilLine, RiEdit2Line, RiErrorWarningLine, RiFolder3Line, RiFolderOpenLine, RiGitBranchLine, RiDeleteBinLine, RiArrowDownSLine, RiBarChartBoxLine, RiBookOpenLine, RiBrush3Line, RiKanbanView2, RiMoreLine, RiPaletteLine, RiPriceTag3Line, RiPuzzle2Line, RiSettings3Line, RiTerminalBoxLine, RiTerminalLine, RiTimeLine, RiTimerLine, RiUserSettingsLine, RiVipCrownLine } from '@remixicon/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { MouseEvent, ReactNode } from 'react';
 import {
@@ -76,7 +76,6 @@ type Props = {
   onOpenCleanup: () => void;
   onOpenUsage: () => void;
   onOpenQuota: () => void;
-  onOpenAbout: () => void;
   onOpenKanban: () => void;
   /** Toggles the SSH view (hosts, keys, SSH terminals, remote files). */
   onOpenTerminal: () => void;
@@ -324,7 +323,6 @@ export function AppSidebar({
   onOpenCleanup,
   onOpenUsage,
   onOpenQuota,
-  onOpenAbout,
   onOpenKanban,
   onOpenTerminal,
   terminalActive = false,
@@ -1061,7 +1059,7 @@ export function AppSidebar({
   ];
 
   // The TodeX menu (formerly the identity menu), grouped: management, then
-  // usage and about. Settings sits right above it as its own row.
+  // usage. Settings (with About) sits right above it as its own row.
   const teamMenuGroups: DashboardTeamMenuGroup[] = [
     {
       id: 'manage',
@@ -1101,7 +1099,6 @@ export function AppSidebar({
       items: [
         { id: 'usage', icon: RiBarChartBoxLine, label: t('app.usage'), onSelect: onOpenUsage },
         { id: 'quota', icon: RiVipCrownLine, label: t('usage.quotaTitle'), onSelect: onOpenQuota },
-        { id: 'about', icon: RiInformationLine, label: t('app.about'), onSelect: onOpenAbout },
       ],
     },
   ];

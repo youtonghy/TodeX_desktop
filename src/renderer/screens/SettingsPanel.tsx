@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ComponentType, type ReactNode, type Ref } from 'react';
 import { Tab, TabList, TabPanel, Tabs } from 'react-aria-components';
-import { RiApps2Line, RiComputerLine, RiNotification3Line, RiPaletteLine, RiServerLine, RiSettings3Line, RiTerminalBoxLine } from '@remixicon/react';
+import { RiApps2Line, RiComputerLine, RiInformationLine, RiNotification3Line, RiPaletteLine, RiServerLine, RiSettings3Line, RiTerminalBoxLine } from '@remixicon/react';
 import { Select, SelectItem } from '@/components/base/select/select';
 import { Switch } from '@/components/base/switch/switch';
 import { cx } from '@/utils/cx';
@@ -10,12 +10,15 @@ import { AppearanceSettings } from '../components/AppearanceSettings';
 import { FeatureSettings } from '../components/FeatureSettings';
 import { SettingsCard, SettingsGroup, SettingsRow } from '../components/settings/SettingsRows';
 import { SshConnectionSettings } from '../components/settings/SshConnectionSettings';
+import { AboutPanel } from './AboutPanel';
 import { ScrollArea } from '../components/ui/scroll-area';
 import { toast } from '../components/ui/toast';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { LOCALE_LABELS, SUPPORTED_LOCALES, getLocalePreference, isLocale, setLocalePreference, useT, type LocalePreference } from '../i18n';
 
-type SettingsSection = 'general' | 'features' | 'appearance' | 'connection' | 'ssh' | 'notifications' | 'agent';
+export type SettingsSection = 'general' | 'features' | 'appearance' | 'connection' | 'ssh' | 'notifications' | 'agent' | 'about';
+/** Show a category on open or while open; `at` makes a repeat request distinct. */
+export type SettingsSectionRequest = { section: SettingsSection; at: number };
 
 type Props = {
   session: TodeXSession;
@@ -23,12 +26,13 @@ type Props = {
   historyRecoverySetup?: boolean;
   /** Start device pairing again (from a refused connection's re-pair action). */
   repairPairing?: boolean;
+  sectionRequest?: SettingsSectionRequest;
 };
 
 /** Compact select trigger for the right side of a settings row. */
 const ROW_SELECT_TRIGGER = 'h-8 w-auto gap-1 rounded-lg px-2 py-1.5';
 
-export function SettingsPanel({ session, historyRecoverySetup = false, repairPairing = false }: Props) {
+export function SettingsPanel({ session, historyRecoverySetup = false, repairPairing = false, sectionRequest }: Props) {
   const t = useT();
   const [languagePreference, setLanguagePreference] = useState<LocalePreference>(() => getLocalePreference());
   const [pairingAutoStart, setPairingAutoStart] = useState(0);
@@ -36,7 +40,10 @@ export function SettingsPanel({ session, historyRecoverySetup = false, repairPai
   const [agentPage, setAgentPage] = useState<AgentDesktopPage | null>(null);
   // The backend whose own page replaces the backend list.
   const [backendPage, setBackendPage] = useState<string | null>(null);
-  const [section, setSection] = useState<SettingsSection>('general');
+  const [section, setSection] = useState<SettingsSection>(sectionRequest?.section ?? 'general');
+  useEffect(() => {
+    if (sectionRequest) setSection(sectionRequest.section);
+  }, [sectionRequest]);
   const agentPanel = useRef<HTMLDivElement>(null);
   const backendPanel = useRef<HTMLDivElement>(null);
   // Re-pairing and recovery-key setup both live on the page of the backend
@@ -72,6 +79,7 @@ export function SettingsPanel({ session, historyRecoverySetup = false, repairPai
     { id: 'ssh', label: t('settings.ssh'), icon: RiTerminalBoxLine },
     { id: 'notifications', label: t('settings.notifications'), icon: RiNotification3Line },
     { id: 'agent', label: t('agentDesktop.title'), icon: RiComputerLine },
+    { id: 'about', label: t('app.about'), icon: RiInformationLine },
   ];
   const titleOf = (id: SettingsSection) => sections.find((item) => item.id === id)?.label ?? '';
 
@@ -197,6 +205,10 @@ export function SettingsPanel({ session, historyRecoverySetup = false, repairPai
 
         <SettingsPage id="agent" title={titleOf('agent')} viewportRef={agentPanel}>
           <AgentDesktopSettings session={session} page={agentPage} onPageChange={setAgentPage} />
+        </SettingsPage>
+
+        <SettingsPage id="about" title={titleOf('about')}>
+          <AboutPanel session={session} />
         </SettingsPage>
       </div>
     </Tabs>

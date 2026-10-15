@@ -5,7 +5,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
-import { startAutoUpdates, refreshUpdateMenu } from './autoUpdates';
+import { checkForUpdates, downloadUpdate, installUpdate, refreshUpdateMenu, setAutoDownload, startAutoUpdates, updateState } from './autoUpdates';
 import { syncDesktopEntry } from './desktopEntry';
 import { PreviewViews, type InspectColors, type PreviewTarget } from './previewViews';
 import { isMainLocale, mainT, setMainLocale } from './i18n';
@@ -188,6 +188,9 @@ function enqueueSecureStore<T>(key: string, task: () => Promise<T>): Promise<T> 
   });
   return run;
 }
+
+// Main-process only: the renderer changes it through 'updates:setAutoDownload'.
+const UPDATES_AUTO_DOWNLOAD_KEY = 'updates.autoDownload';
 
 function storePath(): string {
   return join(app.getPath('userData'), 'todex-desktop-store.json');
@@ -961,7 +964,24 @@ app.whenReady().then(() => {
     previews?.setBounds(key, rect && [rect.x, rect.y, rect.width, rect.height].every(Number.isFinite) ? rect : null);
   });
   syncLinuxDesktopEntry();
-  startAutoUpdates(BUILD_VERSION, syncLinuxDesktopEntry);
+  handleIpc('updates:getState', () => updateState());
+  handleIpc('updates:check', () => checkForUpdates());
+  handleIpc('updates:download', () => downloadUpdate());
+  handleIpc('updates:setAutoDownload', (_event, enabled: unknown) => setAutoDownload(enabled === true));
+  ipcMain.on('updates:install', () => installUpdate());
+  startAutoUpdates(BUILD_VERSION, {
+    onAppImageMoved: syncLinuxDesktopEntry,
+    readAutoDownload: () => readStore()[UPDATES_AUTO_DOWNLOAD_KEY] !== false,
+    writeAutoDownload: (enabled) => writeStore({ ...readStore(), [UPDATES_AUTO_DOWNLOAD_KEY]: enabled }),
+    onShowUpdates: () => {
+      const window = liveWindow();
+      if (!window) return;
+      if (window.isMinimized()) window.restore();
+      window.show();
+      window.focus();
+      window.webContents.send('updates:show');
+    },
+  });
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

@@ -38,13 +38,8 @@ export type MainKey = keyof typeof zhCN;
 type MainMessages = Record<MainLocale, Record<MainKey, string>>;
 
 const zhCN = {
-  'main.updateDownloaded': '版本 {version} 已下载，将在退出应用后安装。',
-  'main.latestStable': '当前已是最新稳定版本。',
   'main.updateMenu': '更新',
   'main.checkUpdates': '检查更新…',
-  'main.updateTitle': 'TodeX 更新',
-  'main.updateFailed': '更新失败',
-  'main.updateFailedDetail': '无法检查或下载更新，请稍后重试。',
   'main.fileNotFound': '文件不存在',
   'main.pathNotAbsolute': '只能打开绝对路径',
   'main.openLaunchable': '为安全起见，不能直接打开可执行文件或应用；请使用“打开方式…”或在文件夹中显示',
@@ -60,13 +55,8 @@ const zhCN = {
 const messages: MainMessages = {
   'zh-CN': zhCN,
   en: {
-    'main.updateDownloaded': 'Version {version} has been downloaded and will be installed when the app quits.',
-    'main.latestStable': 'You are on the latest stable version.',
     'main.updateMenu': 'Update',
     'main.checkUpdates': 'Check for Updates…',
-    'main.updateTitle': 'TodeX Update',
-    'main.updateFailed': 'Update Failed',
-    'main.updateFailedDetail': 'Could not check for or download updates. Please try again later.',
     'main.fileNotFound': 'File does not exist',
     'main.pathNotAbsolute': 'Only absolute paths can be opened',
     'main.openLaunchable': 'Executables and apps are not opened directly for safety; use Open With… or Show in Folder',
@@ -79,13 +69,8 @@ const messages: MainMessages = {
     'main.operationDone': 'Done',
   },
   ja: {
-    'main.updateDownloaded': 'バージョン {version} をダウンロードしました。アプリ終了後にインストールされます。',
-    'main.latestStable': '現在最新の安定版です。',
     'main.updateMenu': 'アップデート',
     'main.checkUpdates': 'アップデートを確認…',
-    'main.updateTitle': 'TodeX アップデート',
-    'main.updateFailed': 'アップデート失敗',
-    'main.updateFailedDetail': 'アップデートを確認またはダウンロードできません。後で再試行してください。',
     'main.fileNotFound': 'ファイルが存在しません',
     'main.pathNotAbsolute': '絶対パスのみ開けます',
     'main.openLaunchable': '安全のため、実行ファイルやアプリは直接開けません。「このアプリケーションで開く…」またはフォルダに表示を使用してください',
@@ -98,13 +83,8 @@ const messages: MainMessages = {
     'main.operationDone': '完了しました',
   },
   ko: {
-    'main.updateDownloaded': '버전 {version}이(가) 다운로드되었습니다. 앱 종료 후 설치됩니다.',
-    'main.latestStable': '현재 최신 안정 버전입니다.',
     'main.updateMenu': '업데이트',
     'main.checkUpdates': '업데이트 확인…',
-    'main.updateTitle': 'TodeX 업데이트',
-    'main.updateFailed': '업데이트 실패',
-    'main.updateFailedDetail': '업데이트를 확인하거나 다운로드할 수 없습니다. 잠시 후 다시 시도하세요.',
     'main.fileNotFound': '파일이 존재하지 않습니다',
     'main.pathNotAbsolute': '절대 경로만 열 수 있습니다',
     'main.openLaunchable': '보안을 위해 실행 파일이나 앱은 바로 열 수 없습니다. "다음으로 열기…" 또는 폴더에서 보기를 사용하세요',

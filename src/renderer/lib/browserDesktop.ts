@@ -108,6 +108,18 @@ export function installBrowserDesktopBridge(): void {
       info: async () => ({ enabled: false, buildVersion: 'browser', configPath: '', logPath: '', chromiumLogPath: '' }),
       log: () => undefined,
     },
+    updates: (() => {
+      const state = { status: 'unsupported' as const, currentVersion: __TODEX_BUILD_VERSION__, autoDownload: false, reason: 'dev' as const };
+      return {
+        getState: async () => state,
+        check: async () => state,
+        download: async () => state,
+        install: () => undefined,
+        setAutoDownload: async () => state,
+        onState: () => () => undefined,
+        onShow: () => () => undefined,
+      };
+    })(),
   };
 
   window.todexDesktop = api;

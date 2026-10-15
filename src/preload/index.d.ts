@@ -61,6 +61,31 @@ export type TodeXDesktopApi = {
     info: () => Promise<DesktopDebugLogInfo>;
     log: (level: string, event: string, data?: unknown) => void;
   };
+  /** Release auto-updates (GitHub Releases), driven by the main process. */
+  updates: {
+    getState: () => Promise<UpdateState>;
+    check: () => Promise<UpdateState>;
+    download: () => Promise<UpdateState>;
+    /** Quits and installs a downloaded update, then relaunches. */
+    install: () => void;
+    setAutoDownload: (enabled: boolean) => Promise<UpdateState>;
+    onState: (listener: (state: UpdateState) => void) => () => void;
+    /** The native "Check for Updates…" menu item asks for the settings page. */
+    onShow: (listener: () => void) => () => void;
+  };
+};
+
+export type UpdateStatus = 'unsupported' | 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'error';
+/** Mirror of the main process's UpdateState (src/main/updatePolicy.ts). */
+export type UpdateState = {
+  status: UpdateStatus;
+  currentVersion: string;
+  version?: string;
+  progress?: number;
+  lastChecked?: number;
+  error?: string;
+  autoDownload: boolean;
+  reason?: 'dev' | 'appimage';
 };
 
 /** Window-relative CSS pixels of a native view. */

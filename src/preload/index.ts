@@ -25,6 +25,18 @@ export type DesktopDebugLogInfo = {
   chromiumLogPath: string;
 };
 
+/** Mirror of the main process's UpdateState (src/main/updatePolicy.ts). */
+export type UpdateState = {
+  status: 'unsupported' | 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'error';
+  currentVersion: string;
+  version?: string;
+  progress?: number;
+  lastChecked?: number;
+  error?: string;
+  autoDownload: boolean;
+  reason?: 'dev' | 'appimage';
+};
+
 const api = {
   store: {
     get: (key: string) => ipcRenderer.invoke('store:get', key) as Promise<unknown>,
@@ -136,6 +148,29 @@ const api = {
     info: () => ipcRenderer.invoke('debug:info') as Promise<DesktopDebugLogInfo>,
     log: (level: string, event: string, data?: unknown) => {
       ipcRenderer.send('debug:log', { level, event, data });
+    },
+  },
+  updates: {
+    getState: () => ipcRenderer.invoke('updates:getState') as Promise<UpdateState>,
+    check: () => ipcRenderer.invoke('updates:check') as Promise<UpdateState>,
+    download: () => ipcRenderer.invoke('updates:download') as Promise<UpdateState>,
+    install: () => {
+      ipcRenderer.send('updates:install');
+    },
+    setAutoDownload: (enabled: boolean) => ipcRenderer.invoke('updates:setAutoDownload', enabled) as Promise<UpdateState>,
+    onState: (listener: (state: UpdateState) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, state: UpdateState) => listener(state);
+      ipcRenderer.on('updates:state', handler);
+      return () => {
+        ipcRenderer.removeListener('updates:state', handler);
+      };
+    },
+    onShow: (listener: () => void) => {
+      const handler = () => listener();
+      ipcRenderer.on('updates:show', handler);
+      return () => {
+        ipcRenderer.removeListener('updates:show', handler);
+      };
     },
   },
 };

@@ -176,7 +176,7 @@ pnpm run dev
 ## 桌面端发布
 
 桌面安装包通过 **Actions > Release desktop packages** 手动发布。输入 `1.2.3`
-这样的稳定语义版本后，工作流会把版本注入应用元数据和“关于”页面，验证应用并
+这样的稳定语义版本后，工作流会把版本注入应用元数据和设置中的“关于”页面，验证应用并
 发布 Windows x64、Windows ARM64 NSIS 安装程序、macOS Apple Silicon DMG、Linux
 x64 AppImage 和 SHA-256 校验文件。
 

@@ -4,7 +4,6 @@ export type DesktopPanel =
   | 'settings'
   | 'usage'
   | 'quota'
-  | 'about'
   | 'cli-manager'
   | 'agent-providers'
   | 'cleanup'
@@ -48,8 +47,6 @@ export function panelFromRoute(name: string): DesktopPanel | null {
       return 'usage';
     case 'Quota':
       return 'quota';
-    case 'About':
-      return 'about';
     case 'CliManager':
       return 'cli-manager';
     case 'AgentProviders':

@@ -34,6 +34,7 @@ import { isWorkbenchTab, panelFromRoute, type DesktopPanel, type OpenPanelOption
 import type { RemoteFilesBinding } from './session/fileSources';
 import { ShortcutHint, useAppShortcuts, useShortcutHintTracking } from './lib/shortcuts';
 import { useT } from './i18n';
+import type { SettingsSectionRequest } from './screens/SettingsPanel';
 import { useAppearance } from './lib/appearance';
 import { useFeatureModes } from './session/featureToggles';
 
@@ -44,7 +45,6 @@ const CapabilitiesPanel = lazy(() => import('./screens/CapabilitiesPanel').then(
 const WorkbenchPanel = lazy(() => import('./screens/WorkbenchPanel').then((module) => ({ default: module.WorkbenchPanel })));
 const UsagePanel = lazy(() => import('./screens/UsagePanel').then((module) => ({ default: module.UsagePanel })));
 const QuotaPanel = lazy(() => import('./screens/QuotaPanel').then((module) => ({ default: module.QuotaPanel })));
-const AboutPanel = lazy(() => import('./screens/AboutPanel').then((module) => ({ default: module.AboutPanel })));
 const CliManagerPanel = lazy(() => import('./screens/CliManagerPanel').then((module) => ({ default: module.CliManagerPanel })));
 const AgentProvidersPanel = lazy(() => import('./screens/AgentProvidersPanel').then((module) => ({ default: module.AgentProvidersPanel })));
 const CleanupPanel = lazy(() => import('./screens/CleanupPanel').then((module) => ({ default: module.CleanupPanel })));
@@ -152,6 +152,7 @@ export function App() {
   const t = useT();
   const themeSource = useAppearance().theme;
   const [panel, setPanel] = useState<DesktopPanel | null>(null);
+  const [settingsSectionRequest, setSettingsSectionRequest] = useState<SettingsSectionRequest>();
   const panelScopeRef = useRef('');
   const [slashCommand, setSlashCommand] = useState<string>();
   const [sidebarOpen, setSidebarOpen] = useState(() => readLayoutOpen().sidebarOpen);
@@ -243,6 +244,12 @@ export function App() {
   );
 
   const openPanel = useCallback((name: string, params?: OpenPanelOptions) => {
+    // About is a settings category now; the route still opens it.
+    if (name === 'About') {
+      setSettingsSectionRequest({ section: 'about', at: Date.now() });
+      setPanel('settings');
+      return;
+    }
     const next = panelFromRoute(name);
     if (!next) {
       return;
@@ -254,14 +261,14 @@ export function App() {
     if (isWorkbenchTab(next)) {
       setWorkbenchTab(next);
     }
-    if (next !== 'settings' && next !== 'usage' && next !== 'quota' && next !== 'about' && next !== 'cli-manager' && next !== 'agent-providers' && next !== 'cleanup') {
+    if (next !== 'settings' && next !== 'usage' && next !== 'quota' && next !== 'cli-manager' && next !== 'agent-providers' && next !== 'cleanup') {
       persistAsideOpen(true);
     }
   }, [persistAsideOpen, scopeKey, setPanelTarget, setWorkbenchTab]);
   openPanelHandlerRef.current = openPanel;
 
   useEffect(() => {
-    setPanel(current => current && ['settings', 'usage', 'quota', 'about', 'cli-manager', 'agent-providers', 'cleanup', 'kanban', 'ssh'].includes(current) ? current : null);
+    setPanel(current => current && ['settings', 'usage', 'quota', 'cli-manager', 'agent-providers', 'cleanup', 'kanban', 'ssh'].includes(current) ? current : null);
     setSlashCommand(undefined);
   }, [scopeKey]);
 
@@ -340,6 +347,33 @@ export function App() {
     window.todexDesktop.app.closeWindow();
   }), []);
 
+  // The native "Check for Updates…" item shows the About settings page; a
+  // release downloaded in the background offers a restart once per version.
+  const updateToastVersionRef = useRef<string | undefined>(undefined);
+  const updateToastT = useRef(t);
+  updateToastT.current = t;
+  useEffect(() => {
+    const { updates } = window.todexDesktop;
+    const offShow = updates.onShow(() => {
+      setSettingsSectionRequest({ section: 'about', at: Date.now() });
+      setPanel('settings');
+    });
+    const offState = updates.onState((state) => {
+      if (state.status !== 'downloaded' || !state.version || updateToastVersionRef.current === state.version) return;
+      updateToastVersionRef.current = state.version;
+      const tr = updateToastT.current;
+      toast.success(tr('updates.readyToast', { version: state.version }), {
+        description: tr('updates.downloadedHint'),
+        timeout: 0,
+        actionProps: { children: tr('updates.restart'), onPress: () => updates.install() },
+      });
+    });
+    return () => {
+      offShow();
+      offState();
+    };
+  }, []);
+
   useShortcutHintTracking();
   useAppShortcuts({
     toggleSidebar: () => persistSidebarOpen(!sidebarOpen),
@@ -397,13 +431,14 @@ export function App() {
   // A refused connection's re-pair action opened settings to pair again.
   const [repairPairing, setRepairPairing] = useState(false);
   useEffect(() => { if (!settingsOpen) setRepairPairing(false); }, [settingsOpen]);
+  // A category to show (About, from the update menu or the About route).
+  useEffect(() => { if (!settingsOpen) setSettingsSectionRequest(undefined); }, [settingsOpen]);
   const usageOpen = panel === 'usage';
   const quotaOpen = panel === 'quota';
-  const aboutOpen = panel === 'about';
   const cliManagerOpen = panel === 'cli-manager';
   const agentProvidersOpen = panel === 'agent-providers';
   const cleanupOpen = panel === 'cleanup';
-  const modalPanel = settingsOpen || usageOpen || quotaOpen || aboutOpen || cliManagerOpen || agentProvidersOpen || cleanupOpen;
+  const modalPanel = settingsOpen || usageOpen || quotaOpen || cliManagerOpen || agentProvidersOpen || cleanupOpen;
   const subagentRuns = session.activeConversation
     ? session.subagentsByConversation[session.activeConversation.id] ?? []
     : [];
@@ -567,7 +602,6 @@ export function App() {
       onOpenCleanup={() => { persistAsideOpen(false); setPanel('cleanup'); }}
       onOpenUsage={() => setPanel('usage')}
       onOpenQuota={() => setPanel('quota')}
-      onOpenAbout={() => setPanel('about')}
       onOpenKanban={() => { setPanel('kanban'); persistAsideOpen(false); }}
       onOpenTerminal={toggleSshView}
       terminalActive={sshActive}
@@ -658,16 +692,13 @@ export function App() {
       {/* A fixed height keeps the dialog still when switching sections; each
           category page scrolls on its own beside the category list. */}
       <Modal isOpen={settingsOpen} onOpenChange={closePanel('settings')} title={t('app.settings')} size="4xl" className="h-[min(90vh,48rem)]" bodyClassName="flex min-h-0 flex-col overflow-hidden px-0 pb-0">
-        <PanelBoundary><SettingsPanel session={session} historyRecoverySetup={historyRecoverySetup} repairPairing={repairPairing} /></PanelBoundary>
+        <PanelBoundary><SettingsPanel session={session} historyRecoverySetup={historyRecoverySetup} repairPairing={repairPairing} sectionRequest={settingsSectionRequest} /></PanelBoundary>
       </Modal>
       <Modal isOpen={usageOpen} onOpenChange={closePanel('usage')} title={t('app.usage')} size="3xl" className="max-h-[92vh]" bodyClassName="overflow-y-auto">
         <PanelBoundary><UsagePanel session={session} /></PanelBoundary>
       </Modal>
       <Modal isOpen={quotaOpen} onOpenChange={closePanel('quota')} title={t('usage.quotaTitle')} size="2xl" className="max-h-[90vh]" bodyClassName="overflow-y-auto">
         <PanelBoundary><QuotaPanel session={session} /></PanelBoundary>
-      </Modal>
-      <Modal isOpen={aboutOpen} onOpenChange={closePanel('about')} title={t('app.about')} size="2xl" className="max-h-[90vh]" bodyClassName="overflow-y-auto">
-        <PanelBoundary><AboutPanel session={session} /></PanelBoundary>
       </Modal>
       <Modal isOpen={cliManagerOpen} onOpenChange={closePanel('cli-manager')} title={t('app.cliManager')} size="3xl" className="max-h-[92vh]" bodyClassName="overflow-y-auto">
         <PanelBoundary><CliManagerPanel session={session} /></PanelBoundary>

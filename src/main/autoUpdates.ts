@@ -1,17 +1,37 @@
-import { app, dialog, Menu, MenuItem } from 'electron';
+import { app, BrowserWindow, Menu, MenuItem, powerMonitor } from 'electron';
 import electronUpdater from 'electron-updater';
-import { canAutoUpdate, createUpdateCheck } from './updatePolicy';
+import { canAutoUpdate, createUpdateController, type UpdateController, type UpdateState } from './updatePolicy';
 import { mainT } from './i18n';
 
 const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+// Waking from sleep checks again only when the last check is this old.
+const RESUME_CHECK_AFTER_MS = 60 * 60 * 1000;
 
-let runCheck: ((interactive: boolean) => void) | undefined;
+export type AutoUpdateOptions = {
+  /** Fired after the installed AppImage moves to its new versioned file name. */
+  onAppImageMoved?: (destination: string) => void;
+  /** Persisted "download updates automatically" choice; defaults to on. */
+  readAutoDownload: () => boolean;
+  writeAutoDownload: (enabled: boolean) => void;
+  /** The native "Check for Updates…" item: show the settings page that reports the result. */
+  onShowUpdates: () => void;
+};
+
+let controller: UpdateController | undefined;
+let unsupportedState: UpdateState | undefined;
+let updateOptions: AutoUpdateOptions | undefined;
 let updateMenuItem: MenuItem | undefined;
 
 function buildUpdateMenuItem(): MenuItem {
   return new MenuItem({
     label: mainT('main.updateMenu'),
-    submenu: [{ label: mainT('main.checkUpdates'), click: () => { runCheck?.(true); } }],
+    submenu: [{
+      label: mainT('main.checkUpdates'),
+      click: () => {
+        updateOptions?.onShowUpdates();
+        void controller?.check();
+      },
+    }],
   });
 }
 
@@ -28,11 +48,50 @@ export function refreshUpdateMenu(): void {
   Menu.setApplicationMenu(menu);
 }
 
-export function startAutoUpdates(buildVersion: string, onAppImageMoved?: (destination: string) => void): void {
+function broadcast(state: UpdateState): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.isDestroyed()) window.webContents.send('updates:state', state);
+  }
+}
+
+export function updateState(): UpdateState {
+  return controller?.getState() ?? unsupportedState ?? { status: 'unsupported', currentVersion: app.getVersion(), autoDownload: false, reason: 'dev' };
+}
+
+export function checkForUpdates(): Promise<UpdateState> {
+  return controller ? controller.check() : Promise.resolve(updateState());
+}
+
+export function downloadUpdate(): Promise<UpdateState> {
+  return controller ? controller.download() : Promise.resolve(updateState());
+}
+
+export function setAutoDownload(enabled: boolean): UpdateState {
+  if (!controller || !updateOptions) return updateState();
+  updateOptions.writeAutoDownload(enabled);
+  controller.setAutoDownload(enabled);
+  // Turning it on downloads a release that an earlier check only found.
+  if (enabled && controller.getState().status === 'available') void controller.download();
+  return controller.getState();
+}
+
+export function installUpdate(): void {
+  if (controller?.getState().status !== 'downloaded') return;
+  // Silent on Windows, then relaunch the updated app.
+  electronUpdater.autoUpdater.quitAndInstall(true, true);
+}
+
+export function startAutoUpdates(buildVersion: string, options: AutoUpdateOptions): void {
   // Both independent build identities must agree. Source runs and unversioned
   // local packages must not contact the release service, even via the menu.
-  if (!canAutoUpdate(app.isPackaged, buildVersion, app.getVersion())) return;
-  if (process.platform === 'linux' && !process.env.APPIMAGE) return;
+  if (!canAutoUpdate(app.isPackaged, buildVersion, app.getVersion())) {
+    unsupportedState = { status: 'unsupported', currentVersion: buildVersion, autoDownload: false, reason: 'dev' };
+    return;
+  }
+  if (process.platform === 'linux' && !process.env.APPIMAGE) {
+    unsupportedState = { status: 'unsupported', currentVersion: buildVersion, autoDownload: false, reason: 'appimage' };
+    return;
+  }
 
   const { autoUpdater } = electronUpdater;
   autoUpdater.setFeedURL({ provider: 'github', owner: 'youtonghy', repo: 'TodeX_desktop' });
@@ -43,35 +102,37 @@ export function startAutoUpdates(buildVersion: string, onAppImageMoved?: (destin
   autoUpdater.autoInstallOnAppQuit = true;
   autoUpdater.logger = console;
   autoUpdater.on('error', (error) => console.warn('[updates]', error.message));
-  // Fired after the installed AppImage is moved to its new versioned file
-  // name; the launcher entry is repointed before the old process exits.
-  autoUpdater.on('appimage-filename-updated', (destination) => onAppImageMoved?.(destination));
-  const check = createUpdateCheck(autoUpdater, buildVersion);
+  // The launcher entry is repointed before the old process exits.
+  autoUpdater.on('appimage-filename-updated', (destination) => options.onAppImageMoved?.(destination));
+  autoUpdater.on('download-progress', (progress) => controller?.setProgress(progress.percent));
 
-  const run = async (interactive: boolean) => {
-    try {
-      const message = await check();
-      console.info('[updates]', message);
-      if (interactive) await dialog.showMessageBox({ type: 'info', title: mainT('main.updateTitle'), message });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      console.warn('[updates] Check or download failed; keeping current version:', message);
-      if (interactive) await dialog.showMessageBox({ type: 'error', title: mainT('main.updateFailed'), message: mainT('main.updateFailedDetail'), detail: message });
-    }
-  };
-  runCheck = (interactive) => { void run(interactive); };
+  updateOptions = options;
+  controller = createUpdateController(autoUpdater, buildVersion, {
+    autoDownload: options.readAutoDownload(),
+    onChange: (state) => {
+      console.info('[updates]', state.status, state.version ?? '', state.error ?? '');
+      broadcast(state);
+    },
+  });
+  const run = () => { void controller?.check(); };
 
-  // Native desktop application menu; no renderer or web-client API is exposed.
+  // Native desktop application menu entry; it opens the settings page.
   const menu = Menu.getApplicationMenu() ?? new Menu();
   updateMenuItem = buildUpdateMenuItem();
   menu.append(updateMenuItem);
   Menu.setApplicationMenu(menu);
-  const initialCheck = setTimeout(() => { void run(false); }, 15_000);
-  const periodicCheck = setInterval(() => { void run(false); }, CHECK_INTERVAL_MS);
+  const initialCheck = setTimeout(run, 15_000);
+  const periodicCheck = setInterval(run, CHECK_INTERVAL_MS);
   initialCheck.unref();
   periodicCheck.unref();
+  const onResume = () => {
+    const lastChecked = controller?.getState().lastChecked;
+    if (lastChecked && Date.now() - lastChecked >= RESUME_CHECK_AFTER_MS) run();
+  };
+  powerMonitor.on('resume', onResume);
   app.once('before-quit', () => {
     clearTimeout(initialCheck);
     clearInterval(periodicCheck);
+    powerMonitor.off('resume', onResume);
   });
 }

@@ -1,6 +1,3 @@
-// .ts extension: this module is also loaded directly by node --test.
-import { mainT } from './i18n.ts';
-
 const STABLE_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 
 export function isReleaseVersion(version: string): boolean {
@@ -26,22 +23,97 @@ export interface ReleaseUpdater {
   downloadUpdate(): Promise<unknown>;
 }
 
-// Keep one check/download in flight, and never replace a staged update before quit.
-export function createUpdateCheck(updater: ReleaseUpdater, currentVersion: string) {
-  let pending: Promise<string> | undefined;
-  let stagedVersion: string | undefined;
-  return (): Promise<string> => {
-    if (stagedVersion) return Promise.resolve(mainT('main.updateDownloaded', { version: stagedVersion }));
+export type UpdateStatus = 'unsupported' | 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'error';
+
+/** What the settings page shows; mirrored to every window on change. */
+export type UpdateState = {
+  status: UpdateStatus;
+  currentVersion: string;
+  /** Newer release found (available, downloading, downloaded, or a failed download). */
+  version?: string;
+  /** Download progress, 0-100. */
+  progress?: number;
+  /** Epoch ms of the last completed check. */
+  lastChecked?: number;
+  error?: string;
+  /** Download newer releases as soon as a check finds them. */
+  autoDownload: boolean;
+  /** Why this build cannot update itself (`unsupported` only). */
+  reason?: 'dev' | 'appimage';
+};
+
+export type UpdateController = {
+  getState(): UpdateState;
+  /** Look for a newer release; downloads it too when `autoDownload` is on. */
+  check(): Promise<UpdateState>;
+  /** Download the release a check found. */
+  download(): Promise<UpdateState>;
+  setProgress(percent: number): void;
+  setAutoDownload(enabled: boolean): void;
+};
+
+// One check/download in flight at a time, and a staged update is never
+// replaced before quit. Failures land in the state instead of rejecting.
+export function createUpdateController(
+  updater: ReleaseUpdater,
+  currentVersion: string,
+  options: { autoDownload: boolean; onChange?: (state: UpdateState) => void; now?: () => number },
+): UpdateController {
+  const now = options.now ?? Date.now;
+  let state: UpdateState = { status: 'idle', currentVersion, autoDownload: options.autoDownload };
+  let pending: Promise<UpdateState> | undefined;
+
+  const set = (patch: Partial<UpdateState>) => {
+    state = { ...state, ...patch };
+    options.onChange?.(state);
+  };
+  const failure = (error: unknown) => (error instanceof Error ? error.message : String(error));
+  const run = (task: () => Promise<void>): Promise<UpdateState> => {
     if (pending) return pending;
-    pending = (async () => {
-      const result = await updater.checkForUpdates();
-      if (!result || !isNewerRelease(currentVersion, result.updateInfo.version)) {
-        return mainT('main.latestStable');
-      }
-      await updater.downloadUpdate();
-      stagedVersion = result.updateInfo.version;
-      return mainT('main.updateDownloaded', { version: stagedVersion });
-    })().finally(() => { pending = undefined; });
+    pending = task().then(() => state).finally(() => { pending = undefined; });
     return pending;
+  };
+
+  const downloadFound = async () => {
+    set({ status: 'downloading', progress: 0, error: undefined });
+    try {
+      await updater.downloadUpdate();
+      set({ status: 'downloaded', progress: 100 });
+    } catch (error) {
+      set({ status: 'error', progress: undefined, error: failure(error) });
+    }
+  };
+
+  return {
+    getState: () => state,
+    check() {
+      if (state.status === 'downloaded') return Promise.resolve(state);
+      return run(async () => {
+        set({ status: 'checking', error: undefined });
+        let version: string | undefined;
+        try {
+          const result = await updater.checkForUpdates();
+          version = result && isNewerRelease(currentVersion, result.updateInfo.version) ? result.updateInfo.version : undefined;
+        } catch (error) {
+          set({ status: 'error', version: undefined, progress: undefined, error: failure(error), lastChecked: now() });
+          return;
+        }
+        set({ status: version ? 'available' : 'idle', version, progress: undefined, lastChecked: now() });
+        if (version && state.autoDownload) await downloadFound();
+      });
+    },
+    download() {
+      if (!state.version || (state.status !== 'available' && state.status !== 'error')) return pending ?? Promise.resolve(state);
+      return run(downloadFound);
+    },
+    setProgress(percent) {
+      if (state.status !== 'downloading' || !Number.isFinite(percent)) return;
+      // Whole percents only: progress events arrive far more often than that.
+      const progress = Math.max(0, Math.min(100, Math.floor(percent)));
+      if (progress !== state.progress) set({ progress });
+    },
+    setAutoDownload(enabled) {
+      set({ autoDownload: enabled });
+    },
   };
 }
