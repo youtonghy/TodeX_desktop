@@ -676,6 +676,21 @@ if (jsFlags) {
 
 initializeDebugLogging();
 
+// Chromium picks the Linux keychain from XDG_CURRENT_DESKTOP and falls back
+// to `basic_text` (refused by secureStore) on desktops it does not know, such
+// as Hyprland, Sway or niri, even when a Secret Service (gnome-keyring,
+// KeePassXC, KWallet) is running. Use libsecret there; desktops Chromium
+// recognizes keep their backend, so existing secrets stay readable, and
+// nothing was ever sealed with `basic_text`. An explicit --password-store wins.
+const CHROMIUM_KEYCHAIN_DESKTOPS = ['gnome', 'kde', 'unity', 'xfce', 'pantheon', 'deepin', 'ukui'];
+if (process.platform === 'linux' && !app.commandLine.hasSwitch('password-store')) {
+  const desktops = (process.env.XDG_CURRENT_DESKTOP ?? '').toLowerCase().split(':').filter(Boolean);
+  if (!desktops.some((desktop) => CHROMIUM_KEYCHAIN_DESKTOPS.includes(desktop))) {
+    app.commandLine.appendSwitch('password-store', 'gnome-libsecret');
+    debugLog('info', 'secureStore.passwordStore', { backend: 'gnome-libsecret', desktop: process.env.XDG_CURRENT_DESKTOP ?? '' });
+  }
+}
+
 app.whenReady().then(() => {
   setMainLocale(app.getLocale());
   debugLog('info', 'app.ready', { readyAt: new Date().toISOString() });
