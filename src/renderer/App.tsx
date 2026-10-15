@@ -76,7 +76,7 @@ class PanelErrorBoundary extends Component<{ children: ReactNode }, { error: unk
 }
 
 function PanelBoundary({ children }: { children: ReactNode }) {
-  return <PanelErrorBoundary><PanelBoundary>{children}</PanelBoundary></PanelErrorBoundary>;
+  return <PanelErrorBoundary><Suspense fallback={panelFallback}>{children}</Suspense></PanelErrorBoundary>;
 }
 
 /** The compact-layout drawer motion from the BoardUI AI chat shell. */
