@@ -40,6 +40,7 @@ export function installBrowserDesktopBridge(): void {
       set: async (_key, value) => {
         if (value !== null) throw new Error(t('history.keyFailed'));
       },
+      available: async () => false,
     },
     dialog: {
       openDirectory: async () => null,

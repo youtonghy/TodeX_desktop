@@ -1148,7 +1148,7 @@ function FilesPane({ session, target, onTargetChange, remote, onRemoteRebind }: 
     () => (remote ? remoteFileSource(api, remote) : workspaceFileSource(api, workspacePath, isLoopbackUrl(serverUrl))),
     [api, remote, serverUrl, workspacePath],
   );
-  const remoteConnector = useRemoteConnector(api);
+  const remoteConnector = useRemoteConnector(api, session.activeBackendConnectionId);
   const [entries, setEntries] = useState<FileTreeEntry[]>([]);
   const [selected, setSelected] = useState('');
   const [focused, setFocused] = useState('');

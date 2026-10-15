@@ -41,7 +41,7 @@ export function SshPanel({ session, scopeKey, workbenchItems, onOpenSshTerminal,
   const t = useT();
   const { serverUrl, deviceSecret, encryptionProtocol, encryptionPublicKey, transportVerified } = session.settings;
   const api = useCallback(() => backendApi({ serverUrl, deviceSecret, encryptionProtocol, encryptionPublicKey, transportVerified }), [deviceSecret, encryptionProtocol, encryptionPublicKey, serverUrl, transportVerified]);
-  const remoteConnector = useRemoteConnector(api);
+  const remoteConnector = useRemoteConnector(api, session.activeBackendConnectionId);
   const [tab, setTab] = useState<SshTab>('hosts');
   const [hosts, setHosts] = useState<SshHostsResponse | null>(null);
   const [keys, setKeys] = useState<SshKeysResponse | null>(null);
@@ -139,6 +139,9 @@ export function SshPanel({ session, scopeKey, workbenchItems, onOpenSshTerminal,
               {hosts ? (
                 <SshHostsTab
                   api={api}
+                  backendId={session.activeBackendConnectionId}
+                  askPassword={remoteConnector.askPassword}
+                  rememberPassword={remoteConnector.rememberPassword}
                   hosts={hosts.hosts}
                   ftpSites={hosts.ftpSites}
                   keys={keys?.keys ?? []}

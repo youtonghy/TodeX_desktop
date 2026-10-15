@@ -101,6 +101,7 @@ import {
 import { loadJson, loadSecret, removeSecret, saveJson, saveSecret } from '../lib/storage';
 import { ConnectionError } from '@todex/protocol/connectionError';
 import { desktopAlert } from '../lib/desktopAlert';
+import { loadSshPassword } from '../lib/sshPasswordStore';
 import { createConcurrencyLimit } from '../lib/concurrencyLimit';
 import { panelFromRoute, type DesktopPanel, type OpenPanelOptions } from '../lib/panels';
 import type { CapabilityManager, CatalogState } from '../screens/CapabilitiesPanel';
@@ -170,6 +171,7 @@ import {
   type PluginsCatalogState,
   type MemorySettingsState,
   type TerminalClientState,
+  type TerminalStartOptions,
   type TerminalTarget,
   type PendingThreadAction,
   type ComposerSelection,
@@ -408,6 +410,9 @@ const RETAINED_CONVERSATION_RUNTIMES = 8;
 // How long a failed prompt waits for the daemon's queue snapshot before the
 // client asks for it (`conversation.queue.list`).
 const BACKEND_CONTINUATION_SETTLE_MS = 1_000;
+/** An ssh exit this soon after a saved-password start is treated as a failed
+ * sign-in rather than the end of a session. */
+const SSH_PASSWORD_FALLBACK_WINDOW_MS = 30_000;
 /** Storage keys of the client-side candidate queue and rate-limit wait older
  * builds persisted; read once to migrate / delete them. */
 const LEGACY_QUEUED_FOLLOW_UPS_KEY = 'todex.queued-follow-ups.v1';
@@ -2981,6 +2986,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     });
   }, []);
 
+  const startTerminalSessionRef = useRef<((target: TerminalTarget, options: TerminalStartOptions) => boolean) | null>(null);
+
   const handleTerminalEvent = useCallback((event: ServerEvent, data: Record<string, unknown>) => {
     if (!event.type.startsWith('terminal.')) {
       return false;
@@ -3040,6 +3047,27 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     const shell = typeof rawShell === 'string' ? rawShell : '';
     const conversation = conversationsRef.current.find((item) => terminalIdForConversation(item.id) === terminalId);
     const conversationId = conversation?.id ?? activeConversationRef.current;
+
+    // ssh exits with 255 when the saved password is rejected or the host key
+    // is not yet confirmed (askpass never answers that); sign in at the prompt.
+    const known = terminalByIdRef.current[terminalId];
+    if (
+      event.type === 'terminal.exited'
+      && data.exitCode === 255
+      && known?.ssh
+      && known.sshPasswordAt !== undefined
+      && Date.now() - known.sshPasswordAt < SSH_PASSWORD_FALLBACK_WINDOW_MS
+      && !known.stopRequested
+      && known.status !== 'stopping'
+    ) {
+      const host = known.ssh.host;
+      window.setTimeout(() => {
+        appendTerminalOutput(terminalId, terminalOutputLine('system', t('sess.sshPasswordFallback')));
+        startTerminalSessionRef.current?.({ kind: 'ssh', host }, {
+          terminalId, cwd: '', shell: '', rows: known.rows, cols: known.cols, preserveOutput: true, interactive: true,
+        });
+      }, 0);
+    }
 
     setTerminalById((current) => {
       const existing = current[terminalId];
@@ -4584,37 +4612,17 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     return terminalId;
   }, [settings.tenantId]);
 
-  const startTerminalSession = useCallback((
+  const sendTerminalStart = useCallback((
     target: TerminalTarget,
-    options: { cwd: string; shell: string; rows: number; cols: number; terminalId?: string; preserveOutput?: boolean },
+    terminalId: string,
+    { cwd, shell, rows, cols }: { cwd: string; shell: string; rows: number; cols: number },
+    password?: string,
   ) => {
-    const workspace = target.kind === 'workspace' ? target.workspace : null;
-    // SSH terminals run `ssh -tt <host>` on the backend; cwd/workspace are ignored.
-    const cwd = workspace ? options.cwd.trim() || workspace.path : '';
-    const shell = options.shell.trim();
-    const rows = Number.isFinite(options.rows) ? Math.round(options.rows) : DEFAULT_TERMINAL_ROWS;
-    const cols = Number.isFinite(options.cols) ? Math.round(options.cols) : DEFAULT_TERMINAL_COLS;
-    const terminalId = seedTerminalState(target, {
-      terminalId: options.terminalId,
-      cwd,
-      shell,
-      rows,
-      cols,
-      status: 'starting',
-      error: '',
-      exitCode: null,
-      stopRequested: false,
-      ...(options.preserveOutput ? {} : {
-        output: [
-          terminalOutputLine('system', target.kind === 'ssh' ? `connecting to ${target.host}` : `starting terminal in ${cwd}`),
-        ],
-      }),
-    }, options.preserveOutput ? terminalOutputLine('system', 'restarting terminal') : undefined);
     const sent = sendProtocolMessage('terminal.start', target.kind === 'ssh' ? {
       terminalId,
       tenantId: settings.tenantId,
       cwd: '',
-      ssh: { host: target.host },
+      ssh: { host: target.host, ...(password ? { password } : {}) },
       rows,
       cols,
     } : {
@@ -4649,7 +4657,51 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       return false;
     }
     return true;
-  }, [seedTerminalState, sendProtocolMessage, settings.tenantId]);
+  }, [sendProtocolMessage, settings.tenantId]);
+
+  const startTerminalSession = useCallback((target: TerminalTarget, options: TerminalStartOptions) => {
+    const workspace = target.kind === 'workspace' ? target.workspace : null;
+    // SSH terminals run `ssh -tt <host>` on the backend; cwd/workspace are ignored.
+    const cwd = workspace ? options.cwd.trim() || workspace.path : '';
+    const shell = options.shell.trim();
+    const rows = Number.isFinite(options.rows) ? Math.round(options.rows) : DEFAULT_TERMINAL_ROWS;
+    const cols = Number.isFinite(options.cols) ? Math.round(options.cols) : DEFAULT_TERMINAL_COLS;
+    const terminalId = seedTerminalState(target, {
+      terminalId: options.terminalId,
+      cwd,
+      shell,
+      rows,
+      cols,
+      status: 'starting',
+      error: '',
+      exitCode: null,
+      stopRequested: false,
+      sshPasswordAt: undefined,
+      ...(options.preserveOutput ? {} : {
+        output: [
+          terminalOutputLine('system', target.kind === 'ssh' ? `connecting to ${target.host}` : `starting terminal in ${cwd}`),
+        ],
+      }),
+    }, options.preserveOutput ? terminalOutputLine('system', 'restarting terminal') : undefined);
+    if (target.kind === 'ssh' && !options.interactive) {
+      // A saved password signs in through the backend's askpass helper; the
+      // keychain lookup is asynchronous, so the start is sent once it settles.
+      const backendId = terminalByIdRef.current[terminalId]?.backendConnectionId ?? activeBackendConnectionIdRef.current;
+      void loadSshPassword(backendId, target.host).then((password) => {
+        if (password) {
+          setTerminalById((current) => {
+            const existing = current[terminalId];
+            return existing ? { ...current, [terminalId]: { ...existing, sshPasswordAt: Date.now() } } : current;
+          });
+        }
+        sendTerminalStart(target, terminalId, { cwd, shell, rows, cols }, password ?? undefined);
+      });
+      return true;
+    }
+    return sendTerminalStart(target, terminalId, { cwd, shell, rows, cols });
+  }, [seedTerminalState, sendTerminalStart]);
+
+  startTerminalSessionRef.current = startTerminalSession;
 
   const sendTerminalInput = useCallback((terminalId: string, tenantId: string, data: string) => {
     const terminal = terminalById[terminalId];

@@ -35,6 +35,7 @@ const api = {
   secureStore: {
     get: (key: string) => ipcRenderer.invoke('secureStore:get', key) as Promise<string | null>,
     set: (key: string, value: string | null) => ipcRenderer.invoke('secureStore:set', key, value) as Promise<void>,
+    available: () => ipcRenderer.invoke('secureStore:available') as Promise<boolean>,
   },
   dialog: {
     openDirectory: () => ipcRenderer.invoke('dialog:openDirectory') as Promise<string | null>,

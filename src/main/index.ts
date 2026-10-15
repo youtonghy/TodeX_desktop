@@ -752,6 +752,8 @@ app.whenReady().then(() => {
     });
   });
 
+  handleIpc('secureStore:available', () => requireSecureStorage().then(() => true, () => false));
+
   handleIpc('dialog:openDirectory', async () => {
     const result = await dialog.showOpenDialog({
       properties: ['openDirectory', 'createDirectory'],

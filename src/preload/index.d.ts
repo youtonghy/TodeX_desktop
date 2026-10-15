@@ -6,6 +6,8 @@ export type TodeXDesktopApi = {
   secureStore: {
     get: (key: string) => Promise<string | null>;
     set: (key: string, value: string | null) => Promise<void>;
+    /** Whether OS-backed encryption is available, i.e. `set` can succeed. */
+    available: () => Promise<boolean>;
   };
   dialog: {
     openDirectory: () => Promise<string | null>;

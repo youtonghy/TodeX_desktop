@@ -7,7 +7,8 @@ import {
 import { sshHostEndpoint, type FtpSite, type SshHost, type SshKey, type SshTestResult } from '@todex/protocol/ssh';
 import { useT } from '../../i18n';
 import { FtpSiteFormDialog, SshHostFormDialog, SshImportDialog } from './SshHostDialogs';
-import type { RemoteConnectTarget } from './useRemoteConnector';
+import type { EnteredPassword, RemoteConnectTarget } from './useRemoteConnector';
+import { loadSshPassword, saveSshPassword } from '../../lib/sshPasswordStore';
 import { SSH_FAILURE_HINT_KEYS, SSH_FAILURE_LABEL_KEYS, errorMessage, type SshApi } from './sshShared';
 import { Chip } from '@/components/base/badges/chip';
 import { Button } from '@/components/base/buttons/button';
@@ -27,6 +28,10 @@ const ICON_TILE = 'flex size-9 shrink-0 items-center justify-center rounded-xl b
 
 type Props = {
   api: SshApi;
+  /** Backend profile the hosts belong to; saved passwords are kept per profile. */
+  backendId: string;
+  askPassword: (label: string, sshHost?: boolean) => Promise<EnteredPassword | null>;
+  rememberPassword: (alias: string, entered: EnteredPassword) => Promise<void>;
   hosts: SshHost[];
   ftpSites: FtpSite[];
   keys: SshKey[];
@@ -37,7 +42,7 @@ type Props = {
 
 type PendingDelete = { kind: 'host'; alias: string } | { kind: 'ftp'; site: FtpSite };
 
-export function SshHostsTab({ api, hosts, ftpSites, keys, onReload, onConnect, onOpenFiles }: Props) {
+export function SshHostsTab({ api, backendId, askPassword, rememberPassword, hosts, ftpSites, keys, onReload, onConnect, onOpenFiles }: Props) {
   const t = useT();
   const [hostDialog, setHostDialog] = useState<{ host?: SshHost } | null>(null);
   const [importOpen, setImportOpen] = useState(false);
@@ -47,11 +52,25 @@ export function SshHostsTab({ api, hosts, ftpSites, keys, onReload, onConnect, o
   const [testResults, setTestResults] = useState<Record<string, SshTestResult>>({});
   const [accessPending, setAccessPending] = useState<Record<string, boolean>>({});
 
-  const testHost = async (alias: string) => {
+  /** Password hosts test with the saved password, else one entered now;
+   * `promptPassword` always asks (to retry or replace a wrong one). */
+  const testHost = async (host: SshHost, promptPassword = false) => {
+    const { alias } = host;
+    let entered: EnteredPassword | null = null;
+    let password: string | undefined;
+    if (promptPassword || host.managed?.authMethod === 'password') {
+      if (!promptPassword) password = (await loadSshPassword(backendId, alias)) ?? undefined;
+      if (!password) {
+        entered = await askPassword(alias, true);
+        if (!entered) return;
+        password = entered.password;
+      }
+    }
     setTesting((current) => ({ ...current, [alias]: true }));
     try {
-      const result = await api().testSshHost(alias);
+      const result = await api().testSshHost(alias, password);
       setTestResults((current) => ({ ...current, [alias]: result }));
+      if (result.ok && entered) await rememberPassword(alias, entered);
     } catch (error) {
       toast.danger(errorMessage(error, t('ssh.hosts.testFailed')));
     } finally {
@@ -85,8 +104,10 @@ export function SshHostsTab({ api, hosts, ftpSites, keys, onReload, onConnect, o
     setPendingDelete(null);
     if (!target) return;
     try {
-      if (target.kind === 'host') await api().deleteSshHost(target.alias);
-      else await api().deleteFtpSite(target.site.id);
+      if (target.kind === 'host') {
+        await api().deleteSshHost(target.alias);
+        await saveSshPassword(backendId, target.alias, null).catch(() => undefined);
+      } else await api().deleteFtpSite(target.site.id);
       onReload();
     } catch (error) {
       toast.danger(errorMessage(error, t('ssh.deleteFailed')));
@@ -110,6 +131,7 @@ export function SshHostsTab({ api, hosts, ftpSites, keys, onReload, onConnect, o
             {hosts.map((host) => {
               const result = testResults[host.alias];
               const managed = host.source === 'managed';
+              const passwordAuth = host.managed?.authMethod === 'password';
               return (
                 <Card key={host.alias} className="min-w-0">
                   <div className="flex items-start gap-3">
@@ -129,6 +151,7 @@ export function SshHostsTab({ api, hosts, ftpSites, keys, onReload, onConnect, o
                             {managed ? t('ssh.hosts.sourceManagedHint') : t('ssh.hosts.sourceConfigHint', { path: host.sourcePath || '~/.ssh/config' })}
                           </Tooltip>
                         </TooltipTrigger>
+                        {passwordAuth ? <Chip variant="caption" color="neutral">{t('ssh.hosts.passwordAuth')}</Chip> : null}
                       </div>
                       <p className="mt-1 truncate font-mono text-caption-1-regular text-text-secondary" title={sshHostEndpoint(host)}>{sshHostEndpoint(host)}</p>
                       {host.resolved?.proxyJump ? <p className="mt-0.5 truncate text-caption-1-regular text-text-tertiary">{t('ssh.hosts.via', { jump: host.resolved.proxyJump })}</p> : null}
@@ -166,9 +189,16 @@ export function SshHostsTab({ api, hosts, ftpSites, keys, onReload, onConnect, o
                         : t(SSH_FAILURE_LABEL_KEYS[result.failure ?? 'other'])}
                       description={!result.ok ? (
                         <>
-                          {t(SSH_FAILURE_HINT_KEYS[result.failure ?? 'other'])}
+                          {passwordAuth && result.failure === 'authenticationFailed'
+                            ? t('ssh.hint.passwordFailed')
+                            : t(SSH_FAILURE_HINT_KEYS[result.failure ?? 'other'])}
                           {result.detail ? <span className="mt-1 block break-words font-mono text-caption-1-regular opacity-80">{result.detail}</span> : null}
                         </>
+                      ) : undefined}
+                      actions={!result.ok && result.failure === 'authenticationFailed' ? (
+                        <Button size="small" variant="secondary" disabled={testing[host.alias]} onClick={() => void testHost(host, true)}>
+                          {t('ssh.hosts.testWithPassword')}
+                        </Button>
                       ) : undefined}
                     />
                   ) : null}
@@ -181,7 +211,7 @@ export function SshHostsTab({ api, hosts, ftpSites, keys, onReload, onConnect, o
                       leadingIcon={testing[host.alias] ? SpinnerIcon : RiPulseLine}
                       disabled={testing[host.alias]}
                       aria-busy={testing[host.alias] || undefined}
-                      onClick={() => void testHost(host.alias)}
+                      onClick={() => void testHost(host)}
                     >
                       {t('ssh.hosts.test')}
                     </Button>
@@ -246,7 +276,7 @@ export function SshHostsTab({ api, hosts, ftpSites, keys, onReload, onConnect, o
       </section>
 
       {hostDialog ? (
-        <SshHostFormDialog api={api} host={hostDialog.host?.managed} keys={keys} onClose={() => setHostDialog(null)} onSaved={onReload} />
+        <SshHostFormDialog api={api} backendId={backendId} host={hostDialog.host?.managed} keys={keys} onClose={() => setHostDialog(null)} onSaved={onReload} />
       ) : null}
       {importOpen ? <SshImportDialog api={api} onClose={() => setImportOpen(false)} onImported={onReload} /> : null}
       {ftpDialog ? <FtpSiteFormDialog api={api} site={ftpDialog.site} onClose={() => setFtpDialog(null)} onSaved={onReload} /> : null}

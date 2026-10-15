@@ -1,11 +1,14 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useId, useState, type ReactNode } from 'react';
 import { Button as AriaButton } from 'react-aria-components';
 import { RiKey2Line } from '@remixicon/react';
-import type { FtpProtocol, FtpSite, FtpSiteInput, ManagedHost, SshHostImportResult, SshKey } from '@todex/protocol/ssh';
+import type { FtpProtocol, FtpSite, FtpSiteInput, ManagedHost, SshAuthMethod, SshHostImportResult, SshKey } from '@todex/protocol/ssh';
 import { Field } from '../Field';
 import { useT } from '../../i18n';
+import { canRememberSshPasswords, loadSshPassword, saveSshPassword, sshPasswordsRememberable } from '../../lib/sshPasswordStore';
 import { errorMessage, parsePort, type SshApi } from './sshShared';
 import { Button } from '@/components/base/buttons/button';
+import { Checkbox } from '@/components/base/checkbox/checkbox';
+import { SegmentedControl, SegmentedControlItem } from '@/components/base/segmented-control/segmented-control';
 import { Select, SelectItem } from '@/components/base/select/select';
 import { Textarea } from '@/components/base/textarea/textarea';
 import { Alert } from '@/components/ui/alert';
@@ -46,8 +49,10 @@ function DialogShell({ title, onClose, footer, children, wide = false }: {
 }
 
 /** Add or edit a TodeX-managed host (`$DATA_DIR/ssh/hosts.conf`). */
-export function SshHostFormDialog({ api, host, keys, onClose, onSaved }: {
+export function SshHostFormDialog({ api, backendId, host, keys, onClose, onSaved }: {
   api: SshApi;
+  /** Backend profile the host belongs to; saved passwords are kept per profile. */
+  backendId: string;
   /** Editing when set; the alias is the route key and stays fixed. */
   host?: ManagedHost;
   keys: SshKey[];
@@ -61,8 +66,37 @@ export function SshHostFormDialog({ api, host, keys, onClose, onSaved }: {
   const [user, setUser] = useState(host?.user ?? '');
   const [identityFile, setIdentityFile] = useState(host?.identityFile ?? '');
   const [proxyJump, setProxyJump] = useState(host?.proxyJump ?? '');
+  const [authMethod, setAuthMethod] = useState<SshAuthMethod>(host?.authMethod ?? 'key');
+  // Saved passwords live in this client's keychain, never in the host itself.
+  const [hasSavedPassword, setHasSavedPassword] = useState(false);
+  const [keychainReady, setKeychainReady] = useState(false);
+  const [remember, setRemember] = useState(false);
+  const [password, setPassword] = useState('');
   const [saving, setSaving] = useState(false);
+  const authLabelId = useId();
   const privateKeys = keys.filter((key) => key.privateKeyPath);
+
+  useEffect(() => {
+    if (!sshPasswordsRememberable) return;
+    let cancelled = false;
+    void canRememberSshPasswords().then((ready) => { if (!cancelled) setKeychainReady(ready); });
+    if (host) {
+      void loadSshPassword(backendId, host.alias).then((saved) => {
+        if (cancelled || !saved) return;
+        setHasSavedPassword(true);
+        setRemember(true);
+      });
+    }
+    return () => { cancelled = true; };
+  }, [backendId, host]);
+
+  /** Applies the password choices once the host itself is saved. */
+  const savePassword = async (savedAlias: string) => {
+    if (!sshPasswordsRememberable) return;
+    const keep = authMethod === 'password' && remember;
+    if (keep && password) await saveSshPassword(backendId, savedAlias, password);
+    else if (!keep && hasSavedPassword) await saveSshPassword(backendId, savedAlias, null);
+  };
 
   const submit = async () => {
     const trimmedAlias = alias.trim();
@@ -75,8 +109,9 @@ export function SshHostFormDialog({ api, host, keys, onClose, onSaved }: {
       hostName: hostName.trim(),
       ...(user.trim() ? { user: user.trim() } : {}),
       ...(parsedPort ? { port: parsedPort } : {}),
-      ...(identityFile.trim() ? { identityFile: identityFile.trim() } : {}),
+      ...(authMethod === 'key' && identityFile.trim() ? { identityFile: identityFile.trim() } : {}),
       ...(proxyJump.trim() ? { proxyJump: proxyJump.trim() } : {}),
+      ...(authMethod === 'password' ? { authMethod } : {}),
       // Extra ssh_config options are not editable here; keep them intact.
       ...(host?.options?.length ? { options: host.options } : {}),
     };
@@ -85,6 +120,7 @@ export function SshHostFormDialog({ api, host, keys, onClose, onSaved }: {
       if (host) await api().updateSshHost(host.alias, next);
       else await api().createSshHost(next);
       toast.success(t(host ? 'ssh.hostForm.updated' : 'ssh.hostForm.created', { alias: next.alias }));
+      await savePassword(next.alias).catch((error: unknown) => toast.danger(errorMessage(error, t('ssh.password.saveFailed'))));
       onSaved();
       onClose();
     } catch (error) {
@@ -111,34 +147,72 @@ export function SshHostFormDialog({ api, host, keys, onClose, onSaved }: {
         <Field label={t('ssh.hostForm.user')} value={user} onChange={setUser} />
         <Field label={t('ssh.hostForm.port')} value={port} onChange={setPort} description={t('ssh.hostForm.portHint')} />
       </div>
-      <div className="flex items-end gap-2">
-        <div className="min-w-0 flex-1">
-          <Field label={t('ssh.hostForm.identityFile')} value={identityFile} onChange={setIdentityFile} />
-        </div>
-        <MenuTrigger>
-          <AriaButton
-            isDisabled={!privateKeys.length}
-            aria-label={t('ssh.hostForm.pickKey')}
-            className={cx(
-              'inline-flex h-9 shrink-0 cursor-pointer items-center gap-1.5 rounded-2lg px-3 text-body-medium text-text-secondary',
-              'transition-colors duration-150 ease hover:bg-background-secondary-hover hover:text-text-primary',
-              'outline-none focus-visible:ring-2 focus-visible:ring-border-focus-ring',
-              'data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50 data-[disabled]:hover:bg-transparent data-[disabled]:hover:text-text-secondary',
-            )}
-          >
-            <RiKey2Line aria-hidden className="size-4 text-foreground-icon-secondary" />{t('ssh.hostForm.pickKey')}
-          </AriaButton>
-          <MenuPopover placement="bottom end">
-            <Menu aria-label={t('ssh.hostForm.pickKey')} onAction={(key) => setIdentityFile(String(key))}>
-              {privateKeys.map((key) => (
-                <MenuItem key={key.name} id={key.privateKeyPath ?? key.name} textValue={key.name} trailing={key.algorithm}>
-                  {key.name}
-                </MenuItem>
-              ))}
-            </Menu>
-          </MenuPopover>
-        </MenuTrigger>
+      <div className="flex flex-col gap-1.5">
+        <span id={authLabelId} className="text-body-medium text-text-primary">{t('ssh.hostForm.authMethod')}</span>
+        <SegmentedControl
+          aria-labelledby={authLabelId}
+          className="self-start"
+          selectedKeys={[authMethod]}
+          onSelectionChange={(keys) => {
+            const [next] = [...keys] as SshAuthMethod[];
+            if (next) setAuthMethod(next);
+          }}
+        >
+          <SegmentedControlItem id="key">{t('ssh.hostForm.authKey')}</SegmentedControlItem>
+          <SegmentedControlItem id="password">{t('ssh.hostForm.authPassword')}</SegmentedControlItem>
+        </SegmentedControl>
       </div>
+      {authMethod === 'key' ? (
+        <div className="flex items-end gap-2">
+          <div className="min-w-0 flex-1">
+            <Field label={t('ssh.hostForm.identityFile')} value={identityFile} onChange={setIdentityFile} />
+          </div>
+          <MenuTrigger>
+            <AriaButton
+              isDisabled={!privateKeys.length}
+              aria-label={t('ssh.hostForm.pickKey')}
+              className={cx(
+                'inline-flex h-9 shrink-0 cursor-pointer items-center gap-1.5 rounded-2lg px-3 text-body-medium text-text-secondary',
+                'transition-colors duration-150 ease hover:bg-background-secondary-hover hover:text-text-primary',
+                'outline-none focus-visible:ring-2 focus-visible:ring-border-focus-ring',
+                'data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50 data-[disabled]:hover:bg-transparent data-[disabled]:hover:text-text-secondary',
+              )}
+            >
+              <RiKey2Line aria-hidden className="size-4 text-foreground-icon-secondary" />{t('ssh.hostForm.pickKey')}
+            </AriaButton>
+            <MenuPopover placement="bottom end">
+              <Menu aria-label={t('ssh.hostForm.pickKey')} onAction={(key) => setIdentityFile(String(key))}>
+                {privateKeys.map((key) => (
+                  <MenuItem key={key.name} id={key.privateKeyPath ?? key.name} textValue={key.name} trailing={key.algorithm}>
+                    {key.name}
+                  </MenuItem>
+                ))}
+              </Menu>
+            </MenuPopover>
+          </MenuTrigger>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-3">
+          <p className="text-caption-1-regular text-text-tertiary">{t('ssh.hostForm.authPasswordHint')}</p>
+          {sshPasswordsRememberable ? (
+            <>
+              <div className="flex flex-col gap-1">
+                <Checkbox isSelected={remember} isDisabled={!keychainReady} onChange={setRemember}>{t('ssh.password.remember')}</Checkbox>
+                {!keychainReady ? <p className="text-caption-1-regular text-text-tertiary">{t('ssh.password.keychainUnavailable')}</p> : null}
+              </div>
+              {remember ? (
+                <Field
+                  label={t('ssh.remote.password')}
+                  type="password"
+                  value={password}
+                  onChange={setPassword}
+                  description={hasSavedPassword ? t('ssh.password.savedKeep') : t('ssh.password.rememberHint')}
+                />
+              ) : null}
+            </>
+          ) : null}
+        </div>
+      )}
       <Field label={t('ssh.hostForm.proxyJump')} value={proxyJump} onChange={setProxyJump} description={t('ssh.hostForm.proxyJumpHint')} />
     </DialogShell>
   );

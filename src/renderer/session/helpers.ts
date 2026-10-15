@@ -364,7 +364,21 @@ export type TerminalClientState = {
   stopRequested?: boolean;
   pid?: number | null;
   exitCode?: number | null;
+  /** When an SSH terminal was started with a saved password; an early ssh
+   * failure then retries without it so the user can sign in at the prompt. */
+  sshPasswordAt?: number;
   updatedAt: number;
+};
+
+export type TerminalStartOptions = {
+  cwd: string;
+  shell: string;
+  rows: number;
+  cols: number;
+  terminalId?: string;
+  preserveOutput?: boolean;
+  /** SSH only: skip the saved password and let ssh prompt in the terminal. */
+  interactive?: boolean;
 };
 
 export type PendingThreadAction = {
