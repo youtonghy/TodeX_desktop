@@ -386,6 +386,19 @@ export function AppSidebar({
     return [...groups.values()].sort((a, b) => (a.profile?.name ?? '').localeCompare(b.profile?.name ?? ''));
   }, [session.backendConnections, session.workspaces, session.activeBackendConnectionId]);
 
+  // Display names shared by several workspaces; only those rows show the
+  // backend dot so same-named workspaces on different backends stay apart.
+  const duplicateWorkspaceNames = useMemo(() => {
+    const seen = new Set<string>();
+    const duplicates = new Set<string>();
+    for (const workspace of session.workspaces) {
+      const name = workspaceDisplayName(workspace);
+      if (seen.has(name)) duplicates.add(name);
+      else seen.add(name);
+    }
+    return duplicates;
+  }, [session.workspaces]);
+
   const { collapsedGroups, toggleGroupCollapsed } = useSidebarGroupCollapse();
   const dragSourceRef = useRef<WorkspaceDragSource | null>(null);
   const [draggingKey, setDraggingKey] = useState<string | null>(null);
@@ -743,6 +756,7 @@ export function AppSidebar({
     const isMissing = Boolean(workspace.pathMissing);
     const backend = session.backendConnections.find((profile) => profile.id === (workspace.backendConnectionId || session.activeBackendConnectionId));
     const backendLabel = backend ? t('sidebar.backendLabel', { name: backend.name, url: backend.serverUrl }) : t('sidebar.backendRemoved');
+    const showBackend = duplicateWorkspaceNames.has(workspaceDisplayName(workspace));
     const workspaceStatus = workspaceStatusMap[workspace.id];
     const workspaceStatusLabel = workspaceStatus === 'working'
       ? t('sidebar.statusWorking')
@@ -786,7 +800,7 @@ export function AppSidebar({
               {isMissing ? <RiErrorWarningLine className="size-3 shrink-0 text-status-yellow-text" aria-label={t('sidebar.workspaceMissingPath')} /> : null}
             </span>
           </span>
-          {rail ? null : (
+          {rail || !showBackend ? null : (
             <TooltipTrigger delay={300}>
               <Focusable>
                 <span
@@ -798,7 +812,7 @@ export function AppSidebar({
                   <span aria-hidden="true" className="size-2.5 rounded-full ring-1 ring-separator-border" style={{ backgroundColor: backendLabelColor(backend) }} />
                 </span>
               </Focusable>
-              <Tooltip placement="right" className="max-w-xs break-all">{backendLabel}</Tooltip>
+              <Tooltip placement="right" className="max-w-xs break-all">{backend?.name ?? backendLabel}</Tooltip>
             </TooltipTrigger>
           )}
         </RowContent>
@@ -863,6 +877,7 @@ export function AppSidebar({
     const isMissing = Boolean(workspace.pathMissing);
     const backend = session.backendConnections.find((profile) => profile.id === (workspace.backendConnectionId || session.activeBackendConnectionId));
     const backendLabel = backend ? t('sidebar.backendLabel', { name: backend.name, url: backend.serverUrl }) : t('sidebar.backendRemoved');
+    const showBackend = duplicateWorkspaceNames.has(workspaceDisplayName(workspace));
     const workspaceStatus = workspaceStatusMap[workspace.id];
     const WorkspaceGlyph = workspaceIconComponent(workspace.icon);
     return (
@@ -901,14 +916,16 @@ export function AppSidebar({
           <span className="flex items-center gap-1">
             {pins.workspace.includes(workspace.id) ? <RiPushpin2Fill className="size-3 shrink-0 text-foreground-icon-tertiary" aria-label={t('sidebar.pinned')} /> : null}
             {isMissing ? <RiErrorWarningLine className="size-3 shrink-0 text-status-yellow-text" aria-label={t('sidebar.workspaceMissingPath')} /> : null}
-            <TooltipTrigger delay={300}>
-              <Focusable>
-                <span role="img" tabIndex={-1} aria-label={backendLabel} className={cx('flex size-6 shrink-0 items-center justify-center rounded-full', FOCUS_RING)}>
-                  <span aria-hidden="true" className="size-2.5 rounded-full ring-1 ring-separator-border" style={{ backgroundColor: backendLabelColor(backend) }} />
-                </span>
-              </Focusable>
-              <Tooltip placement="right" className="max-w-xs break-all">{backendLabel}</Tooltip>
-            </TooltipTrigger>
+            {showBackend ? (
+              <TooltipTrigger delay={300}>
+                <Focusable>
+                  <span role="img" tabIndex={-1} aria-label={backendLabel} className={cx('flex size-6 shrink-0 items-center justify-center rounded-full', FOCUS_RING)}>
+                    <span aria-hidden="true" className="size-2.5 rounded-full ring-1 ring-separator-border" style={{ backgroundColor: backendLabelColor(backend) }} />
+                  </span>
+                </Focusable>
+                <Tooltip placement="right" className="max-w-xs break-all">{backend?.name ?? backendLabel}</Tooltip>
+              </TooltipTrigger>
+            ) : null}
           </span>
         )}
       />
