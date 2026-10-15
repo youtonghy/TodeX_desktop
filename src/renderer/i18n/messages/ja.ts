@@ -137,6 +137,8 @@ export const ja: Messages = {
   'app.workspaceRoot': 'ワークスペースのルート',
   'app.workspaceBrowse': 'Backend のディレクトリを参照',
   'app.workspacePickLocal': 'ローカルで選択',
+  'app.workspaceNewFolder': '新しいフォルダー',
+  'app.workspaceNewFolderName': 'フォルダー名',
   'app.workspaceReadFailed': 'ディレクトリを読み取れませんでした',
   'app.workspaceCreate': '作成',
 
@@ -2168,6 +2170,8 @@ export const ja: Messages = {
   // workspace
   'workspace.dirReadFailed': 'ディレクトリの読み取りに失敗: {status}',
   'workspace.noCurrentDir': 'Backend が現在のディレクトリを返しませんでした',
+  'workspace.dirCreateFailed': 'フォルダーの作成に失敗: {status}',
+  'workspace.dirCreateUnsupported': 'この Backend はフォルダーの作成に対応していません。先に Backend を更新してください。',
 
   // Agent providers (cc-switch model)
   'ap.readFailed': 'プロバイダーを読み込めません',

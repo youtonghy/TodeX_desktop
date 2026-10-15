@@ -137,6 +137,8 @@ export const zhCN = {
   'app.workspaceRoot': '工作区根目录',
   'app.workspaceBrowse': '浏览后端目录',
   'app.workspacePickLocal': '本机选择',
+  'app.workspaceNewFolder': '新建文件夹',
+  'app.workspaceNewFolderName': '文件夹名称',
   'app.workspaceReadFailed': '无法读取目录',
   'app.workspaceCreate': '创建',
 
@@ -2168,6 +2170,8 @@ export const zhCN = {
   // workspace
   'workspace.dirReadFailed': '目录读取失败: {status}',
   'workspace.noCurrentDir': '后端没有返回当前目录',
+  'workspace.dirCreateFailed': '新建文件夹失败: {status}',
+  'workspace.dirCreateUnsupported': '后端版本不支持新建文件夹，请先更新后端',
 
   // Agent providers (cc-switch model)
   'ap.readFailed': '无法读取 Agent 供应商',

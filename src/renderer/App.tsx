@@ -1,8 +1,9 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { RiAddLine, RiExpandLeftLine, RiExpandRightLine, RiGithubLine, RiLayoutLeftLine, RiLayoutRightLine, RiRobot2Line } from '@remixicon/react';
+import { RiAddLine, RiFolderAddLine, RiExpandLeftLine, RiExpandRightLine, RiGithubLine, RiLayoutLeftLine, RiLayoutRightLine, RiRobot2Line } from '@remixicon/react';
 import { motion, useReducedMotion } from 'motion/react';
 import { Dialog, Modal as AriaModal, ModalOverlay } from 'react-aria-components';
 import { Badge } from '@/components/base/badges/badge';
+import { Input } from '@/components/base/input/input';
 import { Button } from '@/components/base/buttons/button';
 import { Select, SelectItem } from '@/components/base/select/select';
 import { useDirection } from '@/components/foundations/direction/direction';
@@ -27,7 +28,7 @@ import { AppIcon } from './components/AppIcon';
 import { ChatPanel } from './screens/ChatPanel';
 import { HistoryRecoveryNotice } from './components/HistoryRecoveryNotice';
 import { Field } from './components/Field';
-import { connectionStateLabel, fetchWorkspaceDirectorySnapshot } from './session/helpers';
+import { connectionStateLabel, createWorkspaceDirectory, fetchWorkspaceDirectorySnapshot } from './session/helpers';
 import { isWorkbenchTab, panelFromRoute, type DesktopPanel, type OpenPanelOptions, type WorkbenchItem, type WorkbenchRequest, type WorkbenchTab } from './lib/panels';
 import type { RemoteFilesBinding } from './session/fileSources';
 import { ShortcutHint, useAppShortcuts, useShortcutHintTracking } from './lib/shortcuts';
@@ -687,6 +688,8 @@ function CreateWorkspaceModal({
   const [entries, setEntries] = useState<string[]>([]);
   const [roots, setRoots] = useState<string[]>([]);
   const [activeRoot, setActiveRoot] = useState('');
+  const [newFolderName, setNewFolderName] = useState<string | null>(null);
+  const [creatingFolder, setCreatingFolder] = useState(false);
   const selectedBackend = session.backendConnections.find((profile) => profile.id === backendId);
   const directorySettings = selectedBackend ? { ...session.settings, serverUrl: selectedBackend.serverUrl, deviceSecret: selectedBackend.deviceSecret, tenantId: selectedBackend.tenantId, encryptionProtocol: selectedBackend.encryptionProtocol, encryptionPublicKey: selectedBackend.encryptionPublicKey, transportVerified: selectedBackend.transportVerified } : session.settings;
 
@@ -724,6 +727,22 @@ function CreateWorkspaceModal({
 
   const readFailed = (error: unknown) => toast.danger(error instanceof Error ? error.message : t('app.workspaceReadFailed'));
 
+  const submitNewFolder = async () => {
+    const folderName = newFolderName?.trim();
+    if (!folderName || creatingFolder) return;
+    setCreatingFolder(true);
+    try {
+      applySnapshot(await createWorkspaceDirectory(directorySettings, path, folderName));
+    } catch (error) {
+      readFailed(error);
+      return;
+    } finally {
+      setCreatingFolder(false);
+    }
+    if (!name.trim()) setName(folderName);
+    setNewFolderName(null);
+  };
+
   return (
     <Modal
       isOpen={isOpen}
@@ -733,6 +752,11 @@ function CreateWorkspaceModal({
       bodyClassName="flex flex-col gap-4"
       footer={(
         <>
+          {workspace ? null : (
+            <Button variant="secondary" className="me-auto" leadingIcon={RiFolderAddLine} onClick={() => setNewFolderName('')}>
+              {t('app.workspaceNewFolder')}
+            </Button>
+          )}
           <Button variant="secondary" onClick={() => onOpenChange(false)}>{t('common.cancel')}</Button>
           <Button
             leadingIcon={workspace ? undefined : RiAddLine}
@@ -825,6 +849,22 @@ function CreateWorkspaceModal({
           ))}
         </ScrollArea>
       ) : null}
+      <Modal
+        isOpen={newFolderName !== null}
+        onOpenChange={(open) => { if (!open) setNewFolderName(null); }}
+        title={t('app.workspaceNewFolder')}
+        size="sm"
+        footer={(
+          <>
+            <Button variant="secondary" onClick={() => setNewFolderName(null)}>{t('common.cancel')}</Button>
+            <Button type="submit" form="workspace-new-folder-form" disabled={creatingFolder || !newFolderName?.trim()}>{t('app.workspaceCreate')}</Button>
+          </>
+        )}
+      >
+        <form id="workspace-new-folder-form" onSubmit={(event) => { event.preventDefault(); void submitNewFolder(); }}>
+          <Input label={t('app.workspaceNewFolderName')} hint={path} value={newFolderName ?? ''} onChange={setNewFolderName} autoFocus />
+        </form>
+      </Modal>
     </Modal>
   );
 }

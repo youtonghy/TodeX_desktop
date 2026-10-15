@@ -137,6 +137,8 @@ export const ko: Messages = {
   'app.workspaceRoot': '워크스페이스 루트',
   'app.workspaceBrowse': 'Backend 디렉터리 찾아보기',
   'app.workspacePickLocal': '로컬에서 선택',
+  'app.workspaceNewFolder': '새 폴더',
+  'app.workspaceNewFolderName': '폴더 이름',
   'app.workspaceReadFailed': '디렉터리를 읽을 수 없습니다',
   'app.workspaceCreate': '만들기',
 
@@ -2168,6 +2170,8 @@ export const ko: Messages = {
   // workspace
   'workspace.dirReadFailed': '디렉터리 읽기 실패: {status}',
   'workspace.noCurrentDir': 'Backend가 현재 디렉터리를 반환하지 않았습니다',
+  'workspace.dirCreateFailed': '폴더 생성 실패: {status}',
+  'workspace.dirCreateUnsupported': '이 Backend는 폴더 생성을 지원하지 않습니다. 먼저 Backend를 업데이트하세요.',
 
   // Agent providers (cc-switch model)
   'ap.readFailed': '프로바이더를 읽을 수 없습니다',

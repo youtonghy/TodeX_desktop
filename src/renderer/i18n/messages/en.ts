@@ -137,6 +137,8 @@ export const en: Messages = {
   'app.workspaceRoot': 'Workspace root',
   'app.workspaceBrowse': 'Browse backend directories',
   'app.workspacePickLocal': 'Choose locally',
+  'app.workspaceNewFolder': 'New folder',
+  'app.workspaceNewFolderName': 'Folder name',
   'app.workspaceReadFailed': 'Could not read the directory',
   'app.workspaceCreate': 'Create',
 
@@ -2168,6 +2170,8 @@ export const en: Messages = {
   // workspace
   'workspace.dirReadFailed': 'Failed to read directory: {status}',
   'workspace.noCurrentDir': 'The backend did not return the current directory',
+  'workspace.dirCreateFailed': 'Failed to create folder: {status}',
+  'workspace.dirCreateUnsupported': 'This backend cannot create folders yet. Update the backend first.',
 
   // Agent providers (cc-switch model)
   'ap.readFailed': 'Unable to read agent providers',

@@ -3007,12 +3007,38 @@ export async function fetchWorkspaceDirectorySnapshot(
     query: path ? { path } : undefined,
     headers: { accept: 'application/json' },
   });
+  return readWorkspaceDirectoryResponse(response, 'workspace.dirReadFailed');
+}
+
+/** Creates `name` directly under `parent` on the backend and returns the new folder's listing. */
+export async function createWorkspaceDirectory(
+  settings: ConnectionSettings,
+  parent: string,
+  name: string,
+): Promise<WorkspaceDirectorySnapshot> {
+  const response = await backendFetch(settings, {
+    method: 'POST',
+    path: '/v2/workspace/directories',
+    headers: { 'content-type': 'application/json', accept: 'application/json' },
+    body: JSON.stringify({ parent, name }),
+  });
+  // Older backends only route GET here; 404 means the parent is missing.
+  if (response.status === 405) {
+    throw new Error(t('workspace.dirCreateUnsupported'));
+  }
+  return readWorkspaceDirectoryResponse(response, 'workspace.dirCreateFailed');
+}
+
+async function readWorkspaceDirectoryResponse(
+  response: Response,
+  failureKey: 'workspace.dirReadFailed' | 'workspace.dirCreateFailed',
+): Promise<WorkspaceDirectorySnapshot> {
   const body = await response.json().catch(() => null);
   if (!response.ok) {
     const message = body && typeof body === 'object' && !Array.isArray(body)
       ? stringFromUnknown((body as Record<string, unknown>).message)
       : '';
-    throw new Error(message || t('workspace.dirReadFailed', { status: response.status }));
+    throw new Error(message || t(failureKey, { status: response.status }));
   }
   const snapshot = parseWorkspaceDirectorySnapshot(body);
   if (!snapshot.current) {
