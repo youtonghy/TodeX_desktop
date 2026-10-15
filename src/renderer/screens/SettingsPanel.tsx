@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ComponentType, type ReactNode, type Ref } from 'react';
 import { Radio, RadioGroup, Tab, TabList, TabPanel, Tabs } from 'react-aria-components';
-import { RiApps2Line, RiComputerLine, RiNotification3Line, RiPaletteLine, RiServerLine, RiSettings3Line, RiShieldKeyholeLine } from '@remixicon/react';
+import { RiApps2Line, RiComputerLine, RiNotification3Line, RiPaletteLine, RiServerLine, RiSettings3Line, RiShieldKeyholeLine, RiTerminalBoxLine } from '@remixicon/react';
 import { normalizeServerUrl } from '@todex/protocol/todex';
 import { Chip } from '@/components/base/badges/chip';
 import { Button } from '@/components/base/buttons/button';
@@ -17,13 +17,14 @@ import { AgentDesktopSettings, type AgentDesktopPage } from '../components/Agent
 import { AppearanceSettings } from '../components/AppearanceSettings';
 import { FeatureSettings } from '../components/FeatureSettings';
 import { SettingsCard, SettingsGroup, SettingsRow } from '../components/settings/SettingsRows';
+import { SshConnectionSettings } from '../components/settings/SshConnectionSettings';
 import { ScrollArea } from '../components/ui/scroll-area';
 import { toast } from '../components/ui/toast';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { UNPAIRED_TRANSPORT, connectionStateLabel, healthLabelOf, settingsFromProfile } from '../session/helpers';
 import { LOCALE_LABELS, SUPPORTED_LOCALES, getLocalePreference, isLocale, setLocalePreference, useT, type LocalePreference } from '../i18n';
 
-type SettingsSection = 'general' | 'features' | 'appearance' | 'connection' | 'security' | 'notifications' | 'agent';
+type SettingsSection = 'general' | 'features' | 'appearance' | 'connection' | 'ssh' | 'security' | 'notifications' | 'agent';
 
 type Props = {
   session: TodeXSession;
@@ -64,6 +65,7 @@ export function SettingsPanel({ session, historyRecoverySetup = false, repairPai
     { id: 'features', label: t('settings.features'), icon: RiApps2Line },
     { id: 'appearance', label: t('settings.appearance'), icon: RiPaletteLine },
     { id: 'connection', label: t('settings.connection'), icon: RiServerLine },
+    { id: 'ssh', label: t('settings.ssh'), icon: RiTerminalBoxLine },
     { id: 'security', label: t('settings.security'), icon: RiShieldKeyholeLine },
     { id: 'notifications', label: t('settings.notifications'), icon: RiNotification3Line },
     { id: 'agent', label: t('agentDesktop.title'), icon: RiComputerLine },
@@ -238,6 +240,10 @@ export function SettingsPanel({ session, historyRecoverySetup = false, repairPai
               </>
             ) : null}
           </SettingsGroup>
+        </SettingsPage>
+
+        <SettingsPage id="ssh" title={titleOf('ssh')}>
+          <SshConnectionSettings session={session} />
         </SettingsPage>
 
         <SettingsPage id="security" title={titleOf('security')}>
