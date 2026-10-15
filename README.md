@@ -47,6 +47,7 @@ Built with **Electron 44**, **React 19**, **Vite 7**, **Tailwind CSS v4**, and *
   - Connect via direct host/port URL; requests are signed with the per-device key enrolled through device verification.
   - [Device verification](docs/device-verification.md) (pairing v3, commit then reveal): enter only the backend address, compare the random code (and the transport key fingerprint) with the backend TUI and approve once. The code also authenticates the backend's transport public key, so approval enrolls this device's signing key and pins that key in one step, then connects.
   - No manual key entry, paste or QR import: Settings shows the pinned protocol, key fingerprint and verified state read-only, with a **Re-pair** action. Changing the address clears the device key and the pin; re-pairing the same backend keeps the device key.
+  - **Parallel backends**: Settings › Backend connections manages every backend (add, remove); opening one shows its connection, device verification and history encryption. Each backend stays connected and serves its own workspaces, so switching workspaces never disconnects or reconnects. New conversations outside any workspace (None) start on the backend chosen there, by default the first one added.
   - Clear connection diagnostic states (categorizes connection errors such as unstarted backend, port mismatch, token error, deprecated `/v1` endpoints, or handshake issues).
 - **Native OS Integration**:
   - Secure Electron architecture: Preload bridge with isolated context (`contextBridge`) and `nodeIntegration: false`.
