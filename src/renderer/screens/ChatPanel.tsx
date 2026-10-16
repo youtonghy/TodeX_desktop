@@ -354,6 +354,24 @@ function ContextUsageIndicator({
   const [open, setOpen] = useState(false);
   const [quota, setQuota] = useState<ProviderQuotaSnapshot | null | undefined>(undefined);
   const percent = contextWindow ? Math.min(100, Math.max(0, usedTokens / contextWindow * 100)) : null;
+  // Split the window into its buckets when they add up to the used total:
+  // Anthropic counts cache beside input, while other providers fold cached
+  // input into it. Otherwise the counters are listed without a share.
+  const cached = cachedInputTokens + cacheWriteTokens;
+  const freshInput = inputTokens + outputTokens + cached === usedTokens ? inputTokens
+    : inputTokens >= cached && inputTokens + outputTokens === usedTokens ? inputTokens - cached : null;
+  const segments = freshInput === null ? [
+    { label: t('usage.quotaContextUsed'), tokens: usedTokens },
+    { label: t('usage.inputLabel'), tokens: inputTokens, deferred: true },
+    { label: t('usage.outputLabel'), tokens: outputTokens, deferred: true },
+    { label: t('usage.cacheReadLabel'), tokens: cachedInputTokens, deferred: true },
+    { label: t('usage.cacheWriteLabel'), tokens: cacheWriteTokens, deferred: true },
+  ] : [
+    { label: t('usage.cacheReadLabel'), tokens: cachedInputTokens },
+    { label: t('usage.cacheWriteLabel'), tokens: cacheWriteTokens },
+    { label: t('usage.inputLabel'), tokens: freshInput },
+    { label: t('usage.outputLabel'), tokens: outputTokens },
+  ];
   const progress = percent ?? 0;
   const circumference = 2 * Math.PI * 6;
 
@@ -406,17 +424,7 @@ function ContextUsageIndicator({
               {percent === null ? <span className="ms-auto shrink-0 text-caption-1-regular text-text-tertiary">{t('chat.contextWaiting')}</span> : null}
             </>
           )}
-          context={contextWindow ? {
-            max: contextWindow,
-            segments: [
-              { label: t('usage.quotaContextUsed'), tokens: usedTokens },
-              // Turn token counters, listed for reference but not part of the window.
-              { label: t('usage.inputLabel'), tokens: inputTokens, deferred: true },
-              { label: t('usage.outputLabel'), tokens: outputTokens, deferred: true },
-              { label: t('usage.cacheReadLabel'), tokens: cachedInputTokens, deferred: true },
-              { label: t('usage.cacheWriteLabel'), tokens: cacheWriteTokens, deferred: true },
-            ],
-          } : undefined}
+          context={contextWindow ? { max: contextWindow, segments } : undefined}
           defaultExpanded
           plan={quota?.planType ?? undefined}
           limits={quota ? quotaLimits(quota) : []}
