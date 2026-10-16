@@ -34,7 +34,7 @@ function linkOf(session: TodeXSession, backendId: string): BackendLinkStatus | u
  * shows its connection, device pairing and history encryption on its own
  * page, in place of the overview.
  */
-export function BackendConnectionSettings({ session, page, onPageChange, deviceName, pairingAutoStart, historyRecoverySetup, footer }: {
+export function BackendConnectionSettings({ session, page, onPageChange, deviceName, pairingAutoStart, historyRecoverySetup, footer, managed = false }: {
   session: TodeXSession;
   /** The backend whose page is open; null shows the overview. */
   page: string | null;
@@ -45,6 +45,9 @@ export function BackendConnectionSettings({ session, page, onPageChange, deviceN
   historyRecoverySetup: boolean;
   /** Extra overview content (platform-specific). */
   footer?: ReactNode;
+  /** The platform fixes the backends (a self-hosted web deployment): no
+   * adding, removing or editing addresses; pairing works as usual. */
+  managed?: boolean;
 }) {
   const t = useT();
   const profile = page ? session.backendConnections.find((item) => item.id === page) : undefined;
@@ -56,6 +59,7 @@ export function BackendConnectionSettings({ session, page, onPageChange, deviceN
         deviceName={deviceName}
         pairingAutoStart={pairingAutoStart}
         historyRecoverySetup={historyRecoverySetup}
+        managed={managed}
         onBack={() => onPageChange(null)}
       />
     );
@@ -65,7 +69,7 @@ export function BackendConnectionSettings({ session, page, onPageChange, deviceN
     <>
       <SettingsGroup
         description={t('settings.backendListHint')}
-        action={(
+        action={managed ? undefined : (
           <Button size="small" variant="secondary" onClick={() => onPageChange(session.addBackendConnection().id)}>
             {t('settings.addBackend')}
           </Button>
@@ -119,12 +123,13 @@ export function BackendConnectionSettings({ session, page, onPageChange, deviceN
 }
 
 /** One backend's own page: connection, device pairing, history encryption. */
-function BackendDetail({ session, profile, deviceName, pairingAutoStart, historyRecoverySetup, onBack }: {
+function BackendDetail({ session, profile, deviceName, pairingAutoStart, historyRecoverySetup, managed, onBack }: {
   session: TodeXSession;
   profile: BackendConnectionProfile;
   deviceName: string;
   pairingAutoStart: number;
   historyRecoverySetup: boolean;
+  managed: boolean;
   onBack: () => void;
 }) {
   const t = useT();
@@ -184,9 +189,15 @@ function BackendDetail({ session, profile, deviceName, pairingAutoStart, history
               ))}
             </RadioGroup>
           </SettingsRow>
-          <SettingsRow label={t('settings.serverUrl')} description={<span className="text-status-yellow-text">{t('settings.credentialWarning')}</span>}>
-            <Input aria-label={t('settings.serverUrl')} name={t('settings.serverUrl')} size="small" className="w-64" value={profile.serverUrl} onChange={updateServerUrl} />
-          </SettingsRow>
+          {managed ? (
+            <SettingsRow label={t('settings.serverUrl')}>
+              <span className="w-64 truncate text-body-regular text-text-secondary">{profile.serverUrl}</span>
+            </SettingsRow>
+          ) : (
+            <SettingsRow label={t('settings.serverUrl')} description={<span className="text-status-yellow-text">{t('settings.credentialWarning')}</span>}>
+              <Input aria-label={t('settings.serverUrl')} name={t('settings.serverUrl')} size="small" className="w-64" value={profile.serverUrl} onChange={updateServerUrl} />
+            </SettingsRow>
+          )}
           <SettingsRow label="Tenant">
             <Input aria-label="Tenant" name="Tenant" size="small" className="w-64" value={profile.tenantId} onChange={(tenantId) => session.updateBackendConnection(profile.id, { tenantId })} />
           </SettingsRow>
@@ -199,12 +210,14 @@ function BackendDetail({ session, profile, deviceName, pairingAutoStart, history
       </SettingsGroup>
       <DevicePairingPanel session={session} backendId={profile.id} deviceName={deviceName} autoStartNonce={pairingAutoStart} />
       <HistoryEncryptionPanel history={session.historyEncryption.forBackend(profile.id)} autoStartRecovery={historyRecoverySetup} />
-      <SettingsGroup label={t('settings.removeBackend')}>
-        <div className="flex flex-wrap items-center gap-3 px-3">
-          <Button size="small" variant="danger" disabled={!canRemove} onClick={() => setConfirmRemove(true)}>{t('settings.removeBackend')}</Button>
-          {!canRemove ? <p className="text-body-2-regular text-text-secondary">{t('settings.removeBackendLast')}</p> : null}
-        </div>
-      </SettingsGroup>
+      {managed ? null : (
+        <SettingsGroup label={t('settings.removeBackend')}>
+          <div className="flex flex-wrap items-center gap-3 px-3">
+            <Button size="small" variant="danger" disabled={!canRemove} onClick={() => setConfirmRemove(true)}>{t('settings.removeBackend')}</Button>
+            {!canRemove ? <p className="text-body-2-regular text-text-secondary">{t('settings.removeBackendLast')}</p> : null}
+          </div>
+        </SettingsGroup>
+      )}
       <ConfirmDialog
         isOpen={confirmRemove}
         onOpenChange={setConfirmRemove}
