@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { RiDeleteBin6Line, RiDownload2Line, RiDownloadCloud2Line, RiFileList3Line, RiRefreshLine, RiServerLine, RiSettings3Line } from '@remixicon/react';
+import { RiArrowDownSLine, RiDeleteBin6Line, RiDownload2Line, RiDownloadCloud2Line, RiFileList3Line, RiRefreshLine, RiServerLine, RiSettings3Line, RiTerminalBoxLine } from '@remixicon/react';
 import { Chip, type ChipProps } from '@/components/base/badges/chip';
 import { Button } from '@/components/base/buttons/button';
+import { Divider } from '@/components/base/divider/divider';
 import { Card } from '@/components/ui/card';
+import { EmptyState } from '@/components/ui/empty-state';
 import { IconAction } from '@/components/ui/icon-action';
 import { Spinner, SpinnerIcon } from '@/components/ui/spinner';
 import { toast } from '@/components/ui/toast';
@@ -152,6 +154,77 @@ export function CliManagerPanel({ session }: { session: TodeXSession }) {
   };
 
   const activeBackend = backend.profile;
+  const operationBusy = operation?.status === 'running' || Boolean(submittingProvider);
+  const installed = clis.filter((cli) => cli.status !== 'notInstalled');
+  const available = clis.filter((cli) => cli.status === 'notInstalled');
+  // Collapsed by default; opens on its own when nothing is installed yet or
+  // one of its CLIs is mid-install, so progress is never hidden.
+  const [moreOpen, setMoreOpen] = useState(false);
+  const showAvailable = moreOpen || !installed.length || available.some((cli) => operation?.provider === cli.id && operation.status === 'running');
+
+  const renderInstalled = (cli: CliVersionInfo) => {
+    const status = STATUS[cli.status] ?? { labelKey: 'cli.statusUnknown' as MessageKey, color: 'neutral' as const };
+    const running = operation?.provider === cli.id && operation.status === 'running';
+    const busyLabel = operation?.action === 'install' ? t('cli.installing') : t('cli.upgrading');
+    const showRemoveIntegration = cli.id === 'antigravity';
+    const settingsId = hasCliSettings(cli.id) ? cli.id : null;
+    return (
+      <Card key={cli.id} variant="secondary" className="min-w-0 gap-4">
+        <div className="flex items-start gap-3">
+          <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-stat-card-icon-background">
+            <ProviderIcon className="size-5" provider={cli.id} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="truncate text-body-semibold text-text-primary">{cli.name}</h3>
+              <Chip variant="caption" color={status.color}>{running ? busyLabel : t(status.labelKey)}</Chip>
+            </div>
+            <dl className="mt-3 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-caption-1-regular">
+              <dt className="text-text-secondary">{t('cli.currentVersion')}</dt><dd className="truncate text-caption-1-medium text-text-primary tabular-nums">{cli.currentVersion || t('cli.unavailable')}</dd>
+              <dt className="text-text-secondary">{t('cli.latestVersion')}</dt><dd className="truncate text-caption-1-medium text-text-primary tabular-nums">{cli.latestVersion || t('cli.notFetched')}</dd>
+            </dl>
+            <NoticeToast message={cli.error && cli.error !== operation?.error ? t('cli.namedError', { name: cli.name, error: cli.error }) : null}
+              variant="danger" scope={backend.backendId} />
+          </div>
+        </div>
+        {cli.kind === 'managed' || showRemoveIntegration || settingsId ? (
+          <div className="flex flex-col gap-2">
+            {cli.kind === 'managed' ? (
+              <Button
+                className="w-full"
+                size="small"
+                variant="secondary"
+                leadingIcon={running ? SpinnerIcon : RiDownloadCloud2Line}
+                aria-busy={running || undefined}
+                disabled={!cli.upgradeSupported || operationBusy}
+                onClick={() => void startOperation(cli.id, 'upgrade')}
+              >
+                {running ? t('cli.upgradingNow') : t('cli.upgradeToLatest')}
+              </Button>
+            ) : null}
+            {showRemoveIntegration ? (
+              <button
+                type="button"
+                aria-busy={removingIntegration || undefined}
+                disabled={removingIntegration}
+                onClick={() => void removeAntigravityIntegration()}
+                className={QUIET_ACTION}
+              >
+                {removingIntegration ? <Spinner size="sm" /> : <RiDeleteBin6Line aria-hidden className="size-4 text-foreground-icon-secondary" />}
+                {t('cli.antigravityRemoveIntegration')}
+              </button>
+            ) : null}
+            {settingsId ? (
+              <button type="button" onClick={() => setSettingsProvider(settingsId)} className={QUIET_ACTION}>
+                <RiSettings3Line aria-hidden className="size-4 text-foreground-icon-secondary" />
+                {t('cliSettings.open')}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+      </Card>
+    );
+  };
 
   return (
     <div className="flex flex-col gap-4 py-1">
@@ -171,87 +244,69 @@ export function CliManagerPanel({ session }: { session: TodeXSession }) {
       {loading ? (
         <div className="flex min-h-48 items-center justify-center"><Spinner size="md" aria-label={t('cli.reading')} /></div>
       ) : (
-        <div className="grid gap-3 sm:grid-cols-2">
-          {clis.map((cli) => {
-            const status = STATUS[cli.status] ?? { labelKey: 'cli.statusUnknown' as MessageKey, color: 'neutral' as const };
-            const running = operation?.provider === cli.id && operation.status === 'running';
-            const installing = running && operation?.action === 'install';
-            const notInstalled = cli.status === 'notInstalled';
-            // Older backends attach the lookup failure to a missing CLI.
-            const error = notInstalled ? undefined : cli.error;
-            const busyLabel = installing ? t('cli.installing') : t('cli.upgrading');
-            const showRemoveIntegration = cli.id === 'antigravity' && !notInstalled;
-            const settingsId = hasCliSettings(cli.id) && !notInstalled ? cli.id : null;
-            return (
-              <Card key={cli.id} variant="secondary" className="min-w-0 gap-4">
-                <div className="flex items-start gap-3">
-                  <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-stat-card-icon-background">
-                    <ProviderIcon className="size-5" provider={cli.id} />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <h3 className="truncate text-body-semibold text-text-primary">{cli.name}</h3>
-                      <Chip variant="caption" color={status.color}>{running ? busyLabel : t(status.labelKey)}</Chip>
-                    </div>
-                    <dl className="mt-3 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-caption-1-regular">
-                      <dt className="text-text-secondary">{t('cli.currentVersion')}</dt><dd className="truncate text-caption-1-medium text-text-primary tabular-nums">{cli.currentVersion || t(notInstalled ? 'cli.statusNotInstalled' : 'cli.unavailable')}</dd>
-                      <dt className="text-text-secondary">{t('cli.latestVersion')}</dt><dd className="truncate text-caption-1-medium text-text-primary tabular-nums">{cli.latestVersion || t('cli.notFetched')}</dd>
-                    </dl>
-                    <NoticeToast message={error && error !== operation?.error ? t('cli.namedError', { name: cli.name, error }) : null}
-                      variant="danger" scope={backend.backendId} />
-                  </div>
-                </div>
-                {cli.kind === 'managed' || showRemoveIntegration || settingsId ? (
-                  <div className="flex flex-col gap-2">
-                    {cli.kind === 'managed' && notInstalled ? (
-                      <Button
-                        className="w-full"
-                        size="small"
-                        variant="secondary"
-                        leadingIcon={running ? SpinnerIcon : RiDownload2Line}
-                        aria-busy={running || undefined}
-                        disabled={!cli.installSupported || Boolean(operation?.status === 'running') || Boolean(submittingProvider)}
-                        onClick={() => void startOperation(cli.id, 'install')}
-                      >
-                        {running ? t('cli.installingNow') : t('cli.install')}
-                      </Button>
-                    ) : cli.kind === 'managed' ? (
-                      <Button
-                        className="w-full"
-                        size="small"
-                        variant="secondary"
-                        leadingIcon={running ? SpinnerIcon : RiDownloadCloud2Line}
-                        aria-busy={running || undefined}
-                        disabled={!cli.upgradeSupported || Boolean(operation?.status === 'running') || Boolean(submittingProvider)}
-                        onClick={() => void startOperation(cli.id, 'upgrade')}
-                      >
-                        {running ? t('cli.upgradingNow') : t('cli.upgradeToLatest')}
-                      </Button>
-                    ) : null}
-                    {showRemoveIntegration ? (
-                      <button
-                        type="button"
-                        aria-busy={removingIntegration || undefined}
-                        disabled={removingIntegration}
-                        onClick={() => void removeAntigravityIntegration()}
-                        className={QUIET_ACTION}
-                      >
-                        {removingIntegration ? <Spinner size="sm" /> : <RiDeleteBin6Line aria-hidden className="size-4 text-foreground-icon-secondary" />}
-                        {t('cli.antigravityRemoveIntegration')}
-                      </button>
-                    ) : null}
-                    {settingsId ? (
-                      <button type="button" onClick={() => setSettingsProvider(settingsId)} className={QUIET_ACTION}>
-                        <RiSettings3Line aria-hidden className="size-4 text-foreground-icon-secondary" />
-                        {t('cliSettings.open')}
-                      </button>
-                    ) : null}
-                  </div>
-                ) : null}
-              </Card>
-            );
-          })}
-        </div>
+        <>
+          {installed.length ? (
+            <div className="grid gap-3 sm:grid-cols-2">{installed.map(renderInstalled)}</div>
+          ) : clis.length ? (
+            <EmptyState size="sm" icon={RiTerminalBoxLine} title={t('cli.noneInstalled')} />
+          ) : null}
+          {available.length ? (
+            <section className="flex flex-col gap-2">
+              <button
+                type="button"
+                aria-expanded={showAvailable}
+                aria-controls="cli-install-more"
+                onClick={() => setMoreOpen(!showAvailable)}
+                className={cx(
+                  'flex w-full cursor-pointer items-center gap-2 rounded-2lg px-1 py-1.5 text-start',
+                  'outline-none focus-visible:ring-2 focus-visible:ring-border-focus-ring',
+                )}
+              >
+                <span className="text-body-semibold text-text-primary">{t('cli.installMore')}</span>
+                <Chip variant="caption" color="neutral">{available.length}</Chip>
+                <span className="min-w-0 flex-1 truncate text-caption-1-regular text-text-secondary">{t('cli.installMoreHint')}</span>
+                <RiArrowDownSLine aria-hidden className={cx('size-5 shrink-0 text-foreground-icon-secondary transition-transform duration-200 ease-[cubic-bezier(0.22,1,0.36,1)]', showAvailable && 'rotate-180')} />
+              </button>
+              {showAvailable ? (
+                <Card id="cli-install-more" variant="secondary" className="gap-0 py-1">
+                  {available.map((cli, index) => {
+                    const running = operation?.provider === cli.id && operation.status === 'running';
+                    return (
+                      <div key={cli.id} className="flex flex-col">
+                        {index ? <Divider /> : null}
+                        <div className="flex min-w-0 items-center gap-3 py-3">
+                          <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-stat-card-icon-background">
+                            <ProviderIcon className="size-5" provider={cli.id} />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <h3 className="truncate text-body-semibold text-text-primary">{cli.name}</h3>
+                            <p className="truncate text-caption-1-regular text-text-secondary tabular-nums">
+                              {t('cli.latestVersion')} {cli.latestVersion || t('cli.notFetched')}
+                            </p>
+                          </div>
+                          {cli.kind === 'managed' ? (
+                            <Button
+                              size="small"
+                              variant="secondary"
+                              leadingIcon={running ? SpinnerIcon : RiDownload2Line}
+                              aria-busy={running || undefined}
+                              disabled={!cli.installSupported || operationBusy}
+                              onClick={() => void startOperation(cli.id, 'install')}
+                            >
+                              {running ? t('cli.installingNow') : t('cli.install')}
+                            </Button>
+                          ) : (
+                            <Chip variant="caption" color="neutral">{t('cli.statusExternal')}</Chip>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </Card>
+              ) : null}
+            </section>
+          ) : null}
+        </>
       )}
       <CliSettingsModal provider={settingsProvider} onClose={() => setSettingsProvider(null)} api={api} />
       <InstructionPresetsModal isOpen={presetsOpen} onClose={() => setPresetsOpen(false)} api={api} />
