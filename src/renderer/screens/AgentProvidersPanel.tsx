@@ -853,12 +853,16 @@ function ModelsField({
   );
 }
 
-/// Common context-window sizes listed in the combo box; the input still
-/// accepts any number (allowsCustomValue).
+/// Common context-window sizes listed in the combo box, at the exact token
+/// counts models ship with: binary sizes for the 128K/256K/1M classes (Qwen,
+/// DeepSeek, Kimi, Gemini), decimal for Claude (200K) and GPT-5 (272K input).
+/// The input still accepts any number (allowsCustomValue).
 const CONTEXT_PRESETS = [
-  { id: '128000', label: '128K' },
+  { id: '131072', label: '128K' },
+  { id: '200000', label: '200K' },
+  { id: '262144', label: '256K' },
   { id: '272000', label: '272K' },
-  { id: '1000000', label: '1M' },
+  { id: '1048576', label: '1M' },
 ] as const;
 
 /// Per-model settings below the membership picker: context/output limits and
