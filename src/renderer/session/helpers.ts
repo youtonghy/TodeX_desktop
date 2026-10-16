@@ -108,6 +108,7 @@ import {
   reduceConversationEvents as sharedReduceConversationEvents,
   type ConversationBlockCategory,
   type ConversationBlockPhase,
+  type ProviderTurnTrigger,
 } from '@todex/protocol/mobileParity';
 
 export type ServerVersion = {
@@ -1288,6 +1289,9 @@ export type TimelineEntry = {
   detailStub?: boolean;
   /** Encrypted history this device holds no key for (one notice per turn). */
   detailLocked?: boolean;
+  /** Opens a turn the provider started on its own; `subtitle` holds its
+   * summary, if any. */
+  providerTrigger?: ProviderTurnTrigger;
 };
 
 export function workspaceDisplayName(workspace: Pick<WorkspaceRecord, 'name' | 'path'>): string {

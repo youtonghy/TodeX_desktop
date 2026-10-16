@@ -2498,6 +2498,9 @@ export const ja: Messages = {
 
   // history encryption
   'chat.historyLocked': 'このデバイスはこの履歴をまだ表示する権限がありません',
+  'chat.providerTurn.backgroundTask': 'バックグラウンドタスクが完了し、Claude が作業を続けました',
+  'chat.providerTurn.wakeup': 'スケジュールされた起動で Claude が作業を続けました',
+  'chat.providerTurn.cron': '定期タスクが実行され、Claude が作業を続けました',
   'history.title': '履歴の暗号化',
   'history.hint': '会話履歴は常にエンドツーエンドで暗号化して保存され、バックエンドのディスクには復号できる鍵がありません。',
   'history.loading': '暗号化の状態を読み込み中…',

@@ -2498,6 +2498,9 @@ export const en: Messages = {
 
   // history encryption
   'chat.historyLocked': 'This device is not yet authorized to view this part of the history',
+  'chat.providerTurn.backgroundTask': 'Background task finished — Claude continued',
+  'chat.providerTurn.wakeup': 'Scheduled wakeup — Claude continued',
+  'chat.providerTurn.cron': 'Scheduled task fired — Claude continued',
   'history.title': 'History encryption',
   'history.hint': 'Conversation history is always stored end-to-end encrypted; the backend disk holds no key that can decrypt it.',
   'history.loading': 'Reading encryption state…',

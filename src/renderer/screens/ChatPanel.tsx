@@ -130,6 +130,14 @@ const REFERENCE_TYPE_KEYS = {
   app: 'chat.referenceTypeApp',
 } as const satisfies Record<ReferenceType, string>;
 
+/** Why a turn without a user message began (`TimelineEntry.providerTrigger`). */
+const PROVIDER_TURN_NOTICES = {
+  background_task: 'chat.providerTurn.backgroundTask',
+  wakeup: 'chat.providerTurn.wakeup',
+  cron: 'chat.providerTurn.cron',
+  unknown: 'chat.providerTurn.backgroundTask',
+} as const satisfies Record<NonNullable<TimelineEntry['providerTrigger']>, string>;
+
 const MAX_COMPOSER_IMAGE_BYTES = 2_500_000;
 const MAX_COMPOSER_TEXT_BYTES = 512 * 1024;
 const HYDRATE_DEBOUNCE_MS = 200;
@@ -720,6 +728,15 @@ const ChatTimelineItem = memo(function ChatTimelineItem({
   // line per turn (docs/history-encryption.md §5.3).
   if (entry.detailLocked) {
     return <p data-message-id={entry.id} role="note" className="py-1 text-center text-caption-1-regular text-text-tertiary">{t('chat.historyLocked')}</p>;
+  }
+  // A turn the agent started on its own (a background task finished, a
+  // wakeup fired) has no user message: one quiet line says why it began.
+  if (entry.providerTrigger) {
+    return (
+      <p data-message-id={entry.id} role="note" title={entry.subtitle || undefined} className="py-1 text-center text-caption-1-regular text-text-tertiary">
+        {t(PROVIDER_TURN_NOTICES[entry.providerTrigger])}
+      </p>
+    );
   }
   if (isChatToolEntry(entry)) {
     const tool = toolCardPresentation(entry, thinking);

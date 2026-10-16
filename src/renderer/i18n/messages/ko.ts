@@ -2498,6 +2498,9 @@ export const ko: Messages = {
 
   // history encryption
   'chat.historyLocked': '이 기기는 아직 이 기록을 볼 권한이 없습니다',
+  'chat.providerTurn.backgroundTask': '백그라운드 작업이 끝나 Claude가 작업을 이어갔습니다',
+  'chat.providerTurn.wakeup': '예약된 깨우기로 Claude가 작업을 이어갔습니다',
+  'chat.providerTurn.cron': '예약 작업이 실행되어 Claude가 작업을 이어갔습니다',
   'history.title': '기록 암호화',
   'history.hint': '대화 기록은 항상 종단 간 암호화되어 저장되며 백엔드 디스크에는 이를 복호화할 키가 없습니다.',
   'history.loading': '암호화 상태를 읽는 중…',
