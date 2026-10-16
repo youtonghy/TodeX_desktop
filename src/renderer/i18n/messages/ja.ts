@@ -272,7 +272,7 @@ export const ja: Messages = {
   'settings.notifyDenied': 'システムが通知を拒否しました。システム設定で許可してから有効にしてください。',
   'settings.notifyUnsupported': 'この環境ではシステム通知をサポートしていません（HTTPS またはローカルアクセスが必要です）。',
   'settings.notifyTaskDone': 'タスク完了の通知',
-  'settings.notifyTaskDoneHint': '会話タスクが完了して返信を受け取ったときにシステム通知を送ります。有効にすると通知権限を要求します。',
+  'settings.notifyTaskDoneHint': '会話タスクが完了して返信を受け取ったとき、または権限の承認を待っているときにシステム通知を送ります。有効にすると通知権限を要求します。',
   'settings.localData': 'ローカルブラウザデータ',
   'settings.localDataHint': '接続・認証情報・設定・ローカルキャッシュを削除します。',
   'settings.localDataConfirm': 'このブラウザ内のすべての TodeX Web データを削除しますか？',

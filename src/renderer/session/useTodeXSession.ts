@@ -3,6 +3,7 @@ import { ownerBackendId, resolveNoWorkspaceBackendId, tagLegacyBackendRecords } 
 import { useWorkbenchSharing } from './useWorkbenchSharing';
 import {
   completionNotificationBody,
+  permissionNotificationBody,
   postCompletionNotification,
   shouldNotifyCompletion,
   useCompletionNotifications,
@@ -5051,6 +5052,55 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       onActivate: () => { if (conversation) selectConversation(conversation.workspaceId, localId); },
     });
   };
+
+  /** Each permission request alerts once, like a finished turn: to the
+   * notification history when out of sight, and as a system notification
+   * when completion alerts are on. */
+  const notifiedPermissionIdsRef = useRef(new Set<string>());
+  useEffect(() => {
+    const ownerById = new Map<string, string>();
+    for (const [localId, state] of Object.entries(conversationRuntimeById)) {
+      for (const permission of state.pendingPermissions) ownerById.set(permission.id, localId);
+    }
+    for (const request of pendingRequests) {
+      const localId = ownerById.get(request.requestId);
+      if (!localId || notifiedPermissionIdsRef.current.has(request.requestId)) continue;
+      notifiedPermissionIdsRef.current.add(request.requestId);
+      const viewingConversation = activeConversationRef.current === localId
+        && document.visibilityState === 'visible'
+        && document.hasFocus();
+      if (viewingConversation) continue;
+      const conversation = conversationsRef.current.find((item) => item.id === localId);
+      const workspace = workspacesRef.current.find((item) => item.id === conversation?.workspaceId);
+      const title = conversation?.title?.trim() || workspace?.name?.trim() || 'TodeX';
+      const body = permissionNotificationBody(request);
+      addNotification({
+        kind: 'conversation',
+        status: 'information',
+        title,
+        description: body,
+        workspaceId: conversation?.workspaceId,
+        conversationId: localId,
+      });
+      if (!shouldNotifyCompletion({
+        enabled: completionNotificationsState.completionNotifications,
+        supported: completionNotificationsState.completionNotificationsSupported,
+        viewingConversation,
+      })) continue;
+      postCompletionNotification({
+        title,
+        body,
+        tag: `permission-request-${request.requestId}`,
+        onActivate: () => { if (conversation) selectConversation(conversation.workspaceId, localId); },
+      });
+    }
+  }, [
+    pendingRequests,
+    conversationRuntimeById,
+    completionNotificationsState.completionNotifications,
+    completionNotificationsState.completionNotificationsSupported,
+    selectConversation,
+  ]);
 
   const removeWorkspace = useCallback(
     (workspaceId: string) => {

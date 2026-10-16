@@ -272,7 +272,7 @@ export const ko: Messages = {
   'settings.notifyDenied': '시스템에서 알림 권한을 거부했습니다. 시스템 설정에서 허용한 후 다시 켜주세요.',
   'settings.notifyUnsupported': '현재 환경에서는 시스템 알림을 지원하지 않습니다(HTTPS 또는 로컬 접속 필요).',
   'settings.notifyTaskDone': '작업 완료 알림',
-  'settings.notifyTaskDoneHint': '대화 작업이 완료되어 답장을 받으면 시스템 알림을 보냅니다. 켜면 알림 권한을 요청합니다.',
+  'settings.notifyTaskDoneHint': '대화 작업이 완료되어 답장을 받거나 권한 승인을 기다릴 때 시스템 알림을 보냅니다. 켜면 알림 권한을 요청합니다.',
   'settings.localData': '로컬 브라우저 데이터',
   'settings.localDataHint': '연결, 자격 증명, 환경 설정, 로컬 캐시를 삭제합니다.',
   'settings.localDataConfirm': '이 브라우저의 모든 TodeX Web 데이터를 삭제하시겠습니까?',

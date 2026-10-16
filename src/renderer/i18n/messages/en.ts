@@ -272,7 +272,7 @@ export const en: Messages = {
   'settings.notifyDenied': 'The system denied notification permission. Allow it in system settings, then enable again.',
   'settings.notifyUnsupported': 'This environment does not support system notifications (requires HTTPS or local access).',
   'settings.notifyTaskDone': 'Task completion alerts',
-  'settings.notifyTaskDoneHint': 'Send a system notification when a conversation task completes with a reply. Enabling requests notification permission.',
+  'settings.notifyTaskDoneHint': 'Send a system notification when a conversation task completes with a reply or is waiting for permission approval. Enabling requests notification permission.',
   'settings.localData': 'Local browser data',
   'settings.localDataHint': 'Delete connections, credentials, preferences, and local cache.',
   'settings.localDataConfirm': 'Clear all TodeX Web data in this browser?',

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { loadJson, saveJson } from '../lib/storage';
 import { SETTINGS_STORAGE_KEY, type TimelineEntry } from './helpers';
 import { t } from '../i18n';
+import { permissionRequestSummary, type PendingRequest } from '@todex/protocol/todex';
 
 const STORAGE_KEY = `${SETTINGS_STORAGE_KEY}.completionNotifications.v1`;
 const BODY_MAX_LENGTH = 160;
@@ -17,6 +18,15 @@ export function completionNotificationBody(timeline: TimelineEntry[]): string {
   const reply = timeline.find((entry) => entry.kind === 'incoming' && entry.subtitle.trim());
   const text = (reply?.subtitle ?? '').replace(/\s+/g, ' ').trim();
   if (!text) return t('notify.completedFallback');
+  return text.length > BODY_MAX_LENGTH ? `${text.slice(0, BODY_MAX_LENGTH)}…` : text;
+}
+
+/** What the approval card asks, as a notification body. */
+export function permissionNotificationBody(request: PendingRequest): string {
+  const summary = permissionRequestSummary(request);
+  const text = summary.command ? `${t('runStatus.runCommand')}: ${summary.command.replace(/\s+/g, ' ').trim()}`
+    : summary.tool ? t('runStatus.useTool', { tool: summary.tool })
+      : request.title || t('chat.permissionApproval');
   return text.length > BODY_MAX_LENGTH ? `${text.slice(0, BODY_MAX_LENGTH)}…` : text;
 }
 

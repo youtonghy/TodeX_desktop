@@ -272,7 +272,7 @@ export const zhCN = {
   'settings.notifyDenied': '系统拒绝了通知权限，请在系统设置中允许后再开启。',
   'settings.notifyUnsupported': '当前环境不支持系统通知（需要 HTTPS 或本机访问）。',
   'settings.notifyTaskDone': '任务完成提醒',
-  'settings.notifyTaskDoneHint': '对话任务完成并收到回复时发送系统通知。开启时会请求系统通知权限。',
+  'settings.notifyTaskDoneHint': '对话任务完成并收到回复、或等待权限审批时发送系统通知。开启时会请求系统通知权限。',
   'settings.localData': '本地浏览器数据',
   'settings.localDataHint': '删除连接、凭据、偏好和本地缓存。',
   'settings.localDataConfirm': '确定清除这个浏览器中的所有 TodeX Web 数据吗？',
