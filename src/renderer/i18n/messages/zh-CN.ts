@@ -2380,7 +2380,7 @@ export const zhCN = {
   'ssh.hostForm.pickKey': '选择密钥',
   'ssh.hostForm.authPasswordHint': '连接时跳过密钥，直接使用密码登录。未保存密码时，在终端中输入。经跳板机连接的主机始终在终端中输入密码。',
   'ssh.hostForm.authPassword': '密码',
-  'ssh.hostForm.authKey': '密钥 / Agent',
+  'ssh.hostForm.authKey': '密钥',
   'ssh.hostForm.authMethod': '认证方式',
   'ssh.hostForm.proxyJump': '跳板机（ProxyJump）',
   'ssh.hostForm.proxyJumpHint': '可选，例如 bastion 或 user@bastion:22',

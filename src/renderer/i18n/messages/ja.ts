@@ -2380,7 +2380,7 @@ export const ja: Messages = {
   'ssh.hostForm.pickKey': '鍵を選択',
   'ssh.hostForm.authPasswordHint': '鍵を使わずパスワードでログインします。パスワードを保存していない場合はターミナルで入力します。踏み台経由のホストは常にターミナルで入力します。',
   'ssh.hostForm.authPassword': 'パスワード',
-  'ssh.hostForm.authKey': '鍵 / エージェント',
+  'ssh.hostForm.authKey': '鍵',
   'ssh.hostForm.authMethod': '認証方式',
   'ssh.hostForm.proxyJump': '踏み台（ProxyJump）',
   'ssh.hostForm.proxyJumpHint': '任意。例: bastion または user@bastion:22',

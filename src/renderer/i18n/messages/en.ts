@@ -2380,7 +2380,7 @@ export const en: Messages = {
   'ssh.hostForm.pickKey': 'Choose key',
   'ssh.hostForm.authPasswordHint': 'Keys are skipped and the host signs in with a password. Without a saved password, type it in the terminal. Hosts behind a jump host always ask in the terminal.',
   'ssh.hostForm.authPassword': 'Password',
-  'ssh.hostForm.authKey': 'Key / agent',
+  'ssh.hostForm.authKey': 'SSH key',
   'ssh.hostForm.authMethod': 'Authentication',
   'ssh.hostForm.proxyJump': 'Jump host (ProxyJump)',
   'ssh.hostForm.proxyJumpHint': 'Optional, e.g. bastion or user@bastion:22',

@@ -2380,7 +2380,7 @@ export const ko: Messages = {
   'ssh.hostForm.pickKey': '키 선택',
   'ssh.hostForm.authPasswordHint': '키를 건너뛰고 비밀번호로 로그인합니다. 비밀번호를 저장하지 않았다면 터미널에서 입력합니다. 점프 호스트를 거치는 호스트는 항상 터미널에서 입력합니다.',
   'ssh.hostForm.authPassword': '비밀번호',
-  'ssh.hostForm.authKey': '키 / 에이전트',
+  'ssh.hostForm.authKey': '키',
   'ssh.hostForm.authMethod': '인증 방식',
   'ssh.hostForm.proxyJump': '점프 호스트(ProxyJump)',
   'ssh.hostForm.proxyJumpHint': '선택 사항. 예: bastion 또는 user@bastion:22',
