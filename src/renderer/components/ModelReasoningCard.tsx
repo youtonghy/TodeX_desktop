@@ -105,14 +105,15 @@ function ModelMenuItem({ className, children, trailing, ref, ...props }: Omit<Ar
   );
 }
 
-function ModelMenu({ label, selectedKeys, onAction, children }: {
+function ModelMenu({ label, selectedKeys, onAction, className, children }: {
   label: string;
+  className?: string;
   selectedKeys: Iterable<Key>;
   onAction: (key: Key) => void;
   children: ReactNode;
 }) {
   return (
-    <ScrollArea className="max-h-56">
+    <ScrollArea className={className ?? 'max-h-56'}>
       <AriaMenu
         aria-label={label}
         autoFocus={false}
@@ -477,7 +478,9 @@ export function ModelReasoningCard({
                     {providerModels.map(modelRow)}
                   </ModelMenu>
                 ) : (
-                  <div className="flex min-h-0 flex-1">
+                  // Fixed height so hovering families with different model counts
+                  // doesn't resize (and re-flip) the popover; panes scroll instead.
+                  <div className="flex h-56 min-h-0">
                     <div
                       className="me-1 w-38 shrink-0 border-e border-separator-border pe-1"
                       onKeyDown={(event) => {
@@ -495,6 +498,7 @@ export function ModelReasoningCard({
                     >
                       <ModelMenu
                         label="模型系列"
+                        className="h-full"
                         selectedKeys={familyPaneSelectedKeys}
                         onAction={(key) => {
                           const id = String(key);
@@ -540,6 +544,7 @@ export function ModelReasoningCard({
                         <ModelMenu
                           key={activeGroup.family}
                           label={`${familyLabel(activeGroup.family)} 版本`}
+                          className="h-full"
                           selectedKeys={selectedKeys}
                           onAction={selectModel}
                         >
