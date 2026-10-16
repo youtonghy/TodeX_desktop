@@ -1331,6 +1331,7 @@ export const zhCN = {
   'cli.notFetched': '未获取',
   'cli.upgradingNow': '正在升级',
   'cli.upgradeToLatest': '升级到最新版',
+  'cli.upgradeTo': '更新到 {version}',
   'cli.namedError': '{name}：{error}',
   'cli.install': '安装',
   'cli.installMore': '安装更多',

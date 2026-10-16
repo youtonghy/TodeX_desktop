@@ -1331,6 +1331,7 @@ export const en: Messages = {
   'cli.notFetched': 'Not fetched',
   'cli.upgradingNow': 'Upgrading',
   'cli.upgradeToLatest': 'Upgrade to latest',
+  'cli.upgradeTo': 'Update to {version}',
   'cli.namedError': '{name}: {error}',
   'cli.install': 'Install',
   'cli.installMore': 'Install more',

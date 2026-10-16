@@ -1331,6 +1331,7 @@ export const ja: Messages = {
   'cli.notFetched': '未取得',
   'cli.upgradingNow': 'アップグレード中',
   'cli.upgradeToLatest': '最新版にアップグレード',
+  'cli.upgradeTo': '{version} に更新',
   'cli.namedError': '{name}: {error}',
   'cli.install': 'インストール',
   'cli.installMore': 'さらにインストール',

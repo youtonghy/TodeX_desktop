@@ -1331,6 +1331,7 @@ export const ko: Messages = {
   'cli.notFetched': '가져오지 않음',
   'cli.upgradingNow': '업그레이드 중',
   'cli.upgradeToLatest': '최신 버전으로 업그레이드',
+  'cli.upgradeTo': '{version}(으)로 업데이트',
   'cli.namedError': '{name}: {error}',
   'cli.install': '설치',
   'cli.installMore': '더 설치하기',
