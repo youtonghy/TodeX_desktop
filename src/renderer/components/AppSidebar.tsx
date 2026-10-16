@@ -46,6 +46,7 @@ import { ProviderIcon } from './ProviderIcon';
 import { ConversationScheduleIcon } from './ConversationSchedule';
 import { ScheduleConversationDialog } from './ScheduleConversationDialog';
 import { WorkspaceGroupRenameDialog } from './WorkspaceGroupRenameDialog';
+import { WorkspaceHoverTooltip } from './WorkspaceHoverTooltip';
 import { AppIcon } from './AppIcon';
 import { WORKSPACE_ICON_CHOICES, WORKSPACE_RING_STYLES, WorkspaceStatusRing, ringStyleKey, workspaceIconComponent } from './WorkspaceIcon';
 import type { TodeXSession } from '../session/useTodeXSession';
@@ -393,6 +394,15 @@ export function AppSidebar({
     }
     return duplicates;
   }, [session.workspaces]);
+
+  // Newest conversation update per workspace, for the row tooltip.
+  const workspaceLastActivity = useMemo(() => {
+    const latest = new Map<string, number>();
+    for (const conversation of session.conversations) {
+      if (conversation.updatedAt > (latest.get(conversation.workspaceId) ?? 0)) latest.set(conversation.workspaceId, conversation.updatedAt);
+    }
+    return latest;
+  }, [session.conversations]);
 
   const { collapsedGroups, toggleGroupCollapsed } = useSidebarGroupCollapse();
   const dragSourceRef = useRef<WorkspaceDragSource | null>(null);
@@ -787,7 +797,7 @@ export function AppSidebar({
         data-workspace-in-group={group ? 'true' : undefined}
         onContextMenu={(event) => openContextMenu(event, 'workspace', workspace.id)}
       >
-        <RowContent rail={rail} indent={Boolean(group)} title={isMissing ? t('sidebar.workspaceMissingPath') : rail ? workspaceDisplayName(workspace) : undefined}>
+        <RowContent rail={rail} indent={Boolean(group)}>
           <span className="relative flex size-5 shrink-0 items-center justify-center">
             {workspaceStatus ? (
               <WorkspaceStatusRing kind={workspaceStatus} style={workspace.ringStyle} label={workspaceStatusLabel} />
@@ -805,22 +815,33 @@ export function AppSidebar({
             </span>
           </span>
           {rail || !showBackend ? null : (
-            <TooltipTrigger delay={300}>
-              <Focusable>
-                <span
-                  role="img"
-                  tabIndex={-1}
-                  aria-label={backendLabel}
-                  className={cx('ms-auto flex size-6 shrink-0 items-center justify-center rounded-full', FOCUS_RING)}
-                >
-                  <span aria-hidden="true" className="size-2.5 rounded-full ring-1 ring-separator-border" style={{ backgroundColor: backendLabelColor(backend) }} />
-                </span>
-              </Focusable>
-              <Tooltip placement="right" className="max-w-xs break-all">{backend?.name ?? backendLabel}</Tooltip>
-            </TooltipTrigger>
+            <span role="img" aria-label={backendLabel} className="ms-auto flex size-6 shrink-0 items-center justify-center">
+              <span aria-hidden="true" className="size-2.5 rounded-full ring-1 ring-separator-border" style={{ backgroundColor: backendLabelColor(backend) }} />
+            </span>
           )}
         </RowContent>
       </GridListItem>
+    );
+  };
+
+  const workspaceTooltipContent = (workspaceId: string): ReactNode => {
+    const workspace = session.workspaces.find((item) => item.id === workspaceId);
+    if (!workspace) return null;
+    const backend = session.backendConnections.find((profile) => profile.id === (workspace.backendConnectionId || session.activeBackendConnectionId));
+    const lastActivity = workspaceLastActivity.get(workspace.id) ?? workspace.updatedAt;
+    return (
+      <span className="flex flex-col gap-1">
+        <bdi className="text-caption-1-semibold">{workspaceDisplayName(workspace)}</bdi>
+        <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-2 gap-y-0.5">
+          <dt className="text-text-tertiary">{t('sidebar.workspaceTipBackend')}</dt>
+          <dd className="break-words">{backend ? backend.name : t('sidebar.backendRemoved')}</dd>
+          <dt className="text-text-tertiary">{t('sidebar.workspaceTipPath')}</dt>
+          <dd className="break-all"><span dir="ltr">{workspace.path || '—'}</span></dd>
+          <dt className="text-text-tertiary">{t('sidebar.workspaceTipActivity')}</dt>
+          <dd>{lastActivity ? relativeTime(lastActivity) : '—'}</dd>
+        </dl>
+        {workspace.pathMissing ? <span className="text-status-yellow-text">{t('sidebar.workspaceMissingPath')}</span> : null}
+      </span>
     );
   };
 
@@ -902,7 +923,7 @@ export function AppSidebar({
         data-workspace-in-group={group ? 'true' : undefined}
         onContextMenu={(event) => openContextMenu(event, 'workspace', workspace.id)}
         leading={(
-          <span className="relative flex size-5 shrink-0 items-center justify-center" title={isMissing ? t('sidebar.workspaceMissingPath') : undefined}>
+          <span className="relative flex size-5 shrink-0 items-center justify-center">
             {workspaceStatus ? (
               <WorkspaceStatusRing
                 kind={workspaceStatus}
@@ -921,14 +942,9 @@ export function AppSidebar({
             {pins.workspace.includes(workspace.id) ? <RiPushpin2Fill className="size-3 shrink-0 text-foreground-icon-tertiary" aria-label={t('sidebar.pinned')} /> : null}
             {isMissing ? <RiErrorWarningLine className="size-3 shrink-0 text-status-yellow-text" aria-label={t('sidebar.workspaceMissingPath')} /> : null}
             {showBackend ? (
-              <TooltipTrigger delay={300}>
-                <Focusable>
-                  <span role="img" tabIndex={-1} aria-label={backendLabel} className={cx('flex size-6 shrink-0 items-center justify-center rounded-full', FOCUS_RING)}>
-                    <span aria-hidden="true" className="size-2.5 rounded-full ring-1 ring-separator-border" style={{ backgroundColor: backendLabelColor(backend) }} />
-                  </span>
-                </Focusable>
-                <Tooltip placement="right" className="max-w-xs break-all">{backend?.name ?? backendLabel}</Tooltip>
-              </TooltipTrigger>
+              <span role="img" aria-label={backendLabel} className="flex size-6 shrink-0 items-center justify-center">
+                <span aria-hidden="true" className="size-2.5 rounded-full ring-1 ring-separator-border" style={{ backgroundColor: backendLabelColor(backend) }} />
+              </span>
             ) : null}
           </span>
         )}
@@ -1251,6 +1267,7 @@ export function AppSidebar({
                 rail || query ? null : <p className="px-2 py-1 text-caption-1-regular text-text-tertiary">{t('sidebar.noWorkspaces')}</p>
               ) : displayedEntries.length === 0 ? null : (
                 <>
+                  <WorkspaceHoverTooltip disabled={Boolean(draggingKey) || Boolean(contextMenu)} renderContent={workspaceTooltipContent}>
                   {rail ? (
                     <GridList
                       key={`workspaces_${workspaceLimit}`}
@@ -1307,6 +1324,7 @@ export function AppSidebar({
                         : workspaceTreeItem(entry.workspace, null)))}
                     </TreeView>
                   )}
+                  </WorkspaceHoverTooltip>
 
                   {!query && workspaceEntries.length > 5 && !rail && (
                     <ListPaging
