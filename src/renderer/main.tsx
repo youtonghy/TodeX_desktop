@@ -69,7 +69,12 @@ async function boot() {
     throw new Error('root element missing');
   }
 
-  createRoot(root).render(
+  const reactRoot = createRoot(root);
+  // A hot update that cannot Fast Refresh re-runs this module: unmount the
+  // previous app first, or it keeps running unseen with its own state,
+  // backend sockets and store writes beside the new one.
+  import.meta.hot?.dispose(() => reactRoot.unmount());
+  reactRoot.render(
     <StrictMode>
       <Root />
     </StrictMode>,
