@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Chip } from '@/components/base/badges/chip';
 import { Tab, TabList, TabPanel, Tabs } from '@/components/base/tabs/tabs';
 import { toast } from '@/components/ui/toast';
@@ -28,8 +28,6 @@ const NATIVE_TABS: Array<{ id: NativeHistoryProvider; label: string }> = [
   { id: 'grok-build', label: 'Grok Build' },
   { id: 'devin', label: 'Devin' },
 ];
-const NATIVE_IDS = new Set<string>(NATIVE_TABS.map((item) => item.id));
-
 type TabKey = 'todex' | NativeHistoryProvider;
 
 /** TodeX's own conversations on the picked backend: usage, the backend's
@@ -133,22 +131,32 @@ export function CleanupPanel({ session }: { session: TodeXSession }) {
   const t = useT();
   const [tab, setTab] = useState<TabKey>('todex');
   const backend = usePanelBackend(session);
+  // Only agents installed on the picked backend's machine get a tab.
+  const nativeTabs = useMemo(
+    () => NATIVE_TABS.filter((item) => backend.providers.some((provider) => provider.id === item.id && provider.available)),
+    [backend.providers],
+  );
+  // An agent missing on the picked backend falls back to TodeX's own tab.
+  const selected: TabKey = nativeTabs.some((item) => item.id === tab) ? tab : 'todex';
   return (
-    <Tabs selectedKey={tab} onSelectionChange={(key) => setTab(NATIVE_IDS.has(String(key)) ? String(key) as NativeHistoryProvider : 'todex')} className="gap-4 py-1">
+    <Tabs selectedKey={selected} onSelectionChange={(key) => setTab(String(key) as TabKey)} className="gap-4 py-1">
       <div className="flex min-w-0 items-center gap-3">
-        <TabList aria-label={t('app.cleanup')} className="min-w-0 flex-1">
-          <Tab id="todex">{t('cleanup.tabTodex')}</Tab>
-          {NATIVE_TABS.map((item) => (
-            <Tab key={item.id} id={item.id}>
-              <span className="flex items-center gap-1.5"><ProviderIcon provider={item.id} className="size-4" />{item.label}</span>
-            </Tab>
-          ))}
-        </TabList>
+        {/* The tabs scroll on their own so the backend picker never leaves the row. */}
+        <div className="min-w-0 flex-1 overflow-x-auto">
+          <TabList aria-label={t('app.cleanup')}>
+            <Tab id="todex">{t('cleanup.tabTodex')}</Tab>
+            {nativeTabs.map((item) => (
+              <Tab key={item.id} id={item.id}>
+                <span className="flex items-center gap-1.5"><ProviderIcon provider={item.id} className="size-4" />{item.label}</span>
+              </Tab>
+            ))}
+          </TabList>
+        </div>
         <BackendSelect profiles={session.backendConnections} linkStates={session.backendLinkStatus} selectedId={backend.backendId} onChange={backend.setBackendId} />
       </div>
       {/* Keyed by backend so a switch starts from that backend's own data. */}
       <TabPanel id="todex"><TodexHistoryTab key={backend.backendId} session={session} backend={backend} /></TabPanel>
-      {NATIVE_TABS.map((item) => (
+      {nativeTabs.map((item) => (
         <TabPanel key={item.id} id={item.id}><NativeHistoryTab key={backend.backendId} backend={backend} provider={item.id} label={item.label} /></TabPanel>
       ))}
     </Tabs>
