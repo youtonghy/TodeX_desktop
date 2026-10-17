@@ -63,7 +63,6 @@ import { EFFORT_TEXT, ModelReasoningCard } from '../components/ModelReasoningCar
 import { ProviderIcon } from '../components/ProviderIcon';
 import type { TodeXSession } from '../session/useTodeXSession';
 import {
-  conversationPermissionMode,
   conversationPermissionCapabilities,
   attachmentId,
   canSwitchConversationAgent,
@@ -1303,7 +1302,7 @@ export function ChatPanel({ session }: Props) {
     ?? providerModels.find((item) => item.id === contextModelId || item.id.endsWith(`/${contextModelId}`))?.contextWindow;
   const permissionConfig = conversationPermissionCapabilities(conversation, session.v2Providers);
   const permissionModes = (permissionConfig?.modes ?? []).filter((mode) => PERMISSION_MODES.includes(mode));
-  const currentPermission = conversationPermissionMode(conversation, workspace, session.v2Providers);
+  const currentPermission = session.resolvePermissionMode(conversation, workspace);
   const fixedPermission = permissionModes.length === 1;
   const canChoosePermission = permissionModes.length > 0;
   const permissionHint = agentProvider === 'pi' ? t('chat.permissionHintPi')

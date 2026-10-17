@@ -2515,6 +2515,10 @@ export function mergeManifestConversations(
   manifests: ConversationManifest[],
   workspaces: WorkspaceRecord[],
   backendConnectionId: string,
+  /** Run modes for a record first seen here (created elsewhere, or rebuilt
+   * after its local record was lost), so it does not fall back to whatever
+   * the backend declares as its provider default. */
+  initialRunModes?: (record: ConversationRecord, workspace: WorkspaceRecord) => Partial<Pick<ConversationRecord, 'permissionMode'>>,
 ): ConversationRecord[] {
   // The backend is authoritative after materialization. Provider-backed local
   // drafts have no v2ConversationId yet and must survive manifest refreshes.
@@ -2591,7 +2595,8 @@ export function mergeManifestConversations(
         };
       }
     } else {
-      const record = conversationFromManifest(manifest, workspace.id);
+      const base = conversationFromManifest(manifest, workspace.id);
+      const record = { ...base, ...initialRunModes?.(base, workspace) };
       // The None workspace spans backends; its conversations carry their own.
       next.unshift(manifest.scratchWorkspace ? { ...record, backendConnectionId } : record);
       changed = true;

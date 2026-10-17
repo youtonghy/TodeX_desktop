@@ -9,10 +9,14 @@ export function conversationPermissionCapabilities(
   return providers.find((provider) => provider.id === (conversation?.provider || 'codex'))?.capabilities.permissionConfig;
 }
 
+/// `remembered` is the mode last chosen for this agent: a record without its
+/// own mode (one rebuilt from a backend manifest) follows it before the
+/// backend's provider default, which need not match what the user picked.
 export function conversationPermissionMode(
   conversation: ConversationRecord | null | undefined,
   workspace: WorkspaceRecord | null | undefined,
   providers: ProviderDescriptor[],
+  remembered?: PermissionMode,
 ): 'ask' | 'auto' | 'full-access' | null {
   const config = conversationPermissionCapabilities(conversation, providers);
   if (conversation?.permissionMode) return config?.modes?.includes(conversation.permissionMode) ? conversation.permissionMode : null;
@@ -34,6 +38,7 @@ export function conversationPermissionMode(
   if (approval === 'never') return null;
   if (profile === 'auto-review' || reviewer === 'auto_review') return supported('auto');
   if (profile === ':workspace' || profile === 'default') return supported('ask');
+  if (remembered && supported(remembered)) return remembered;
   return config?.defaultMode ? supported(config.defaultMode) : null;
 }
 
