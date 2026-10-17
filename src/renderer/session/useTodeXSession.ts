@@ -321,7 +321,6 @@ import {
   providerHasBackendQueue,
   providerSupportsScheduledConversations,
   providerHasBackendQueueControl,
-  conversationImageInputSupport,
   canSwitchConversationAgent,
   resolveCreateConversationAgent,
   isTurnTerminalEvent,
@@ -536,7 +535,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const terminalByIdRef = useRef<Record<string, TerminalClientState>>({});
   const providerModelPreferencesRef = useRef<ProviderModelPreferences>({});
   const providerModelsByBackendRef = useRef<Record<string, ProviderModelCatalog>>({});
-  const providerImageInputRef = useRef<Record<string, { status: 'loading' | 'ready' | 'error'; imageInput?: boolean; reason?: string }>>({});
   const pendingLocalStartsRef = useRef(new Map<string, PendingLocalStart>());
   const autoStartedLocalConversationsRef = useRef(new Set<string>());
   const pendingThreadStartsRef = useRef(new Map<string, PendingThreadStart>());
@@ -759,7 +757,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   }, []);
   const [capabilityCatalogs, setCapabilityCatalogs] = useState<Partial<Record<ProviderKind, CatalogState>>>({});
   const [providerModelsByBackend, setProviderModelsByBackend] = useState<Record<string, ProviderModelCatalog>>({});
-  const [providerImageInput, setProviderImageInput] = useState<Record<string, { status: 'loading' | 'ready' | 'error'; imageInput?: boolean; reason?: string }>>({});
   const [providerModelPreferences, setProviderModelPreferences] = useState<ProviderModelPreferences>({});
   const [providerCommandsByBackend, setProviderCommandsByBackend] = useState<Record<string, Partial<Record<ProviderKind, ProviderCommandDescriptor[]>>>>({});
   const v2Providers = v2ProvidersByBackend[activeBackendConnectionId] ?? EMPTY_PROVIDERS;
@@ -1531,9 +1528,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     providerModelPreferencesRef.current = providerModelPreferences;
   }, [providerModelPreferences]);
 
-  useEffect(() => {
-    providerImageInputRef.current = providerImageInput;
-  }, [providerImageInput]);
 
   useEffect(() => {
     if (!hydrated) {
@@ -2041,44 +2035,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     [activeConversationId, conversations],
   );
 
-  useEffect(() => {
-    if (!hydrated || !activeConversation || !activeWorkspace?.path) return;
-    const descriptor = v2Providers.find((item) => item.id === activeConversation.provider);
-    if (descriptor?.capabilities.imageInputMode !== 'profile') return;
-    const conversationId = activeConversation.id;
-    let cancelled = false;
-    setProviderImageInput((current) => ({
-      ...current,
-      [conversationId]: { status: 'loading' },
-    }));
-    const api = backendApi(settings);
-    void api.getProviderImageInput(
-      descriptor.id,
-      activeWorkspace.path,
-      activeConversation.providerProfile,
-      activeConversation.model,
-    ).then((result) => {
-      if (cancelled) return;
-      setProviderImageInput((current) => ({
-        ...current,
-        [conversationId]: {
-          status: 'ready',
-          imageInput: result.imageInput,
-          reason: result.reason,
-        },
-      }));
-    }).catch((error) => {
-      if (cancelled) return;
-      setProviderImageInput((current) => ({
-        ...current,
-        [conversationId]: {
-          status: 'error',
-          reason: error instanceof Error ? error.message : t('image.profileUnconfirmed'),
-        },
-      }));
-    });
-    return () => { cancelled = true; };
-  }, [activeConversation, activeWorkspace?.path, hydrated, settings.deviceSecret, settings.encryptionProtocol, settings.encryptionPublicKey, settings.transportVerified, settings.serverUrl, v2Providers]);
 
   const restoreSubmissionDraft = useCallback((conversationId: string, submission: SubmissionDraft) => {
     setConversationChatDraft(conversationId, (current) => current || submission.text);
@@ -7157,19 +7113,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         restoreSubmission();
         return false;
       }
-      if (attachments.some((attachment) => attachment.kind === 'image')) {
-        const imageSupport = conversationImageInputSupport(conversation, providersForConversation(conversation), {
-          models: conversation.provider
-            ? providerModelsFor(conversation.backendConnectionId ?? workspace.backendConnectionId, conversation.provider)
-            : undefined,
-          profileCapability: providerImageInputRef.current[conversation.id],
-        });
-        if (!imageSupport.supported) {
-          setLastError(imageSupport.reason || t('image.agentUnsupportedShort'));
-          restoreSubmission();
-          return false;
-        }
-      }
       const requestId = createRequestId('prompt');
       const submission = { text, skills, attachments, requestId, phase: 'sending' as 'sending' | 'running' | 'unknown', turnId: undefined as string | undefined };
       pendingV2SubmissionsRef.current.set(conversation.id, submission);
@@ -8947,18 +8890,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       return;
     }
     const { workspace, conversation } = context;
-    if (attachments.some((attachment) => attachment.kind === 'image')) {
-      const imageSupport = conversationImageInputSupport(conversation, providersForConversation(conversation), {
-        models: conversation.provider
-          ? providerModelsFor(conversation.backendConnectionId ?? workspace.backendConnectionId, conversation.provider)
-          : undefined,
-        profileCapability: providerImageInputRef.current[conversation.id],
-      });
-      if (!imageSupport.supported) {
-        setLastError(imageSupport.reason || t('image.agentUnsupportedShort'));
-        return;
-      }
-    }
     const isThinking = thinkingConversations[conversationId] === true;
     if (text === '/compact') {
       if (isThinking || pendingV2SubmissionsRef.current.has(conversationId)) {
@@ -9404,7 +9335,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     v2Conversations,
     capabilityCatalogs,
     providerModels,
-    providerImageInput,
     providerCommands,
     contextUsageByConversation,
     compactionByConversation,

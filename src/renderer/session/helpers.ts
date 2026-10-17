@@ -2336,67 +2336,6 @@ export function hasBackendQueue(providers: readonly ProviderDescriptor[], conver
   return Boolean(conversation?.v2ConversationId && providerHasBackendQueue(providers, conversation.provider));
 }
 
-export function conversationImageInputSupport(
-  conversation: ConversationRecord | null | undefined,
-  providers: ProviderDescriptor[],
-  options: {
-    models?: ProviderModelDescriptor[];
-    profileCapability?: { status: 'loading' | 'ready' | 'error'; imageInput?: boolean; reason?: string };
-  } = {},
-): { supported: boolean; reason?: string } {
-  if (!conversation) {
-    return { supported: false, reason: t('image.pickConversation') };
-  }
-  // Provider-less conversations use the legacy local Codex path.
-  if (!isV2Conversation(conversation)) {
-    return { supported: true };
-  }
-  const descriptor = providers.find((item) => item.id === conversation.provider);
-  const mode = descriptor?.capabilities.imageInputMode;
-  if (mode === 'model') {
-    const models = options.models?.length ? options.models : descriptor?.models ?? [];
-    const model = conversation.model
-      ? models.find((item) => item.id === conversation.model)
-      : models.find((item) => item.isDefault);
-    if (model?.imageInput === true) return { supported: true };
-    return {
-      supported: false,
-      reason: model
-        ? t('image.modelUnsupported', { model: model.displayName || model.id })
-        : t('image.modelUnconfirmed'),
-    };
-  }
-  if (mode === 'profile') {
-    if (options.profileCapability?.status === 'ready') {
-      return options.profileCapability.imageInput
-        ? { supported: true }
-        : { supported: false, reason: options.profileCapability.reason || t('image.profileUnsupported') };
-    }
-    return {
-      supported: false,
-      reason: options.profileCapability?.status === 'error'
-        ? options.profileCapability.reason || t('image.profileUnconfirmed')
-        : t('image.profileConfirming'),
-    };
-  }
-  if (mode === 'none') {
-    return { supported: false, reason: t('image.agentUnsupported') };
-  }
-  if (descriptor?.capabilities.imageInput === true) {
-    return { supported: true };
-  }
-  if (!descriptor || descriptor.capabilities.imageInput === undefined) {
-    return {
-      supported: false,
-      reason: t('image.backendUndeclared'),
-    };
-  }
-  return {
-    supported: false,
-    reason: t('image.providerUnsupported', { provider: providerDisplayName(descriptor.id, descriptor.displayName) }),
-  };
-}
-
 export function resolveCreateConversationAgent(input: {
   requestedProvider?: string;
   requestedProfile?: string;
