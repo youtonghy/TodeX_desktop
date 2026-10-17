@@ -2,6 +2,7 @@ import { ConversationControls } from '../components/ConversationControls';
 import { ComputerLiveView } from '../components/ComputerLiveView';
 import { ConversationScheduleBar } from '../components/ConversationSchedule';
 import { NoticeToast } from '../components/NoticeToast';
+import { PiExtensionPanel } from '../components/PiExtensionPanel';
 import {
   RiArrowDownDoubleLine,
   RiArrowUpLine,
@@ -764,6 +765,7 @@ const ChatTimelineItem = memo(function ChatTimelineItem({
       data-message-id={entry.id}
       className={cx('flex min-w-0 flex-col gap-2 py-1', isUser ? 'items-end' : 'items-start')}
     >
+      {entry.category === 'extension' ? <p className="text-caption-1-medium text-text-tertiary">{t('chat.piExtensionEntry', { title: entry.title })}</p> : null}
       {isUser ? (
         <>
           {entry.sentAttachments?.length ? <SentAttachmentList attachments={entry.sentAttachments} /> : null}
@@ -1644,6 +1646,14 @@ export function ChatPanel({ session }: Props) {
             deviceSecret={session.settings.deviceSecret}
             onSelect={(option, data) => { session.sendApprovalResponse(option, request, data); }}
           />)}
+          {currentProvider === 'pi' && runtime ? <PiExtensionPanel placement="aboveEditor"
+            extensionUi={runtime.extensionUi} providerRuntime={runtime.providerRuntime}
+            pendingEditorRequest={session.pendingPluginDrafts[conversation.id]}
+            onReplaceEditor={request => session.handlePluginDraft(conversation.id, request, true)}
+            onDismissEditor={request => session.handlePluginDraft(conversation.id, request, false)}
+            onStopRuntime={providerDescriptor?.capabilities.runtimeStop ? () => { void session.stopProviderRuntime(conversation.id); } : undefined}
+            isStopping={session.stoppingProviderRuntimes[conversation.id]}
+            isConnected={session.connectionState === 'open'} /> : null}
           {(slashSuggestions.length > 0 || referenceSuggestions.length > 0 || (mentionActive && referenceSuggestions.length === 0) || capabilityActive) ? (
             <motion.div
               ref={suggestionsPopoverRef}
@@ -2020,6 +2030,8 @@ export function ChatPanel({ session }: Props) {
               </div>
             </ComposerLoader>
           </ConversationPromptInput>
+          {currentProvider === 'pi' && runtime ? <PiExtensionPanel placement="belowEditor"
+            extensionUi={runtime.extensionUi} /> : null}
         </div>
       </div>
     </div>

@@ -12,6 +12,9 @@ import { addNotification } from './notificationFeed';
 import { bindSentAttachmentEvents, prepareSentAttachments, projectSentAttachments, pruneSentAttachmentRecords, type SentAttachmentRecord } from './sentAttachments';
 import { configureKanbanRouting, configureKanbanSync, syncKanbanTasksFromBackend, type KanbanTaskSchedule } from './kanbanTasks';
 import { t } from '../i18n';
+import { toast } from '../components/ui/toast';
+import { piExtensionPlainText } from '../components/piExtensionPresentation';
+import { PiExtensionEffects, canApplyPluginDraft } from './piExtensionEffects';
 import { migrateLegacyFollowUps, restoreQueuedFollowUps, type LegacyAddResult, type LegacyFollowUps, type LegacyQueueTarget } from './queuedFollowUps';
 import { backendRateLimitState } from './sessionRateLimit';
 import { LegacyEventRecovery } from './legacyEventRecovery';
@@ -23,7 +26,7 @@ import {
   isAgentBrowserWatchRequestId,
   type AgentBrowserFrame,
 } from '@todex/protocol/agentDesktop';
-import { parseFollowUpQueue, type ConversationRuntime, type FollowUpQueueState } from '@todex/protocol/conversationRuntime';
+import { parseFollowUpQueue, type ConversationRuntime, type ExtensionEditorRequest, type FollowUpQueueState } from '@todex/protocol/conversationRuntime';
 import { conversationScheduleFrame, followUpQueueFrame } from '@todex/protocol/conversationCommands';
 import { conversationTranscriptMarkdown, fetchConversationTranscriptTail, transcriptEntries } from '@todex/protocol/conversationExport';
 import { canonicalConversationEventType, type ConversationEvent } from '@todex/protocol/v2';
@@ -714,7 +717,18 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const [mentionHistory, setMentionHistory] = useState<WorkspaceMentionHistory[]>([]);
   const [experimentalFeatures, setExperimentalFeatures] = useState<ExperimentalFeatureSettings>(EXPERIMENTAL_FEATURE_DEFAULTS);
   const [selectedRequestId, setSelectedRequestId] = useState('');
-  const [chatDrafts, setChatDrafts] = useState<Record<string, string>>({});
+  const [chatDrafts, setChatDraftsState] = useState<Record<string, string>>({});
+  const chatDraftsRef = useRef<Record<string, string>>({});
+  const setChatDrafts = useCallback((value: SetStateAction<Record<string, string>>) => {
+    const next = typeof value === 'function' ? value(chatDraftsRef.current) : value;
+    chatDraftsRef.current = next;
+    setChatDraftsState(next);
+  }, []);
+  // Pi extensions: notices and editor drafts their events produce, and
+  // runtimes being stopped from the extension panel.
+  const extensionEffectsRef = useRef(new PiExtensionEffects());
+  const [pendingPluginDrafts, setPendingPluginDrafts] = useState<Record<string, ExtensionEditorRequest | undefined>>({});
+  const [stoppingProviderRuntimes, setStoppingProviderRuntimes] = useState<Record<string, boolean>>({});
   const [controlStatusByConversation, setControlStatusByConversation] = useState<Record<string, 'pending' | 'unknown' | undefined>>({});
   const controlRequestsRef = useRef(new Map<string, string>());
   const controlDraftsRef = useRef(new Map<string, { conversationId: string; text: string }>());
@@ -2102,6 +2116,26 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     if (!conversation) return;
     const localId = conversation.id;
     setConversationRuntimeById((current) => ({ ...current, [localId]: state }));
+    setPendingPluginDrafts(current => {
+      const request = current[localId];
+      return request && (request.runtimeId !== state.extensionUi.runtimeId || request.eventId !== state.extensionUi.editorRequest?.eventId || state.providerRuntime?.status === 'stopped')
+        ? { ...current, [localId]: undefined } : current;
+    });
+    for (const event of appliedEvents) {
+      const effect = extensionEffectsRef.current.consume(event, state);
+      if (effect?.kind === 'notice') {
+        const title = t('sess.piNoticeTitle', { conversation: conversation.title || t('sess.piConversation'), level: effect.notice.level === 'error' ? t('pi.noticeError') : effect.notice.level === 'warning' ? t('pi.noticeWarning') : t('pi.noticeInfo') });
+        const options = { description: piExtensionPlainText(effect.notice.message).slice(0, 300), timeout: 6000 };
+        if (effect.notice.level === 'error') toast.danger(title, options);
+        else if (effect.notice.level === 'warning') toast.warning(title, options);
+        else toast.info(title, options);
+      } else if (effect?.kind === 'editor') {
+        if (canApplyPluginDraft(chatDraftsRef.current[localId] ?? '')) {
+          setConversationChatDraft(localId, effect.request.text);
+          setPendingPluginDrafts(current => ({ ...current, [localId]: undefined }));
+        } else setPendingPluginDrafts(current => ({ ...current, [localId]: effect.request }));
+      }
+    }
     if (state.pendingControl) {
       controlRequestsRef.current.set(localId, state.pendingControl.requestId);
       setControlStatusByConversation(current => ({ ...current, [localId]: state.pendingControl!.status }));
@@ -2376,6 +2410,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       setOpenStatusByConversation(withoutReleased);
       setEarlierHistory(withoutReleased);
     }
+    // Agent extension state is rebuilt on demand.
+    extensionEffectsRef.current.reset();
+    setPendingPluginDrafts({});
+    setStoppingProviderRuntimes({});
     setRuntimeRevision((value) => value + 1);
   }, [backendConnections, closeSocket, hydrated, patchLinkStatus]);
 
@@ -3720,7 +3758,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
             (item.v2ConversationId === event.conversationId || item.id === event.conversationId)
             && backendIdForConversation(item.id) === backendId
           ));
-          if (conversation) conversationEventBatcherRef.current!.push(event.conversationId, conversation.workspaceId, event);
+          if (conversation) {
+            if (parsed.delivery === 'live') extensionEffectsRef.current.markLive(event);
+            conversationEventBatcherRef.current!.push(event.conversationId, conversation.workspaceId, event);
+          }
         };
         const history = historyEncryptionRef.current;
         if (!history || !rawConversationId) deliver(raw);
@@ -7022,6 +7063,30 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     }
   }, [activeBackendConnectionId, backendConnections, getConversationContext, recoverConversation, settings.deviceSecret, settings.encryptionProtocol, settings.encryptionPublicKey, settings.transportVerified, settings.serverUrl, subscribeV2Conversation]);
 
+  /** Applies (or dismisses) the editor draft a Pi extension proposed while
+   * the composer held the user's own text. */
+  const handlePluginDraft = useCallback((conversationId: string, request: ExtensionEditorRequest, replace: boolean) => {
+    const current = pendingPluginDrafts[conversationId];
+    const runtime = conversationRuntimeById[conversationId];
+    if (current?.eventId !== request.eventId || current.eventId !== runtime?.extensionUi.editorRequest?.eventId || current.runtimeId !== runtime?.extensionUi.runtimeId
+      || runtime.providerRuntime?.status === 'stopped') return;
+    if (replace) setConversationChatDraft(conversationId, current.text);
+    setPendingPluginDrafts(items => ({ ...items, [conversationId]: undefined }));
+  }, [pendingPluginDrafts, conversationRuntimeById, setConversationChatDraft]);
+
+  const stopProviderRuntime = useCallback(async (conversationId: string) => {
+    const conversation = conversationsRef.current.find(item => item.id === conversationId);
+    if (!conversation?.v2ConversationId) return;
+    setStoppingProviderRuntimes(current => ({ ...current, [conversationId]: true }));
+    try {
+      await sendProtocolCommand({ id: createRequestId('runtime-stop'), type: 'conversation.runtime.stop',
+        payload: { conversationId: conversation.v2ConversationId } });
+      await recoverConversation(conversationId);
+    } catch (error) {
+      setLastError(error instanceof Error ? error.message : t('sess.piStopFailed'));
+    } finally { setStoppingProviderRuntimes(current => ({ ...current, [conversationId]: false })); }
+  }, [sendProtocolCommand, recoverConversation, setLastError]);
+
   const sendV2Prompt = useCallback(
     async (
       text: string,
@@ -9378,6 +9443,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     submitChat,
     sendAgentMessage,
     setConversationChatDraft,
+    pendingPluginDrafts,
+    handlePluginDraft,
+    stoppingProviderRuntimes,
+    stopProviderRuntime,
     setConversationAttachments,
     setConversationSelectedSkills,
     setConversationComposerSelection,

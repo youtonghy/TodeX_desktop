@@ -148,6 +148,8 @@ function SubagentCard({ run }: { run: SubagentRun }) {
   const errorText = run.error || (run.status === 'failed' ? run.result ?? '' : '');
   const resultText = run.status === 'failed' ? '' : run.result ?? '';
   const agentId = run.agentId || run.id;
+  // What a running agent is doing right now, when its provider reports it.
+  const activity = run.status === 'running' && typeof run.metadata?.activity === 'string' ? run.metadata.activity.trim() : '';
   const started = timeLabel(run.startedAt);
   const finished = timeLabel(run.finishedAt);
   const hasContent = Boolean(
@@ -163,6 +165,7 @@ function SubagentCard({ run }: { run: SubagentRun }) {
       title={run.title}
       isExpandable={hasContent}
       toolCallId={run.providerItemId}
+      footer={activity ? <p className="truncate text-caption-1-regular text-text-tertiary" title={activity}>{activity}</p> : undefined}
       meta={(
         <>
           {duration ? <span className="shrink-0 text-caption-1-regular text-text-tertiary">{duration}</span> : null}
