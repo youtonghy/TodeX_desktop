@@ -45,6 +45,8 @@ export type TodeXDesktopApi = {
   };
   preview: {
     open: (key: string, target: { url: string } | { html: string }) => Promise<void>;
+    /** Where the preview's loopback requests are forwarded; null loads them on this machine. */
+    setBackend: (backend: PreviewBackend | null) => Promise<void>;
     reload: (key: string) => Promise<void>;
     capture: (key: string) => Promise<string | null>;
     inspect: (key: string, colors: { hover: string; selected: string } | null) => Promise<void>;
@@ -90,6 +92,13 @@ export type UpdateState = {
 
 /** Window-relative CSS pixels of a native view. */
 export type ViewBounds = { x: number; y: number; width: number; height: number };
+export type PreviewBackend = {
+  serverUrl: string;
+  deviceSecret: string;
+  encryptionProtocol: 'none' | 'x25519' | 'ml-kem-768';
+  encryptionPublicKey: string;
+  transportVerified?: boolean;
+};
 export type PreviewState = { key: string; url: string; title: string; loading: boolean; error?: string };
 export type PreviewPicked = { key: string; tag: string; id: string; text: string };
 export type DesktopDebugLogInfo = {

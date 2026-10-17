@@ -50,6 +50,9 @@ const zhCN = {
   'main.gitReadFailed': 'Git 读取失败',
   'main.notInitialized': '未初始化',
   'main.operationDone': '操作完成',
+  'preview.targetUnreachable': '后端主机上的 {target} 无法连接，请确认开发服务器正在后端主机上运行。',
+  'preview.backendOutdated': '当前后端不支持网页转发，请更新后端后重试。',
+  'preview.forwardFailed': '无法通过后端加载 {target}：{reason}',
 };
 
 const messages: MainMessages = {
@@ -67,6 +70,9 @@ const messages: MainMessages = {
     'main.gitReadFailed': 'Git read failed',
     'main.notInitialized': 'Not initialized',
     'main.operationDone': 'Done',
+    'preview.targetUnreachable': 'Could not connect to {target} on the backend host. Make sure the dev server is running there.',
+    'preview.backendOutdated': 'This backend does not support page forwarding. Update the backend and try again.',
+    'preview.forwardFailed': 'Could not load {target} through the backend: {reason}',
   },
   ja: {
     'main.updateMenu': 'アップデート',
@@ -81,6 +87,9 @@ const messages: MainMessages = {
     'main.gitReadFailed': 'Git の読み取りに失敗しました',
     'main.notInitialized': '未初期化',
     'main.operationDone': '完了しました',
+    'preview.targetUnreachable': 'バックエンドホスト上の {target} に接続できません。開発サーバーがそのホストで起動しているか確認してください。',
+    'preview.backendOutdated': 'このバックエンドはページ転送に対応していません。バックエンドを更新してから再試行してください。',
+    'preview.forwardFailed': 'バックエンド経由で {target} を読み込めませんでした：{reason}',
   },
   ko: {
     'main.updateMenu': '업데이트',
@@ -95,6 +104,9 @@ const messages: MainMessages = {
     'main.gitReadFailed': 'Git 읽기 실패',
     'main.notInitialized': '초기화되지 않음',
     'main.operationDone': '작업 완료',
+    'preview.targetUnreachable': '백엔드 호스트의 {target}에 연결할 수 없습니다. 개발 서버가 해당 호스트에서 실행 중인지 확인하세요.',
+    'preview.backendOutdated': '이 백엔드는 페이지 전달을 지원하지 않습니다. 백엔드를 업데이트한 후 다시 시도하세요.',
+    'preview.forwardFailed': '백엔드를 통해 {target}을(를) 불러오지 못했습니다: {reason}',
   },
 };
 

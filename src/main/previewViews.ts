@@ -8,7 +8,7 @@ const VIEWPORT = { width: 1280, height: 800 };
 const PARKED = { x: -VIEWPORT.width - 200, y: 0, ...VIEWPORT };
 
 /** Workbench preview pages share one partition, apart from the app's own storage. */
-const PARTITION = 'persist:todex-preview';
+export const PREVIEW_PARTITION = 'persist:todex-preview';
 const INSPECT_WORLD = 'todex-inspect';
 const INSPECT_BINDING = '__todexInspect';
 
@@ -203,7 +203,7 @@ export class PreviewViews {
   private create(key: string): Preview {
     const window = this.window();
     if (!window) throw new Error('the TodeX window is not open');
-    const view = new WebContentsView({ webPreferences: { partition: PARTITION, sandbox: true, contextIsolation: true, nodeIntegration: false } });
+    const view = new WebContentsView({ webPreferences: { partition: PREVIEW_PARTITION, sandbox: true, contextIsolation: true, nodeIntegration: false } });
     const preview: Preview = { view, inspect: null, listening: false };
     const contents = view.webContents;
     const allowed = (url: string) => isLoopbackUrl(url) || url.startsWith('data:text/html') || url === 'about:blank';

@@ -15,6 +15,7 @@ export type GitRepositorySummary = {
 };
 /** Window-relative CSS pixels of a native view. */
 export type ViewBounds = { x: number; y: number; width: number; height: number };
+export type PreviewBackend = { serverUrl: string; deviceSecret: string; encryptionProtocol: 'none' | 'x25519' | 'ml-kem-768'; encryptionPublicKey: string; transportVerified?: boolean };
 export type PreviewState = { key: string; url: string; title: string; loading: boolean; error?: string };
 export type PreviewPicked = { key: string; tag: string; id: string; text: string };
 export type DesktopDebugLogInfo = {
@@ -117,6 +118,7 @@ const api = {
   /** Workbench browser tabs, rendered as native views by the main process. */
   preview: {
     open: (key: string, target: { url: string } | { html: string }) => ipcRenderer.invoke('preview:open', key, target) as Promise<void>,
+    setBackend: (backend: PreviewBackend | null) => ipcRenderer.invoke('preview:setBackend', backend) as Promise<void>,
     reload: (key: string) => ipcRenderer.invoke('preview:reload', key) as Promise<void>,
     capture: (key: string) => ipcRenderer.invoke('preview:capture', key) as Promise<string | null>,
     inspect: (key: string, colors: { hover: string; selected: string } | null) => ipcRenderer.invoke('preview:inspect', key, colors) as Promise<void>,

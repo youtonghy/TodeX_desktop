@@ -2058,6 +2058,14 @@ export function overrideBackendTransport(transport: SecureTransport | null): voi
   transportOverride = transport;
 }
 
+/** The profile the Workbench browser forwards its loopback requests through;
+ * null in the demo preview, whose backend is fixtures. */
+export function previewBackendProfile(settings: BackendTransportProfile): BackendTransportProfile | null {
+  if (transportOverride) return null;
+  const { serverUrl, deviceSecret, encryptionProtocol, encryptionPublicKey, transportVerified } = settings;
+  return { serverUrl, deviceSecret, encryptionProtocol, encryptionPublicKey, transportVerified };
+}
+
 const localizedTransports = new WeakMap<SecureTransport, SecureTransport>();
 const MIB = 1024 * 1024;
 

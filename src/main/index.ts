@@ -7,7 +7,8 @@ import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { checkForUpdates, downloadUpdate, installUpdate, refreshUpdateMenu, setAutoDownload, startAutoUpdates, updateState } from './autoUpdates';
 import { syncDesktopEntry } from './desktopEntry';
-import { PreviewViews, type InspectColors, type PreviewTarget } from './previewViews';
+import { PREVIEW_PARTITION, PreviewViews, type InspectColors, type PreviewTarget } from './previewViews';
+import { PreviewProxy, type PreviewBackend } from './previewProxy';
 import { isMainLocale, mainT, setMainLocale } from './i18n';
 import { openPathRefusal, shellPathRefusal, type PathInfo, type ShellPathRefusal } from './shellPolicy';
 import {
@@ -113,6 +114,15 @@ function handleIpc(channel: string, handler: (event: Electron.IpcMainInvokeEvent
       throw error;
     }
   });
+}
+
+/** The renderer's backend profile for the preview forwarder; null when absent or malformed. */
+function previewBackend(value: unknown): PreviewBackend | null {
+  if (!value || typeof value !== 'object') return null;
+  const { serverUrl, deviceSecret, encryptionProtocol, encryptionPublicKey, transportVerified } = value as Record<string, unknown>;
+  if (typeof serverUrl !== 'string' || !serverUrl || typeof deviceSecret !== 'string' || typeof encryptionPublicKey !== 'string') return null;
+  if (encryptionProtocol !== 'none' && encryptionProtocol !== 'x25519' && encryptionProtocol !== 'ml-kem-768') return null;
+  return { serverUrl, deviceSecret, encryptionProtocol, encryptionPublicKey, transportVerified: transportVerified === true };
 }
 
 function sourceRoot(): string {
@@ -944,6 +954,8 @@ app.whenReady().then(() => {
     picked => liveWindow()?.webContents.send('preview:picked', picked),
   );
   handleIpc('preview:open', (_event, key: string, target: PreviewTarget) => previews?.open(String(key), target));
+  const previewProxy = new PreviewProxy(session.fromPartition(PREVIEW_PARTITION));
+  handleIpc('preview:setBackend', (_event, backend: unknown) => previewProxy.setBackend(previewBackend(backend)));
   handleIpc('preview:reload', (_event, key: string) => previews?.reload(String(key)));
   handleIpc('preview:capture', (_event, key: string) => previews?.capture(String(key)) ?? null);
   handleIpc('preview:inspect', (_event, key: string, colors: InspectColors | null) => previews?.inspect(String(key), colors));

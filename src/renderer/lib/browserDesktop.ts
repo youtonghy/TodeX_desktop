@@ -92,6 +92,7 @@ export function installBrowserDesktopBridge(): void {
       open: async () => {
         throw new Error(t('storage.browserShell'));
       },
+      setBackend: async () => undefined,
       reload: async () => undefined,
       capture: async () => null,
       inspect: async () => undefined,

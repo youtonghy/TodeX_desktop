@@ -39,7 +39,7 @@ import {
 } from '../session/helpers';
 import type { OpenPanelOptions, WorkbenchItem, WorkbenchRequest, WorkbenchTab } from '../lib/panels';
 import { normalizeWorkbenchLayout } from '../session/workbenchLayout';
-import { SETTINGS_STORAGE_KEY, attachmentId, backendApi, referenceToken, uniqueReferenceName } from '../session/helpers';
+import { SETTINGS_STORAGE_KEY, attachmentId, backendApi, previewBackendProfile, referenceToken, uniqueReferenceName } from '../session/helpers';
 import { isConflictError } from '@todex/protocol/connectionError';
 import { isNotFoundError, type SshExecRun } from '@todex/protocol/ssh';
 import { isLoopbackUrl } from '@todex/protocol/mobileParity';
@@ -895,10 +895,21 @@ function BrowserPane({ itemId, isActive, workspacePath, session, target, onTarge
   useNoticeToast(error, { variant: 'danger', scope: workspacePath });
   const { hostRef, covered, still } = useNativeViewHost(hasPage ? itemId : undefined, isActive, preview);
 
+  // Loopback requests go through the backend, so a page served on its host
+  // loads here wherever the backend runs.
+  const backend = previewBackendProfile(session.settings);
+  const backendKey = JSON.stringify(backend);
+  const backendReady = useRef<Promise<void>>(Promise.resolve());
+  useEffect(() => {
+    backendReady.current = preview.setBackend(backend).catch(() => undefined);
+  }, [backendKey, preview]);
+
   const load = useCallback((page: { url: string } | { html: string }) => {
     setError('');
     setHasPage(true);
-    void preview.open(itemId, page).catch((reason) => setError(reason instanceof Error ? reason.message : t('workbench.invalidUrl')));
+    void backendReady.current
+      .then(() => preview.open(itemId, page))
+      .catch((reason) => setError(reason instanceof Error ? reason.message : t('workbench.invalidUrl')));
   }, [itemId, preview]);
 
   const navigateTo = useCallback((input: string) => {
