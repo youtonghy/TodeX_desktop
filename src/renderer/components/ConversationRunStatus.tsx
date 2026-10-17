@@ -21,7 +21,6 @@ import { Textarea } from '@/components/base/textarea/textarea';
 import { SpinnerIcon } from '@/components/ui/spinner';
 import { toast } from '@/components/ui/toast';
 import { cx } from '@/utils/cx';
-import { hasActiveConversationWork } from './conversationProgress';
 import { useNoticeToast } from './NoticeToast';
 import { getLocale, t, useLocale, useT } from '../i18n';
 import { isMacLike } from '../lib/shortcuts';
@@ -30,42 +29,14 @@ type SubmissionStatus = 'sending' | 'running' | 'unknown' | undefined;
 type Props = {
   submissionStatus?: SubmissionStatus;
   runtime?: ConversationRuntime;
-  isRecovering?: boolean;
-  isConnected?: boolean;
   compaction?: ContextCompactionState & { recommended?: boolean };
   onRecover: () => Promise<void>;
 };
 
-export function ConversationRunStatus({ submissionStatus, runtime, compaction, onRecover, isRecovering = false, isConnected = true }: Props) {
+export function ConversationRunStatus({ submissionStatus, runtime, compaction, onRecover }: Props) {
   const t = useT();
-  const progressToastRef = useRef<string | null>(null);
   const [recovering, setRecovering] = useState(false);
   const unknown = submissionStatus === 'unknown';
-  const running = runtime?.status === 'running';
-  const activeWork = runtime ? hasActiveConversationWork(runtime, compaction) : false;
-  const observeQuiet = running && !unknown && !activeWork && !isRecovering && isConnected;
-  useEffect(() => {
-    if (!observeQuiet) return;
-    // Measure time observed on this client, so replayed timestamps and server
-    // clock differences cannot produce an immediate stale warning.
-    const observedAt = Date.now();
-    let notified = false;
-    const timer = window.setInterval(() => {
-      if (notified || Date.now() - observedAt < 120_000) return;
-      notified = true;
-      progressToastRef.current = toast.info(t('runStatus.stale'), {
-        description: t('runStatus.staleHint'),
-        timeout: 6000,
-      });
-    }, 15_000);
-    return () => {
-      window.clearInterval(timer);
-      if (progressToastRef.current !== null) {
-        toast.close(progressToastRef.current);
-        progressToastRef.current = null;
-      }
-    };
-  }, [observeQuiet, runtime?.conversationId, runtime?.activeTurnId, runtime?.lastProgressAt]);
   useNoticeToast(unknown ? t('runStatus.unknown') : null, {
     description: t('runStatus.unknownHint'),
     scope: runtime?.conversationId,

@@ -534,8 +534,6 @@ export const zhCN = {
   'controls.save': '保存',
 
   // runStatus
-  'runStatus.stale': '暂未收到新的运行状态',
-  'runStatus.staleHint': '可以继续等待；如需结束本轮，可使用停止按钮。',
   'runStatus.unknown': '执行状态待确认',
   'runStatus.unknownHint': '尚未确认这次提交的执行结果。核对记录后再发送，避免重复执行。',
   'runStatus.compactionFailed': '上下文压缩失败',

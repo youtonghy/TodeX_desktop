@@ -534,8 +534,6 @@ export const ko: Messages = {
   'controls.save': '저장',
 
   // runStatus
-  'runStatus.stale': '새 실행 상태가 아직 없습니다',
-  'runStatus.staleHint': '계속 기다릴 수 있습니다. 이번 차례를 끝내려면 중지 버튼을 사용하세요.',
   'runStatus.unknown': '실행 상태 미확인',
   'runStatus.unknownHint': '이번 제출의 실행 결과가 아직 확인되지 않았습니다. 중복 실행을 피하려면 기록을 확인한 후 다시 보내세요.',
   'runStatus.compactionFailed': '컨텍스트 압축 실패',

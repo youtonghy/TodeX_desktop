@@ -534,8 +534,6 @@ export const ja: Messages = {
   'controls.save': '保存',
 
   // runStatus
-  'runStatus.stale': '新しい実行状態をまだ受け取っていません',
-  'runStatus.staleHint': 'このまま待つこともできます。今回のターンを終了するには停止ボタンを使ってください。',
   'runStatus.unknown': '実行状態が未確認です',
   'runStatus.unknownHint': 'この送信の実行結果はまだ確認できていません。重複実行を避けるため、履歴を確認してから再送してください。',
   'runStatus.compactionFailed': 'コンテキストの圧縮に失敗しました',

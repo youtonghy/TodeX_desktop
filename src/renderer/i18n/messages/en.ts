@@ -534,8 +534,6 @@ export const en: Messages = {
   'controls.save': 'Save',
 
   // runStatus
-  'runStatus.stale': 'No new run status yet',
-  'runStatus.staleHint': 'You can keep waiting; use the stop button to end this turn.',
   'runStatus.unknown': 'Execution status unconfirmed',
   'runStatus.unknownHint': 'The execution result of this submission has not been confirmed. Review the history before resending to avoid duplicate runs.',
   'runStatus.compactionFailed': 'Context compaction failed',

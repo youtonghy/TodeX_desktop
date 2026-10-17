@@ -1744,8 +1744,6 @@ export function ChatPanel({ session }: Props) {
             scope={conversation.id}
           />
           <ConversationRunStatus
-            isRecovering={session.recoveringConversations[conversation.id] === true}
-            isConnected={session.connectionState === 'open'}
             submissionStatus={submissionStatus}
             runtime={runtime}
             compaction={compaction}
