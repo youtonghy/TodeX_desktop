@@ -241,6 +241,17 @@ body {
   @apply bg-background-secondary-default text-body-medium;
 }
 
+/* Denser prose for side-panel blocks (subagent task and result). */
+.markdown.markdown-compact {
+  @apply text-body-2-regular;
+  line-height: 1.6;
+}
+
+.markdown-compact :is(h1, h2) { @apply text-headline-semibold; }
+.markdown-compact :is(h3, h4) { @apply text-body-2-semibold; }
+.markdown-compact th { @apply text-body-2-medium; }
+.markdown-compact :is(th, td) { @apply px-2 py-1; }
+
 .markdown-inline-code {
   @apply rounded-md bg-background-tertiary-default px-1.5 py-0.5 font-mono text-text-primary;
   font-size: 0.875em;

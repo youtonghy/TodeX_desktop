@@ -1,5 +1,7 @@
-import { useState, type ComponentType, type ReactNode } from 'react';
+import { useLayoutEffect, useRef, useState, type ComponentType, type ReactNode } from 'react';
 import {
+  RiArrowDownSLine,
+  RiArrowUpSLine,
   RiCheckLine,
   RiExportLine,
   RiFileCopyLine,
@@ -13,7 +15,10 @@ import type { SubagentRun, SubagentStatus } from '@todex/protocol/v2';
 import { Badge } from '@/components/base/badges/badge';
 import { Chip, type ChipProps } from '@/components/base/badges/chip';
 import { Button } from '@/components/base/buttons/button';
+import { LinkButton } from '@/components/base/buttons/link-button';
+import { SegmentedControl, SegmentedControlItem } from '@/components/base/segmented-control/segmented-control';
 import { IconAction } from '@/components/ui/icon-action';
+import { Markdown } from '@/components/ui/markdown';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cx } from '@/utils/cx';
 import { ToolCallCard, ToolCallText, type ToolCallState } from '../components/chat/ToolCallCard';
@@ -96,6 +101,89 @@ function DetailRow({ label, children }: { label: string; children?: ReactNode })
   );
 }
 
+/** Collapsed height of a task/result block, in px (Tailwind `max-h-60`). */
+const COLLAPSED_HEIGHT = 240;
+
+type TextMode = 'preview' | 'source';
+
+/** Task or result text: rendered as Markdown (or shown as its source), folded
+ * to a fixed height behind a fade until expanded. */
+function SubagentText({ label, text }: { label: string; text: string }) {
+  const t = useT();
+  const [mode, setMode] = useState<TextMode>('preview');
+  const [expanded, setExpanded] = useState(false);
+  const [overflows, setOverflows] = useState(false);
+  const contentRef = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    const el = contentRef.current;
+    if (!el) return;
+    const measure = () => setOverflows(el.offsetHeight > COLLAPSED_HEIGHT + 1);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [mode, text]);
+
+  const folded = overflows && !expanded;
+  return (
+    <div className="flex min-w-0 flex-col gap-1.5 rounded-xl bg-background-secondary-default px-3 py-2">
+      <div className="flex min-w-0 items-center justify-between gap-2">
+        <span className="text-caption-1-medium uppercase text-text-tertiary">{label}</span>
+        <div className="flex shrink-0 items-center gap-1">
+          <SegmentedControl
+            variant="plain"
+            aria-label={label}
+            selectedKeys={[mode]}
+            onSelectionChange={(keys) => {
+              const next = [...keys][0];
+              if (next === 'preview' || next === 'source') setMode(next);
+            }}
+          >
+            {(['preview', 'source'] as const).map((id) => (
+              <SegmentedControlItem
+                key={id}
+                id={id}
+                className={({ isSelected }) => cx('px-1.5 py-0.5', isSelected ? 'text-caption-1-semibold' : 'text-caption-1-regular')}
+              >
+                {t(id === 'preview' ? 'aside.subagentPreview' : 'aside.subagentSource')}
+              </SegmentedControlItem>
+            ))}
+          </SegmentedControl>
+          <CopyValue value={text} label={t('common.copy')} />
+        </div>
+      </div>
+      <div className={cx('relative overflow-hidden', folded && 'max-h-60')}>
+        <div ref={contentRef}>
+          {mode === 'preview' ? (
+            <Markdown className="markdown-compact">{text}</Markdown>
+          ) : (
+            <pre className="m-0 whitespace-pre-wrap wrap-anywhere font-mono text-caption-1-regular text-text-primary">{text}</pre>
+          )}
+        </div>
+        {folded ? (
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-linear-to-t from-background-secondary-default to-transparent"
+          />
+        ) : null}
+      </div>
+      {overflows ? (
+        <LinkButton
+          size="xs"
+          variant="secondary"
+          className="self-start"
+          trailingIcon={expanded ? RiArrowUpSLine : RiArrowDownSLine}
+          aria-expanded={expanded}
+          onClick={() => setExpanded((value) => !value)}
+        >
+          {t(expanded ? 'aside.subagentShowLess' : 'aside.subagentShowMore')}
+        </LinkButton>
+      ) : null}
+    </div>
+  );
+}
+
 function SectionLabel({ children }: { children: string }) {
   return <div className="mb-1 text-caption-2-medium uppercase tracking-wide text-text-tertiary">{children}</div>;
 }
@@ -173,8 +261,8 @@ function SubagentCard({ run }: { run: SubagentRun }) {
         </>
       )}
     >
-      {run.task ? <ToolCallText label={t('aside.subagentTask')}>{run.task}</ToolCallText> : null}
-      {resultText ? <ToolCallText label={t('aside.subagentResult')}>{resultText}</ToolCallText> : null}
+      {run.task ? <SubagentText label={t('aside.subagentTask')} text={run.task} /> : null}
+      {resultText ? <SubagentText label={t('aside.subagentResult')} text={resultText} /> : null}
       {errorText ? <ToolCallText label={t('aside.subagentError')} tone="error">{errorText}</ToolCallText> : null}
       <div>
         <SectionLabel>{t('aside.subagentDetails')}</SectionLabel>
