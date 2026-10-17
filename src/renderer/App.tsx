@@ -99,7 +99,7 @@ function AsideSheet({ isOpen, onOpenChange, label, children }: {
       isOpen={isOpen}
       onOpenChange={onOpenChange}
       isDismissable
-      className="fixed inset-0 z-50 bg-black/40 transition-opacity duration-300 ease-out data-[entering]:opacity-0 data-[exiting]:opacity-0 motion-reduce:transition-none"
+      className="window-no-drag fixed inset-0 z-50 bg-black/40 transition-opacity duration-300 ease-out data-[entering]:opacity-0 data-[exiting]:opacity-0 motion-reduce:transition-none"
     >
       <AriaModal
         className={cx(

@@ -51,7 +51,8 @@ export interface ModalProps {
 }
 
 const OVERLAY = [
-  'fixed inset-0 z-100 flex items-center justify-center bg-black/70 p-4',
+  // No-drag so title-bar drag strips underneath don't swallow clicks (Electron).
+  'window-no-drag fixed inset-0 z-100 flex items-center justify-center bg-black/70 p-4',
   'transition-opacity duration-300 ease-out',
   'data-[entering]:opacity-0 data-[exiting]:opacity-0',
 ].join(' ');
