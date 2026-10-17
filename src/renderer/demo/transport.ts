@@ -11,7 +11,7 @@ import type {
   SecureTransport,
 } from '@todex/protocol/secureTransport';
 import type { ConversationEvent, ConversationManifest, McpCatalog, McpServerCatalogDescriptor, ProviderKind, SkillCatalog, SkillCatalogDescriptor } from '@todex/protocol/v2';
-import { applyMergePatch, type SettingsObject } from '../lib/cliSettings';
+import { applyMergePatch, setAt, type SettingsObject } from '../lib/cliSettings';
 import * as fixtures from './fixtures';
 
 const encoder = new TextEncoder();
@@ -74,13 +74,132 @@ const demoCliSettings: Record<string, DemoSettingsFile> = {
     theme: 'dark',
     quietStartup: 'header',
     compaction: { enabled: true, reserveTokens: 16384 },
-    packages: ['npm:pi-skills'],
+    enabledModels: ['anthropic/claude-opus-4-5', 'anthropic/claude-sonnet-4-5', 'openai/*'],
+    packages: [
+      'npm:@gotgenes/pi-permission-system',
+      'npm:pi-mcp-adapter',
+      'npm:pi-web-access',
+      'npm:@tintinweb/pi-subagents',
+      { source: 'npm:pi-context-prune', extensions: [], skills: [], prompts: [], themes: [] },
+      'npm:pi-cache-optimizer',
+      { source: 'npm:pi-skills', skills: ['!legacy/**'] },
+      'npm:pi-tool-display',
+    ],
+    extensions: ['-builtin:mcp'],
   }),
 };
 
 function demoCliSettingsDocument(file: DemoSettingsFile) {
   const revision = [...file.text].reduce((hash, char) => (hash * 31 + char.charCodeAt(0)) >>> 0, 7).toString(16);
   return { path: file.path, format: file.format, exists: true, revision, text: file.text, settings: file.settings };
+}
+
+const demoPiPackageMeta: Record<string, { name: string; version: string; description: string }> = {
+  'npm:@gotgenes/pi-permission-system': { name: '@gotgenes/pi-permission-system', version: '40.1.2', description: 'Permission policies for Pi' },
+  'npm:pi-mcp-adapter': { name: 'pi-mcp-adapter', version: '5.1.0', description: 'MCP adapter' },
+  'npm:pi-web-access': { name: 'pi-web-access', version: '0.37.0', description: 'Web search and fetch' },
+  'npm:@tintinweb/pi-subagents': { name: '@tintinweb/pi-subagents', version: '0.20.0', description: 'Subagents' },
+  'npm:pi-context-prune': { name: 'pi-context-prune', version: '2.1.0', description: 'Context pruning' },
+  'npm:pi-cache-optimizer': { name: 'pi-cache-optimizer', version: '1.4.0', description: 'Prompt cache optimizer' },
+  'npm:pi-skills': { name: 'pi-skills', version: '0.3.1', description: 'A collection of community skills for Pi' },
+  'npm:pi-tool-display': { name: 'pi-tool-display', version: '0.8.0', description: 'Tool output rendering' },
+};
+const demoPiPluginConfigs: Record<string, SettingsObject | null> = {
+  'permission-system': {
+    yoloMode: false,
+    permission: {
+      '*': 'ask',
+      bash: { '*': 'allow', 'rm *': 'ask', 'sudo *': { action: 'deny', reason: 'No root on this host' }, 'git push *': 'ask' },
+      path_write: { '~/.ssh/*': 'deny', '~/.pi/agent/settings.json': 'ask' },
+    },
+  },
+  'web-access': { provider: 'exa', braveApiKey: '__todex_secret__', tavilyApiKey: '$TAVILY_API_KEY' },
+};
+let demoPiOperation: { id: string; action: 'install' | 'remove'; source: string; status: string; startedAt: string; finishedAt?: string; error?: string } | null = null;
+
+function demoPiPluginList() {
+  const file = demoCliSettings.pi;
+  const settings = file.settings ?? {};
+  const entries = Array.isArray(settings.packages) ? settings.packages : [];
+  const extensions = Array.isArray(settings.extensions) ? settings.extensions : [];
+  const packages = entries.map((entry) => {
+    const object = typeof entry === 'object' && entry !== null ? entry as SettingsObject : null;
+    const source = object ? String(object.source) : String(entry);
+    const disabled = object !== null && Object.keys(object).length === 5 && ['extensions', 'skills', 'prompts', 'themes'].every((kind) => Array.isArray(object[kind]) && (object[kind] as unknown[]).length === 0);
+    const meta = demoPiPackageMeta[source];
+    return { source, state: object ? (disabled ? 'disabled' : 'filtered') : 'enabled', installedPath: `/home/demo/.pi/agent/npm/node_modules/${meta?.name ?? source.slice(4)}`, ...meta };
+  });
+  return {
+    settingsPath: file.path,
+    revision: demoCliSettingsDocument(file).revision,
+    packages,
+    builtins: ['mcp', 'codemode', 'tool-search', 'llama.cpp'].map((id) => ({ id, enabled: !extensions.includes(`-builtin:${id}`) })),
+  };
+}
+
+function demoPiPluginsRoute(method: string, path: string, body: Record<string, unknown>): SecureResponse | null {
+  const file = demoCliSettings.pi;
+  const save = (settings: SettingsObject) => Object.assign(file, demoSettingsFile(file.path, file.format, settings));
+  if (path === '/v2/providers/pi/plugins' && method === 'GET') return json(demoPiPluginList());
+  if (path === '/v2/providers/pi/plugins/state' && method === 'PUT') {
+    if (body.revision !== demoPiPluginList().revision) return json({ error: { code: 'CONFLICT', message: 'settings changed on disk' } }, 409);
+    const settings = { ...(file.settings ?? {}) };
+    if (typeof body.builtin === 'string') {
+      const off = `-builtin:${body.builtin}`;
+      const extensions = (Array.isArray(settings.extensions) ? settings.extensions : []).filter((entry) => entry !== off && entry !== `+builtin:${body.builtin}`);
+      settings.extensions = body.enabled ? extensions : [...extensions, off];
+    } else {
+      const source = String(body.source);
+      settings.packages = (Array.isArray(settings.packages) ? settings.packages : []).map((entry) => {
+        const entrySource = typeof entry === 'object' && entry !== null ? (entry as SettingsObject).source : entry;
+        if (entrySource !== source) return entry;
+        return body.enabled ? source : { source, extensions: [], skills: [], prompts: [], themes: [] };
+      });
+    }
+    save(settings);
+    return json(demoPiPluginList());
+  }
+  if (path === '/v2/providers/pi/plugins/operations' && method === 'POST') {
+    demoPiOperation = { id: `pipkg_demo_${Date.now()}`, action: body.action === 'remove' ? 'remove' : 'install', source: String(body.source), status: 'running', startedAt: new Date().toISOString() };
+    return json(demoPiOperation);
+  }
+  const operationId = path.match(/^\/v2\/providers\/pi\/plugins\/operations\/([^/]+)$/)?.[1];
+  if (operationId && method === 'GET') {
+    if (!demoPiOperation || demoPiOperation.id !== operationId) return json({ error: { code: 'NOT_FOUND', message: 'operation not found' } }, 404);
+    if (demoPiOperation.status === 'running') {
+      // The demo finishes an operation on its first poll.
+      const { action, source } = demoPiOperation;
+      const settings = { ...(file.settings ?? {}) };
+      const entries = Array.isArray(settings.packages) ? settings.packages : [];
+      const sourceOf = (entry: unknown) => (typeof entry === 'object' && entry !== null ? (entry as SettingsObject).source : entry);
+      settings.packages = action === 'install' ? [...entries.filter((entry) => sourceOf(entry) !== source), source] : entries.filter((entry) => sourceOf(entry) !== source);
+      save(settings);
+      demoPiOperation = { ...demoPiOperation, status: 'succeeded', finishedAt: new Date().toISOString() };
+    }
+    return json(demoPiOperation);
+  }
+  const plugin = path.match(/^\/v2\/providers\/pi\/plugin-config\/([^/]+)$/)?.[1];
+  if (plugin) {
+    const stored = demoPiPluginConfigs[plugin] ?? null;
+    const document = () => {
+      const current = demoPiPluginConfigs[plugin] ?? null;
+      const text = current ? JSON.stringify(current) : null;
+      return { plugin, path: `/home/demo/.pi/agent/${plugin}.json`, exists: current !== null, revision: demoRevision(text), settings: current ?? {} };
+    };
+    if (method === 'GET') return json(document());
+    if (method === 'PATCH') {
+      if (body.revision !== document().revision) return json({ error: { code: 'CONFLICT', message: 'settings changed on disk' } }, 409);
+      let next = applyMergePatch(stored ?? {}, body.patch as SettingsObject);
+      for (const replacePath of Array.isArray(body.replace) ? body.replace as string[][] : []) {
+        let value: unknown = body.patch;
+        for (const key of replacePath) value = (value as SettingsObject | undefined)?.[key];
+        next = setAt(next, replacePath, value);
+      }
+      demoPiPluginConfigs[plugin] = next;
+      return json(document());
+    }
+  }
+  return null;
 }
 
 type DemoInstructionPreset = { id: string; name: string; text: string; revision: number; updatedAt: number };
@@ -408,6 +527,8 @@ function route(request: SecureRequest): SecureResponse {
   if (settingsFile && method === 'GET') return json(demoCliSettingsDocument(settingsFile));
   const instructionsResponse = demoInstructionsRoute(method, path, readBody(request));
   if (instructionsResponse) return instructionsResponse;
+  const piPluginsResponse = demoPiPluginsRoute(method, path, readBody(request));
+  if (piPluginsResponse) return piPluginsResponse;
 
   if (method === 'GET') {
     switch (path) {

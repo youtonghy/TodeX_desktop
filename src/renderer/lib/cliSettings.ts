@@ -20,13 +20,38 @@ export const UNSET = '__unset';
 export type FieldSpec =
   /** true / false / unset, as a three-way select. */
   | { kind: 'bool'; path: string[] }
-  /** Option labels are `<prefix>.option.<id>.<value>`. */
-  | { kind: 'enum'; path: string[]; options: OptionValue[] }
+  /** A switch over a key whose unset value is `default`; toggling writes it. */
+  | { kind: 'switch'; path: string[]; default: boolean }
+  /**
+   * Option labels are `<prefix>.option.<id>.<value>`. With `default`, the
+   * unset choice is labelled with the option it falls back to.
+   */
+  | { kind: 'enum'; path: string[]; options: OptionValue[]; default?: OptionValue }
   /** Free text; an empty input removes the key. */
   | { kind: 'text'; path: string[]; placeholder?: string }
   /** Multi-line free text; an empty input removes the key. */
   | { kind: 'longtext'; path: string[]; placeholder?: string }
-  | { kind: 'integer'; path: string[]; min: number; max: number }
+  | { kind: 'integer'; path: string[]; min: number; max: number; default?: number }
+  /** An integer, unset (`default`) or `null`, labelled `<prefix>.option.<id>.null`. */
+  | { kind: 'limit'; path: string[]; min: number; max: number; default: number }
+  /**
+   * A credential: masked, never shown back. A stored literal arrives as
+   * `secretPlaceholder` and is kept unless replaced or cleared.
+   */
+  | { kind: 'secret'; path: string[]; secretPlaceholder: string }
+  /**
+   * A model from the Pi models the user enabled: `provider/model-id` text, or
+   * `{ provider, modelId }`. `extra` options (such as `"default"`) are
+   * labelled `<prefix>.option.<id>.<value>`.
+   */
+  | { kind: 'model'; path: string[]; format: 'string' | 'object'; extra?: string[] }
+  /**
+   * An ordered `pattern -> action` map where the last match wins; actions are
+   * strings or `{ action, reason }`, the latter only for `reasonAction` when
+   * set (switching such a rule to another action drops its reason). Saved
+   * whole so the order is kept.
+   */
+  | { kind: 'rules'; path: string[]; actions: string[]; reasonAction?: string; placeholder?: string }
   /** A string array, edited one entry per line. */
   | { kind: 'lines'; path: string[]; placeholder?: string }
   /** Keys whose only value is the string `"disable"`. */

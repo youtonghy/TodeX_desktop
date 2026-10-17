@@ -1,10 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { RiAddLine, RiDeleteBin6Line, RiEyeLine, RiEyeOffLine } from '@remixicon/react';
 import type { CliSettingsDocument, CliSettingsProvider, V2ApiClient } from '@todex/protocol/v2';
 import { isConflictError } from '@todex/protocol/connectionError';
 import { Button } from '@/components/base/buttons/button';
 import { Input } from '@/components/base/input/input';
-import { Select, SelectItem } from '@/components/base/select/select';
 import { Tab, TabList, TabPanel, Tabs } from '@/components/base/tabs/tabs';
 import { Textarea } from '@/components/base/textarea/textarea';
 import { Alert } from '@/components/ui/alert';
@@ -13,30 +12,28 @@ import { Modal } from '@/components/ui/modal';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Spinner } from '@/components/ui/spinner';
 import { toast } from '@/components/ui/toast';
-import { SettingsCard, SettingsGroup, SettingsRow, SETTINGS_ROW } from '@/components/settings/SettingsRows';
+import { SettingsCard, SettingsGroup, SETTINGS_ROW } from '@/components/settings/SettingsRows';
 import { useT, type MessageKey } from '@/i18n';
 import { cx } from '@/utils/cx';
 import {
   CLI_SETTINGS,
   ENV_NAME,
-  UNSET,
   applyMergePatch,
   envFromRows,
   envRows,
   fieldId,
   getAt,
   mergePatch,
-  optionId,
   setAt,
   type CliSettingsSchema,
-  type FieldSpec,
-  type OptionValue,
   type SettingsObject,
 } from '@/lib/cliSettings';
 import { CliInstructionsPanel, useCliInstructions } from './CliInstructionsTab';
+import { PiPluginsPanel, usePiPlugins } from './PiPluginsTab';
+import { SettingsField, SettingsFieldModels } from './SettingsFields';
 
-type TabId = 'form' | 'env' | 'raw' | 'agents';
-const TAB_IDS: TabId[] = ['form', 'env', 'raw', 'agents'];
+type TabId = 'form' | 'env' | 'plugins' | 'raw' | 'agents';
+const TAB_IDS: TabId[] = ['form', 'env', 'plugins', 'raw', 'agents'];
 type EnvRow = { key: number; name: string; value: string; revealed: boolean };
 
 const key = (value: string) => value as MessageKey;
@@ -80,6 +77,7 @@ function CliSettingsEditor({ schema, api, onClose }: { schema: CliSettingsSchema
   const [saving, setSaving] = useState(false);
   const nextEnvKey = useRef(0);
   const instructions = useCliInstructions(provider, api);
+  const isPi = provider === 'pi';
 
   const toEnvRows = (settings: SettingsObject) => (envPath ? envRows(settings, envPath) : []).map((row) => ({ ...row, key: nextEnvKey.current++, revealed: false }));
 
@@ -110,24 +108,47 @@ function CliSettingsEditor({ schema, api, onClose }: { schema: CliSettingsSchema
   const patch = useMemo(() => (saved ? mergePatch(saved, formNext) : {}), [saved, formNext]);
   const formDirty = Object.keys(patch).length > 0;
   const rawDirty = Boolean(doc) && rawText !== doc?.text;
+  // Plugin switches rewrite settings.json: take the new revision in when
+  // nothing here is being edited, else saving reports the conflict.
+  const pristine = useRef(true);
+  pristine.current = !formDirty && !rawDirty;
+  const plugins = usePiPlugins(isPi, api, () => { if (pristine.current) void load(); });
+  // Models the plugin pages offer: the ones enabled in Pi, without patterns.
+  const piModels = useMemo(() => {
+    if (!isPi) return [];
+    const enabled = getAt(draft, ['enabledModels']);
+    const models = Array.isArray(enabled) ? enabled.filter((item): item is string => typeof item === 'string' && !item.includes('*')) : [];
+    const provider = getAt(draft, ['defaultProvider']);
+    const model = getAt(draft, ['defaultModel']);
+    if (typeof provider === 'string' && typeof model === 'string') models.unshift(`${provider}/${model}`);
+    return [...new Set(models)];
+  }, [draft, isPi]);
   // TOML is checked by the backend on save.
   const rawError = useMemo(() => (doc?.format === 'toml' ? null : rawObjectError(rawText)), [doc?.format, rawText]);
   const fileName = doc?.path.split(/[\\/]/).pop() || doc?.path || '';
   const envInvalid = env.some((row) => row.name.trim() !== '' && !ENV_NAME.test(row.name.trim()));
   const editingRaw = tab === 'raw';
   const editingAgents = tab === 'agents';
+  const editingPlugins = tab === 'plugins';
   const canSave = editingAgents
     ? instructions.canSave
-    : Boolean(doc) && !saving && (editingRaw ? rawDirty && !rawError : formDirty && !envInvalid);
+    : editingPlugins
+      ? plugins.canSave
+      : Boolean(doc) && !saving && (editingRaw ? rawDirty && !rawError : formDirty && !envInvalid);
   // Edits left unsaved on a tab other than the one shown.
-  const unsavedElsewhere = editingAgents
-    ? (formDirty || rawDirty) && 'cliSettings.settingsUnsaved'
+  const unsavedElsewhere = editingAgents || editingPlugins
+    ? (formDirty || rawDirty) ? 'cliSettings.settingsUnsaved'
+      : editingAgents ? plugins.dirty && 'cliSettings.pluginsUnsaved' : instructions.dirty && 'cliSettings.agentsUnsaved'
     : (editingRaw ? formDirty : rawDirty) ? (editingRaw ? 'cliSettings.formUnsaved' : 'cliSettings.rawUnsaved')
-      : instructions.dirty && 'cliSettings.agentsUnsaved';
+      : instructions.dirty ? 'cliSettings.agentsUnsaved' : plugins.dirty && 'cliSettings.pluginsUnsaved';
 
   const save = async () => {
     if (editingAgents) {
       await instructions.save();
+      return;
+    }
+    if (editingPlugins) {
+      await plugins.save();
       return;
     }
     if (!doc) return;
@@ -184,6 +205,7 @@ function CliSettingsEditor({ schema, api, onClose }: { schema: CliSettingsSchema
         <TabList aria-label={t('cliSettings.tabsLabel')}>
           <Tab id="form" isDisabled={!saved}>{t('cliSettings.tabForm')}</Tab>
           {envPath ? <Tab id="env" isDisabled={!saved} count={env.length || undefined}>{t('cliSettings.tabEnv')}</Tab> : null}
+          {isPi ? <Tab id="plugins" count={plugins.list?.packages.length || undefined}>{t('cliSettings.tabPlugins')}</Tab> : null}
           <Tab id="raw">{t('cliSettings.tabRaw')}</Tab>
           <Tab id="agents">AGENTS.md</Tab>
         </TabList>
@@ -213,6 +235,13 @@ function CliSettingsEditor({ schema, api, onClose }: { schema: CliSettingsSchema
             <TabPanel id="env" className="flex flex-col gap-3">
               {schema.hints.env ? <p className="px-3 text-body-2-regular text-text-secondary">{t(schema.hints.env)}</p> : null}
               <EnvEditor rows={env} onChange={setEnv} nextKey={() => nextEnvKey.current++} />
+            </TabPanel>
+          ) : null}
+          {isPi ? (
+            <TabPanel id="plugins">
+              <SettingsFieldModels.Provider value={piModels}>
+                <PiPluginsPanel state={plugins} />
+              </SettingsFieldModels.Provider>
             </TabPanel>
           ) : null}
           <TabPanel id="raw" className="flex flex-col gap-3">
@@ -247,8 +276,8 @@ function CliSettingsEditor({ schema, api, onClose }: { schema: CliSettingsSchema
         {unsavedElsewhere ? (
           <span className="me-auto text-body-2-regular text-text-secondary">{t(unsavedElsewhere)}</span>
         ) : null}
-        <Button variant="secondary" onClick={onClose} disabled={saving || instructions.busy}>{t('common.close')}</Button>
-        <Button onClick={() => void save()} disabled={!canSave} aria-busy={(editingAgents ? instructions.busy : saving) || undefined}>{t('common.save')}</Button>
+        <Button variant="secondary" onClick={onClose} disabled={saving || instructions.busy || plugins.saving}>{t('common.close')}</Button>
+        <Button onClick={() => void save()} disabled={!canSave} aria-busy={(editingAgents ? instructions.busy : editingPlugins ? plugins.saving : saving) || undefined}>{t('common.save')}</Button>
       </div>
     </div>
   );
@@ -261,215 +290,6 @@ function rawObjectError(text: string): string | null {
   } catch (error) {
     return error instanceof Error ? error.message : String(error);
   }
-}
-
-const COMPACT_SELECT = { className: 'w-44', triggerClassName: 'h-8 rounded-lg px-2 py-1.5', popoverClassName: 'w-(--trigger-width)' } as const;
-
-function SettingsField({ field, keyPrefix, value, onChange }: {
-  field: FieldSpec; keyPrefix: string; value: unknown; onChange: (value: unknown) => void;
-}) {
-  const t = useT();
-  const id = fieldId(field.path);
-  const label = t(key(`${keyPrefix}.field.${id}`));
-  const description = (
-    <>
-      {t(key(`${keyPrefix}.hint.${id}`))}
-      <span className="ms-1.5 font-mono text-caption-1-regular text-text-tertiary" dir="ltr">{id}</span>
-    </>
-  );
-  const unsetLabel = t('cliSettings.unset');
-
-  if (field.kind === 'lines') {
-    return <LinesField label={label} description={description} placeholder={field.placeholder} value={value} onChange={onChange} />;
-  }
-
-  let control;
-  switch (field.kind) {
-    case 'bool':
-    case 'enum': {
-      const options: OptionValue[] = field.kind === 'bool' ? [true, false] : field.options;
-      const optionLabel = (option: OptionValue) => (field.kind === 'bool'
-        ? t(option ? 'cliSettings.on' : 'cliSettings.off')
-        : t(key(`${keyPrefix}.option.${id}.${String(option)}`)));
-      // A value the CLI accepts but the list lacks (a custom theme, a
-      // notification event list, a granular approval table) stays
-      // selectable so it is shown and kept as is.
-      const known = value === undefined || options.some((option) => option === value);
-      const custom = known ? null : optionId(value);
-      control = (
-        <Select
-          aria-label={label}
-          {...COMPACT_SELECT}
-          selectedKey={value === undefined ? UNSET : optionId(value)}
-          onSelectionChange={(next) => {
-            if (next === UNSET || next == null) onChange(undefined);
-            else if (next !== custom) onChange(options.find((option) => optionId(option) === next));
-          }}
-        >
-          <SelectItem id={UNSET} textValue={unsetLabel}>{unsetLabel}</SelectItem>
-          {options.map((option) => (
-            <SelectItem key={optionId(option)} id={optionId(option)} textValue={optionLabel(option)}>{optionLabel(option)}</SelectItem>
-          ))}
-          {custom ? (
-            <SelectItem id={custom} textValue={typeof value === 'string' ? value : custom}>
-              <span className="truncate" dir="ltr">{typeof value === 'string' ? value : custom}</span>
-            </SelectItem>
-          ) : null}
-        </Select>
-      );
-      break;
-    }
-    case 'disable':
-      control = (
-        <Select aria-label={label} {...COMPACT_SELECT} selectedKey={value === 'disable' ? 'disable' : UNSET} onSelectionChange={(next) => onChange(next === 'disable' ? 'disable' : undefined)}>
-          <SelectItem id={UNSET} textValue={t('cliSettings.allowed')}>{t('cliSettings.allowed')}</SelectItem>
-          <SelectItem id="disable" textValue={t('cliSettings.disabled')}>{t('cliSettings.disabled')}</SelectItem>
-        </Select>
-      );
-      break;
-    case 'text':
-      control = (
-        <Input aria-label={label} size="small" className="w-44" inputDir="ltr" placeholder={field.placeholder}
-          value={typeof value === 'string' ? value : ''} onChange={(next) => onChange(next.trim() ? next : undefined)} />
-      );
-      break;
-    case 'longtext':
-      return (
-        <div className={cx(SETTINGS_ROW, 'flex flex-col gap-2')}>
-          <div className="flex min-w-0 flex-col">
-            <div className="text-body-regular text-text-primary">{label}</div>
-            <div className="text-body-2-regular text-text-secondary">{description}</div>
-          </div>
-          <Textarea
-            className="w-full"
-            aria-label={label}
-            value={typeof value === 'string' ? value : ''}
-            rows={3}
-            autoResize
-            maxRows={12}
-            placeholder={field.placeholder}
-            onChange={(next) => onChange(next.trim() ? next : undefined)}
-          />
-        </div>
-      );
-    case 'integer':
-      return <IntegerField label={label} description={description} placeholder={unsetLabel} min={field.min} max={field.max} value={value} onChange={onChange} />;
-    case 'attribution':
-      return <AttributionField label={label} description={description} value={value} onChange={onChange} />;
-  }
-  return <SettingsRow label={label} description={description}>{control}</SettingsRow>;
-}
-
-function IntegerField({ label, description, placeholder, min, max, value, onChange }: {
-  label: string; description: ReactNode; placeholder: string; min: number; max: number; value: unknown; onChange: (value: unknown) => void;
-}) {
-  const t = useT();
-  const [text, setText] = useState(typeof value === 'number' ? String(value) : '');
-  const parsed = Number(text);
-  const invalid = text.trim() !== '' && !(Number.isInteger(parsed) && parsed >= min && parsed <= max);
-  useEffect(() => {
-    // Follow outside changes (a reload) without fighting the user's typing.
-    if (value !== (text.trim() === '' ? undefined : parsed)) setText(typeof value === 'number' ? String(value) : '');
-  }, [value]);
-  return (
-    <SettingsRow label={label} description={description}>
-      <Input
-        aria-label={label}
-        size="small"
-        className="w-44"
-        inputMode="numeric"
-        inputDir="ltr"
-        placeholder={placeholder}
-        value={text}
-        isInvalid={invalid}
-        hint={invalid ? t('cliSettings.integerRange', { min, max }) : undefined}
-        onChange={(next) => {
-          setText(next);
-          const number = Number(next);
-          if (next.trim() === '') onChange(undefined);
-          else if (Number.isInteger(number) && number >= min && number <= max) onChange(number);
-        }}
-      />
-    </SettingsRow>
-  );
-}
-
-type AttributionMode = 'default' | 'hidden' | 'custom';
-
-function AttributionField({ label, description, value, onChange }: {
-  label: string; description: ReactNode; value: unknown; onChange: (value: unknown) => void;
-}) {
-  const t = useT();
-  // An empty string is both "hidden" and a custom text being typed, so the
-  // mode is kept here rather than derived from the value alone.
-  const [mode, setMode] = useState<AttributionMode>(typeof value !== 'string' ? 'default' : value === '' ? 'hidden' : 'custom');
-  useEffect(() => {
-    if (typeof value !== 'string') setMode('default');
-    else if (value !== '') setMode('custom');
-    else setMode((current) => (current === 'default' ? 'hidden' : current));
-  }, [value]);
-  const text = typeof value === 'string' ? value : '';
-  const choose = (next: AttributionMode) => {
-    setMode(next);
-    onChange(next === 'default' ? undefined : next === 'hidden' ? '' : text);
-  };
-  return (
-    <div className={SETTINGS_ROW}>
-      <SettingsRow label={label} description={description} className="border-b-0 py-0 pe-0">
-        <Select aria-label={label} {...COMPACT_SELECT} selectedKey={mode} onSelectionChange={(next) => choose(next === 'hidden' || next === 'custom' ? next : 'default')}>
-          <SelectItem id="default" textValue={t('cliSettings.attributionDefault')}>{t('cliSettings.attributionDefault')}</SelectItem>
-          <SelectItem id="hidden" textValue={t('cliSettings.attributionHidden')}>{t('cliSettings.attributionHidden')}</SelectItem>
-          <SelectItem id="custom" textValue={t('cliSettings.attributionCustom')}>{t('cliSettings.attributionCustom')}</SelectItem>
-        </Select>
-      </SettingsRow>
-      {mode === 'custom' ? (
-        <Textarea
-          className="mt-2 w-full"
-          aria-label={label}
-          value={text}
-          rows={3}
-          spellCheck="false"
-          onChange={onChange}
-          inputClassName="font-mono text-caption-1-regular"
-        />
-      ) : null}
-    </div>
-  );
-}
-
-function LinesField({ label, description, placeholder, value, onChange }: {
-  label: string; description: ReactNode; placeholder?: string; value: unknown; onChange: (value: unknown) => void;
-}) {
-  const toText = (current: unknown) => (Array.isArray(current) ? current.map((item) => (typeof item === 'string' ? item : JSON.stringify(item))).join('\n') : '');
-  const [text, setText] = useState(() => toText(value));
-  const lines = (source: string) => source.split('\n').map((line) => line.trim()).filter(Boolean);
-  useEffect(() => {
-    if (JSON.stringify(lines(text)) !== JSON.stringify(Array.isArray(value) ? value : [])) setText(toText(value));
-  }, [value]);
-  return (
-    <div className={cx(SETTINGS_ROW, 'flex flex-col gap-2')}>
-      <div className="flex min-w-0 flex-col">
-        <div className="text-body-regular text-text-primary">{label}</div>
-        <div className="text-body-2-regular text-text-secondary">{description}</div>
-      </div>
-      <Textarea
-        className="w-full"
-        aria-label={label}
-        value={text}
-        rows={3}
-        autoResize
-        maxRows={10}
-        spellCheck="false"
-        placeholder={placeholder}
-        onChange={(next) => {
-          setText(next);
-          const items = lines(next);
-          onChange(items.length > 0 ? items : undefined);
-        }}
-        inputClassName="font-mono text-caption-1-regular"
-      />
-    </div>
-  );
 }
 
 function EnvEditor({ rows, onChange, nextKey }: { rows: EnvRow[]; onChange: (rows: EnvRow[]) => void; nextKey: () => number }) {
