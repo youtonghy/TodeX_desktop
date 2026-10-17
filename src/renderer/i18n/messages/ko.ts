@@ -487,8 +487,6 @@ export const ko: Messages = {
   'chat.addAttachment': '첨부 파일 추가',
   'chat.addImageOrText': '이미지 또는 텍스트 첨부',
   'chat.stop': '중지',
-  'chat.stopTurn': '이번 차례 중지',
-  'chat.toolSilent': '{minutes}분 동안 새 출력이 없습니다. 명령이 아직 실행 중일 수 있습니다',
   'chat.pendingApproval': '승인 대기',
   'chat.workProcess': '작업 과정',
   'chat.thinking': '생각 중',

@@ -487,8 +487,6 @@ export const ja: Messages = {
   'chat.addAttachment': '添付ファイルを追加',
   'chat.addImageOrText': '画像またはテキストを添付',
   'chat.stop': '停止',
-  'chat.stopTurn': 'このターンを停止',
-  'chat.toolSilent': '{minutes} 分間新しい出力がありません。コマンドはまだ実行中の可能性があります',
   'chat.pendingApproval': '承認待ち',
   'chat.workProcess': '作業過程',
   'chat.thinking': '思考中',
