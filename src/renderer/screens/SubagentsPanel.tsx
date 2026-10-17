@@ -204,8 +204,10 @@ const USAGE_TONE_CLASS: Record<UsageStat['tone'], { chip: string; value: string 
 };
 
 function usageStats(usage: SubagentRun['usage'], t: ReturnType<typeof useT>): UsageStat[] {
+  // Zero means "not reported": pi-subagents launches background runs with
+  // placeholder zeros and only fills real numbers in on completion.
   return Object.entries(usage ?? {})
-    .filter(([, value]) => typeof value === 'number')
+    .filter(([, value]) => typeof value === 'number' && value > 0)
     .map(([key, value]) => {
       const k = key.toLowerCase();
       if (/tool/.test(k)) {
