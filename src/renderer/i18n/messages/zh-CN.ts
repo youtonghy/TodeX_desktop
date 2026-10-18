@@ -2499,6 +2499,7 @@ export const zhCN = {
   'chat.providerTurn.backgroundTask': '后台任务完成，Claude 继续工作',
   'chat.providerTurn.wakeup': '定时唤醒，Claude 继续工作',
   'chat.providerTurn.cron': '定时任务触发，Claude 继续工作',
+  'chat.providerNotice.autoModeUnavailable': '当前模型或账户不支持自动模式，本轮已按请求审批执行',
   'history.title': '历史记录加密',
   'history.hint': '会话历史始终以端到端密文保存，后端磁盘上没有可解密它的私钥。',
   'history.loading': '正在读取加密状态…',

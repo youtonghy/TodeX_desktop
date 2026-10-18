@@ -139,6 +139,11 @@ const PROVIDER_TURN_NOTICES = {
   unknown: 'chat.providerTurn.backgroundTask',
 } as const satisfies Record<NonNullable<TimelineEntry['providerTrigger']>, string>;
 
+/** Provider notices shown as one quiet line (`TimelineEntry.providerNotice`). */
+const PROVIDER_NOTICES = {
+  auto_mode_unavailable: 'chat.providerNotice.autoModeUnavailable',
+} as const satisfies Record<NonNullable<TimelineEntry['providerNotice']>, string>;
+
 const MAX_COMPOSER_IMAGE_BYTES = 2_500_000;
 const MAX_COMPOSER_TEXT_BYTES = 512 * 1024;
 const HYDRATE_DEBOUNCE_MS = 200;
@@ -735,6 +740,13 @@ const ChatTimelineItem = memo(function ChatTimelineItem({
     return (
       <p data-message-id={entry.id} role="note" title={entry.subtitle || undefined} className="py-1 text-center text-caption-1-regular text-text-tertiary">
         {t(PROVIDER_TURN_NOTICES[entry.providerTrigger])}
+      </p>
+    );
+  }
+  if (entry.providerNotice) {
+    return (
+      <p data-message-id={entry.id} role="note" title={entry.subtitle || undefined} className="py-1 text-center text-caption-1-regular text-text-tertiary">
+        {t(PROVIDER_NOTICES[entry.providerNotice])}
       </p>
     );
   }

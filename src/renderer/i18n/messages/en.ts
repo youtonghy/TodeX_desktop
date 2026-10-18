@@ -2499,6 +2499,7 @@ export const en: Messages = {
   'chat.providerTurn.backgroundTask': 'Background task finished — Claude continued',
   'chat.providerTurn.wakeup': 'Scheduled wakeup — Claude continued',
   'chat.providerTurn.cron': 'Scheduled task fired — Claude continued',
+  'chat.providerNotice.autoModeUnavailable': 'Auto mode isn\'t available for this model or account; this turn ran with per-request approvals',
   'history.title': 'History encryption',
   'history.hint': 'Conversation history is always stored end-to-end encrypted; the backend disk holds no key that can decrypt it.',
   'history.loading': 'Reading encryption state…',

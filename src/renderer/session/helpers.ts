@@ -108,6 +108,7 @@ import {
   reduceConversationEvents as sharedReduceConversationEvents,
   type ConversationBlockCategory,
   type ConversationBlockPhase,
+  type ProviderNotice,
   type ProviderTurnTrigger,
 } from '@todex/protocol/mobileParity';
 
@@ -1296,6 +1297,9 @@ export type TimelineEntry = {
   /** Opens a turn the provider started on its own; `subtitle` holds its
    * summary, if any. */
   providerTrigger?: ProviderTurnTrigger;
+  /** A provider notice (e.g. auto mode unavailable); `subtitle` holds the
+   * provider's reason, if any. */
+  providerNotice?: ProviderNotice;
 };
 
 export function workspaceDisplayName(workspace: Pick<WorkspaceRecord, 'name' | 'path'>): string {
