@@ -51,10 +51,10 @@ export function AgentScopeSettings({ api, providers, scope, workspace, disabled,
       .then(result => setModelLists(current => ({ ...current, [provider.id]: { status: 'ready', models: result.models } })))
       .catch(() => setModelLists(current => ({ ...current, [provider.id]: { status: 'error', models: provider.models } })));
   };
-  // Agents limited to some models show their model list at once.
+  // Every allowed agent loads its model list so "selected models" is choosable.
   useEffect(() => {
     for (const provider of listed) {
-      if (scope.models[provider.id] && scopeAllowsAgent(scope, provider.id)) loadModels(provider);
+      if (scopeAllowsAgent(scope, provider.id)) loadModels(provider);
     }
   }, [scope, providers]);
 
