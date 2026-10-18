@@ -84,7 +84,8 @@ export interface NotificationProps
   onDismiss?: () => void;
   /**
    * Automatically dismiss after this many milliseconds. A 3px blue countdown
-   * bar is rendered along the full bottom edge for the same duration.
+   * bar is rendered along the full bottom edge for the same duration; it
+   * pauses while the pointer or focus is inside the viewport.
    */
   autoDismissDuration?: number;
   /** Optional entrance delay in seconds. */
@@ -217,16 +218,6 @@ export function Notification({
   }, [isDismissed]);
   const Icon = icon ?? STATUS_ICON[status];
   const hasIntro = introDelay !== undefined;
-  const introDelayMs = (introDelay ?? 0) * 1000;
-
-  useEffect(() => {
-    if (!autoDismissDuration || autoDismissDuration <= 0) return;
-    const timer = window.setTimeout(
-      () => setDismissed(true),
-      autoDismissDuration + introDelayMs,
-    );
-    return () => window.clearTimeout(timer);
-  }, [autoDismissDuration, introDelayMs]);
 
   return (
     <AnimatePresence onExitComplete={onDismiss}>
@@ -306,16 +297,21 @@ export function Notification({
           ) : null}
 
           {autoDismissDuration && autoDismissDuration > 0 ? (
-            <motion.span
+            // The countdown is a CSS animation so hovering or focusing the
+            // stack can pause it; its end is what dismisses the card.
+            <span
               aria-hidden
-              className="absolute inset-x-0 bottom-0 h-[3px] origin-left rtl:origin-right bg-accent-600"
-              initial={{ scaleX: 1 }}
-              animate={{ scaleX: 0 }}
-              transition={{
-                duration: autoDismissDuration / 1000,
-                delay: introDelay,
-                ease: "linear",
+              className="absolute inset-x-0 bottom-0 h-[3px] origin-left rtl:origin-right bg-accent-600 group-hover/notifications:[animation-play-state:paused] group-focus-within/notifications:[animation-play-state:paused]"
+              // Longhands only: the shorthand would set play-state inline and
+              // override the pause classes.
+              style={{
+                animationName: "notification-countdown",
+                animationDuration: `${autoDismissDuration}ms`,
+                animationTimingFunction: "linear",
+                animationDelay: `${introDelay ?? 0}s`,
+                animationFillMode: "forwards",
               }}
+              onAnimationEnd={() => setDismissed(true)}
             />
           ) : null}
         </motion.div>
@@ -325,8 +321,9 @@ export function Notification({
 }
 
 /**
- * Viewport-level notification region. Anchor the stack to any corner or
- * horizontal center with `position`; children with stable keys move smoothly
+ * Viewport-level notification region, layered above everything else
+ * (modals included). Anchor the stack to any corner or horizontal center
+ * with `position`; children with stable keys move smoothly
  * as notifications enter and leave.
  */
 export function NotificationViewport({
@@ -352,8 +349,12 @@ export function NotificationViewport({
       layoutRoot
       dir={direction}
       aria-label={ariaLabel}
+      // Keeps toasts usable above React Aria modals: not aria-hidden, focus
+      // is not pulled back, and clicks do not dismiss the modal.
+      data-react-aria-top-layer=""
       className={cx(
-        "pointer-events-none fixed z-100 flex w-[min(400px,calc(100vw-24px))] flex-col gap-3",
+        // Above every other layer (modals and drawers use z-100).
+        "group/notifications pointer-events-none fixed z-1000 flex w-[min(400px,calc(100vw-24px))] flex-col gap-3",
         VIEWPORT_POSITION[resolvedPosition],
         className,
       )}

@@ -176,6 +176,13 @@ body {
   to { transform: translateX(300%); }
 }
 
+/* Toast countdown bar (components/base/notification). Its animationend
+   dismisses the toast, so pausing the bar also pauses the timer. */
+@keyframes notification-countdown {
+  from { transform: scaleX(1); }
+  to { transform: scaleX(0); }
+}
+
 /* ---------------------------------------------------------------- Markdown
  * Prose for agent replies and file previews (components/ui/markdown.tsx).
  * Every top-level block renders in its own .markdown-block, so spacing sits
