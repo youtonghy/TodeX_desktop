@@ -19,7 +19,6 @@ import {
 } from '../session/helpers';
 import { XtermTerminal } from '../components/XtermTerminal';
 import { CapabilitiesPanel } from './CapabilitiesPanel';
-import { SubagentsPanel } from './SubagentsPanel';
 import { useT } from '../i18n';
 import { cx } from '@/utils/cx';
 
@@ -65,15 +64,6 @@ export function AsidePanel({ session, panel, slashCommand, onBack }: Props) {
         onLoadMcpConfig={(server) => session.getMcpServerConfig(server.provider, server.resourceId)}
         manager={session.capabilityManager}
       />
-      </div>
-    );
-  }
-
-  if (panel === 'subagents') {
-    return (
-      <div className="flex h-full min-h-0 flex-col">
-        {back}
-        <SubagentsPanel session={session} conversationId={conversation?.id} />
       </div>
     );
   }
@@ -285,9 +275,6 @@ function SlashActionAside({ session, command, conversationId }: { session: TodeX
   const memoryEntries = session.memoryEntriesByConversation[conversationId] ?? [];
   if (command === '/memory') {
     return <div className="flex h-full flex-col gap-3 p-5"><h2 className="text-title-3-semibold text-text-primary">{t('aside.memoryTitle')}</h2><p className="text-body-regular text-text-secondary">{t('aside.memoryHint')}</p><ScrollArea className="min-h-0 flex-1" surface="secondary">{memoryEntries.length ? memoryEntries.map(entry => <Card key={entry.id} variant="secondary" className="mb-2 gap-2 p-3"><p className="whitespace-pre-wrap text-body-regular text-text-primary">{entry.content}</p><p className="text-caption-1-regular text-text-secondary">{entry.scope === 'user' ? t('aside.memoryUser') : entry.scope === 'workspace' ? t('aside.memoryWorkspace') : t('aside.memoryConversation')}</p></Card>) : <p className="text-body-regular text-text-secondary">{t('aside.memoryEmpty')}</p>}</ScrollArea></div>;
-  }
-  if (command === '/subagents') {
-    return <SubagentsPanel session={session} conversationId={conversationId} />;
   }
   return (
     <div className="flex flex-col gap-4 p-5">

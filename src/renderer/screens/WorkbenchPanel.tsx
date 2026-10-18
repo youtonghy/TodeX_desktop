@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ButtonHTMLAttributes, ComponentType, MouseEvent as ReactMouseEvent, ReactNode, RefObject } from 'react';
-import { RiAppsLine, RiCloseLine, RiDeleteBinLine, RiDownload2Line, RiEdit2Line, RiFolderAddLine, RiLinksLine, RiLink, RiServerLine, RiTerminalBoxLine, RiTerminalWindowLine, RiUpload2Line, RiGitBranchLine, RiAddLine, RiArrowLeftDoubleLine, RiArrowLeftLine, RiArrowRightDoubleLine, RiExternalLinkLine, RiBracesLine, RiFileCodeLine, RiFileLine, RiFilePdf2Line, RiFileSettingsLine, RiFileTextLine, RiFileZipLine, RiImageLine, RiLockLine, RiMarkdownLine, RiFolder3Line, RiFolderOpenLine, RiGlobalLine, RiFocus3Line, RiLayoutColumnLine, RiLayoutRowLine, RiRefreshLine, RiStopCircleLine } from '@remixicon/react';
+import { RiAppsLine, RiCloseLine, RiDeleteBinLine, RiDownload2Line, RiEdit2Line, RiFolderAddLine, RiLinksLine, RiLink, RiServerLine, RiTerminalBoxLine, RiTerminalWindowLine, RiUpload2Line, RiGitBranchLine, RiAddLine, RiArrowLeftDoubleLine, RiArrowLeftLine, RiArrowRightDoubleLine, RiExternalLinkLine, RiBracesLine, RiFileCodeLine, RiFileLine, RiFilePdf2Line, RiFileSettingsLine, RiFileTextLine, RiFileZipLine, RiImageLine, RiLockLine, RiMarkdownLine, RiFolder3Line, RiFolderOpenLine, RiGlobalLine, RiFocus3Line, RiLayoutColumnLine, RiLayoutRowLine, RiRefreshLine, RiRobot2Line, RiStopCircleLine } from '@remixicon/react';
 import { Focusable, Pressable } from 'react-aria-components';
 import type { Key, Selection } from 'react-aria-components';
 import { Badge } from '@/components/base/badges/badge';
@@ -37,11 +37,13 @@ import {
   terminalStatusLabel,
   type TerminalTarget,
 } from '../session/helpers';
-import type { OpenPanelOptions, WorkbenchItem, WorkbenchRequest, WorkbenchTab } from '../lib/panels';
+import { isSystemWorkbenchTab, type OpenPanelOptions, type WorkbenchItem, type WorkbenchRequest, type WorkbenchTab } from '../lib/panels';
 import { normalizeWorkbenchLayout } from '../session/workbenchLayout';
 import { SETTINGS_STORAGE_KEY, attachmentId, backendApi, previewBackendProfile, referenceToken, uniqueReferenceName } from '../session/helpers';
 import { isConflictError } from '@todex/protocol/connectionError';
 import { isNotFoundError, type SshExecRun } from '@todex/protocol/ssh';
+import type { SubagentRun } from '@todex/protocol/v2';
+import { SubagentsPanel } from './SubagentsPanel';
 import { isLoopbackUrl } from '@todex/protocol/mobileParity';
 import { t, useT, type MessageKey } from '../i18n';
 
@@ -72,7 +74,7 @@ type StoredWorkbenchState = {
   activeId: string;
 };
 
-/** Types written to the tab store; 'ssh-exec' and 'agent-browser' tabs are session-only. */
+/** Types written to the tab store; 'ssh-exec', 'subagents' and 'agent-browser' tabs are session-only. */
 const WORKBENCH_TYPES = new Set<WorkbenchTab>(['terminal', 'browser', 'files', 'git-diff']);
 
 const WORKBENCH_LABEL_KEYS: Record<WorkbenchTab, MessageKey> = {
@@ -81,6 +83,7 @@ const WORKBENCH_LABEL_KEYS: Record<WorkbenchTab, MessageKey> = {
   files: 'workbench.tabFiles',
   'git-diff': 'workbench.tabGitDiff',
   'ssh-exec': 'workbench.tabSshExec',
+  subagents: 'app.subagents',
   'agent-browser': 'agentBrowser.title',
 };
 
@@ -92,6 +95,7 @@ const WORKBENCH_ICONS = {
   files: RiFileTextLine,
   'git-diff': RiGitBranchLine,
   'ssh-exec': RiTerminalWindowLine,
+  subagents: RiRobot2Line,
   'agent-browser': RiGlobalLine,
 };
 
@@ -149,7 +153,7 @@ function ExpandableAction({ icon: Icon, label, tone = 'secondary', iconClassName
 
 const WORKBENCH_TAB_AXIS_KEY = `${SETTINGS_STORAGE_KEY}.workbenchTabAxis.v1`;
 
-/** `sessionItems` are this app session's 'ssh-exec' tab for the scope; they
+/** `sessionItems` are this app session's session-only tabs for the scope; they
  * follow the stored tabs and may hold the stored active tab. */
 function parseStoredWorkbenchState(value: unknown, sessionItems: WorkbenchItem[] = []): StoredWorkbenchState {
   if (!value || typeof value !== 'object') return { items: sessionItems, activeId: sessionItems[0]?.id ?? '' };
@@ -316,9 +320,10 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
 
   // Closing a terminal tab that holds a live PTY stops the backend PTY
   // instead of leaving it running in the background; closing a remote files
-  // tab closes its backend connection.
+  // tab closes its backend connection. Agent SSH and Subagents tabs stay.
   const closeTab = useCallback((id: string) => {
     const item = items.find((entry) => entry.id === id);
+    if (item && isSystemWorkbenchTab(item.type)) return;
     const terminal = item?.type === 'terminal' ? session.terminalById[terminalIdForConversation(scopeKey, id)] : undefined;
     if (item && terminal && (terminal.status === 'running' || terminal.status === 'starting' || terminal.status === 'stopping')) {
       session.stopTerminalSession(terminalIdForConversation(scopeKey, id), item.ssh ? sshSettings.tenantId : session.activeWorkspace?.tenantId || session.settings.tenantId);
@@ -367,14 +372,15 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
         opened = item;
         continue;
       }
-      if (request.kind === 'ssh-exec') {
-        // One log per conversation: reuse it, or re-create it if it was closed.
-        const existing = [...items, ...added].find(item => item.sshExec?.conversationId === request.conversationId);
+      if (request.kind === 'ssh-exec' || request.kind === 'subagents') {
+        // One tab per conversation and kind: reuse it, or create it.
+        const { kind, conversationId } = request;
+        const existing = [...items, ...added].find(item => (kind === 'ssh-exec' ? item.sshExec : item.subagents)?.conversationId === conversationId);
         if (existing) {
           opened = existing;
           continue;
         }
-        const item: WorkbenchItem = { id: `ssh-exec-${Date.now()}-${request.id}`, type: 'ssh-exec', title: t('workbench.tabSshExec'), sshExec: { conversationId: request.conversationId } };
+        const item: WorkbenchItem = { id: `${kind}-${Date.now()}-${request.id}`, type: kind, title: workbenchLabel(kind), ...(kind === 'ssh-exec' ? { sshExec: { conversationId } } : { subagents: { conversationId } }) };
         added.push(item);
         opened = item;
         continue;
@@ -394,6 +400,8 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
     }
   }, [closeTab, items, onRequestsHandled, onTabChange, requests, restored, t]);
 
+  // The shortcut is consumed on an Agent SSH or Subagents tab (which stays),
+  // rather than falling back to closing the window.
   const closeActiveTab = useCallback(() => {
     if (!activeId) return false;
     closeTab(activeId);
@@ -432,7 +440,7 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
   const tabStrip = items.map((item) => {
     const Icon = item.ssh || item.remote ? REMOTE_ICONS[item.type === 'terminal' ? 'terminal' : 'files'] : WORKBENCH_ICONS[item.type];
     const workspacePath = session.activeWorkspace?.path;
-    const location = item.type === 'ssh-exec'
+    const location = isSystemWorkbenchTab(item.type)
       ? ''
       : item.type === 'agent-browser'
       ? [...(session.conversationRuntimeById[item.agentBrowser?.conversationId ?? '']?.desktopBrowser.actions ?? [])].reverse().find(action => action.url)?.url || ''
@@ -445,9 +453,10 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
           : item.type === 'browser'
             ? item.target?.url || item.target?.filePath || 'http://127.0.0.1:7345'
             : item.target?.filePath || workspacePath;
-    const title = item.type === 'ssh-exec' ? workbenchLabel(item.type) : location ? `${workbenchLabel(item.type)} ${location}` : item.title;
+    const title = isSystemWorkbenchTab(item.type) ? workbenchLabel(item.type) : location ? `${workbenchLabel(item.type)} ${location}` : item.title;
     const isActive = item.id === activeId;
-    const tabIconClass = cx('size-4 transition-opacity duration-150', isActive && 'group-hover/tab:opacity-0 group-focus-within/tab:opacity-0 [@media(hover:none)]:opacity-0');
+    const closable = !isSystemWorkbenchTab(item.type);
+    const tabIconClass = cx('size-4 transition-opacity duration-150', closable && isActive && 'group-hover/tab:opacity-0 group-focus-within/tab:opacity-0 [@media(hover:none)]:opacity-0');
     return (
       <div
         key={item.id}
@@ -469,6 +478,8 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
             >
               {item.sshExec ? (
                 <SshExecTabIcon conversationId={item.sshExec.conversationId} runs={session.conversationRuntimeById[item.sshExec.conversationId]?.sshExecs} className={tabIconClass} />
+              ) : item.subagents ? (
+                <SubagentsTabIcon runs={session.subagentsByConversation[item.subagents.conversationId]} className={tabIconClass} />
               ) : <Icon aria-hidden="true" className={tabIconClass} />}
             </button>
           </Focusable>
@@ -476,14 +487,16 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
             {title}
           </Tooltip>
         </TooltipTrigger>
-        <IconAction
-          icon={RiCloseLine} size="xs" aria-label={t('workbench.closeTab', { title })}
-          className={cx(
-            'pointer-events-none absolute inset-0 m-auto rounded-full opacity-0 transition-[opacity,background-color,color]',
-            isActive && 'group-hover/tab:pointer-events-auto group-hover/tab:opacity-100 group-focus-within/tab:pointer-events-auto group-focus-within/tab:opacity-100 [@media(hover:none)]:pointer-events-auto [@media(hover:none)]:opacity-100',
-          )}
-          onClick={() => closeTab(item.id)}
-        />
+        {closable ? (
+          <IconAction
+            icon={RiCloseLine} size="xs" aria-label={t('workbench.closeTab', { title })}
+            className={cx(
+              'pointer-events-none absolute inset-0 m-auto rounded-full opacity-0 transition-[opacity,background-color,color]',
+              isActive && 'group-hover/tab:pointer-events-auto group-hover/tab:opacity-100 group-focus-within/tab:pointer-events-auto group-focus-within/tab:opacity-100 [@media(hover:none)]:pointer-events-auto [@media(hover:none)]:opacity-100',
+            )}
+            onClick={() => closeTab(item.id)}
+          />
+        ) : null}
       </div>
     );
   });
@@ -565,6 +578,7 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
             {item.type === 'files' ? <FilesPane session={session} remote={item.remote} remoteBackendId={sshBackendId} onRemoteRebind={next => updateRemoteBinding(item.id, next)} target={item.type === tab && item.id === active?.id && (target?.filePath || target?.url) ? target : item.target} onTargetChange={next => updateTabTarget(item.id, next)} /> : null}
             {item.type === 'git-diff' ? <GitDiffPane session={session} /> : null}
             {item.type === 'ssh-exec' && item.sshExec ? <SshExecPane conversationId={item.sshExec.conversationId} runs={session.conversationRuntimeById[item.sshExec.conversationId]?.sshExecs ?? NO_SSH_EXECS} isActive={item.id === active?.id} /> : null}
+            {item.type === 'subagents' && item.subagents ? <SubagentsPanel session={session} conversationId={item.subagents.conversationId} /> : null}
             {item.type === 'agent-browser' && item.agentBrowser ? <AgentBrowserLiveView session={session} isActive={shown && item.id === active?.id} conversationId={item.agentBrowser.conversationId} /> : null}
           </div>
         ))}
@@ -582,6 +596,23 @@ function SshExecTabIcon({ conversationId, runs = NO_SSH_EXECS, className }: { co
   return (
     <span className={cx('relative inline-flex', className)}>
       <RiTerminalWindowLine aria-hidden="true" className="size-4" />
+      {count ? (
+        <Badge color="primary" className="absolute -end-2.5 -top-2 min-w-4 px-0.5 text-caption-2-semibold tabular-nums">
+          {count > 99 ? '99+' : count}
+        </Badge>
+      ) : null}
+    </span>
+  );
+}
+
+const NO_SUBAGENTS: SubagentRun[] = [];
+
+/** The Subagents tab icon carries the number of queued or running subagents. */
+function SubagentsTabIcon({ runs = NO_SUBAGENTS, className }: { runs?: SubagentRun[]; className: string }) {
+  const count = runs.filter(run => run.status === 'running' || run.status === 'queued').length;
+  return (
+    <span className={cx('relative inline-flex', className)}>
+      <RiRobot2Line aria-hidden="true" className="size-4" />
       {count ? (
         <Badge color="primary" className="absolute -end-2.5 -top-2 min-w-4 px-0.5 text-caption-2-semibold tabular-nums">
           {count > 99 ? '99+' : count}

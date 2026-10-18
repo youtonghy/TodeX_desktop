@@ -1,8 +1,7 @@
 import { Component, lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { RiAddLine, RiFolderAddLine, RiExpandLeftLine, RiExpandRightLine, RiGithubLine, RiLayoutLeftLine, RiLayoutRightLine, RiRobot2Line } from '@remixicon/react';
+import { RiAddLine, RiFolderAddLine, RiExpandLeftLine, RiExpandRightLine, RiGithubLine, RiLayoutLeftLine, RiLayoutRightLine } from '@remixicon/react';
 import { motion, useReducedMotion } from 'motion/react';
 import { Dialog, Modal as AriaModal, ModalOverlay } from 'react-aria-components';
-import { Badge } from '@/components/base/badges/badge';
 import { Input } from '@/components/base/input/input';
 import { Button } from '@/components/base/buttons/button';
 import { Select, SelectItem } from '@/components/base/select/select';
@@ -17,7 +16,7 @@ import { ConversationSplit, useMediaQuery } from './components/ConversationSplit
 import { useWorkbenchLayout } from './session/useWorkbenchLayout';
 import { sshWorkbenchScopeKey, workbenchScopeKey } from './session/workbenchLayout';
 import { createAgentBrowserWatch, takeNewAgentBrowserTab } from './session/agentBrowserTabs';
-import { createSshExecWatch, takeNewSshExecs } from './session/sshExecTabs';
+import { createRunWatch, takeNewSshExecs, takeNewSubagents } from './session/sshExecTabs';
 import { useTodeXSession, type TodeXSession } from './session/useTodeXSession';
 import { ConversationHeaderDetails } from './components/ConversationHeaderDetails';
 import { GitActionsModal } from './components/GitActionsModal';
@@ -313,12 +312,12 @@ export function App() {
     setWorkbenchRequests([]);
     setWorkbenchItems([]);
   }, [scopeKey]);
-  // An agent `ssh_exec` call that starts in the viewed conversation opens the
-  // side panel on the conversation's single read-only Agent SSH log tab,
-  // re-creating it if it was closed. Calls already in the runtime when the
-  // conversation became the viewed one (history, replay) are only recorded,
-  // and the SSH view (another Workbench scope) records without opening.
-  const sshExecWatchRef = useRef(createSshExecWatch());
+  // An agent `ssh_exec` call or a subagent that starts in the viewed
+  // conversation opens the side panel on the conversation's single Agent SSH
+  // log or Subagents tab, creating it on first use. Runs already in the runtime
+  // when the conversation became the viewed one (history, replay) are only
+  // recorded, and the SSH view (another Workbench scope) records without opening.
+  const sshExecWatchRef = useRef(createRunWatch());
   const viewedConversationId = session.activeConversation?.id ?? '';
   const viewedRuntime = viewedConversationId ? session.conversationRuntimeById[viewedConversationId] : undefined;
   const viewedRecovering = viewedConversationId ? session.recoveringConversations[viewedConversationId] === true : false;
@@ -326,6 +325,13 @@ export function App() {
     const fresh = takeNewSshExecs(sshExecWatchRef.current, viewedConversationId, viewedRuntime, viewedRecovering);
     if (!fresh.length || sshActive || !scopeKey) return;
     queueWorkbenchRequest(id => ({ id, kind: 'ssh-exec', conversationId: viewedConversationId }));
+    persistAsideOpen(true);
+  }, [persistAsideOpen, queueWorkbenchRequest, scopeKey, sshActive, viewedConversationId, viewedRecovering, viewedRuntime]);
+  const subagentWatchRef = useRef(createRunWatch());
+  useEffect(() => {
+    const fresh = takeNewSubagents(subagentWatchRef.current, viewedConversationId, viewedRuntime, viewedRecovering);
+    if (!fresh.length || sshActive || !scopeKey) return;
+    queueWorkbenchRequest(id => ({ id, kind: 'subagents', conversationId: viewedConversationId }));
     persistAsideOpen(true);
   }, [persistAsideOpen, queueWorkbenchRequest, scopeKey, sshActive, viewedConversationId, viewedRecovering, viewedRuntime]);
   // A new agent-browser tab lifetime in the viewed conversation (its first
@@ -448,12 +454,6 @@ export function App() {
   const agentProvidersOpen = panel === 'agent-providers';
   const cleanupOpen = panel === 'cleanup';
   const modalPanel = settingsOpen || usageOpen || quotaOpen || cliManagerOpen || agentProvidersOpen || cleanupOpen;
-  const subagentRuns = session.activeConversation
-    ? session.subagentsByConversation[session.activeConversation.id] ?? []
-    : [];
-  const activeSubagents = subagentRuns.filter(
-    (run) => run.status === 'running' || run.status === 'queued',
-  ).length;
   const overlayPanel = panelScopeRef.current === scopeKey && panel && panel !== 'kanban' && panel !== 'ssh' && !modalPanel && !isWorkbenchTab(panel) ? panel : null;
 
   const asideContent = (
@@ -497,21 +497,6 @@ export function App() {
           <span className="relative inline-flex shrink-0">
             <IconAction icon={RiGithubLine} aria-label={t('app.githubActions')} onClick={() => setGitOpen(true)} />
             <ShortcutHint id="gitActions" className={headerHint} />
-          </span>
-        ) : null}
-        {subagentRuns.length > 0 && !kanbanActive ? (
-          <span className="relative inline-flex shrink-0">
-            <IconAction
-              icon={RiRobot2Line}
-              aria-label={t('app.subagents')}
-              active={panel === 'subagents' && asideOpen}
-              aria-pressed={undefined}
-              aria-expanded={asideOpen && panel === 'subagents'}
-              onClick={() => openPanel('Subagents')}
-            />
-            {activeSubagents > 0 ? (
-              <Badge color="primary" className="pointer-events-none absolute -end-1 -top-1 min-w-4 rounded-full px-0.5 text-caption-2-semibold">{activeSubagents}</Badge>
-            ) : null}
           </span>
         ) : null}
         {asideShown && !compactLayout ? (

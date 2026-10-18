@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from 'react';
 import type { ConversationRuntime } from '@todex/protocol/conversationRuntime';
 import type { SshExecRun } from '@todex/protocol/ssh';
+import type { SubagentRun } from '@todex/protocol/v2';
 import type { WorkbenchItem } from '../lib/panels';
 
 export function formatSshExecDuration(ms: number): string {
@@ -11,38 +12,40 @@ export function formatSshExecDuration(ms: number): string {
   return `${Math.floor(seconds / 60)}m ${Math.round(seconds % 60)}s`;
 }
 
-/** Tracks which calls of the viewed conversation were already known. */
-export type SshExecWatch = { conversationId: string; seen: Set<string> | null; sequence: number };
+/** Tracks which runs (Agent SSH calls, subagents) of the viewed conversation
+ * were already known. */
+export type RunWatch = { conversationId: string; seen: Set<string> | null; sequence: number };
 
-export function createSshExecWatch(): SshExecWatch {
+export function createRunWatch(): RunWatch {
   return { conversationId: '', seen: null, sequence: 0 };
 }
 
 /**
- * Returns the calls of the viewed conversation that started after it became
+ * Returns the runs of the viewed conversation that started after it became
  * the viewed one. The first runtime seen for a conversation, recovery
  * batches, and updates that did not advance the applied sequence (history
- * paged in below the window) only mark their calls as known, so replayed
- * history never opens the log. Each id is reported at most once per activation.
+ * paged in below the window) only mark their runs as known, so replayed
+ * history never opens their tab. Each id is reported at most once per activation.
  */
-export function takeNewSshExecs(
-  watch: SshExecWatch,
+function takeNewRuns<Run extends { id: string }>(
+  watch: RunWatch,
   conversationId: string,
-  runtime: Pick<ConversationRuntime, 'sshExecs' | 'appliedSequence'> | undefined,
+  runs: readonly Run[] | undefined,
+  appliedSequence: number,
   recovering: boolean,
-): SshExecRun[] {
+): Run[] {
   if (watch.conversationId !== conversationId) {
     watch.conversationId = conversationId;
     watch.seen = null;
     watch.sequence = 0;
   }
-  if (!conversationId || !runtime) return [];
-  const seeding = !watch.seen || recovering || runtime.appliedSequence <= watch.sequence;
+  if (!conversationId || !runs) return [];
+  const seeding = !watch.seen || recovering || appliedSequence <= watch.sequence;
   const seen = watch.seen ?? new Set<string>();
   watch.seen = seen;
-  watch.sequence = Math.max(watch.sequence, runtime.appliedSequence);
-  const fresh: SshExecRun[] = [];
-  for (const run of runtime.sshExecs) {
+  watch.sequence = Math.max(watch.sequence, appliedSequence);
+  const fresh: Run[] = [];
+  for (const run of runs) {
     if (seen.has(run.id)) continue;
     seen.add(run.id);
     if (!seeding) fresh.push(run);
@@ -50,7 +53,25 @@ export function takeNewSshExecs(
   return fresh;
 }
 
-/** The Agent SSH and agent-browser tabs are session-only; they survive a
+export function takeNewSshExecs(
+  watch: RunWatch,
+  conversationId: string,
+  runtime: Pick<ConversationRuntime, 'sshExecs' | 'appliedSequence'> | undefined,
+  recovering: boolean,
+): SshExecRun[] {
+  return takeNewRuns(watch, conversationId, runtime?.sshExecs, runtime?.appliedSequence ?? 0, recovering);
+}
+
+export function takeNewSubagents(
+  watch: RunWatch,
+  conversationId: string,
+  runtime: Pick<ConversationRuntime, 'subagents' | 'appliedSequence'> | undefined,
+  recovering: boolean,
+): SubagentRun[] {
+  return takeNewRuns(watch, conversationId, runtime?.subagents, runtime?.appliedSequence ?? 0, recovering);
+}
+
+/** The Agent SSH, Subagents and agent-browser tabs are session-only; they survive a
  * workbench remount (switching conversations and back, or the aside toggling
  * the scope) but are never written to the tab store. */
 const sessionSshExecTabs = new Map<string, WorkbenchItem[]>();
@@ -60,7 +81,7 @@ export function sessionSshExecTabsFor(storageKey: string): WorkbenchItem[] {
 }
 
 export function rememberSessionSshExecTabs(storageKey: string, items: WorkbenchItem[]): void {
-  const execItems = items.filter(item => item.type === 'ssh-exec' || item.type === 'agent-browser');
+  const execItems = items.filter(item => item.type === 'ssh-exec' || item.type === 'subagents' || item.type === 'agent-browser');
   if (execItems.length) sessionSshExecTabs.set(storageKey, execItems);
   else sessionSshExecTabs.delete(storageKey);
 }

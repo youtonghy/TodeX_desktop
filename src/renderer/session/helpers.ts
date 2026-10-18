@@ -1666,7 +1666,6 @@ export const SLASH_COMMANDS: SlashCommand[] = [
   { command: '/compact', title: 'Compact', description: 'summarize conversation to prevent hitting the context limit', category: 'thread' },
   { command: '/plan', title: 'Plan', description: 'switch to Plan mode', category: 'core' },
   { command: '/goal', title: 'Goal', description: 'set or view the goal for a long-running task', category: 'thread' },
-  { command: '/subagents', title: 'Subagents', description: 'manage and switch between sub-agent threads', category: 'thread' },
   { command: '/side', title: 'Side', description: 'start a side conversation in an ephemeral fork', category: 'thread' },
   { command: '/btw', title: 'BTW', description: 'alias for /side', category: 'thread' },
   { command: '/copy', title: 'Copy', description: 'copy last response as markdown', category: 'context' },
