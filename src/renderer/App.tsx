@@ -750,8 +750,13 @@ function CreateWorkspaceModal({
   const [activeRoot, setActiveRoot] = useState('');
   const [newFolderName, setNewFolderName] = useState<string | null>(null);
   const [creatingFolder, setCreatingFolder] = useState(false);
-  const selectedBackend = session.backendConnections.find((profile) => profile.id === backendId);
-  const directorySettings = selectedBackend ? { ...session.settings, serverUrl: selectedBackend.serverUrl, deviceSecret: selectedBackend.deviceSecret, tenantId: selectedBackend.tenantId, encryptionProtocol: selectedBackend.encryptionProtocol, encryptionPublicKey: selectedBackend.encryptionPublicKey, transportVerified: selectedBackend.transportVerified } : session.settings;
+  const settingsForBackend = (id: string) => {
+    const profile = session.backendConnections.find((candidate) => candidate.id === id);
+    return profile ? { ...session.settings, serverUrl: profile.serverUrl, deviceSecret: profile.deviceSecret, tenantId: profile.tenantId, encryptionProtocol: profile.encryptionProtocol, encryptionPublicKey: profile.encryptionPublicKey, transportVerified: profile.transportVerified } : session.settings;
+  };
+  const directorySettings = settingsForBackend(backendId);
+  // Guards against a slow listing from a previously selected backend overwriting the current one.
+  const browseRequest = useRef(0);
 
   const applySnapshot = (snapshot: Awaited<ReturnType<typeof fetchWorkspaceDirectorySnapshot>>) => {
     setPath(snapshot.current);
@@ -760,30 +765,37 @@ function CreateWorkspaceModal({
     setActiveRoot(snapshot.root);
   };
 
+  const clearListing = () => {
+    setEntries([]);
+    setRoots([]);
+    setActiveRoot('');
+  };
+
+  /** Shows `id`'s directories, starting at `preferredPath` or else that backend's configured workspace root. */
+  const browseBackend = async (id: string, preferredPath?: string) => {
+    const request = ++browseRequest.current;
+    const settings = settingsForBackend(id);
+    const backendRoot = session.backendLinkStatus[id]?.serverVersion?.workspace_root || '';
+    // Without a path the backend lists its own workspace root.
+    const attempts = [...new Set([preferredPath || undefined, backendRoot || undefined])];
+    setPath(preferredPath || backendRoot);
+    for (const attempt of attempts) {
+      try {
+        const snapshot = await fetchWorkspaceDirectorySnapshot(settings, attempt);
+        if (request === browseRequest.current) applySnapshot(snapshot);
+        return;
+      } catch {
+        // Fall through to the backend's root.
+      }
+    }
+    if (request === browseRequest.current) clearListing();
+  };
+
   useEffect(() => {
     if (!isOpen || workspace) return;
-    const defaultPath = session.settings.defaultWorkspacePath;
     setBackendId(session.activeBackendConnectionId);
-    const backendRoot = session.serverVersion?.workspace_root || '';
-    setPath(defaultPath);
-    void fetchWorkspaceDirectorySnapshot(directorySettings, defaultPath)
-      .then(applySnapshot)
-      .catch(async () => {
-        if (!backendRoot || backendRoot === defaultPath) {
-          setEntries([]);
-          setRoots([]);
-          setActiveRoot('');
-          return;
-        }
-        try {
-          applySnapshot(await fetchWorkspaceDirectorySnapshot(directorySettings, backendRoot));
-        } catch {
-          setEntries([]);
-          setRoots([]);
-          setActiveRoot('');
-        }
-      });
-  }, [isOpen, workspace, session.activeBackendConnectionId, session.serverVersion?.workspace_root, session.settings]);
+    void browseBackend(session.activeBackendConnectionId, session.settings.defaultWorkspacePath);
+  }, [isOpen, workspace, session.activeBackendConnectionId, session.settings]);
 
   const readFailed = (error: unknown) => toast.danger(error instanceof Error ? error.message : t('app.workspaceReadFailed'));
 
@@ -851,7 +863,11 @@ function CreateWorkspaceModal({
         popoverClassName="w-(--trigger-width)"
         isDisabled={Boolean(workspace)}
         selectedKey={backendId}
-        onSelectionChange={(key) => { if (typeof key === 'string') setBackendId(key); }}
+        onSelectionChange={(key) => {
+          if (typeof key !== 'string' || key === backendId) return;
+          setBackendId(key);
+          void browseBackend(key);
+        }}
       >
         {session.backendConnections.map((profile) => <SelectItem key={profile.id} id={profile.id} textValue={profile.name}>{profile.name} · {profile.serverUrl}</SelectItem>)}
       </Select>
