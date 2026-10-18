@@ -56,7 +56,6 @@ export function AgentScopeSettings({ api, providers, scope, workspace, disabled,
     for (const provider of listed) {
       if (scope.models[provider.id] && scopeAllowsAgent(scope, provider.id)) loadModels(provider);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scope, providers]);
 
   const setAllAgents = (selected: boolean) => {

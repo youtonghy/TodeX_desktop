@@ -87,6 +87,7 @@ import {
   workspaceLinkTarget,
   STREAMING_REPLY_PLACEHOLDER,
   canAutoLoadEarlierHistory,
+  isListedConversation,
   type ComposerAttachmentDraft,
   type MentionTrigger,
   type TimelineEntry,
@@ -1156,7 +1157,7 @@ export function ChatPanel({ session }: Props) {
     : referenceState.stage === 'type'
       ? [...buildReferenceTypeSuggestions(referenceState.prefix, (type) => t(REFERENCE_TYPE_KEYS[type])), ...entryRows]
       : referenceType === 'chat'
-        ? buildChatReferenceSuggestions(referenceQuery, session.conversations, conversation.workspaceId, conversation.id, t('chat.newConversation'))
+        ? buildChatReferenceSuggestions(referenceQuery, session.conversations.filter(isListedConversation), conversation.workspaceId, conversation.id, t('chat.newConversation'))
         : referenceType === 'skill' || referenceType === 'mcp'
           ? buildCapabilityReferenceSuggestions(
             buildCapabilitySuggestions(session.capabilityCatalogs, capabilityProviderOrder, referenceQuery, { limit: 100, isSkillAttached }),

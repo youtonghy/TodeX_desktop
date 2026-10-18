@@ -126,44 +126,45 @@ export function AgentCallCard({ call, agentName, onOpen, onCancel }: {
       title={title}
       isExpandable={call.turns.some(turn => turn.text || turn.output || turn.error)}
       defaultExpanded={active}
-      meta={(
-        <>
-          <TurnElapsed turn={latest} />
-          <StatusChip status={call.status} />
-        </>
-      )}
       footer={(
         <div className="flex min-w-0 flex-col gap-1.5 pb-1.5">
-          <span
-            className={cx('min-w-0 truncate text-caption-1-regular', details ? 'text-text-tertiary' : 'text-text-placeholder')}
-            title={details || undefined}
-          >
-            {details || t('agentCalls.defaultModel')}
-            {call.turns.length > 1 ? ` · ${t('agentCalls.turns', { count: call.turns.length })}` : ''}
-          </span>
+          {/* The header carries only the agent name, which stays readable in
+              the narrow aside; status, model, effort, turns and elapsed time
+              share this meta line. */}
+          <div className="flex min-w-0 items-center gap-2">
+            <StatusChip status={call.status} />
+            <span
+              className={cx('min-w-0 flex-1 truncate text-caption-1-regular', details ? 'text-text-tertiary' : 'text-text-placeholder')}
+              title={details || undefined}
+            >
+              {details || t('agentCalls.defaultModel')}
+              {call.turns.length > 1 ? ` · ${t('agentCalls.turns', { count: call.turns.length })}` : ''}
+            </span>
+            <TurnElapsed turn={latest} />
+          </div>
           <div className="flex flex-wrap items-center gap-2">
-          {active ? (
+            {active ? (
+              <Button
+                size="xs"
+                variant="secondary"
+                leadingIcon={RiStopCircleLine}
+                disabled={pending !== null}
+                aria-busy={pending === 'cancel' || undefined}
+                onClick={() => run('cancel', onCancel, 'agentCalls.cancelFailed')}
+              >
+                {t('agentCalls.cancel')}
+              </Button>
+            ) : null}
             <Button
               size="xs"
               variant="secondary"
-              leadingIcon={RiStopCircleLine}
+              leadingIcon={RiChatSmile2Line}
               disabled={pending !== null}
-              aria-busy={pending === 'cancel' || undefined}
-              onClick={() => run('cancel', onCancel, 'agentCalls.cancelFailed')}
+              aria-busy={pending === 'open' || undefined}
+              onClick={() => run('open', onOpen, 'agentCalls.openFailed')}
             >
-              {t('agentCalls.cancel')}
+              {t('agentCalls.open')}
             </Button>
-          ) : null}
-          <Button
-            size="xs"
-            variant="secondary"
-            leadingIcon={RiChatSmile2Line}
-            disabled={pending !== null}
-            aria-busy={pending === 'open' || undefined}
-            onClick={() => run('open', onOpen, 'agentCalls.openFailed')}
-          >
-            {t('agentCalls.open')}
-          </Button>
           </div>
         </div>
       )}
