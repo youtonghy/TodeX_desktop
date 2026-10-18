@@ -300,6 +300,33 @@ export function useHistoryEncryption({ backends, focusBackendId, sendCommand, on
     if (decrypted) setTitleRevision((value) => value + 1);
   }, [decryptorFor]);
 
+  /** Records a title this device just set, so the manifest carrying its
+   * new ciphertext shows it right away (and on every later list refresh). */
+  const rememberTitle = useCallback((backendId: string, manifest: ConversationManifest, title: string) => {
+    if (manifest.titleEnc && title) titles.current.set(titleKey(backendId, manifest), title);
+  }, []);
+
+  /** Fills the title of one fetched manifest (a fork, a materialized draft,
+   * an Agent Calling child), decrypting it when needed. Resolves the
+   * manifest unchanged when the title cannot be read. */
+  const withDecryptedTitle = useCallback(async (backendId: string, manifest: ConversationManifest): Promise<ConversationManifest> => {
+    if (!manifest.titleEnc || manifest.title) return manifest;
+    const key = titleKey(backendId, manifest);
+    let title = titles.current.get(key);
+    if (title === undefined) {
+      if (!live.current.backends[backendId]?.connected) return manifest;
+      try {
+        const { decryptor, ready } = decryptorFor(backendId);
+        await ready;
+        title = await decryptor.decryptTitle(manifest.id, manifest.titleEnc);
+        titles.current.set(key, title);
+      } catch {
+        return manifest;
+      }
+    }
+    return title ? { ...manifest, title } : manifest;
+  }, [decryptorFor]);
+
   /** Reads the backend state and, when `register`, makes sure this device's
    * history key exists and is registered (§3.3). */
   const refresh = useCallback(async (backendId: string, register = false) => {
@@ -637,6 +664,8 @@ export function useHistoryEncryption({ backends, focusBackendId, sendCommand, on
     receiveSocketEvent,
     withDecryptedTitles,
     decryptManifestTitles,
+    rememberTitle,
+    withDecryptedTitle,
     receiveUpdate,
     forgetBackend,
     unlocked,

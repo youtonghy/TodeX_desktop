@@ -2521,7 +2521,9 @@ export function mergeManifestConversations(
       const manifestUpdatedAt = Date.parse(manifest.updatedAt) || 0;
       const updatedAt = Math.max(existing.updatedAt, manifestUpdatedAt);
       const lastSequence = Math.max(existing.lastSequence ?? 0, manifest.lastSequence ?? 0);
-      const title = manifest.title || providerDisplayName(manifest.provider);
+      // An encrypted title this device has not read yet keeps the local one
+      // (e.g. a rename just made here) instead of the provider name.
+      const title = manifest.title || (manifest.titleEnc && existing.title ? existing.title : providerDisplayName(manifest.provider));
       const archived = Boolean(manifest.archivedAt);
       const legacyPlaintext = manifest.legacyPlaintext === true;
       const schedule = parseConversationSchedule(manifest.schedule);

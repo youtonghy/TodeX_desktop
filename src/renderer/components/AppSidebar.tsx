@@ -40,12 +40,12 @@ import { useKanbanTasks } from '../session/kanbanTasks';
 import { setFeaturesMoreOpen, useFeatureModes, useFeaturesMoreOpen, type FeatureId } from '../session/featureToggles';
 import { BACKEND_LABEL_COLORS, backendLabelColor } from '../session/backendColors';
 import type { BackendConnectionProfile } from '../session/backendColors';
-import { groupWorkspaceEntries, moveWorkspaceEntry, moveWorkspaceToGroup, newWorkspaceGroupId, removeWorkspaceFromGroup, renameWorkspaceGroup, ungroupWorkspaceGroup, workspaceLayoutPatches } from '@todex/protocol/todex';
+import { WORKSPACE_GROUP_FIELD_MAX, groupWorkspaceEntries, moveWorkspaceEntry, moveWorkspaceToGroup, newWorkspaceGroupId, removeWorkspaceFromGroup, renameWorkspaceGroup, ungroupWorkspaceGroup, workspaceLayoutPatches } from '@todex/protocol/todex';
 import type { WorkspaceDragSource, WorkspaceDropTarget, WorkspaceRecord, WorkspaceSidebarEntry } from '@todex/protocol/todex';
 import { ProviderIcon } from './ProviderIcon';
 import { ConversationScheduleIcon } from './ConversationSchedule';
 import { ScheduleConversationDialog } from './ScheduleConversationDialog';
-import { WorkspaceGroupRenameDialog } from './WorkspaceGroupRenameDialog';
+import { RenameDialog } from './RenameDialog';
 import { WorkspaceHoverTooltip } from './WorkspaceHoverTooltip';
 import { AppIcon } from './AppIcon';
 import { WORKSPACE_ICON_CHOICES, WORKSPACE_RING_STYLES, WorkspaceStatusRing, ringStyleKey, workspaceIconComponent } from './WorkspaceIcon';
@@ -409,6 +409,7 @@ export function AppSidebar({
   const [draggingKey, setDraggingKey] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<WorkspaceDropTarget | null>(null);
   const [renamingGroup, setRenamingGroup] = useState<{ id: string; name: string } | null>(null);
+  const [renaming, setRenaming] = useState<{ kind: 'workspace' | 'conversation'; id: string; name: string } | null>(null);
   // Other configured backends that are not connected right now.
   const offlineBackends = session.backendConnections.filter((profile) => (
     profile.id !== session.activeBackendConnectionId && profile.serverUrl.trim()
@@ -742,18 +743,14 @@ export function AppSidebar({
     if (menu.kind === 'workspace') {
       const workspace = session.workspaces.find((item) => item.id === menu.id);
       if (!workspace) return;
-      if (action === 'rename') {
-        const name = window.prompt(t('sidebar.renameWorkspacePrompt'), workspace.name);
-        if (name) session.renameWorkspace(workspace.id, name);
-      } else if (action === 'edit') onEditWorkspace(workspace.id);
+      if (action === 'rename') setRenaming({ kind: 'workspace', id: workspace.id, name: workspace.name });
+      else if (action === 'edit') onEditWorkspace(workspace.id);
       else if (action === 'delete') session.removeWorkspace(workspace.id);
     } else {
       const conversation = session.conversations.find((item) => item.id === menu.id);
       if (!conversation) return;
-      if (action === 'rename') {
-        const title = window.prompt(t('sidebar.renameConversationPrompt'), conversation.title);
-        if (title) session.renameConversation(conversation.id, title);
-      } else if (action === 'fork') session.forkConversation(conversation.id);
+      if (action === 'rename') setRenaming({ kind: 'conversation', id: conversation.id, name: conversationDisplayTitle(conversation, session.timeline) });
+      else if (action === 'fork') session.forkConversation(conversation.id);
       else if (action === 'delete') session.removeConversation(conversation.id);
     }
     setContextMenu(null);
@@ -1680,10 +1677,26 @@ export function AppSidebar({
       </PointMenu>
 
       {renamingGroup ? (
-        <WorkspaceGroupRenameDialog
+        <RenameDialog
+          title={t('sidebar.renameGroup')}
+          label={t('sidebar.groupNameLabel')}
+          maxLength={WORKSPACE_GROUP_FIELD_MAX}
           initialName={renamingGroup.name}
           onSubmit={(name) => applyWorkspaceLayout(renameWorkspaceGroup(workspaceEntriesRef.current, renamingGroup.id, name))}
           onClose={() => setRenamingGroup(null)}
+        />
+      ) : null}
+      {renaming ? (
+        <RenameDialog
+          key={`${renaming.kind}:${renaming.id}`}
+          title={renaming.kind === 'workspace' ? t('sidebar.renameWorkspace') : t('sidebar.renameConversation')}
+          label={renaming.kind === 'workspace' ? t('sidebar.renameWorkspacePrompt') : t('sidebar.renameConversationPrompt')}
+          initialName={renaming.name}
+          onSubmit={(name) => {
+            if (renaming.kind === 'workspace') session.renameWorkspace(renaming.id, name);
+            else session.renameConversation(renaming.id, name);
+          }}
+          onClose={() => setRenaming(null)}
         />
       ) : null}
       </>

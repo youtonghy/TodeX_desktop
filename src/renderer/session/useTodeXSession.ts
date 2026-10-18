@@ -656,6 +656,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const historyEncryptionRef = useRef<HistoryEncryptionSession | null>(null);
   const withDecryptedTitles = (backendId: string, manifests: ConversationManifest[]) =>
     historyEncryptionRef.current?.withDecryptedTitles(backendId, manifests) ?? manifests;
+  const withDecryptedManifest = async (backendId: string, manifest: ConversationManifest): Promise<ConversationManifest> =>
+    (await historyEncryptionRef.current?.withDecryptedTitle(backendId, manifest)) ?? manifest;
   const decryptedHistoryReplay = useCallback(async <P extends ConversationReplay>(conversationId: string, page: Promise<P>, detail: 'summary' | 'full'): Promise<P> => {
     const history = historyEncryptionRef.current;
     const result = await page;
@@ -6819,7 +6821,33 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       return;
     }
     if (refuseReadOnlyWrite(context.conversation)) return;
+    const { conversation } = context;
+    const previousTitle = conversation.title;
     updateConversation(conversationId, { title: nextTitle });
+    const v2ConversationId = conversation.v2ConversationId;
+    if (isV2Conversation(conversation) && v2ConversationId) {
+      // The backend seals the title into `titleEnc`; the local title stays
+      // until the sealed one is readable, so it neither flashes back to the
+      // provider name nor reverts on the next list poll.
+      const backendId = backendIdForConversation(conversationId);
+      void (async () => {
+        try {
+          const manifest = await v2ApiForConversation(conversationId).updateConversation(v2ConversationId, { title: nextTitle });
+          historyEncryptionRef.current?.rememberTitle(backendId, manifest, nextTitle);
+          setV2ConversationsByBackend((current) => {
+            const manifests = current[backendId];
+            if (!manifests) return current;
+            return { ...current, [backendId]: manifests.map((item) => (item.id === manifest.id ? manifest : item)) };
+          });
+          // A list poll that landed mid-request may have restored the old title.
+          updateConversation(conversationId, { title: manifest.title || nextTitle });
+        } catch (error) {
+          updateConversation(conversationId, { title: previousTitle });
+          toast.danger(t('sess.renameFailed'), { description: error instanceof Error ? error.message : undefined });
+        }
+      })();
+      return;
+    }
     void sendNativeThreadAction(
       conversationId,
       'rename',
@@ -6827,7 +6855,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       (threadId) => ({ threadId, name: nextTitle }),
       { title: nextTitle },
     );
-  }, [getConversationContext, sendNativeThreadAction, updateConversation]);
+  }, [getConversationContext, sendNativeThreadAction, updateConversation, v2ApiForConversation]);
 
   const forkConversation = useCallback((conversationId: string) => {
     const context = getConversationContext(conversationId);
