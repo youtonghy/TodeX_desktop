@@ -1,6 +1,7 @@
 import { buildHttpUrl, type ConnectionSettings } from '@todex/protocol/todex';
 import { backendFetch } from '../session/helpers';
 import { t } from '../i18n';
+import { isGitDiffPathRequired } from './gitErrors';
 
 export interface GitWorkspaceBranch {
   name: string;
@@ -243,4 +244,30 @@ export function readGitStatus(settings: ConnectionSettings, workspacePath: strin
   const url = new URL(buildHttpUrl(settings.serverUrl, '/v2/git/status'));
   url.searchParams.set('workspacePath', workspacePath);
   return request(settings, url.toString(), undefined, undefined, signal);
+}
+
+/** Whole-repo working-tree diff: tracked and untracked changes against the
+ * upstream merge-base (`upstream`), else `HEAD`, else the empty tree. */
+export interface GitWorkingTreeDiff {
+  repositoryPath: string;
+  path: string;
+  diff: string;
+  truncated: boolean;
+  untracked: boolean;
+  base?: string;
+  baseRef?: 'upstream' | 'head' | 'empty';
+}
+
+/** Reads the whole working-tree diff (`GET /v2/git/diff` without `path`).
+ * A backend that predates it rejects the request; see `gitDiffUnsupported`. */
+export function readGitWorkingTreeDiff(settings: ConnectionSettings, workspacePath: string, signal?: AbortSignal): Promise<GitWorkingTreeDiff> {
+  const url = new URL(buildHttpUrl(settings.serverUrl, '/v2/git/diff'));
+  url.searchParams.set('workspacePath', workspacePath);
+  return request(settings, url.toString(), undefined, undefined, signal);
+}
+
+/** The backend is too old for the whole-repo diff (it requires `path`). */
+export function gitDiffUnsupported(error: unknown): boolean {
+  return error instanceof GitWorkspaceError
+    && isGitDiffPathRequired({ status: error.status, code: error.code, message: error.message });
 }

@@ -264,13 +264,6 @@ export type PendingThreadList = {
   timeoutId: ReturnType<typeof setTimeout>;
 };
 
-export type PendingGitDiff = {
-  workspaceId: string;
-  conversationId: string;
-  requestId: string;
-  timeoutId: ReturnType<typeof setTimeout>;
-};
-
 export type ExperimentalFeatureId =
   | 'gitDiffViewer'
   | 'verboseRuntimeEvents'
@@ -288,9 +281,14 @@ export type ExperimentalFeatureDefinition = {
 export type GitDiffState = {
   status: 'idle' | 'loading' | 'ready' | 'error';
   diff: string;
+  /** Commit the diff is against (the upstream merge-base, else HEAD). */
   sha: string;
   error: string;
   updatedAt: number;
+  /** What `sha` is: the upstream merge-base, HEAD, or the empty tree. */
+  baseRef?: 'upstream' | 'head' | 'empty';
+  /** The backend cut the diff at its size limit. */
+  truncated?: boolean;
 };
 
 export type McpInventoryState = {

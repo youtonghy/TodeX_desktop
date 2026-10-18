@@ -19,6 +19,7 @@ import {
 } from '../session/helpers';
 import { XtermTerminal } from '../components/XtermTerminal';
 import { CapabilitiesPanel } from './CapabilitiesPanel';
+import { GitDiffText } from '../components/GitDiffText';
 import { useT } from '../i18n';
 import { cx } from '@/utils/cx';
 
@@ -101,7 +102,7 @@ export function AsidePanel({ session, panel, slashCommand, onBack }: Props) {
           </Button>
         </div>
         <ScrollArea className="min-h-0 flex-1" surface="secondary">
-          <pre className="whitespace-pre-wrap font-mono text-caption-1-regular text-text-primary">{state?.diff || state?.error || t('aside.noDiff')}</pre>
+          <GitDiffText state={state} />
         </ScrollArea>
         {state?.diff ? (
           <Button className="mt-3" variant="secondary" onClick={() => void navigator.clipboard.writeText(state.diff)}>{t('common.copy')}</Button>

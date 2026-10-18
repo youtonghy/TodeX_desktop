@@ -21,6 +21,7 @@ import { toast } from '@/components/ui/toast';
 import { cx } from '@/utils/cx';
 import { WorkspaceFilePreview, type PreviewFile, type ReferenceSelection, type WorkspaceFileSaveOutcome } from '../components/WorkspaceFilePreview';
 import { useNoticeToast } from '../components/NoticeToast';
+import { GitDiffText } from '../components/GitDiffText';
 import { XtermTerminal } from '../components/XtermTerminal';
 import { SshExecPane } from '../components/ssh/SshExecPane';
 import { AgentBrowserLiveView } from '../components/AgentBrowserLiveView';
@@ -1121,6 +1122,15 @@ function GitDiffPane({ session }: { session: TodeXSession }) {
     setPathDraft(selectedRepoPath);
   }, [selectedRepoPath]);
 
+  // Opening the tab (or switching to a conversation without a diff yet)
+  // reads it right away instead of showing an empty pane.
+  const conversationId = conversation?.id;
+  const hasState = Boolean(state);
+  useEffect(() => {
+    if (conversationId && !hasState) void session.requestGitDiff(conversationId, selectedRepoPath);
+    // Only a conversation change triggers the read; refresh is manual.
+  }, [conversationId]);
+
   const handleRefresh = () => {
     if (conversation) {
       void session.requestGitDiff(conversation.id, pathDraft);
@@ -1162,9 +1172,7 @@ function GitDiffPane({ session }: { session: TodeXSession }) {
         className="min-h-0 flex-1 overflow-hidden rounded-2xl bg-background-secondary-default"
         contentClassName="p-3"
       >
-        <pre className={cx('whitespace-pre-wrap font-mono text-caption-1-regular', state?.error && !state?.diff ? 'text-text-error-primary' : 'text-text-primary')}>
-          {state?.diff || state?.error || t('aside.noDiff')}
-        </pre>
+        <GitDiffText state={state} />
       </ScrollArea>
     </div>
   );

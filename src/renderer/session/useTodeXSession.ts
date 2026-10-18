@@ -106,6 +106,7 @@ import {
 import { loadJson, loadSecret, removeSecret, saveJson, saveSecret } from '../lib/storage';
 import { ConnectionError } from '@todex/protocol/connectionError';
 import { desktopAlert } from '../lib/desktopAlert';
+import { gitDiffUnsupported, readGitWorkingTreeDiff } from '../lib/gitWorkspace';
 import { loadSshPassword } from '../lib/sshPasswordStore';
 import { createConcurrencyLimit } from '../lib/concurrencyLimit';
 import { panelFromRoute, type DesktopPanel, type OpenPanelOptions } from '../lib/panels';
@@ -167,7 +168,6 @@ import {
   type ServerVersion,
   type ConversationRecord,
   type PendingThreadList,
-  type PendingGitDiff,
   type ExperimentalFeatureSettings,
   type GitDiffState,
   type McpInventoryState,
@@ -560,7 +560,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     || (heldFollowUpsRef.current.get(localId)?.length ?? 0) > 0;
   // Set during render (like rawProtocolSenderRef) so earlier effects can reach it.
   const subscribeV2ConversationRef = useRef<(v2ConversationId: string, options?: { afterSequence?: number; limit?: number }) => boolean>(() => false);
-  const pendingGitDiffsRef = useRef(new Map<string, PendingGitDiff>());
   const pendingSkillListsRef = useRef(new Map<string, PendingSkillList>());
   const pendingModelListRef = useRef<PendingModelList | null>(null);
   const pendingJsonSavesRef = useRef(new Map<string, PendingJsonSave>());
@@ -2824,31 +2823,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     }
   }, []);
 
-  const finishPendingGitDiff = useCallback((pending: PendingGitDiff, errorMessage = '') => {
-    clearTimeout(pending.timeoutId);
-    pendingGitDiffsRef.current.delete(pending.requestId);
-    if (!errorMessage) {
-      setLastError('');
-      return;
-    }
-    setGitDiffByConversation((current) => ({
-      ...current,
-      [pending.conversationId]: {
-        ...(current[pending.conversationId] ?? {
-          status: 'idle',
-          diff: '',
-          sha: '',
-          error: '',
-          updatedAt: 0,
-        }),
-        status: 'error',
-        error: errorMessage,
-        updatedAt: Date.now(),
-      },
-    }));
-    setLastError(errorMessage);
-  }, []);
-
   const finishPendingSkillList = useCallback((pending: PendingSkillList, errorMessage = '') => {
     clearTimeout(pending.timeoutId);
     pendingSkillListsRef.current.delete(pending.requestId);
@@ -3288,31 +3262,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         }
       }
       const maybeThreadRequestId = typeof maybeModelListRequestId === 'string' ? maybeModelListRequestId : '';
-      const pendingGitDiff = maybeThreadRequestId ? pendingGitDiffsRef.current.get(maybeThreadRequestId) ?? null : null;
-      if (pendingGitDiff) {
-        if (event.type === 'codex.control.response') {
-          const responseValue = data.result ?? data;
-          const responseRecord = responseValue && typeof responseValue === 'object' && !Array.isArray(responseValue)
-            ? responseValue as Record<string, unknown>
-            : {};
-          const diff = typeof responseRecord.diff === 'string' ? responseRecord.diff : '';
-          const sha = typeof responseRecord.sha === 'string' ? responseRecord.sha : shortJson(responseRecord.sha ?? '');
-          setGitDiffByConversation((current) => ({
-            ...current,
-            [pendingGitDiff.conversationId]: {
-              status: 'ready',
-              diff,
-              sha,
-              error: '',
-              updatedAt: Date.now(),
-            },
-          }));
-          appendTimeline(makeSystemEntry('Git diff loaded', diff ? `${diff.length} characters` : 'No diff', pendingGitDiff.workspaceId, pendingGitDiff.conversationId));
-          finishPendingGitDiff(pendingGitDiff);
-        } else if (protocolError || event.type === 'codex.control.error') {
-          finishPendingGitDiff(pendingGitDiff, localTurnErrorMessage(protocolError || t('sess.gitDiffFailed')));
-        }
-      }
       const pendingSkillList = maybeThreadRequestId ? pendingSkillListsRef.current.get(maybeThreadRequestId) ?? null : null;
       if (pendingSkillList) {
         if (event.type === 'codex.control.response') {
@@ -3625,7 +3574,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         setLastError(localTurnErrorMessage(protocolError));
       }
     },
-    [appendTimeline, findPendingLocalStart, finishPendingGitDiff, finishPendingSkillList, finishPendingThreadAction, finishPendingThreadList, handleTerminalEvent, persistSessionCursors, resetWorkspaceSession, resolveTimelineTarget, settlePendingLocalStart, settlePendingThreadStart, setConversationThinking, setConversationTurnId, updateConversation, upsertChatTimeline, upsertNativeThreads],
+    [appendTimeline, findPendingLocalStart, finishPendingSkillList, finishPendingThreadAction, finishPendingThreadList, handleTerminalEvent, persistSessionCursors, resetWorkspaceSession, resolveTimelineTarget, settlePendingLocalStart, settlePendingThreadStart, setConversationThinking, setConversationTurnId, updateConversation, upsertChatTimeline, upsertNativeThreads],
   );
 
   const appendEvent = useCallback((event: ServerEvent) => {
@@ -6373,6 +6322,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     return true;
   }, [appendTimeline, getConversationContext, sendLocalMethodRequest, setLastError]);
 
+  // The latest diff request per conversation; older answers are dropped.
+  const gitDiffRequestRef = useRef(new Map<string, number>());
   const requestGitDiff = useCallback(async (conversationId = activeConversationRef.current, cwd = '') => {
     const context = getConversationContext(conversationId);
     if (!context) {
@@ -6380,65 +6331,45 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       return false;
     }
     const { workspace, conversation } = context;
+    const empty: GitDiffState = { status: 'idle', diff: '', sha: '', error: '', updatedAt: 0 };
     setGitDiffByConversation((current) => ({
       ...current,
-      [conversation.id]: {
-        ...(current[conversation.id] ?? {
-          status: 'idle',
-          diff: '',
-          sha: '',
-          error: '',
-          updatedAt: 0,
-        }),
-        status: 'loading',
-        error: '',
-      },
+      [conversation.id]: { ...(current[conversation.id] ?? empty), status: 'loading', error: '' },
     }));
+    const requestNumber = (gitDiffRequestRef.current.get(conversation.id) ?? 0) + 1;
+    gitDiffRequestRef.current.set(conversation.id, requestNumber);
+    const current = () => gitDiffRequestRef.current.get(conversation.id) === requestNumber;
+    // The backend's whole-repo diff (GET /v2/git/diff without `path`); no
+    // local Codex adapter is started for it.
+    const repoPath = cwd.trim() || workspace.path;
     try {
-      await startLocalAdapter(workspace, conversation);
-    } catch (error) {
-      const message = error instanceof Error ? localTurnErrorMessage(error.message) : t('sess.localNotStarted');
-      setGitDiffByConversation((current) => ({
-        ...current,
+      const result = await readGitWorkingTreeDiff(settingsForBackend(backendIdForConversation(conversation.id)), repoPath);
+      if (!current()) return false;
+      setGitDiffByConversation((latest) => ({
+        ...latest,
         [conversation.id]: {
-          ...(current[conversation.id] ?? {
-            status: 'idle',
-            diff: '',
-            sha: '',
-            error: '',
-            updatedAt: 0,
-          }),
-          status: 'error',
-          error: message,
+          status: 'ready',
+          diff: result.diff,
+          sha: result.base ?? '',
+          error: '',
           updatedAt: Date.now(),
+          baseRef: result.baseRef,
+          truncated: result.truncated,
         },
       }));
-      setLastError(message);
+      return true;
+    } catch (error) {
+      if (!current()) return false;
+      const message = gitDiffUnsupported(error)
+        ? t('sess.gitDiffBackendTooOld')
+        : error instanceof Error ? error.message : t('sess.gitDiffFailed');
+      setGitDiffByConversation((latest) => ({
+        ...latest,
+        [conversation.id]: { ...(latest[conversation.id] ?? empty), status: 'error', error: message, updatedAt: Date.now() },
+      }));
       return false;
     }
-    const requestId = createRequestId('git-diff');
-    const timeoutId = setTimeout(() => {
-      const pending = pendingGitDiffsRef.current.get(requestId);
-      if (pending) {
-        finishPendingGitDiff(pending, t('sess.requestTimeout', { method: 'gitDiffToRemote' }));
-      }
-    }, 15000);
-    pendingGitDiffsRef.current.set(requestId, {
-      workspaceId: workspace.id,
-      conversationId: conversation.id,
-      requestId,
-      timeoutId,
-    });
-    const sent = sendLocalMethodRequest(workspace, conversation, 'gitDiffToRemote', { cwd: cwd.trim() || workspace.path }, requestId);
-    if (!sent) {
-      const pending = pendingGitDiffsRef.current.get(requestId);
-      if (pending) {
-        finishPendingGitDiff(pending, t('sess.connectBackendFirst'));
-      }
-      return false;
-    }
-    return true;
-  }, [finishPendingGitDiff, getConversationContext, sendLocalMethodRequest, startLocalAdapter]);
+  }, [getConversationContext, settingsForBackend]);
 
   const selectGitRepo = useCallback((workspaceId: string, path: string) => {
     setSelectedGitRepoByWorkspace((current) => (current[workspaceId] === path
