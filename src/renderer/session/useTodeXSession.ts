@@ -5000,7 +5000,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
    * are left out of the conversation list, so one opened for the first time
    * is fetched by id from its parent's backend and kept as a hidden record
    * in the parent's workspace. */
-  const openAgentCallConversation = useCallback(async (parentConversationId: string, childConversationId: string) => {
+  const openAgentCallConversation = useCallback(async (parentConversationId: string, childConversationId: string, fallbackTitle?: string) => {
     const existing = conversationsRef.current.find((item) => item.v2ConversationId === childConversationId || item.id === childConversationId);
     if (existing) {
       selectConversation(existing.workspaceId, existing.id);
@@ -5011,9 +5011,14 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     const backendId = backendIdForConversation(parent.id);
     const profile = profileFor(backendId);
     if (!profile) throw new Error(t('sidebar.backendRemoved'));
-    const [manifest] = withDecryptedTitles(backendId, [await backendApi(profile).getConversation(childConversationId)]);
+    // Children are not listed, so their sealed title is decrypted here; the
+    // call's own title stands in when it cannot be read.
+    const manifest = await withDecryptedManifest(backendId, await backendApi(profile).getConversation(childConversationId));
     const workspace = workspacesRef.current.find((item) => item.id === parent.workspaceId);
-    const base = conversationFromManifest(manifest, parent.workspaceId);
+    const base = conversationFromManifest(
+      !manifest.title && fallbackTitle?.trim() ? { ...manifest, title: fallbackTitle.trim() } : manifest,
+      parent.workspaceId,
+    );
     const record: ConversationRecord = {
       ...base,
       ...(workspace ? manifestRunModes(backendId)(base, workspace) : {}),
@@ -6808,12 +6813,17 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       }
       void (async () => {
         try {
+          const forkTitle = t('sess.forkTitle', { title: conversation.title || t('sess.conversation') });
           const result = await sendProtocolCommand({ id: createRequestId('fork'), type: 'conversation.fork', payload: {
-            conversationId: conversation.v2ConversationId, title: t('sess.forkTitle', { title: conversation.title || t('sess.conversation') }),
+            conversationId: conversation.v2ConversationId, title: forkTitle,
           } }, 45_000);
           if (typeof result.conversationId !== 'string') throw new Error(t('sess.forkNoId'));
-          // The fork lives on the source conversation's backend.
-          const created = await v2ApiForConversation(conversation.id).getConversation(result.conversationId);
+          // The fork lives on the source conversation's backend; its sealed
+          // title is decrypted, else the title this device asked for stays.
+          const backendId = backendIdForConversation(conversation.id);
+          const fetched = await withDecryptedManifest(backendId, await v2ApiForConversation(conversation.id).getConversation(result.conversationId));
+          if (!fetched.title) historyEncryptionRef.current?.rememberTitle(backendId, fetched, forkTitle);
+          const created = fetched.title ? fetched : { ...fetched, title: forkTitle };
           const record = { ...conversationFromManifest(created, workspace.id), backendConnectionId: conversation.backendConnectionId,
             model: conversation.model, reasoningEffort: conversation.reasoningEffort,
             permissionMode: conversation.permissionMode, mode: conversation.mode };
@@ -7004,20 +7014,25 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
 
       try {
         const api = backendApi(backendProfile ?? settings);
+        const requestedTitle = isDefaultTitle ? firstMessageTitle || undefined : title || undefined;
         const created = await api.createConversation({
           provider: provider.id,
           // None: the backend creates this conversation's own folder.
           ...(isNoneWorkspaceId(workspace.id) ? { scratchWorkspace: true } : { workspace: workspace.path }),
-          title: isDefaultTitle ? firstMessageTitle || undefined : title || undefined,
+          title: requestedTitle,
           providerProfile: conversation.providerProfile && provider.profiles.includes(conversation.providerProfile)
             ? conversation.providerProfile
             : provider.profiles[0],
         });
         const latestConversation = conversationsRef.current.find((item) => item.id === conversationId)
           ?? conversation;
+        // The backend seals the title; keep the one asked for (or the local
+        // one) instead of the provider name until this device reads it.
+        if (backendConnectionId && requestedTitle) historyEncryptionRef.current?.rememberTitle(backendConnectionId, created, requestedTitle);
+        const readableTitle = created.title || requestedTitle;
         const record: ConversationRecord = {
           ...latestConversation,
-          ...conversationFromManifest(created, workspace.id),
+          ...conversationFromManifest(readableTitle ? { ...created, title: readableTitle } : created, workspace.id),
           id: latestConversation.id,
           sessionId: latestConversation.sessionId,
           backendConnectionId,

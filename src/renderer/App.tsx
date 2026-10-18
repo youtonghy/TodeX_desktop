@@ -28,7 +28,7 @@ import { AppIcon } from './components/AppIcon';
 import { ChatPanel } from './screens/ChatPanel';
 import { HistoryRecoveryNotice } from './components/HistoryRecoveryNotice';
 import { Field } from './components/Field';
-import { connectionStateLabel, createWorkspaceDirectory, fetchWorkspaceDirectorySnapshot } from './session/helpers';
+import { connectionStateLabel, conversationDisplayTitle, createWorkspaceDirectory, fetchWorkspaceDirectorySnapshot } from './session/helpers';
 import { isWorkbenchTab, panelFromRoute, type DesktopPanel, type OpenPanelOptions, type WorkbenchItem, type WorkbenchRequest, type WorkbenchTab } from './lib/panels';
 import type { RemoteFilesBinding } from './session/fileSources';
 import { ShortcutHint, useAppShortcuts, useShortcutHintTracking } from './lib/shortcuts';
@@ -441,11 +441,12 @@ export function App() {
     void window.todexDesktop.theme.shouldUseDark().then(applyTheme);
   }, [themeSource]);
 
+  // The same title the sidebar shows (not the raw provider-name default).
+  const windowConversationTitle = session.activeConversation ? conversationDisplayTitle(session.activeConversation, session.timeline) : '';
   useEffect(() => {
-    const conversation = session.activeConversation;
     const status = connectionStateLabel(session.connectionState);
-    document.title = conversation ? `TodeX · ${conversation.title} · ${status}` : `TodeX · ${status}`;
-  }, [session.activeConversation, session.connectionState]);
+    document.title = windowConversationTitle ? `TodeX · ${windowConversationTitle} · ${status}` : `TodeX · ${status}`;
+  }, [windowConversationTitle, session.connectionState]);
 
   const insetChrome = window.todexDesktop.app.windowChrome === 'hidden-inset';
   const settingsOpen = panel === 'settings';

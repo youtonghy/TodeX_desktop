@@ -202,7 +202,7 @@ export function AgentCallsPanel({ session, conversationId }: Props) {
               key={call.childConversationId}
               call={call}
               agentName={agentName(call.agent)}
-              onOpen={() => session.openAgentCallConversation(conversationId, call.childConversationId)}
+              onOpen={() => session.openAgentCallConversation(conversationId, call.childConversationId, call.title)}
               onCancel={async () => {
                 const latest = call.turns[call.turns.length - 1];
                 await session.cancelAgentCall(conversationId, call.childConversationId, latest && isActiveAgentCallStatus(latest.status) ? latest.childTurnId : undefined);
