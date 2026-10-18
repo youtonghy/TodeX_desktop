@@ -37,6 +37,7 @@ import { ConfirmDialog } from '@/components/ui/modal';
 import { toast } from '@/components/ui/toast';
 import { cx } from '@/utils/cx';
 import { useSidebarPins } from '../session/useSidebarPins';
+import { searchConversations } from '../session/conversationSearch';
 import { useSidebarGroupCollapse } from '../session/useSidebarGroupCollapse';
 import { useKanbanTasks } from '../session/kanbanTasks';
 import { setFeaturesMoreOpen, useFeatureModes, useFeaturesMoreOpen, type FeatureId } from '../session/featureToggles';
@@ -561,17 +562,19 @@ export function AppSidebar({
   // Conversations order by the last finished/stopped turn, so a running
   // conversation no longer re-sorts while it streams. Items that have never
   // completed keep their creation order.
-  const sortedConversations = useMemo(() => {
-    return [...workspaceConversations].sort((a, b) => {
-      const pinOrder = Number(pins.conversation.includes(b.id)) - Number(pins.conversation.includes(a.id));
-      if (pinOrder) return pinOrder;
-      const aTime = a.lastCompletedAt || a.createdAt || 0;
-      const bTime = b.lastCompletedAt || b.createdAt || 0;
-      if (bTime !== aTime) return bTime - aTime;
-      if ((b.createdAt || 0) !== (a.createdAt || 0)) return (b.createdAt || 0) - (a.createdAt || 0);
-      return a.id.localeCompare(b.id);
-    });
-  }, [workspaceConversations, pins.conversation]);
+  const compareConversations = useCallback((a: TodeXSession['conversations'][number], b: TodeXSession['conversations'][number]) => {
+    const pinOrder = Number(pins.conversation.includes(b.id)) - Number(pins.conversation.includes(a.id));
+    if (pinOrder) return pinOrder;
+    const aTime = a.lastCompletedAt || a.createdAt || 0;
+    const bTime = b.lastCompletedAt || b.createdAt || 0;
+    if (bTime !== aTime) return bTime - aTime;
+    if ((b.createdAt || 0) !== (a.createdAt || 0)) return (b.createdAt || 0) - (a.createdAt || 0);
+    return a.id.localeCompare(b.id);
+  }, [pins.conversation]);
+  const sortedConversations = useMemo(
+    () => [...workspaceConversations].sort(compareConversations),
+    [workspaceConversations, compareConversations],
+  );
 
   // Top-level rows: lone workspaces and groups. "Show more" pages by these,
   // so a group counts as one row.
@@ -623,13 +626,17 @@ export function AppSidebar({
     for (const { id, patch } of workspaceLayoutPatches(next)) session.updateWorkspace(id, patch);
   }, [session]);
 
-  // Titles are only resolved for every conversation while a search runs.
+  // A search covers the conversations of every workspace (except those whose
+  // directory is missing on the backend); titles are only resolved for every
+  // conversation while it runs.
+  const workspaceById = useMemo(() => new Map(session.workspaces.map((workspace) => [workspace.id, workspace])), [session.workspaces]);
   const matchedConversations = useMemo(() => {
     if (!query) return sortedConversations;
-    return sortedConversations.filter((conversation) => (
-      conversationDisplayTitle(conversation, session.timeline).toLocaleLowerCase().includes(query)
-    ));
-  }, [sortedConversations, query, session.timeline]);
+    const hidden = new Set(session.workspaces.filter((workspace) => workspace.pathMissing).map((workspace) => workspace.id));
+    return searchConversations(session.conversations, query, (conversation) => conversationDisplayTitle(conversation, session.timeline), hidden)
+      .filter((conversation) => workspaceById.has(conversation.workspaceId))
+      .sort(compareConversations);
+  }, [sortedConversations, query, session.conversations, session.workspaces, session.timeline, workspaceById, compareConversations]);
 
   const displayedConversations = useMemo(() => {
     return query ? matchedConversations : matchedConversations.slice(0, conversationLimit);
@@ -1424,7 +1431,7 @@ export function AppSidebar({
           )}
 
           {(query || !conversationsCollapsed) && (
-            workspaceConversations.length === 0 ? (
+            !query && workspaceConversations.length === 0 ? (
               rail ? null : (
                 <p className="px-2 py-1 text-caption-1-regular text-text-tertiary">
                   {session.activeWorkspaceId ? t('sidebar.noConversations') : t('sidebar.selectWorkspace')}
@@ -1433,11 +1440,11 @@ export function AppSidebar({
             ) : (
               <>
                 <GridList
-                  key={`${session.activeWorkspaceId || 'no-workspace'}_${conversationLimit}`}
+                  key={query ? `search_${query}` : `${session.activeWorkspaceId || 'no-workspace'}_${conversationLimit}`}
                   aria-label={t('sidebar.conversations')}
                   className="flex flex-col outline-none"
                   onAction={(key) => {
-                    const conversation = workspaceConversations.find((item) => item.id === String(key));
+                    const conversation = displayedConversations.find((item) => item.id === String(key));
                     if (conversation) {
                       session.selectConversation(conversation.workspaceId, conversation.id);
                       onSelectConversation?.();
@@ -1457,6 +1464,8 @@ export function AppSidebar({
                     const tasksDone = Boolean(taskMeta && taskMeta.pending === 0);
                     const title = conversationDisplayTitle(conversation, session.timeline);
                     const running = isConversationHighlighted(conversation, session.activeConversationId, session.turnIds);
+                    // Search results come from every workspace, so each names its own.
+                    const resultWorkspace = query ? workspaceById.get(conversation.workspaceId) : undefined;
                     return (
                       <GridListItem
                         key={conversation.id}
@@ -1491,6 +1500,9 @@ export function AppSidebar({
                                 </span>
                               ) : null}
                             </span>
+                            {resultWorkspace ? (
+                              <span className="truncate text-caption-1-regular text-text-tertiary">{workspaceDisplayName(resultWorkspace)}</span>
+                            ) : null}
                           </span>
                           {rail ? null : (
                             <span className="flex shrink-0 items-center gap-1">
