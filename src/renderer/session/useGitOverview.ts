@@ -6,8 +6,9 @@ import {
 } from '../lib/gitWorkspace';
 import { t } from '../i18n';
 
-/** The status tab shows the latest commit first and reveals this many more per expand. */
-export const GIT_LOG_PAGE_SIZE = 5;
+import { GIT_LOG_FIRST_READ, GIT_LOG_PAGE_SIZE } from './gitLogPaging';
+
+export { GIT_LOG_PAGE_SIZE } from './gitLogPaging';
 /**
  * The backend admits two concurrent Git reads and answers 409 once a request
  * has queued for two seconds; scans and PR lookups can hold a slot for longer.
@@ -96,7 +97,7 @@ export function useGitOverview({ settings, repoPath, enabled }: {
         return;
       }
       setCommits(current => ({ ...current, loading: true }));
-      await step(() => readGitLog(settings, repoPath, 0, 1, signal),
+      await step(() => readGitLog(settings, repoPath, 0, GIT_LOG_FIRST_READ, signal),
         result => setCommits('data' in result
           ? { items: result.data.commits, hasMore: result.data.hasMore, error: '', loading: false, unsupported: false }
           : result.status === 404

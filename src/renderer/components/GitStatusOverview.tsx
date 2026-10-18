@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Chip } from '@/components/base/badges/chip';
 import { Spinner } from '@/components/ui/spinner';
 import { cx } from '@/utils/cx';
@@ -8,7 +8,8 @@ import {
   RiLockLine, RiStackLine,
 } from '@remixicon/react';
 import { externalHttpUrl, type GitLogCommit, type GitPullRequest, type GitRepositoryFile, type GitStatusSummary } from '../lib/gitWorkspace';
-import { GIT_LOG_PAGE_SIZE, type GitOverview } from '../session/useGitOverview';
+import { type GitOverview } from '../session/useGitOverview';
+import { GIT_LOG_PAGE_SIZE, nextCommitReveal, shouldPrefetchCommits } from '../session/gitLogPaging';
 import { useLocale, useT, type MessageKey } from '../i18n';
 
 type ChipColor = 'neutral' | 'blue' | 'lime' | 'yellow' | 'rose';
@@ -160,15 +161,21 @@ function CommitRow({ commit, head, last }: { commit: GitLogCommit; head: boolean
 function CommitHistory({ overview }: { overview: GitOverview }) {
   const t = useT();
   const { commits, loadMoreCommits } = overview;
-  // Latest commit by default; each expand reveals GIT_LOG_PAGE_SIZE more. Collapsing keeps the
-  // loaded pages so re-expanding does not refetch.
+  // Latest commit by default; each expand reveals up to GIT_LOG_PAGE_SIZE more. One page stays
+  // loaded ahead so the button names exactly what it reveals. Collapsing keeps the loaded pages
+  // so re-expanding does not refetch.
   const [shown, setShown] = useState(1);
-  const visible = commits.items.slice(0, shown);
-  const canShowMore = commits.items.length > shown || commits.hasMore;
+  const visibleCount = Math.min(shown, commits.items.length);
+  const visible = commits.items.slice(0, visibleCount);
+  const reveal = nextCommitReveal(commits.items.length, visibleCount, commits.hasMore);
+  const prefetch = !commits.loading && !commits.error && shouldPrefetchCommits(commits.items.length, visibleCount, commits.hasMore);
+  useEffect(() => {
+    if (prefetch) void loadMoreCommits();
+  }, [prefetch, loadMoreCommits]);
   const more = async () => {
-    const target = shown + GIT_LOG_PAGE_SIZE;
-    if (commits.items.length < target && commits.hasMore) await loadMoreCommits();
-    setShown(target);
+    if (!reveal) return;
+    if (reveal.count === undefined) await loadMoreCommits();
+    setShown(visibleCount + (reveal.count ?? GIT_LOG_PAGE_SIZE));
   };
   if (!commits.items.length) {
     if (commits.unsupported) return <p className="text-caption-1-regular text-text-tertiary">{t('git.commitsUnsupported')}</p>;
@@ -176,17 +183,19 @@ function CommitHistory({ overview }: { overview: GitOverview }) {
     if (commits.error) return <SectionError error={commits.error} />;
     return <p className="text-caption-1-regular text-text-tertiary">{t('git.noCommits')}</p>;
   }
-  const nextCount = Math.min(GIT_LOG_PAGE_SIZE, commits.hasMore ? GIT_LOG_PAGE_SIZE : commits.items.length - shown);
+  // The count-free label covers a page still loading; clicking waits for it.
+  const loadingMore = commits.loading && reveal?.count === undefined;
   return <div>
     <ol aria-label={t('git.commitHistory')}>
       {visible.map((commit, index) => <CommitRow key={commit.sha} commit={commit} head={index === 0} last={index === visible.length - 1} />)}
     </ol>
     {commits.error ? <SectionError error={commits.error} /> : null}
-    {canShowMore || shown > 1 ? <div className="flex items-center gap-1 pt-1">
-      {canShowMore ? <button type="button" className={cx(QUIET_ACTION, 'text-text-accent')} disabled={commits.loading} aria-busy={commits.loading || undefined} onClick={() => void more()}>
-        {commits.loading ? <Spinner size="sm" className="text-current" /> : <RiArrowDownSLine aria-hidden className="size-4" />}{t('git.showEarlierCommits', { count: nextCount })}
+    {reveal || visibleCount > 1 ? <div className="flex items-center gap-1 pt-1">
+      {reveal ? <button type="button" className={cx(QUIET_ACTION, 'text-text-accent')} disabled={loadingMore} aria-busy={loadingMore || undefined} onClick={() => void more()}>
+        {loadingMore ? <Spinner size="sm" className="text-current" /> : <RiArrowDownSLine aria-hidden className="size-4" />}
+        {reveal.count === undefined ? t('git.showEarlierCommitsUncounted') : t('git.showEarlierCommits', { count: reveal.count })}
       </button> : null}
-      {shown > 1 ? <button type="button" className={cx(QUIET_ACTION, 'text-text-secondary hover:text-text-primary')} onClick={() => setShown(1)}>
+      {visibleCount > 1 ? <button type="button" className={cx(QUIET_ACTION, 'text-text-secondary hover:text-text-primary')} onClick={() => setShown(1)}>
         <RiArrowUpSLine aria-hidden className="size-4" />{t('git.collapse')}
       </button> : null}
     </div> : null}

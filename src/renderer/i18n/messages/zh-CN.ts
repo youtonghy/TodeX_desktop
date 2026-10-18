@@ -932,6 +932,7 @@ export const zhCN = {
   'git.commitsUnsupported': '当前后端版本不支持提交记录，更新并重启后端后可查看。',
   'git.unpushed': '未推送',
   'git.showEarlierCommits': '显示更早的 {count} 个提交',
+  'git.showEarlierCommitsUncounted': '显示更早的提交',
   'git.collapse': '收起',
   'git.openInBrowser': '浏览器打开',
   'git.openPrInBrowser': '在默认浏览器中打开 #{number} {title}',

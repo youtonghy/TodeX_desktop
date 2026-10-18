@@ -932,6 +932,7 @@ export const ja: Messages = {
   'git.commitsUnsupported': 'このバックエンドのバージョンはコミット履歴に対応していません。更新して再起動すると表示されます。',
   'git.unpushed': '未プッシュ',
   'git.showEarlierCommits': '以前のコミットを {count} 件表示',
+  'git.showEarlierCommitsUncounted': '以前のコミットを表示',
   'git.collapse': '折りたたむ',
   'git.openInBrowser': 'ブラウザで開く',
   'git.openPrInBrowser': '#{number} {title} を既定のブラウザで開く',
