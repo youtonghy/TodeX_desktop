@@ -715,6 +715,13 @@ function route(request: SecureRequest): SecureResponse {
     return notFound(method, path);
   }
 
+  // Prompt attachments: the demo keeps no bytes, only reports a stored path.
+  if (path === '/v2/uploads' && method === 'PUT') {
+    const bytes = request.body instanceof Uint8Array ? request.body.length : String(request.body ?? '').length;
+    const uploadId = query.get('uploadId') || crypto.randomUUID().replace(/-/g, '');
+    const name = (query.get('name') ?? '').split(/[\\/]/).pop()?.trim() || 'file';
+    return json({ uploadId, path: `/tmp/todex/file/${uploadId}/${name}`, name, mimeType: /\.md$/i.test(name) ? 'text/markdown' : 'application/octet-stream', sizeBytes: Number(query.get('offset') ?? 0) + bytes });
+  }
   const body = readBody(request);
   if (path === '/v2/workspaces' && method === 'PUT') {
     if (Array.isArray(body.workspaces)) workspaces = body.workspaces as typeof workspaces;

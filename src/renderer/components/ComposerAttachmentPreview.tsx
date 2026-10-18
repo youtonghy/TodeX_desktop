@@ -18,7 +18,8 @@ export function ComposerAttachmentPreview({ attachment, onOpenChange, onOpenSour
   const kindLabel = !attachment ? ''
     : attachment.kind === 'image' ? t('session.kindImage')
       : attachment.kind === 'reference' ? t('session.kindReference')
-        : t('session.kindFile');
+        : attachment.kind === 'text' ? t('session.kindText')
+          : t('session.kindFile');
   const referenceLocation = attachment?.kind === 'reference' && attachment.path
     ? `${attachment.path}${attachment.lineStart ? `:${attachment.lineStart}${attachment.lineEnd && attachment.lineEnd !== attachment.lineStart ? `-${attachment.lineEnd}` : ''}` : ''}`
     : '';
@@ -38,8 +39,10 @@ export function ComposerAttachmentPreview({ attachment, onOpenChange, onOpenSour
       aria-label={t('chat.previewAttachment')}
       title={<span className="break-all">{attachment?.name}</span>}
       description={(
-        <span className="break-all text-caption-1-regular">
-          {[kindLabel, attachment?.mimeType, formatBytes(attachment?.sizeBytes), referenceLocation].filter(Boolean).join(' · ')}
+        <span className="flex flex-col gap-1 break-all text-caption-1-regular">
+          <span>{[kindLabel, attachment?.mimeType, formatBytes(attachment?.sizeBytes), referenceLocation].filter(Boolean).join(' · ')}</span>
+          {/* Where the backend stored the upload; the agent receives this path. */}
+          {attachment?.uploadedPath ? <span dir="ltr" className="font-mono text-text-tertiary">{attachment.uploadedPath}</span> : null}
         </span>
       )}
       size="xl"

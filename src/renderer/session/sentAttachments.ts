@@ -21,7 +21,7 @@ export type SentAttachmentRecord = {
   attachments: SentAttachment[];
 };
 
-type AttachmentDraft = Omit<SentAttachment, 'previewUrl' | 'kind'> & { kind: 'image' | 'file' | 'reference'; dataUrl: string };
+type AttachmentDraft = Omit<SentAttachment, 'previewUrl' | 'kind'> & { kind: 'image' | 'file' | 'reference' | 'text'; dataUrl: string };
 const MAX_PREVIEW_LENGTH = 100 * 1024;
 
 /** Oversized text still previews, truncated to the shared preview budget. */
@@ -65,7 +65,7 @@ export async function prepareSentAttachments(drafts: readonly AttachmentDraft[])
   return Promise.all(drafts.map(async ({ id, kind, name, mimeType, sizeBytes, dataUrl, textContent }) => {
     const previewUrl = kind === 'image' ? await imagePreview(dataUrl) : undefined;
     // References surface as plain file receipts; their text stays in the message.
-    const sentKind = kind === 'reference' ? 'file' : kind;
+    const sentKind = kind === 'image' ? 'image' : 'file';
     return {
       id, kind: sentKind, name, mimeType, sizeBytes,
       ...(previewUrl ? { previewUrl } : {}),

@@ -43,7 +43,8 @@ import { cx } from '@/utils/cx';
 import { baseMarkdownComponents } from '../components/markdownComponents';
 import { providerDisplayName, type ProviderKind, type ProviderQuotaSnapshot, type PermissionMode, type SkillCatalogDescriptor } from '@todex/protocol/v2';
 import { ConversationPermissionActions, ConversationPromptInput, ConversationRunStatus, PermissionRequestCard, TurnUsageSummary } from '../components/ConversationRunStatus';
-import { ReferenceComposer, type ReferenceComposerHandle } from '../components/ReferenceComposer';
+import { ReferenceComposer, type ComposerTokenState, type ReferenceComposerHandle } from '../components/ReferenceComposer';
+import { PROMPT_UPLOAD_MAX_BYTES, isPromptUploadUnsupported, pastedTextDisposition } from '@todex/protocol/promptUploads';
 import { ComposerAttachmentPreview } from '../components/ComposerAttachmentPreview';
 import { SentAttachmentList } from '../components/chat/AttachmentTile';
 import {
@@ -75,6 +76,7 @@ import {
   MAX_COMPOSER_ATTACHMENTS,
   SLASH_COMMANDS,
   attachmentToken,
+  composerTokenPattern,
   findMentionTrigger,
   insertMention,
   tokenSafeName,
@@ -144,14 +146,13 @@ const PROVIDER_NOTICES = {
   auto_mode_unavailable: 'chat.providerNotice.autoModeUnavailable',
 } as const satisfies Record<NonNullable<TimelineEntry['providerNotice']>, string>;
 
+/** Images up to this size also keep a local copy for the preview and the
+ * sent-message thumbnail; every file is uploaded regardless. */
 const MAX_COMPOSER_IMAGE_BYTES = 2_500_000;
+/** Text files up to this size keep their text for the preview, and travel
+ * inline when the backend predates uploads. */
 const MAX_COMPOSER_TEXT_BYTES = 512 * 1024;
 const HYDRATE_DEBOUNCE_MS = 200;
-// Clipboard text longer than this becomes a capsule attachment instead of
-// flooding the composer.
-const PASTED_TEXT_MAX_LINES = 5;
-const COMPOSER_IMAGE_ACCEPT = 'image/png,image/jpeg,image/gif,image/webp';
-const COMPOSER_TEXT_ACCEPT = 'text/*,.md,.mdx,.json,.yaml,.yml,.toml,.csv,.tsv,.ts,.tsx,.js,.jsx,.css,.html,.xml,.svg,.sh,.py,.rs,.go,.java,.kt,.swift';
 const SUPPORTED_COMPOSER_IMAGE_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
 /** A row that mounts while a turn runs blurs in like a streaming line (BoardUI AI chat). */
 const ENTRANCE_EASE = [0.25, 0.1, 0.25, 1] as const;
@@ -168,13 +169,41 @@ function isTextFile(file: File): boolean {
   return file.type.startsWith('text/') || /\.(md|mdx|txt|json|ya?ml|toml|csv|tsv|tsx?|jsx?|css|html?|xml|svg|sh|py|rs|go|java|kt|swift)$/i.test(file.name);
 }
 
-function readFileAsDataUrl(file: File): Promise<string> {
+function readFileAsDataUrl(file: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onerror = () => reject(reader.error ?? new Error(t('chat.readImageFailed')));
     reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
     reader.readAsDataURL(file);
   });
+}
+
+/** Dropped files, and how many dropped folders were left out. */
+function droppedFiles(data: DataTransfer): { files: File[]; folders: number } {
+  const files: File[] = [];
+  let folders = 0;
+  for (const item of Array.from(data.items)) {
+    if (item.kind !== 'file') continue;
+    if (item.webkitGetAsEntry?.()?.isDirectory) {
+      folders += 1;
+      continue;
+    }
+    const file = item.getAsFile();
+    if (file) files.push(file);
+  }
+  return files.length > 0 || folders > 0 ? { files, folders } : { files: Array.from(data.files), folders: 0 };
+}
+
+/** What a backend without `/v2/uploads` gets in the prompt instead of a path:
+ * a small supported image or text file inline, as before uploads existed. */
+async function inlineAttachmentContent(attachment: ComposerAttachmentDraft, blob: Blob): Promise<Partial<ComposerAttachmentDraft> | null> {
+  if (attachment.kind === 'image') {
+    if (!isSupportedComposerImage(attachment.mimeType) || blob.size > MAX_COMPOSER_IMAGE_BYTES) return null;
+    return { dataUrl: attachment.dataUrl || await readFileAsDataUrl(blob) };
+  }
+  if (blob.size > MAX_COMPOSER_TEXT_BYTES) return null;
+  if (attachment.textContent !== undefined) return { textContent: attachment.textContent };
+  return attachment.mimeType.startsWith('text/') ? { textContent: await blob.text() } : null;
 }
 
 function clipboardFiles(data: DataTransfer): File[] {
@@ -855,6 +884,15 @@ export function ChatPanel({ session }: Props) {
   const [expandedProcessIds, setExpandedProcessIds] = useState<Set<string>>(() => new Set());
   const [processGroupLoad, setProcessGroupLoad] = useState<Record<string, 'loading' | 'error'>>({});
   const [isDraggingAttachment, setIsDraggingAttachment] = useState(false);
+  /** Files kept for retrying a failed upload, by attachment id. */
+  const uploadBlobsRef = useRef(new Map<string, Blob>());
+  /** A drag that started inside the composer moves its own text. */
+  const internalDragRef = useRef(false);
+  // Let go of retry copies once their attachment is gone (sent or removed).
+  useEffect(() => {
+    const live = new Set(Object.values(session.composerAttachments).flat().map((item) => item.id));
+    for (const id of uploadBlobsRef.current.keys()) if (!live.has(id)) uploadBlobsRef.current.delete(id);
+  }, [session.composerAttachments]);
   const [previewAttachment, setPreviewAttachment] = useState<ComposerAttachmentDraft | null>(null);
   const isComposingRef = useRef(false);
   useEffect(() => {
@@ -1120,6 +1158,13 @@ export function ChatPanel({ session }: Props) {
   }
 
   const attachments = session.composerAttachments[conversation.id] ?? [];
+  const tokenStates: Record<string, { state: ComposerTokenState; title?: string }> = {};
+  for (const item of attachments) {
+    if (!item.uploadState) continue;
+    tokenStates[attachmentToken(item)] = item.uploadState === 'uploading'
+      ? { state: 'uploading', title: t('chat.uploading', { name: item.name }) }
+      : { state: 'failed', title: uploadBlobsRef.current.has(item.id) ? t('chat.uploadFailedRetry', { name: item.name, error: item.uploadError ?? '' }) : item.uploadError };
+  }
   const currentProvider = isV2Conversation(conversation) ? conversation.provider || '' : '';
   const agentProvider = conversation.provider || (isV2Conversation(conversation) ? '' : 'codex');
   const slashTrigger = draft.trim().startsWith('/') ? draft.trim() : '';
@@ -1286,7 +1331,6 @@ export function ChatPanel({ session }: Props) {
   const providerDescriptor = session.v2Providers.find((item) => item.id === currentProvider);
   const liveProviderModels = session.providerModels[currentProvider as ProviderKind];
   const providerModels = liveProviderModels?.length ? liveProviderModels : providerDescriptor?.models ?? [];
-  const attachmentAccept = `${COMPOSER_IMAGE_ACCEPT},${COMPOSER_TEXT_ACCEPT}`;
   const currentModel = conversation.model || providerModels.find((item) => item.isDefault)?.id || (currentProvider === 'codex' ? workspace.model || session.settings.defaultModel : '');
   const currentModelDescriptor = providerModels.find((item) => item.id === currentModel);
   const supportedReasoningEfforts = currentModelDescriptor?.supportedReasoningEfforts ?? [];
@@ -1403,13 +1447,51 @@ export function ChatPanel({ session }: Props) {
     toast.success(t('chat.chatMentionAdded'));
   };
 
+  const patchAttachment = (conversationId: string, id: string, patch: Partial<ComposerAttachmentDraft>) => {
+    session.setConversationAttachments(conversationId, (current) =>
+      current.some((entry) => entry.id === id)
+        ? current.map((entry) => entry.id === id ? { ...entry, ...patch } : entry)
+        : current);
+  };
+
+  /** Uploads an attachment to the backend; the prompt then names the stored
+   * path. A backend without `/v2/uploads` gets the content inline instead,
+   * when it is an image or text file small enough for that. */
+  const uploadAttachment = async (conversationId: string, attachment: ComposerAttachmentDraft, blob: Blob) => {
+    uploadBlobsRef.current.set(attachment.id, blob);
+    patchAttachment(conversationId, attachment.id, { uploadState: 'uploading', uploadError: undefined, uploadedPath: undefined });
+    try {
+      const stored = await session.uploadComposerFile(conversationId, attachment.name, blob);
+      uploadBlobsRef.current.delete(attachment.id);
+      patchAttachment(conversationId, attachment.id, { uploadState: undefined, uploadedPath: stored.path, sizeBytes: stored.sizeBytes });
+    } catch (error) {
+      if (isPromptUploadUnsupported(error)) {
+        const inline = await inlineAttachmentContent(attachment, blob);
+        if (inline) {
+          uploadBlobsRef.current.delete(attachment.id);
+          patchAttachment(conversationId, attachment.id, { uploadState: undefined, ...inline });
+          return;
+        }
+        // Retrying cannot help until the backend is updated.
+        uploadBlobsRef.current.delete(attachment.id);
+        patchAttachment(conversationId, attachment.id, { uploadState: 'failed', uploadError: t('chat.uploadUnsupported') });
+        return;
+      }
+      patchAttachment(conversationId, attachment.id, {
+        uploadState: 'failed',
+        uploadError: error instanceof ConnectionError ? error.userMessage : error instanceof Error ? error.message : String(error),
+      });
+    }
+  };
+
   const addBrowserFiles = async (files: File[], source: 'clipboard' | 'file' = 'file') => {
+    const conversationId = conversation.id;
     const remaining = MAX_COMPOSER_ATTACHMENTS - attachments.length;
     if (remaining <= 0) {
       toast.danger(t('chat.maxAttachments', { max: MAX_COMPOSER_ATTACHMENTS }));
       return;
     }
-    const nextAttachments: (typeof attachments) = [];
+    const nextAttachments: { attachment: ComposerAttachmentDraft; file: File }[] = [];
     let reachedLimit = false;
     for (const [index, file] of files.entries()) {
       if (nextAttachments.length >= remaining) {
@@ -1417,71 +1499,107 @@ export function ChatPanel({ session }: Props) {
         break;
       }
       try {
+        if (file.size > PROMPT_UPLOAD_MAX_BYTES) throw new Error(t('chat.uploadTooLarge', { name: file.name }));
         const mimeType = file.type || inferMimeType(file.name);
-        const image = isSupportedComposerImage(mimeType);
-        if (!image && isImageMimeType(mimeType) && !isTextFile(file)) {
-          throw new Error(t('chat.imageFormats'));
-        }
-        if (image && file.size > MAX_COMPOSER_IMAGE_BYTES) throw new Error(t('chat.imageTooLarge'));
-        if (!image && (!isTextFile(file) || file.size > MAX_COMPOSER_TEXT_BYTES)) {
-          throw new Error(t('chat.textAttachmentLimit'));
-        }
+        const image = isImageMimeType(mimeType);
         const name = uniqueAttachmentName(
           attachmentName(file, index, mimeType, source),
-          [...attachments, ...nextAttachments],
+          [...attachments, ...nextAttachments.map((item) => item.attachment)],
           draft,
         );
+        const previewImage = isSupportedComposerImage(mimeType) && file.size <= MAX_COMPOSER_IMAGE_BYTES;
+        const previewText = !image && isTextFile(file) && file.size <= MAX_COMPOSER_TEXT_BYTES;
         nextAttachments.push({
-          id: attachmentId(),
-          kind: image ? 'image' : 'file',
-          name,
-          mimeType,
-          sizeBytes: file.size,
-          dataUrl: image ? await readFileAsDataUrl(file) : '',
-          textContent: image ? undefined : await file.text(),
-          source,
+          file,
+          attachment: {
+            id: attachmentId(),
+            kind: image ? 'image' : 'file',
+            name,
+            mimeType,
+            sizeBytes: file.size,
+            dataUrl: previewImage ? await readFileAsDataUrl(file) : '',
+            textContent: previewText ? await file.text() : undefined,
+            source,
+            uploadState: 'uploading',
+          },
         });
       } catch (error) {
         toast.danger(error instanceof Error ? error.message : t('chat.attachmentReadFailed'));
       }
     }
     if (nextAttachments.length > 0) {
-      session.setConversationAttachments(conversation.id, (current) => [
+      session.setConversationAttachments(conversationId, (current) => [
         ...current,
-        ...nextAttachments,
+        ...nextAttachments.map((item) => item.attachment),
       ].slice(0, MAX_COMPOSER_ATTACHMENTS));
       // Every attachment lives in the draft as a capsule token, exactly like a quote.
-      insertAttachmentTokens(nextAttachments.map(attachmentToken));
+      insertAttachmentTokens(nextAttachments.map((item) => attachmentToken(item.attachment)));
+      for (const { attachment, file } of nextAttachments) void uploadAttachment(conversationId, attachment, file);
     }
     if (reachedLimit) {
       toast.danger(t('chat.maxAttachments', { max: MAX_COMPOSER_ATTACHMENTS }));
     }
   };
 
-  // Returns true when the pasted text was converted into a capsule attachment.
+  /** Short single-line text is typed in as is; longer text becomes a text
+   * capsule, and text beyond the capsule limit is uploaded as a Markdown
+   * file. Returns true when the text was taken as an attachment. */
   const addPastedText = (text: string): boolean => {
-    if (text.replace(/\n+$/, '').split('\n').length <= PASTED_TEXT_MAX_LINES) return false;
+    // Copied capsules paste back as capsules (the editor rebuilds them).
+    if (composerTokenPattern('').test(text)) return false;
+    const disposition = pastedTextDisposition(text);
+    if (disposition === 'inline') return false;
     if (attachments.length >= MAX_COMPOSER_ATTACHMENTS) {
       toast.danger(t('chat.maxAttachments', { max: MAX_COMPOSER_ATTACHMENTS }));
       return true;
     }
-    const sizeBytes = new TextEncoder().encode(text).length;
-    if (sizeBytes > MAX_COMPOSER_TEXT_BYTES) {
-      toast.danger(t('chat.textAttachmentLimit'));
+    const conversationId = conversation.id;
+    const blob = new Blob([text], { type: 'text/markdown' });
+    if (blob.size > PROMPT_UPLOAD_MAX_BYTES) {
+      toast.danger(t('chat.uploadTooLarge', { name: t('chat.pastedTextName') }));
       return true;
     }
+    const capsule = disposition === 'capsule';
     const attachment: ComposerAttachmentDraft = {
       id: attachmentId(),
-      kind: 'file',
-      name: uniqueAttachmentName(t('chat.pastedTextName'), attachments, draft),
-      mimeType: 'text/plain',
-      sizeBytes,
+      kind: capsule ? 'text' : 'file',
+      name: uniqueAttachmentName(capsule ? t('chat.pastedTextName') : `${t('chat.pastedTextName')}.md`, attachments, draft),
+      mimeType: capsule ? 'text/plain' : 'text/markdown',
+      sizeBytes: blob.size,
       dataUrl: '',
-      textContent: text,
+      textContent: capsule || blob.size <= MAX_COMPOSER_TEXT_BYTES ? text : undefined,
       source: 'clipboard',
+      ...(capsule ? {} : { uploadState: 'uploading' as const }),
     };
-    session.setConversationAttachments(conversation.id, (current) => [...current, attachment]);
+    session.setConversationAttachments(conversationId, (current) => [...current, attachment]);
     insertAttachmentTokens([attachmentToken(attachment)]);
+    if (!capsule) void uploadAttachment(conversationId, attachment, blob);
+    return true;
+  };
+
+  /** Saving an edited text attachment: an uploaded file is uploaded again, and
+   * a text capsule that outgrew the capsule limit turns into a Markdown file. */
+  const saveAttachmentText = (item: ComposerAttachmentDraft, text: string) => {
+    const conversationId = conversation.id;
+    const sizeBytes = new TextEncoder().encode(text).length;
+    if (item.kind === 'text' && pastedTextDisposition(text) === 'file') {
+      const name = uniqueAttachmentName(`${t('chat.pastedTextName')}.md`, attachments, draft);
+      const next: ComposerAttachmentDraft = { ...item, kind: 'file', name, mimeType: 'text/markdown', textContent: text, sizeBytes };
+      session.setConversationAttachments(conversationId, (current) => current.map((entry) => entry.id === item.id ? next : entry));
+      session.setConversationChatDraft(conversationId, (current) => current.replace(attachmentToken(item), attachmentToken(next)));
+      void uploadAttachment(conversationId, next, new Blob([text], { type: 'text/markdown' }));
+      return;
+    }
+    patchAttachment(conversationId, item.id, { textContent: text, sizeBytes });
+    if (item.kind !== 'text' && item.kind !== 'reference' && (item.uploadedPath || item.uploadState)) {
+      void uploadAttachment(conversationId, { ...item, textContent: text, sizeBytes }, new Blob([text], { type: item.mimeType || 'text/plain' }));
+    }
+  };
+
+  const retryAttachmentUpload = (item: ComposerAttachmentDraft): boolean => {
+    const blob = uploadBlobsRef.current.get(item.id);
+    if (item.uploadState !== 'failed' || !blob) return false;
+    void uploadAttachment(conversation.id, item, blob);
     return true;
   };
 
@@ -1638,10 +1756,7 @@ export function ChatPanel({ session }: Props) {
         onOpenChange={(open) => { if (!open) setPreviewAttachment(null); }}
         onOpenSource={openAttachmentSource}
         onSaveText={(item, text) => {
-          session.setConversationAttachments(conversation.id, (current) =>
-            current.map((entry) => entry.id === item.id
-              ? { ...entry, textContent: text, sizeBytes: new TextEncoder().encode(text).length }
-              : entry));
+          saveAttachmentText(item, text);
           setPreviewAttachment(null);
         }}
       />
@@ -1789,7 +1904,6 @@ export function ChatPanel({ session }: Props) {
             type="file"
             hidden
             multiple
-            accept={attachmentAccept}
             disabled={attachDisabled}
             onChange={(event) => {
               const files = Array.from(event.currentTarget.files ?? []);
@@ -1815,6 +1929,8 @@ export function ChatPanel({ session }: Props) {
             <ComposerLoader active={thinking && !readOnly} radius={24}>
               <div
                 data-dragging={isDraggingAttachment || undefined}
+                onDragStart={() => { internalDragRef.current = true; }}
+                onDragEnd={() => { internalDragRef.current = false; }}
                 onDragEnter={(event) => {
                   if (!event.dataTransfer.types.includes('Files')) return;
                   event.preventDefault();
@@ -1833,11 +1949,19 @@ export function ChatPanel({ session }: Props) {
                   }
                 }}
                 onDrop={(event) => {
-                  const files = Array.from(event.dataTransfer.files);
-                  if (files.length === 0) return;
-                  event.preventDefault();
                   setIsDraggingAttachment(false);
-                  void addBrowserFiles(files);
+                  if (internalDragRef.current) return;
+                  const files = droppedFiles(event.dataTransfer);
+                  if (files.files.length > 0 || files.folders > 0) {
+                    event.preventDefault();
+                    if (files.folders > 0) toast.danger(t('chat.folderUnsupported'));
+                    if (files.files.length > 0) void addBrowserFiles(files.files);
+                    return;
+                  }
+                  // Dropped text follows the paste rules; short text drops in
+                  // where the pointer is, as the browser does it.
+                  const text = event.dataTransfer.getData('text/plain');
+                  if (text && addPastedText(text)) event.preventDefault();
                 }}
                 // Capture phase so long text pastes become capsules before the
                 // editor inserts them as plain text.
@@ -1886,12 +2010,15 @@ export function ChatPanel({ session }: Props) {
                     resolveTokenLabel={(kind, name) => {
                       const item = attachments.find((entry) => entry.kind === kind && entry.name === name);
                       if (!item) return undefined;
-                      return item.kind === 'reference' ? referencePreview(item.textContent) || item.name : item.name;
+                      if (item.kind === 'reference') return referencePreview(item.textContent) || item.name;
+                      if (item.kind === 'text') return referencePreview(item.textContent, 16) || item.name;
+                      return item.name;
                     }}
                     onTokenClick={(kind, name) => {
                       const item = attachments.find((entry) => entry.kind === kind && entry.name === name);
-                      if (item) setPreviewAttachment(item);
+                      if (item && !retryAttachmentUpload(item)) setPreviewAttachment(item);
                     }}
+                    tokenStates={tokenStates}
                   />
                 </div>
                 <div className="composer-toolbar flex cursor-default items-center justify-between gap-2">

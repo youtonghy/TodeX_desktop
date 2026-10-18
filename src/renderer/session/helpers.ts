@@ -435,7 +435,9 @@ export const DEFAULT_COMPOSER_SELECTION: ComposerSelection = { start: 0, end: 0 
 
 export type ComposerAttachmentDraft = {
   id: string;
-  kind: 'image' | 'file' | 'reference';
+  /** `text` is a pasted-text capsule: its `textContent` goes back into the
+   * message where the capsule sits. */
+  kind: 'image' | 'file' | 'reference' | 'text';
   name: string;
   mimeType: string;
   sizeBytes: number | null;
@@ -446,6 +448,13 @@ export type ComposerAttachmentDraft = {
   lineStart?: number;
   lineEnd?: number;
   messageId?: string;
+  /** Where `PUT /v2/uploads` stored the file on the backend's machine; the
+   * prompt names this path instead of carrying the content. */
+  uploadedPath?: string;
+  /** Set while the upload runs and after it failed; absent once uploaded
+   * (or for attachments that never upload). */
+  uploadState?: 'uploading' | 'failed';
+  uploadError?: string;
 };
 
 /** A message headed for the backend follow-up queue (`conversation.queue.add`).
@@ -1038,6 +1047,12 @@ export function codexInputFromComposer(
     });
   });
   attachments.forEach((attachment) => {
+    if (attachment.uploadedPath) {
+      items.push(attachment.kind === 'image'
+        ? { type: 'localImage', path: attachment.uploadedPath }
+        : { type: 'text', text: `[附件: ${attachment.name}]\nPath: ${attachment.uploadedPath}` });
+      return;
+    }
     if (attachment.kind === 'image') {
       items.push({
         type: 'image',
@@ -1058,17 +1073,19 @@ export function codexInputFromComposer(
  * lives in the draft as one of these tokens, which the editor renders as an
  * atomic pill and the payload builder resolves back to the attachment.
  */
-export const COMPOSER_TOKEN_SOURCE = '\\[(引用|文件|图片):([^\\]\n]+)\\]';
+export const COMPOSER_TOKEN_SOURCE = '\\[(引用|文件|文本|图片):([^\\]\n]+)\\]';
 
 const TOKEN_LABEL_BY_KIND: Record<ComposerAttachmentDraft['kind'], string> = {
   reference: '引用',
   file: '文件',
+  text: '文本',
   image: '图片',
 };
 
 const TOKEN_KIND_BY_LABEL: Record<string, ComposerAttachmentDraft['kind']> = {
   引用: 'reference',
   文件: 'file',
+  文本: 'text',
   图片: 'image',
 };
 
@@ -1156,6 +1173,21 @@ export function uniqueReferenceName(
   draftText: string,
 ): string {
   return uniqueAttachmentName(base, attachments, draftText);
+}
+
+/** Puts each pasted-text capsule's text back where its token sits, so the
+ * agent (and the sent message) reads it as part of the message. Returns the
+ * remaining attachments. */
+export function expandTextCapsules(
+  text: string,
+  attachments: readonly ComposerAttachmentDraft[],
+): { text: string; attachments: ComposerAttachmentDraft[] } {
+  const capsules = new Map(attachments
+    .filter((item) => item.kind === 'text')
+    .map((item) => [attachmentToken(item), item.textContent ?? ''] as const));
+  if (!capsules.size) return { text, attachments: [...attachments] };
+  const expanded = text.replace(composerTokenPattern(), (token) => capsules.get(token) ?? token);
+  return { text: expanded, attachments: attachments.filter((item) => item.kind !== 'text') };
 }
 
 /** Attachments only count while their capsule token still lives in the draft text. */

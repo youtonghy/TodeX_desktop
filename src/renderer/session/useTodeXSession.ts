@@ -10,6 +10,8 @@ import {
 } from './completionNotifications';
 import { addNotification } from './notificationFeed';
 import { bindSentAttachmentEvents, prepareSentAttachments, projectSentAttachments, pruneSentAttachmentRecords, type SentAttachmentRecord } from './sentAttachments';
+import { uploadPromptFile } from './promptUploads';
+import { uploadedPromptContent } from '@todex/protocol/promptUploads';
 import { configureKanbanRouting, configureKanbanSync, syncKanbanTasksFromBackend, type KanbanTaskSchedule } from './kanbanTasks';
 import { t } from '../i18n';
 import { toast } from '../components/ui/toast';
@@ -252,6 +254,7 @@ import {
   codexInputFromComposer,
   attachmentSummary,
   liveComposerAttachments,
+  expandTextCapsules,
   selectedSkillSummary,
   skillIdFromPath,
   parseSkillListItems,
@@ -6931,7 +6934,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
 
   const promptContentFromAttachments = useCallback((attachments: ComposerAttachmentDraft[]): PromptContentRef[] => {
     const content: PromptContentRef[] = [];
+    const imageBudget = { used: 0 };
     for (const attachment of attachments) {
+      // Uploaded files are named by their path on the backend's machine.
+      if (attachment.uploadedPath) {
+        content.push(uploadedPromptContent({ path: attachment.uploadedPath, name: attachment.name, mimeType: attachment.mimeType, sizeBytes: attachment.sizeBytes }, imageBudget));
+        continue;
+      }
       if (attachment.kind === 'image' && attachment.dataUrl) {
         const comma = attachment.dataUrl.indexOf(',');
         if (comma >= 0) {
@@ -8249,6 +8258,14 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     return conversationTranscriptMarkdown(transcript.entries, { title: conversation.title, maxBytes, olderUnread: transcript.olderUnread });
   }, [decryptedHistoryReplay, v2ApiForConversation]);
 
+  /** Uploads a composer attachment to the backend that owns the conversation;
+   * the prompt then names the returned path on that backend's machine. */
+  const uploadComposerFile = useCallback(async (conversationId: string, name: string, blob: Blob) => {
+    const profile = profileFor(backendIdForConversation(conversationId));
+    if (!profile) throw new Error(t('sidebar.backendRemoved'));
+    return uploadPromptFile(backendApi(profile), name, blob);
+  }, []);
+
   const sendSlashCommand = useCallback(
     (input: string, conversationId = activeConversationRef.current) => {
       const trimmed = input.trim();
@@ -9004,12 +9021,20 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   }, [appendTimeline, recoverConversation, sendProtocolCommand, sendWorkspaceCommand, turnIds]);
 
   const submitChat = useCallback((conversationId: string) => {
-    const text = (chatDrafts[conversationId] ?? '').trim();
-    const attachments = composerAttachments[conversationId] ?? [];
+    const draftText = (chatDrafts[conversationId] ?? '').trim();
+    const draftAttachments = composerAttachments[conversationId] ?? [];
     const skills = selectedSkills[conversationId] ?? [];
-    if (!text && attachments.length === 0 && skills.length === 0) {
+    if (!draftText && draftAttachments.length === 0 && skills.length === 0) {
       return;
     }
+    const pendingUpload = liveComposerAttachments(draftText, draftAttachments).find((item) => item.uploadState);
+    if (pendingUpload) {
+      toast.danger(pendingUpload.uploadState === 'uploading' ? t('chat.uploadPending') : t('chat.uploadFailedBlocking', { name: pendingUpload.name }));
+      return;
+    }
+    // Pasted-text capsules are sent as the text they stand for.
+    const { text: expandedText, attachments } = expandTextCapsules(draftText, draftAttachments);
+    const text = expandedText.trim();
     const context = getConversationContext(conversationId);
     if (!context) {
       desktopAlert(t('alert.noWorkspace'), t('alert.pickWorkspace'));
@@ -9042,8 +9067,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       appendTimeline(makeSystemEntry(t('sess.skillSelected'), selectedSkillSummary(skills), workspace.id, conversationId));
     }
     const clearSubmittedComposer = () => {
-      setConversationChatDraft(conversationId, (current) => current.trim() === text ? '' : current);
-      setConversationAttachments(conversationId, (current) => current === attachments ? [] : current);
+      setConversationChatDraft(conversationId, (current) => current.trim() === draftText ? '' : current);
+      setConversationAttachments(conversationId, (current) => current === draftAttachments ? [] : current);
       setConversationSelectedSkills(conversationId, (current) => current === skills ? [] : current);
       setConversationComposerSelection(conversationId, DEFAULT_COMPOSER_SELECTION);
     };
@@ -9544,6 +9569,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     openSlashCommandActionPage,
     copyLastAgentMessage,
     exportConversationMarkdown,
+    uploadComposerFile,
     runWorkspaceCommand,
     runThreadMenuAction,
     submitThreadCommandPrompt,
