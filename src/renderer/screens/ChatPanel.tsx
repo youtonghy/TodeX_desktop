@@ -1947,7 +1947,7 @@ export function ChatPanel({ session }: Props) {
                       trigger={(
                         <>
                           <RiCpuLine aria-hidden className={cx(COMPOSER_CONTROL_ICON, effortClass ?? (displayedReasoningEffort ? 'text-text-accent' : undefined))} />
-                          <span className="composer-control__text">{modelDisplayLabel(currentModel, session.modelCatalog)}</span>
+                          <span className="composer-control__text">{currentModelDescriptor?.displayName || modelDisplayLabel(currentModel, session.modelCatalog)}</span>
                           {displayedReasoningEffort ? (
                             <span className={cx('composer-control__effort text-caption-1-semibold', effortClass ?? 'text-text-accent')}>
                               · {reasoningEffortLabel(displayedReasoningEffort)}
