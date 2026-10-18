@@ -957,6 +957,7 @@ app.whenReady().then(() => {
   const previewProxy = new PreviewProxy(session.fromPartition(PREVIEW_PARTITION));
   handleIpc('preview:setBackend', (_event, backend: unknown) => previewProxy.setBackend(previewBackend(backend)));
   handleIpc('preview:reload', (_event, key: string) => previews?.reload(String(key)));
+  handleIpc('preview:goBack', (_event, key: string) => previews?.goBack(String(key)));
   handleIpc('preview:capture', (_event, key: string) => previews?.capture(String(key)) ?? null);
   handleIpc('preview:inspect', (_event, key: string, colors: InspectColors | null) => previews?.inspect(String(key), colors));
   handleIpc('preview:close', (_event, key: string) => previews?.close(String(key)));

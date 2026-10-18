@@ -714,6 +714,7 @@ export const en: Messages = {
   'workbench.inspectBlocked': 'This page forbids reading elements; inspect is unavailable',
   'workbench.address': 'Address',
   'workbench.refreshPage': 'Refresh page',
+  'workbench.back': 'Back',
   'workbench.refresh': 'Refresh',
   'workbench.exitInspect': 'Exit inspect',
   'workbench.selectElement': 'Select element',

@@ -714,6 +714,7 @@ export const ja: Messages = {
   'workbench.inspectBlocked': 'このページは要素の読み取りを禁止しているため、インスペクト機能を使えません',
   'workbench.address': 'アドレス',
   'workbench.refreshPage': 'ページを更新',
+  'workbench.back': '戻る',
   'workbench.refresh': '更新',
   'workbench.exitInspect': 'インスペクトを終了',
   'workbench.selectElement': '要素を選択',

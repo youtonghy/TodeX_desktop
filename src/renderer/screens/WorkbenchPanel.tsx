@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ButtonHTMLAttributes, ComponentType, MouseEvent as ReactMouseEvent, ReactNode, RefObject } from 'react';
-import { RiAppsLine, RiCloseLine, RiDeleteBinLine, RiDownload2Line, RiEdit2Line, RiFolderAddLine, RiLinksLine, RiLink, RiServerLine, RiTerminalBoxLine, RiTerminalWindowLine, RiUpload2Line, RiGitBranchLine, RiAddLine, RiArrowLeftDoubleLine, RiArrowRightDoubleLine, RiExternalLinkLine, RiBracesLine, RiFileCodeLine, RiFileLine, RiFilePdf2Line, RiFileSettingsLine, RiFileTextLine, RiFileZipLine, RiImageLine, RiLockLine, RiMarkdownLine, RiFolder3Line, RiFolderOpenLine, RiGlobalLine, RiFocus3Line, RiLayoutColumnLine, RiLayoutRowLine, RiRefreshLine, RiStopCircleLine } from '@remixicon/react';
+import { RiAppsLine, RiCloseLine, RiDeleteBinLine, RiDownload2Line, RiEdit2Line, RiFolderAddLine, RiLinksLine, RiLink, RiServerLine, RiTerminalBoxLine, RiTerminalWindowLine, RiUpload2Line, RiGitBranchLine, RiAddLine, RiArrowLeftDoubleLine, RiArrowLeftLine, RiArrowRightDoubleLine, RiExternalLinkLine, RiBracesLine, RiFileCodeLine, RiFileLine, RiFilePdf2Line, RiFileSettingsLine, RiFileTextLine, RiFileZipLine, RiImageLine, RiLockLine, RiMarkdownLine, RiFolder3Line, RiFolderOpenLine, RiGlobalLine, RiFocus3Line, RiLayoutColumnLine, RiLayoutRowLine, RiRefreshLine, RiStopCircleLine } from '@remixicon/react';
 import { Focusable, Pressable } from 'react-aria-components';
 import type { Key, Selection } from 'react-aria-components';
 import { Badge } from '@/components/base/badges/badge';
@@ -891,6 +891,7 @@ function BrowserPane({ itemId, isActive, workspacePath, session, target, onTarge
   const [hasPage, setHasPage] = useState(false);
   const [error, setError] = useState('');
   const [inspect, setInspect] = useState(false);
+  const [canGoBack, setCanGoBack] = useState(false);
   const loadedUrlRef = useRef('');
   useNoticeToast(error, { variant: 'danger', scope: workspacePath });
   const { hostRef, covered, still } = useNativeViewHost(hasPage ? itemId : undefined, isActive, preview);
@@ -957,6 +958,7 @@ function BrowserPane({ itemId, isActive, workspacePath, session, target, onTarge
   useEffect(() => preview.onState((state) => {
     if (state.key !== itemId) return;
     if (state.error) setError(state.error);
+    setCanGoBack(state.canGoBack);
     if (state.url && state.url !== loadedUrlRef.current) {
       loadedUrlRef.current = state.url;
       setDraft(state.url);
@@ -988,6 +990,15 @@ function BrowserPane({ itemId, isActive, workspacePath, session, target, onTarge
   return (
     <div className="flex h-full min-h-0 flex-col px-4 pb-4 pt-3">
       <div className="mb-3 flex items-center justify-between gap-3">
+        {hasPage && canGoBack ? (
+          <ExpandableAction
+            icon={RiArrowLeftLine}
+            iconClassName="rtl:-scale-x-100"
+            label={t('workbench.back')}
+            onClick={() => { void preview.goBack(itemId); }}
+            aria-label={t('workbench.back')}
+          />
+        ) : null}
         <form
           onSubmit={(e) => {
             e.preventDefault();

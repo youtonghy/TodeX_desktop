@@ -714,6 +714,7 @@ export const ko: Messages = {
   'workbench.inspectBlocked': '이 페이지는 요소 읽기를 금지하여 검사 기능을 사용할 수 없습니다',
   'workbench.address': '주소',
   'workbench.refreshPage': '페이지 새로고침',
+  'workbench.back': '뒤로',
   'workbench.refresh': '새로고침',
   'workbench.exitInspect': '검사 종료',
   'workbench.selectElement': '요소 선택',

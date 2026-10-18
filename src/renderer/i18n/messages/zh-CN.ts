@@ -714,6 +714,7 @@ export const zhCN = {
   'workbench.inspectBlocked': '该页面禁止读取元素，无法使用检查功能',
   'workbench.address': '地址',
   'workbench.refreshPage': '刷新网页',
+  'workbench.back': '返回',
   'workbench.refresh': '刷新',
   'workbench.exitInspect': '退出检查',
   'workbench.selectElement': '选择元素',

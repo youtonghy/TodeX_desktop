@@ -13,7 +13,7 @@ const INSPECT_WORLD = 'todex-inspect';
 const INSPECT_BINDING = '__todexInspect';
 
 export type PreviewTarget = { url: string } | { html: string };
-export type PreviewState = { key: string; url: string; title: string; loading: boolean; error?: string };
+export type PreviewState = { key: string; url: string; title: string; loading: boolean; canGoBack: boolean; error?: string };
 export type PickedElement = { key: string; tag: string; id: string; text: string };
 export type InspectColors = { hover: string; selected: string };
 
@@ -121,6 +121,11 @@ export class PreviewViews {
     this.previews.get(key)?.view.webContents.reload();
   }
 
+  goBack(key: string): void {
+    const history = this.previews.get(key)?.view.webContents.navigationHistory;
+    if (history?.canGoBack()) history.goBack();
+  }
+
   setBounds(key: string, bounds: Rectangle | null): void {
     const preview = this.previews.get(key);
     if (!preview) return;
@@ -218,7 +223,7 @@ export class PreviewViews {
       return { action: 'deny' };
     });
     contents.session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
-    for (const event of ['did-start-loading', 'did-stop-loading', 'did-navigate', 'page-title-updated'] as const) {
+    for (const event of ['did-start-loading', 'did-stop-loading', 'did-navigate', 'did-navigate-in-page', 'page-title-updated'] as const) {
       contents.on(event as 'did-start-loading', () => this.emit(key));
     }
     // A new document needs the picker again.
@@ -240,6 +245,7 @@ export class PreviewViews {
       url: url.startsWith('data:') ? '' : url,
       title: contents.getTitle(),
       loading: contents.isLoading(),
+      canGoBack: contents.navigationHistory.canGoBack(),
       ...(error ? { error } : {}),
     });
   }

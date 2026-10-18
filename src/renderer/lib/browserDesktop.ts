@@ -94,6 +94,7 @@ export function installBrowserDesktopBridge(): void {
       },
       setBackend: async () => undefined,
       reload: async () => undefined,
+      goBack: async () => undefined,
       capture: async () => null,
       inspect: async () => undefined,
       close: async () => undefined,
