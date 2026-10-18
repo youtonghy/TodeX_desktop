@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ButtonHTMLAttributes, ComponentType, MouseEvent as ReactMouseEvent, ReactNode, RefObject } from 'react';
-import { RiAppsLine, RiCloseLine, RiDeleteBinLine, RiDownload2Line, RiEdit2Line, RiFolderAddLine, RiLinksLine, RiLink, RiServerLine, RiTerminalBoxLine, RiTerminalWindowLine, RiUpload2Line, RiGitBranchLine, RiAddLine, RiArrowLeftDoubleLine, RiArrowLeftLine, RiArrowRightDoubleLine, RiExternalLinkLine, RiBracesLine, RiFileCodeLine, RiFileLine, RiFilePdf2Line, RiFileSettingsLine, RiFileTextLine, RiFileZipLine, RiImageLine, RiLockLine, RiMarkdownLine, RiFolder3Line, RiFolderOpenLine, RiGlobalLine, RiFocus3Line, RiLayoutColumnLine, RiLayoutRowLine, RiRefreshLine, RiRobot2Line, RiStopCircleLine } from '@remixicon/react';
+import { RiAppsLine, RiCloseLine, RiDeleteBinLine, RiDownload2Line, RiEdit2Line, RiFolderAddLine, RiLinksLine, RiLink, RiServerLine, RiTerminalBoxLine, RiTerminalWindowLine, RiUpload2Line, RiGitBranchLine, RiAddLine, RiArrowLeftDoubleLine, RiArrowLeftLine, RiArrowRightDoubleLine, RiExternalLinkLine, RiBracesLine, RiFileCodeLine, RiFileLine, RiFilePdf2Line, RiFileSettingsLine, RiFileTextLine, RiFileZipLine, RiImageLine, RiLockLine, RiMarkdownLine, RiFolder3Line, RiFolderOpenLine, RiGlobalLine, RiFocus3Line, RiLayoutColumnLine, RiLayoutRowLine, RiRefreshLine, RiRobot2Line, RiStopCircleLine, RiTeamLine } from '@remixicon/react';
 import { Focusable, Pressable } from 'react-aria-components';
 import type { Key, Selection } from 'react-aria-components';
 import { Badge } from '@/components/base/badges/badge';
@@ -44,6 +44,8 @@ import { isConflictError } from '@todex/protocol/connectionError';
 import { isNotFoundError, type SshExecRun } from '@todex/protocol/ssh';
 import type { SubagentRun } from '@todex/protocol/v2';
 import { SubagentsPanel } from './SubagentsPanel';
+import { AgentCallsPanel } from './AgentCallsPanel';
+import { isActiveAgentCallStatus, type AgentCallSession } from '@todex/protocol/agentCalling';
 import { isLoopbackUrl } from '@todex/protocol/mobileParity';
 import { t, useT, type MessageKey } from '../i18n';
 
@@ -74,7 +76,7 @@ type StoredWorkbenchState = {
   activeId: string;
 };
 
-/** Types written to the tab store; 'ssh-exec', 'subagents' and 'agent-browser' tabs are session-only. */
+/** Types written to the tab store; 'ssh-exec', 'subagents', 'agent-calls' and 'agent-browser' tabs are session-only. */
 const WORKBENCH_TYPES = new Set<WorkbenchTab>(['terminal', 'browser', 'files', 'git-diff']);
 
 const WORKBENCH_LABEL_KEYS: Record<WorkbenchTab, MessageKey> = {
@@ -84,6 +86,7 @@ const WORKBENCH_LABEL_KEYS: Record<WorkbenchTab, MessageKey> = {
   'git-diff': 'workbench.tabGitDiff',
   'ssh-exec': 'workbench.tabSshExec',
   subagents: 'app.subagents',
+  'agent-calls': 'agentCalls.title',
   'agent-browser': 'agentBrowser.title',
 };
 
@@ -96,6 +99,7 @@ const WORKBENCH_ICONS = {
   'git-diff': RiGitBranchLine,
   'ssh-exec': RiTerminalWindowLine,
   subagents: RiRobot2Line,
+  'agent-calls': RiTeamLine,
   'agent-browser': RiGlobalLine,
 };
 
@@ -320,7 +324,7 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
 
   // Closing a terminal tab that holds a live PTY stops the backend PTY
   // instead of leaving it running in the background; closing a remote files
-  // tab closes its backend connection. Agent SSH and Subagents tabs stay.
+  // tab closes its backend connection. Agent SSH, Subagents and Agent calls tabs stay.
   const closeTab = useCallback((id: string) => {
     const item = items.find((entry) => entry.id === id);
     if (item && isSystemWorkbenchTab(item.type)) return;
@@ -372,15 +376,15 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
         opened = item;
         continue;
       }
-      if (request.kind === 'ssh-exec' || request.kind === 'subagents') {
+      if (request.kind === 'ssh-exec' || request.kind === 'subagents' || request.kind === 'agent-calls') {
         // One tab per conversation and kind: reuse it, or create it.
         const { kind, conversationId } = request;
-        const existing = [...items, ...added].find(item => (kind === 'ssh-exec' ? item.sshExec : item.subagents)?.conversationId === conversationId);
+        const existing = [...items, ...added].find(item => (kind === 'ssh-exec' ? item.sshExec : kind === 'subagents' ? item.subagents : item.agentCalls)?.conversationId === conversationId);
         if (existing) {
           opened = existing;
           continue;
         }
-        const item: WorkbenchItem = { id: `${kind}-${Date.now()}-${request.id}`, type: kind, title: workbenchLabel(kind), ...(kind === 'ssh-exec' ? { sshExec: { conversationId } } : { subagents: { conversationId } }) };
+        const item: WorkbenchItem = { id: `${kind}-${Date.now()}-${request.id}`, type: kind, title: workbenchLabel(kind), ...(kind === 'ssh-exec' ? { sshExec: { conversationId } } : kind === 'subagents' ? { subagents: { conversationId } } : { agentCalls: { conversationId } }) };
         added.push(item);
         opened = item;
         continue;
@@ -400,7 +404,7 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
     }
   }, [closeTab, items, onRequestsHandled, onTabChange, requests, restored, t]);
 
-  // The shortcut is consumed on an Agent SSH or Subagents tab (which stays),
+  // The shortcut is consumed on an Agent SSH, Subagents or Agent calls tab (which stays),
   // rather than falling back to closing the window.
   const closeActiveTab = useCallback(() => {
     if (!activeId) return false;
@@ -480,6 +484,8 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
                 <SshExecTabIcon conversationId={item.sshExec.conversationId} runs={session.conversationRuntimeById[item.sshExec.conversationId]?.sshExecs} className={tabIconClass} />
               ) : item.subagents ? (
                 <SubagentsTabIcon runs={session.subagentsByConversation[item.subagents.conversationId]} className={tabIconClass} />
+              ) : item.agentCalls ? (
+                <AgentCallsTabIcon calls={session.agentCallsByConversation[item.agentCalls.conversationId]} className={tabIconClass} />
               ) : <Icon aria-hidden="true" className={tabIconClass} />}
             </button>
           </Focusable>
@@ -579,6 +585,7 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
             {item.type === 'git-diff' ? <GitDiffPane session={session} /> : null}
             {item.type === 'ssh-exec' && item.sshExec ? <SshExecPane conversationId={item.sshExec.conversationId} runs={session.conversationRuntimeById[item.sshExec.conversationId]?.sshExecs ?? NO_SSH_EXECS} isActive={item.id === active?.id} /> : null}
             {item.type === 'subagents' && item.subagents ? <SubagentsPanel session={session} conversationId={item.subagents.conversationId} /> : null}
+            {item.type === 'agent-calls' && item.agentCalls ? <AgentCallsPanel session={session} conversationId={item.agentCalls.conversationId} /> : null}
             {item.type === 'agent-browser' && item.agentBrowser ? <AgentBrowserLiveView session={session} isActive={shown && item.id === active?.id} conversationId={item.agentBrowser.conversationId} /> : null}
           </div>
         ))}
@@ -606,6 +613,23 @@ function SshExecTabIcon({ conversationId, runs = NO_SSH_EXECS, className }: { co
 }
 
 const NO_SUBAGENTS: SubagentRun[] = [];
+
+const NO_AGENT_CALLS: AgentCallSession[] = [];
+
+/** The Agent calls tab icon carries the number of running calls. */
+function AgentCallsTabIcon({ calls = NO_AGENT_CALLS, className }: { calls?: AgentCallSession[]; className: string }) {
+  const count = calls.filter(call => isActiveAgentCallStatus(call.status)).length;
+  return (
+    <span className={cx('relative inline-flex', className)}>
+      <RiTeamLine aria-hidden="true" className="size-4" />
+      {count ? (
+        <Badge color="primary" className="absolute -end-2.5 -top-2 min-w-4 px-0.5 text-caption-2-semibold tabular-nums">
+          {count > 99 ? '99+' : count}
+        </Badge>
+      ) : null}
+    </span>
+  );
+}
 
 /** The Subagents tab icon carries the number of queued or running subagents. */
 function SubagentsTabIcon({ runs = NO_SUBAGENTS, className }: { runs?: SubagentRun[]; className: string }) {

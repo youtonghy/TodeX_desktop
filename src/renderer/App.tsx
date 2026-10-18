@@ -16,7 +16,7 @@ import { ConversationSplit, useMediaQuery } from './components/ConversationSplit
 import { useWorkbenchLayout } from './session/useWorkbenchLayout';
 import { sshWorkbenchScopeKey, workbenchScopeKey } from './session/workbenchLayout';
 import { createAgentBrowserWatch, takeNewAgentBrowserTab } from './session/agentBrowserTabs';
-import { createRunWatch, takeNewSshExecs, takeNewSubagents } from './session/sshExecTabs';
+import { createRunWatch, takeNewAgentCalls, takeNewSshExecs, takeNewSubagents } from './session/sshExecTabs';
 import { useTodeXSession, type TodeXSession } from './session/useTodeXSession';
 import { ConversationHeaderDetails } from './components/ConversationHeaderDetails';
 import { GitActionsModal } from './components/GitActionsModal';
@@ -332,6 +332,15 @@ export function App() {
     const fresh = takeNewSubagents(subagentWatchRef.current, viewedConversationId, viewedRuntime, viewedRecovering);
     if (!fresh.length || sshActive || !scopeKey) return;
     queueWorkbenchRequest(id => ({ id, kind: 'subagents', conversationId: viewedConversationId }));
+    persistAsideOpen(true);
+  }, [persistAsideOpen, queueWorkbenchRequest, scopeKey, sshActive, viewedConversationId, viewedRecovering, viewedRuntime]);
+  // A child conversation the viewed conversation's agent starts through the
+  // `todex_agents` MCP server opens the Agent calls tab, like subagents.
+  const agentCallWatchRef = useRef(createRunWatch());
+  useEffect(() => {
+    const fresh = takeNewAgentCalls(agentCallWatchRef.current, viewedConversationId, viewedRuntime, viewedRecovering);
+    if (!fresh.length || sshActive || !scopeKey) return;
+    queueWorkbenchRequest(id => ({ id, kind: 'agent-calls', conversationId: viewedConversationId }));
     persistAsideOpen(true);
   }, [persistAsideOpen, queueWorkbenchRequest, scopeKey, sshActive, viewedConversationId, viewedRecovering, viewedRuntime]);
   // A new agent-browser tab lifetime in the viewed conversation (its first

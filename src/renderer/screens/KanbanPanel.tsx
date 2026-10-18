@@ -7,7 +7,7 @@ import { Button } from '@/components/base/buttons/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { ALL_BACKENDS, BackendSelect } from '@/components/ui/backend-select';
 import { ScheduleConversationDialog } from '../components/ScheduleConversationDialog';
-import { isNoneWorkspaceId, workspaceDisplayName } from '../session/helpers';
+import { isListedConversation, isNoneWorkspaceId, workspaceDisplayName } from '../session/helpers';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { useT } from '../i18n';
 import {
@@ -60,7 +60,7 @@ export function KanbanPanel({ session, onOpenConversation }: Props) {
   const schedulingWorkspace = schedulingTask ? session.workspaces.find((workspace) => workspace.id === schedulingTask.workspaceId) : undefined;
   const total = groups.reduce((count, group) => count + group.tasks.length, 0);
   const conversations = useMemo(
-    () => session.conversations.filter((conversation) => !conversation.archived).sort((a, b) => b.updatedAt - a.updatedAt),
+    () => session.conversations.filter((conversation) => !conversation.archived && isListedConversation(conversation)).sort((a, b) => b.updatedAt - a.updatedAt),
     [session.conversations],
   );
 

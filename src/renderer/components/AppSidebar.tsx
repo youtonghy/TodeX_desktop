@@ -50,7 +50,7 @@ import { WorkspaceHoverTooltip } from './WorkspaceHoverTooltip';
 import { AppIcon } from './AppIcon';
 import { WORKSPACE_ICON_CHOICES, WORKSPACE_RING_STYLES, WorkspaceStatusRing, ringStyleKey, workspaceIconComponent } from './WorkspaceIcon';
 import type { TodeXSession } from '../session/useTodeXSession';
-import { connectionStateLabel, conversationDisplayTitle, formatResetInstant, getConversationStatus, healthLabelOf, isConversationHighlighted, isNoneWorkspaceId, workspaceDisplayName } from '../session/helpers';
+import { connectionStateLabel, conversationDisplayTitle, formatResetInstant, getConversationStatus, healthLabelOf, isConversationHighlighted, isListedConversation, isNoneWorkspaceId, workspaceDisplayName } from '../session/helpers';
 import { ShortcutHint, shortcutKeys, useAppShortcuts, type ShortcutId } from '../lib/shortcuts';
 import { useT } from '../i18n';
 
@@ -354,7 +354,7 @@ export function AppSidebar({
   // Every backend stays connected, so None lists the conversations of all of them.
   const workspaceConversations = useMemo(() => (
     session.conversations.filter(
-      (conversation) => conversation.workspaceId === session.activeWorkspaceId && !conversation.archived,
+      (conversation) => conversation.workspaceId === session.activeWorkspaceId && !conversation.archived && isListedConversation(conversation),
     )
   ), [session.activeWorkspaceId, session.conversations]);
 
@@ -537,7 +537,7 @@ export function AppSidebar({
     const rank = { working: 3, issue: 2, unread: 1 } as const;
     const map: Record<string, keyof typeof rank> = {};
     for (const conversation of session.conversations) {
-      if (!conversation.workspaceId || conversation.archived) continue;
+      if (!conversation.workspaceId || conversation.archived || !isListedConversation(conversation)) continue;
       const status = getConversationStatus(session, conversation, timelineInfoMap[conversation.id]?.latestEntry, timelineInfoMap[conversation.id]?.latestIncomingAt);
       if (!status) continue;
       const current = map[conversation.workspaceId];

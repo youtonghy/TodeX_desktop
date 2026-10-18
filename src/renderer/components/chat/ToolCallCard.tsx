@@ -84,6 +84,8 @@ export interface ToolCallCardProps {
   title: string;
   /** Muted lead-in before the title, e.g. "Calling: ". */
   prefix?: string;
+  /** Small element between the status glyph and the title (an agent icon). */
+  leading?: ReactNode;
   /** Shimmers the title; defaults to `state === 'running'`. */
   active?: boolean;
   /** Trailing content in the header (duration, status chip). */
@@ -110,6 +112,7 @@ export function ToolCallCard({
   state,
   title,
   prefix,
+  leading,
   active,
   meta,
   footer,
@@ -153,6 +156,7 @@ export function ToolCallCard({
         )}
       >
         <ToolCallStatusGlyph state={state} />
+        {leading}
         <span className="flex min-w-0 flex-1 items-baseline gap-1 text-body-regular text-text-secondary">
           {prefix ? <span className="shrink-0 text-text-tertiary">{prefix}</span> : null}
           <span className="min-w-0 truncate">{shimmer ? <ShimmerText>{title}</ShimmerText> : title}</span>

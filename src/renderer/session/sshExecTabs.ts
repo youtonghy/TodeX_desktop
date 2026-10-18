@@ -2,6 +2,7 @@ import { useSyncExternalStore } from 'react';
 import type { ConversationRuntime } from '@todex/protocol/conversationRuntime';
 import type { SshExecRun } from '@todex/protocol/ssh';
 import type { SubagentRun } from '@todex/protocol/v2';
+import type { AgentCallSession } from '@todex/protocol/agentCalling';
 import type { WorkbenchItem } from '../lib/panels';
 
 export function formatSshExecDuration(ms: number): string {
@@ -71,7 +72,19 @@ export function takeNewSubagents(
   return takeNewRuns(watch, conversationId, runtime?.subagents, runtime?.appliedSequence ?? 0, recovering);
 }
 
-/** The Agent SSH, Subagents and agent-browser tabs are session-only; they survive a
+/** Child conversations (Agent Calling) first seen after the conversation
+ * became the viewed one; a follow-up turn to a known child is not new. */
+export function takeNewAgentCalls(
+  watch: RunWatch,
+  conversationId: string,
+  runtime: Pick<ConversationRuntime, 'agentCalls' | 'appliedSequence'> | undefined,
+  recovering: boolean,
+): AgentCallSession[] {
+  const runs = runtime?.agentCalls.map(session => ({ id: session.childConversationId, session }));
+  return takeNewRuns(watch, conversationId, runs, runtime?.appliedSequence ?? 0, recovering).map(run => run.session);
+}
+
+/** The Agent SSH, Subagents, Agent calls and agent-browser tabs are session-only; they survive a
  * workbench remount (switching conversations and back, or the aside toggling
  * the scope) but are never written to the tab store. */
 const sessionSshExecTabs = new Map<string, WorkbenchItem[]>();
@@ -81,7 +94,7 @@ export function sessionSshExecTabsFor(storageKey: string): WorkbenchItem[] {
 }
 
 export function rememberSessionSshExecTabs(storageKey: string, items: WorkbenchItem[]): void {
-  const execItems = items.filter(item => item.type === 'ssh-exec' || item.type === 'subagents' || item.type === 'agent-browser');
+  const execItems = items.filter(item => item.type === 'ssh-exec' || item.type === 'subagents' || item.type === 'agent-calls' || item.type === 'agent-browser');
   if (execItems.length) sessionSshExecTabs.set(storageKey, execItems);
   else sessionSshExecTabs.delete(storageKey);
 }

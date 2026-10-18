@@ -64,7 +64,7 @@ function timeLabel(iso?: string): string {
     : date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
-function formatMs(ms: number): string {
+export function formatMs(ms: number): string {
   if (ms < 1000) return `${ms}ms`;
   const seconds = Math.round(ms / 1000);
   if (seconds < 60) return `${seconds}s`;
@@ -77,7 +77,7 @@ function durationLabel(run: SubagentRun): string {
   return !Number.isFinite(ms) || ms < 0 ? '' : ms < 1000 ? '<1s' : formatMs(ms);
 }
 
-function CopyValue({ value, label, pill = false }: { value: string; label: string; pill?: boolean }) {
+export function CopyValue({ value, label, pill = false }: { value: string; label: string; pill?: boolean }) {
   const [copied, setCopied] = useState(false);
   const onPress = () => {
     void navigator.clipboard.writeText(value).then(() => {
@@ -108,7 +108,7 @@ type TextMode = 'preview' | 'source';
 
 /** Task or result text: rendered as Markdown (or shown as its source), folded
  * to a fixed height behind a fade until expanded. */
-function SubagentText({ label, text }: { label: string; text: string }) {
+export function SubagentText({ label, text }: { label: string; text: string }) {
   const t = useT();
   const [mode, setMode] = useState<TextMode>('preview');
   const [expanded, setExpanded] = useState(false);

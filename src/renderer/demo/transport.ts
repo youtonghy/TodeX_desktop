@@ -10,7 +10,7 @@ import type {
   SecureStreamResponse,
   SecureTransport,
 } from '@todex/protocol/secureTransport';
-import type { ConversationEvent, ConversationManifest, McpCatalog, McpServerCatalogDescriptor, ProviderKind, SkillCatalog, SkillCatalogDescriptor } from '@todex/protocol/v2';
+import type { AgentCallingSettings, ApiKeySummary, ConversationEvent, ConversationManifest, McpCatalog, McpServerCatalogDescriptor, ProviderKind, SkillCatalog, SkillCatalogDescriptor } from '@todex/protocol/v2';
 import { applyMergePatch, setAt, type SettingsObject } from '../lib/cliSettings';
 import * as fixtures from './fixtures';
 
@@ -366,6 +366,88 @@ function demoDelete(ids: string[]) {
   return { deleted, skipped: [], freedBytes };
 }
 let agentDesktop = { ...fixtures.demoAgentDesktop };
+
+// Agent Calling: settings as the daemon reports them; listener changes only
+// take effect "after a restart", so they leave `listening`/`baseUrl` alone.
+const demoListenerRunning = { enabled: true, port: 7346 };
+let agentCalling: AgentCallingSettings = {
+  scope: { agents: null, models: {} },
+  mcp: { enabled: true, approval: 'ask', injected: true },
+  apiListener: { enabled: true, host: '127.0.0.1', port: 7346, listening: true, baseUrl: 'http://127.0.0.1:7346/api/v1', pendingRestart: false },
+  limits: { maxConcurrentCalls: 4, maxWaitSecs: 1200, defaultWaitSecs: 300 },
+};
+let apiKeys: ApiKeySummary[] = [
+  { id: '3f9c2a7d1b6e4c08', name: 'CI 脚本', prefix: 'tdx_3f9c2a7d1b6e4c08', status: 'active', scopes: { agents: ['codex'], workspaces: [fixtures.DEMO_ROOT] },
+    approval: 'auto-approve', createdAt: Date.now() - 12 * 86_400_000, expiresAt: Date.now() + 78 * 86_400_000, lastUsedAt: Date.now() - 3_600_000, revokedAt: null },
+  { id: '8a01d55e2f3b9c47', name: '旧笔记本', prefix: 'tdx_8a01d55e2f3b9c47', status: 'revoked', scopes: {},
+    approval: 'ask', createdAt: Date.now() - 90 * 86_400_000, expiresAt: null, lastUsedAt: Date.now() - 40 * 86_400_000, revokedAt: Date.now() - 30 * 86_400_000 },
+];
+
+function demoAgentCallingUpdate(body: Record<string, unknown>): SecureResponse {
+  const scope = body.scope as AgentCallingSettings['scope'] | undefined;
+  if (scope && Object.values(scope.models ?? {}).some((models) => !Array.isArray(models) || !models.length)) {
+    return json({ error: { code: 'INVALID_REQUEST', message: 'scope.models lists must not be empty' } }, 400);
+  }
+  const mcpUpdate = (body.mcp ?? {}) as Partial<AgentCallingSettings['mcp']>;
+  const nextScope = scope ?? agentCalling.scope;
+  const mcpEnabled = typeof mcpUpdate.enabled === 'boolean' ? mcpUpdate.enabled : agentCalling.mcp.enabled;
+  agentCalling = {
+    ...agentCalling,
+    scope: nextScope,
+    mcp: {
+      enabled: mcpEnabled,
+      approval: mcpUpdate.approval ?? agentCalling.mcp.approval,
+      injected: mcpEnabled && (nextScope.agents === null || nextScope.agents.length > 0),
+    },
+  };
+  return json(agentCalling);
+}
+
+function demoApiListenerUpdate(body: Record<string, unknown>): SecureResponse {
+  const port = typeof body.port === 'number' ? body.port : agentCalling.apiListener.port;
+  if (!Number.isInteger(port) || port < 1 || port > 65535 || port === 7345) {
+    return json({ error: { code: 'INVALID_REQUEST', message: 'port must be 1-65535 and differ from the main listener' } }, 400);
+  }
+  const enabled = typeof body.enabled === 'boolean' ? body.enabled : agentCalling.apiListener.enabled;
+  agentCalling = {
+    ...agentCalling,
+    apiListener: { ...agentCalling.apiListener, enabled, port,
+      pendingRestart: enabled !== demoListenerRunning.enabled || port !== demoListenerRunning.port },
+  };
+  return json(agentCalling);
+}
+
+function demoApiKeysRoute(method: string, path: string, body: Record<string, unknown>): SecureResponse | null {
+  if (path === '/v2/api-keys' && method === 'POST') {
+    const id = [...crypto.getRandomValues(new Uint8Array(8))].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+    const secret = [...crypto.getRandomValues(new Uint8Array(24))].map((byte) => byte.toString(36).padStart(2, '0')).join('').slice(0, 43);
+    const key: ApiKeySummary = {
+      id, name: String(body.name ?? '').trim() || 'key', prefix: `tdx_${id}`, status: 'active',
+      scopes: (body.scopes ?? {}) as ApiKeySummary['scopes'], approval: (body.approval ?? 'ask') as ApiKeySummary['approval'],
+      createdAt: Date.now(), expiresAt: typeof body.expiresAt === 'number' ? body.expiresAt : null, lastUsedAt: null, revokedAt: null,
+    };
+    apiKeys = [key, ...apiKeys];
+    return json({ ...key, key: `tdx_${id}_${secret}` }, 201);
+  }
+  const match = path.match(/^\/v2\/api-keys\/([^/]+)$/);
+  const key = match ? apiKeys.find((item) => item.id === decodeURIComponent(match[1])) : undefined;
+  if (!match || (method !== 'PATCH' && method !== 'DELETE')) return null;
+  if (!key) return json({ error: { code: 'NOT_FOUND', message: 'api key not found' } }, 404);
+  if (method === 'DELETE') {
+    apiKeys = apiKeys.map((item) => (item.id === key.id ? { ...item, status: 'revoked', revokedAt: Date.now() } : item));
+    return json({ id: key.id, revoked: key.status !== 'revoked' });
+  }
+  const next: ApiKeySummary = {
+    ...key,
+    ...(typeof body.name === 'string' ? { name: body.name.trim() } : {}),
+    ...(body.scopes ? { scopes: body.scopes as ApiKeySummary['scopes'] } : {}),
+    ...(typeof body.approval === 'string' ? { approval: body.approval as ApiKeySummary['approval'] } : {}),
+    ...('expiresAt' in body ? { expiresAt: typeof body.expiresAt === 'number' ? body.expiresAt : null } : {}),
+  };
+  next.status = next.revokedAt ? 'revoked' : next.expiresAt && next.expiresAt <= Date.now() ? 'expired' : 'active';
+  apiKeys = apiKeys.map((item) => (item.id === key.id ? next : item));
+  return json(next);
+}
 const sockets = new Set<DemoSocket>();
 
 function json(value: unknown, status = 200): SecureResponse {
@@ -563,7 +645,13 @@ function route(request: SecureRequest): SecureResponse {
       case '/v2/workspaces':
         return json({ workspaces });
       case '/v2/conversations':
-        return json({ conversations: [...journals.values()].map((journal) => journal.manifest) });
+        // Agent Calling children are listed only on request, like the daemon.
+        return json({ conversations: [...journals.values()].map((journal) => journal.manifest)
+          .filter((manifest) => query.get('includeChildren') === 'true' || !manifest.parentConversationId) });
+      case '/v2/agent-calling':
+        return json(agentCalling);
+      case '/v2/api-keys':
+        return json({ keys: apiKeys });
       case '/v2/kanban/tasks':
         return json({ tasks: kanbanTasks });
       case '/v2/history/storage': {
@@ -719,6 +807,16 @@ function route(request: SecureRequest): SecureResponse {
     journals.delete(journal.manifest.id);
     return json({ deleted: true });
   }
+  if (path === '/v2/agent-calling' && method === 'PUT') return demoAgentCallingUpdate(body);
+  if (path === '/v2/agent-calling/api-listener' && method === 'PUT') return demoApiListenerUpdate(body);
+  const apiKeyResponse = demoApiKeysRoute(method, path, body);
+  if (apiKeyResponse) return apiKeyResponse;
+  const cancel = path.match(/^\/v2\/conversations\/([^/]+)\/cancel$/);
+  if (cancel && method === 'POST') {
+    const target = journals.get(decodeURIComponent(cancel[1]));
+    if (!target) return notFound(method, path);
+    return json({ conversationId: target.manifest.id, cancelled: cancelDemoTurn(target, typeof body.turnId === 'string' ? body.turnId : undefined), turnId: body.turnId ?? null });
+  }
   if (path.startsWith('/v2/agent-desktop') && (method === 'PUT' || method === 'POST' || method === 'PATCH')) {
     if (typeof body.enabled === 'boolean') agentDesktop = { ...agentDesktop, enabled: body.enabled };
     if (typeof body.computerEnabled === 'boolean') agentDesktop = { ...agentDesktop, computerEnabled: body.computerEnabled };
@@ -789,11 +887,64 @@ function broadcast(event: ConversationEvent) {
   for (const socket of sockets) socket.emit({ type: 'conversation.event', payload: event });
 }
 
+type DemoStep = [number, string, Record<string, unknown> | (() => Record<string, unknown> | null)];
+type DemoRun = { turnId: string; timers: ReturnType<typeof setTimeout>[]; onCancel?: () => void };
+/** Scripted turns still playing, by conversation id, so they can be cancelled. */
+const demoRuns = new Map<string, DemoRun>();
+
+function appendDemoEvent(journal: Journal, turnId: string, type: string, payload: Record<string, unknown>): void {
+  const event: ConversationEvent = {
+    schemaVersion: 2,
+    eventId: `${turnId}-${type}-${journal.events.length + 1}`,
+    conversationId: journal.manifest.id,
+    sequence: journal.events.length + 1,
+    time: new Date().toISOString(),
+    type,
+    provider: journal.manifest.provider,
+    payload: { turnId, ...payload },
+  };
+  journal.events.push(event);
+  journal.manifest.lastSequence = event.sequence;
+  journal.manifest.updatedAt = event.time;
+  if (type === 'turn.started') journal.manifest.status = 'running';
+  if (type === 'turn.completed' || type === 'turn.cancelled') journal.manifest.status = 'idle';
+  broadcast(event);
+}
+
+/** Plays `steps` (delay ms, type, payload — a function payload is read when
+ * it fires and skips the step when it returns null). */
+function scheduleDemoTurn(journal: Journal, turnId: string, steps: DemoStep[], onCancel?: () => void): void {
+  const run: DemoRun = { turnId, timers: [], onCancel };
+  demoRuns.set(journal.manifest.id, run);
+  for (const [delay, type, payload] of steps) {
+    run.timers.push(setTimeout(() => {
+      const body = typeof payload === 'function' ? payload() : payload;
+      if (!body) return;
+      appendDemoEvent(journal, turnId, type, body);
+      if (type === 'turn.completed' && demoRuns.get(journal.manifest.id) === run) demoRuns.delete(journal.manifest.id);
+    }, delay));
+  }
+}
+
+function cancelDemoTurn(journal: Journal, turnId?: string): boolean {
+  const run = demoRuns.get(journal.manifest.id);
+  if (!run || (turnId && run.turnId !== turnId)) return false;
+  run.timers.forEach(clearTimeout);
+  demoRuns.delete(journal.manifest.id);
+  appendDemoEvent(journal, run.turnId, 'turn.cancelled', { status: 'cancelled' });
+  run.onCancel?.();
+  return true;
+}
+
 /** Streams a short scripted turn so prompts typed in the preview get an answer. */
 function playCannedTurn(journal: Journal, text: string): string {
   const turnId = `${journal.manifest.id}-live-${Date.now()}`;
+  if (/agent|调用/i.test(text) && !journal.manifest.parentConversationId) {
+    playAgentCallTurn(journal, turnId, text);
+    return turnId;
+  }
   const toolCallId = `${turnId}-call`;
-  const steps: Array<[number, string, Record<string, unknown>]> = [
+  scheduleDemoTurn(journal, turnId, [
     [0, 'message.created', { role: 'user', content: text }],
     [150, 'turn.started', { status: 'running' }],
     [700, 'thought.delta', { thinking: '这是演示预览：后端是内存中的模拟数据，下面的步骤和回复都是预设的。' }],
@@ -806,27 +957,69 @@ function playCannedTurn(journal: Journal, text: string): string {
     }],
     [3900, 'usage.updated', { model: 'opus', contextWindow: 200_000, usage: { last: { input: 9_800, output: 640, cacheRead: 52_000, cacheWrite: 1_200, total: 10_440 } } }],
     [4000, 'turn.completed', { status: 'completed' }],
-  ];
-  for (const [delay, type, payload] of steps) {
-    setTimeout(() => {
-      const event: ConversationEvent = {
-        schemaVersion: 2,
-        eventId: `${turnId}-${type}`,
-        conversationId: journal.manifest.id,
-        sequence: journal.events.length + 1,
-        time: new Date().toISOString(),
-        type,
-        provider: journal.manifest.provider,
-        payload: { turnId, ...payload },
-      };
-      journal.events.push(event);
-      journal.manifest.lastSequence = event.sequence;
-      journal.manifest.updatedAt = event.time;
-      journal.manifest.status = type === 'turn.completed' ? 'idle' : 'running';
-      broadcast(event);
-    }, delay);
-  }
+  ]);
   return turnId;
+}
+
+/** A prompt mentioning agents plays an Agent Calling turn: the agent calls
+ * Codex through `mcp__todex_agents__agent_run`, which runs in a child
+ * conversation (hidden from the list) whose progress the parent journals as
+ * `agent.call.*` events. Cancelling the child cancels the call. */
+function playAgentCallTurn(journal: Journal, turnId: string, text: string): void {
+  const toolCallId = `${turnId}-agent-run`;
+  const childId = crypto.randomUUID();
+  const childTurnId = `${childId}-turn-1`;
+  const task = '检查 src/checkout 下的表单校验，列出缺少错误提示的字段。';
+  const output = '发现 3 个字段缺少错误提示：\n\n- `email`：格式错误时无提示\n- `zip`：长度校验失败时无提示\n- `phone`：只在提交后才校验\n\n建议统一改用 `FieldError` 组件。';
+  const toolName = 'mcp__todex_agents__agent_run';
+  const args = { agent: 'codex', text: task, reasoningEffort: 'high' };
+  const startedAt = Date.now();
+  let cancelled = false;
+  const call = { childConversationId: childId, childTurnId };
+  const now = new Date().toISOString();
+  const child: Journal = {
+    manifest: { ...journal.manifest, id: childId, provider: 'codex', title: 'Agent call · Codex', status: 'idle', lastSequence: 0,
+      createdAt: now, updatedAt: now, parentConversationId: journal.manifest.id },
+    events: [],
+  };
+  delete child.manifest.archivedAt;
+  delete child.manifest.schedule;
+  delete child.manifest.titleEnc;
+  scheduleDemoTurn(journal, turnId, [
+    [0, 'message.created', { role: 'user', content: text }],
+    [150, 'turn.started', { status: 'running' }],
+    [600, 'tool.started', { toolCallId, toolName, arguments: args }],
+    [900, 'agent.call.started', () => {
+      journals.set(childId, child);
+      scheduleDemoTurn(child, childTurnId, [
+        [0, 'message.created', { role: 'user', content: task }],
+        [100, 'turn.started', { status: 'running' }],
+        [1500, 'tool.started', { toolCallId: `${childTurnId}-grep`, toolName: 'shell', arguments: { command: 'rg -n "validate" src/checkout' } }],
+        [2400, 'tool.completed', { toolCallId: `${childTurnId}-grep`, toolName: 'shell', arguments: { command: 'rg -n "validate" src/checkout' }, result: 'src/checkout/schema.ts:12: validate(email)', isError: false }],
+        [5000, 'message.completed', {
+          role: 'assistant',
+          message: { role: 'assistant', content: [{ type: 'text', text: output }] },
+          block: { category: 'assistant_final', id: `${childTurnId}-answer`, turnId: childTurnId, phase: 'completed' },
+        }],
+        [5200, 'turn.completed', { status: 'completed' }],
+      ], () => {
+        cancelled = true;
+        appendDemoEvent(journal, turnId, 'agent.call.cancelled', { ...call, status: 'cancelled', output: '', durationMs: Date.now() - startedAt });
+      });
+      return { ...call, agent: 'codex', model: 'gpt-5.5-codex', reasoningEffort: 'high', text: task, title: 'Agent call · Codex', status: 'running', startedAt: new Date().toISOString() };
+    }],
+    [2500, 'agent.call.updated', () => (cancelled ? null : { ...call, status: 'waiting_permission' })],
+    [4000, 'agent.call.updated', () => (cancelled ? null : { ...call, status: 'running' })],
+    [6300, 'agent.call.completed', () => (cancelled ? null : { ...call, status: 'completed', output, durationMs: Date.now() - startedAt })],
+    [6400, 'tool.completed', () => ({ toolCallId, toolName, arguments: args, isError: false,
+      result: JSON.stringify({ conversationId: childId, turnId: childTurnId, status: cancelled ? 'cancelled' : 'completed', output: cancelled ? '' : output, error: null }) })],
+    [6900, 'message.completed', () => ({
+      role: 'assistant',
+      message: { role: 'assistant', content: [{ type: 'text', text: cancelled ? 'Codex 的调用已取消。' : `Codex 已完成检查：\n\n${output}` }] },
+      block: { category: 'assistant_final', id: `${turnId}-answer`, turnId, phase: 'completed' },
+    })],
+    [7000, 'turn.completed', { status: 'completed' }],
+  ]);
 }
 
 export const demoTransport: SecureTransport = {

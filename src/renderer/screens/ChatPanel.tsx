@@ -112,8 +112,9 @@ import type { SshHost } from '@todex/protocol/ssh';
 import type { HostApp } from '@todex/protocol/agentDesktop';
 import { ConnectionError } from '@todex/protocol/connectionError';
 import { describeToolCall, type ToolCallKind } from '@todex/protocol/toolPresentation';
+import { agentCallingToolFromName, agentCallingToolSummary, type AgentCallingTool } from '@todex/protocol/agentCalling';
 import { isThinkingProgressEntry } from '@todex/protocol/mobileParity';
-import { getLocale, t, useT } from '../i18n';
+import { getLocale, t, useT, type MessageKey } from '../i18n';
 
 type Props = {
   session: TodeXSession;
@@ -199,6 +200,14 @@ function toolKindLabel(kind: ToolCallKind): string {
   }
 }
 
+const AGENT_CALLING_TOOL_LABELS: Record<AgentCallingTool, MessageKey> = {
+  agents_list: 'chat.agentToolList',
+  agent_run: 'chat.agentToolRun',
+  agent_turn: 'chat.agentToolTurn',
+  agent_wait: 'chat.agentToolWait',
+  agent_cancel: 'chat.agentToolCancel',
+};
+
 /** Tool rows name the tool and show its key argument (command, path, query)
  * without expanding; arguments, output and errors stay in the body. */
 function toolCardPresentation(entry: TimelineEntry, active: boolean) {
@@ -208,9 +217,11 @@ function toolCardPresentation(entry: TimelineEntry, active: boolean) {
       : 'running';
   // A failed call without its own error text surfaces its output as the error.
   const outputIsError = state === 'failed' && !tool.errorText;
+  // Agent Calling tools (`mcp__todex_agents__*`) read as what they do.
+  const agentTool = agentCallingToolFromName(tool.name);
   return {
-    label: tool.name || toolKindLabel(tool.kind),
-    summary: tool.summary,
+    label: agentTool ? t(AGENT_CALLING_TOOL_LABELS[agentTool]) : tool.name || toolKindLabel(tool.kind),
+    summary: agentTool ? agentCallingToolSummary(tool.argsText) || tool.summary : tool.summary,
     argsText: tool.argsText,
     output: outputIsError ? undefined : tool.outputText,
     errorText: state === 'failed' ? (tool.errorText ?? tool.outputText) : undefined,

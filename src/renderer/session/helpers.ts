@@ -179,6 +179,12 @@ export type ConversationRecord = {
   model?: string;
   reasoningEffort?: string | null;
   v2ConversationId?: string;
+  /** Child conversation an agent started through Agent Calling (manifest
+   * `parentConversationId`): the parent's backend id. Children are left out
+   * of the backend's conversation list and of the sidebar; a child record
+   * exists only once opened from the parent's Agent calls tab, and lives as
+   * long as its parent is listed. */
+  parentConversationId?: string;
   lastSequence?: number;
   lastCompletedAt?: number;
   /** Last time the conversation was visible in a focused window. */
@@ -2440,10 +2446,16 @@ export function conversationFromManifest(
     provider: manifest.provider,
     providerProfile: manifest.providerProfile,
     v2ConversationId: manifest.id,
+    ...(manifest.parentConversationId ? { parentConversationId: manifest.parentConversationId } : {}),
     lastSequence: manifest.lastSequence,
     createdAt,
     updatedAt,
   };
+}
+
+/** Conversations the sidebar and pickers list: everything but Agent Calling children. */
+export function isListedConversation(conversation: Pick<ConversationRecord, 'parentConversationId'>): boolean {
+  return !conversation.parentConversationId;
 }
 
 export function sameConversationSchedule(left?: ConversationSchedule, right?: ConversationSchedule): boolean {
@@ -2481,10 +2493,13 @@ export function mergeManifestConversations(
   );
   const manifestIds = new Set(manifests.map((manifest) => manifest.id));
   let changed = false;
+  // Child conversations (Agent Calling) are not listed; they stay while
+  // their parent is.
   const next = current.filter((item) => (
     !isV2Conversation(item)
     || !item.v2ConversationId
     || manifestIds.has(item.v2ConversationId)
+    || (item.parentConversationId !== undefined && manifestIds.has(item.parentConversationId))
     || !conversationInScope(item)
   ));
   if (next.length !== current.length) {

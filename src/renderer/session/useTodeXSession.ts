@@ -26,6 +26,7 @@ import {
   isAgentBrowserWatchRequestId,
   type AgentBrowserFrame,
 } from '@todex/protocol/agentDesktop';
+import type { AgentCallSession } from '@todex/protocol/agentCalling';
 import { parseFollowUpQueue, type ConversationRuntime, type ExtensionEditorRequest, type FollowUpQueueState } from '@todex/protocol/conversationRuntime';
 import { conversationScheduleFrame, followUpQueueFrame } from '@todex/protocol/conversationCommands';
 import { conversationTranscriptMarkdown, fetchConversationTranscriptTail, transcriptEntries } from '@todex/protocol/conversationExport';
@@ -820,6 +821,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const [contextUsageByConversation, setContextUsageByConversation] = useState<Record<string, ConversationContextUsage>>({});
   const [compactionByConversation, setCompactionByConversation] = useState<Record<string, ContextCompactionState & { recommended?: boolean }>>({});
   const [subagentsByConversation, setSubagentsByConversation] = useState<Record<string, SubagentRun[]>>({});
+  /** Child conversations each conversation's agent called (Agent Calling), by local id. */
+  const [agentCallsByConversation, setAgentCallsByConversation] = useState<Record<string, AgentCallSession[]>>({});
   const [memoryEntriesByConversation, setMemoryEntriesByConversation] = useState<Record<string, MemoryEntry[]>>({});
   const [usageRecords, setUsageRecords] = useState<UsageRecord[]>([]);
   const [conversationRuntimeById, setConversationRuntimeById] = useState<Record<string, ConversationRuntime>>({});
@@ -875,7 +878,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   );
   // Runtime subagent and usage arrays keep their identity until an event
   // changes them; the copies stamped with local ids are only rebuilt then.
-  const projectedRuntimeListsRef = useRef(new Map<string, Pick<ConversationRuntime, 'subagents' | 'usageRecords'>>());
+  const projectedRuntimeListsRef = useRef(new Map<string, Pick<ConversationRuntime, 'subagents' | 'agentCalls' | 'usageRecords'>>());
 
 
   useEffect(() => {
@@ -2159,9 +2162,12 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     if (state.contextUsage) setContextUsageByConversation((current) => current[localId] === state.contextUsage ? current : { ...current, [localId]: state.contextUsage! });
     setCompactionByConversation((current) => current[localId] === state.compaction ? current : { ...current, [localId]: state.compaction });
     const projected = projectedRuntimeListsRef.current.get(localId);
-    projectedRuntimeListsRef.current.set(localId, { subagents: state.subagents, usageRecords: state.usageRecords });
+    projectedRuntimeListsRef.current.set(localId, { subagents: state.subagents, agentCalls: state.agentCalls, usageRecords: state.usageRecords });
     if (projected?.subagents !== state.subagents) {
       setSubagentsByConversation((current) => ({ ...current, [localId]: state.subagents.map((run) => ({ ...run, conversationId: localId })) }));
+    }
+    if (projected?.agentCalls !== state.agentCalls) {
+      setAgentCallsByConversation((current) => ({ ...current, [localId]: state.agentCalls }));
     }
     setMemoryEntriesByConversation((current) => current[localId] === state.memoryEntries ? current : { ...current, [localId]: state.memoryEntries });
     if (projected?.usageRecords !== state.usageRecords) {
@@ -5037,6 +5043,43 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     setActiveWorkspaceId(workspaceId);
     setActiveConversationId(conversationId);
     setLastError('');
+  }, []);
+
+  /** Shows a child conversation (Agent Calling) in the main chat. Children
+   * are left out of the conversation list, so one opened for the first time
+   * is fetched by id from its parent's backend and kept as a hidden record
+   * in the parent's workspace. */
+  const openAgentCallConversation = useCallback(async (parentConversationId: string, childConversationId: string) => {
+    const existing = conversationsRef.current.find((item) => item.v2ConversationId === childConversationId || item.id === childConversationId);
+    if (existing) {
+      selectConversation(existing.workspaceId, existing.id);
+      return;
+    }
+    const parent = conversationsRef.current.find((item) => item.id === parentConversationId || item.v2ConversationId === parentConversationId);
+    if (!parent) throw new Error(t('agentCalls.parentMissing'));
+    const backendId = backendIdForConversation(parent.id);
+    const profile = profileFor(backendId);
+    if (!profile) throw new Error(t('sidebar.backendRemoved'));
+    const [manifest] = withDecryptedTitles(backendId, [await backendApi(profile).getConversation(childConversationId)]);
+    const workspace = workspacesRef.current.find((item) => item.id === parent.workspaceId);
+    const base = conversationFromManifest(manifest, parent.workspaceId);
+    const record: ConversationRecord = {
+      ...base,
+      ...(workspace ? manifestRunModes(backendId)(base, workspace) : {}),
+      ...(parent.backendConnectionId ? { backendConnectionId: parent.backendConnectionId } : {}),
+      parentConversationId: manifest.parentConversationId || parent.v2ConversationId || parent.id,
+    };
+    setConversations((current) => current.some((item) => item.v2ConversationId === manifest.id) ? current : [record, ...current]);
+    const localId = conversationsRef.current.find((item) => item.v2ConversationId === manifest.id)?.id ?? record.id;
+    selectConversation(parent.workspaceId, localId);
+  }, [selectConversation]);
+
+  /** Cancels a child conversation's running turn (Agent Calling) through its
+   * parent's backend; the parent's journal reports the result. */
+  const cancelAgentCall = useCallback(async (parentConversationId: string, childConversationId: string, childTurnId?: string) => {
+    const profile = profileFor(backendIdForConversation(parentConversationId));
+    if (!profile) throw new Error(t('sidebar.backendRemoved'));
+    return backendApi(profile).cancel(childConversationId, childTurnId);
   }, []);
 
   /** A turn that finished out of sight goes to the notification history. */
@@ -9399,6 +9442,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     contextUsageByConversation,
     compactionByConversation,
     subagentsByConversation,
+    agentCallsByConversation,
     conversationRuntimeById,
     recoveringConversations,
     openStatusByConversation,
@@ -9427,6 +9471,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     materializeConversation: materializeV2Conversation,
     switchConversationAgent,
     selectConversation,
+    openAgentCallConversation,
+    cancelAgentCall,
     renameConversation,
     forkConversation,
     removeConversation,
