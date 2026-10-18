@@ -2,21 +2,27 @@ import { useState } from 'react';
 import { backendWallClockToIso } from '@todex/protocol/todex';
 import { Button } from '@/components/base/buttons/button';
 import { Input } from '@/components/base/input/input';
+import { Select, SelectItem } from '@/components/base/select/select';
+import type { ProviderDescriptor, ProviderKind } from '@todex/protocol/v2';
+import { ProviderIcon } from './ProviderIcon';
 import { Modal } from '@/components/ui/modal';
 import { kanbanBackendLocalTime, kanbanTimeZoneLabel, useKanbanTimeZone } from '../session/kanbanTasks';
 import { useT } from '../i18n';
 
-/** Picks the time a scheduled conversation sends at. The time is wall-clock
- * in the backend's zone, which is where it runs; `onConfirm` gets the ISO
- * instant and resolves whether it was applied. */
-export function ScheduleConversationDialog({ isOpen, mode, initialAt, backendId, onConfirm, onClose }: {
+/** Picks the time a scheduled conversation sends at (and, when creating
+ * with `agents`, the agent it runs). The time is wall-clock in the backend's
+ * zone, which is where it runs; `onConfirm` gets the ISO instant and the
+ * picked agent and resolves whether it was applied. */
+export function ScheduleConversationDialog({ isOpen, mode, initialAt, backendId, agents, onConfirm, onClose }: {
   isOpen: boolean;
   /** Backend the conversation runs on (default: the focused one). */
   backendId?: string;
   mode: 'create' | 'reschedule';
   /** ISO instant to start from when rescheduling. */
   initialAt?: string;
-  onConfirm: (at: string) => Promise<boolean>;
+  /** Agents a new scheduled conversation can run on, and the default. */
+  agents?: { providers: ProviderDescriptor[]; defaultProvider?: ProviderKind };
+  onConfirm: (at: string, options: { provider?: ProviderKind }) => Promise<boolean>;
   onClose: () => void;
 }) {
   const t = useT();
@@ -25,6 +31,9 @@ export function ScheduleConversationDialog({ isOpen, mode, initialAt, backendId,
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [openedWith, setOpenedWith] = useState<string | null>(null);
+  const [provider, setProvider] = useState<ProviderKind | undefined>(undefined);
+  const agentChoices = mode === 'create' ? agents?.providers ?? [] : [];
+  const pickedProvider = agentChoices.some((item) => item.id === provider) ? provider : agents?.defaultProvider ?? agentChoices[0]?.id;
 
   // Seed on open: the current time when rescheduling, else an hour ahead.
   const openKey = isOpen ? `${mode}:${initialAt ?? ''}:${zone ? 'zone' : ''}` : null;
@@ -36,6 +45,8 @@ export function ScheduleConversationDialog({ isOpen, mode, initialAt, backendId,
       setError('');
       setBusy(false);
     }
+    // A fresh open starts from the default agent; the zone arriving later keeps the pick.
+    if (openKey && !openedWith) setProvider(agents?.defaultProvider);
   }
 
   const submit = async () => {
@@ -46,7 +57,7 @@ export function ScheduleConversationDialog({ isOpen, mode, initialAt, backendId,
       return;
     }
     setBusy(true);
-    const applied = await onConfirm(iso);
+    const applied = await onConfirm(iso, { provider: agentChoices.length ? pickedProvider : undefined });
     setBusy(false);
     if (applied) onClose();
   };
@@ -61,12 +72,26 @@ export function ScheduleConversationDialog({ isOpen, mode, initialAt, backendId,
       footer={(
         <>
           <Button variant="secondary" onClick={onClose}>{t('common.cancel')}</Button>
-          <Button onClick={() => { void submit(); }} disabled={!zone || !at || busy}>
+          <Button onClick={() => { void submit(); }} disabled={!zone || !at || busy || (Boolean(agents) && mode === 'create' && !pickedProvider)}>
             {mode === 'create' ? t('schedule.confirm') : t('schedule.save')}
           </Button>
         </>
       )}
     >
+      {agentChoices.length ? (
+        <Select
+          label={t('schedule.agent')}
+          selectedKey={pickedProvider ?? null}
+          onSelectionChange={(key) => { if (key !== null) setProvider(String(key) as ProviderKind); }}
+        >
+          {agentChoices.map((item) => (
+            <SelectItem key={item.id} id={item.id} textValue={item.displayName}>
+              <ProviderIcon className="size-4" provider={item.id} />
+              {item.displayName}
+            </SelectItem>
+          ))}
+        </Select>
+      ) : null}
       <Input
         label={t('schedule.at')}
         name="schedule-conversation-at"

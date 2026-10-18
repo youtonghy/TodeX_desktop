@@ -2582,6 +2582,7 @@ export const zhCN = {
   'schedule.createTitle': '创建定时对话',
   'schedule.rescheduleTitle': '修改定时',
   'schedule.at': '发送时间',
+  'schedule.agent': 'Agent',
   'schedule.hint': '创建后在对话里照常发送消息，它们会暂存在后端，到点后依次发出。',
   'schedule.confirm': '创建',
   'schedule.save': '保存',

@@ -595,8 +595,8 @@ export function App() {
         session.createConversation(session.activeWorkspaceId);
         setPanel(null);
       }}
-      onCreateScheduledConversation={async (workspaceId, at) => {
-        const record = await session.createScheduledConversation(workspaceId, at);
+      onCreateScheduledConversation={async (workspaceId, at, options) => {
+        const record = await session.createScheduledConversation(workspaceId, at, options);
         if (record) setPanel(null);
         return Boolean(record);
       }}

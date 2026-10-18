@@ -2582,6 +2582,7 @@ export const ja: Messages = {
   'schedule.createTitle': 'スケジュール会話を作成',
   'schedule.rescheduleTitle': '予定時刻を変更',
   'schedule.at': '送信時刻',
+  'schedule.agent': 'エージェント',
   'schedule.hint': '会話でいつも通りメッセージを送ると、バックエンドが保持し、この時刻に順番に送信します。',
   'schedule.confirm': '作成',
   'schedule.save': '保存',

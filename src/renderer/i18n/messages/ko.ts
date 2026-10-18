@@ -2582,6 +2582,7 @@ export const ko: Messages = {
   'schedule.createTitle': '예약 대화 만들기',
   'schedule.rescheduleTitle': '예약 시각 변경',
   'schedule.at': '전송 시각',
+  'schedule.agent': '에이전트',
   'schedule.hint': '대화에서 평소처럼 메시지를 보내면 백엔드가 보관했다가 이 시각에 순서대로 보냅니다.',
   'schedule.confirm': '만들기',
   'schedule.save': '저장',

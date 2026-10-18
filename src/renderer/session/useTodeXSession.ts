@@ -7494,9 +7494,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const createScheduledConversation = useCallback(async (
     workspaceId: string,
     at: string,
-    options?: { title?: string },
+    options?: { title?: string; provider?: ProviderKind },
   ): Promise<ConversationRecord | null> => {
-    const created = createConversation(workspaceId, { fresh: true, ...(options?.title ? { title: options.title } : {}) });
+    const created = createConversation(workspaceId, {
+      fresh: true,
+      ...(options?.title ? { title: options.title } : {}),
+      ...(options?.provider ? { provider: options.provider } : {}),
+    });
     if (!created) return null;
     if (!providerSupportsScheduledConversations(providersForConversation(created), created.provider)) {
       setLastError(t('sess.scheduleNeedsUpgrade'));
@@ -7507,6 +7511,25 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     if (!await scheduleConversation(record.id, at)) return null;
     return conversationsRef.current.find((item) => item.id === record.id) ?? record;
   }, [createConversation, materializeV2Conversation, scheduleConversation, setLastError]);
+
+  /** Agents a scheduled conversation in the workspace can run on (available
+   * and able to hold its queue until a set time), and the one a new
+   * conversation there would start with when it is among them. */
+  const scheduledConversationAgents = useCallback((workspaceId: string): { providers: ProviderDescriptor[]; defaultProvider?: ProviderKind } => {
+    const workspace = workspacesRef.current.find((item) => item.id === workspaceId);
+    const backendConnectionId = workspace?.backendConnectionId
+      ?? (workspace && isNoneWorkspaceId(workspace.id) ? noWorkspaceBackendIdRef.current || null : null);
+    const providers = (backendConnectionId ? v2ProvidersByBackendRef.current[backendConnectionId] : undefined) ?? v2ProvidersRef.current;
+    const eligible = providers.filter((item) => item.available && providerSupportsScheduledConversations(providers, item.id));
+    const agent = resolveCreateConversationAgent({
+      providers,
+      conversations: conversationsRef.current,
+      activeConversationId: activeConversationRef.current,
+      workspaceId,
+    });
+    const defaultProvider = eligible.some((item) => item.id === agent?.provider) ? agent?.provider : eligible[0]?.id;
+    return { providers: eligible, defaultProvider };
+  }, []);
 
   useEffect(() => {
     refreshFollowUpQueueRef.current = refreshFollowUpQueue;
@@ -9386,6 +9409,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     scheduleConversation,
     sendScheduledNow,
     createScheduledConversation,
+    scheduledConversationAgents,
     controlConversation,
     controlStatusByConversation,
     composerAttachments,

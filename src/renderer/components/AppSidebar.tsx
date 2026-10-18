@@ -53,6 +53,7 @@ import { WorkspaceHoverTooltip } from './WorkspaceHoverTooltip';
 import { AppIcon } from './AppIcon';
 import { WORKSPACE_ICON_CHOICES, WORKSPACE_RING_STYLES, WorkspaceStatusRing, ringStyleKey, workspaceIconComponent } from './WorkspaceIcon';
 import type { TodeXSession } from '../session/useTodeXSession';
+import type { ProviderKind } from '@todex/protocol/v2';
 import { connectionStateLabel, conversationDisplayTitle, formatResetInstant, getConversationStatus, healthLabelOf, isConversationHighlighted, isListedConversation, isNoneWorkspaceId, workspaceDisplayName } from '../session/helpers';
 import { ShortcutHint, shortcutKeys, useAppShortcuts, type ShortcutId } from '../lib/shortcuts';
 import { useT } from '../i18n';
@@ -71,8 +72,9 @@ type Props = {
   onCreateWorkspace: () => void;
   onEditWorkspace: (workspaceId: string) => void;
   onCreateConversation: () => void;
-  /** Creates a conversation in the workspace that sends at `at` (ISO). */
-  onCreateScheduledConversation: (workspaceId: string, at: string) => Promise<boolean>;
+  /** Creates a conversation in the workspace that sends at `at` (ISO), on
+   * the picked agent (the default one when absent). */
+  onCreateScheduledConversation: (workspaceId: string, at: string, options: { provider?: ProviderKind }) => Promise<boolean>;
   onOpenSettings: () => void;
   onOpenCapabilities: () => void;
   onOpenCliManager: () => void;
@@ -439,6 +441,11 @@ export function AppSidebar({
 
   const [contextMenu, setContextMenu] = useState<ContextMenu>(null);
   const [schedulingWorkspaceId, setSchedulingWorkspaceId] = useState<string | null>(null);
+  const schedulingAgents = useMemo(
+    () => (schedulingWorkspaceId ? session.scheduledConversationAgents(schedulingWorkspaceId) : undefined),
+    // Re-read when the agent catalogs change while the dialog is open.
+    [schedulingWorkspaceId, session.scheduledConversationAgents, session.v2Providers],
+  );
   const canSchedule = features.scheduledConversations !== 'off' && session.v2Providers.some((provider) => provider.available && provider.capabilities.scheduledConversations === true);
   // The menu keeps rendering its last target while it animates out.
   const lastContextMenuRef = useRef<ContextMenu>(contextMenu);
@@ -1560,7 +1567,8 @@ export function AppSidebar({
       <ScheduleConversationDialog
         isOpen={schedulingWorkspaceId !== null}
         mode="create"
-        onConfirm={(at) => (schedulingWorkspaceId ? onCreateScheduledConversation(schedulingWorkspaceId, at) : Promise.resolve(false))}
+        agents={schedulingAgents}
+        onConfirm={(at, options) => (schedulingWorkspaceId ? onCreateScheduledConversation(schedulingWorkspaceId, at, options) : Promise.resolve(false))}
         onClose={() => setSchedulingWorkspaceId(null)}
       />
       <PointMenu position={contextMenu} onClose={closeContextMenu}>
