@@ -736,7 +736,6 @@ export const ko: Messages = {
   'workbench.browserPreview': '브라우저 미리보기',
   'workbench.browserPreviewHint': '주소를 입력하면 backend가 실행 중인 머신이 요청하여 내용을 반환합니다. 워크스페이스 {workspace}.',
   'workbench.noWorkspace': '선택되지 않음',
-  'workbench.openDefault': '기본 주소 열기',
   'workbench.gitPath': 'Git 워크스페이스 경로',
   'workbench.refreshGitDiff': 'Git Diff 새로고침',
   'workbench.fileReadFailed': '파일을 읽지 못했습니다',

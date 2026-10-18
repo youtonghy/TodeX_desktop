@@ -736,7 +736,6 @@ export const ja: Messages = {
   'workbench.browserPreview': 'ブラウザープレビュー',
   'workbench.browserPreviewHint': 'アドレスを入力すると、backend を実行中のマシンが内容を取得して返します。ワークスペース {workspace}。',
   'workbench.noWorkspace': '未選択',
-  'workbench.openDefault': 'デフォルトアドレスを開く',
   'workbench.gitPath': 'Git ワークスペースパス',
   'workbench.refreshGitDiff': 'Git Diff を更新',
   'workbench.fileReadFailed': 'ファイルの読み込みに失敗しました',

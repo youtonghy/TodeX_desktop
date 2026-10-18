@@ -736,7 +736,6 @@ export const en: Messages = {
   'workbench.browserPreview': 'Browser preview',
   'workbench.browserPreviewHint': 'After you enter an address, the machine running the backend fetches and returns the content. Workspace: {workspace}.',
   'workbench.noWorkspace': 'Not selected',
-  'workbench.openDefault': 'Open default address',
   'workbench.gitPath': 'Git workspace path',
   'workbench.refreshGitDiff': 'Refresh Git Diff',
   'workbench.fileReadFailed': 'Failed to read file',

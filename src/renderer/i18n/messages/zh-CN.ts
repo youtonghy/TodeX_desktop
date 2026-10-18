@@ -736,7 +736,6 @@ export const zhCN = {
   'workbench.browserPreview': '浏览器预览',
   'workbench.browserPreviewHint': '输入地址后由 backend 所在机器请求并返回内容。工作区 {workspace}。',
   'workbench.noWorkspace': '尚未选择',
-  'workbench.openDefault': '打开默认地址',
   'workbench.gitPath': 'Git 工作区路径',
   'workbench.refreshGitDiff': '刷新 Git Diff',
   'workbench.fileReadFailed': '文件读取失败',

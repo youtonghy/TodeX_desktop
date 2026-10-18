@@ -456,7 +456,7 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
         : item.type === 'terminal'
           ? session.terminalById[terminalIdForConversation(scopeKey, item.id)]?.cwd || workspacePath
           : item.type === 'browser'
-            ? item.target?.url || item.target?.filePath || 'http://127.0.0.1:7345'
+            ? item.target?.url || item.target?.filePath || ''
             : item.target?.filePath || workspacePath;
     const title = isSystemWorkbenchTab(item.type) ? workbenchLabel(item.type) : location ? `${workbenchLabel(item.type)} ${location}` : item.title;
     const isActive = item.id === activeId;
@@ -942,8 +942,9 @@ function BrowserPane({ itemId, isActive, workspacePath, session, target, onTarge
   targetChangeRef.current = onTargetChange;
   // Every URL source (typed, chat link, restored layout) must stay loopback.
   const targetUrl = target?.url && isLoopbackUrl(target.url) ? target.url : undefined;
-  const defaultUrl = targetUrl ? targetUrl : (target?.filePath ? '' : 'http://127.0.0.1:7345');
-  const [draft, setDraft] = useState(defaultUrl || 'http://127.0.0.1:7345');
+  // A new tab starts blank (address bar + empty state) and loads nothing
+  // until an address is entered.
+  const [draft, setDraft] = useState(targetUrl ?? '');
   const [hasPage, setHasPage] = useState(false);
   const [error, setError] = useState('');
   const [inspect, setInspect] = useState(false);
@@ -995,10 +996,7 @@ function BrowserPane({ itemId, isActive, workspacePath, session, target, onTarge
       load({ url: target.url });
       return;
     }
-    if (!target?.filePath) {
-      if (defaultUrl && !loadedUrlRef.current) load({ url: defaultUrl });
-      return;
-    }
+    if (!target?.filePath) return;
     targetChangeRef.current?.(target);
     setDraft(target.filePath);
     const api = backendApi(session.settings);
@@ -1100,11 +1098,7 @@ function BrowserPane({ itemId, isActive, workspacePath, session, target, onTarge
           title={t('workbench.browserPreview')}
           description={t('workbench.browserPreviewHint', { workspace: workspacePath || t('workbench.noWorkspace') })}
           className="min-h-0 flex-1 rounded-2xl bg-background-secondary-default px-6"
-        >
-          <Button size="small" variant="secondary" onClick={() => navigateTo(draft || 'http://127.0.0.1:7345')}>
-            {t('workbench.openDefault')}
-          </Button>
-        </EmptyState>
+        />
       )}
     </div>
   );
