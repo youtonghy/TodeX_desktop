@@ -33,6 +33,8 @@ import { Button } from '@/components/base/buttons/button';
 import { Tooltip, TooltipTrigger } from '@/components/base/tooltip/tooltip';
 import { IconAction } from '@/components/ui/icon-action';
 import { Menu, MenuItem, MenuPopover, MenuSeparator, MenuTrigger } from '@/components/ui/menu';
+import { ConfirmDialog } from '@/components/ui/modal';
+import { toast } from '@/components/ui/toast';
 import { cx } from '@/utils/cx';
 import { useSidebarPins } from '../session/useSidebarPins';
 import { useSidebarGroupCollapse } from '../session/useSidebarGroupCollapse';
@@ -410,6 +412,9 @@ export function AppSidebar({
   const [dropTarget, setDropTarget] = useState<WorkspaceDropTarget | null>(null);
   const [renamingGroup, setRenamingGroup] = useState<{ id: string; name: string } | null>(null);
   const [renaming, setRenaming] = useState<{ kind: 'workspace' | 'conversation'; id: string; name: string } | null>(null);
+  // Delete asks first; `local` marks a legacy record that is only archived.
+  const [deleting, setDeleting] = useState<{ kind: 'workspace' | 'conversation'; id: string; local?: boolean } | null>(null);
+  const [deletePending, setDeletePending] = useState(false);
   // Other configured backends that are not connected right now.
   const offlineBackends = session.backendConnections.filter((profile) => (
     profile.id !== session.activeBackendConnectionId && profile.serverUrl.trim()
@@ -745,15 +750,36 @@ export function AppSidebar({
       if (!workspace) return;
       if (action === 'rename') setRenaming({ kind: 'workspace', id: workspace.id, name: workspace.name });
       else if (action === 'edit') onEditWorkspace(workspace.id);
-      else if (action === 'delete') session.removeWorkspace(workspace.id);
+      else if (action === 'delete') setDeleting({ kind: 'workspace', id: workspace.id });
     } else {
       const conversation = session.conversations.find((item) => item.id === menu.id);
       if (!conversation) return;
       if (action === 'rename') setRenaming({ kind: 'conversation', id: conversation.id, name: conversationDisplayTitle(conversation, session.timeline) });
       else if (action === 'fork') session.forkConversation(conversation.id);
-      else if (action === 'delete') session.removeConversation(conversation.id);
+      else if (action === 'delete') setDeleting({ kind: 'conversation', id: conversation.id, local: !conversation.v2ConversationId });
     }
     setContextMenu(null);
+  };
+
+  const confirmDelete = async () => {
+    if (!deleting || deletePending) return;
+    if (deleting.kind === 'workspace') {
+      session.removeWorkspace(deleting.id);
+      setDeleting(null);
+      return;
+    }
+    setDeletePending(true);
+    try {
+      const outcome = await session.deleteConversation(deleting.id);
+      if (outcome.status === 'skipped') {
+        toast.warning(outcome.code === 'CONFLICT' ? t('sidebar.deleteRunning') : outcome.message || t('sidebar.deleteFailed'));
+      }
+      setDeleting(null);
+    } catch (error) {
+      toast.danger(t('sidebar.deleteFailed'), { description: error instanceof Error ? error.message : undefined });
+    } finally {
+      setDeletePending(false);
+    }
   };
 
   const renderWorkspaceItem = (workspace: WorkspaceRecord, group: { entry: WorkspaceGroupEntry; last: boolean; folded: boolean } | null) => {
@@ -1686,6 +1712,19 @@ export function AppSidebar({
           onClose={() => setRenamingGroup(null)}
         />
       ) : null}
+      <ConfirmDialog
+        isOpen={deleting !== null}
+        onOpenChange={(open) => { if (!open && !deletePending) setDeleting(null); }}
+        title={deleting?.kind === 'workspace' ? t('sidebar.deleteWorkspaceTitle') : t('sidebar.deleteConversationTitle')}
+        description={deleting?.kind === 'workspace'
+          ? t('sidebar.deleteWorkspaceBody')
+          : deleting?.local ? t('sidebar.deleteLocalConversationBody') : t('sidebar.deleteConversationBody')}
+        confirmLabel={t('common.delete')}
+        cancelLabel={t('common.cancel')}
+        tone="danger"
+        isPending={deletePending}
+        onConfirm={() => { void confirmDelete(); }}
+      />
       {renaming ? (
         <RenameDialog
           key={`${renaming.kind}:${renaming.id}`}

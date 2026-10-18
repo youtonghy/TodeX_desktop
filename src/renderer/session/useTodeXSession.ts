@@ -7870,6 +7870,31 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     return result;
   }, [forgetDeletedConversations, settingsForBackend]);
 
+  /** The sidebar's "delete": a backend conversation is deleted for good with
+   * its Agent Calling children; a legacy local record is archived. Resolves
+   * a skip (e.g. `CONFLICT` while it runs) instead of throwing for it. */
+  const deleteConversation = useCallback(async (conversationId: string): Promise<
+    { status: 'deleted' | 'archived' } | { status: 'skipped'; code: string; message: string }
+  > => {
+    const conversation = conversationsRef.current.find((item) => item.id === conversationId);
+    const v2ConversationId = conversation?.v2ConversationId;
+    if (!conversation || !isV2Conversation(conversation) || !v2ConversationId) {
+      removeConversation(conversationId);
+      return { status: 'archived' };
+    }
+    const backendId = backendIdForConversation(conversationId);
+    const result = await purgeConversations([v2ConversationId], backendId);
+    const skip = result.skipped.find((item) => item.conversationId === v2ConversationId) ?? result.skipped[0];
+    if (!result.deleted.includes(v2ConversationId)) {
+      return { status: 'skipped', code: skip?.code ?? '', message: skip?.message ?? '' };
+    }
+    const children = conversationsRef.current
+      .filter((item) => item.parentConversationId === v2ConversationId && item.v2ConversationId)
+      .map((item) => item.v2ConversationId as string);
+    forgetDeletedConversations(children, backendId);
+    return { status: 'deleted' };
+  }, [forgetDeletedConversations, purgeConversations, removeConversation]);
+
   const capabilityManager = useMemo<CapabilityManager>(() => ({
     createSkill: (provider, input) => mutateCapabilityCatalog(provider, (api, workspace) => api.createSkill(provider, workspace, input)),
     updateSkill: (provider, resourceId, content) => mutateCapabilityCatalog(provider, (api, workspace) => api.updateSkill(provider, workspace, resourceId, content)),
@@ -9505,6 +9530,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     forkConversation,
     removeConversation,
     purgeConversations,
+    deleteConversation,
     forgetDeletedConversations,
     getHistoryStorage,
     setConversationLabelColor,
