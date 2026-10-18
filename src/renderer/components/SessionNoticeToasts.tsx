@@ -14,7 +14,9 @@ type Props = {
 export function SessionNoticeToasts({ lastError, health, scope, onRepair }: Props) {
   const t = useT();
   const [failure, setFailure] = useState({ scope: '', message: '', error: '' });
-  const message = connectionFailureLabel(health.code) || health.error;
+  // A request the backend refused (e.g. a 403 permission error) shows its
+  // own message; other failures get the short localized label.
+  const message = (health.code === 'request_failed' && health.error) || connectionFailureLabel(health.code) || health.error;
   useEffect(() => {
     // Polling temporarily clears the error while checking. Only a settled health
     // result resets the notice, so an offline backend does not notify every poll.

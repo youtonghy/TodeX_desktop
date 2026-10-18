@@ -1936,7 +1936,7 @@ export const ko: Messages = {
   'conn.versionMismatchShort': '버전 불일치',
   'conn.failure.backend_unreachable': 'Backend가 실행되지 않았거나 포트가 잘못되었습니다',
   'conn.failure.invalid_server_url': 'Backend 주소가 잘못되었습니다',
-  'conn.failure.authentication_failed': '토큰이 없거나 유효하지 않습니다',
+  'conn.failure.authentication_failed': '기기가 페어링되지 않았거나 인증에 실패했습니다',
   'conn.failure.protocol_mismatch': '프로토콜이 폐기되었습니다(/v1)',
   'conn.failure.websocket_failed': 'WebSocket 핸드셰이크에 실패했습니다',
   'conn.failure.provider_unavailable': 'Agent를 사용할 수 없습니다',

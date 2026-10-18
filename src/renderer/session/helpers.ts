@@ -672,6 +672,14 @@ const CONNECTION_FAILURE_LABELS: Record<ConnectionFailureCode, MessageKey> = {
   request_failed: 'conn.failure.request_failed',
 };
 
+/** Text for a ConnectionError: an authentication failure gets the localized
+ * pairing message (the protocol's own text is a locale-neutral fallback);
+ * everything else, including a 403 permission refusal, keeps the backend's
+ * message. */
+export function connectionErrorText(error: ConnectionError): string {
+  return error.code === 'authentication_failed' ? t('conn.failure.authentication_failed') : error.userMessage;
+}
+
 /** Short, localized label for a connection failure code; empty when unknown. */
 export function connectionFailureLabel(code?: ConnectionFailureCode | ''): string {
   return code && Object.prototype.hasOwnProperty.call(CONNECTION_FAILURE_LABELS, code) ? t(CONNECTION_FAILURE_LABELS[code]) : '';

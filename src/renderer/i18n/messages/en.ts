@@ -1936,7 +1936,7 @@ export const en: Messages = {
   'conn.versionMismatchShort': 'version mismatch',
   'conn.failure.backend_unreachable': 'Backend not running or wrong port',
   'conn.failure.invalid_server_url': 'Invalid backend address',
-  'conn.failure.authentication_failed': 'Token missing or invalid',
+  'conn.failure.authentication_failed': 'Device not paired or authentication failed',
   'conn.failure.protocol_mismatch': 'Protocol retired (/v1)',
   'conn.failure.websocket_failed': 'WebSocket handshake failed',
   'conn.failure.provider_unavailable': 'Agent unavailable',

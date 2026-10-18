@@ -1936,7 +1936,7 @@ export const ja: Messages = {
   'conn.versionMismatchShort': 'バージョン不一致',
   'conn.failure.backend_unreachable': 'Backend が起動していないか、ポートが違います',
   'conn.failure.invalid_server_url': 'Backend のアドレスが無効です',
-  'conn.failure.authentication_failed': 'トークンがないか無効です',
+  'conn.failure.authentication_failed': 'デバイスが未ペアリングか、認証に失敗しました',
   'conn.failure.protocol_mismatch': 'プロトコルは廃止されました（/v1）',
   'conn.failure.websocket_failed': 'WebSocket ハンドシェイクに失敗しました',
   'conn.failure.provider_unavailable': 'Agent を利用できません',

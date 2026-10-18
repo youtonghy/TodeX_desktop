@@ -1936,7 +1936,7 @@ export const zhCN = {
   'conn.versionMismatchShort': '版本不一致',
   'conn.failure.backend_unreachable': 'Backend 未启动或端口错误',
   'conn.failure.invalid_server_url': 'Backend 地址无效',
-  'conn.failure.authentication_failed': 'Token 缺失或无效',
+  'conn.failure.authentication_failed': '设备未配对或认证失败',
   'conn.failure.protocol_mismatch': '协议已废弃（/v1）',
   'conn.failure.websocket_failed': 'WebSocket 握手失败',
   'conn.failure.provider_unavailable': 'Agent 不可用',
