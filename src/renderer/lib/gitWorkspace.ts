@@ -1,7 +1,7 @@
 import { buildHttpUrl, type ConnectionSettings } from '@todex/protocol/todex';
 import { backendFetch } from '../session/helpers';
 import { t } from '../i18n';
-import { isGitDiffPathRequired } from './gitErrors';
+import { gitOperationOutput, isGitDiffPathRequired, isUncertainGitOutcome } from './gitErrors';
 
 export interface GitWorkspaceBranch {
   name: string;
@@ -62,8 +62,6 @@ export class GitWorkspaceError extends Error {
   }
 }
 
-const uncertainCodes = new Set(['GIT_PARTIAL_SUCCESS', 'GIT_COMMAND_TIMED_OUT', 'GIT_COMMAND_TIMEOUT', 'GIT_OUTCOME_UNKNOWN']);
-
 async function request<T>(settings: ConnectionSettings, url: string, operation?: GitWorkspaceOperation,
   workspacePath?: string, externalSignal?: AbortSignal): Promise<T> {
   const controller = new AbortController();
@@ -87,7 +85,7 @@ async function request<T>(settings: ConnectionSettings, url: string, operation?:
       const code = typeof data.code === 'string' ? data.code : undefined;
       throw new GitWorkspaceError(typeof data.message === 'string' ? data.message : t('git.requestFailed', { status: response.status }), {
         status: response.status, code,
-        unknownOutcome: Boolean(operation && (data.unknownOutcome === true || (code && uncertainCodes.has(code)) || response.status >= 500)),
+        unknownOutcome: Boolean(operation && isUncertainGitOutcome({ status: response.status, code, unknownOutcome: data.unknownOutcome === true })),
       });
     }
     if (!body || typeof body !== 'object') {
@@ -111,9 +109,11 @@ export function readGitWorkspace(settings: ConnectionSettings, workspacePath: st
   return request(settings, url.toString(), undefined, undefined, signal);
 }
 
-export function runGitWorkspaceOperation(settings: ConnectionSettings, workspacePath: string,
+export async function runGitWorkspaceOperation(settings: ConnectionSettings, workspacePath: string,
   operation: GitWorkspaceOperation): Promise<GitWorkspaceOperationResult> {
-  return request(settings, buildHttpUrl(settings.serverUrl, '/v2/git/operation'), operation, workspacePath);
+  const result = await request<GitWorkspaceOperationResult>(settings, buildHttpUrl(settings.serverUrl, '/v2/git/operation'), operation, workspacePath);
+  // No output (or an old backend's placeholder) reads as the UI's own "done".
+  return { ...result, output: gitOperationOutput(result.output) };
 }
 
 export interface GitPullRequest {
