@@ -60,7 +60,7 @@ import { ToolCallCard, type ToolCallState } from '../components/chat/ToolCallCar
 import { ToolElapsed } from '../components/chat/ToolRunStatus';
 import { activeChatProcessId, buildChatRenderItems, isChatTimelineEntry, isChatToolEntry, latestIncomingEntryIds, sameTimelineEntries, sortChatEntries } from '../components/conversationTimeline';
 import type { ChatRenderItem } from '../components/conversationTimeline';
-import type { BackgroundTask } from '@todex/protocol/conversationRuntime';
+import { awaitedBackgroundTasks, type BackgroundTask } from '@todex/protocol/conversationRuntime';
 import { EFFORT_TEXT, ModelReasoningCard } from '../components/ModelReasoningCard';
 import { ProviderIcon } from '../components/ProviderIcon';
 import type { TodeXSession } from '../session/useTodeXSession';
@@ -144,7 +144,23 @@ const PROVIDER_TURN_NOTICES = {
 /** Provider notices shown as one quiet line (`TimelineEntry.providerNotice`). */
 const PROVIDER_NOTICES = {
   auto_mode_unavailable: 'chat.providerNotice.autoModeUnavailable',
+  background_tasks_ended: 'chat.providerNotice.backgroundTasksEnded',
 } as const satisfies Record<NonNullable<TimelineEntry['providerNotice']>, string>;
+
+/** Why background work was lost (`background_tasks_ended`'s `reason`, the
+ * notice's subtitle); anything else reads as the process having ended. */
+const BACKGROUND_ENDED_REASONS: Record<string, MessageKey> = {
+  settings_changed: 'chat.backgroundEnded.settingsChanged',
+  daemon_restarted: 'chat.backgroundEnded.daemonRestarted',
+  stopped: 'chat.backgroundEnded.stopped',
+  evicted: 'chat.backgroundEnded.evicted',
+  expired: 'chat.backgroundEnded.expired',
+};
+
+function providerNoticeText(notice: NonNullable<TimelineEntry['providerNotice']>, subtitle: string): string {
+  if (notice !== 'background_tasks_ended') return t(PROVIDER_NOTICES[notice]);
+  return t(PROVIDER_NOTICES[notice], { reason: t(BACKGROUND_ENDED_REASONS[subtitle] ?? 'chat.backgroundEnded.processEnded') });
+}
 
 /** Images up to this size also keep a local copy for the preview and the
  * sent-message thumbnail; every file is uploaded regardless. */
@@ -244,12 +260,15 @@ const AGENT_CALLING_TOOL_LABELS: Record<AgentCallingTool, MessageKey> = {
 };
 
 /** Tool rows name the tool and show its key argument (command, path, query)
- * without expanding; arguments, output and errors stay in the body. */
-function toolCardPresentation(entry: TimelineEntry, active: boolean) {
+ * without expanding; arguments, output and errors stay in the body. A call
+ * that launched a background task the agent still waits on (`background`)
+ * reads as running although the call itself returned at once. */
+function toolCardPresentation(entry: TimelineEntry, active: boolean, background = false) {
   const tool = describeToolCall(entry.subtitle);
   const state: ToolCallState = tool.status === 'failed' ? 'failed'
-    : tool.status === 'completed' || entry.phase === 'completed' || !active ? 'completed'
-      : 'running';
+    : background ? 'running'
+      : tool.status === 'completed' || entry.phase === 'completed' || !active ? 'completed'
+        : 'running';
   // A failed call without its own error text surfaces its output as the error.
   const outputIsError = state === 'failed' && !tool.errorText;
   // Agent Calling tools (`mcp__todex_agents__*`) read as what they do.
@@ -268,6 +287,16 @@ function toolCardPresentation(entry: TimelineEntry, active: boolean) {
 function toolElapsed(entry: TimelineEntry, running: boolean) {
   return <ToolElapsed startedAt={entry.firstAt} endedAt={entry.at} running={running} />;
 }
+
+/** Whether `entry` is the tool call that launched one of the awaited
+ * background tasks (`ids` holds their `toolUseId`s, a call's block id). */
+function launchesBackgroundTask(entry: TimelineEntry, ids: ReadonlySet<string>): boolean {
+  if (!ids.size) return false;
+  if (entry.blockId && ids.has(entry.blockId)) return true;
+  for (const id of ids) if (entry.id.endsWith(`-${id}`)) return true;
+  return false;
+}
+const NO_BACKGROUND_TOOLS: ReadonlySet<string> = new Set();
 
 function backgroundTaskKind(taskType: string | undefined): string {
   if (taskType === 'local_bash') return t('chat.backgroundTaskShell');
@@ -298,7 +327,7 @@ function BackgroundTasksStatus({ tasks, items }: { tasks: readonly BackgroundTas
       <ProcessSteps>
         {tasks.map((task, index) => {
           const launcher = task.toolUseId ? launchers.get(task.toolUseId) : undefined;
-          const tool = launcher ? toolCardPresentation(launcher, true) : undefined;
+          const tool = launcher ? toolCardPresentation(launcher, true, true) : undefined;
           const startedAt = task.startedAt ? new Date(task.startedAt) : null;
           const meta = [
             backgroundTaskKind(task.taskType),
@@ -574,6 +603,8 @@ type ChatTimelineItemProps = {
   conversationId: string;
   thinking: boolean;
   isStreamingGroup: boolean;
+  /** `toolUseId`s of the background tasks the agent still waits on. */
+  backgroundToolIds: ReadonlySet<string>;
   groupExpanded: boolean;
   groupLoadState: 'loading' | 'error' | undefined;
   groupPendingCount: number;
@@ -622,6 +653,7 @@ const ChatTimelineItem = memo(function ChatTimelineItem({
   conversationId,
   thinking,
   isStreamingGroup,
+  backgroundToolIds,
   groupExpanded,
   groupLoadState,
   groupPendingCount,
@@ -682,7 +714,7 @@ const ChatTimelineItem = memo(function ChatTimelineItem({
     // elapsed time instead.
     const lastEntry = item.entries[lastIndex];
     const foldedElapsed = !groupExpanded && lastEntry && isChatToolEntry(lastEntry)
-      && toolCardPresentation(lastEntry, isStreamingGroup).state === 'running'
+      && toolCardPresentation(lastEntry, isStreamingGroup, launchesBackgroundTask(lastEntry, backgroundToolIds)).state === 'running'
       ? toolElapsed(lastEntry, true) : undefined;
     return (
       <RowEntrance enter={animateEntrance}>
@@ -737,7 +769,7 @@ const ChatTimelineItem = memo(function ChatTimelineItem({
                     </ProcessStep>
                   );
                 }
-                const tool = toolCardPresentation(entry, isStreamingGroup);
+                const tool = toolCardPresentation(entry, isStreamingGroup, launchesBackgroundTask(entry, backgroundToolIds));
                 return (
                   <ProcessStep key={entry.id} last={last}>
                     <ToolCallCard
@@ -775,12 +807,12 @@ const ChatTimelineItem = memo(function ChatTimelineItem({
   if (entry.providerNotice) {
     return (
       <p data-message-id={entry.id} role="note" title={entry.subtitle || undefined} className="py-1 text-center text-caption-1-regular text-text-tertiary">
-        {t(PROVIDER_NOTICES[entry.providerNotice])}
+        {providerNoticeText(entry.providerNotice, entry.subtitle)}
       </p>
     );
   }
   if (isChatToolEntry(entry)) {
-    const tool = toolCardPresentation(entry, thinking);
+    const tool = toolCardPresentation(entry, thinking, launchesBackgroundTask(entry, backgroundToolIds));
     return (
       <RowEntrance enter={animateEntrance}>
         <ToolCallCard
@@ -837,6 +869,7 @@ const ChatTimelineItem = memo(function ChatTimelineItem({
   && prev.conversationId === next.conversationId
   && prev.thinking === next.thinking
   && prev.isStreamingGroup === next.isStreamingGroup
+  && prev.backgroundToolIds === next.backgroundToolIds
   && prev.groupExpanded === next.groupExpanded
   && prev.groupLoadState === next.groupLoadState
   && prev.groupPendingCount === next.groupPendingCount
@@ -977,6 +1010,14 @@ export function ChatPanel({ session }: Props) {
     .filter((entry) => isChatTimelineEntry(entry) && !isChatReminderEntry(entry))), [conversationTimeline]);
   const items = useMemo(() => buildChatRenderItems(chatEntries), [chatEntries]);
   const actionableIncoming = useMemo(() => latestIncomingEntryIds(chatEntries), [chatEntries]);
+  // Background tasks the agent still waits on; the calls that launched them
+  // read as running.
+  const runtimeBackgroundTasks = conversation ? session.conversationRuntimeById[conversation.id]?.backgroundTasks : undefined;
+  const backgroundTasks = useMemo(() => awaitedBackgroundTasks(runtimeBackgroundTasks ?? []), [runtimeBackgroundTasks]);
+  const backgroundToolIds = useMemo(() => {
+    const ids = backgroundTasks.flatMap(task => task.toolUseId ? [task.toolUseId] : []);
+    return ids.length ? new Set(ids) : NO_BACKGROUND_TOOLS;
+  }, [backgroundTasks]);
   // Only the newest rows are mounted. Scrolling up reveals loaded rows a
   // window at a time before any older history is fetched; returning to the
   // bottom unmounts them again. `null` slides with the newest rows, a row key
@@ -1297,13 +1338,13 @@ export function ChatPanel({ session }: Props) {
   const permissionRequests = session.pendingRequests.filter(item => item.requestId && pendingPermissionIds.has(item.requestId));
   const compaction = session.compactionByConversation[conversation.id];
   const latestProcessGroupId = activeChatProcessId(items, runtime?.activeTurnId || session.turnIds[conversation.id]);
-  // The agent has stopped answering and only waits on provider background tasks (e.g. a CI watcher).
-  const backgroundTasks = thinking ? runtime?.backgroundTasks ?? [] : [];
+  // The agent has stopped answering and only waits on provider background
+  // tasks (e.g. a CI watcher), within its turn or after it completed.
   const backgroundTaskCount = backgroundTasks.length;
   // Once the agent has replied after its last steps, the live status moves
   // below that reply instead of staying on the finished group above it.
   const lastItem = items[items.length - 1];
-  const showTrailingStatus = thinking && (backgroundTaskCount > 0 || !latestProcessGroupId) && items.length > 0
+  const showTrailingStatus = (backgroundTaskCount > 0 || (thinking && !latestProcessGroupId)) && items.length > 0
     && !(lastItem?.type === 'entry' && lastItem.entry.subtitle === STREAMING_REPLY_PLACEHOLDER);
   // A trailing reply whose turn is still running is unfinished: hide its
   // copy/fork/usage actions until the turn settles. A newer outgoing entry
@@ -1691,6 +1732,7 @@ export function ChatPanel({ session }: Props) {
               conversationId={conversation.id}
               thinking={thinking}
               isStreamingGroup={item.type === 'executionGroup' && thinking && backgroundTaskCount === 0 && item.id === latestProcessGroupId}
+              backgroundToolIds={backgroundToolIds}
               groupExpanded={item.type === 'executionGroup' && expandedProcessIds.has(item.id)}
               groupLoadState={item.type === 'executionGroup' ? processGroupLoad[item.id] : undefined}
               groupPendingCount={item.type === 'executionGroup'
