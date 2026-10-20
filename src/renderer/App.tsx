@@ -21,6 +21,7 @@ import { useTodeXSession, type TodeXSession } from './session/useTodeXSession';
 import { ConversationHeaderDetails } from './components/ConversationHeaderDetails';
 import { GitActionsModal } from './components/GitActionsModal';
 import { DesktopAlertHost } from './components/DesktopAlertHost';
+import { SshLoginPrompter } from './components/ssh/SshLoginPrompter';
 import { SessionNoticeToasts } from './components/SessionNoticeToasts';
 import { useNoticeToast } from './components/NoticeToast';
 import { AppSidebar } from './components/AppSidebar';
@@ -686,6 +687,7 @@ export function App() {
         scope={`${session.activeBackendConnectionId}:${session.settings.serverUrl}`}
         onRepair={() => { setRepairPairing(true); setPanel('settings'); }} />
       <DesktopAlertHost />
+      {session.hydrated ? <SshLoginPrompter session={session} /> : null}
       {session.hydrated ? (
         shell
       ) : (

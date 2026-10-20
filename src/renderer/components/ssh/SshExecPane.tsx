@@ -1,6 +1,6 @@
 import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { RiArrowDownLine, RiDeleteBinLine, RiFileCopyLine } from '@remixicon/react';
-import { isSshFailureKind, type SshExecRun } from '@todex/protocol/ssh';
+import { isSshFailureKind, isSshLoginPending, type SshExecLogin, type SshExecRun } from '@todex/protocol/ssh';
 import { SSH_FAILURE_HINT_KEYS, SSH_FAILURE_LABEL_KEYS } from './sshShared';
 import {
   clearSshExecView,
@@ -67,6 +67,23 @@ function LiveDuration({ startedAt }: { startedAt?: string }) {
   return Number.isFinite(started) ? <>{formatSshExecDuration(Math.max(0, now - started))}</> : null;
 }
 
+/** The login this call waited on, if ssh could not authenticate on its own. */
+function SshExecLoginLine({ login }: { login: SshExecLogin }) {
+  const t = useT();
+  const pending = isSshLoginPending(login);
+  const label = pending
+    ? t('sshExec.login.pending')
+    : login.status === 'connected'
+      ? t(login.remembered ? 'sshExec.login.connectedRemembered' : 'sshExec.login.connected')
+      : t(login.status === 'pending' || login.status === 'timedOut' ? 'sshExec.login.timedOut' : login.status === 'declined' ? 'sshExec.login.declined' : 'sshExec.login.cancelled');
+  return (
+    <p data-ssh-login={login.status} className="mx-3.5 mt-1.5 flex items-center gap-1.5 text-caption-1-regular text-text-secondary">
+      {pending ? <Spinner size="xs" className="size-3 text-current" /> : null}
+      {label}
+    </p>
+  );
+}
+
 /** One call. Memoized on the run object, which the runtime only replaces when
  * that call changes, so an output batch re-renders just its own card. */
 const SshExecCard = memo(function SshExecCard({ run }: { run: SshExecRun }) {
@@ -121,6 +138,7 @@ const SshExecCard = memo(function SshExecCard({ run }: { run: SshExecRun }) {
           {t('sshExec.cwd')} <code className="font-mono">{run.cwd}</code>
         </div>
       ) : null}
+      {run.login ? <SshExecLoginLine login={run.login} /> : null}
       {status.hint ? <div className="mx-3 mt-2 rounded-xl bg-status-yellow-background px-2.5 py-1.5 text-caption-1-regular text-status-yellow-text">{status.hint}</div> : null}
       {showOutput ? (
         <div className={cx('relative mx-3 mt-2 rounded-xl border border-separator-border', OUTPUT_BG)}>
