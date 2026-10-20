@@ -115,6 +115,12 @@ const demoPiPluginConfigs: Record<string, SettingsObject | null> = {
   },
   'web-access': { provider: 'exa', braveApiKey: '__todex_secret__', tavilyApiKey: '$TAVILY_API_KEY' },
 };
+let demoPiMcp: SettingsObject | null = {
+  mcpServers: {
+    context7: { command: 'npx', args: ['-y', '@upstash/context7-mcp'], description: 'Library documentation' },
+    linear: { url: 'https://mcp.linear.app/mcp', exposure: 'deferred', enabled: false },
+  },
+};
 let demoPiOperation: { id: string; action: 'install' | 'remove'; source: string; status: string; startedAt: string; finishedAt?: string; error?: string } | null = null;
 
 function demoPiPluginList() {
@@ -196,6 +202,36 @@ function demoPiPluginsRoute(method: string, path: string, body: Record<string, u
         next = setAt(next, replacePath, value);
       }
       demoPiPluginConfigs[plugin] = next;
+      return json(document());
+    }
+  }
+  if (path === '/v2/providers/pi/mcp') {
+    const document = () => {
+      const text = demoPiMcp ? JSON.stringify(demoPiMcp) : null;
+      const list = demoPiPluginList();
+      return {
+        path: '/home/demo/.pi/agent/mcp.json',
+        exists: demoPiMcp !== null,
+        revision: demoRevision(text),
+        config: demoPiMcp ?? {},
+        builtinEnabled: list.builtins.some((builtin) => builtin.id === 'mcp' && builtin.enabled),
+        adapterInstalled: list.packages.some((pkg) => pkg.source.includes('pi-mcp-adapter') && pkg.state !== 'disabled'),
+      };
+    };
+    if (method === 'GET') return json(document());
+    if (method === 'PATCH') {
+      if (body.revision !== document().revision) return json({ error: { code: 'CONFLICT', message: 'mcp.json changed on disk' } }, 409);
+      const patch = body.patch as SettingsObject;
+      const next: SettingsObject = { ...(demoPiMcp ?? {}) };
+      const servers = { ...(next.mcpServers as SettingsObject | undefined) };
+      for (const [name, entry] of Object.entries((patch.mcpServers as SettingsObject | undefined) ?? {})) {
+        if (entry === null) delete servers[name];
+        else servers[name] = entry;
+      }
+      if (patch.mcpServers) next.mcpServers = servers;
+      if (patch.autoEnableCodemode === null) delete next.autoEnableCodemode;
+      else if (patch.autoEnableCodemode !== undefined) next.autoEnableCodemode = patch.autoEnableCodemode;
+      demoPiMcp = next;
       return json(document());
     }
   }

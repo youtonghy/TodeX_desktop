@@ -29,11 +29,12 @@ import {
   type SettingsObject,
 } from '@/lib/cliSettings';
 import { CliInstructionsPanel, useCliInstructions } from './CliInstructionsTab';
+import { PiMcpPanel, usePiMcp } from './PiMcpTab';
 import { PiPluginsPanel, usePiPlugins } from './PiPluginsTab';
 import { SettingsField, SettingsFieldModels } from './SettingsFields';
 
-type TabId = 'form' | 'env' | 'plugins' | 'raw' | 'agents';
-const TAB_IDS: TabId[] = ['form', 'env', 'plugins', 'raw', 'agents'];
+type TabId = 'form' | 'env' | 'plugins' | 'mcp' | 'raw' | 'agents';
+const TAB_IDS: TabId[] = ['form', 'env', 'plugins', 'mcp', 'raw', 'agents'];
 type EnvRow = { key: number; name: string; value: string; revealed: boolean };
 
 const key = (value: string) => value as MessageKey;
@@ -113,6 +114,7 @@ function CliSettingsEditor({ schema, api, onClose }: { schema: CliSettingsSchema
   const pristine = useRef(true);
   pristine.current = !formDirty && !rawDirty;
   const plugins = usePiPlugins(isPi, api, () => { if (pristine.current) void load(); });
+  const mcp = usePiMcp(isPi && tab === 'mcp', api);
   // Models the plugin pages offer: the ones enabled in Pi, without patterns.
   const piModels = useMemo(() => {
     if (!isPi) return [];
@@ -130,15 +132,18 @@ function CliSettingsEditor({ schema, api, onClose }: { schema: CliSettingsSchema
   const editingRaw = tab === 'raw';
   const editingAgents = tab === 'agents';
   const editingPlugins = tab === 'plugins';
-  const canSave = editingAgents
+  // MCP changes are written as they are made.
+  const editingMcp = tab === 'mcp';
+  const canSave = editingMcp ? false : editingAgents
     ? instructions.canSave
     : editingPlugins
       ? plugins.canSave
       : Boolean(doc) && !saving && (editingRaw ? rawDirty && !rawError : formDirty && !envInvalid);
   // Edits left unsaved on a tab other than the one shown.
-  const unsavedElsewhere = editingAgents || editingPlugins
+  const unsavedElsewhere = editingAgents || editingPlugins || editingMcp
     ? (formDirty || rawDirty) ? 'cliSettings.settingsUnsaved'
-      : editingAgents ? plugins.dirty && 'cliSettings.pluginsUnsaved' : instructions.dirty && 'cliSettings.agentsUnsaved'
+      : !editingAgents && instructions.dirty ? 'cliSettings.agentsUnsaved'
+        : !editingPlugins && plugins.dirty && 'cliSettings.pluginsUnsaved'
     : (editingRaw ? formDirty : rawDirty) ? (editingRaw ? 'cliSettings.formUnsaved' : 'cliSettings.rawUnsaved')
       : instructions.dirty ? 'cliSettings.agentsUnsaved' : plugins.dirty && 'cliSettings.pluginsUnsaved';
 
@@ -206,6 +211,7 @@ function CliSettingsEditor({ schema, api, onClose }: { schema: CliSettingsSchema
           <Tab id="form" isDisabled={!saved}>{t('cliSettings.tabForm')}</Tab>
           {envPath ? <Tab id="env" isDisabled={!saved} count={env.length || undefined}>{t('cliSettings.tabEnv')}</Tab> : null}
           {isPi ? <Tab id="plugins" count={plugins.list?.packages.length || undefined}>{t('cliSettings.tabPlugins')}</Tab> : null}
+          {isPi ? <Tab id="mcp" count={Object.keys(mcp.doc?.config?.mcpServers ?? {}).length || undefined}>MCP</Tab> : null}
           <Tab id="raw">{t('cliSettings.tabRaw')}</Tab>
           <Tab id="agents">AGENTS.md</Tab>
         </TabList>
@@ -244,6 +250,18 @@ function CliSettingsEditor({ schema, api, onClose }: { schema: CliSettingsSchema
               </SettingsFieldModels.Provider>
             </TabPanel>
           ) : null}
+          {isPi ? (
+            <TabPanel id="mcp">
+              <PiMcpPanel
+                state={mcp}
+                builtinBusy={Boolean(plugins.toggling)}
+                onEnableBuiltin={async () => {
+                  await plugins.toggle({ builtin: 'mcp' }, true);
+                  await mcp.load();
+                }}
+              />
+            </TabPanel>
+          ) : null}
           <TabPanel id="raw" className="flex flex-col gap-3">
             {doc.parseError ? <Alert status="warning" title={t('cliSettings.parseError', { file: fileName })} description={doc.parseError} /> : null}
             {rawRevealed || !doc.exists ? (
@@ -276,7 +294,7 @@ function CliSettingsEditor({ schema, api, onClose }: { schema: CliSettingsSchema
         {unsavedElsewhere ? (
           <span className="me-auto text-body-2-regular text-text-secondary">{t(unsavedElsewhere)}</span>
         ) : null}
-        <Button variant="secondary" onClick={onClose} disabled={saving || instructions.busy || plugins.saving}>{t('common.close')}</Button>
+        <Button variant="secondary" onClick={onClose} disabled={saving || instructions.busy || plugins.saving || mcp.busy}>{t('common.close')}</Button>
         <Button onClick={() => void save()} disabled={!canSave} aria-busy={(editingAgents ? instructions.busy : editingPlugins ? plugins.saving : saving) || undefined}>{t('common.save')}</Button>
       </div>
     </div>
