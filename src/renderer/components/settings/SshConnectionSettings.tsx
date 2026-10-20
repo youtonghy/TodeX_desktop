@@ -12,6 +12,7 @@ import type { TodeXSession } from '../../session/useTodeXSession';
 import { useT } from '../../i18n';
 import { backendApi } from '../../session/helpers';
 import { usePanelBackend, type PanelBackend } from '../../session/panelBackend';
+import { AgentOutputFilterSettings } from './AgentOutputFilterSettings';
 import { BackendScopeRow } from './BackendScopeRow';
 import { toast } from '../ui/toast';
 import { SettingsCard, SettingsNote, SettingsRow } from './SettingsRows';
@@ -36,6 +37,7 @@ export function SshConnectionSettings({ session }: { session: TodeXSession }) {
     <div className="flex flex-col gap-6">
       <BackendScopeRow session={session} backend={backend} />
       <BackendSshSettings key={backend.backendId} backend={backend} />
+      <AgentOutputFilterSettings key={`filter:${backend.backendId}`} backend={backend} />
     </div>
   );
 }

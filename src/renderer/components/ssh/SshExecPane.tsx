@@ -1,6 +1,14 @@
 import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { RiArrowDownLine, RiDeleteBinLine, RiFileCopyLine } from '@remixicon/react';
-import { isSshFailureKind, isSshLoginPending, type SshExecLogin, type SshExecRun } from '@todex/protocol/ssh';
+import { RiArrowDownLine, RiDeleteBinLine, RiFileCopyLine, RiShieldKeyholeLine } from '@remixicon/react';
+import {
+  isSshFailureKind,
+  isSshLoginPending,
+  summarizeAgentOutputRedactions,
+  type AgentOutputFilterCategory,
+  type AgentOutputRedactions,
+  type SshExecLogin,
+  type SshExecRun,
+} from '@todex/protocol/ssh';
 import { SSH_FAILURE_HINT_KEYS, SSH_FAILURE_LABEL_KEYS } from './sshShared';
 import {
   clearSshExecView,
@@ -14,7 +22,7 @@ import {
   useSshExecClear,
   visibleSshExecs,
 } from '../../session/sshExecTabs';
-import { t, useT } from '../../i18n';
+import { t, useT, type MessageKey } from '../../i18n';
 import { Chip } from '@/components/base/badges/chip';
 import { Button } from '@/components/base/buttons/button';
 import { LinkButton } from '@/components/base/buttons/link-button';
@@ -80,6 +88,30 @@ function SshExecLoginLine({ login }: { login: SshExecLogin }) {
     <p data-ssh-login={login.status} className="mx-3.5 mt-1.5 flex items-center gap-1.5 text-caption-1-regular text-text-secondary">
       {pending ? <Spinner size="xs" className="size-3 text-current" /> : null}
       {label}
+    </p>
+  );
+}
+
+const REDACTION_LABEL_KEYS: Record<AgentOutputFilterCategory, MessageKey> = {
+  privateKey: 'sshExec.redaction.privateKey',
+  publicKey: 'sshExec.redaction.publicKey',
+  credential: 'sshExec.redaction.credential',
+  bankCard: 'sshExec.redaction.bankCard',
+  idCard: 'sshExec.redaction.idCard',
+};
+
+/** What the privacy filter kept from the agent; the output above stays raw. */
+function SshExecRedactionsLine({ redactions }: { redactions: AgentOutputRedactions }) {
+  const t = useT();
+  const { total, items } = summarizeAgentOutputRedactions(redactions);
+  if (!total) return null;
+  const details = items
+    .map(item => t('sshExec.redactionItem', { label: t(REDACTION_LABEL_KEYS[item.category]), count: item.count }))
+    .join(t('sshExec.redactionSeparator'));
+  return (
+    <p data-ssh-redactions={total} className="mx-3.5 mt-1 flex items-start gap-1.5 text-caption-1-regular text-text-secondary">
+      <RiShieldKeyholeLine aria-hidden className="mt-px size-3.5 shrink-0 text-foreground-icon-tertiary" />
+      <span className="min-w-0">{t('sshExec.redactions', { count: total, details })}</span>
     </p>
   );
 }
@@ -162,6 +194,7 @@ const SshExecCard = memo(function SshExecCard({ run }: { run: SshExecRun }) {
         </div>
       ) : null}
       {run.outputTruncated ? <p className="mx-3.5 mt-1 text-caption-2-regular text-text-tertiary">{t('sshExec.outputTruncated')}</p> : null}
+      {run.redactions ? <SshExecRedactionsLine redactions={run.redactions} /> : null}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3.5 pt-2 pb-2.5">
         {collapsible ? (
           <LinkButton size="xs" onClick={() => setExpanded(open => !open)}>
