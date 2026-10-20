@@ -29,7 +29,8 @@ function PortTagInput({ tags, limit, onChange }: { tags: string[]; limit: number
   const [error, setError] = useState('');
 
   const add = () => {
-    const entries = draft.split(/[\s,]+/).map(normalizePortEntry).filter(Boolean);
+    // Collapse `7000 - 7010` before splitting on commas and whitespace.
+    const entries = draft.replace(/\s*-\s*/g, '-').split(/[\s,]+/).map(normalizePortEntry).filter(Boolean);
     if (!entries.length) return;
     for (const entry of entries) {
       const parsed = parseSshPortSpec([entry], limit);
@@ -47,7 +48,7 @@ function PortTagInput({ tags, limit, onChange }: { tags: string[]; limit: number
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex items-end gap-2">
+      <div className="flex items-start gap-2">
         <Input
           className="min-w-0 flex-1"
           label={t('ssh.ipPool.ports')}
@@ -64,7 +65,7 @@ function PortTagInput({ tags, limit, onChange }: { tags: string[]; limit: number
           isInvalid={Boolean(error)}
           hint={error || t('ssh.ipPool.portsHint')}
         />
-        <Button variant="secondary" leadingIcon={RiAddLine} disabled={!draft.trim()} onClick={add}>{t('ssh.ipPool.addPort')}</Button>
+        <Button variant="secondary" className="mt-6" leadingIcon={RiAddLine} disabled={!draft.trim()} onClick={add}>{t('ssh.ipPool.addPort')}</Button>
       </div>
       {tags.length ? (
         <div className="flex flex-wrap gap-1.5" dir="ltr">
@@ -212,7 +213,7 @@ export function SshIpAssignmentDialog({ api, hosts, pool, assignment, initialAli
           </LinkButton>
           {showAutoPorts ? (
             <div className="flex flex-wrap gap-1.5" dir="ltr">
-              {pool.autoPorts.map((entry) => <Chip key={entry} variant="caption" color="soft" className="font-mono">{entry}</Chip>)}
+              {pool.autoPorts.map((entry) => <Chip key={entry} variant="caption" color="neutral" className="font-mono">{entry}</Chip>)}
             </div>
           ) : null}
         </div>

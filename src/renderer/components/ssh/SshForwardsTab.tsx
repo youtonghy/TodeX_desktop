@@ -21,7 +21,7 @@ import { ConfirmDialog } from '@/components/ui/modal';
 import { Spinner, SpinnerIcon } from '@/components/ui/spinner';
 import { toast } from '@/components/ui/toast';
 
-const GROUP = 'flex flex-col rounded-2xl bg-background-secondary-default ps-3';
+const GROUP = 'flex flex-col rounded-3xl border border-border-button-default bg-background-primary-default ps-4 shadow-card';
 const ROW = 'flex min-w-0 flex-col gap-1.5 border-b border-separator-border py-2.5 pe-2.5 last:border-b-0';
 const POLL_MS = 3000;
 
@@ -34,6 +34,15 @@ const STATUS_CHIPS: Record<SshForwardStatus, { key: MessageKey; color: 'lime' | 
 
 /** Opens a dialog from elsewhere in the SSH view (the host row menu). */
 export type SshForwardsRequest = { id: number; kind: 'forward' | 'ip'; alias: string };
+
+/** Two local/dynamic forwards that would listen on the same local socket. */
+function sameLocalListener(a: SshForward, b: SshForward): boolean {
+  if (a.kind === 'remote' || b.kind === 'remote' || a.bindPort !== b.bindPort) return false;
+  const left = (a.bindAddress || SSH_FORWARD_DEFAULT_BIND_ADDRESS).toLowerCase();
+  const right = (b.bindAddress || SSH_FORWARD_DEFAULT_BIND_ADDRESS).toLowerCase();
+  // `localhost` may resolve to either loopback address.
+  return left === right || left === 'localhost' || right === 'localhost';
+}
 
 /** Local side of a forward as a client would dial it. */
 function forwardAddress(forward: SshForward): string {
@@ -143,6 +152,12 @@ export function SshForwardsTab({ api, backendId, hosts, askPassword, rememberPas
   const replaceForward = (next: SshForward) => setForwards((current) => current?.map((item) => item.id === next.id ? next : item) ?? current);
 
   const start = async (forward: SshForward) => {
+    const clash = forwards?.find((other) => other.id !== forward.id
+      && (other.status === 'running' || other.status === 'starting') && sameLocalListener(forward, other));
+    if (clash) {
+      toast.danger(t('ssh.forwards.portInUse', { address: forwardAddress(forward) }));
+      return;
+    }
     const host = hosts.find((item) => item.alias === forward.alias);
     setForwardBusy(forward.id, true);
     try {
@@ -303,7 +318,7 @@ export function SshForwardsTab({ api, backendId, hosts, askPassword, rememberPas
                   </div>
                   {forward.status === 'failed' ? (
                     <p className="break-words ps-8 text-caption-1-regular text-text-error-primary">
-                      {t(SSH_FAILURE_LABEL_KEYS[forward.failure ?? 'other'])}
+                      {t(!forward.failure || forward.failure === 'other' ? 'ssh.forwards.failureOther' : SSH_FAILURE_LABEL_KEYS[forward.failure])}
                       {forward.error ? <span className="ms-1 font-mono opacity-80">{forward.error}</span> : null}
                     </p>
                   ) : null}
@@ -356,12 +371,12 @@ export function SshForwardsTab({ api, backendId, hosts, askPassword, rememberPas
       <ConfirmDialog
         isOpen={Boolean(pendingDelete)}
         onOpenChange={(open) => { if (!open) setPendingDelete(null); }}
-        title={t('ssh.deleteTitle')}
+        title={pendingDelete?.kind === 'assignment' ? t('ssh.ipPool.removeTitle') : t('ssh.deleteTitle')}
         description={pendingDelete?.kind === 'forward'
           ? t('ssh.forwards.deleteBody', { route: forwardRoute(pendingDelete.forward), alias: pendingDelete.forward.alias })
           : pendingDelete ? t('ssh.ipPool.removeBody', { ip: pendingDelete.assignment.ip, alias: pendingDelete.assignment.alias }) : null}
         cancelLabel={t('common.cancel')}
-        confirmLabel={t('common.delete')}
+        confirmLabel={pendingDelete?.kind === 'assignment' ? t('ssh.ipPool.remove') : t('common.delete')}
         tone="danger"
         onConfirm={() => void confirmDelete()}
       />

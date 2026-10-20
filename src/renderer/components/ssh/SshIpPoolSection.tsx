@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { Focusable } from 'react-aria-components';
 import { RiAddLine, RiDeleteBinLine, RiEdit2Line, RiFileCopyLine, RiLinkM, RiLinkUnlink, RiRouterLine } from '@remixicon/react';
 import {
-  SSH_IP_POOL_IDLE_MINUTES_RANGE,
+  SSH_IP_POOL_IDLE_MINUTES_RANGE, validateSshIpPoolCidr,
+  type SshIpPoolCidrError,
   type SshHost, type SshIpAssignment, type SshIpAssignmentState, type SshIpPool,
 } from '@todex/protocol/ssh';
 import { useT, type MessageKey } from '../../i18n';
@@ -20,18 +21,26 @@ import { SpinnerIcon } from '@/components/ui/spinner';
 import { toast } from '@/components/ui/toast';
 
 /** BoardUI settings-row recipe: a grouped secondary card of hairline rows. */
-const GROUP = 'flex flex-col rounded-2xl bg-background-secondary-default ps-3';
+const GROUP = 'flex flex-col rounded-3xl border border-border-button-default bg-background-primary-default ps-4 shadow-card';
 const ROW = 'flex min-w-0 flex-col gap-2 border-b border-separator-border py-2.5 pe-2.5 last:border-b-0';
 
-type ChipColor = 'lime' | 'rose' | 'yellow' | 'blue' | 'neutral' | 'soft';
+type ChipColor = 'lime' | 'rose' | 'yellow' | 'blue' | 'neutral';
 
 const STATE_CHIPS: Record<SshIpAssignmentState, { key: MessageKey; color: ChipColor }> = {
   disabled: { key: 'ssh.ipPool.state.disabled', color: 'neutral' },
-  idle: { key: 'ssh.ipPool.state.idle', color: 'soft' },
+  idle: { key: 'ssh.ipPool.state.idle', color: 'neutral' },
   connecting: { key: 'ssh.ipPool.state.connecting', color: 'blue' },
   connected: { key: 'ssh.ipPool.state.connected', color: 'lime' },
   needsLogin: { key: 'ssh.ipPool.state.needsLogin', color: 'yellow' },
   failed: { key: 'ssh.ipPool.state.failed', color: 'rose' },
+};
+
+const CIDR_ERROR_KEYS: Record<SshIpPoolCidrError, MessageKey> = {
+  format: 'ssh.ipPool.cidrError.format',
+  outsideLoopback: 'ssh.ipPool.cidrError.outsideLoopback',
+  prefix: 'ssh.ipPool.cidrError.prefix',
+  hostBits: 'ssh.ipPool.cidrError.hostBits',
+  containsLocalhost: 'ssh.ipPool.cidrError.containsLocalhost',
 };
 
 type Props = {
@@ -84,6 +93,8 @@ export function SshIpPoolSection({ api, backendId, hosts, pool, askPassword, rem
     const { min, max } = SSH_IP_POOL_IDLE_MINUTES_RANGE;
     if (!Number.isInteger(minutes) || minutes < min || minutes > max) return toast.danger(t('ssh.ipPool.idleInvalid', { min, max }));
     if (!cidr.trim()) return toast.danger(t('ssh.ipPool.cidrRequired'));
+    const cidrError = validateSshIpPoolCidr(cidr);
+    if (cidrError) return toast.danger(t(CIDR_ERROR_KEYS[cidrError]));
     void saveConfig({ enabled: pool.enabled, cidr: cidr.trim(), idleMinutes: minutes });
   };
 
@@ -148,7 +159,7 @@ export function SshIpPoolSection({ api, backendId, hosts, pool, askPassword, rem
             onChange={(enabled) => void saveConfig({ enabled, cidr: pool.cidr, idleMinutes: pool.idleMinutes })}
           />
         </div>
-        <div className="flex min-w-0 flex-wrap items-end gap-3 py-2.5 pe-2.5">
+        <div className="flex min-w-0 flex-wrap items-start gap-3 py-2.5 pe-2.5">
           <Input
             className="min-w-48 flex-1"
             label={t('ssh.ipPool.cidr')}
@@ -165,10 +176,9 @@ export function SshIpPoolSection({ api, backendId, hosts, pool, askPassword, rem
             value={idleMinutes}
             onChange={(value) => { setIdleMinutes(value); setDirty(true); }}
           />
-          <div className="flex gap-2 pb-6">
-            {dirty ? <Button size="small" variant="secondary" onClick={() => setDirty(false)}>{t('common.cancel')}</Button> : null}
+          <div className="mt-6 flex gap-2">
+            {dirty ? <Button variant="secondary" onClick={() => setDirty(false)}>{t('common.cancel')}</Button> : null}
             <Button
-              size="small"
               disabled={!dirty || saving}
               leadingIcon={saving ? SpinnerIcon : undefined}
               aria-busy={saving || undefined}
@@ -265,7 +275,9 @@ export function SshIpPoolSection({ api, backendId, hosts, pool, askPassword, rem
                     <IconAction icon={RiDeleteBinLine} size="sm" aria-label={t('ssh.ipPool.remove')} tooltip onClick={() => onRemoveAssignment(assignment)} />
                   </div>
                 </div>
-                {assignment.failure || assignment.error ? (
+                {assignment.state === 'needsLogin' ? (
+                  <p className="text-caption-1-regular text-text-secondary">{t('ssh.ipPool.needsLoginHint')}</p>
+                ) : (assignment.state === 'failed' || assignment.state === 'idle') && (assignment.failure || assignment.error) ? (
                   <p className="break-words text-caption-1-regular text-text-error-primary">
                     {t(SSH_FAILURE_LABEL_KEYS[assignment.failure ?? 'other'])}
                     {assignment.error ? <span className="ms-1 font-mono opacity-80">{assignment.error}</span> : null}
