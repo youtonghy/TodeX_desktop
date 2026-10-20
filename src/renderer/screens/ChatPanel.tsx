@@ -1010,6 +1010,16 @@ export function ChatPanel({ session }: Props) {
     .filter((entry) => isChatTimelineEntry(entry) && !isChatReminderEntry(entry))), [conversationTimeline]);
   const items = useMemo(() => buildChatRenderItems(chatEntries), [chatEntries]);
   const actionableIncoming = useMemo(() => latestIncomingEntryIds(chatEntries), [chatEntries]);
+  const sentHistory = useMemo(() => {
+    const texts: string[] = [];
+    for (const entry of chatEntries) {
+      if (entry.kind !== 'outgoing' || entry.subtitle === STREAMING_REPLY_PLACEHOLDER) continue;
+      const text = entry.subtitle.trim();
+      if (text && texts[texts.length - 1] !== text) texts.push(text);
+    }
+    return texts;
+  }, [chatEntries]);
+  const sentHistoryBrowseRef = useRef<{ conversationId: string; index: number; recalled: string } | null>(null);
   // Background tasks the agent still waits on; the calls that launched them
   // read as running.
   const runtimeBackgroundTasks = conversation ? session.conversationRuntimeById[conversation.id]?.backgroundTasks : undefined;
@@ -1325,6 +1335,37 @@ export function ChatPanel({ session }: Props) {
       event.preventDefault();
       setSuggestionIndex(0);
     }
+  };
+  // Up/Down recall this conversation's earlier messages, shell style: browsing
+  // starts from an empty composer and lasts until the recalled text is edited.
+  const browsingHistory = sentHistoryBrowseRef.current?.conversationId === conversation.id
+    && sentHistoryBrowseRef.current.recalled === draft;
+  const handleHistoryKeyDown = (event: KeyboardEvent) => {
+    if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+    if (event.shiftKey || event.altKey || event.ctrlKey || event.metaKey) return;
+    if (isComposingRef.current || isImeCompositionKey(event) || readOnly) return;
+    const browse = browsingHistory ? sentHistoryBrowseRef.current : null;
+    if (!browse && draft.trim()) return;
+    // Inside a recalled multi-line message the arrows still move the caret
+    // until it reaches either end.
+    const selection = composerSelectionRef.current ?? { start: draft.length, end: draft.length };
+    if (browse && (selection.start !== selection.end || (selection.start > 0 && selection.start < draft.length))) return;
+    const index = (browse ? browse.index : sentHistory.length) + (event.key === 'ArrowUp' ? -1 : 1);
+    if (index < 0 || (!browse && event.key === 'ArrowDown')) return;
+    event.preventDefault();
+    const next = sentHistory[index] ?? '';
+    sentHistoryBrowseRef.current = index < sentHistory.length
+      ? { conversationId: conversation.id, index, recalled: next }
+      : null;
+    setSuggestionIndex(0);
+    session.setConversationChatDraft(conversation.id, next);
+    session.setConversationComposerSelection(conversation.id, { start: next.length, end: next.length });
+    composerRef.current?.focus(next.length);
+  };
+  const handleComposerKeyDown = (event: KeyboardEvent) => {
+    // A recalled `/command` opens the slash menu; keep the arrows on history.
+    if (!browsingHistory) handleSuggestionKeyDown(event);
+    if (!event.defaultPrevented) handleHistoryKeyDown(event);
   };
   const thinking = session.thinkingConversations[conversation.id] === true;
   const submissionStatus = session.submissionStatusByConversation[conversation.id];
@@ -2045,7 +2086,7 @@ export function ChatPanel({ session }: Props) {
                           : liveComposerAttachments(value, current));
                     }}
                     onSubmit={submitComposer}
-                    onKeyDown={handleSuggestionKeyDown}
+                    onKeyDown={handleComposerKeyDown}
                     onSelectionChange={(selection) => session.setConversationComposerSelection(conversation.id, selection)}
                     onCompositionStart={() => { isComposingRef.current = true; }}
                     onCompositionEnd={() => { isComposingRef.current = false; }}
