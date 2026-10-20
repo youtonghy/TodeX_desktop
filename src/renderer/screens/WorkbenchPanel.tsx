@@ -377,6 +377,13 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
         opened = item;
         continue;
       }
+      if (request.kind === 'browser') {
+        const count = [...items, ...added].filter(item => item.type === 'browser').length + 1;
+        const item: WorkbenchItem = { id: `browser-${Date.now()}-${request.id}`, type: 'browser', title: `${workbenchLabel('browser')} ${count}`, target: { url: request.url } };
+        added.push(item);
+        opened = item;
+        continue;
+      }
       if (request.kind === 'ssh-exec' || request.kind === 'subagents' || request.kind === 'agent-calls') {
         // One tab per conversation and kind: reuse it, or create it.
         const { kind, conversationId } = request;

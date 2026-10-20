@@ -302,6 +302,10 @@ export function App() {
     queueWorkbenchRequest(id => ({ id, kind: 'remote-files', remote }));
     persistAsideOpen(true);
   }, [persistAsideOpen, queueWorkbenchRequest]);
+  const openBrowserTab = useCallback((url: string) => {
+    queueWorkbenchRequest(id => ({ id, kind: 'browser', url }));
+    persistAsideOpen(true);
+  }, [persistAsideOpen, queueWorkbenchRequest]);
   const closeWorkbenchItem = useCallback((itemId: string) => queueWorkbenchRequest(id => ({ id, kind: 'close', itemId })), [queueWorkbenchRequest]);
   const toggleSshView = useCallback(() => {
     // Git actions belong to the conversation view, not the SSH view.
@@ -536,6 +540,7 @@ export function App() {
           onOpenSshTerminal={openSshTerminal}
           onOpenRemoteFiles={openRemoteFiles}
           onCloseWorkbenchItem={closeWorkbenchItem}
+          onOpenBrowser={openBrowserTab}
         />
       </PanelBoundary>
     ) : session.historyEncryption.recoveryNoticeVisible ? (

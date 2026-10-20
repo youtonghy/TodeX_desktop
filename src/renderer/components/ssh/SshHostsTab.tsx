@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { Button as AriaButton, Focusable } from 'react-aria-components';
 import {
-  RiAddLine, RiDeleteBinLine, RiEdit2Line, RiFileCopyLine, RiFolder3Line, RiLinkUnlink, RiMore2Line,
-  RiPlugLine, RiPulseLine, RiServerLine, RiTerminalBoxLine,
+  RiAddLine, RiArrowLeftRightLine, RiDeleteBinLine, RiEdit2Line, RiFileCopyLine, RiFolder3Line, RiLinkUnlink, RiMore2Line,
+  RiPlugLine, RiPulseLine, RiRouterLine, RiServerLine, RiTerminalBoxLine,
 } from '@remixicon/react';
 import { sshHostEndpoint, type FtpSite, type SshHost, type SshKey, type SshTestResult } from '@todex/protocol/ssh';
 import { useT } from '../../i18n';
@@ -38,11 +38,15 @@ type Props = {
   onReload: () => void;
   onConnect: (host: string) => void;
   onOpenFiles: (target: RemoteConnectTarget) => void;
+  /** Opens the new port forward dialog for the host (Port forwarding tab). */
+  onNewForward: (alias: string) => void;
+  /** Opens the loopback IP assignment dialog for the host. */
+  onAssignIp: (alias: string) => void;
 };
 
 type PendingDelete = { kind: 'host'; alias: string } | { kind: 'ftp'; site: FtpSite };
 
-export function SshHostsTab({ api, backendId, askPassword, rememberPassword, hosts, ftpSites, keys, onReload, onConnect, onOpenFiles }: Props) {
+export function SshHostsTab({ api, backendId, askPassword, rememberPassword, hosts, ftpSites, keys, onReload, onConnect, onOpenFiles, onNewForward, onAssignIp }: Props) {
   const t = useT();
   const [hostDialog, setHostDialog] = useState<{ host?: SshHost } | null>(null);
   const [importOpen, setImportOpen] = useState(false);
@@ -173,8 +177,12 @@ export function SshHostsTab({ api, backendId, askPassword, rememberPassword, hos
                           if (key === 'edit') setHostDialog({ host });
                           if (key === 'delete') setPendingDelete({ kind: 'host', alias: host.alias });
                           if (key === 'disconnect') void disconnect(host.alias);
+                          if (key === 'forward') onNewForward(host.alias);
+                          if (key === 'assignIp') onAssignIp(host.alias);
                         }}>
                           <MenuItem id="disconnect" icon={RiLinkUnlink} textValue={t('ssh.hosts.disconnect')}>{t('ssh.hosts.disconnect')}</MenuItem>
+                          <MenuItem id="forward" icon={RiArrowLeftRightLine} textValue={t('ssh.hosts.newForward')}>{t('ssh.hosts.newForward')}</MenuItem>
+                          <MenuItem id="assignIp" icon={RiRouterLine} textValue={t('ssh.hosts.assignIp')}>{t('ssh.hosts.assignIp')}</MenuItem>
                           {managed ? <MenuItem id="edit" icon={RiEdit2Line} textValue={t('ssh.edit')}>{t('ssh.edit')}</MenuItem> : null}
                           {managed ? <MenuItem id="delete" icon={RiDeleteBinLine} tone="danger" textValue={t('common.delete')}>{t('common.delete')}</MenuItem> : null}
                         </Menu>

@@ -115,6 +115,8 @@ export type WorkbenchItem = {
 export type WorkbenchRequest =
   | { id: number; kind: 'ssh-terminal'; host: string }
   | { id: number; kind: 'remote-files'; remote: RemoteFilesBinding }
+  /** A new browser tab on a loopback URL (the SSH view's running forwards). */
+  | { id: number; kind: 'browser'; url: string }
   | { id: number; kind: 'ssh-exec'; conversationId: string }
   | { id: number; kind: 'subagents'; conversationId: string }
   | { id: number; kind: 'agent-calls'; conversationId: string }

@@ -1,6 +1,7 @@
 import type { SshFailureKind } from '@todex/protocol/ssh';
 import type { V2ApiClient } from '@todex/protocol/v2';
 import type { MessageKey } from '../../i18n';
+import { toast } from '@/components/ui/toast';
 
 export type SshApi = () => V2ApiClient;
 
@@ -38,4 +39,27 @@ export function parsePort(value: string): number | undefined | null {
   if (!trimmed) return undefined;
   const port = Number(trimmed);
   return Number.isInteger(port) && port >= 1 && port <= 65535 ? port : null;
+}
+
+/** Formats an optional RFC3339 timestamp from the backend. */
+export function formatIsoTimestamp(value?: string): string {
+  if (!value) return '';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? '' : date.toLocaleString();
+}
+
+/** `3.7 KB`, `14.5 MB`: rough sizes for estimates. */
+export function formatApproxBytes(bytes: number): string {
+  if (bytes < 1024) return `${Math.round(bytes)} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+export async function copyText(text: string, done: string, failed: string) {
+  try {
+    await navigator.clipboard.writeText(text);
+    toast.success(done);
+  } catch {
+    toast.danger(failed);
+  }
 }
