@@ -1,5 +1,19 @@
 allowBuilds:
-  '@zowe/secrets-for-zowe-sdk': true
   electron: true
   electron-winstaller: false
   esbuild: false
+
+# Hold back versions published less than a day ago (minutes), so a hijacked
+# release has time to be caught before it reaches this lockfile.
+minimumReleaseAge: 1440
+
+# Patched transitive dependencies of electron-builder that its own ranges do
+# not pull in yet. Drop an entry once upstream ships the fixed version.
+overrides:
+  brace-expansion@^1: ^1.1.21
+  brace-expansion@^2: ^2.1.7
+  brace-expansion@^5: ^5.0.12
+  fast-uri@^3: ^3.1.9
+  http-cache-semantics@^4: ^4.3.0
+  tar@^7: ^7.5.22
+  undici@^6: ^6.29.1
