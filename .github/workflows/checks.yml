@@ -24,12 +24,12 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Checkout desktop
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           path: TodeX_desktop
 
       - name: Checkout shared protocol
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           repository: youtonghy/TodeX_protocol
           ref: main
@@ -37,7 +37,7 @@ jobs:
           token: ${{ secrets.PROTOCOL_REPO_TOKEN || github.token }}
 
       - name: Setup Node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version: ${{ env.NODE_VERSION }}
 
@@ -50,6 +50,10 @@ jobs:
         run: |
           pnpm install --frozen-lockfile --ignore-scripts
           pnpm rebuild
+
+      - name: Audit dependencies
+        working-directory: TodeX_desktop
+        run: pnpm audit --audit-level high
 
       - name: Check Electron
         working-directory: TodeX_desktop
