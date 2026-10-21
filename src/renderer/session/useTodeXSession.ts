@@ -601,12 +601,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const [backendConnections, setBackendConnections] = useState<BackendConnectionProfile[]>([]);
   const backendConnectionsRef = useRef(backendConnections);
   backendConnectionsRef.current = backendConnections;
-  // The backend new None-workspace conversations start on; empty means the
-  // first backend added.
+  // The default None backend picked in Settings; empty means the first
+  // backend added.
   const [noWorkspaceBackendPreference, setNoWorkspaceBackendPreference] = useState('');
-  const noWorkspaceBackendId = resolveNoWorkspaceBackendId(backendConnections, noWorkspaceBackendPreference);
-  const noWorkspaceBackendIdRef = useRef(noWorkspaceBackendId);
-  noWorkspaceBackendIdRef.current = noWorkspaceBackendId;
+  const noWorkspaceDefaultBackendId = resolveNoWorkspaceBackendId(backendConnections, noWorkspaceBackendPreference);
+  // The sidebar lists None once per backend; this is the row last picked.
+  const [noneBackendSelection, setNoneBackendSelection] = useState('');
+  const noWorkspaceBackendIdRef = useRef('');
   const [linkStatusByBackend, setLinkStatusByBackend] = useState<Record<string, BackendLinkStatus>>({});
   const patchLinkStatus = useCallback((backendId: string, patch: Partial<BackendLinkStatus> | ((current: BackendLinkStatus) => Partial<BackendLinkStatus>)) => {
     setLinkStatusByBackend((current) => {
@@ -672,11 +673,22 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const [directorySyncByBackend, setDirectorySyncByBackend] = useState<Record<string, 'loading' | 'ready' | 'error'>>({});
   const [activeWorkspaceId, setActiveWorkspaceId] = useState('');
   const [activeConversationId, setActiveConversationId] = useState('');
+  const activeConversationRecord = conversations.find((item) => item.id === activeConversationId);
+  // The None backend in view: the backend of the open None conversation,
+  // else the None row last picked, else the Settings default. New None
+  // conversations and untagged None drafts belong to it.
+  const noWorkspaceBackendId = resolveNoWorkspaceBackendId(
+    backendConnections,
+    isNoneWorkspaceId(activeConversationRecord?.workspaceId) ? activeConversationRecord?.backendConnectionId : null,
+    noneBackendSelection,
+    noWorkspaceDefaultBackendId,
+  );
+  noWorkspaceBackendIdRef.current = noWorkspaceBackendId;
   // The focused backend serves the visible conversation (or workspace). It
   // only decides what the UI shows and where workspace-less panels act;
   // every backend stays connected regardless.
   const activeBackendConnectionId = ownerBackendId(
-    conversations.find((item) => item.id === activeConversationId),
+    activeConversationRecord,
     workspaces.find((item) => item.id === activeWorkspaceId),
     noWorkspaceBackendId,
   ) || 'default-backend';
@@ -1380,7 +1392,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         loadJson<ConversationRecord[]>(CONVERSATIONS_STORAGE_KEY, []),
         loadJson<TimelineEntry[]>(TIMELINE_STORAGE_KEY, []),
         loadJson<SentAttachmentRecord[]>(SENT_ATTACHMENTS_STORAGE_KEY, []),
-        loadJson<{ workspaceId?: string; conversationId?: string } | null>(ACTIVE_SELECTION_STORAGE_KEY, null),
+        loadJson<{ workspaceId?: string; conversationId?: string; noneBackendId?: string } | null>(ACTIVE_SELECTION_STORAGE_KEY, null),
         loadJson<WorkspaceMentionHistory[]>(MENTION_HISTORY_STORAGE_KEY, []),
         loadJson<Record<string, number>>(SESSION_CURSORS_STORAGE_KEY, {}),
         loadJson<Partial<ExperimentalFeatureSettings> | null>(EXPERIMENTAL_FEATURES_STORAGE_KEY, null),
@@ -1500,6 +1512,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       setProviderModelPreferences(normalizedProviderModelPreferences);
       setActiveWorkspaceId(firstWorkspaceId);
       setActiveConversationId(firstConversationId);
+      setNoneBackendSelection(typeof storedActiveSelection?.noneBackendId === 'string' ? storedActiveSelection.noneBackendId : '');
       setAutoConnectEnabled(hydratedProfiles.length > 0 || Boolean(storedSettings?.serverUrl?.trim()));
       setHydrated(true);
     })();
@@ -1909,8 +1922,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     void saveJson(ACTIVE_SELECTION_STORAGE_KEY, {
       workspaceId: activeWorkspaceId,
       conversationId: activeConversationId,
+      noneBackendId: noWorkspaceBackendId,
     });
-  }, [activeConversationId, activeWorkspaceId, hydrated]);
+  }, [activeConversationId, activeWorkspaceId, hydrated, noWorkspaceBackendId]);
 
   const activeWorkspace = useMemo(() => {
     const workspace = workspaces.find((item) => item.id === activeWorkspaceId) ?? null;
@@ -4977,17 +4991,24 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     setNoWorkspaceBackendPreference(id);
   }, []);
 
-  const selectWorkspace = useCallback((workspaceId: string) => {
+  /** Opens a workspace. None is listed once per backend: `noneBackendId`
+   * picks which backend's None conversations it shows and starts. */
+  const selectWorkspace = useCallback((workspaceId: string, noneBackendId?: string) => {
     const workspace = workspaces.find((item) => item.id === workspaceId);
     if (!workspace || workspace.pathMissing) {
       return;
     }
+    const noneBackend = isNoneWorkspaceId(workspaceId) ? noneBackendId || noWorkspaceBackendIdRef.current : '';
+    if (noneBackend) setNoneBackendSelection(noneBackend);
     setActiveWorkspaceId(workspaceId);
-    const conversation = conversations.find((item) => item.workspaceId === workspaceId);
+    const conversation = conversations.find((item) => item.workspaceId === workspaceId
+      && (!noneBackend || ownerBackendId(item, workspace, noneBackend) === noneBackend));
     if (conversation) {
       setActiveConversationId(conversation.id);
     } else {
-      const nextConversation = createDefaultConversation(workspace);
+      const nextConversation = noneBackend
+        ? { ...createDefaultConversation(workspace), backendConnectionId: noneBackend }
+        : createDefaultConversation(workspace);
       setConversations((current) => current.some((item) => item.id === nextConversation.id) ? current : [nextConversation, ...current]);
       setActiveConversationId(nextConversation.id);
     }
@@ -9417,7 +9438,11 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     activeBackendConnectionId,
     /** Connection status of every backend, by profile id. */
     backendLinkStatus: linkStatusByBackend,
+    /** Backend of the None workspace in view (the sidebar lists None once
+     * per backend). */
     noWorkspaceBackendId,
+    /** Default None backend picked in Settings. */
+    noWorkspaceDefaultBackendId,
     setNoWorkspaceBackendId,
     updateBackendConnection,
     addBackendConnection,

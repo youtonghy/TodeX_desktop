@@ -746,6 +746,16 @@ export function isNoneWorkspaceId(workspaceId: string | null | undefined): boole
   return workspaceId === NONE_WORKSPACE_ID;
 }
 
+/** The sidebar lists None once per backend; each row's id names its backend. */
+export function noneWorkspaceRowId(backendId: string): string {
+  return `${NONE_WORKSPACE_ID}@${backendId}`;
+}
+
+/** Backend of a per-backend None row id, or null for any other id. */
+export function noneWorkspaceRowBackendId(rowId: string): string | null {
+  return rowId.startsWith(`${NONE_WORKSPACE_ID}@`) ? rowId.slice(NONE_WORKSPACE_ID.length + 1) : null;
+}
+
 export function createNoneWorkspace(
   settings: Pick<ConnectionSettings, 'tenantId' | 'defaultModel' | 'approvalPolicy' | 'sandboxMode'>,
 ): WorkspaceRecord {

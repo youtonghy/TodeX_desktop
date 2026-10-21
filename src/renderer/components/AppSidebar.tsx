@@ -54,7 +54,8 @@ import { AppIcon } from './AppIcon';
 import { WORKSPACE_ICON_CHOICES, WORKSPACE_RING_STYLES, WorkspaceStatusRing, ringStyleKey, workspaceIconComponent } from './WorkspaceIcon';
 import type { TodeXSession } from '../session/useTodeXSession';
 import type { ProviderKind } from '@todex/protocol/v2';
-import { connectionStateLabel, conversationDisplayTitle, formatResetInstant, getConversationStatus, healthLabelOf, isConversationHighlighted, isListedConversation, isNoneWorkspaceId, workspaceDisplayName } from '../session/helpers';
+import { connectionStateLabel, conversationDisplayTitle, formatResetInstant, getConversationStatus, healthLabelOf, isConversationHighlighted, isListedConversation, isNoneWorkspaceId, NONE_WORKSPACE_ID, noneWorkspaceRowBackendId, noneWorkspaceRowId, workspaceDisplayName } from '../session/helpers';
+import { ownerBackendId } from '../session/backendRouting';
 import { ShortcutHint, shortcutKeys, useAppShortcuts, type ShortcutId } from '../lib/shortcuts';
 import { useT } from '../i18n';
 
@@ -311,6 +312,16 @@ function relativeTime(at: number): string {
 }
 const DOCS_DISMISSED_KEY = 'todex.sidebar.docsDismissed';
 
+/** Whether a sidebar workspace row is one of the per-backend None rows. */
+function isNoneRowId(rowId: string): boolean {
+  return noneWorkspaceRowBackendId(rowId) !== null;
+}
+
+/** The workspace record behind a sidebar row (None rows share one). */
+function workspaceIdOfRow(rowId: string): string {
+  return isNoneRowId(rowId) ? NONE_WORKSPACE_ID : rowId;
+}
+
 export function AppSidebar({
   session,
   open,
@@ -356,18 +367,49 @@ export function AppSidebar({
     return map;
   }, [kanbanTasks]);
 
-  // Every backend stays connected, so None lists the conversations of all of them.
+  // None is listed once per backend: its row id names the backend, and each
+  // row holds only that backend's None conversations (an untagged draft
+  // belongs to the None in view).
+  const activeRowId = isNoneWorkspaceId(session.activeWorkspaceId) ? noneWorkspaceRowId(session.noWorkspaceBackendId) : session.activeWorkspaceId;
+  const rowIdOf = useCallback((conversation: TodeXSession['conversations'][number]) => (
+    isNoneWorkspaceId(conversation.workspaceId)
+      ? noneWorkspaceRowId(ownerBackendId(conversation, null, session.noWorkspaceBackendId))
+      : conversation.workspaceId
+  ), [session.noWorkspaceBackendId]);
   const workspaceConversations = useMemo(() => (
     session.conversations.filter(
-      (conversation) => conversation.workspaceId === session.activeWorkspaceId && !conversation.archived && isListedConversation(conversation),
+      (conversation) => rowIdOf(conversation) === activeRowId && !conversation.archived && isListedConversation(conversation),
     )
-  ), [session.activeWorkspaceId, session.conversations]);
+  ), [activeRowId, rowIdOf, session.conversations]);
 
   // Workspaces of every configured backend are live and editable here; only
   // those left behind by a removed backend profile render read-only below.
-  const ownWorkspaces = useMemo(() => session.workspaces.filter(
-    (workspace) => !workspace.backendConnectionId || session.backendConnections.some((profile) => profile.id === workspace.backendConnectionId),
-  ), [session.workspaces, session.backendConnections]);
+  // None becomes one row per backend, the Settings default first.
+  const ownWorkspaces = useMemo(() => {
+    const listed = session.workspaces.filter((workspace) => !isNoneWorkspaceId(workspace.id) && (
+      !workspace.backendConnectionId || session.backendConnections.some((profile) => profile.id === workspace.backendConnectionId)
+    ));
+    const none = session.workspaces.find((workspace) => isNoneWorkspaceId(workspace.id));
+    if (!none) return listed;
+    const defaultId = session.noWorkspaceDefaultBackendId;
+    const profiles = [...session.backendConnections]
+      .sort((a, b) => Number(b.id === defaultId) - Number(a.id === defaultId) || a.createdAt - b.createdAt);
+    const rows = profiles.map((profile, index): WorkspaceRecord => ({
+      ...none,
+      id: noneWorkspaceRowId(profile.id),
+      name: profiles.length > 1 ? `${none.name} · ${profile.name}` : none.name,
+      backendConnectionId: profile.id,
+      sortOrder: index,
+    }));
+    return [...rows, ...listed];
+  }, [session.workspaces, session.backendConnections, session.noWorkspaceDefaultBackendId]);
+  const openWorkspaceRow = (rowId: string) => {
+    const noneBackendId = noneWorkspaceRowBackendId(rowId);
+    if (noneBackendId === null) session.selectWorkspace(rowId);
+    else session.selectWorkspace(NONE_WORKSPACE_ID, noneBackendId || undefined);
+  };
+  const rowById = useMemo(() => new Map(ownWorkspaces.map((workspace) => [workspace.id, workspace])), [ownWorkspaces]);
+  const splitNone = ownWorkspaces.filter((workspace) => isNoneRowId(workspace.id)).length > 1;
 
   const foreignWorkspaceGroups = useMemo(() => {
     const groups = new Map<string, { profile: BackendConnectionProfile | undefined; workspaces: WorkspaceRecord[] }>();
@@ -404,10 +446,11 @@ export function AppSidebar({
   const workspaceLastActivity = useMemo(() => {
     const latest = new Map<string, number>();
     for (const conversation of session.conversations) {
-      if (conversation.updatedAt > (latest.get(conversation.workspaceId) ?? 0)) latest.set(conversation.workspaceId, conversation.updatedAt);
+      const rowId = rowIdOf(conversation);
+      if (conversation.updatedAt > (latest.get(rowId) ?? 0)) latest.set(rowId, conversation.updatedAt);
     }
     return latest;
-  }, [session.conversations]);
+  }, [session.conversations, rowIdOf]);
 
   const { collapsedGroups, toggleGroupCollapsed } = useSidebarGroupCollapse();
   const dragSourceRef = useRef<WorkspaceDragSource | null>(null);
@@ -491,7 +534,7 @@ export function AppSidebar({
   // Reset conversation limit when switching workspaces
   useEffect(() => {
     setConversationLimit(5);
-  }, [session.activeWorkspaceId]);
+  }, [activeRowId]);
 
   // Two modes only: the full 260px panel or the 60px icon rail. The rail
   // never widens on hover, focus or an open menu; the app header's toggle
@@ -554,17 +597,18 @@ export function AppSidebar({
       if (!conversation.workspaceId || conversation.archived || !isListedConversation(conversation)) continue;
       const status = getConversationStatus(session, conversation, timelineInfoMap[conversation.id]?.latestEntry, timelineInfoMap[conversation.id]?.latestIncomingAt);
       if (!status) continue;
-      const current = map[conversation.workspaceId];
+      const rowId = rowIdOf(conversation);
+      const current = map[rowId];
       if (!current || rank[status.kind] > rank[current]) {
-        map[conversation.workspaceId] = status.kind;
+        map[rowId] = status.kind;
       }
     }
     return map;
-  }, [session, timelineInfoMap]);
+  }, [session, timelineInfoMap, rowIdOf]);
 
   // Workspaces use an explicit manual order and never move when a conversation updates.
   // The built-in None workspace always leads the list.
-  const sortedWorkspaces = useMemo(() => [...ownWorkspaces].sort((a, b) => Number(isNoneWorkspaceId(b.id)) - Number(isNoneWorkspaceId(a.id)) || Number(pins.workspace.includes(b.id)) - Number(pins.workspace.includes(a.id)) || (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || (a.createdAt - b.createdAt) || a.id.localeCompare(b.id)), [ownWorkspaces, pins.workspace]);
+  const sortedWorkspaces = useMemo(() => [...ownWorkspaces].sort((a, b) => Number(isNoneRowId(b.id)) - Number(isNoneRowId(a.id)) || Number(pins.workspace.includes(b.id)) - Number(pins.workspace.includes(a.id)) || (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || (a.createdAt - b.createdAt) || a.id.localeCompare(b.id)), [ownWorkspaces, pins.workspace]);
 
   // Conversations order by the last finished/stopped turn, so a running
   // conversation no longer re-sorts while it streams. Items that have never
@@ -630,7 +674,9 @@ export function AppSidebar({
 
   // Persists a regrouped or reordered layout as per-workspace sortOrder/groupId/groupName.
   const applyWorkspaceLayout = useCallback((next: WorkspaceSidebarEntry[]) => {
-    for (const { id, patch } of workspaceLayoutPatches(next)) session.updateWorkspace(id, patch);
+    for (const { id, patch } of workspaceLayoutPatches(next)) {
+      if (!isNoneRowId(id)) session.updateWorkspace(id, patch);
+    }
   }, [session]);
 
   // A search covers the conversations of every workspace (except those whose
@@ -743,14 +789,16 @@ export function AppSidebar({
   };
 
   // The built-in None workspace keeps only pin and icon actions.
-  const contextIsNone = menu?.kind === 'workspace' && isNoneWorkspaceId(menu.id);
+  const contextIsNone = menu?.kind === 'workspace' && isNoneRowId(menu.id);
   // Legacy plaintext history is read-only: no rename or fork.
   const contextReadOnly = menu?.kind === 'conversation'
     && session.conversations.find((item) => item.id === menu.id)?.legacyPlaintext === true;
   const runContextAction = (action: 'rename' | 'edit' | 'fork' | 'pin' | 'delete' | 'schedule') => {
     if (!menu || menu.kind === 'group') return;
     if (action === 'schedule') {
-      setSchedulingWorkspaceId(menu.id);
+      // A None row schedules on its own backend: it opens first.
+      if (isNoneRowId(menu.id)) openWorkspaceRow(menu.id);
+      setSchedulingWorkspaceId(workspaceIdOfRow(menu.id));
       setContextMenu(null);
       return;
     }
@@ -797,7 +845,7 @@ export function AppSidebar({
   };
 
   const renderWorkspaceItem = (workspace: WorkspaceRecord, group: { entry: WorkspaceGroupEntry; last: boolean; folded: boolean } | null) => {
-    const isSelected = workspace.id === session.activeWorkspaceId;
+    const isSelected = workspace.id === activeRowId;
     // A group-after drop on an expanded group marks the group's last row.
     const drop = dropTarget?.kind === 'workspace' && dropTarget.id === workspace.id
       ? dropTarget.position
@@ -807,7 +855,7 @@ export function AppSidebar({
     const isMissing = Boolean(workspace.pathMissing);
     const backend = session.backendConnections.find((profile) => profile.id === (workspace.backendConnectionId || session.activeBackendConnectionId));
     const backendLabel = backend ? t('sidebar.backendLabel', { name: backend.name, url: backend.serverUrl }) : t('sidebar.backendRemoved');
-    const showBackend = duplicateWorkspaceNames.has(workspaceDisplayName(workspace));
+    const showBackend = duplicateWorkspaceNames.has(workspaceDisplayName(workspace)) || (splitNone && isNoneRowId(workspace.id));
     const workspaceStatus = workspaceStatusMap[workspace.id];
     const workspaceStatusLabel = workspaceStatus === 'working'
       ? t('sidebar.statusWorking')
@@ -830,7 +878,7 @@ export function AppSidebar({
         })}
         inert={group?.folded || undefined}
         data-workspace-id={workspace.id}
-        data-workspace-drag={isNoneWorkspaceId(workspace.id) ? undefined : `workspace:${workspace.id}`}
+        data-workspace-drag={isNoneRowId(workspace.id) ? undefined : `workspace:${workspace.id}`}
         data-workspace-in-group={group ? 'true' : undefined}
         onContextMenu={(event) => openContextMenu(event, 'workspace', workspace.id)}
       >
@@ -862,7 +910,7 @@ export function AppSidebar({
   };
 
   const workspaceTooltipContent = (workspaceId: string): ReactNode => {
-    const workspace = session.workspaces.find((item) => item.id === workspaceId);
+    const workspace = rowById.get(workspaceId) ?? session.workspaces.find((item) => item.id === workspaceId);
     if (!workspace) return null;
     const backend = session.backendConnections.find((profile) => profile.id === (workspace.backendConnectionId || session.activeBackendConnectionId));
     const lastActivity = workspaceLastActivity.get(workspace.id) ?? workspace.updatedAt;
@@ -873,7 +921,7 @@ export function AppSidebar({
           <dt className="text-text-tertiary">{t('sidebar.workspaceTipBackend')}</dt>
           <dd className="break-words">{backend ? backend.name : t('sidebar.backendRemoved')}</dd>
           <dt className="text-text-tertiary">{t('sidebar.workspaceTipPath')}</dt>
-          <dd className="break-all"><span dir="ltr">{workspace.path || '—'}</span></dd>
+          <dd className="break-all"><span dir="ltr">{(isNoneRowId(workspace.id) ? session.backendLinkStatus[workspace.backendConnectionId ?? '']?.serverVersion?.scratch_workspace_root : workspace.path) || '—'}</span></dd>
           <dt className="text-text-tertiary">{t('sidebar.workspaceTipActivity')}</dt>
           <dd>{lastActivity ? relativeTime(lastActivity) : '—'}</dd>
         </dl>
@@ -885,7 +933,7 @@ export function AppSidebar({
   const renderGroupItems = (entry: WorkspaceGroupEntry) => {
     const folded = isGroupFolded(entry.id);
     const name = entry.name || t('sidebar.newGroupName');
-    const containsSelected = entry.workspaces.some((workspace) => workspace.id === session.activeWorkspaceId);
+    const containsSelected = entry.workspaces.some((workspace) => workspace.id === activeRowId);
     const statuses = entry.workspaces
       .map((workspace) => workspaceStatusMap[workspace.id])
       .filter((status): status is NonNullable<typeof status> => Boolean(status))
@@ -930,7 +978,7 @@ export function AppSidebar({
   // branches (folder, chevron, guides) holding their workspaces; lone
   // workspaces are root leaves. The icon rail keeps the flat grid list.
   const workspaceTreeItem = (workspace: WorkspaceRecord, group: { entry: WorkspaceGroupEntry; last: boolean } | null): ReactNode => {
-    const isSelected = workspace.id === session.activeWorkspaceId;
+    const isSelected = workspace.id === activeRowId;
     const drop = dropTarget?.kind === 'workspace' && dropTarget.id === workspace.id
       ? dropTarget.position
       : group?.last && dropTarget?.kind === 'group' && dropTarget.id === group.entry.id && dropTarget.position === 'after'
@@ -939,7 +987,7 @@ export function AppSidebar({
     const isMissing = Boolean(workspace.pathMissing);
     const backend = session.backendConnections.find((profile) => profile.id === (workspace.backendConnectionId || session.activeBackendConnectionId));
     const backendLabel = backend ? t('sidebar.backendLabel', { name: backend.name, url: backend.serverUrl }) : t('sidebar.backendRemoved');
-    const showBackend = duplicateWorkspaceNames.has(workspaceDisplayName(workspace));
+    const showBackend = duplicateWorkspaceNames.has(workspaceDisplayName(workspace)) || (splitNone && isNoneRowId(workspace.id));
     const workspaceStatus = workspaceStatusMap[workspace.id];
     const WorkspaceGlyph = workspaceIconComponent(workspace.icon);
     return (
@@ -956,7 +1004,7 @@ export function AppSidebar({
           draggingKey === `workspace:${workspace.id}` && 'opacity-40',
         )}
         data-workspace-id={workspace.id}
-        data-workspace-drag={isNoneWorkspaceId(workspace.id) ? undefined : `workspace:${workspace.id}`}
+        data-workspace-drag={isNoneRowId(workspace.id) ? undefined : `workspace:${workspace.id}`}
         data-workspace-in-group={group ? 'true' : undefined}
         onContextMenu={(event) => openContextMenu(event, 'workspace', workspace.id)}
         leading={(
@@ -992,7 +1040,7 @@ export function AppSidebar({
   const groupTreeItem = (entry: WorkspaceGroupEntry): ReactNode => {
     const folded = isGroupFolded(entry.id);
     const name = entry.name || t('sidebar.newGroupName');
-    const containsSelected = entry.workspaces.some((workspace) => workspace.id === session.activeWorkspaceId);
+    const containsSelected = entry.workspaces.some((workspace) => workspace.id === activeRowId);
     const statuses = entry.workspaces
       .map((workspace) => workspaceStatusMap[workspace.id])
       .filter((status): status is NonNullable<typeof status> => Boolean(status))
@@ -1168,7 +1216,7 @@ export function AppSidebar({
     </span>
   );
 
-  const menuWorkspace = menu?.kind === 'workspace' ? session.workspaces.find((item) => item.id === menu.id) : undefined;
+  const menuWorkspace = menu?.kind === 'workspace' ? session.workspaces.find((item) => item.id === workspaceIdOfRow(menu.id)) : undefined;
   const nothingMatches = Boolean(query)
     && matchedWorkspaceCount === 0
     && matchedForeignGroups.length === 0
@@ -1321,7 +1369,7 @@ export function AppSidebar({
                         if (target?.pathMissing) {
                           return;
                         }
-                        session.selectWorkspace(String(key));
+                        openWorkspaceRow(String(key));
                       }}
                     >
                       {displayedEntries.flatMap((entry) => (entry.kind === 'group'
@@ -1335,7 +1383,7 @@ export function AppSidebar({
                       className="rounded-none border-0 bg-transparent p-0"
                       selectionMode="single"
                       selectionBehavior="replace"
-                      selectedKeys={session.activeWorkspaceId ? [session.activeWorkspaceId] : []}
+                      selectedKeys={activeRowId ? [activeRowId] : []}
                       expandedKeys={expandedGroupKeys}
                       onExpandedChange={(keys) => {
                         for (const entry of displayedEntries) {
@@ -1353,7 +1401,7 @@ export function AppSidebar({
                           return;
                         }
                         if (session.workspaces.find((item) => item.id === key)?.pathMissing) return;
-                        session.selectWorkspace(key);
+                        openWorkspaceRow(key);
                       }}
                     >
                       {displayedEntries.map((entry) => (entry.kind === 'group'
@@ -1447,7 +1495,7 @@ export function AppSidebar({
             ) : (
               <>
                 <GridList
-                  key={query ? `search_${query}` : `${session.activeWorkspaceId || 'no-workspace'}_${conversationLimit}`}
+                  key={query ? `search_${query}` : `${activeRowId || 'no-workspace'}_${conversationLimit}`}
                   aria-label={t('sidebar.conversations')}
                   className="flex flex-col outline-none"
                   onAction={(key) => {
@@ -1472,7 +1520,7 @@ export function AppSidebar({
                     const title = conversationDisplayTitle(conversation, session.timeline);
                     const running = isConversationHighlighted(conversation, session.activeConversationId, session.turnIds);
                     // Search results come from every workspace, so each names its own.
-                    const resultWorkspace = query ? workspaceById.get(conversation.workspaceId) : undefined;
+                    const resultWorkspace = query ? rowById.get(rowIdOf(conversation)) ?? workspaceById.get(conversation.workspaceId) : undefined;
                     return (
                       <GridListItem
                         key={conversation.id}
@@ -1602,7 +1650,7 @@ export function AppSidebar({
                               aria-label={key}
                               active={(menuWorkspace.icon ?? 'folder') === key}
                               onClick={() => {
-                                session.updateWorkspace(menu.id, { icon: key === 'folder' ? undefined : key });
+                                session.updateWorkspace(workspaceIdOfRow(menu.id), { icon: key === 'folder' ? undefined : key });
                                 setContextMenu(null);
                               }}
                             />
@@ -1612,7 +1660,7 @@ export function AppSidebar({
                           label={t('sidebar.iconColor')}
                           value={menuWorkspace.iconColor}
                           onChange={(color) => {
-                            session.updateWorkspace(menu.id, { iconColor: color });
+                            session.updateWorkspace(workspaceIdOfRow(menu.id), { iconColor: color });
                             setContextMenu(null);
                           }}
                         />
@@ -1636,7 +1684,7 @@ export function AppSidebar({
                                   active && 'bg-background-secondary-hover',
                                 )}
                                 onClick={() => {
-                                  session.updateWorkspace(menu.id, { ringStyle: key === 'orbit' ? undefined : key });
+                                  session.updateWorkspace(workspaceIdOfRow(menu.id), { ringStyle: key === 'orbit' ? undefined : key });
                                   setContextMenu(null);
                                 }}
                               >
@@ -1652,7 +1700,7 @@ export function AppSidebar({
                           type="button"
                           className={cx(QUIET_BUTTON, 'justify-start text-body-medium text-text-secondary')}
                           onClick={() => {
-                            session.updateWorkspace(menu.id, { icon: undefined, iconColor: undefined, ringStyle: undefined });
+                            session.updateWorkspace(workspaceIdOfRow(menu.id), { icon: undefined, iconColor: undefined, ringStyle: undefined });
                             setContextMenu(null);
                           }}
                         >

@@ -19,6 +19,12 @@ test('the no-workspace backend is the chosen one, else the first added', () => {
   assert.equal(resolveNoWorkspaceBackendId([], 'b1'), '');
 });
 
+test('the None row in view wins over the Settings default while it exists', () => {
+  assert.equal(resolveNoWorkspaceBackendId(profiles, 'b1', 'b2'), 'b1');
+  assert.equal(resolveNoWorkspaceBackendId(profiles, null, 'gone', 'b2'), 'b2');
+  assert.equal(resolveNoWorkspaceBackendId(profiles, 'gone', ''), 'b1');
+});
+
 test('a conversation belongs to its own tag, then its workspace, then the no-workspace backend', () => {
   assert.equal(ownerBackendId({ workspaceId: 'w', backendConnectionId: 'b2' }, { id: 'w', backendConnectionId: 'b1' }, 'b9'), 'b2');
   assert.equal(ownerBackendId({ workspaceId: 'w' }, { id: 'w', backendConnectionId: 'b1' }, 'b9'), 'b1');

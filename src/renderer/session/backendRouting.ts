@@ -1,7 +1,7 @@
 /** Which backend owns a workspace, conversation or command. Every backend
  * profile keeps its own connection; records carry the profile id of the
- * backend that serves them, and the None workspace (which spans backends)
- * starts its new conversations on the profile chosen for it in Settings. */
+ * backend that serves them, and the None workspace (listed once per backend)
+ * starts its new conversations on the backend of the None row in view. */
 
 /** Built-in None workspace id (mirrors helpers.ts `NONE_WORKSPACE_ID`). */
 const NONE_WORKSPACE_ID = 'workspace-none';
@@ -11,10 +11,12 @@ type WorkspaceLike = { id: string; backendConnectionId?: string | null };
 type ConversationLike = { workspaceId: string; backendConnectionId?: string | null; v2ConversationId?: string };
 type TombstoneLike = { backendConnectionId?: string | null };
 
-/** The backend new None-workspace conversations start on: the one picked in
- * Settings while it exists, otherwise the first backend added. */
-export function resolveNoWorkspaceBackendId(profiles: readonly ProfileLike[], preferredId: string | null | undefined): string {
-  if (preferredId && profiles.some((profile) => profile.id === preferredId)) return preferredId;
+/** The backend new None-workspace conversations start on: the first of the
+ * preferred ids (the None row in view, then the one picked in Settings) that
+ * still exists, otherwise the first backend added. */
+export function resolveNoWorkspaceBackendId(profiles: readonly ProfileLike[], ...preferredIds: Array<string | null | undefined>): string {
+  const preferred = preferredIds.find((id) => id && profiles.some((profile) => profile.id === id));
+  if (preferred) return preferred;
   let first: ProfileLike | undefined;
   for (const profile of profiles) {
     if (!first || profile.createdAt < first.createdAt) first = profile;

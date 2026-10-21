@@ -89,7 +89,7 @@ export function BackendConnectionSettings({ session, page, onPageChange, deviceN
                 description={item.tenantId ? `${item.serverUrl} · ${item.tenantId}` : item.serverUrl}
                 trailing={(
                   <>
-                    {item.id === session.noWorkspaceBackendId ? <Chip variant="caption" color="neutral">{t('settings.noWorkspaceTag')}</Chip> : null}
+                    {item.id === session.noWorkspaceDefaultBackendId ? <Chip variant="caption" color="neutral">{t('settings.noWorkspaceTag')}</Chip> : null}
                     {mismatch ? <Chip variant="caption" color="yellow">{t('conn.versionMismatchShort')}</Chip> : null}
                     <Chip variant="caption" color={item.deviceSecret ? 'neutral' : 'yellow'}>
                       {item.deviceSecret ? t('settings.backendPaired') : t('settings.backendUnpaired')}
@@ -107,7 +107,7 @@ export function BackendConnectionSettings({ session, page, onPageChange, deviceN
         <SettingsRow label={t('settings.noWorkspaceBackend')} description={t('settings.noWorkspaceBackendHint')}>
           <Select
             aria-label={t('settings.noWorkspaceBackend')}
-            selectedKey={session.noWorkspaceBackendId}
+            selectedKey={session.noWorkspaceDefaultBackendId}
             triggerClassName={ROW_SELECT_TRIGGER}
             onSelectionChange={(key) => { if (typeof key === 'string') session.setNoWorkspaceBackendId(key); }}
           >
