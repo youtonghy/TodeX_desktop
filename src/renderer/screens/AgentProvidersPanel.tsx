@@ -44,9 +44,12 @@ import {
   asRecord,
   buildSettingsConfig,
   defaultEfforts,
+  DSH_API_KINDS,
+  DSH_DEEPSEEK_ROUTE,
   emptyModelEntry,
   extractFormValues,
   GROK_API_BACKENDS,
+  isAdditiveAgent,
   modelIdsFromText,
   providerBaseUrl,
   providerModelIds,
@@ -207,7 +210,7 @@ export function AgentProvidersPanel({ session }: { session: TodeXSession }) {
   };
 
   const activeBackend = backend.profile;
-  const additiveAgent = agent === 'pi' || agent === 'opencode';
+  const additiveAgent = isAdditiveAgent(agent);
   const additive = bucket?.mode === 'additive';
   const live = bucket?.live;
   const liveSelection = live?.kind === 'additive' ? live.selection : null;
@@ -324,6 +327,13 @@ export function AgentProvidersPanel({ session }: { session: TodeXSession }) {
                       ) : null}
                     </div>
                     <div className="flex shrink-0 items-center gap-1">
+                      {agent === 'deepseek-harness' && !isDefault ? (
+                        <Button size="small" variant="secondary" className="me-1" disabled={Boolean(busy)} aria-busy={activating || undefined}
+                          leadingIcon={activating ? SpinnerIcon : RiCheckLine}
+                          onClick={() => activate(profile)}>
+                          {t('ap.setDefault')}
+                        </Button>
+                      ) : null}
                       {!additive && !isCurrent ? (
                         <Button size="small" variant="primary" className="me-1" disabled={Boolean(busy)} aria-busy={activating || undefined}
                           leadingIcon={activating ? SpinnerIcon : RiCheckLine}
@@ -459,7 +469,11 @@ function ProviderEditor({
     : editor.kind === 'adopt' ? editor.nodeId : '';
   const baseSource: ProviderConfigSource | undefined = profile
     ?? (adoptNode ? { name: adoptName, settingsConfig: adoptNode } : undefined);
-  const [form, setForm] = useState<ProviderFormValues>(() => extractFormValues(agent, baseSource));
+  const [form, setForm] = useState<ProviderFormValues>(() => {
+    const values = extractFormValues(agent, baseSource);
+    // A new dsh route starts as a custom one, which needs a protocol.
+    return agent === 'deepseek-harness' && !baseSource ? { ...values, apiKind: DSH_API_KINDS[0] } : values;
+  });
   const [formDirty, setFormDirty] = useState(false);
   const updateForm = (patch: Partial<ProviderFormValues>) => {
     setForm((current) => ({ ...current, ...patch }));
@@ -479,7 +493,10 @@ function ProviderEditor({
   const isCodex = agent === 'codex';
   const isGrok = agent === 'grok-build';
   const grokSubscription = isGrok && form.authMode === 'subscription';
-  const isAdditive = agent === 'pi' || agent === 'opencode';
+  const isDsh = agent === 'deepseek-harness';
+  // dsh's built-in DeepSeek route takes only a key and an endpoint.
+  const dshDeepseek = isDsh && id.trim() === DSH_DEEPSEEK_ROUTE;
+  const isAdditive = isAdditiveAgent(agent) && !dshDeepseek;
 
   const apiKindOptions =
     form.apiKind && !PI_API_KINDS.includes(form.apiKind)
@@ -584,10 +601,30 @@ function ProviderEditor({
               <SelectItem id="api" textValue={t('ap.authApi')}>{t('ap.authApi')}</SelectItem>
             </Select>
           ) : null}
+          {isDsh && editor.kind === 'new' ? (
+            <Select
+              label={t('ap.dshRouteKind')}
+              className="w-full sm:col-span-2"
+              popoverClassName="w-(--trigger-width)"
+              selectedKey={dshDeepseek ? 'deepseek' : 'custom'}
+              onSelectionChange={(key) => {
+                if (key === 'deepseek') {
+                  setId(DSH_DEEPSEEK_ROUTE);
+                  updateForm({ apiKind: '', models: [], name: form.name || 'DeepSeek' });
+                } else if (key === 'custom') {
+                  if (dshDeepseek) setId('');
+                  updateForm({ apiKind: form.apiKind || DSH_API_KINDS[0] });
+                }
+              }}
+            >
+              <SelectItem id="deepseek" textValue={t('ap.dshRouteDeepseek')}>{t('ap.dshRouteDeepseek')}</SelectItem>
+              <SelectItem id="custom" textValue={t('ap.dshRouteCustom')}>{t('ap.dshRouteCustom')}</SelectItem>
+            </Select>
+          ) : null}
           {grokSubscription ? null : (
             <>
               <Field label={t('ap.baseUrl')} value={form.baseUrl} onChange={(baseUrl) => updateForm({ baseUrl })}
-                description={isGrok ? t('ap.grokBaseUrlHint') : undefined} />
+                description={isGrok ? t('ap.grokBaseUrlHint') : dshDeepseek ? t('ap.dshDeepseekBaseUrlHint') : undefined} />
               <Field label={t('ap.apiKey')} value={form.apiKey} onChange={(apiKey) => updateForm({ apiKey })} description={t('ap.secretKept')} />
             </>
           )}
@@ -620,7 +657,7 @@ function ProviderEditor({
               <Field label={t('ap.contextWindow')} value={form.contextWindow} onChange={(contextWindow) => updateForm({ contextWindow })} />
             </>
           ) : null}
-          {agent === 'pi' ? (
+          {agent === 'pi' || (isDsh && !dshDeepseek) ? (
             <Select
               label={t('ap.apiKind')}
               className="w-full"
@@ -630,7 +667,7 @@ function ProviderEditor({
                 if (typeof key === 'string') updateForm({ apiKind: key });
               }}
             >
-              {apiKindOptions.map((kind) => (
+              {(isDsh ? DSH_API_KINDS : apiKindOptions).map((kind) => (
                 <SelectItem key={kind} id={kind} textValue={kind}>{kind}</SelectItem>
               ))}
             </Select>
@@ -655,6 +692,9 @@ function ProviderEditor({
                 onChange={(models) => updateForm({ models })}
               />
             </div>
+          ) : null}
+          {isDsh ? (
+            <p className="text-caption-1-regular text-text-secondary sm:col-span-2">{t(dshDeepseek ? 'ap.dshDeepseekHint' : 'ap.dshCustomHint')}</p>
           ) : null}
         </div>
       )}

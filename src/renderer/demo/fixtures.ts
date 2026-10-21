@@ -118,7 +118,7 @@ export const demoProviders: ProviderDescriptor[] = [
   provider('pi', 'Pi', true),
   provider('opencode', 'OpenCode', false, 'opencode is not installed'),
   provider('antigravity', 'Antigravity', false, "executable 'agy' was not found"),
-  provider('deepseek-harness', 'DeepSeek Harness', false, "executable 'dsh' was not found"),
+  provider('deepseek-harness', 'DeepSeek Harness', true),
 ];
 
 // --- Conversation journals ---------------------------------------------------
@@ -336,6 +336,7 @@ export const demoCliVersions: CliVersionsResponse = {
     { id: 'codex', kind: 'managed', name: 'Codex', installed: true, currentVersion: '0.162.0', latestVersion: '0.163.1', status: 'updateAvailable', upgradeSupported: true, installSupported: true },
     { id: 'pi', kind: 'managed', name: 'Pi', installed: true, currentVersion: '1.1.0', latestVersion: '1.1.0', status: 'upToDate', upgradeSupported: true, installSupported: true },
     { id: 'opencode', kind: 'managed', name: 'OpenCode', installed: false, latestVersion: '1.18.35', status: 'notInstalled', upgradeSupported: true, installSupported: true },
+    { id: 'deepseek-harness', kind: 'managed', name: 'DeepSeek Harness', installed: true, currentVersion: '0.2.1-rc.2', latestVersion: '0.2.1-rc.2', status: 'upToDate', upgradeSupported: true, installSupported: true },
   ],
 };
 
@@ -359,6 +360,39 @@ export const demoAgentProviders: AgentProvidersResponse = {
       live: { kind: 'exclusive', configured: true, config: null, matchesCurrent: true },
       providers: [
         { id: 'openai-official', name: 'OpenAI 官方', settingsConfig: {}, category: 'official', createdAt: NOW - 15 * DAY, updatedAt: NOW - 3 * DAY },
+      ],
+    },
+    'deepseek-harness': {
+      agent: 'deepseek-harness',
+      mode: 'additive',
+      currentProviderId: 'team-gateway',
+      live: {
+        kind: 'additive',
+        providers: {
+          'deepseek-official': { apiKey: '__TODEX_MASKED__' },
+          'team-gateway': { displayName: '团队网关', api: 'openai-completions', baseURL: 'https://gateway.example.com/v1', models: [{ id: 'qwen3-coder' }, { id: 'kimi-k2' }] },
+        },
+        selection: { providerId: 'team-gateway', modelId: 'qwen3-coder' },
+        unmanagedProviders: [],
+      },
+      providers: [
+        { id: 'deepseek-official', name: 'DeepSeek', settingsConfig: { apiKey: '__TODEX_MASKED__' }, createdAt: NOW - 6 * DAY, updatedAt: NOW - 6 * DAY },
+        {
+          id: 'team-gateway',
+          name: '团队网关',
+          settingsConfig: {
+            displayName: '团队网关',
+            api: 'openai-completions',
+            baseURL: 'https://gateway.example.com/v1',
+            apiKey: '__TODEX_MASKED__',
+            models: [
+              { id: 'qwen3-coder', contextWindow: 262144, reasoningEfforts: { off: null, minimal: null, low: 'low', medium: 'medium', high: 'high', xhigh: null, max: null } },
+              { id: 'kimi-k2', contextWindow: 131072 },
+            ],
+          },
+          createdAt: NOW - 4 * DAY,
+          updatedAt: NOW - 4 * DAY,
+        },
       ],
     },
   },

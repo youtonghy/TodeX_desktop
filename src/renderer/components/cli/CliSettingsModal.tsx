@@ -29,6 +29,7 @@ import {
   type SettingsObject,
 } from '@/lib/cliSettings';
 import { CliInstructionsPanel, useCliInstructions } from './CliInstructionsTab';
+import { DshPluginsPanel, useDshPlugins } from './DshPluginsTab';
 import { PiMcpPanel, usePiMcp } from './PiMcpTab';
 import { PiPluginsPanel, usePiPlugins } from './PiPluginsTab';
 import { SettingsField, SettingsFieldModels } from './SettingsFields';
@@ -74,11 +75,13 @@ function CliSettingsEditor({ schema, api, onClose }: { schema: CliSettingsSchema
   const [env, setEnv] = useState<EnvRow[]>([]);
   const [rawText, setRawText] = useState('');
   const [rawRevealed, setRawRevealed] = useState(false);
-  const [tab, setTab] = useState<TabId>('form');
+  const hasForm = schema.groups.length > 0;
+  const [tab, setTab] = useState<TabId>(hasForm ? 'form' : 'plugins');
   const [saving, setSaving] = useState(false);
   const nextEnvKey = useRef(0);
   const instructions = useCliInstructions(provider, api);
   const isPi = provider === 'pi';
+  const isDsh = provider === 'deepseek-harness';
 
   const toEnvRows = (settings: SettingsObject) => (envPath ? envRows(settings, envPath) : []).map((row) => ({ ...row, key: nextEnvKey.current++, revealed: false }));
 
@@ -90,6 +93,7 @@ function CliSettingsEditor({ schema, api, onClose }: { schema: CliSettingsSchema
     setEnv(toEnvRows(settings));
     setRawText(next.text);
     if (!next.settings) setTab('raw');
+    else if (!hasForm) setTab((current) => (current === 'form' ? 'plugins' : current));
   }, []);
 
   const load = useCallback(async () => {
@@ -113,7 +117,10 @@ function CliSettingsEditor({ schema, api, onClose }: { schema: CliSettingsSchema
   // nothing here is being edited, else saving reports the conflict.
   const pristine = useRef(true);
   pristine.current = !formDirty && !rawDirty;
-  const plugins = usePiPlugins(isPi, api, () => { if (pristine.current) void load(); });
+  const piPlugins = usePiPlugins(isPi, api, () => { if (pristine.current) void load(); });
+  const dshPlugins = useDshPlugins(isDsh, api, () => { if (pristine.current) void load(); });
+  // The Plugins tab's state (save, unsaved edits) for whichever CLI has one.
+  const plugins = isDsh ? dshPlugins : piPlugins;
   const mcp = usePiMcp(isPi && tab === 'mcp', api);
   // Models the plugin pages offer: the ones enabled in Pi, without patterns.
   const piModels = useMemo(() => {
@@ -125,8 +132,8 @@ function CliSettingsEditor({ schema, api, onClose }: { schema: CliSettingsSchema
     if (typeof provider === 'string' && typeof model === 'string') models.unshift(`${provider}/${model}`);
     return [...new Set(models)];
   }, [draft, isPi]);
-  // TOML is checked by the backend on save.
-  const rawError = useMemo(() => (doc?.format === 'toml' ? null : rawObjectError(rawText)), [doc?.format, rawText]);
+  // TOML and YAML are checked by the backend on save.
+  const rawError = useMemo(() => (doc?.format === 'json' ? rawObjectError(rawText) : null), [doc?.format, rawText]);
   const fileName = doc?.path.split(/[\\/]/).pop() || doc?.path || '';
   const envInvalid = env.some((row) => row.name.trim() !== '' && !ENV_NAME.test(row.name.trim()));
   const editingRaw = tab === 'raw';
@@ -208,15 +215,16 @@ function CliSettingsEditor({ schema, api, onClose }: { schema: CliSettingsSchema
       <p className={cx('truncate text-body-2-regular text-text-secondary', editingAgents && 'invisible')} dir="ltr" title={doc.path}>{doc.path}</p>
       <Tabs selectedKey={tab} onSelectionChange={(next) => setTab(TAB_IDS.find((id) => id === next) ?? 'form')} className="min-h-0 flex-1 gap-0">
         <TabList aria-label={t('cliSettings.tabsLabel')}>
-          <Tab id="form" isDisabled={!saved}>{t('cliSettings.tabForm')}</Tab>
+          {hasForm ? <Tab id="form" isDisabled={!saved}>{t('cliSettings.tabForm')}</Tab> : null}
           {envPath ? <Tab id="env" isDisabled={!saved} count={env.length || undefined}>{t('cliSettings.tabEnv')}</Tab> : null}
-          {isPi ? <Tab id="plugins" count={plugins.list?.packages.length || undefined}>{t('cliSettings.tabPlugins')}</Tab> : null}
+          {isPi ? <Tab id="plugins" count={piPlugins.list?.packages.length || undefined}>{t('cliSettings.tabPlugins')}</Tab> : null}
+          {isDsh ? <Tab id="plugins" count={dshPlugins.list?.packages.length || undefined}>{t('cliSettings.tabPlugins')}</Tab> : null}
           {isPi ? <Tab id="mcp" count={Object.keys(mcp.doc?.config?.mcpServers ?? {}).length || undefined}>MCP</Tab> : null}
           <Tab id="raw">{t('cliSettings.tabRaw')}</Tab>
           <Tab id="agents">AGENTS.md</Tab>
         </TabList>
         <ScrollArea surface="full" className="-mx-6 flex-1" contentClassName="px-6 pt-4 pb-4">
-          <TabPanel id="form" className="flex flex-col gap-5">
+          {hasForm ? <TabPanel id="form" className="flex flex-col gap-5">
             <p className="px-3 text-body-2-regular text-text-secondary">
               {doc.exists ? t(schema.hints.scope) : t('cliSettings.missingHint')}
             </p>
@@ -236,7 +244,7 @@ function CliSettingsEditor({ schema, api, onClose }: { schema: CliSettingsSchema
               </SettingsGroup>
             ))}
             <p className="px-3 text-body-2-regular text-text-secondary">{t(schema.hints.moreInRaw)}</p>
-          </TabPanel>
+          </TabPanel> : null}
           {envPath ? (
             <TabPanel id="env" className="flex flex-col gap-3">
               {schema.hints.env ? <p className="px-3 text-body-2-regular text-text-secondary">{t(schema.hints.env)}</p> : null}
@@ -246,7 +254,7 @@ function CliSettingsEditor({ schema, api, onClose }: { schema: CliSettingsSchema
           {isPi ? (
             <TabPanel id="plugins">
               <SettingsFieldModels.Provider value={piModels}>
-                <PiPluginsPanel state={plugins} />
+                <PiPluginsPanel state={piPlugins} />
               </SettingsFieldModels.Provider>
             </TabPanel>
           ) : null}
@@ -254,12 +262,18 @@ function CliSettingsEditor({ schema, api, onClose }: { schema: CliSettingsSchema
             <TabPanel id="mcp">
               <PiMcpPanel
                 state={mcp}
-                builtinBusy={Boolean(plugins.toggling)}
+                builtinBusy={Boolean(piPlugins.toggling)}
                 onEnableBuiltin={async () => {
-                  await plugins.toggle({ builtin: 'mcp' }, true);
+                  await piPlugins.toggle({ builtin: 'mcp' }, true);
                   await mcp.load();
                 }}
               />
+            </TabPanel>
+          ) : null}
+          {isDsh ? (
+            <TabPanel id="plugins" className="flex flex-col gap-3">
+              {dshPlugins.page ? null : <p className="px-3 text-body-2-regular text-text-secondary">{t(schema.hints.scope)}</p>}
+              <DshPluginsPanel state={dshPlugins} />
             </TabPanel>
           ) : null}
           <TabPanel id="raw" className="flex flex-col gap-3">
@@ -273,7 +287,7 @@ function CliSettingsEditor({ schema, api, onClose }: { schema: CliSettingsSchema
                 rows={22}
                 spellCheck="false"
                 isInvalid={Boolean(rawError)}
-                hint={rawError ?? t(doc.format === 'toml' ? 'cliSettings.rawHintToml' : 'cliSettings.rawHintJson')}
+                hint={rawError ?? t(doc.format === 'toml' ? 'cliSettings.rawHintToml' : doc.format === 'yaml' ? 'cliSettings.rawHintYaml' : 'cliSettings.rawHintJson')}
                 inputClassName="font-mono text-caption-1-regular"
               />
             ) : (

@@ -10,7 +10,7 @@ import type {
   SecureStreamResponse,
   SecureTransport,
 } from '@todex/protocol/secureTransport';
-import type { AgentCallingSettings, ApiKeySummary, ConversationEvent, ConversationManifest, McpCatalog, McpServerCatalogDescriptor, ProviderKind, SkillCatalog, SkillCatalogDescriptor } from '@todex/protocol/v2';
+import type { AgentCallingSettings, ApiKeySummary, ConversationEvent, ConversationManifest, DshPackage, DshPluginList, DshPluginOperation, DshPluginRow, McpCatalog, McpServerCatalogDescriptor, ProviderKind, SkillCatalog, SkillCatalogDescriptor } from '@todex/protocol/v2';
 import { applyMergePatch, setAt, type SettingsObject } from '../lib/cliSettings';
 import * as fixtures from './fixtures';
 
@@ -33,7 +33,7 @@ function demoConversationBytes(journal: Journal): number {
   return 40_000 + (seed % 97) * 23_000 + journal.events.length * 1_800;
 }
 
-type DemoSettingsFile = { path: string; format: 'json' | 'toml'; text: string; settings: SettingsObject | null };
+type DemoSettingsFile = { path: string; format: 'json' | 'toml' | 'yaml'; text: string; settings: SettingsObject | null };
 
 /** Enough TOML for the demo: scalars and arrays, then one `[table]` per nested object. */
 function demoToml(settings: SettingsObject, prefix: string[] = []): string {
@@ -51,6 +51,12 @@ function demoSettingsFile(path: string, format: 'json' | 'toml', settings: Setti
 }
 
 const demoCliSettings: Record<string, DemoSettingsFile> = {
+  'deepseek-harness': {
+    path: '/home/demo/.dsh/profiles/acp/cordis.patch.yml',
+    format: 'yaml',
+    text: "# Your patch layer for this dsh profile, applied after every bundle layer.\n- id: llm-pi-ai\n  config:\n    providers:\n      team-gateway:\n        displayName: 团队网关\n        api: openai-completions\n        baseURL: https://gateway.example.com/v1\n        apiKeyEnv: TODEX_DSH_TEAM_GATEWAY_API_KEY\n        models:\n        - id: qwen3-coder\n- id: acp\n  config:\n    provider: team-gateway\n    model: qwen3-coder\n",
+    settings: {},
+  },
   'claude-code': demoSettingsFile('/home/demo/.claude/settings.json', 'json', {
     env: { ANTHROPIC_BASE_URL: 'https://gateway.example.com', ANTHROPIC_AUTH_TOKEN: 'sk-demo-0000' },
     permissions: { defaultMode: 'acceptEdits', allow: ['Bash(pnpm test:*)'] },
@@ -143,9 +149,106 @@ function demoPiPluginList() {
   };
 }
 
+// --- DeepSeek Harness plugins: a few rows of the composed acp profile ------
+
+const DSH_PROFILE_PATCH = '/home/demo/.dsh/profiles/acp/cordis.patch.yml';
+const demoDshRows: DshPluginRow[] = [
+  ...['session-log-deepseek', 'plugin-package-inventory-deepseek'].map((id): DshPluginRow => ({
+    id, name: `@deepseek-ai/dsh-${id}`, state: { kind: 'disabled' }, source: '@deepseek-ai/dsh-base', sourceLayer: 'bundle', patchedBy: ['/home/demo/.todex-agent/providers/deepseek-harness/todex.patch.yml'], locked: true, overridden: false, toggleable: false, configurable: false,
+  })),
+  { id: 'plugin-manager', name: '@deepseek-ai/dsh-plugin-manager', state: { kind: 'conditional', expression: "!ctx.get('profileContext')" }, source: '@deepseek-ai/dsh-base', sourceLayer: 'bundle', locked: false, overridden: false, toggleable: false, configurable: false },
+  ...['tool-todo', 'tool-subagent', 'goal', 'tool-workflow'].map((id): DshPluginRow => ({
+    id, name: `@deepseek-ai/dsh-${id}`, state: { kind: 'enabled' }, source: '@deepseek-ai/dsh-base', sourceLayer: 'bundle', locked: false, overridden: false, toggleable: true, configurable: false,
+  })),
+  { id: 'web', name: '@deepseek-ai/dsh-web', state: { kind: 'enabled' }, source: '@deepseek-ai/dsh-base', sourceLayer: 'bundle', locked: false, overridden: false, toggleable: true, configurable: true },
+  { id: 'web-deepseek-api', name: '@deepseek-ai/dsh-web-deepseek-api', state: { kind: 'enabled' }, source: '@deepseek-ai/dsh-base', sourceLayer: 'bundle', locked: false, overridden: false, toggleable: true, configurable: true },
+  { id: 'todex-mcp-docs', name: '@deepseek-ai/dsh-mcp-client', state: { kind: 'enabled' }, source: DSH_PROFILE_PATCH, sourceLayer: 'profile', locked: false, overridden: false, toggleable: true, configurable: false },
+];
+const demoDshPackages: DshPackage[] = [
+  { name: '@deepseek-ai/dsh-base', bundle: true, selected: true, builtin: true },
+  { name: '@deepseek-ai/dsh-acp-app', bundle: true, selected: true, builtin: true },
+  { name: '@deepseek-ai/dsh-subagent-codex', spec: '0.2.1-rc.2', version: '0.2.1-rc.2', description: 'Codex as a dsh subagent provider', bundle: true, selected: true, builtin: false },
+];
+const demoDshConfigs: Record<string, SettingsObject> = {
+  web: { searchProvider: 'deepseek-official', fetchProvider: 'http' },
+  'web-deepseek-api': { sendOriginalQuestion: true, baseURL: 'https://api.deepseek.com/v1/tools' },
+};
+let demoDshRevision = 1;
+let demoDshOperation: DshPluginOperation | null = null;
+
+function demoDshPluginList(): DshPluginList {
+  return {
+    profilePath: DSH_PROFILE_PATCH,
+    revision: `dsh-${demoDshRevision}`,
+    manifestRevision: `dsh-manifest-${demoDshRevision}`,
+    runtimeVersion: '0.2.1-rc.2',
+    pnpmAvailable: true,
+    rows: demoDshRows,
+    packages: demoDshPackages,
+    exemptions: [],
+  };
+}
+
+function demoDshPluginsRoute(method: string, path: string, body: Record<string, unknown>): SecureResponse | null {
+  const base = '/v2/providers/deepseek-harness/';
+  if (!path.startsWith(base)) return null;
+  const rest = path.slice(base.length);
+  const conflict = () => json({ error: { code: 'CONFLICT', message: 'changed on disk' } }, 409);
+  if (rest === 'plugins' && method === 'GET') return json(demoDshPluginList());
+  if (rest === 'plugins/state' && method === 'PUT') {
+    if (body.revision !== demoDshPluginList().revision) return conflict();
+    const row = demoDshRows.find((item) => item.id === body.id);
+    if (!row?.toggleable) return conflict();
+    row.state = { kind: body.enabled ? 'enabled' : 'disabled' };
+    demoDshRevision += 1;
+    return json(demoDshPluginList());
+  }
+  if (rest === 'plugins/bundles' && method === 'PUT') {
+    const pkg = demoDshPackages.find((item) => item.name === body.name);
+    if (!pkg || pkg.builtin) return conflict();
+    pkg.selected = Boolean(body.enabled);
+    demoDshRevision += 1;
+    return json(demoDshPluginList());
+  }
+  if (rest === 'plugins/operations' && method === 'POST') {
+    const action = String(body.action) as DshPluginOperation['action'];
+    demoDshOperation = { id: `dshpkg_demo_${Date.now()}`, action, source: String(body.source), status: 'running', startedAt: new Date().toISOString() };
+    return json(demoDshOperation);
+  }
+  const operationId = rest.match(/^plugins\/operations\/([^/]+)$/)?.[1];
+  if (operationId && method === 'GET') {
+    if (!demoDshOperation || demoDshOperation.id !== operationId) return json({ error: { code: 'NOT_FOUND', message: 'operation not found' } }, 404);
+    if (demoDshOperation.status === 'running') {
+      // The demo finishes an operation on its first poll.
+      const { action, source } = demoDshOperation;
+      if (action === 'install' && !demoDshPackages.some((item) => item.name === source)) {
+        demoDshPackages.push({ name: source, spec: 'latest', bundle: true, selected: true, builtin: false });
+      } else if (action === 'remove') {
+        demoDshPackages.splice(demoDshPackages.findIndex((item) => item.name === source), 1);
+      }
+      demoDshRevision += 1;
+      demoDshOperation = { ...demoDshOperation, status: 'succeeded', finishedAt: new Date().toISOString() };
+    }
+    return json(demoDshOperation);
+  }
+  const plugin = rest.match(/^plugin-config\/([^/]+)$/)?.[1];
+  if (plugin && demoDshConfigs[plugin]) {
+    const document = () => ({ id: plugin, revision: `dsh-${demoDshRevision}`, config: demoDshConfigs[plugin], overridden: false });
+    if (method === 'GET') return json(document());
+    if (method === 'PATCH') {
+      if (body.revision !== document().revision) return conflict();
+      const patch = body.patch as SettingsObject;
+      demoDshConfigs[plugin] = { ...demoDshConfigs[plugin], ...Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== null)) };
+      demoDshRevision += 1;
+      return json(document());
+    }
+  }
+  return null;
+}
+
 function demoPiPluginsRoute(method: string, path: string, body: Record<string, unknown>): SecureResponse | null {
   const file = demoCliSettings.pi;
-  const save = (settings: SettingsObject) => Object.assign(file, demoSettingsFile(file.path, file.format, settings));
+  const save = (settings: SettingsObject) => Object.assign(file, demoSettingsFile(file.path, 'json', settings));
   if (path === '/v2/providers/pi/plugins' && method === 'GET') return json(demoPiPluginList());
   if (path === '/v2/providers/pi/plugins/state' && method === 'PUT') {
     if (body.revision !== demoPiPluginList().revision) return json({ error: { code: 'CONFLICT', message: 'settings changed on disk' } }, 409);
@@ -243,6 +346,7 @@ const demoInstructionFiles: Record<string, { path: string; text: string | null; 
   'claude-code': { path: '/home/demo/.claude/CLAUDE.md', text: '# Personal rules\n\n- Answer in Chinese.\n- Prefer pnpm.\n' },
   codex: { path: '/home/demo/.codex/AGENTS.md', text: null },
   pi: { path: '/home/demo/.pi/agent/AGENTS.md', text: null },
+  'deepseek-harness': { path: '/home/demo/.dsh/AGENTS.md', text: null },
 };
 let demoInstructionPresets: DemoInstructionPreset[] = [
   { id: 'demo-preset-team', name: 'Team defaults', text: '# Team defaults\n\n- Run the tests before committing.\n- Keep commits small.\n', revision: 1, updatedAt: Date.now() },
@@ -262,7 +366,7 @@ function demoPresetView(preset: DemoInstructionPreset) {
 
 function demoInstructionsRoute(method: string, path: string, body: Record<string, unknown>): SecureResponse | undefined {
   const conflict = () => json({ error: { code: 'CONFLICT', message: 'changed on disk' } }, 409);
-  const fileMatch = path.match(/^\/v2\/providers\/(claude-code|codex|pi)\/instructions(\/source)?$/);
+  const fileMatch = path.match(/^\/v2\/providers\/(claude-code|codex|pi|deepseek-harness)\/instructions(\/source)?$/);
   if (fileMatch) {
     const [, provider, source] = fileMatch;
     const file = demoInstructionFiles[provider];
@@ -647,6 +751,8 @@ function route(request: SecureRequest): SecureResponse {
   if (instructionsResponse) return instructionsResponse;
   const piPluginsResponse = demoPiPluginsRoute(method, path, readBody(request));
   if (piPluginsResponse) return piPluginsResponse;
+  const dshPluginsResponse = demoDshPluginsRoute(method, path, readBody(request));
+  if (dshPluginsResponse) return dshPluginsResponse;
 
   if (method === 'GET') {
     switch (path) {
@@ -774,7 +880,7 @@ function route(request: SecureRequest): SecureResponse {
       settingsFile.text = String(body.text);
       // The demo does not parse TOML; the form keeps the last patched values.
       if (settingsFile.format === 'json') settingsFile.settings = JSON.parse(settingsFile.text) as SettingsObject;
-    } else {
+    } else if (settingsFile.format !== 'yaml') {
       Object.assign(settingsFile, demoSettingsFile(settingsFile.path, settingsFile.format, applyMergePatch(settingsFile.settings ?? {}, body.patch as SettingsObject)));
     }
     return json(demoCliSettingsDocument(settingsFile));

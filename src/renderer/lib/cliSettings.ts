@@ -309,10 +309,22 @@ export const PI_SETTINGS: CliSettingsSchema = {
   ],
 };
 
+// DeepSeek Harness's acp profile patch is a YAML list of rows whose
+// configs dsh replaces wholesale, so it has no generic form: plugins and
+// their known settings live in the Plugins tab, the rest in the raw editor.
+export const DSH_SETTINGS: CliSettingsSchema = {
+  provider: 'deepseek-harness',
+  name: 'DeepSeek Harness',
+  keyPrefix: 'cliSettings.dsh',
+  hints: { scope: 'cliSettings.dsh.scopeHint', moreInRaw: 'cliSettings.dsh.scopeHint', rawHidden: 'cliSettings.dsh.rawHiddenHint' },
+  groups: [],
+};
+
 export const CLI_SETTINGS: Record<CliSettingsProvider, CliSettingsSchema> = {
   'claude-code': CLAUDE_SETTINGS,
   codex: CODEX_SETTINGS,
   pi: PI_SETTINGS,
+  'deepseek-harness': DSH_SETTINGS,
 };
 
 export function hasCliSettings(provider: string): provider is CliSettingsProvider {

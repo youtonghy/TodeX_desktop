@@ -7,14 +7,27 @@ export const MASKED_SECRET = '__TODEX_MASKED__';
 export const PI_THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
 export const OPENCODE_THINKING_LEVELS = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
 
+/// DeepSeek Harness routes take pi-ai's levels, which match Pi's.
+const usesPiLevels = (agent: ManagedProviderAgent) => agent === 'pi' || agent === 'deepseek-harness';
+
 export function thinkingLevelsFor(agent: ManagedProviderAgent): readonly string[] {
-  return agent === 'pi' ? PI_THINKING_LEVELS : OPENCODE_THINKING_LEVELS;
+  return usesPiLevels(agent) ? PI_THINKING_LEVELS : OPENCODE_THINKING_LEVELS;
 }
 
 /// Enabled levels when a model gains reasoning support without an existing
 /// map: matches what Pi/OpenCode expose for an unconfigured reasoning model.
 export function defaultEfforts(agent: ManagedProviderAgent): string[] {
-  return agent === 'pi' ? ['off', 'minimal', 'low', 'medium', 'high'] : ['low', 'medium', 'high'];
+  return usesPiLevels(agent) ? ['off', 'minimal', 'low', 'medium', 'high'] : ['low', 'medium', 'high'];
+}
+
+/// DeepSeek Harness: dsh's built-in DeepSeek route (key and endpoint only)
+/// and the wire protocols its OpenAI/Anthropic-compatible routes speak.
+export const DSH_DEEPSEEK_ROUTE = 'deepseek-official';
+export const DSH_API_KINDS = ['openai-completions', 'openai-responses', 'anthropic-messages'] as const;
+
+/** Agents whose providers live side by side, one of them the default. */
+export function isAdditiveAgent(agent: ManagedProviderAgent): boolean {
+  return agent === 'pi' || agent === 'opencode' || agent === 'deepseek-harness';
 }
 
 /// Per-model editor row shared by the additive agents: the form edits this
@@ -366,6 +379,22 @@ function piEntryToForm(entry: Record<string, unknown>): ModelFormEntry {
   };
 }
 
+/// A dsh pi-ai model: `reasoningEfforts` maps each offered level to its wire
+/// value (`null` turns one off, `false` turns reasoning off).
+function dshEntryToForm(entry: Record<string, unknown>): ModelFormEntry {
+  const efforts = entry.reasoningEfforts;
+  const reasoning = Boolean(efforts) && typeof efforts === 'object';
+  const map = asRecord(efforts);
+  return {
+    id: asString(entry.id),
+    name: asString(entry.name),
+    contextWindow: numberField(entry.contextWindow),
+    maxTokens: numberField(entry.maxTokens),
+    reasoning,
+    efforts: reasoning ? PI_THINKING_LEVELS.filter((level) => level in map && map[level] !== null) : [],
+  };
+}
+
 function opencodeEntryToForm(id: string, entry: Record<string, unknown>): ModelFormEntry {
   const limit = asRecord(entry.limit);
   const variants = asRecord(entry.variants);
@@ -441,6 +470,16 @@ export function extractFormValues(
         models: models.map((model) => piEntryToForm(asRecord(model))).filter((m) => m.id),
       };
     }
+    case 'deepseek-harness': {
+      const models = Array.isArray(settings.models) ? settings.models : [];
+      return {
+        ...base,
+        baseUrl: asString(settings.baseURL),
+        apiKey: asString(settings.apiKey),
+        apiKind: asString(settings.api),
+        models: models.map((model) => dshEntryToForm(asRecord(model))).filter((m) => m.id),
+      };
+    }
   }
 }
 
@@ -512,6 +551,31 @@ function piModelEntry(model: ModelFormEntry, existing: Record<string, unknown>):
   return entry;
 }
 
+/// dsh pi-ai `models[]` entry: offered levels keep their existing wire value
+/// (the level name by default), the others are `null`; turning reasoning off
+/// writes `false` only when the entry had a map, so the catalog's capability
+/// otherwise still applies.
+function dshModelEntry(model: ModelFormEntry, existing: Record<string, unknown>): Record<string, unknown> {
+  const entry: Record<string, unknown> = { ...existing, id: model.id };
+  applyName(entry, model);
+  const contextWindow = parsePositiveInt(model.contextWindow);
+  if (contextWindow) entry.contextWindow = contextWindow;
+  else delete entry.contextWindow;
+  const maxTokens = parsePositiveInt(model.maxTokens);
+  if (maxTokens) entry.maxTokens = maxTokens;
+  else delete entry.maxTokens;
+  if (model.reasoning) {
+    const previous = asRecord(existing.reasoningEfforts);
+    entry.reasoningEfforts = Object.fromEntries(PI_THINKING_LEVELS.map((level) => [
+      level,
+      model.efforts.includes(level) ? (typeof previous[level] === 'string' ? previous[level] : level) : null,
+    ]));
+  } else if ('reasoningEfforts' in existing) {
+    entry.reasoningEfforts = false;
+  }
+  return entry;
+}
+
 /// OpenCode `models.<id>` entry: context/output live under `limit` (the pair
 /// is required by the config schema), effort choices are `variants` named by
 /// level carrying `{reasoningEffort}`; unchecking an existing variant keeps
@@ -566,10 +630,10 @@ export function validateModelForm(
   const invalid = (text: string) => text.trim() !== '' && parsePositiveInt(text) === undefined;
   if (agent === 'codex') return invalid(form.contextWindow) ? 'ap.invalidNumber' : null;
   if (agent === 'grok-build') return form.authMode === 'api' && !form.model.trim() ? 'ap.modelRequired' : null;
-  if (agent !== 'pi' && agent !== 'opencode') return null;
+  if (!isAdditiveAgent(agent)) return null;
   const settings = asRecord(existing?.settingsConfig);
   const existingModels =
-    agent === 'pi'
+    agent !== 'opencode'
       ? Object.fromEntries(
           (Array.isArray(settings.models) ? settings.models : [])
             .map((model) => [asString(asRecord(model).id), model])
@@ -646,6 +710,23 @@ export function buildSettingsConfig(
       if (form.apiKind.trim()) next.api = form.apiKind.trim();
       return next;
     }
+    case 'deepseek-harness': {
+      const next: Record<string, unknown> = { ...previous };
+      if (form.baseUrl.trim()) next.baseURL = form.baseUrl.trim();
+      else delete next.baseURL;
+      if (form.apiKey.trim()) next.apiKey = form.apiKey.trim();
+      // The built-in DeepSeek route has no protocol or model list of its own.
+      if (!form.apiKind.trim()) return next;
+      next.api = form.apiKind.trim();
+      if (form.name.trim()) next.displayName = form.name.trim();
+      const existingById = new Map<string, Record<string, unknown>>();
+      for (const model of Array.isArray(previous.models) ? previous.models : []) {
+        const record = asRecord(model);
+        if (asString(record.id)) existingById.set(asString(record.id), record);
+      }
+      next.models = form.models.map((model) => dshModelEntry(model, existingById.get(model.id) ?? {}));
+      return next;
+    }
   }
 }
 
@@ -655,6 +736,7 @@ export function providerModelIds(agent: ManagedProviderAgent, settings: Record<s
     case 'opencode':
       return Object.keys(asRecord(settings.models));
     case 'pi':
+    case 'deepseek-harness':
       return (Array.isArray(settings.models) ? settings.models : [])
         .map((model) => asString(asRecord(model).id))
         .filter(Boolean);
@@ -685,5 +767,7 @@ export function providerBaseUrl(agent: ManagedProviderAgent, settings: Record<st
     }
     case 'pi':
       return asString(settings.baseUrl);
+    case 'deepseek-harness':
+      return asString(settings.baseURL);
   }
 }
