@@ -71,7 +71,6 @@ export function PiExtensionPanel({ extensionUi, placement, providerRuntime, pend
   return <Card variant="secondary" className="my-2 flex min-w-0 flex-col gap-2 rounded-2xl p-2 text-caption-1-regular" data-testid={`pi-extension-${placement}`}>
     <div className="flex min-w-0 items-start gap-2 px-1">
       <Disclosure
-        defaultOpen
         className="min-w-0 flex-1"
         label={<>
           <span className="min-w-0 break-words text-caption-1-medium text-text-primary">{title}</span>
