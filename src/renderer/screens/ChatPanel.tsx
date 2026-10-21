@@ -157,9 +157,10 @@ const BACKGROUND_ENDED_REASONS: Record<string, MessageKey> = {
   expired: 'chat.backgroundEnded.expired',
 };
 
-function providerNoticeText(notice: NonNullable<TimelineEntry['providerNotice']>, subtitle: string): string {
+/** `agent` names the conversation's agent (Claude Code, Pi, …). */
+function providerNoticeText(notice: NonNullable<TimelineEntry['providerNotice']>, subtitle: string, agent: string): string {
   if (notice !== 'background_tasks_ended') return t(PROVIDER_NOTICES[notice]);
-  return t(PROVIDER_NOTICES[notice], { reason: t(BACKGROUND_ENDED_REASONS[subtitle] ?? 'chat.backgroundEnded.processEnded') });
+  return t(PROVIDER_NOTICES[notice], { agent, reason: t(BACKGROUND_ENDED_REASONS[subtitle] ?? 'chat.backgroundEnded.processEnded', { agent }) });
 }
 
 /** Images up to this size also keep a local copy for the preview and the
@@ -601,6 +602,8 @@ function RowEntrance({ enter, className, children, ...props }: { enter: boolean;
 type ChatTimelineItemProps = {
   item: ChatRenderItem;
   conversationId: string;
+  /** The conversation's agent, as notices about its own work name it. */
+  agentName: string;
   thinking: boolean;
   isStreamingGroup: boolean;
   /** `toolUseId`s of the background tasks the agent still waits on. */
@@ -651,6 +654,7 @@ function chatRowItemEqual(prev: ChatRenderItem, next: ChatRenderItem): boolean {
 const ChatTimelineItem = memo(function ChatTimelineItem({
   item,
   conversationId,
+  agentName,
   thinking,
   isStreamingGroup,
   backgroundToolIds,
@@ -800,14 +804,14 @@ const ChatTimelineItem = memo(function ChatTimelineItem({
   if (entry.providerTrigger) {
     return (
       <p data-message-id={entry.id} role="note" title={entry.subtitle || undefined} className="py-1 text-center text-caption-1-regular text-text-tertiary">
-        {t(PROVIDER_TURN_NOTICES[entry.providerTrigger])}
+        {t(PROVIDER_TURN_NOTICES[entry.providerTrigger], { agent: agentName })}
       </p>
     );
   }
   if (entry.providerNotice) {
     return (
       <p data-message-id={entry.id} role="note" title={entry.subtitle || undefined} className="py-1 text-center text-caption-1-regular text-text-tertiary">
-        {providerNoticeText(entry.providerNotice, entry.subtitle)}
+        {providerNoticeText(entry.providerNotice, entry.subtitle, agentName)}
       </p>
     );
   }
@@ -867,6 +871,7 @@ const ChatTimelineItem = memo(function ChatTimelineItem({
 }, (prev, next) =>
   chatRowItemEqual(prev.item, next.item)
   && prev.conversationId === next.conversationId
+  && prev.agentName === next.agentName
   && prev.thinking === next.thinking
   && prev.isStreamingGroup === next.isStreamingGroup
   && prev.backgroundToolIds === next.backgroundToolIds
@@ -1771,6 +1776,7 @@ export function ChatPanel({ session }: Props) {
               key={chatRenderItemKey(item)}
               item={item}
               conversationId={conversation.id}
+              agentName={agentLabel}
               thinking={thinking}
               isStreamingGroup={item.type === 'executionGroup' && thinking && backgroundTaskCount === 0 && item.id === latestProcessGroupId}
               backgroundToolIds={backgroundToolIds}
