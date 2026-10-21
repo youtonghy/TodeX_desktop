@@ -1863,12 +1863,12 @@ export function ChatPanel({ session }: Props) {
           ) : null}
         </div>
         </ScrollArea>
-        {/* Sits in the gutter beside the centered message column; hidden when the gutter is too narrow. */}
+        {/* Sits in the gutter beside the centered message column; collapses to a hover reveal when the gutter is too narrow. */}
         <TurnNavigator
           turns={chatTurns}
           activeId={activeTurnId}
           onSelect={jumpToTurn}
-          className="absolute start-3 top-1/2 z-20 hidden -translate-y-1/2 @min-[52rem]:flex"
+          className="absolute inset-y-0 start-0 z-20 ps-3"
         />
         {isAtBottom ? null : (
           <Button
