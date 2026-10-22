@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import {
   Button as AriaButton,
   ListBox as AriaListBox,
@@ -43,6 +43,7 @@ import {
   asRecord,
   buildSettingsConfig,
   claudeUnmanagedKeys,
+  CODEX_REASONING_EFFORTS,
   defaultEfforts,
   DSH_API_KINDS,
   DSH_DEEPSEEK_ROUTE,
@@ -629,7 +630,7 @@ function ProviderEditor({
               <Field label={t('ap.apiKey')} value={form.apiKey} onChange={(apiKey) => updateForm({ apiKey })} description={t('ap.secretKept')} />
             </>
           )}
-          {isClaude || isCodex || isGrok ? (
+          {isClaude || isGrok ? (
             <Field label={t('ap.model')} value={form.model} onChange={(model) => updateForm({ model })}
               description={grokSubscription ? t('ap.grokModelHint') : undefined} />
           ) : null}
@@ -654,8 +655,18 @@ function ProviderEditor({
           ) : null}
           {isCodex ? (
             <>
-              <Field label={t('ap.reasoningEffort')} value={form.reasoningEffort} onChange={(reasoningEffort) => updateForm({ reasoningEffort })} />
-              <Field label={t('ap.contextWindow')} value={form.contextWindow} onChange={(contextWindow) => updateForm({ contextWindow })} />
+              <ModelPicker
+                value={form.model}
+                onChange={(model) => updateForm({ model })}
+                fetchModels={fetchEditorModels}
+                canFetch={Boolean(form.baseUrl.trim())}
+              />
+              <ContextWindowField value={form.contextWindow} onChange={(contextWindow) => updateForm({ contextWindow })} />
+              <ReasoningEffortPicker
+                className="sm:col-span-2"
+                value={form.reasoningEffort}
+                onChange={(reasoningEffort) => updateForm({ reasoningEffort })}
+              />
             </>
           ) : null}
           {agent === 'pi' || (isDsh && !dshDeepseek) ? (
@@ -904,6 +915,170 @@ const CONTEXT_PRESETS = [
   { id: '1048576', label: '1M' },
 ] as const;
 
+/// Context-window input with the CONTEXT_PRESETS as quick fills.
+function ContextWindowField({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  const t = useT();
+  return (
+    <ComboBox
+      label={t('ap.contextWindow')}
+      allowsCustomValue
+      inputValue={value}
+      items={CONTEXT_PRESETS}
+      defaultFilter={() => true}
+      onInputChange={onChange}
+      onSelectionChange={(key) => {
+        if (key != null) onChange(String(key));
+      }}
+    >
+      {(preset) => (
+        <ComboBoxItem id={preset.id} textValue={preset.id}>
+          <div className="flex min-w-0 items-baseline gap-2">
+            <span>{preset.label}</span>
+            <span className="text-caption-1-regular text-text-secondary">{preset.id}</span>
+          </div>
+        </ComboBoxItem>
+      )}
+    </ComboBox>
+  );
+}
+
+/// Single-model picker for exclusive agents (Codex): fetched catalog entries
+/// as suggestions, while any typed id is kept as is.
+function ModelPicker({
+  value,
+  onChange,
+  fetchModels,
+  canFetch,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  fetchModels: () => Promise<Array<{ id: string; name: string }>>;
+  /** The catalog lives at the profile's base URL; without one there is nothing to fetch. */
+  canFetch: boolean;
+}) {
+  const t = useT();
+  const [fetched, setFetched] = useState<Array<{ id: string; name: string }>>();
+  const [fetching, setFetching] = useState(false);
+  const [fetchFailed, setFetchFailed] = useState(false);
+
+  const items = useMemo(() => {
+    const seen = new Set<string>();
+    const out: Array<{ id: string; label: string }> = [];
+    for (const model of fetched ?? []) {
+      if (model.id && !seen.has(model.id)) {
+        seen.add(model.id);
+        out.push({ id: model.id, label: model.name || model.id });
+      }
+    }
+    const current = value.trim();
+    if (current && !seen.has(current)) out.unshift({ id: current, label: current });
+    return out;
+  }, [fetched, value]);
+
+  const runFetch = async () => {
+    setFetching(true);
+    try {
+      setFetched(await fetchModels());
+      setFetchFailed(false);
+    } catch (error) {
+      setFetchFailed(true);
+      toast.danger(error instanceof Error ? error.message : t('ap.failed'));
+    } finally {
+      setFetching(false);
+    }
+  };
+
+  return (
+    <div className="flex min-w-0 flex-col gap-1">
+      <div className="flex items-end gap-1">
+        <ComboBox
+          className="min-w-0 flex-1"
+          label={t('ap.model')}
+          allowsCustomValue
+          inputValue={value}
+          items={items}
+          onInputChange={onChange}
+          onSelectionChange={(key) => {
+            if (key != null) onChange(String(key));
+          }}
+          onOpenChange={(open) => {
+            if (open && canFetch && fetched === undefined && !fetchFailed && !fetching) void runFetch();
+          }}
+        >
+          {(item) => (
+            <ComboBoxItem id={item.id} textValue={item.id}>
+              <div className="flex min-w-0 flex-col">
+                <span className="truncate">{item.label}</span>
+                {item.label !== item.id ? (
+                  <span className="truncate text-caption-1-regular text-text-secondary">{item.id}</span>
+                ) : null}
+              </div>
+            </ComboBoxItem>
+          )}
+        </ComboBox>
+        <IconAction
+          className="mb-1.5"
+          icon={fetching ? SpinnerIcon : RiRefreshLine}
+          size="sm"
+          aria-label={t('ap.fetchModels')}
+          tooltip={t('ap.fetchModels')}
+          aria-busy={fetching || undefined}
+          disabled={fetching || !canFetch}
+          onClick={() => void runFetch()}
+        />
+      </div>
+      <p className="text-caption-1-medium text-text-secondary">
+        {canFetch
+          ? fetched ? t('ap.modelsFetched', { count: fetched.length }) : t('ap.modelFetchHint')
+          : t('ap.modelFetchNeedsBaseUrl')}
+      </p>
+    </div>
+  );
+}
+
+/// Codex reasoning effort as one choice among CODEX_REASONING_EFFORTS; the
+/// empty "default" leaves it to Codex's per-model default. A stored value
+/// outside the list shows as an extra option so it is never silently lost.
+function ReasoningEffortPicker({
+  value,
+  onChange,
+  className,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  className?: string;
+}) {
+  const t = useT();
+  const labelId = useId();
+  const current = value.trim();
+  const levels: string[] = [...CODEX_REASONING_EFFORTS];
+  if (current && !levels.includes(current)) levels.push(current);
+  const option = (level: string, label: string) => {
+    const selected = current === level;
+    return (
+      <ButtonGroupItem
+        key={level || 'default'}
+        size="small"
+        selected={selected}
+        className={cx(selected ? 'bg-badge-new-background text-badge-new-text hover:bg-badge-new-background' : 'text-text-secondary')}
+        onClick={() => onChange(level)}
+      >
+        {label}
+      </ButtonGroupItem>
+    );
+  };
+  return (
+    <div className={cx('flex min-w-0 flex-col gap-1', className)}>
+      <Label id={labelId} elementType="span">{t('ap.reasoningEffort')}</Label>
+      <ButtonGroup size="small" aria-labelledby={labelId} className="max-w-full self-start overflow-x-auto">
+        {option('', t('ap.effortDefault'))}
+        {levels.map((level) => option(level, level))}
+      </ButtonGroup>
+      <p className="text-caption-1-medium text-text-secondary">{t('ap.effortDefaultHint')}</p>
+    </div>
+  );
+}
+
 /// Per-model settings below the membership picker: context/output limits and
 /// the enabled thinking levels. Rows stay collapsed to a one-line summary.
 function ModelConfigList({
@@ -966,26 +1141,10 @@ function ModelConfigList({
                   value={model.name}
                   onChange={(name) => update(model.id, { name })}
                 />
-                <ComboBox
-                  label={t('ap.contextWindow')}
-                  allowsCustomValue
-                  inputValue={model.contextWindow}
-                  items={CONTEXT_PRESETS}
-                  defaultFilter={() => true}
-                  onInputChange={(contextWindow) => update(model.id, { contextWindow })}
-                  onSelectionChange={(key) => {
-                    if (key != null) update(model.id, { contextWindow: String(key) });
-                  }}
-                >
-                  {(preset) => (
-                    <ComboBoxItem id={preset.id} textValue={preset.id}>
-                      <div className="flex min-w-0 items-baseline gap-2">
-                        <span>{preset.label}</span>
-                        <span className="text-caption-1-regular text-text-secondary">{preset.id}</span>
-                      </div>
-                    </ComboBoxItem>
-                  )}
-                </ComboBox>
+                <ContextWindowField
+                  value={model.contextWindow}
+                  onChange={(contextWindow) => update(model.id, { contextWindow })}
+                />
                 <Field
                   label={t('ap.maxTokens')}
                   value={model.maxTokens}

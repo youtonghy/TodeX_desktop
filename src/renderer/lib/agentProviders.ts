@@ -7,6 +7,10 @@ export const MASKED_SECRET = '__TODEX_MASKED__';
 export const PI_THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
 export const OPENCODE_THINKING_LEVELS = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
 
+/// Codex `model_reasoning_effort` values (codex-rs `ReasoningEffort`); rarer
+/// or model-defined ones stay editable through JSON mode.
+export const CODEX_REASONING_EFFORTS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
+
 /// DeepSeek Harness routes take pi-ai's levels, which match Pi's.
 const usesPiLevels = (agent: ManagedProviderAgent) => agent === 'pi' || agent === 'deepseek-harness';
 
@@ -234,16 +238,16 @@ function patchTomlScalar(
   return `${head}${head ? '\n\n' : ''}[${newTable}]\n${assignment}\n`;
 }
 
-/** Drops `key = …` lines inside the matching tables. */
-function removeTomlKey(text: string, key: string, withinTable: TableMatcher): string {
+/** Drops `key = …` lines on the TOML top level or inside the matching tables. */
+function removeTomlKey(text: string, key: string, withinTable?: TableMatcher): string {
   const keyPattern = new RegExp(`^\\s*${escapeRegExp(key)}\\s*=`);
-  let inTargetTable = false;
+  let inTargetTable = withinTable === undefined;
   return text
     .split('\n')
     .filter((line) => {
       const header = tableHeader(line);
       if (header !== undefined) {
-        inTargetTable = tableMatches(withinTable, header);
+        inTargetTable = withinTable !== undefined && tableMatches(withinTable, header);
         return true;
       }
       return !(inTargetTable && keyPattern.test(line));
@@ -536,11 +540,15 @@ function codexConfigFromForm(
 ): string {
   let config = codexConfigText(existing).trim() || CODEX_CONFIG_TEMPLATE;
   if (form.model.trim()) config = patchTomlScalar(config, 'model', form.model.trim());
-  if (form.reasoningEffort.trim()) {
-    config = patchTomlScalar(config, 'model_reasoning_effort', form.reasoningEffort.trim());
-  }
+  // An empty effort or window means Codex's per-model default: drop the key.
+  const effort = form.reasoningEffort.trim();
+  config = effort
+    ? patchTomlScalar(config, 'model_reasoning_effort', effort)
+    : removeTomlKey(config, 'model_reasoning_effort');
   const contextWindow = parsePositiveInt(form.contextWindow);
-  if (contextWindow) config = patchTomlNumber(config, 'model_context_window', contextWindow);
+  config = contextWindow
+    ? patchTomlNumber(config, 'model_context_window', contextWindow)
+    : removeTomlKey(config, 'model_context_window');
   const providerTable = tomlScalar(config, 'model_provider') || 'custom';
   config = patchTomlScalar(config, 'model_provider', providerTable);
   if (form.baseUrl.trim()) {

@@ -47,3 +47,37 @@ test('Claude Code managed keys match the backend list', () => {
     ['permissions', 'env.HTTP_PROXY'],
   );
 });
+
+const codexConfig = `model_provider = "gw"
+model = "gpt-5"
+model_reasoning_effort = "high"
+model_context_window = 272000
+approval_policy = "never"
+
+[model_providers.gw]
+name = "Gateway"
+base_url = "https://gw/v1"
+model_context_window = 1
+`;
+
+test('Codex effort and context window round-trip through the form', () => {
+  const source = { name: 'Gateway', settingsConfig: { auth: { OPENAI_API_KEY: MASKED_SECRET }, config: codexConfig } };
+  const form = extractFormValues('codex', source);
+  assert.equal(form.reasoningEffort, 'high');
+  assert.equal(form.contextWindow, '272000');
+  const config = buildSettingsConfig('codex', { ...form, reasoningEffort: 'xhigh', contextWindow: '1048576' }, source).config as string;
+  assert.match(config, /^model_reasoning_effort = "xhigh"$/m);
+  assert.match(config, /^model_context_window = 1048576$/m);
+  assert.match(config, /^approval_policy = "never"$/m);
+});
+
+test('clearing Codex effort and context window drops only the top-level keys', () => {
+  const source = { name: 'Gateway', settingsConfig: { auth: {}, config: codexConfig } };
+  const form = { ...extractFormValues('codex', source), reasoningEffort: '', contextWindow: ' ' };
+  const config = buildSettingsConfig('codex', form, source).config as string;
+  assert.doesNotMatch(config, /model_reasoning_effort/);
+  assert.doesNotMatch(config, /^model_context_window = 272000$/m);
+  // A same-named key inside a table is not the top-level setting.
+  assert.match(config, /^model_context_window = 1$/m);
+  assert.match(config, /^base_url = "https:\/\/gw\/v1"$/m);
+});
