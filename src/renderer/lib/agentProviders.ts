@@ -25,6 +25,39 @@ export function defaultEfforts(agent: ManagedProviderAgent): string[] {
 export const DSH_DEEPSEEK_ROUTE = 'deepseek-official';
 export const DSH_API_KINDS = ['openai-completions', 'openai-responses', 'anthropic-messages'] as const;
 
+/// Claude Code `env` switches that pick a cloud platform; a provider profile
+/// owns them along with every `ANTHROPIC_*` variable.
+const CLAUDE_MANAGED_ENV_SWITCHES = new Set(['CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX', 'CLAUDE_CODE_USE_FOUNDRY']);
+/// Top-level Claude Code settings keys a provider profile owns (besides the
+/// managed `env` entries).
+const CLAUDE_MANAGED_TOP_LEVEL_KEYS = new Set(['model', 'apiKeyHelper']);
+
+/** Whether a Claude Code settings key is owned by the active provider
+ * profile, so switching profiles rewrites (or removes) it. `scope` is `env`
+ * for variables inside `env`, `top` for top-level settings keys.
+ *
+ * Must stay in sync with the managed-key list in the backend's
+ * `src/agent_providers/claude.rs`, which is authoritative: only those keys
+ * are written to (and cleared from) settings.json on activate and delete. */
+export function isClaudeManagedKey(scope: 'env' | 'top', name: string): boolean {
+  return scope === 'env'
+    ? name.startsWith('ANTHROPIC_') || CLAUDE_MANAGED_ENV_SWITCHES.has(name)
+    : CLAUDE_MANAGED_TOP_LEVEL_KEYS.has(name);
+}
+
+/** Keys of a Claude Code profile's settingsConfig that the backend no longer
+ * writes when switching to it: unmanaged top-level keys as is, unmanaged
+ * `env` variables as `env.NAME`. */
+export function claudeUnmanagedKeys(settingsConfig: unknown): string[] {
+  const settings = asRecord(settingsConfig);
+  return Object.entries(settings).flatMap(([key, value]) => {
+    if (key === 'env') {
+      return Object.keys(asRecord(value)).filter((name) => !isClaudeManagedKey('env', name)).map((name) => `env.${name}`);
+    }
+    return isClaudeManagedKey('top', key) ? [] : [key];
+  });
+}
+
 /** Agents whose providers live side by side, one of them the default. */
 export function isAdditiveAgent(agent: ManagedProviderAgent): boolean {
   return agent === 'pi' || agent === 'opencode' || agent === 'deepseek-harness';
@@ -410,6 +443,13 @@ function opencodeEntryToForm(id: string, entry: Record<string, unknown>): ModelF
   };
 }
 
+/// The `env` variable holding a Claude Code profile's key:
+/// `ANTHROPIC_AUTH_TOKEN` wins, as in Claude Code itself; a profile that only
+/// has `ANTHROPIC_API_KEY` keeps using it.
+function claudeApiKeyEnvName(env: Record<string, unknown>): 'ANTHROPIC_AUTH_TOKEN' | 'ANTHROPIC_API_KEY' {
+  return env.ANTHROPIC_AUTH_TOKEN == null && env.ANTHROPIC_API_KEY != null ? 'ANTHROPIC_API_KEY' : 'ANTHROPIC_AUTH_TOKEN';
+}
+
 export function extractFormValues(
   agent: ManagedProviderAgent,
   source?: ProviderConfigSource,
@@ -422,7 +462,7 @@ export function extractFormValues(
       return {
         ...base,
         baseUrl: asString(env.ANTHROPIC_BASE_URL),
-        apiKey: asString(env.ANTHROPIC_AUTH_TOKEN ?? env.ANTHROPIC_API_KEY),
+        apiKey: asString(env[claudeApiKeyEnvName(env)]),
         model: asString(env.ANTHROPIC_MODEL),
       };
     }
@@ -666,9 +706,23 @@ export function buildSettingsConfig(
   switch (agent) {
     case 'claude-code': {
       const env: Record<string, unknown> = { ...asRecord(previous.env) };
-      if (form.baseUrl.trim()) env.ANTHROPIC_BASE_URL = form.baseUrl.trim();
-      if (form.apiKey.trim()) env.ANTHROPIC_AUTH_TOKEN = form.apiKey.trim();
-      if (form.model.trim()) env.ANTHROPIC_MODEL = form.model.trim();
+      // The key goes back where extractFormValues read it from, so a masked
+      // value resolves against the same path on the backend.
+      const keyName = claudeApiKeyEnvName(env);
+      const fields: [string, string][] = [
+        ['ANTHROPIC_BASE_URL', form.baseUrl],
+        [keyName, form.apiKey],
+        ['ANTHROPIC_MODEL', form.model],
+      ];
+      for (const [name, value] of fields) {
+        if (value.trim()) env[name] = value.trim();
+        else delete env[name];
+      }
+      // A cleared key clears the credential, not just the variable shown.
+      if (!form.apiKey.trim()) {
+        delete env.ANTHROPIC_AUTH_TOKEN;
+        delete env.ANTHROPIC_API_KEY;
+      }
       return { ...previous, env };
     }
     case 'codex': {

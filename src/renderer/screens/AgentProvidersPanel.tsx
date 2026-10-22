@@ -23,6 +23,7 @@ import { Alert } from '@/components/ui/alert';
 import { Card } from '@/components/ui/card';
 import { ComboBox, ComboBoxItem } from '@/components/ui/combo-box';
 import { IconAction } from '@/components/ui/icon-action';
+import { ConfirmDialog } from '@/components/ui/modal';
 import { Spinner, SpinnerIcon } from '@/components/ui/spinner';
 import { toast } from '@/components/ui/toast';
 import { cx } from '@/utils/cx';
@@ -41,6 +42,7 @@ import { Field } from '../components/Field';
 import {
   asRecord,
   buildSettingsConfig,
+  claudeUnmanagedKeys,
   defaultEfforts,
   DSH_API_KINDS,
   DSH_DEEPSEEK_ROUTE,
@@ -89,6 +91,8 @@ export function AgentProvidersPanel({ backend, agent }: { backend: PanelBackend;
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string>();
   const [editor, setEditor] = useState<EditorState>(null);
+  // Activating and deleting rewrite the agent's global config, so both ask first.
+  const [confirming, setConfirming] = useState<{ action: 'activate' | 'delete'; profile: AgentProviderProfile } | null>(null);
   const requestGeneration = useRef(0);
   const importInput = useRef<HTMLInputElement>(null);
   const { settings } = backend;
@@ -139,16 +143,25 @@ export function AgentProvidersPanel({ backend, agent }: { backend: PanelBackend;
     }
   };
 
-  const activate = (profile: AgentProviderProfile) => {
-    void run(`activate:${profile.id}`,
-      () => api().activateAgentProvider(agent, profile.id), 'ap.activated');
-  };
+  const activate = (profile: AgentProviderProfile) =>
+    run(`activate:${profile.id}`, () => api().activateAgentProvider(agent, profile.id), 'ap.activated');
 
-  const remove = (profile: AgentProviderProfile) => {
-    void run(`delete:${profile.id}`, async () => {
+  const remove = (profile: AgentProviderProfile) =>
+    run(`delete:${profile.id}`, async () => {
       await api().deleteAgentProvider(agent, profile.id);
       await refresh(true);
     }, 'ap.deleted');
+
+  /** What confirming the pending action does to the agent's config. */
+  const confirmDescription = (action: 'activate' | 'delete', profile: AgentProviderProfile): string => {
+    const agentName = PROVIDER_DISPLAY_NAMES[agent];
+    if (action === 'activate') {
+      return agent === 'claude-code' ? t('ap.activateConfirmClaude') : t('ap.activateConfirmOther', { agent: agentName });
+    }
+    if (isAdditiveAgent(agent)) return t('ap.deleteConfirmAdditive', { agent: agentName });
+    return agent === 'claude-code' && bucket?.currentProviderId === profile.id
+      ? t('ap.deleteConfirmCurrentClaude')
+      : t('ap.deleteConfirmProfileOnly');
   };
 
   /// The file carries every secret in clear so another backend can use it;
@@ -286,21 +299,21 @@ export function AgentProvidersPanel({ backend, agent }: { backend: PanelBackend;
                       {agent === 'deepseek-harness' && !isDefault ? (
                         <Button size="small" variant="secondary" className="me-1" disabled={Boolean(busy)} aria-busy={activating || undefined}
                           leadingIcon={activating ? SpinnerIcon : RiCheckLine}
-                          onClick={() => activate(profile)}>
+                          onClick={() => void activate(profile)}>
                           {t('ap.setDefault')}
                         </Button>
                       ) : null}
                       {!additive && !isCurrent ? (
                         <Button size="small" variant="primary" className="me-1" disabled={Boolean(busy)} aria-busy={activating || undefined}
                           leadingIcon={activating ? SpinnerIcon : RiCheckLine}
-                          onClick={() => activate(profile)}>
+                          onClick={() => setConfirming({ action: 'activate', profile })}>
                           {t('ap.activate')}
                         </Button>
                       ) : null}
                       <IconAction icon={RiEdit2Line} size="sm" aria-label={t('ap.edit')}
                         onClick={() => setEditor({ kind: 'edit', profile })} />
                       <IconAction icon={RiDeleteBinLine} size="sm" aria-label={t('ap.delete')}
-                        disabled={busy === `delete:${profile.id}`} onClick={() => remove(profile)} />
+                        disabled={busy === `delete:${profile.id}`} onClick={() => setConfirming({ action: 'delete', profile })} />
                     </div>
                   </div>
                 </Card>
@@ -385,6 +398,22 @@ export function AgentProvidersPanel({ backend, agent }: { backend: PanelBackend;
           )}
         </>
       )}
+
+      <ConfirmDialog
+        isOpen={confirming !== null}
+        onOpenChange={(open) => { if (!open) setConfirming(null); }}
+        title={confirming ? t(confirming.action === 'activate' ? 'ap.activateConfirmTitle' : 'ap.deleteConfirmTitle', { name: confirming.profile.name }) : null}
+        description={confirming ? confirmDescription(confirming.action, confirming.profile) : null}
+        cancelLabel={t('common.cancel')}
+        confirmLabel={t(confirming?.action === 'delete' ? 'ap.delete' : 'ap.activate')}
+        tone={confirming?.action === 'delete' ? 'danger' : 'default'}
+        isPending={Boolean(confirming && busy === `${confirming.action}:${confirming.profile.id}`)}
+        onConfirm={async () => {
+          if (!confirming) return;
+          await (confirming.action === 'activate' ? activate(confirming.profile) : remove(confirming.profile));
+          setConfirming(null);
+        }}
+      />
     </div>
   );
 }
@@ -446,6 +475,17 @@ function ProviderEditor({
 
   const idLocked = editor.kind !== 'new';
   const isClaude = agent === 'claude-code';
+  // Claude Code switches write only the keys a profile manages; anything
+  // else in the JSON stays in the profile but no longer reaches settings.json.
+  // Text that does not parse lists nothing (saving reports it).
+  const unmanagedKeys = useMemo(() => {
+    if (!isClaude || !jsonMode) return [];
+    try {
+      return claudeUnmanagedKeys(JSON.parse(jsonText));
+    } catch {
+      return [];
+    }
+  }, [isClaude, jsonMode, jsonText]);
   const isCodex = agent === 'codex';
   const isGrok = agent === 'grok-build';
   const grokSubscription = isGrok && form.authMode === 'subscription';
@@ -533,14 +573,19 @@ function ProviderEditor({
       </div>
 
       {jsonMode ? (
-        <Textarea
-          className="w-full"
-          label={t('ap.settingsConfig')}
-          value={jsonText}
-          onChange={setJsonText}
-          rows={10}
-          inputClassName="font-mono text-caption-1-regular"
-        />
+        <>
+          <Textarea
+            className="w-full"
+            label={t('ap.settingsConfig')}
+            value={jsonText}
+            onChange={setJsonText}
+            rows={10}
+            inputClassName="font-mono text-caption-1-regular"
+          />
+          {unmanagedKeys.length ? (
+            <Alert status="warning" description={t('ap.unmanagedKeys', { count: unmanagedKeys.length, keys: unmanagedKeys.join(', ') })} />
+          ) : null}
+        </>
       ) : (
         <div className="grid gap-3 sm:grid-cols-2">
           {isGrok ? (

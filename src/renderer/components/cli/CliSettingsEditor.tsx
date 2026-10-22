@@ -26,6 +26,7 @@ import {
   type CliSettingsSchema,
   type SettingsObject,
 } from '@/lib/cliSettings';
+import { isClaudeManagedKey } from '@/lib/agentProviders';
 import { CliInstructionsPanel, useCliInstructions } from './CliInstructionsTab';
 import { DshPluginsPanel, useDshPlugins } from './DshPluginsTab';
 import { PiMcpPanel, usePiMcp } from './PiMcpTab';
@@ -84,6 +85,22 @@ function CliSettingsForm({ schema, api }: { schema: CliSettingsSchema; api: () =
   }, [adopt, api, provider]);
 
   useEffect(() => { void load(); }, [load]);
+
+  // Claude Code env rows the active provider profile owns are rewritten on
+  // every profile switch; they are marked only while a profile is active.
+  const [profileActive, setProfileActive] = useState(false);
+  useEffect(() => {
+    if (provider !== 'claude-code') return;
+    let cancelled = false;
+    api().listAgentProviders().then(
+      (response) => { if (!cancelled) setProfileActive(Boolean(response.agents['claude-code']?.currentProviderId)); },
+      // Without the profile list the rows stay unmarked; the settings
+      // themselves load and save independently of it.
+      () => { if (!cancelled) setProfileActive(false); },
+    );
+    return () => { cancelled = true; };
+  }, [api, provider]);
+  const envManaged = profileActive ? (name: string) => isClaudeManagedKey('env', name.trim()) : undefined;
 
   const saved = doc?.settings ?? null;
   // The form and the env tab edit one draft; env rows are folded in on save.
@@ -226,7 +243,7 @@ function CliSettingsForm({ schema, api }: { schema: CliSettingsSchema; api: () =
           {envPath ? (
             <TabPanel id="env" className="flex flex-col gap-3">
               {schema.hints.env ? <p className="px-3 text-body-2-regular text-text-secondary">{t(schema.hints.env)}</p> : null}
-              <EnvEditor rows={env} onChange={setEnv} nextKey={() => nextEnvKey.current++} />
+              <EnvEditor rows={env} onChange={setEnv} nextKey={() => nextEnvKey.current++} isManaged={envManaged} />
             </TabPanel>
           ) : null}
           {isPi ? (
@@ -303,7 +320,13 @@ function rawObjectError(text: string): string | null {
   }
 }
 
-function EnvEditor({ rows, onChange, nextKey }: { rows: EnvRow[]; onChange: (rows: EnvRow[]) => void; nextKey: () => number }) {
+function EnvEditor({ rows, onChange, nextKey, isManaged }: {
+  rows: EnvRow[];
+  onChange: (rows: EnvRow[]) => void;
+  nextKey: () => number;
+  /** Rows owned by the active provider profile, noted under the name. */
+  isManaged?: (name: string) => boolean;
+}) {
   const t = useT();
   const update = (rowKey: number, changes: Partial<EnvRow>) => onChange(rows.map((row) => (row.key === rowKey ? { ...row, ...changes } : row)));
   return (
@@ -320,7 +343,7 @@ function EnvEditor({ rows, onChange, nextKey }: { rows: EnvRow[]; onChange: (row
               placeholder="NAME"
               value={row.name}
               isInvalid={invalid}
-              hint={invalid ? t('cliSettings.envNameInvalid') : undefined}
+              hint={invalid ? t('cliSettings.envNameInvalid') : isManaged?.(row.name) ? t('cliSettings.envManagedByProfile') : undefined}
               onChange={(name) => update(row.key, { name })}
               inputClassName="font-mono"
             />
