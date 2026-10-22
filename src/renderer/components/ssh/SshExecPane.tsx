@@ -98,6 +98,13 @@ const REDACTION_LABEL_KEYS: Record<AgentOutputFilterCategory, MessageKey> = {
   credential: 'sshExec.redaction.credential',
   bankCard: 'sshExec.redaction.bankCard',
   idCard: 'sshExec.redaction.idCard',
+  proxyCredential: 'sshExec.redaction.proxyCredential',
+  urlToken: 'sshExec.redaction.urlToken',
+  highEntropy: 'sshExec.redaction.highEntropy',
+  uuid: 'sshExec.redaction.uuid',
+  email: 'sshExec.redaction.email',
+  phone: 'sshExec.redaction.phone',
+  publicIp: 'sshExec.redaction.publicIp',
 };
 
 /** What the privacy filter kept from the agent; the output above stays raw. */
