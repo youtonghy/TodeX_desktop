@@ -131,7 +131,6 @@ export const en: Messages = {
   'sidebar.statusWorking': 'Working',
   'sidebar.statusIssue': 'Issue',
   'sidebar.statusUnread': 'Unread reply',
-  'sidebar.menu': 'TodeX menu',
   'sidebar.backendConnected': 'Backend connected',
   'sidebar.backendDisconnected': 'Backend disconnected',
   'backendSelect.label': 'Backend',

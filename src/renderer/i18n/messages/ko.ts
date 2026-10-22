@@ -131,7 +131,6 @@ export const ko: Messages = {
   'sidebar.statusWorking': '작업 중',
   'sidebar.statusIssue': '문제 발생',
   'sidebar.statusUnread': '읽지 않은 답글',
-  'sidebar.menu': 'TodeX 메뉴',
   'sidebar.backendConnected': 'Backend 연결됨',
   'sidebar.backendDisconnected': 'Backend 연결 안 됨',
   'backendSelect.label': '백엔드',

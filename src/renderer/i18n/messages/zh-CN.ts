@@ -131,7 +131,6 @@ export const zhCN = {
   'sidebar.statusWorking': '正在工作',
   'sidebar.statusIssue': '遇到问题',
   'sidebar.statusUnread': '有未读回复',
-  'sidebar.menu': 'TodeX 菜单',
   'sidebar.backendConnected': '后端已连接',
   'sidebar.backendDisconnected': '后端未连接',
   'backendSelect.label': '后端',

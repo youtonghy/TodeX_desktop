@@ -615,6 +615,7 @@ export function App() {
       onOpenTerminal={toggleSshView}
       terminalActive={sshActive}
       kanbanActive={kanbanActive}
+      profileActive={profileActive}
       onSelectConversation={() => setPanel(current => current === 'ssh' || current === 'kanban' || current === 'profile' ? null : current)}
     />
   );

@@ -1,4 +1,4 @@
-import { RiPushpin2Fill, RiLockLine, RiAddLine, RiArrowRightSLine, RiCheckLine, RiFolderReduceLine, RiFoldersLine, RiFolderTransferLine, RiPencilLine, RiEdit2Line, RiErrorWarningLine, RiFolder3Line, RiFolderOpenLine, RiGitBranchLine, RiDeleteBinLine, RiArrowDownSLine, RiBookOpenLine, RiKanbanView2, RiMoreLine, RiPaletteLine, RiPriceTag3Line, RiSettings3Line, RiTerminalLine, RiTimeLine, RiTimerLine, RiUser3Line } from '@remixicon/react';
+import { RiPushpin2Fill, RiLockLine, RiAddLine, RiArrowRightSLine, RiCheckLine, RiFolderReduceLine, RiFoldersLine, RiFolderTransferLine, RiPencilLine, RiEdit2Line, RiErrorWarningLine, RiFolder3Line, RiFolderOpenLine, RiGitBranchLine, RiDeleteBinLine, RiArrowDownSLine, RiBookOpenLine, RiKanbanView2, RiMoreLine, RiPaletteLine, RiPriceTag3Line, RiSettings3Line, RiTerminalLine, RiTimeLine, RiTimerLine } from '@remixicon/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { MouseEvent, ReactNode } from 'react';
 import {
@@ -20,7 +20,7 @@ import { TreeView, TreeViewItem } from '@/components/base/tree-view/tree-view';
 import { NotificationCenter, type NotificationCenterItem } from '@/components/application/notification-center/notification-center';
 import { markAllNotificationsRead, markNotificationRead, useNotificationFeed } from '../session/notificationFeed';
 import { getLocale, translate } from '../i18n';
-import { DashboardTeamMenu, type DashboardTeamMenuGroup } from '@/components/application/dashboard/dashboard-team-menu';
+import { DashboardTeamMenu } from '@/components/application/dashboard/dashboard-team-menu';
 import {
   DashboardUserMenu,
   DashboardUserMenuActions,
@@ -84,6 +84,7 @@ type Props = {
   terminalActive?: boolean;
   /** The task board is showing in the main area. */
   kanbanActive?: boolean;
+  profileActive?: boolean;
   /** Called after the user picks a conversation, e.g. to leave the SSH view. */
   onSelectConversation?: () => void;
 };
@@ -334,6 +335,7 @@ export function AppSidebar({
   onOpenTerminal,
   terminalActive = false,
   kanbanActive = false,
+  profileActive = false,
   onSelectConversation,
 }: Props) {
   const t = useT();
@@ -1149,25 +1151,6 @@ export function AppSidebar({
     { key: 'settings', label: t('app.settings'), icon: RiSettings3Line, isSelected: false, onClick: onOpenSettings },
   ];
 
-  // The TodeX menu (formerly the identity menu): the profile page. Settings
-  // (with About, CLI management and cleanup) sits right above it as its own row.
-  const teamMenuGroups: DashboardTeamMenuGroup[] = [
-    {
-      id: 'profile',
-      items: [
-        {
-          id: 'profile',
-          icon: RiUser3Line,
-          label: t('app.profile'),
-          onSelect: () => {
-            if (mobile) onCloseMobile?.();
-            onOpenProfile();
-          },
-        },
-      ],
-    },
-  ];
-
   // TodeX mark with the backend health dot; its ring matches the surface.
   const identityMark = (
     <span className="relative flex shrink-0">
@@ -1278,10 +1261,14 @@ export function AppSidebar({
           avatar={<AppIcon />}
           title="TodeX"
           subtitle={connectionLabel}
-          aria-label={t('sidebar.menu')}
-          menuLabel={t('sidebar.menu')}
-          groups={teamMenuGroups}
-          footer={{ label: 'TodeX', meta: `v${__TODEX_BUILD_VERSION__}` }}
+          aria-label={t('app.profile')}
+          // The card opens the profile page; Settings (with About, CLI
+          // management and cleanup) sits right above it as its own row.
+          onPress={() => {
+            if (mobile) onCloseMobile?.();
+            onOpenProfile();
+          }}
+          isSelected={profileActive}
         />
       )}
     >

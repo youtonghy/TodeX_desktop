@@ -122,9 +122,11 @@ export function DashboardTeamMenu({
   subtitle,
   "aria-label": ariaLabel,
   menuLabel,
-  groups,
+  groups = [],
   footer,
   onOpenChange,
+  onPress,
+  isSelected = false,
 }: {
   collapsed?: boolean;
   className?: string;
@@ -135,11 +137,15 @@ export function DashboardTeamMenu({
   /** Trigger name; defaults to `title`. */
   "aria-label"?: string;
   /** Accessible name of the panel. */
-  menuLabel: string;
-  groups: DashboardTeamMenuGroup[];
+  menuLabel?: string;
+  groups?: DashboardTeamMenuGroup[];
   /** Footer line, e.g. the product name and its version chip. */
   footer?: { label: ReactNode; meta?: ReactNode };
   onOpenChange?: (isOpen: boolean) => void;
+  /** Makes the card a plain button (no chevron, no panel) that runs this. */
+  onPress?: () => void;
+  /** With `onPress`: the page the card opens is the one shown. */
+  isSelected?: boolean;
 }) {
   const direction = useDirection();
   const [isOpen, setIsOpen] = useState(false);
@@ -153,32 +159,43 @@ export function DashboardTeamMenu({
   // dropdown under the trigger instead.
   const isMobile = useSyncExternalStore(subscribeMobile, mobileSnapshot, () => false);
 
+  const triggerClassName = cx(
+    "flex cursor-pointer items-center overflow-hidden outline-none",
+    "border-2 border-transparent hover:border-border-button-hover",
+    "transition-[width,background-color,border-color,padding] duration-300 ease-in-out motion-reduce:transition-none",
+    "focus-visible:ring-2 focus-visible:ring-border-focus-ring focus-visible:ring-offset-2",
+    collapsed
+      ? "size-9 justify-start rounded-full bg-transparent p-0"
+      : "w-full justify-between rounded-xl bg-background-tertiary-default py-2 pe-4 ps-2.5",
+    onPress && isSelected && "border-border-button-hover",
+    className,
+  );
+  const identity = (
+    <span className="flex min-w-0 items-center gap-2">
+      {avatar}
+      <Collapsible collapsed={collapsed}>
+        <span className="flex min-w-0 flex-col items-start justify-center">
+          <span className="max-w-full truncate text-body-medium whitespace-nowrap text-text-primary">{title}</span>
+          {subtitle ? (
+            <span className="max-w-full truncate text-body-regular whitespace-nowrap text-text-secondary">{subtitle}</span>
+          ) : null}
+        </span>
+      </Collapsible>
+    </span>
+  );
+
+  if (onPress) {
+    return (
+      <AriaButton aria-label={ariaLabel ?? title} aria-current={isSelected ? "page" : undefined} onPress={onPress} className={triggerClassName}>
+        {identity}
+      </AriaButton>
+    );
+  }
+
   return (
     <AriaDialogTrigger isOpen={isOpen} onOpenChange={changeOpen}>
-      <AriaButton
-        aria-label={ariaLabel ?? title}
-        className={cx(
-          "flex cursor-pointer items-center overflow-hidden outline-none",
-          "border-2 border-transparent hover:border-border-button-hover",
-          "transition-[width,background-color,border-color,padding] duration-300 ease-in-out motion-reduce:transition-none",
-          "focus-visible:ring-2 focus-visible:ring-border-focus-ring focus-visible:ring-offset-2",
-          collapsed
-            ? "size-9 justify-start rounded-full bg-transparent p-0"
-            : "w-full justify-between rounded-xl bg-background-tertiary-default py-2 pe-4 ps-2.5",
-          className,
-        )}
-      >
-        <span className="flex min-w-0 items-center gap-2">
-          {avatar}
-          <Collapsible collapsed={collapsed}>
-            <span className="flex min-w-0 flex-col items-start justify-center">
-              <span className="max-w-full truncate text-body-medium whitespace-nowrap text-text-primary">{title}</span>
-              {subtitle ? (
-                <span className="max-w-full truncate text-body-regular whitespace-nowrap text-text-secondary">{subtitle}</span>
-              ) : null}
-            </span>
-          </Collapsible>
-        </span>
+      <AriaButton aria-label={ariaLabel ?? title} className={triggerClassName}>
+        {identity}
         <Collapsible collapsed={collapsed}>
           <span className="flex size-4 shrink-0 items-center justify-center rounded-[3px] bg-background-tertiary-hover">
             <ChevronDownSmall

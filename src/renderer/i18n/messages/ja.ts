@@ -131,7 +131,6 @@ export const ja: Messages = {
   'sidebar.statusWorking': '作業中',
   'sidebar.statusIssue': '問題あり',
   'sidebar.statusUnread': '未読の返信',
-  'sidebar.menu': 'TodeX メニュー',
   'sidebar.backendConnected': 'Backend 接続済み',
   'sidebar.backendDisconnected': 'Backend 未接続',
   'backendSelect.label': 'バックエンド',
