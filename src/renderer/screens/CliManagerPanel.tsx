@@ -21,7 +21,7 @@ import { InstructionPresetsModal } from '../components/cli/InstructionPresetsMod
 import { SettingsCard, SettingsEntry } from '../components/settings/SettingsRows';
 import { ProviderIcon } from '../components/ProviderIcon';
 import { NoticeToast } from '../components/NoticeToast';
-import { t, useT, type MessageKey } from '../i18n';
+import { getLocale, t, useT, type MessageKey } from '../i18n';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { backendApi } from '../session/helpers';
 import { usePanelBackend } from '../session/panelBackend';
@@ -52,23 +52,40 @@ export function CliManagerPanel({ session, page = null, onPageChange = () => {} 
 }) {
   const t = useT();
   const [clis, setClis] = useState<CliVersionInfo[]>([]);
-  const [operation, setOperation] = useState<CliUpgradeOperation>();
+  const [checkedAt, setCheckedAt] = useState<string>();
+  // The latest operation per CLI: several CLIs can install or upgrade at once.
+  const [operations, setOperations] = useState<Partial<Record<ManagedCliProvider, CliUpgradeOperation>>>({});
   const [loading, setLoading] = useState(true);
-  const [submittingProvider, setSubmittingProvider] = useState<ManagedCliProvider>();
+  const [submitting, setSubmitting] = useState<ReadonlySet<ManagedCliProvider>>(() => new Set());
   const requestGeneration = useRef(0);
   const backendGeneration = useRef(0);
+  // Read by the poll loop for toasts without restarting it on every refresh.
+  const names = useRef(new Map<string, string>());
+  names.current = new Map(clis.map((cli) => [cli.id, cli.name]));
   const backend = usePanelBackend(session);
   const { settings } = backend;
   const api = useCallback(() => backendApi(settings), [settings.deviceSecret, settings.encryptionProtocol, settings.encryptionPublicKey, settings.transportVerified, settings.serverUrl]);
 
-  const refresh = useCallback(async (quiet = false) => {
+  /** `force` re-queries every CLI's latest release instead of the backend's cache. */
+  const refresh = useCallback(async ({ quiet = false, force = false } = {}) => {
     const generation = ++requestGeneration.current;
     if (!quiet) setLoading(true);
     try {
-      const response = await api().listCliVersions();
+      const response = await api().listCliVersions({ refresh: force });
       if (generation !== requestGeneration.current) return;
       setClis(response.clis);
-      setOperation(response.activeOperation);
+      setCheckedAt(response.checkedAt);
+      // Older backends report only one running operation.
+      const active = response.activeOperations ?? (response.activeOperation ? [response.activeOperation] : []);
+      // A running operation the list no longer reports has just finished;
+      // keep it until its own poll reports the outcome. A list read before
+      // an operation finished must not turn it back to running.
+      setOperations((previous) => ({
+        ...previous,
+        ...Object.fromEntries(active
+          .filter((item) => previous[item.provider]?.id !== item.id || previous[item.provider]?.status === 'running')
+          .map((item) => [item.provider, item])),
+      }));
     } catch (error) {
       if (generation !== requestGeneration.current) return;
       setClis([]);
@@ -81,58 +98,85 @@ export function CliManagerPanel({ session, page = null, onPageChange = () => {} 
   useEffect(() => {
     backendGeneration.current += 1;
     setClis([]);
-    setOperation(undefined);
-    setSubmittingProvider(undefined);
+    setCheckedAt(undefined);
+    setOperations({});
+    setSubmitting(new Set());
     void refresh();
     return () => { requestGeneration.current += 1; };
   }, [refresh]);
 
+  const running = Object.values(operations).filter((item): item is CliUpgradeOperation => item?.status === 'running');
+  const runningKey = running.map((item) => item.id).sort().join(',');
+  // Poll failures are reported once per operation, across poll restarts.
+  const reportedPollErrors = useRef(new Set<string>());
+
+  // One timer polls every running operation; each finished one is toasted
+  // and the list is refreshed once per round, however many finished.
   useEffect(() => {
-    if (!operation || operation.status !== 'running') return;
+    if (!running.length) return;
     let cancelled = false;
     let timer = 0;
-    let reportedPollError = false;
     const poll = async () => {
-      try {
-        const next = await api().getCliUpgrade(operation.id);
-        if (cancelled) return;
-        reportedPollError = false;
-        setOperation(next);
+      const results = await Promise.allSettled(running.map((item) => api().getCliUpgrade(item.id)));
+      if (cancelled) return;
+      const updates: CliUpgradeOperation[] = [];
+      let failedRead = false;
+      results.forEach((result, index) => {
+        const item = running[index];
+        if (result.status === 'rejected') {
+          failedRead = true;
+          if (!reportedPollErrors.current.has(item.id)) {
+            reportedPollErrors.current.add(item.id);
+            const name = names.current.get(item.provider) ?? item.provider;
+            const message = result.reason instanceof Error ? result.reason.message : t('cli.progressReadFailed');
+            toast.danger(t('cli.namedError', { name, error: message }));
+          }
+          return;
+        }
+        reportedPollErrors.current.delete(item.id);
+        updates.push(result.value);
+      });
+      const finished = updates.filter((next) => next.status !== 'running');
+      for (const next of finished) {
+        const name = names.current.get(next.provider) ?? next.provider;
         const installing = next.action === 'install';
         if (next.status === 'succeeded') {
-          toast.success(t(installing ? 'cli.installed' : 'cli.upgraded'));
-          void refresh(true);
-        } else if (next.status === 'failed') {
-          toast.danger(next.error || t(installing ? 'cli.installFailed' : 'cli.upgradeFailed'));
+          toast.success(next.currentVersion
+            ? t(installing ? 'cli.installedNamedVersion' : 'cli.upgradedNamedVersion', { name, version: next.currentVersion })
+            : t(installing ? 'cli.installedNamed' : 'cli.upgradedNamed', { name }));
         } else {
-          timer = window.setTimeout(() => void poll(), 1200);
+          toast.danger(t('cli.namedError', { name, error: next.error || t(installing ? 'cli.installFailed' : 'cli.upgradeFailed') }));
         }
-      } catch (error) {
-        if (cancelled) return;
-        if (!reportedPollError) {
-          reportedPollError = true;
-          toast.danger(error instanceof Error ? error.message : t('cli.progressReadFailed'));
-        }
-        timer = window.setTimeout(() => void poll(), 2500);
       }
+      if (updates.length) setOperations((previous) => ({ ...previous, ...Object.fromEntries(updates.map((next) => [next.provider, next])) }));
+      if (finished.length) void refresh({ quiet: true });
+      // A finished operation changes `runningKey`, which restarts this loop.
+      if (finished.length < running.length) timer = window.setTimeout(() => void poll(), failedRead ? 2500 : 1200);
     };
     timer = window.setTimeout(() => void poll(), 1200);
     return () => { cancelled = true; window.clearTimeout(timer); };
-  }, [api, operation, refresh]);
+  }, [api, runningKey, refresh]);
 
   const startOperation = async (provider: ManagedCliProvider, action: CliOperationAction) => {
     const generation = backendGeneration.current;
-    setSubmittingProvider(provider);
+    setSubmitting((previous) => new Set(previous).add(provider));
     try {
       const next = action === 'install' ? await api().installCli(provider) : await api().upgradeCli(provider);
-      if (generation === backendGeneration.current) setOperation(next);
+      if (generation === backendGeneration.current) setOperations((previous) => ({ ...previous, [provider]: next }));
     } catch (error) {
       if (generation === backendGeneration.current) {
         const fallback = action === 'install' ? t('cli.installStartFailed') : t('cli.upgradeStartFailed');
-        toast.danger(error instanceof Error ? error.message : fallback);
+        const name = names.current.get(provider) ?? provider;
+        toast.danger(t('cli.namedError', { name, error: error instanceof Error ? error.message : fallback }));
       }
     } finally {
-      if (generation === backendGeneration.current) setSubmittingProvider(undefined);
+      if (generation === backendGeneration.current) {
+        setSubmitting((previous) => {
+          const next = new Set(previous);
+          next.delete(provider);
+          return next;
+        });
+      }
     }
   };
 
@@ -153,17 +197,27 @@ export function CliManagerPanel({ session, page = null, onPageChange = () => {} 
   };
 
   const activeBackend = backend.profile;
-  const operationBusy = operation?.status === 'running' || Boolean(submittingProvider);
+  const isRunning = (id: string) => operations[id as ManagedCliProvider]?.status === 'running';
+  const isBusy = (id: string) => isRunning(id) || submitting.has(id as ManagedCliProvider);
   const installed = clis.filter((cli) => cli.status !== 'notInstalled');
   const available = clis.filter((cli) => cli.status === 'notInstalled');
   // Collapsed by default; opens on its own when nothing is installed yet or
   // one of its CLIs is mid-install, so progress is never hidden.
   const [moreOpen, setMoreOpen] = useState(false);
-  const showAvailable = moreOpen || !installed.length || available.some((cli) => operation?.provider === cli.id && operation.status === 'running');
+  const showAvailable = moreOpen || !installed.length || available.some((cli) => isRunning(cli.id));
+  // Only CLIs with a known newer release join "update all".
+  const updatable = installed.filter((cli) => cli.kind === 'managed' && cli.upgradeSupported && cli.status === 'updateAvailable' && !isBusy(cli.id));
+  const updateAll = () => {
+    for (const cli of updatable) if (cli.kind === 'managed') void startOperation(cli.id, 'upgrade');
+  };
+  const checkedTime = checkedAt && !Number.isNaN(Date.parse(checkedAt))
+    ? new Date(checkedAt).toLocaleTimeString(getLocale(), { hour: '2-digit', minute: '2-digit' })
+    : undefined;
 
   const renderInstalled = (cli: CliVersionInfo, index: number) => {
     const status = STATUS[cli.status] ?? { labelKey: 'cli.statusUnknown' as MessageKey, color: 'neutral' as const };
-    const running = operation?.provider === cli.id && operation.status === 'running';
+    const operation = operations[cli.id as ManagedCliProvider];
+    const running = operation?.status === 'running';
     // Only an available update, or an unknown latest version, offers the
     // upgrade; everything else just reports where the CLI stands.
     const upgradable = cli.kind === 'managed' && cli.upgradeSupported && (cli.status === 'updateAvailable' || cli.status === 'unknown');
@@ -176,14 +230,22 @@ export function CliManagerPanel({ session, page = null, onPageChange = () => {} 
           <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-stat-card-icon-background">
             <ProviderIcon className="size-5" provider={cli.id} />
           </div>
-          <h3 className="min-w-0 flex-1 truncate text-body-semibold text-text-primary">{cli.name}</h3>
+          <div className="min-w-0 flex-1">
+            <h3 className="truncate text-body-semibold text-text-primary">{cli.name}</h3>
+            {cli.kind === 'managed' ? (
+              <p className="truncate text-caption-1-regular text-text-secondary tabular-nums">
+                {cli.currentVersion || t('cli.unavailable')}
+                {cli.status === 'updateAvailable' && cli.latestVersion ? ` → ${cli.latestVersion}` : null}
+              </p>
+            ) : null}
+          </div>
           {upgradable || running ? (
             <Button
               size="small"
               variant="secondary"
               leadingIcon={running ? SpinnerIcon : RiDownloadCloud2Line}
               aria-busy={running || undefined}
-              disabled={running || operationBusy}
+              disabled={isBusy(cli.id)}
               onClick={() => { if (cli.kind === 'managed') void startOperation(cli.id, 'upgrade'); }}
             >
               {running ? t('cli.upgradingNow') : target ? t('cli.upgradeTo', { version: target }) : t('cli.upgradeToLatest')}
@@ -237,11 +299,14 @@ export function CliManagerPanel({ session, page = null, onPageChange = () => {} 
         </div>
         <div className="min-w-0 flex-1">
           <h2 className="truncate text-headline-semibold text-text-primary">{activeBackend?.name || t('cli.currentBackend')}</h2>
-          <p className="truncate text-caption-1-regular text-text-secondary" title={settings.serverUrl}>{settings.serverUrl}</p>
+          <p className="truncate text-caption-1-regular text-text-secondary" title={settings.serverUrl}>
+            {settings.serverUrl}
+            {checkedTime ? ` · ${t('cli.checkedAt', { time: checkedTime })}` : null}
+          </p>
         </div>
         <BackendSelect profiles={session.backendConnections} linkStates={session.backendLinkStatus} selectedId={backend.backendId} onChange={backend.setBackendId} />
         <Button size="small" variant="secondary" leadingIcon={RiFileList3Line} onClick={() => setPresetsOpen(true)}>{t('instructionPresets.open')}</Button>
-        <IconAction icon={RiRefreshLine} size="md" aria-label={t('cli.refreshAria')} disabled={loading} onClick={() => void refresh()} />
+        <IconAction icon={RiRefreshLine} size="md" aria-label={t('cli.refreshAria')} disabled={loading} onClick={() => void refresh({ force: true })} />
       </div>
 
       {sharedAvailable ? (
@@ -254,6 +319,13 @@ export function CliManagerPanel({ session, page = null, onPageChange = () => {} 
         <div className="flex min-h-48 items-center justify-center"><Spinner size="md" aria-label={t('cli.reading')} /></div>
       ) : (
         <>
+          {updatable.length > 1 ? (
+            <div className="flex justify-end">
+              <Button size="small" variant="secondary" leadingIcon={RiDownloadCloud2Line} onClick={updateAll}>
+                {t('cli.upgradeAll', { count: updatable.length })}
+              </Button>
+            </div>
+          ) : null}
           {installed.length ? (
             <Card variant="secondary" className="gap-0 py-1">{installed.map(renderInstalled)}</Card>
           ) : clis.length ? (
@@ -279,7 +351,7 @@ export function CliManagerPanel({ session, page = null, onPageChange = () => {} 
               {showAvailable ? (
                 <Card id="cli-install-more" variant="secondary" className="gap-0 py-1">
                   {available.map((cli, index) => {
-                    const running = operation?.provider === cli.id && operation.status === 'running';
+                    const running = isRunning(cli.id);
                     return (
                       <div key={cli.id} className="flex flex-col">
                         {index ? <Divider /> : null}
@@ -299,7 +371,7 @@ export function CliManagerPanel({ session, page = null, onPageChange = () => {} 
                               variant="secondary"
                               leadingIcon={running ? SpinnerIcon : RiDownload2Line}
                               aria-busy={running || undefined}
-                              disabled={!cli.installSupported || operationBusy}
+                              disabled={!cli.installSupported || isBusy(cli.id)}
                               onClick={() => void startOperation(cli.id, 'install')}
                             >
                               {running ? t('cli.installingNow') : t('cli.install')}
