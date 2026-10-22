@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { Radio, RadioGroup } from 'react-aria-components';
+import { RiArrowLeftRightLine } from '@remixicon/react';
 import { normalizeServerUrl } from '@todex/protocol/todex';
 import { Chip } from '@/components/base/badges/chip';
 import { Button } from '@/components/base/buttons/button';
@@ -13,7 +14,11 @@ import { useT } from '../../i18n';
 import { DevicePairingPanel } from '../DevicePairingPanel';
 import { HistoryEncryptionPanel } from '../HistoryEncryptionPanel';
 import { ConfirmDialog } from '../ui/modal';
+import { ConfigSyncSettings } from './ConfigSyncSettings';
 import { SettingsCard, SettingsEntry, SettingsGroup, SettingsRow, SettingsSubpage } from './SettingsRows';
+
+/** `page` value of the config sync page (backend ids never take this form). */
+export const CONFIG_SYNC_PAGE = '__config-sync__';
 
 /** Compact select trigger for the right side of a settings row. */
 const ROW_SELECT_TRIGGER = 'h-8 w-auto gap-1 rounded-lg px-2 py-1.5';
@@ -36,7 +41,7 @@ function linkOf(session: TodeXSession, backendId: string): BackendLinkStatus | u
  */
 export function BackendConnectionSettings({ session, page, onPageChange, deviceName, pairingAutoStart, historyRecoverySetup, footer, managed = false }: {
   session: TodeXSession;
-  /** The backend whose page is open; null shows the overview. */
+  /** The backend whose page is open (or `CONFIG_SYNC_PAGE`); null shows the overview. */
   page: string | null;
   onPageChange: (backendId: string | null) => void;
   /** Name this device pairs under. */
@@ -50,6 +55,9 @@ export function BackendConnectionSettings({ session, page, onPageChange, deviceN
   managed?: boolean;
 }) {
   const t = useT();
+  if (page === CONFIG_SYNC_PAGE) {
+    return <ConfigSyncSettings session={session} onBack={() => onPageChange(null)} />;
+  }
   const profile = page ? session.backendConnections.find((item) => item.id === page) : undefined;
   if (profile) {
     return (
@@ -116,6 +124,15 @@ export function BackendConnectionSettings({ session, page, onPageChange, deviceN
             ))}
           </Select>
         </SettingsRow>
+      </SettingsCard>
+      <SettingsCard>
+        <SettingsEntry
+          icon={RiArrowLeftRightLine}
+          title={t('configSync.title')}
+          description={session.backendConnections.length < 2 ? t('configSync.needTwoBackends') : t('configSync.entryHint')}
+          isDisabled={session.backendConnections.length < 2}
+          onPress={() => onPageChange(CONFIG_SYNC_PAGE)}
+        />
       </SettingsCard>
       {footer}
     </>
