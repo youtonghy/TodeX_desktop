@@ -22,7 +22,7 @@ import { cx } from '@/utils/cx';
 import { WorkspaceFilePreview, type PreviewFile, type ReferenceSelection, type WorkspaceFileSaveOutcome } from '../components/WorkspaceFilePreview';
 import { useNoticeToast } from '../components/NoticeToast';
 import { GitDiffText } from '../components/GitDiffText';
-import { XtermTerminal } from '../components/XtermTerminal';
+import { XtermTerminal, type XtermTerminalHandlers } from '../components/XtermTerminal';
 import { SshExecPane } from '../components/ssh/SshExecPane';
 import { AgentBrowserLiveView } from '../components/AgentBrowserLiveView';
 import { useNativeViewHost } from '../components/nativeViewHost';
@@ -48,6 +48,9 @@ import { SubagentsPanel } from './SubagentsPanel';
 import { AgentCallsPanel } from './AgentCallsPanel';
 import { isActiveAgentCallStatus, type AgentCallSession } from '@todex/protocol/agentCalling';
 import { isLoopbackUrl } from '@todex/protocol/mobileParity';
+import { resolveTerminalPath } from '@todex/protocol/terminalText';
+import { patchTerminalActivity, forgetTerminalActivity, terminalActivity, useTerminalActivity } from '../session/terminalActivity';
+import { postCompletionNotification } from '../session/completionNotifications';
 import { t, useT, type MessageKey } from '../i18n';
 
 type Props = {
@@ -326,9 +329,16 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
   // Closing a terminal tab that holds a live PTY stops the backend PTY
   // instead of leaving it running in the background; closing a remote files
   // tab closes its backend connection. Agent SSH, Subagents and Agent calls tabs stay.
-  const closeTab = useCallback((id: string) => {
+  const [confirmCloseId, setConfirmCloseId] = useState('');
+  const closeTab = useCallback((id: string, confirmed = false) => {
     const item = items.find((entry) => entry.id === id);
     if (item && isSystemWorkbenchTab(item.type)) return;
+    // Shell integration knows when a command is still running: ask first.
+    if (!confirmed && item?.type === 'terminal' && terminalActivity(terminalIdForConversation(scopeKey, id)).commandRunning) {
+      setConfirmCloseId(id);
+      return;
+    }
+    if (item?.type === 'terminal') forgetTerminalActivity(terminalIdForConversation(scopeKey, id));
     const terminal = item?.type === 'terminal' ? session.terminalById[terminalIdForConversation(scopeKey, id)] : undefined;
     if (item && terminal && (terminal.status === 'running' || terminal.status === 'starting' || terminal.status === 'stopping')) {
       session.stopTerminalSession(terminalIdForConversation(scopeKey, id), item.ssh ? sshSettings.tenantId : session.activeWorkspace?.tenantId || session.settings.tenantId);
@@ -494,11 +504,13 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
                 <SubagentsTabIcon runs={session.subagentsByConversation[item.subagents.conversationId]} className={tabIconClass} />
               ) : item.agentCalls ? (
                 <AgentCallsTabIcon calls={session.agentCallsByConversation[item.agentCalls.conversationId]} className={tabIconClass} />
+              ) : item.type === 'terminal' ? (
+                <TerminalTabIcon terminalId={terminalIdForConversation(scopeKey, item.id)} icon={Icon} className={tabIconClass} />
               ) : <Icon aria-hidden="true" className={tabIconClass} />}
             </button>
           </Focusable>
           <Tooltip placement={vertical ? 'right' : 'bottom'} className="max-w-sm break-all">
-            {title}
+            {item.type === 'terminal' ? <TerminalTabTitle terminalId={terminalIdForConversation(scopeKey, item.id)} fallback={title} /> : title}
           </Tooltip>
         </TooltipTrigger>
         {closable ? (
@@ -580,6 +592,7 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
             {item.type === 'terminal' ? (
               <TerminalPane
                 isActive={item.id === active?.id}
+                shown={shown}
                 session={session}
                 terminalId={terminalIdForConversation(scopeKey, item.id)}
                 workspaceTarget={workspaceTerminalTarget}
@@ -598,6 +611,20 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
           </div>
         ))}
       </div>
+      <ConfirmDialog
+        isOpen={Boolean(confirmCloseId)}
+        onOpenChange={(open) => { if (!open) setConfirmCloseId(''); }}
+        title={t('xterm.closeRunningTitle')}
+        description={t('xterm.closeRunningDescription')}
+        confirmLabel={t('xterm.closeRunningConfirm')}
+        cancelLabel={t('xterm.cancel')}
+        tone="danger"
+        onConfirm={() => {
+          const id = confirmCloseId;
+          setConfirmCloseId('');
+          if (id) closeTab(id, true);
+        }}
+      />
     </div>
   );
 }
@@ -654,10 +681,38 @@ function SubagentsTabIcon({ runs = NO_SUBAGENTS, className }: { runs?: SubagentR
   );
 }
 
-function TerminalPane({ session, terminalId, isActive, workspaceTarget, sshHost, sshBackendId = '', autoConnect = true }: {
+/** A terminal tab's icon, with a dot while output arrives or when a command
+ * finished out of sight. */
+function TerminalTabIcon({ terminalId, icon: Icon, className }: { terminalId: string; icon: ComponentType<{ className?: string; 'aria-hidden'?: boolean | 'true' | 'false' }>; className: string }) {
+  const activity = useTerminalActivity(terminalId);
+  const dot = activity.attention ? 'bg-accent-500' : activity.printing ? 'bg-state-success-base' : '';
+  return (
+    <span className={cx('relative inline-flex', className)}>
+      <Icon aria-hidden="true" className="size-4" />
+      {dot ? <span aria-hidden className={cx('absolute -end-1 -top-1 size-2 rounded-full ring-2 ring-background-primary-default', dot)} /> : null}
+    </span>
+  );
+}
+
+/** A terminal tab's tooltip: the title the shell or program set, else `fallback`. */
+function TerminalTabTitle({ terminalId, fallback }: { terminalId: string; fallback: string }) {
+  const activity = useTerminalActivity(terminalId);
+  return <>{activity.title ? `${activity.title} — ${fallback}` : fallback}</>;
+}
+
+/** Commands this long that finish out of sight post a notification. */
+const COMMAND_NOTIFY_MS = 10_000;
+/** A terminal shows its "printing" dot this long after output. */
+const PRINTING_MS = 1500;
+/** At most one program notification per terminal in this window. */
+const PROGRAM_NOTIFY_INTERVAL_MS = 5000;
+
+function TerminalPane({ session, terminalId, isActive, shown, workspaceTarget, sshHost, sshBackendId = '', autoConnect = true }: {
   session: TodeXSession;
   terminalId: string;
   isActive: boolean;
+  /** The Workbench is on screen. */
+  shown: boolean;
   workspaceTarget: TerminalTarget | null;
   /** Set for SSH tabs: the terminal runs `ssh -tt <host>` on the backend. */
   sshHost?: string;
@@ -682,11 +737,13 @@ function TerminalPane({ session, terminalId, isActive, workspaceTarget, sshHost,
   const autoStartAttempts = useRef(new Set<string>());
   const manualStopRef = useRef(false);
   const reconnectTimerRef = useRef<number | null>(null);
-  const statusCheckTimerRef = useRef<number | null>(null);
   const reconnectAttemptRef = useRef(0);
   const terminalByIdRef = useRef(session.terminalById);
   const terminalSizeRef = useRef({ rows: DEFAULT_TERMINAL_ROWS, cols: DEFAULT_TERMINAL_COLS });
   const terminal = terminalId ? session.terminalById[terminalId] : undefined;
+  const stream = session.terminalStreams.get(terminalId);
+  /** The shell's directory as it reports it (OSC 7). */
+  const liveCwdRef = useRef('');
 
   terminalByIdRef.current = session.terminalById;
 
@@ -694,13 +751,10 @@ function TerminalPane({ session, terminalId, isActive, workspaceTarget, sshHost,
     autoStartAttempts.current.clear();
     manualStopRef.current = false;
     reconnectAttemptRef.current = 0;
+    liveCwdRef.current = '';
     if (reconnectTimerRef.current !== null) {
       window.clearTimeout(reconnectTimerRef.current);
       reconnectTimerRef.current = null;
-    }
-    if (statusCheckTimerRef.current !== null) {
-      window.clearTimeout(statusCheckTimerRef.current);
-      statusCheckTimerRef.current = null;
     }
   }, [terminalId, backendIdentity]);
 
@@ -709,6 +763,8 @@ function TerminalPane({ session, terminalId, isActive, workspaceTarget, sshHost,
     terminalSizeRef.current = { rows: terminal.rows, cols: terminal.cols };
   }, [terminal?.cols, terminal?.rows]);
 
+  // Joins the terminal when the backend still runs it (after a reload, or
+  // from another window), otherwise starts it.
   useEffect(() => {
     if (!target || !terminalId || connectionState !== 'open') {
       return;
@@ -722,28 +778,21 @@ function TerminalPane({ session, terminalId, isActive, workspaceTarget, sshHost,
       return;
     }
     autoStartAttempts.current.add(attemptKey);
-    session.requestTerminalStatus(target, terminalId);
-    const timeoutId = window.setTimeout(() => {
-      const latest = terminalByIdRef.current[terminalId];
-      if ((!latest || latest.status === 'idle') && (!isSsh || autoConnect)) {
-        const size = terminalSizeRef.current;
-        session.startTerminalSession(target, {
-          terminalId,
-          cwd: workspace?.path ?? '',
-          shell: '',
-          rows: size.rows,
-          cols: size.cols,
-        });
-      }
-    }, 300);
-    return () => window.clearTimeout(timeoutId);
+    const size = terminalSizeRef.current;
+    session.openTerminalSession(target, {
+      terminalId,
+      cwd: workspace?.path ?? '',
+      shell: '',
+      rows: size.rows,
+      cols: size.cols,
+      autoStart: !isSsh || autoConnect,
+    });
   }, [
     autoConnect,
     isSsh,
     targetKey,
     connectionState,
-    session.requestTerminalStatus,
-    session.startTerminalSession,
+    session.openTerminalSession,
     terminalId,
     workspace?.id,
     workspace?.path,
@@ -782,44 +831,35 @@ function TerminalPane({ session, terminalId, isActive, workspaceTarget, sshHost,
     reconnectAttemptRef.current += 1;
     reconnectTimerRef.current = window.setTimeout(() => {
       reconnectTimerRef.current = null;
-      // Ask the backend first — another client may already hold a live PTY
-      // under this id, in which case terminal.status flips us back to running
-      // and restarting would spawn a duplicate shell.
-      session.requestTerminalStatus(target, terminalId);
-      statusCheckTimerRef.current = window.setTimeout(() => {
-        statusCheckTimerRef.current = null;
-        if (manualStopRef.current) {
-          return;
-        }
-        const latest = terminalByIdRef.current[terminalId];
-        if (latest?.status !== 'error' && latest?.status !== 'exited' && latest?.status !== 'idle') {
-          return;
-        }
-        if (latest?.stopRequested) {
-          return;
-        }
-        const size = terminalSizeRef.current;
-        session.startTerminalSession(target, {
-          terminalId,
-          cwd: latest?.cwd || workspace?.path || '',
-          shell: latest?.shell || '',
-          rows: size.rows,
-          cols: size.cols,
-          preserveOutput: true,
-        });
-      }, 300);
+      if (manualStopRef.current) {
+        return;
+      }
+      const latest = terminalByIdRef.current[terminalId];
+      if (latest?.stopRequested) {
+        return;
+      }
+      // Joins rather than restarts when another client already brought a
+      // shell back under this id; restarting would spawn a duplicate.
+      const size = terminalSizeRef.current;
+      session.openTerminalSession(target, {
+        terminalId,
+        // The shell's own start directory: one it cd'ed to may lie outside
+        // the backend's workspace roots.
+        cwd: latest?.cwd || workspace?.path || '',
+        shell: latest?.shell || '',
+        rows: size.rows,
+        cols: size.cols,
+        preserveOutput: true,
+        autoStart: true,
+      });
     }, delay);
     return () => {
       if (reconnectTimerRef.current !== null) {
         window.clearTimeout(reconnectTimerRef.current);
         reconnectTimerRef.current = null;
       }
-      if (statusCheckTimerRef.current !== null) {
-        window.clearTimeout(statusCheckTimerRef.current);
-        statusCheckTimerRef.current = null;
-      }
     };
-  }, [target, isSsh, connectionState, session.requestTerminalStatus, session.startTerminalSession, terminal?.status, terminal?.stopRequested, terminalId, workspace]);
+  }, [target, isSsh, connectionState, session.openTerminalSession, terminal?.status, terminal?.stopRequested, terminalId, workspace]);
 
   const handleTerminalData = useCallback((data: string) => {
     const current = terminalByIdRef.current[terminalId];
@@ -837,6 +877,7 @@ function TerminalPane({ session, terminalId, isActive, workspaceTarget, sshHost,
 
   const defaultPath = workspace?.path || '';
   const [cwdDraft, setCwdDraft] = useState(defaultPath);
+  const editingCwdRef = useRef(false);
 
   useEffect(() => {
     setCwdDraft(workspace?.path || '');
@@ -846,6 +887,67 @@ function TerminalPane({ session, terminalId, isActive, workspaceTarget, sshHost,
     const trimmed = targetPath.trim();
     if (!trimmed || !terminalId || !workspace) return;
     session.sendTerminalInput(terminalId, tenantId, `cd "${trimmed.replace(/"/g, '\\"')}"\r`);
+  };
+
+  // Activity, attention and notifications for the tab strip.
+  const visibleRef = useRef(false);
+  visibleRef.current = isActive && shown;
+  useEffect(() => {
+    if (isActive && shown) patchTerminalActivity(terminalId, { attention: false });
+  }, [isActive, shown, terminalId]);
+  const printingTimerRef = useRef(0);
+  useEffect(() => () => window.clearTimeout(printingTimerRef.current), []);
+  const lastProgramNoticeRef = useRef(0);
+  const notify = useCallback((title: string, body: string) => {
+    if (document.hasFocus()) {
+      toast.info(title, { description: body });
+      return;
+    }
+    postCompletionNotification({ title, body, tag: `terminal-${terminalId}`, onActivate: () => session.openPanel('Terminal') });
+  }, [session.openPanel, terminalId]);
+  const label = isSsh ? `ssh ${sshHost}` : t('workbench.tabTerminal');
+  const terminalHandlers: XtermTerminalHandlers = {
+    onData: handleTerminalData,
+    onResize: handleTerminalResize,
+    onClear: () => session.clearTerminalOutput(terminalId),
+    onCwd: (path) => {
+      liveCwdRef.current = path;
+      patchTerminalActivity(terminalId, { cwd: path });
+      if (!editingCwdRef.current) setCwdDraft(path);
+    },
+    onTitle: (title) => patchTerminalActivity(terminalId, { title: title.trim().slice(0, 40) }),
+    onActivity: () => {
+      patchTerminalActivity(terminalId, { printing: true });
+      window.clearTimeout(printingTimerRef.current);
+      printingTimerRef.current = window.setTimeout(() => patchTerminalActivity(terminalId, { printing: false }), PRINTING_MS);
+    },
+    onBell: () => {
+      if (!visibleRef.current || !document.hasFocus()) patchTerminalActivity(terminalId, { attention: true });
+    },
+    onCommandRunning: (commandRunning) => patchTerminalActivity(terminalId, { commandRunning }),
+    onCommandFinished: ({ exitCode, durationMs }) => {
+      const seen = visibleRef.current && document.hasFocus();
+      if (seen) return;
+      patchTerminalActivity(terminalId, { attention: true });
+      if (durationMs >= COMMAND_NOTIFY_MS) {
+        notify(t('xterm.commandFinished', { terminal: label }), exitCode === null || exitCode === 0
+          ? t('xterm.commandSucceeded', { seconds: String(Math.round(durationMs / 1000)) })
+          : t('xterm.commandFailed', { code: String(exitCode), seconds: String(Math.round(durationMs / 1000)) }));
+      }
+    },
+    onNotification: ({ title, body }) => {
+      const now = Date.now();
+      if (now - lastProgramNoticeRef.current < PROGRAM_NOTIFY_INTERVAL_MS) return;
+      lastProgramNoticeRef.current = now;
+      if (!visibleRef.current) patchTerminalActivity(terminalId, { attention: true });
+      notify(title || label, body);
+    },
+    onProgress: ({ state, value }) => patchTerminalActivity(terminalId, { progress: state === 0 ? null : { state, value } }),
+    onOpenFile: workspace ? (path) => {
+      const resolved = resolveTerminalPath(path, liveCwdRef.current || terminal?.cwd || workspace.path, workspace.path);
+      if (resolved) session.openPanel('Files', { filePath: resolved });
+      else toast.info(t('xterm.fileOutsideWorkspace'));
+    } : undefined,
   };
 
   const sshEnded = isSsh && (
@@ -882,6 +984,11 @@ function TerminalPane({ session, terminalId, isActive, workspaceTarget, sshHost,
               size="small"
               value={cwdDraft}
               onChange={setCwdDraft}
+              onFocus={() => { editingCwdRef.current = true; }}
+              onBlur={() => {
+                editingCwdRef.current = false;
+                if (liveCwdRef.current) setCwdDraft(liveCwdRef.current);
+              }}
               placeholder="/path/to/directory..."
               inputClassName="text-caption-1-regular"
             />
@@ -913,10 +1020,6 @@ function TerminalPane({ session, terminalId, isActive, workspaceTarget, sshHost,
                   window.clearTimeout(reconnectTimerRef.current);
                   reconnectTimerRef.current = null;
                 }
-                if (statusCheckTimerRef.current !== null) {
-                  window.clearTimeout(statusCheckTimerRef.current);
-                  statusCheckTimerRef.current = null;
-                }
                 if (terminalId) {
                   session.stopTerminalSession(terminalId, tenantId);
                 }
@@ -928,11 +1031,10 @@ function TerminalPane({ session, terminalId, isActive, workspaceTarget, sshHost,
       </div>
       <div className="min-h-0 flex-1 overflow-hidden rounded-2xl bg-background-secondary-default">
         <XtermTerminal
-          entries={terminal?.output ?? []}
+          stream={stream}
           isActive={isActive}
           isDisabled={!target || terminal?.status !== 'running'}
-          onData={handleTerminalData}
-          onResize={handleTerminalResize}
+          {...terminalHandlers}
         />
       </div>
     </div>

@@ -59,6 +59,15 @@ export function installBrowserDesktopBridge(): void {
     },
     app: {
       focus: () => window.focus(),
+      // No native paste here: read the clipboard and replay it as a paste
+      // event on the focused element.
+      paste: () => {
+        void navigator.clipboard?.readText().then((text) => {
+          const data = new DataTransfer();
+          data.setData('text/plain', text);
+          document.activeElement?.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+        }).catch(() => undefined);
+      },
       closeWindow: () => window.close(),
       // Browsers reserve Cmd+W, so the DOM fallback only fires where the host
       // delivers the key (e.g. embedded webviews).

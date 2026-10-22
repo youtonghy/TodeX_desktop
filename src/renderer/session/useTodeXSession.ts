@@ -34,6 +34,8 @@ import { conversationScheduleFrame, followUpQueueFrame } from '@todex/protocol/c
 import { conversationTranscriptMarkdown, fetchConversationTranscriptTail, transcriptEntries } from '@todex/protocol/conversationExport';
 import { canonicalConversationEventType, type ConversationEvent } from '@todex/protocol/v2';
 import { ConversationEventBatcher } from '@todex/protocol/frameBatch';
+import { TerminalStreamStore } from '@todex/protocol/terminalStream';
+import { getTerminalPreferences } from './terminalPreferences';
 import { ProtocolCommands, ProtocolCommandError, type ProtocolCommand } from './protocolCommands';
 import {
   useCallback,
@@ -147,8 +149,9 @@ import {
   MAX_USAGE_RECORDS,
   MAX_WORKSPACE_TOMBSTONES,
   MAX_EVENTS,
+  TERMINAL_STREAM_EVENT_TYPES,
+  TERMINAL_ATTACH_TIMEOUT_MS,
   CHAT_ATTACH_REPLAY_LIMIT,
-  capTerminalOutput,
   evictIdleTerminalStates,
   DEFAULT_TERMINAL_ROWS,
   DEFAULT_TERMINAL_COLS,
@@ -201,7 +204,6 @@ import {
   type ConnectionState,
   type ConnectionHealth,
   type RuntimeStatusState,
-  type TerminalOutputEntry,
   type TerminalLifecycleState,
   type PermissionPreset,
   type TimelineEntry,
@@ -229,7 +231,6 @@ import {
   createSessionId,
   terminalIdForConversation,
   terminalStatusLabel,
-  terminalOutputLine,
   connectionStateLabel,
   healthLabelOf,
   modeLabelOf,
@@ -540,6 +541,22 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const turnIdsRef = useRef<Record<string, string>>({});
   const thinkingConversationsRef = useRef<Record<string, boolean>>({});
   const terminalByIdRef = useRef<Record<string, TerminalClientState>>({});
+  /** Terminal output, kept out of React state: views subscribe to it. */
+  const terminalStreamsRef = useRef(new TerminalStreamStore());
+  /** Whether each backend replays terminal output (`terminalReplay` in
+   * /v2/version); absent until its version is known. */
+  const terminalReplayRef = useRef(new Map<string, boolean>());
+  /** Terminal opens waiting for their backend's version. */
+  const pendingTerminalOpensRef = useRef(new Map<string, () => void>());
+  /** Starts to send when `terminal.attached` reports no running terminal. */
+  const startOnMissingRef = useRef(new Map<string, () => void>());
+  /** When each terminal's attach went out; one at a time per terminal. */
+  const attachSentAtRef = useRef(new Map<string, number>());
+  // Terminal commands defined further down, used by earlier event handlers.
+  const attachTerminalRef = useRef<(terminalId: string) => boolean>(() => false);
+  const reattachTerminalsRef = useRef<(backendId?: string) => void>(() => {});
+  const noteTerminalReplayRef = useRef<(backendId: string, replay: boolean) => void>(() => {});
+  const requestTerminalStatusRef = useRef<(target: TerminalTarget, terminalId?: string) => boolean>(() => false);
   const providerModelPreferencesRef = useRef<ProviderModelPreferences>({});
   const providerModelsByBackendRef = useRef<Record<string, ProviderModelCatalog>>({});
   const pendingLocalStartsRef = useRef(new Map<string, PendingLocalStart>());
@@ -772,6 +789,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const [pluginsCatalogByConversation, setPluginsCatalogByConversation] = useState<Record<string, PluginsCatalogState>>({});
   const [memorySettingsByConversation, setMemorySettingsByConversation] = useState<Record<string, MemorySettingsState>>({});
   const [terminalById, setTerminalById] = useState<Record<string, TerminalClientState>>({});
+  // Output goes with the terminal records evicted or removed.
+  useEffect(() => {
+    terminalStreamsRef.current.retain(Object.keys(terminalById));
+  }, [terminalById]);
   // Agent, model and command catalogs are per backend: every workspace reads
   // the catalog of its own backend, and switching back does not refetch blind.
   const [v2ProvidersByBackend, setV2ProvidersByBackend] = useState<Record<string, ProviderDescriptor[]>>({});
@@ -2983,26 +3004,45 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     [appendTimeline, updateConversation],
   );
 
-  const appendTerminalOutput = useCallback((terminalId: string, entry: TerminalOutputEntry) => {
-    setTerminalById((current) => {
-      const existing = current[terminalId];
-      if (!existing) {
-        return current;
-      }
-      return evictIdleTerminalStates({
-        ...current,
-        [terminalId]: {
-          ...existing,
-          output: capTerminalOutput([...existing.output, entry]),
-          updatedAt: Date.now(),
-        },
-      });
-    });
+  /** Shows an error inside the terminal, in red, like the backend's own errors. */
+  const appendTerminalError = useCallback((terminalId: string, text: string) => {
+    terminalStreamsRef.current.get(terminalId).append(`\r\n\x1b[31m${text.replace(/\r?\n/g, '\r\n')}\x1b[0m\r\n`);
   }, []);
 
   const startTerminalSessionRef = useRef<((target: TerminalTarget, options: TerminalStartOptions) => boolean) | null>(null);
 
   const handleTerminalEvent = useCallback((event: ServerEvent, data: Record<string, unknown>) => {
+    if (event.type === 'error') {
+      if (data.code === 'EVENT_STREAM_LAGGED') {
+        // Terminal output the socket fell behind on is not replayed by the
+        // event stream: fetch it from each terminal's retained output.
+        reattachTerminalsRef.current();
+        return false;
+      }
+      const failedTerminalId = typeof data.terminalId === 'string' ? data.terminalId : '';
+      if (!failedTerminalId || !terminalByIdRef.current[failedTerminalId]) {
+        return false;
+      }
+      const message = typeof data.message === 'string' ? data.message : 'terminal error';
+      if (/is not running/.test(message)) {
+        // The backend lost this terminal (e.g. it restarted): end it here too,
+        // so local shells restart and SSH tabs offer Reconnect.
+        setTerminalById((current) => {
+          const existing = current[failedTerminalId];
+          if (!existing || (existing.status !== 'running' && existing.status !== 'stopping')) return current;
+          return { ...current, [failedTerminalId]: { ...existing, status: 'exited', exitCode: null, updatedAt: Date.now() } };
+        });
+      } else {
+        appendTerminalError(failedTerminalId, message);
+        // A start the backend refused: leave "starting" for the error state.
+        setTerminalById((current) => {
+          const existing = current[failedTerminalId];
+          if (!existing || existing.status !== 'starting') return current;
+          return { ...current, [failedTerminalId]: { ...existing, status: 'error', error: message, updatedAt: Date.now() } };
+        });
+      }
+      return true;
+    }
     if (!event.type.startsWith('terminal.')) {
       return false;
     }
@@ -3016,10 +3056,62 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       return true;
     }
 
+    // Output and keystroke acknowledgements never touch React state.
+    if (event.type === 'terminal.output') {
+      const text = typeof data.data === 'string' ? data.data : '';
+      const seq = typeof data.seq === 'number' ? data.seq : undefined;
+      if (text && terminalStreamsRef.current.get(terminalId).applyOutput(text, seq) === 'gap') {
+        attachTerminalRef.current(terminalId);
+      }
+      return true;
+    }
+    if (event.type === 'terminal.input.accepted') {
+      return true;
+    }
+    if (event.type === 'terminal.cleared') {
+      terminalStreamsRef.current.get(terminalId).clear();
+      return true;
+    }
+    if (event.type === 'terminal.attached') {
+      attachSentAtRef.current.delete(terminalId);
+    }
+    if (event.type === 'terminal.attached' && data.running !== true) {
+      const start = startOnMissingRef.current.get(terminalId);
+      startOnMissingRef.current.delete(terminalId);
+      if (start) {
+        start();
+        return true;
+      }
+      setTerminalById((current) => {
+        const existing = current[terminalId];
+        if (!existing || (existing.status !== 'running' && existing.status !== 'stopping')) return current;
+        return { ...current, [terminalId]: { ...existing, status: 'exited', exitCode: null, updatedAt: Date.now() } };
+      });
+      return true;
+    }
+    if (event.type === 'terminal.attached') {
+      startOnMissingRef.current.delete(terminalId);
+      terminalStreamsRef.current.get(terminalId).applyAttached({
+        reset: data.reset === true,
+        data: typeof data.data === 'string' ? data.data : '',
+        seq: typeof data.seq === 'number' ? data.seq : 0,
+      });
+    }
+
     if (event.type === 'terminal.status') {
       const terminals = Array.isArray(data.terminals) ? data.terminals : [];
+      const requestedId = typeof data.terminalId === 'string' ? data.terminalId : '';
       setTerminalById((current) => {
         let next = current;
+        // A terminal asked about by id but not listed is no longer running.
+        const requested = requestedId ? current[requestedId] : undefined;
+        if (
+          requested
+          && (requested.status === 'running' || requested.status === 'stopping')
+          && !terminals.some((item) => item && typeof item === 'object' && (item as Record<string, unknown>).terminalId === requestedId)
+        ) {
+          next = { ...current, [requestedId]: { ...requested, status: 'exited', exitCode: null, updatedAt: Date.now() } };
+        }
         terminals.forEach((item) => {
           if (!item || typeof item !== 'object') {
             return;
@@ -3076,7 +3168,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     ) {
       const host = known.ssh.host;
       window.setTimeout(() => {
-        appendTerminalOutput(terminalId, terminalOutputLine('system', t('sess.sshPasswordFallback')));
         startTerminalSessionRef.current?.({ kind: 'ssh', host, backendConnectionId: known.backendConnectionId ?? '' }, {
           terminalId, cwd: '', shell: '', rows: known.rows, cols: known.cols, preserveOutput: true, interactive: true,
         });
@@ -3097,7 +3188,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         rows: DEFAULT_TERMINAL_ROWS,
         cols: DEFAULT_TERMINAL_COLS,
         status: 'idle',
-        output: [],
         error: '',
         pid: null,
         exitCode: null,
@@ -3105,7 +3195,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       };
       let status: TerminalLifecycleState = base.status;
       let error = base.error;
-      let output = base.output;
       let exitCode = base.exitCode;
       let stopRequested = base.stopRequested ?? false;
       let sshHost = base.ssh?.host;
@@ -3116,17 +3205,15 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         if (typeof startedSsh === 'string' && startedSsh) sshHost = startedSsh;
         error = '';
         stopRequested = false;
-        output = capTerminalOutput([
-          ...output,
-          terminalOutputLine('system', sshHost ? `ssh connected: ${sshHost}` : `terminal started: ${cwd || base.cwd}`),
-        ]);
+      } else if (event.type === 'terminal.attached') {
+        status = 'running';
+        const attachedSsh = data.ssh && typeof data.ssh === 'object' ? (data.ssh as Record<string, unknown>).host : undefined;
+        if (typeof attachedSsh === 'string' && attachedSsh) sshHost = attachedSsh;
+        error = '';
+        stopRequested = false;
       } else if (event.type === 'terminal.stopping') {
         status = 'stopping';
         stopRequested = true;
-        output = capTerminalOutput([
-          ...output,
-          terminalOutputLine('system', 'terminal stopping'),
-        ]);
       } else if (event.type === 'terminal.exited') {
         status = 'exited';
         exitCode = typeof data.exitCode === 'number' ? data.exitCode : null;
@@ -3134,22 +3221,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         // when it was requested — either the backend flagged the payload or we
         // had already observed the terminal.stopping lifecycle state.
         stopRequested = stopRequested || base.status === 'stopping' || data.stoppedByRequest === true;
-        output = capTerminalOutput([
-          ...output,
-          terminalOutputLine('system', `terminal exited${exitCode === null ? '' : ` with code ${exitCode}`}`),
-        ]);
       } else if (event.type === 'terminal.error') {
         status = 'error';
         error = typeof data.error === 'string' ? data.error : 'terminal error';
-        output = capTerminalOutput([
-          ...output,
-          terminalOutputLine('error', error),
-        ]);
-      } else if (event.type === 'terminal.resized') {
-        output = capTerminalOutput([
-          ...output,
-          terminalOutputLine('system', `size ${typeof data.cols === 'number' ? data.cols : base.cols}x${typeof data.rows === 'number' ? data.rows : base.rows}`),
-        ]);
       }
 
       return evictIdleTerminalStates({
@@ -3167,7 +3241,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           pid: typeof data.pid === 'number' ? data.pid : base.pid,
           exitCode,
           status,
-          output,
           error,
           stopRequested,
           updatedAt: Date.now(),
@@ -3175,21 +3248,20 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       });
     });
 
-    if (event.type === 'terminal.output') {
-      const stream = data.stream === 'stderr' ? 'stderr' : 'stdout';
-      const text = typeof data.data === 'string' ? data.data : '';
-      if (text) {
-        appendTerminalOutput(terminalId, terminalOutputLine(stream, text));
-      }
+    if (event.type === 'terminal.error') {
+      appendTerminalError(terminalId, typeof data.error === 'string' ? data.error : 'terminal error');
     }
     return true;
-  }, [appendTerminalOutput, settings.tenantId]);
+  }, [appendTerminalError, settings.tenantId]);
 
   const projectLegacyEvent = useCallback(
     (event: ServerEvent) => {
       const data = eventPayloadData(event);
       const sessionId = sessionIdFromEvent(event, data);
-      setEvents((current) => [event, ...current].slice(0, MAX_EVENTS));
+      // Terminal streams are not kept: they would push everything else out.
+      if (!TERMINAL_STREAM_EVENT_TYPES.has(event.type)) {
+        setEvents((current) => [event, ...current].slice(0, MAX_EVENTS));
+      }
       if (handleTerminalEvent(event, data)) {
         return;
       }
@@ -4048,8 +4120,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       }
       const json = (await response.json()) as ServerVersion;
       patchLinkStatus(backendId, { serverVersion: json });
+      noteTerminalReplayRef.current(backendId, (json.terminalReplay ?? 0) >= 1);
     } catch (error) {
       patchLinkStatus(backendId, { serverVersion: null });
+      noteTerminalReplayRef.current(backendId, false);
       reportLinkError(backendId, error instanceof Error ? error.message : 'failed to fetch /v2/version');
     }
   }, [patchLinkStatus, reportLinkError]);
@@ -4575,7 +4649,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const terminalTenantId = (target: TerminalTarget) => (target.kind === 'workspace' && target.workspace.tenantId)
     || settingsForBackend(terminalBackendId(target)).tenantId;
 
-  const seedTerminalState = useCallback((target: TerminalTarget, patch: Partial<TerminalClientState> = {}, notice?: TerminalOutputEntry) => {
+  const seedTerminalState = useCallback((target: TerminalTarget, patch: Partial<TerminalClientState> = {}) => {
     const workspace = target.kind === 'workspace' ? target.workspace : null;
     const terminalId = patch.terminalId?.trim() || terminalIdForConversation(
       target.kind === 'workspace' ? target.conversation.id : `ssh_${target.host}`,
@@ -4594,14 +4668,12 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         rows: DEFAULT_TERMINAL_ROWS,
         cols: DEFAULT_TERMINAL_COLS,
         status: 'idle',
-        output: [],
         error: '',
         pid: null,
         exitCode: null,
         updatedAt: Date.now(),
       };
       const merged: TerminalClientState = { ...base, ...existing, ...patch };
-      merged.output = capTerminalOutput(notice ? [...merged.output, notice] : merged.output);
       return evictIdleTerminalStates({
         ...current,
         [terminalId]: merged,
@@ -4631,6 +4703,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       shell: shell || undefined,
       rows,
       cols,
+      shellIntegration: getTerminalPreferences().shellIntegration,
     }, createRequestId('terminal-start'), undefined, terminalBackendId(target));
     if (!sent) {
       setTerminalById((current) => {
@@ -4644,18 +4717,15 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
             ...existing,
             status: 'error',
             error: t('sess.connectBackendFirst'),
-            output: capTerminalOutput([
-              ...existing.output,
-              terminalOutputLine('error', t('sess.connectBackendFirst')),
-            ]),
             updatedAt: Date.now(),
           },
         };
       });
+      appendTerminalError(terminalId, t('sess.connectBackendFirst'));
       return false;
     }
     return true;
-  }, [sendProtocolMessage, settingsForBackend]);
+  }, [appendTerminalError, sendProtocolMessage, settingsForBackend]);
 
   const startTerminalSession = useCallback((target: TerminalTarget, options: TerminalStartOptions) => {
     const workspace = target.kind === 'workspace' ? target.workspace : null;
@@ -4675,12 +4745,12 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       exitCode: null,
       stopRequested: false,
       sshPasswordAt: undefined,
-      ...(options.preserveOutput ? {} : {
-        output: [
-          terminalOutputLine('system', target.kind === 'ssh' ? `connecting to ${target.host}` : `starting terminal in ${cwd}`),
-        ],
-      }),
-    }, options.preserveOutput ? terminalOutputLine('system', 'restarting terminal') : undefined);
+    });
+    // A new process numbers its output from 1 again.
+    const stream = terminalStreamsRef.current.get(terminalId);
+    stream.restart();
+    if (!options.preserveOutput) stream.clear();
+    startOnMissingRef.current.delete(terminalId);
     if (target.kind === 'ssh' && !options.interactive) {
       // A saved password signs in through the backend's askpass helper; the
       // keychain lookup is asynchronous, so the start is sent once it settles.
@@ -4701,7 +4771,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   startTerminalSessionRef.current = startTerminalSession;
 
   const sendTerminalInput = useCallback((terminalId: string, tenantId: string, data: string) => {
-    const terminal = terminalById[terminalId];
     const sent = sendProtocolMessage('terminal.input', {
       terminalId,
       tenantId,
@@ -4710,11 +4779,11 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     if (sent) {
       return true;
     }
-    if (terminal) {
-      appendTerminalOutput(terminalId, terminalOutputLine('error', t('sess.connectBackendFirst')));
+    if (terminalByIdRef.current[terminalId]) {
+      appendTerminalError(terminalId, t('sess.connectBackendFirst'));
     }
     return false;
-  }, [appendTerminalOutput, sendProtocolMessage, terminalById]);
+  }, [appendTerminalError, sendProtocolMessage]);
 
   const stopTerminalSession = useCallback((terminalId: string, tenantId: string, force = false) => {
     setTerminalById((current) => {
@@ -4728,10 +4797,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           ...existing,
           status: 'stopping',
           stopRequested: true,
-          output: capTerminalOutput([
-            ...existing.output,
-            terminalOutputLine('system', force ? 'force stopping terminal' : 'stopping terminal'),
-          ]),
           updatedAt: Date.now(),
         },
       };
@@ -4780,23 +4845,127 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       terminalId: resolvedTerminalId,
     }, createRequestId('terminal-status'), undefined, terminalBackendId(target));
   }, [seedTerminalState, sendProtocolMessage, settings.tenantId, settingsForBackend]);
+  requestTerminalStatusRef.current = requestTerminalStatus;
 
-  const clearTerminalOutput = useCallback((terminalId: string) => {
-    setTerminalById((current) => {
-      const existing = current[terminalId];
-      if (!existing) {
-        return current;
-      }
-      return {
-        ...current,
-        [terminalId]: {
-          ...existing,
-          output: [],
-          updatedAt: Date.now(),
-        },
-      };
-    });
+  /** Whether `backendId` replays terminal output; undefined until known. */
+  const terminalReplayFor = (backendId: string) => terminalReplayRef.current.get(backendId);
+
+  /** Re-joins a running terminal: the backend resizes it and sends the
+   * output after the last `seq` this client holds (or all it kept). */
+  const attachTerminal = useCallback((terminalId: string) => {
+    const terminal = terminalByIdRef.current[terminalId];
+    if (!terminal) return false;
+    const backendId = terminal.backendConnectionId || activeBackendConnectionIdRef.current;
+    if (!terminalReplayFor(backendId)) {
+      return sendProtocolMessage('terminal.status', { tenantId: terminal.tenantId, terminalId }, createRequestId('terminal-status'), undefined, backendId);
+    }
+    // One attach at a time: lag and gaps during a flood would otherwise
+    // each ask for the same output again.
+    const sentAt = attachSentAtRef.current.get(terminalId);
+    if (sentAt !== undefined && Date.now() - sentAt < TERMINAL_ATTACH_TIMEOUT_MS) return true;
+    attachSentAtRef.current.set(terminalId, Date.now());
+    const stream = terminalStreamsRef.current.get(terminalId);
+    return sendProtocolMessage('terminal.attach', {
+      terminalId,
+      tenantId: terminal.tenantId,
+      ...(stream.seq > 0 ? { since: stream.seq } : {}),
+      rows: terminal.rows,
+      cols: terminal.cols,
+    }, createRequestId('terminal-attach'), undefined, backendId);
+  }, [sendProtocolMessage]);
+  attachTerminalRef.current = attachTerminal;
+
+  /** After a reconnect or lag: catch every live terminal of `backendId` (all
+   * backends when omitted) up with its output. */
+  const reattachTerminals = useCallback((backendId?: string) => {
+    for (const terminal of Object.values(terminalByIdRef.current)) {
+      if (terminal.status !== 'running' && terminal.status !== 'stopping') continue;
+      const owner = terminal.backendConnectionId || activeBackendConnectionIdRef.current;
+      if (backendId && owner !== backendId) continue;
+      attachTerminal(terminal.terminalId);
+    }
+  }, [attachTerminal]);
+  reattachTerminalsRef.current = reattachTerminals;
+
+  /**
+   * Shows the terminal `options.terminalId`: joins it when the backend still
+   * runs it, otherwise starts it (unless `autoStart` is false, which leaves
+   * it idle). Backends without replay get the older status-then-start check.
+   */
+  const openTerminalSession = useCallback((target: TerminalTarget, options: TerminalStartOptions & { autoStart: boolean }) => {
+    const terminalId = seedTerminalState(target, { terminalId: options.terminalId, rows: options.rows, cols: options.cols });
+    const backendId = terminalBackendId(target);
+    const replay = terminalReplayFor(backendId);
+    if (replay === undefined) {
+      // Decided once the backend's version arrives.
+      pendingTerminalOpensRef.current.set(terminalId, () => openTerminalSessionRef.current(target, options));
+      return;
+    }
+    const start = () => {
+      if (options.autoStart) startTerminalSessionRef.current?.(target, { ...options, terminalId });
+    };
+    if (!replay) {
+      requestTerminalStatusRef.current(target, terminalId);
+      window.setTimeout(() => {
+        const latest = terminalByIdRef.current[terminalId];
+        if (!latest || latest.status === 'idle' || latest.status === 'exited' || latest.status === 'error') start();
+      }, 300);
+      return;
+    }
+    startOnMissingRef.current.set(terminalId, start);
+    const stream = terminalStreamsRef.current.get(terminalId);
+    const sent = sendProtocolMessage('terminal.attach', {
+      terminalId,
+      tenantId: terminalTenantId(target),
+      ...(stream.seq > 0 ? { since: stream.seq } : {}),
+      rows: options.rows,
+      cols: options.cols,
+    }, createRequestId('terminal-attach'), undefined, backendId);
+    if (!sent) startOnMissingRef.current.delete(terminalId);
+  }, [seedTerminalState, sendProtocolMessage, settingsForBackend]);
+  const openTerminalSessionRef = useRef(openTerminalSession);
+  openTerminalSessionRef.current = openTerminalSession;
+
+  /** Records whether `backendId` replays terminal output, then rejoins its
+   * live terminals and runs the opens that waited for this answer. */
+  const noteTerminalReplay = useCallback((backendId: string, replay: boolean) => {
+    terminalReplayRef.current.set(backendId, replay);
+    reattachTerminalsRef.current(backendId);
+    const waiting = [...pendingTerminalOpensRef.current.entries()];
+    for (const [terminalId, open] of waiting) {
+      const terminal = terminalByIdRef.current[terminalId];
+      const owner = terminal?.backendConnectionId || activeBackendConnectionIdRef.current;
+      if (terminal && owner !== backendId) continue;
+      pendingTerminalOpensRef.current.delete(terminalId);
+      open();
+    }
   }, []);
+  noteTerminalReplayRef.current = noteTerminalReplay;
+
+  /** Clears the view and, where the backend keeps output, its copy too. */
+  const clearTerminalOutput = useCallback((terminalId: string) => {
+    terminalStreamsRef.current.get(terminalId).clear();
+    const terminal = terminalByIdRef.current[terminalId];
+    if (!terminal || terminal.status !== 'running') return;
+    const backendId = terminal.backendConnectionId || activeBackendConnectionIdRef.current;
+    if (terminalReplayFor(backendId)) {
+      sendProtocolMessage('terminal.clear', { terminalId, tenantId: terminal.tenantId }, createRequestId('terminal-clear'), undefined, backendId);
+    }
+  }, [sendProtocolMessage]);
+
+  /** Stops the backend PTYs of terminals that are going away with their
+   * conversation or workspace, so they do not keep running unseen. */
+  const stopTerminalsWhere = useCallback((matches: (terminal: TerminalClientState) => boolean) => {
+    for (const terminal of Object.values(terminalByIdRef.current)) {
+      if (!matches(terminal)) continue;
+      startOnMissingRef.current.delete(terminal.terminalId);
+      pendingTerminalOpensRef.current.delete(terminal.terminalId);
+      terminalStreamsRef.current.delete(terminal.terminalId);
+      if (terminal.status === 'running' || terminal.status === 'starting' || terminal.status === 'stopping') {
+        sendProtocolMessage('terminal.stop', { terminalId: terminal.terminalId, tenantId: terminal.tenantId, force: true }, createRequestId('terminal-stop'));
+      }
+    }
+  }, [sendProtocolMessage]);
 
   const requestModelCatalog = useCallback(() => {
     const sessionId =
@@ -5186,6 +5355,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       setSelectedSkills(pruneConversationState);
       setTurnIds(pruneConversationState);
       setThinkingConversations(pruneConversationState);
+      stopTerminalsWhere((terminal) => terminal.workspaceId === workspaceId || removedConversationIds.includes(terminal.conversationId));
       setTerminalById((current) => {
         const next = { ...current };
         Object.entries(next).forEach(([terminalId, terminal]) => {
@@ -6908,10 +7078,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       const { [conversationId]: _removed, ...rest } = current;
       return rest;
     });
+    stopTerminalsWhere((terminal) => terminal.conversationId === conversationId);
     setTerminalById((current) => {
-      const terminalId = terminalIdForConversation(conversationId);
-      const { [terminalId]: _removed, ...rest } = current;
-      return rest;
+      const next = { ...current };
+      for (const [terminalId, terminal] of Object.entries(current)) {
+        if (terminal.conversationId === conversationId || terminalId === terminalIdForConversation(conversationId)) delete next[terminalId];
+      }
+      return next;
     });
     if (activeConversationRef.current === conversationId) {
       setActiveConversationId(nextActive?.id ?? '');
@@ -9592,7 +9765,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     seedTerminalState,
     resizeTerminalSession,
     requestTerminalStatus,
+    openTerminalSession,
     clearTerminalOutput,
+    terminalStreams: terminalStreamsRef.current,
     setSkillListVisible,
     toggleSelectedSkill,
     autoConnectEnabled,

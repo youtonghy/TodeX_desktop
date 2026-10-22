@@ -84,13 +84,6 @@ export function AsidePanel({ session, panel, slashCommand, onBack }: Props) {
     );
   }
 
-  if (panel === 'terminal' && workspace && conversation) {
-    const terminalId = terminalIdForConversation(conversation.id);
-    return (
-      <TerminalAside session={session} terminalId={terminalId} />
-    );
-  }
-
   if (panel === 'slash-commands') {
     return (
       <div className="flex h-full min-h-0 flex-col p-5">
@@ -162,85 +155,6 @@ export function AsidePanel({ session, panel, slashCommand, onBack }: Props) {
   }
 
   return null;
-}
-
-function TerminalAside({ session, terminalId }: { session: TodeXSession; terminalId: string }) {
-  const t = useT();
-  const workspace = session.activeWorkspace;
-  const conversation = session.activeConversation;
-  const terminal = session.terminalById[terminalId];
-  const terminalByIdRef = useRef(session.terminalById);
-  const terminalSizeRef = useRef({ rows: DEFAULT_TERMINAL_ROWS, cols: DEFAULT_TERMINAL_COLS });
-
-  terminalByIdRef.current = session.terminalById;
-
-  useEffect(() => {
-    if (!terminal) return;
-    terminalSizeRef.current = { rows: terminal.rows, cols: terminal.cols };
-  }, [terminal?.cols, terminal?.rows]);
-
-  const handleTerminalData = useCallback((data: string) => {
-    const current = terminalByIdRef.current[terminalId];
-    if (!workspace || !current || current.status !== 'running') return;
-    session.sendTerminalInput(terminalId, workspace.tenantId || session.settings.tenantId, data);
-  }, [session.sendTerminalInput, session.settings.tenantId, terminalId, workspace]);
-
-  const handleTerminalResize = useCallback((rows: number, cols: number) => {
-    terminalSizeRef.current = { rows, cols };
-    const current = terminalByIdRef.current[terminalId];
-    if (!workspace || !current || current.status !== 'running') return;
-    if (current.rows === rows && current.cols === cols) return;
-    session.resizeTerminalSession(terminalId, workspace.tenantId || session.settings.tenantId, rows, cols);
-  }, [session.resizeTerminalSession, session.settings.tenantId, terminalId, workspace]);
-
-  if (!workspace || !conversation) {
-    return <p className="p-5 text-body-regular text-text-secondary">{t('aside.selectConversation')}</p>;
-  }
-
-  return (
-    <div className="flex h-full min-h-0 flex-col p-5">
-      <div className="mb-3 flex items-center justify-between">
-        <div>
-          <h2 className="text-title-3-semibold text-text-primary">{t('aside.terminal')}</h2>
-          <p className="text-caption-1-regular text-text-secondary">{terminal ? terminalStatusLabel(terminal.status) : t('aside.terminalNotStarted')}</p>
-        </div>
-        <div className="flex gap-2">
-          <Button
-            size="small"
-            disabled={terminal?.status === 'running' || terminal?.status === 'starting'}
-            onClick={() => {
-              const size = terminalSizeRef.current;
-              session.startTerminalSession({ kind: 'workspace', workspace, conversation }, {
-                cwd: workspace.path,
-                shell: '',
-                rows: size.rows,
-                cols: size.cols,
-              });
-            }}
-          >
-            {t('aside.terminalStart')}
-          </Button>
-          <Button
-            size="small"
-            variant="danger"
-            disabled={!terminal || terminal.status === 'idle' || terminal.status === 'exited'}
-            onClick={() => session.stopTerminalSession(terminalId, workspace.tenantId || session.settings.tenantId)}
-          >
-            {t('aside.terminalStop')}
-          </Button>
-        </div>
-      </div>
-      <div className="min-h-0 flex-1 overflow-hidden rounded-2xl bg-background-secondary-default">
-        <XtermTerminal
-          entries={terminal?.output ?? []}
-          isActive
-          isDisabled={terminal?.status !== 'running'}
-          onData={handleTerminalData}
-          onResize={handleTerminalResize}
-        />
-      </div>
-    </div>
-  );
 }
 
 function SlashActionAside({ session, command, conversationId }: { session: TodeXSession; command: string; conversationId: string }) {

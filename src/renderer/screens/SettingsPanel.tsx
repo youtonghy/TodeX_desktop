@@ -8,6 +8,7 @@ import { AgentCallingSettings } from '../components/AgentCallingSettings';
 import { AgentDesktopSettings, type AgentDesktopPage } from '../components/AgentDesktopSettings';
 import { BackendConnectionSettings } from '../components/settings/BackendConnectionSettings';
 import { AppearanceSettings } from '../components/AppearanceSettings';
+import { TerminalSettings } from '../components/settings/TerminalSettings';
 import { FeatureSettings } from '../components/FeatureSettings';
 import { SettingsCard, SettingsEntry, SettingsGroup, SettingsRow, SettingsSubpage } from '../components/settings/SettingsRows';
 import { SshConnectionSettings } from '../components/settings/SshConnectionSettings';
@@ -199,6 +200,7 @@ export function SettingsPanel({ session, historyRecoverySetup = false, repairPai
 
         <SettingsPage id="appearance" title={titleOf('appearance')}>
           <AppearanceSettings />
+          <TerminalSettings />
         </SettingsPage>
 
         <SettingsPage id="connection" title={titleOf('connection')} viewportRef={backendPanel}>

@@ -67,6 +67,11 @@ const api = {
     focus: () => {
       ipcRenderer.send('window:focus');
     },
+    /** Pastes the clipboard into the focused field as a native paste event,
+     * so the page needs no clipboard read permission. */
+    paste: () => {
+      ipcRenderer.send('window:paste');
+    },
     closeWindow: () => {
       ipcRenderer.send('window:close');
     },

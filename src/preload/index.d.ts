@@ -24,6 +24,7 @@ export type TodeXDesktopApi = {
   };
   app: {
     focus: () => void;
+    paste: () => void;
     closeWindow: () => void;
     onCloseRequest: (listener: () => void) => () => void;
     /** Window controls for the renderer-drawn title bar (`windowChrome: 'custom'`). */

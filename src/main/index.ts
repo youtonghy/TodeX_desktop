@@ -885,6 +885,10 @@ app.whenReady().then(() => {
     refreshUpdateMenu();
   });
 
+  ipcMain.on('window:paste', (event) => {
+    event.sender.paste();
+  });
+
   ipcMain.on('window:focus', (event) => {
     const window = BrowserWindow.fromWebContents(event.sender);
     if (!window) return;

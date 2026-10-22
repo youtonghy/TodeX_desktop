@@ -75,7 +75,6 @@ import {
   parseCodexNativeThread,
   prepareWorkspaceSyncPayload,
   shortJson,
-  utf8ByteLength,
   type CodexThreadHistoryEntry,
 } from '@todex/protocol/todex';
 import { deviceIdentityFromSecret, type DeviceIdentity } from '@todex/protocol/deviceAuth';
@@ -122,6 +121,8 @@ export type ServerVersion = {
   scratch_workspace_root: string;
   /** `1` when the backend serves end-to-end encrypted history. */
   historyEncryption?: number;
+  /** `1` when terminal output carries `seq` and `terminal.attach` exists. */
+  terminalReplay?: number;
 };
 
 // Dev builds report "DEV0.0.0" (backend and clients) or a bare "0.0.0"; warning
@@ -335,13 +336,6 @@ export type MemorySettingsState = {
 
 export type TerminalLifecycleState = 'idle' | 'starting' | 'running' | 'stopping' | 'exited' | 'error';
 
-export type TerminalOutputEntry = {
-  id: string;
-  kind: 'stdout' | 'stderr' | 'input' | 'system' | 'error';
-  text: string;
-  at: number;
-};
-
 /** What a terminal runs: a local shell in a conversation's workspace, or
  * `ssh -tt <host>` on the backend machine (`terminal.start` with `ssh`). */
 export type TerminalTarget =
@@ -363,7 +357,6 @@ export type TerminalClientState = {
   rows: number;
   cols: number;
   status: TerminalLifecycleState;
-  output: TerminalOutputEntry[];
   error: string;
   /** Set when the exit was requested (terminal.stop from any client or an
    * observed terminal.stopping); suppresses the auto-restart, matching the
@@ -1673,13 +1666,10 @@ export const RECONNECT_DELAY_MS = 2000;
 export const RECONNECT_MAX_DELAY_MS = 30_000;
 export const CHAT_ATTACH_REPLAY_LIMIT = 200;
 export const CHAT_BOTTOM_FOLLOW_THRESHOLD = 72;
-export const TERMINAL_MAX_OUTPUT_ENTRIES = 420;
-/** Per-terminal replay budget — mirrors the mobile client's 256 KiB (+32 KiB
- * slack) in-memory TerminalOutputCache. Oldest entries drop first; a single
- * oversized entry is head-trimmed just after the first newline found within a
- * 4 KiB scan window so replay rarely splits escape sequences mid-stream. */
-export const TERMINAL_MAX_OUTPUT_BYTES = 256 * 1024;
-export const TERMINAL_OUTPUT_SLACK_BYTES = 32 * 1024;
+/** An unanswered `terminal.attach` is sent again after this long. */
+export const TERMINAL_ATTACH_TIMEOUT_MS = 5000;
+/** Terminal events that stream output; kept out of the session's event list. */
+export const TERMINAL_STREAM_EVENT_TYPES: ReadonlySet<string> = new Set(['terminal.output', 'terminal.input.accepted', 'terminal.attached', 'terminal.resized']);
 /** At most this many non-live terminal records are kept (LRU by updatedAt);
  * live PTYs are never evicted. Mirrors the mobile client's maxTerminals = 8. */
 export const TERMINAL_MAX_CACHED_TERMINALS = 8;
@@ -2272,48 +2262,6 @@ export function terminalStatusLabel(status: TerminalLifecycleState): string {
     default:
       return t('terminal.idle');
   }
-}
-
-export function terminalOutputLine(kind: TerminalOutputEntry['kind'], text: string): TerminalOutputEntry {
-  return {
-    id: createRequestId(`terminal-${kind}`),
-    kind,
-    text,
-    at: Date.now(),
-  };
-}
-
-function trimTerminalEntryHead(text: string, dropBytes: number): string {
-  let units = 0;
-  let scanned = 0;
-  for (const char of text) {
-    if (scanned >= dropBytes) break;
-    scanned += utf8ByteLength(char);
-    units += char.length;
-  }
-  const newline = text.indexOf('\n', units);
-  const cut = newline !== -1 && newline - units <= 4096 ? newline + 1 : units;
-  return text.slice(cut);
-}
-
-/** Caps a terminal's replay entries at TERMINAL_MAX_OUTPUT_ENTRIES and
- * TERMINAL_MAX_OUTPUT_BYTES, dropping the oldest entries first. */
-export function capTerminalOutput(output: TerminalOutputEntry[]): TerminalOutputEntry[] {
-  let next = output.length > TERMINAL_MAX_OUTPUT_ENTRIES ? output.slice(-TERMINAL_MAX_OUTPUT_ENTRIES) : output;
-  let bytes = 0;
-  for (const entry of next) bytes += utf8ByteLength(entry.text);
-  if (bytes <= TERMINAL_MAX_OUTPUT_BYTES + TERMINAL_OUTPUT_SLACK_BYTES) return next;
-  let start = 0;
-  while (start < next.length - 1 && bytes > TERMINAL_MAX_OUTPUT_BYTES) {
-    bytes -= utf8ByteLength(next[start].text);
-    start += 1;
-  }
-  next = next.slice(start);
-  if (bytes > TERMINAL_MAX_OUTPUT_BYTES && next.length === 1) {
-    const entry = next[0];
-    next = [{ ...entry, text: trimTerminalEntryHead(entry.text, bytes - TERMINAL_MAX_OUTPUT_BYTES) }];
-  }
-  return next;
 }
 
 /** LRU-evicts terminal records past TERMINAL_MAX_CACHED_TERMINALS, skipping any

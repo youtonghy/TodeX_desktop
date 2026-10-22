@@ -55,6 +55,59 @@
   --color-effort-xhigh-alt: var(--color-effort-xhigh-alt);
 }
 
+/* Terminal palette (components/XtermTerminal.tsx reads these at runtime):
+   the 16 ANSI colors, cursor and selection, and the prompt marks shell
+   integration draws. Background and foreground follow the surface tokens. */
+:root {
+  --color-terminal-cursor: var(--color-text-primary);
+  --color-terminal-selection: #0969da33;
+  --color-terminal-black: var(--color-text-primary);
+  --color-terminal-red: #cf222e;
+  --color-terminal-green: #116329;
+  --color-terminal-yellow: #9a6700;
+  --color-terminal-blue: #0969da;
+  --color-terminal-magenta: #8250df;
+  --color-terminal-cyan: #1b7c83;
+  --color-terminal-white: var(--color-background-secondary-default);
+  --color-terminal-bright-black: #5f6e7a;
+  --color-terminal-bright-red: #a40e26;
+  --color-terminal-bright-green: #1a7f37;
+  --color-terminal-bright-yellow: #633c01;
+  --color-terminal-bright-blue: #218bff;
+  --color-terminal-bright-magenta: #a475f9;
+  --color-terminal-bright-cyan: #3192aa;
+  --color-terminal-bright-white: #ffffff;
+  --color-terminal-mark-success: var(--color-green-500);
+  --color-terminal-mark-failure: var(--color-red-500);
+  --color-terminal-search-match: var(--color-amber-200);
+  --color-terminal-search-active: var(--color-amber-400);
+}
+
+.dark {
+  --color-terminal-cursor: #e7eaee;
+  --color-terminal-selection: #79c0ff44;
+  --color-terminal-black: var(--color-background-secondary-default);
+  --color-terminal-red: #ff7b72;
+  --color-terminal-green: #7ee787;
+  --color-terminal-yellow: #e3b341;
+  --color-terminal-blue: #79c0ff;
+  --color-terminal-magenta: #d2a8ff;
+  --color-terminal-cyan: #a5d6ff;
+  --color-terminal-white: #d8dee9;
+  --color-terminal-bright-black: #8b989e;
+  --color-terminal-bright-red: #ffa198;
+  --color-terminal-bright-green: #aff5b4;
+  --color-terminal-bright-yellow: #f2cc60;
+  --color-terminal-bright-blue: #a5d6ff;
+  --color-terminal-bright-magenta: #d2a8ff;
+  --color-terminal-bright-cyan: #b6e3ff;
+  --color-terminal-bright-white: #f0f6fc;
+  --color-terminal-mark-success: var(--color-green-400);
+  --color-terminal-mark-failure: var(--color-red-400);
+  --color-terminal-search-match: var(--color-amber-700);
+  --color-terminal-search-active: var(--color-amber-500);
+}
+
 /* Bold text setting (lib/appearance.ts): every weight steps up one level,
    for the composite type utilities and the plain font-* utilities alike. */
 :root[data-bold-text='true'] {
@@ -146,6 +199,15 @@ body {
 .xterm .xterm-viewport,
 .xterm .xterm-screen {
   background-color: var(--color-background-secondary-default) !important;
+}
+
+/* Shell integration prompt marks: a bar on the prompt's first cell. */
+.xterm .todex-prompt-mark {
+  box-shadow: inset 2px 0 0 var(--color-terminal-mark-success);
+}
+
+.xterm .todex-prompt-mark[data-failed='true'] {
+  box-shadow: inset 2px 0 0 var(--color-terminal-mark-failure);
 }
 
 /* Hidden title bar (macOS) or app-drawn title bar (Linux): the top strips are
