@@ -1069,7 +1069,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const rememberProviderRunModes = useCallback((
     backendConnectionId: string | null | undefined,
     provider: ProviderKind | string | undefined,
-    modes: { permissionMode?: 'ask' | 'auto' | 'full-access'; workMode?: 'plan' | 'implement' },
+    modes: { permissionMode?: PermissionMode; workMode?: 'plan' | 'implement' },
   ) => {
     if (!provider || (!modes.permissionMode && !modes.workMode)) return;
     const key = providerModelPreferenceKey(backendConnectionId, provider);
@@ -6352,7 +6352,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
 
   const applyConversationPermissionMode = useCallback(async (
     conversationId: string,
-    mode: 'ask' | 'auto' | 'full-access',
+    mode: PermissionMode,
   ): Promise<boolean> => {
     const context = getConversationContext(conversationId);
     if (!context) return false;
@@ -8184,12 +8184,17 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     if (!context) return;
     const config = conversationPermissionCapabilities(context.conversation, providersForConversation(context.conversation));
     const selected = resolvePermissionMode(context.conversation, context.workspace);
-    const labels = { ask: t('chat.permissionAsk'), auto: t('chat.permissionAuto'), 'full-access': t('chat.permissionFullAccess') };
+    const labels: Record<PermissionMode, string> = {
+      ask: t('chat.permissionAsk'),
+      'accept-edits': t('chat.permissionAcceptEdits'),
+      auto: t('chat.permissionAuto'),
+      'full-access': t('chat.permissionFullAccess'),
+    };
     desktopAlert(
       t('sess.permissionSettings'),
       config?.modes?.length ? t('sess.permissionApplyNext') : t('sess.permissionNotProvided'),
       (config?.modes ?? []).map((mode) => ({
-        text: `${selected === mode ? '✓ ' : ''}${labels[mode]}`,
+        text: `${selected === mode ? '✓ ' : ''}${labels[mode] ?? mode}`,
         onPress: () => { void applyConversationPermissionMode(conversationId, mode); },
       })),
     );

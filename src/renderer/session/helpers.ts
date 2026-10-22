@@ -16,7 +16,8 @@ import type {
   ServerEvent,
   WorkspaceRecord,
 } from '@todex/protocol/todex';
-import type { ConversationEvent, ConversationManifest, ConversationSchedule, ProviderDescriptor, ProviderKind, ProviderModelDescriptor } from '@todex/protocol/v2';
+import type { ConversationEvent, ConversationManifest, ConversationSchedule, PermissionMode, ProviderDescriptor, ProviderKind, ProviderModelDescriptor } from '@todex/protocol/v2';
+import { isPermissionMode } from './permissions';
 
 export type ResolvedSessionConfig = {
   model?: import('@todex/protocol/v2').ResolvedConfigValue<string>;
@@ -175,7 +176,7 @@ export type ConversationRecord = {
   threadId: string;
   localAdapterState?: LocalAdapterState;
   mode?: 'plan' | 'implement';
-  permissionMode?: 'ask' | 'auto' | 'full-access';
+  permissionMode?: PermissionMode;
   goalStatus?: string;
   goalObjective?: string;
   provider?: ProviderKind | string;
@@ -202,7 +203,7 @@ export type ConversationRecord = {
 export type ProviderModelPreference = {
   lastModel?: string;
   reasoningByModel: Record<string, string>;
-  lastPermissionMode?: 'ask' | 'auto' | 'full-access';
+  lastPermissionMode?: PermissionMode;
   lastWorkMode?: 'plan' | 'implement';
 };
 
@@ -224,9 +225,7 @@ export function normalizeProviderModelPreferences(value: unknown): ProviderModel
       ))
       : {};
     const lastModel = typeof record.lastModel === 'string' && record.lastModel.trim() ? record.lastModel.trim() : undefined;
-    const lastPermissionMode = ['ask', 'auto', 'full-access'].includes(record.lastPermissionMode as string)
-      ? record.lastPermissionMode as ProviderModelPreference['lastPermissionMode']
-      : undefined;
+    const lastPermissionMode = isPermissionMode(record.lastPermissionMode) ? record.lastPermissionMode : undefined;
     const lastWorkMode = record.lastWorkMode === 'plan' || record.lastWorkMode === 'implement'
       ? record.lastWorkMode
       : undefined;
@@ -1345,6 +1344,11 @@ export type TimelineEntry = {
   /** A provider notice (e.g. auto mode unavailable); `subtitle` holds the
    * provider's reason, if any. */
   providerNotice?: ProviderNotice;
+  /** Permission notices: `settings` when a Claude Code settings layer turned
+   * the requested mode off (absent from older backends). */
+  providerNoticeCause?: 'settings' | 'unavailable';
+  /** The settings layer behind the notice (`metadata.settingsSource`). */
+  providerNoticeSettingsSource?: string;
 };
 
 export function workspaceDisplayName(workspace: Pick<WorkspaceRecord, 'name' | 'path'>): string {
@@ -1858,7 +1862,7 @@ export const PERMISSION_PRESETS: PermissionPreset[] = [
   },
 ];
 
-export { conversationPermissionCapabilities, conversationPermissionMode, rememberedRunModes } from './permissions';
+export { conversationPermissionCapabilities, conversationPermissionMode, isPermissionMode, PERMISSION_MODES, rememberedRunModes } from './permissions';
 
 export function permissionPresetForProfile(
   profileId: string | null | undefined,

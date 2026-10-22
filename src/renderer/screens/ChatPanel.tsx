@@ -12,6 +12,7 @@ import {
   RiCloseLine,
   RiCodeSSlashLine,
   RiCpuLine,
+  RiEditLine,
   RiGitBranchLine,
   RiGitMergeLine,
   RiListCheck2,
@@ -67,6 +68,7 @@ import { ProviderIcon } from '../components/ProviderIcon';
 import type { TodeXSession } from '../session/useTodeXSession';
 import {
   conversationPermissionCapabilities,
+  PERMISSION_MODES,
   attachmentId,
   canSwitchConversationAgent,
   inferMimeType,
@@ -146,7 +148,8 @@ const PROVIDER_TURN_NOTICES = {
 const PROVIDER_NOTICES = {
   auto_mode_unavailable: 'chat.providerNotice.autoModeUnavailable',
   background_tasks_ended: 'chat.providerNotice.backgroundTasksEnded',
-} as const satisfies Record<NonNullable<TimelineEntry['providerNotice']>, string>;
+  bypass_mode_disabled: 'chat.providerNotice.bypassModeDisabledNoLayer',
+} as const satisfies Record<NonNullable<TimelineEntry['providerNotice']>, MessageKey>;
 
 /** Why background work was lost (`background_tasks_ended`'s `reason`, the
  * notice's subtitle); anything else reads as the process having ended. */
@@ -158,10 +161,32 @@ const BACKGROUND_ENDED_REASONS: Record<string, MessageKey> = {
   expired: 'chat.backgroundEnded.expired',
 };
 
+/** Claude Code settings layers a permission notice can name
+ * (`metadata.settingsSource`); an unknown layer is shown as reported. */
+const SETTINGS_SOURCES: Record<string, MessageKey> = {
+  userSettings: 'chat.settingsSource.userSettings',
+  projectSettings: 'chat.settingsSource.projectSettings',
+  localSettings: 'chat.settingsSource.localSettings',
+  policySettings: 'chat.settingsSource.policySettings',
+  flagSettings: 'chat.settingsSource.flagSettings',
+};
+
 /** `agent` names the conversation's agent (Claude Code, Pi, …). */
-function providerNoticeText(notice: NonNullable<TimelineEntry['providerNotice']>, subtitle: string, agent: string): string {
-  if (notice !== 'background_tasks_ended') return t(PROVIDER_NOTICES[notice]);
-  return t(PROVIDER_NOTICES[notice], { agent, reason: t(BACKGROUND_ENDED_REASONS[subtitle] ?? 'chat.backgroundEnded.processEnded', { agent }) });
+function providerNoticeText(notice: NonNullable<TimelineEntry['providerNotice']>, entry: TimelineEntry, agent: string): string {
+  const source = entry.providerNoticeSettingsSource;
+  const layer = source ? (SETTINGS_SOURCES[source] ? t(SETTINGS_SOURCES[source]) : source) : '';
+  switch (notice) {
+    case 'background_tasks_ended':
+      return t(PROVIDER_NOTICES[notice], { agent, reason: t(BACKGROUND_ENDED_REASONS[entry.subtitle] ?? 'chat.backgroundEnded.processEnded', { agent }) });
+    case 'auto_mode_unavailable':
+      // Older backends send no cause; they keep the generic wording.
+      if (entry.providerNoticeCause !== 'settings') return t(PROVIDER_NOTICES[notice]);
+      return layer
+        ? t('chat.providerNotice.autoModeDisabledBySettings', { agent, layer, ask: t('chat.permissionAsk') })
+        : t('chat.providerNotice.autoModeDisabledBySettingsNoLayer', { agent, ask: t('chat.permissionAsk') });
+    case 'bypass_mode_disabled':
+      return layer ? t('chat.providerNotice.bypassModeDisabled', { agent, layer }) : t(PROVIDER_NOTICES[notice], { agent });
+  }
 }
 
 /** Images up to this size also keep a local copy for the preview and the
@@ -360,21 +385,25 @@ function BackgroundTasksStatus({ tasks, items }: { tasks: readonly BackgroundTas
   );
 }
 
-const PERMISSION_MODES: readonly PermissionMode[] = ['ask', 'auto', 'full-access'];
-
 function permissionModeLabel(mode: PermissionMode): string {
   switch (mode) {
     case 'ask': return t('chat.permissionAsk');
+    case 'accept-edits': return t('chat.permissionAcceptEdits');
     case 'auto': return t('chat.permissionAuto');
-    default: return t('chat.permissionFullAccess');
+    case 'full-access': return t('chat.permissionFullAccess');
+    // A mode a newer backend reports that this client cannot label: show it
+    // as is rather than as some other, possibly broader, mode.
+    default: return String(mode);
   }
 }
 
 function permissionModeIcon(mode: PermissionMode): ReactNode {
   switch (mode) {
     case 'ask': return <RiGitMergeLine aria-hidden className={cx(OPTION_ICON, '-scale-y-100')} />;
+    case 'accept-edits': return <RiEditLine aria-hidden className={OPTION_ICON} />;
     case 'auto': return <RiSpeedUpLine aria-hidden className={OPTION_ICON} />;
-    default: return <RiShieldCheckLine aria-hidden className={OPTION_ICON} />;
+    case 'full-access': return <RiShieldCheckLine aria-hidden className={OPTION_ICON} />;
+    default: return <RiShieldLine aria-hidden className={OPTION_ICON} />;
   }
 }
 
@@ -812,7 +841,7 @@ const ChatTimelineItem = memo(function ChatTimelineItem({
   if (entry.providerNotice) {
     return (
       <p data-message-id={entry.id} role="note" title={entry.subtitle || undefined} className="py-1 text-center text-caption-1-regular text-text-tertiary">
-        {providerNoticeText(entry.providerNotice, entry.subtitle, agentName)}
+        {providerNoticeText(entry.providerNotice, entry, agentName)}
       </p>
     );
   }
@@ -1490,7 +1519,8 @@ export function ChatPanel({ session }: Props) {
   const currentContextWindow = contextUsage?.contextWindow
     ?? providerModels.find((item) => item.id === contextModelId || item.id.endsWith(`/${contextModelId}`))?.contextWindow;
   const permissionConfig = conversationPermissionCapabilities(conversation, session.v2Providers);
-  const permissionModes = (permissionConfig?.modes ?? []).filter((mode) => PERMISSION_MODES.includes(mode));
+  // Client menu order, limited to the modes the agent declares.
+  const permissionModes = PERMISSION_MODES.filter((mode) => permissionConfig?.modes?.includes(mode));
   const currentPermission = session.resolvePermissionMode(conversation, workspace);
   const fixedPermission = permissionModes.length === 1;
   const canChoosePermission = permissionModes.length > 0;

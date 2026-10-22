@@ -68,7 +68,7 @@ const capabilities: ProviderCapabilities = {
   streaming: true,
   followUpQueue: true,
   permissionConfig: {
-    modes: ['ask', 'auto', 'full-access'],
+    modes: ['ask', 'accept-edits', 'auto', 'full-access'],
     defaultMode: 'auto',
     supportsPlan: true,
   },

@@ -2,6 +2,15 @@ import type { PermissionMode, ProviderDescriptor } from '@todex/protocol/v2';
 import type { WorkspaceRecord } from '@todex/protocol/todex';
 import type { ConversationRecord, ProviderModelPreference } from './helpers';
 
+/** Session permission modes the client knows how to label and persist, in
+ * menu order. A provider only offers the ones its `permissionConfig.modes`
+ * declares. */
+export const PERMISSION_MODES: readonly PermissionMode[] = ['ask', 'accept-edits', 'auto', 'full-access'];
+
+export function isPermissionMode(value: unknown): value is PermissionMode {
+  return typeof value === 'string' && (PERMISSION_MODES as readonly string[]).includes(value);
+}
+
 export function conversationPermissionCapabilities(
   conversation: ConversationRecord | null | undefined,
   providers: ProviderDescriptor[],
@@ -17,11 +26,11 @@ export function conversationPermissionMode(
   workspace: WorkspaceRecord | null | undefined,
   providers: ProviderDescriptor[],
   remembered?: PermissionMode,
-): 'ask' | 'auto' | 'full-access' | null {
+): PermissionMode | null {
   const config = conversationPermissionCapabilities(conversation, providers);
   if (conversation?.permissionMode) return config?.modes?.includes(conversation.permissionMode) ? conversation.permissionMode : null;
   if (workspace?.permissionProfile === ':read-only' || workspace?.sandboxMode === 'read-only') return null;
-  const supported = (mode: 'ask' | 'auto' | 'full-access') => config?.modes?.includes(mode) ? mode : null;
+  const supported = (mode: PermissionMode) => config?.modes?.includes(mode) ? mode : null;
   const profile = workspace?.permissionProfile;
   const sandbox = workspace?.sandboxMode;
   const approval = workspace?.approvalPolicy;
