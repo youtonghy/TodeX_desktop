@@ -2750,6 +2750,11 @@ export const en: Messages = {
 
   // xterm
   'xterm.interactive': 'Interactive terminal',
+  'xterm.image': "image",
+  'xterm.imageUploading': "Uploading {count} image(s) for the terminal…",
+  'xterm.imageUploadFailed': "Could not paste the image",
+  'xterm.imageTooLarge': "{name} is larger than 20 MB.",
+  'xterm.imageConvertFailed': "The image could not be converted to PNG.",
   'xterm.openLinkHint': "{key}+click to open {target}",
   'xterm.menu': "Terminal actions",
   'xterm.copy': "Copy",

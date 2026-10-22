@@ -2750,6 +2750,11 @@ export const zhCN = {
 
   // xterm
   'xterm.interactive': '交互式终端',
+  'xterm.image': "图片",
+  'xterm.imageUploading': "正在为终端上传 {count} 张图片…",
+  'xterm.imageUploadFailed': "无法粘贴图片",
+  'xterm.imageTooLarge': "{name} 超过 20 MB。",
+  'xterm.imageConvertFailed': "图片无法转换为 PNG。",
   'xterm.openLinkHint': "{key}+点击打开 {target}",
   'xterm.menu': "终端操作",
   'xterm.copy': "复制",

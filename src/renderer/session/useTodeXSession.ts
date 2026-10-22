@@ -546,6 +546,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   /** Whether each backend replays terminal output (`terminalReplay` in
    * /v2/version); absent until its version is known. */
   const terminalReplayRef = useRef(new Map<string, boolean>());
+  /** Whether each backend answers a fresh attach with a screen snapshot. */
+  const terminalSnapshotRef = useRef(new Map<string, boolean>());
   /** Terminal opens waiting for their backend's version. */
   const pendingTerminalOpensRef = useRef(new Map<string, () => void>());
   /** Starts to send when `terminal.attached` reports no running terminal. */
@@ -553,7 +555,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   /** When each terminal's attach went out; one at a time per terminal. */
   const attachSentAtRef = useRef(new Map<string, number>());
   // Terminal commands defined further down, used by earlier event handlers.
-  const attachTerminalRef = useRef<(terminalId: string) => boolean>(() => false);
+  const attachTerminalRef = useRef<(terminalId: string, fresh?: boolean) => boolean>(() => false);
   const reattachTerminalsRef = useRef<(backendId?: string) => void>(() => {});
   const noteTerminalReplayRef = useRef<(backendId: string, replay: boolean) => void>(() => {});
   const requestTerminalStatusRef = useRef<(target: TerminalTarget, terminalId?: string) => boolean>(() => false);
@@ -4120,9 +4122,11 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       }
       const json = (await response.json()) as ServerVersion;
       patchLinkStatus(backendId, { serverVersion: json });
+      terminalSnapshotRef.current.set(backendId, (json.terminalSnapshot ?? 0) >= 1);
       noteTerminalReplayRef.current(backendId, (json.terminalReplay ?? 0) >= 1);
     } catch (error) {
       patchLinkStatus(backendId, { serverVersion: null });
+      terminalSnapshotRef.current.set(backendId, false);
       noteTerminalReplayRef.current(backendId, false);
       reportLinkError(backendId, error instanceof Error ? error.message : 'failed to fetch /v2/version');
     }
@@ -4852,7 +4856,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
 
   /** Re-joins a running terminal: the backend resizes it and sends the
    * output after the last `seq` this client holds (or all it kept). */
-  const attachTerminal = useCallback((terminalId: string) => {
+  const attachTerminal = useCallback((terminalId: string, fresh = false) => {
     const terminal = terminalByIdRef.current[terminalId];
     if (!terminal) return false;
     const backendId = terminal.backendConnectionId || activeBackendConnectionIdRef.current;
@@ -4861,19 +4865,34 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     }
     // One attach at a time: lag and gaps during a flood would otherwise
     // each ask for the same output again.
+    // A view waiting for a snapshot always gets its own request.
     const sentAt = attachSentAtRef.current.get(terminalId);
-    if (sentAt !== undefined && Date.now() - sentAt < TERMINAL_ATTACH_TIMEOUT_MS) return true;
+    if (!fresh && sentAt !== undefined && Date.now() - sentAt < TERMINAL_ATTACH_TIMEOUT_MS) return true;
     attachSentAtRef.current.set(terminalId, Date.now());
     const stream = terminalStreamsRef.current.get(terminalId);
     return sendProtocolMessage('terminal.attach', {
       terminalId,
       tenantId: terminal.tenantId,
-      ...(stream.seq > 0 ? { since: stream.seq } : {}),
+      // Without `since` the backend answers with the whole screen.
+      ...(stream.seq > 0 && !fresh ? { since: stream.seq } : {}),
       rows: terminal.rows,
       cols: terminal.cols,
     }, createRequestId('terminal-attach'), undefined, backendId);
   }, [sendProtocolMessage]);
   attachTerminalRef.current = attachTerminal;
+
+  /**
+   * Asks for the running terminal's screen as a snapshot, for a view whose
+   * kept output lost its start. False when the backend cannot send one (the
+   * view then replays what it has).
+   */
+  const requestTerminalSnapshot = useCallback((terminalId: string) => {
+    const terminal = terminalByIdRef.current[terminalId];
+    if (!terminal || terminal.status !== 'running') return false;
+    const backendId = terminal.backendConnectionId || activeBackendConnectionIdRef.current;
+    if (!terminalSnapshotRef.current.get(backendId)) return false;
+    return attachTerminal(terminalId, true);
+  }, [attachTerminal]);
 
   /** After a reconnect or lag: catch every live terminal of `backendId` (all
    * backends when omitted) up with its output. */
@@ -9768,6 +9787,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     openTerminalSession,
     clearTerminalOutput,
     terminalStreams: terminalStreamsRef.current,
+    requestTerminalSnapshot,
     setSkillListVisible,
     toggleSelectedSkill,
     autoConnectEnabled,

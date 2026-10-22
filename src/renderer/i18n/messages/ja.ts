@@ -2750,6 +2750,11 @@ export const ja: Messages = {
 
   // xterm
   'xterm.interactive': 'インタラクティブターミナル',
+  'xterm.image': "画像",
+  'xterm.imageUploading': "ターミナル用に画像を {count} 枚アップロードしています…",
+  'xterm.imageUploadFailed': "画像を貼り付けられませんでした",
+  'xterm.imageTooLarge': "{name} は 20 MB を超えています。",
+  'xterm.imageConvertFailed': "画像を PNG に変換できませんでした。",
   'xterm.openLinkHint': "{key}+クリックで {target} を開く",
   'xterm.menu': "ターミナルの操作",
   'xterm.copy': "コピー",

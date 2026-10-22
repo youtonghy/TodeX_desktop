@@ -2750,6 +2750,11 @@ export const ko: Messages = {
 
   // xterm
   'xterm.interactive': '대화형 터미널',
+  'xterm.image': "이미지",
+  'xterm.imageUploading': "터미널용 이미지 {count}개를 업로드하는 중…",
+  'xterm.imageUploadFailed': "이미지를 붙여넣을 수 없습니다",
+  'xterm.imageTooLarge': "{name}이(가) 20MB를 넘습니다.",
+  'xterm.imageConvertFailed': "이미지를 PNG로 변환할 수 없습니다.",
   'xterm.openLinkHint': "{key}+클릭하여 {target} 열기",
   'xterm.menu': "터미널 작업",
   'xterm.copy': "복사",

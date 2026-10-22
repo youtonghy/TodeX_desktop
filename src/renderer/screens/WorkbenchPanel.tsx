@@ -51,6 +51,7 @@ import { isLoopbackUrl } from '@todex/protocol/mobileParity';
 import { resolveTerminalPath } from '@todex/protocol/terminalText';
 import { patchTerminalActivity, forgetTerminalActivity, terminalActivity, useTerminalActivity } from '../session/terminalActivity';
 import { postCompletionNotification } from '../session/completionNotifications';
+import { uploadTerminalImages } from '../session/terminalImagePaste';
 import { t, useT, type MessageKey } from '../i18n';
 
 type Props = {
@@ -700,6 +701,8 @@ function TerminalTabTitle({ terminalId, fallback }: { terminalId: string; fallba
   return <>{activity.title ? `${activity.title} — ${fallback}` : fallback}</>;
 }
 
+/** How long opening a terminal waits for its view to report a size. */
+const VIEW_SIZE_WAIT_MS = 400;
 /** Commands this long that finish out of sight post a notification. */
 const COMMAND_NOTIFY_MS = 10_000;
 /** A terminal shows its "printing" dot this long after output. */
@@ -758,15 +761,38 @@ function TerminalPane({ session, terminalId, isActive, shown, workspaceTarget, s
     }
   }, [terminalId, backendIdentity]);
 
+  /** The size the view last reported; null until it has been laid out. */
+  const viewSizeRef = useRef<{ rows: number; cols: number } | null>(null);
+
   useEffect(() => {
     if (!terminal) return;
-    terminalSizeRef.current = { rows: terminal.rows, cols: terminal.cols };
+    // Until the view reports its size, starts use the PTY's last size.
+    if (!viewSizeRef.current) terminalSizeRef.current = { rows: terminal.rows, cols: terminal.cols };
   }, [terminal?.cols, terminal?.rows]);
+
+  // The view's size may arrive while the terminal is still starting (the
+  // resize is dropped then): once it runs, bring the PTY to the view's size.
+  // Only on that transition, so two windows never undo each other's size.
+  useEffect(() => {
+    const view = viewSizeRef.current;
+    const current = terminalByIdRef.current[terminalId];
+    if (terminal?.status !== 'running' || !current || !view) return;
+    if (current.rows === view.rows && current.cols === view.cols) return;
+    session.resizeTerminalSession(terminalId, tenantId, view.rows, view.cols);
+  }, [terminal?.status, terminalId, tenantId, session.resizeTerminalSession]);
+
+  // Opening waits for the view's size (or a moment, for a hidden tab), so
+  // the PTY and its snapshot already have the size the view shows.
+  const [viewReady, setViewReady] = useState(false);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setViewReady(true), VIEW_SIZE_WAIT_MS);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   // Joins the terminal when the backend still runs it (after a reload, or
   // from another window), otherwise starts it.
   useEffect(() => {
-    if (!target || !terminalId || connectionState !== 'open') {
+    if (!target || !terminalId || connectionState !== 'open' || !viewReady) {
       return;
     }
     const current = terminalByIdRef.current[terminalId];
@@ -792,6 +818,7 @@ function TerminalPane({ session, terminalId, isActive, shown, workspaceTarget, s
     isSsh,
     targetKey,
     connectionState,
+    viewReady,
     session.openTerminalSession,
     terminalId,
     workspace?.id,
@@ -869,6 +896,8 @@ function TerminalPane({ session, terminalId, isActive, shown, workspaceTarget, s
 
   const handleTerminalResize = useCallback((rows: number, cols: number) => {
     terminalSizeRef.current = { rows, cols };
+    viewSizeRef.current = { rows, cols };
+    setViewReady(true);
     const current = terminalByIdRef.current[terminalId];
     if (!target || !current || current.status !== 'running') return;
     if (current.rows === rows && current.cols === cols) return;
@@ -910,6 +939,22 @@ function TerminalPane({ session, terminalId, isActive, shown, workspaceTarget, s
     onData: handleTerminalData,
     onResize: handleTerminalResize,
     onClear: () => session.clearTerminalOutput(terminalId),
+    onRequestSnapshot: () => session.requestTerminalSnapshot(terminalId),
+    onPasteImages: async (files) => {
+      const backendId = (isSsh ? sshBackendId : terminal?.backendConnectionId) || session.activeBackendConnectionId;
+      const api = backendApi(session.settingsForBackend(backendId));
+      const pending = toast.info(t('xterm.imageUploading', { count: String(files.length) }), { timeout: 0 });
+      try {
+        return await uploadTerminalImages(files, isSsh && sshHost
+          ? { kind: 'ssh', api, backendId, host: sshHost }
+          : { kind: 'backend', api });
+      } catch (error) {
+        toast.danger(t('xterm.imageUploadFailed'), { description: error instanceof Error ? error.message : String(error) });
+        throw error;
+      } finally {
+        toast.close(pending);
+      }
+    },
     onCwd: (path) => {
       liveCwdRef.current = path;
       patchTerminalActivity(terminalId, { cwd: path });

@@ -123,6 +123,8 @@ export type ServerVersion = {
   historyEncryption?: number;
   /** `1` when terminal output carries `seq` and `terminal.attach` exists. */
   terminalReplay?: number;
+  /** `1` when an attach that cannot continue sends a screen snapshot. */
+  terminalSnapshot?: number;
 };
 
 // Dev builds report "DEV0.0.0" (backend and clients) or a bare "0.0.0"; warning

@@ -11,6 +11,7 @@ import { Terminal, type IDisposable, type IMarker, type ITheme } from '@xterm/xt
 import type { TerminalStream } from '@todex/protocol/terminalStream';
 import {
   findFileLinks,
+  isTerminalImageType,
   parseOsc133,
   parseOsc7,
   parseTerminalNotification,
@@ -47,6 +48,12 @@ export type XtermTerminalHandlers = {
   onProgress?: (progress: { state: number; value: number }) => void;
   /** Ctrl/⌘-click on a `path:line:col` reference; the receiver resolves it. */
   onOpenFile?: (path: string, line?: number, column?: number) => void;
+  /** The kept output lost its start: ask the backend for the screen instead.
+   * True when a snapshot is on its way (it arrives as a reset). */
+  onRequestSnapshot?: () => boolean;
+  /** Images pasted (with no text) or dropped: store them where the program
+   * can read them and resolve with their paths, which are then pasted. */
+  onPasteImages?: (files: File[]) => Promise<string[]>;
 };
 
 type Props = XtermTerminalHandlers & {
@@ -188,6 +195,20 @@ export function XtermTerminal({ stream, isActive, isDisabled = false, ...handler
     terminal.paste(sanitizePaste(text));
   }, []);
 
+  /** Pastes each stored image's path on its own, as agent CLIs expect. */
+  const pasteImages = useCallback(async (files: File[]) => {
+    const upload = handlersRef.current.onPasteImages;
+    if (!upload || !files.length || terminalRef.current?.options.disableStdin) return;
+    let paths: string[];
+    try {
+      paths = await upload(files);
+    } catch {
+      return;
+    }
+    for (const path of paths) terminalRef.current?.paste(path);
+    terminalRef.current?.focus();
+  }, []);
+
   const copySelection = useCallback(() => {
     const selection = terminalRef.current?.getSelection() ?? '';
     if (selection) void navigator.clipboard?.writeText(selection).catch(() => undefined);
@@ -260,8 +281,8 @@ export function XtermTerminal({ stream, isActive, isDisabled = false, ...handler
   }, []);
 
   // The terminal's key and paste handlers read the latest callbacks here.
-  const actionsRef = useRef({ copySelection, openFind, clearTerminal, jumpToPrompt, pasteText });
-  actionsRef.current = { copySelection, openFind, clearTerminal, jumpToPrompt, pasteText };
+  const actionsRef = useRef({ copySelection, openFind, clearTerminal, jumpToPrompt, pasteText, pasteImages });
+  actionsRef.current = { copySelection, openFind, clearTerminal, jumpToPrompt, pasteText, pasteImages };
 
   useEffect(() => {
     const container = containerRef.current;
@@ -441,13 +462,33 @@ export function XtermTerminal({ stream, isActive, isDisabled = false, ...handler
       return true;
     });
 
+    const imagesOf = (data: DataTransfer | null) => [...(data?.files ?? [])].filter((file) => isTerminalImageType(file.type));
     // Every paste (keys, menu, middle click) goes through the safety checks.
+    // Text wins; with no text, pasted images are uploaded and their paths
+    // pasted (an agent CLI then attaches them).
     const onPaste = (event: ClipboardEvent) => {
       event.preventDefault();
       event.stopImmediatePropagation();
-      actionsRef.current.pasteText(event.clipboardData?.getData('text/plain') ?? '');
+      const text = event.clipboardData?.getData('text/plain') ?? '';
+      const images = text ? [] : imagesOf(event.clipboardData);
+      if (images.length) void actionsRef.current.pasteImages(images);
+      else actionsRef.current.pasteText(text);
     };
     container.addEventListener('paste', onPaste, true);
+    const onDragOver = (event: DragEvent) => {
+      if (!handlersRef.current.onPasteImages || !event.dataTransfer?.types.includes('Files')) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'copy';
+    };
+    const onDrop = (event: DragEvent) => {
+      const images = imagesOf(event.dataTransfer);
+      if (!handlersRef.current.onPasteImages || !images.length) return;
+      event.preventDefault();
+      event.stopPropagation();
+      void actionsRef.current.pasteImages(images);
+    };
+    container.addEventListener('dragover', onDragOver);
+    container.addEventListener('drop', onDrop);
 
     on(terminal.onData((data) => handlersRef.current.onData(data)));
 
@@ -485,7 +526,10 @@ export function XtermTerminal({ stream, isActive, isDisabled = false, ...handler
       terminal.write(pending);
       pending = '';
     };
-    terminal.write(stream.snapshot());
+    // A truncated tail may start mid-sequence; a snapshot replaces it.
+    if (!stream.truncated || !handlersRef.current.onRequestSnapshot?.()) {
+      terminal.write(stream.snapshot());
+    }
     const unsubscribe = stream.subscribe((update) => {
       if (update.kind === 'reset') {
         window.cancelAnimationFrame(writeFrame);
@@ -511,6 +555,8 @@ export function XtermTerminal({ stream, isActive, isDisabled = false, ...handler
       window.cancelAnimationFrame(fitFrame);
       window.clearTimeout(resizeTimer);
       container.removeEventListener('paste', onPaste, true);
+      container.removeEventListener('dragover', onDragOver);
+      container.removeEventListener('drop', onDrop);
       resizeObserver.disconnect();
       disposables.forEach((disposable) => disposable.dispose());
       webglRef.current?.dispose();
