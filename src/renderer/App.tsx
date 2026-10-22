@@ -42,8 +42,7 @@ import { useFeatureModes } from './session/featureToggles';
 const SettingsPanel = lazy(() => import('./screens/SettingsPanel').then((module) => ({ default: module.SettingsPanel })));
 const AsidePanel = lazy(() => import('./screens/AsidePanel').then((module) => ({ default: module.AsidePanel })));
 const WorkbenchPanel = lazy(() => import('./screens/WorkbenchPanel').then((module) => ({ default: module.WorkbenchPanel })));
-const UsagePanel = lazy(() => import('./screens/UsagePanel').then((module) => ({ default: module.UsagePanel })));
-const QuotaPanel = lazy(() => import('./screens/QuotaPanel').then((module) => ({ default: module.QuotaPanel })));
+const ProfilePanel = lazy(() => import('./screens/ProfilePanel').then((module) => ({ default: module.ProfilePanel })));
 const KanbanPanel = lazy(() => import('./screens/KanbanPanel').then((module) => ({ default: module.KanbanPanel })));
 const SshPanel = lazy(() => import('./screens/SshPanel').then((module) => ({ default: module.SshPanel })));
 
@@ -193,6 +192,11 @@ export function App() {
     : session.activeBackendConnectionId;
   // The task board, like the terminal, takes the conversation's place in the shell.
   const kanbanActive = panel === 'kanban';
+  // So does the user's profile page.
+  const profileActive = panel === 'profile';
+  // A full page in the conversation's place: it sits on the full surface and
+  // the Workbench stays hidden.
+  const pageActive = kanbanActive || profileActive;
   const features = useFeatureModes();
   const terminalEnabled = features.terminal !== 'off';
   const kanbanEnabled = features.kanban !== 'off';
@@ -211,7 +215,7 @@ export function App() {
   const { isOpen: asideOpen, setOpen: setAsideOpenRaw, tab: workbenchTab, setTab: setWorkbenchTab,
     target: panelTarget, setTarget: setPanelTarget } = layout;
   // The aside is actually on screen; live views stop streaming otherwise.
-  const asideShown = Boolean(scopeKey) && layout.hydrated && asideOpen && !kanbanActive;
+  const asideShown = Boolean(scopeKey) && layout.hydrated && asideOpen && !pageActive;
   const persistAsideOpen = useCallback((open: boolean) => {
     if (open !== asideOpen) animatePanelMotion();
     setAsideOpenRaw(open);
@@ -268,14 +272,14 @@ export function App() {
     if (isWorkbenchTab(next)) {
       setWorkbenchTab(next);
     }
-    if (next !== 'settings' && next !== 'usage' && next !== 'quota') {
+    if (next !== 'settings' && next !== 'profile') {
       persistAsideOpen(true);
     }
   }, [persistAsideOpen, scopeKey, setPanelTarget, setWorkbenchTab]);
   openPanelHandlerRef.current = openPanel;
 
   useEffect(() => {
-    setPanel(current => current && ['settings', 'usage', 'quota', 'kanban', 'ssh'].includes(current) ? current : null);
+    setPanel(current => current && ['settings', 'profile', 'kanban', 'ssh'].includes(current) ? current : null);
     setSlashCommand(undefined);
   }, [scopeKey]);
 
@@ -461,10 +465,8 @@ export function App() {
   useEffect(() => { if (!settingsOpen) setRepairPairing(false); }, [settingsOpen]);
   // A category to show (About, from the update menu or the About route).
   useEffect(() => { if (!settingsOpen) setSettingsSectionRequest(undefined); }, [settingsOpen]);
-  const usageOpen = panel === 'usage';
-  const quotaOpen = panel === 'quota';
-  const modalPanel = settingsOpen || usageOpen || quotaOpen;
-  const overlayPanel = panelScopeRef.current === scopeKey && panel && panel !== 'kanban' && panel !== 'ssh' && !modalPanel && !isWorkbenchTab(panel) ? panel : null;
+  const modalPanel = settingsOpen;
+  const overlayPanel = panelScopeRef.current === scopeKey && panel && panel !== 'kanban' && panel !== 'profile' && panel !== 'ssh' && !modalPanel && !isWorkbenchTab(panel) ? panel : null;
 
   const asideContent = (
     !scopeKey || !layout.hydrated ? null : (
@@ -497,13 +499,13 @@ export function App() {
           <ShortcutHint id="toggleSidebar" className={headerHint} />
         </span>
       )}
-      {sshActive || kanbanActive ? (
-        <span className="min-w-0 flex-1 truncate text-body-semibold text-text-primary">{t(kanbanActive ? 'sidebar.kanban' : 'ssh.title')}</span>
+      {sshActive || pageActive ? (
+        <span className="min-w-0 flex-1 truncate text-body-semibold text-text-primary">{t(kanbanActive ? 'sidebar.kanban' : profileActive ? 'app.profile' : 'ssh.title')}</span>
       ) : (
         <ConversationHeaderDetails session={session} title={session.activeConversation?.title ?? t('app.conversation')} gitOpen={gitOpen} onOpenGit={() => setGitOpen(true)} />
       )}
       <div className="flex shrink-0 items-center gap-1">
-        {!sshActive && !kanbanActive ? (
+        {!sshActive && !pageActive ? (
           <span className="relative inline-flex shrink-0">
             <IconAction icon={RiGithubLine} aria-label={t('app.githubActions')} onClick={() => setGitOpen(true)} />
             <ShortcutHint id="gitActions" className={headerHint} />
@@ -512,7 +514,7 @@ export function App() {
         {asideShown && !compactLayout ? (
           <IconAction icon={RiExpandLeftLine} aria-label={t('app.collapseChat')} tooltip onClick={() => toggleChatCollapsed(true)} />
         ) : null}
-        {kanbanActive ? null : <span className="relative inline-flex shrink-0">
+        {pageActive ? null : <span className="relative inline-flex shrink-0">
           <IconAction icon={RiLayoutRightLine} aria-label={asideOpen ? t('app.closeAside') : t('app.openAside')} aria-expanded={asideOpen} onClick={() => persistAsideOpen(!asideOpen)} />
           <ShortcutHint id="toggleAside" className={headerHint} />
         </span>}
@@ -520,7 +522,11 @@ export function App() {
     </header>
   );
   const mainContent = (
-    kanbanActive ? (
+    profileActive ? (
+      <PanelBoundary>
+        <ProfilePanel session={session} />
+      </PanelBoundary>
+    ) : kanbanActive ? (
       <PanelBoundary>
         <KanbanPanel session={session} onOpenConversation={() => setPanel(null)} />
       </PanelBoundary>
@@ -557,8 +563,9 @@ export function App() {
   const chatContainer = (
     <main className={cx(
       'flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-3xl',
-      // The board's columns are secondary panels, so it sits on the full surface.
-      kanbanActive ? 'border border-border-button-default bg-background-full' : 'bg-background-secondary-default',
+      // The board's columns and the profile's cards are secondary panels, so
+      // those pages sit on the full surface.
+      pageActive ? 'border border-border-button-default bg-background-full' : 'bg-background-secondary-default',
     )}>
       {header}
       <div className="min-h-0 flex-1">{mainContent}</div>
@@ -603,13 +610,12 @@ export function App() {
         return Boolean(record);
       }}
       onOpenSettings={() => setPanel('settings')}
-      onOpenUsage={() => setPanel('usage')}
-      onOpenQuota={() => setPanel('quota')}
+      onOpenProfile={() => { setPanel('profile'); persistAsideOpen(false); }}
       onOpenKanban={() => { setPanel('kanban'); persistAsideOpen(false); }}
       onOpenTerminal={toggleSshView}
       terminalActive={sshActive}
       kanbanActive={kanbanActive}
-      onSelectConversation={() => setPanel(current => current === 'ssh' || current === 'kanban' ? null : current)}
+      onSelectConversation={() => setPanel(current => current === 'ssh' || current === 'kanban' || current === 'profile' ? null : current)}
     />
   );
   const drawerOpen = isMobile && mobileNavOpen;
@@ -697,12 +703,6 @@ export function App() {
           category page scrolls on its own beside the category list. */}
       <Modal isOpen={settingsOpen} onOpenChange={closePanel('settings')} title={t('app.settings')} size="4xl" className="h-[min(90vh,48rem)]" bodyClassName="flex min-h-0 flex-col overflow-hidden px-0 pb-0">
         <PanelBoundary><SettingsPanel session={session} historyRecoverySetup={historyRecoverySetup} repairPairing={repairPairing} sectionRequest={settingsSectionRequest} /></PanelBoundary>
-      </Modal>
-      <Modal isOpen={usageOpen} onOpenChange={closePanel('usage')} title={t('app.usage')} size="3xl" className="max-h-[92vh]" bodyClassName="overflow-y-auto">
-        <PanelBoundary><UsagePanel session={session} /></PanelBoundary>
-      </Modal>
-      <Modal isOpen={quotaOpen} onOpenChange={closePanel('quota')} title={t('usage.quotaTitle')} size="2xl" className="max-h-[90vh]" bodyClassName="overflow-y-auto">
-        <PanelBoundary><QuotaPanel session={session} /></PanelBoundary>
       </Modal>
       <GitActionsModal key={session.activeConversation?.id} session={session} isOpen={gitOpen} onOpenChange={setGitOpen} />
       {createOpen ? <CreateWorkspaceModal

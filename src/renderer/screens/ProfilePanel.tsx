@@ -9,6 +9,7 @@ import { Badge } from '@/components/base/badges/badge';
 import { Chip } from '@/components/base/badges/chip';
 import { Select, SelectItem } from '@/components/base/select/select';
 import { EmptyState } from '@/components/ui/empty-state';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { AppIcon } from '../components/AppIcon';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { getLocale, t, useT } from '../i18n';
@@ -112,10 +113,11 @@ function heatmapCells(tokens: Map<string, number>, today: Date): ContributionCel
   }));
 }
 
-/** Usage on the BoardUI AI profile template: the profile card with totals and
- * the activity heatmap, active conversations per day for a month, the token
- * trend of the last 30 days, and the per-agent / per-model breakdown. */
-export function UsagePanel({ session }: Props) {
+/** The user's profile page, in place of the conversation: usage on the
+ * BoardUI AI profile template — the profile card with totals and the
+ * activity heatmap, active conversations per day for a month beside the
+ * token trend of the last 30 days, and the per-agent / per-model breakdown. */
+export function ProfilePanel({ session }: Props) {
   const t = useT();
   const [provider, setProvider] = useState('all');
   const [model, setModel] = useState('all');
@@ -173,105 +175,109 @@ export function UsagePanel({ session }: Props) {
   }, []);
 
   return (
-    <div className="mx-auto flex w-full max-w-[680px] flex-col items-center gap-4 py-1">
-      <AiProfileCard
-        avatar={<AppIcon className="size-12" />}
-        name={t('app.usage')}
-        subtitle={t('usage.profileSummary', { records: filtered.length, models: new Set(filtered.map((record) => record.model)).size })}
-        badge={<Badge color="neutral">{provider === 'all' ? t('usage.allAgents') : titleCase(provider)}</Badge>}
-        actions={(
-          <>
-            <Select
-              aria-label="Agent"
-              size="sm"
-              className="w-36"
-              triggerClassName="w-full"
-              popoverClassName="w-56"
-              selectedKey={provider}
-              onSelectionChange={(key) => { if (typeof key === 'string') { setProvider(key); setModel('all'); } }}
-            >
-              <SelectItem id="all" textValue={t('usage.allAgents')}>{t('usage.allAgents')}</SelectItem>
-              {providers.map((item) => <SelectItem key={item} id={item} textValue={titleCase(item)}>{titleCase(item)}</SelectItem>)}
-            </Select>
-            <Select
-              aria-label={t('usage.modelLabel')}
-              size="sm"
-              className="w-36"
-              triggerClassName="w-full"
-              popoverClassName="w-56"
-              selectedKey={models.includes(model) ? model : 'all'}
-              onSelectionChange={(key) => { if (typeof key === 'string') setModel(key); }}
-            >
-              <SelectItem id="all" textValue={t('usage.allModels')}>{t('usage.allModels')}</SelectItem>
-              {models.map((item) => <SelectItem key={item} id={item} textValue={item}>{item}</SelectItem>)}
-            </Select>
-          </>
-        )}
-        headlineLabel={t('usage.totalLabel')}
-        headline={totals.totalTokens}
-        formatHeadline={formatTokens}
-        chip={cacheRate === null ? undefined : <Chip variant="bold" color="purple">{t('usage.cacheChip', { rate: cacheRate })}</Chip>}
-        stats={[
-          { value: formatTokens(totals.inputTokens), label: t('usage.inputLabel') },
-          { value: formatTokens(totals.outputTokens), label: t('usage.outputLabel') },
-          { value: formatTokens(totals.cachedInputTokens), label: t('usage.cacheReadLabel') },
-          { value: formatTokens(totals.cacheWriteTokens), label: t('usage.cacheWriteLabel') },
-        ]}
-        activityLabel={t('usage.activity')}
-        cells={cells}
-      />
+    <ScrollArea className="h-full" contentClassName="px-5 pb-6" surface="full">
+      <div className="mx-auto flex w-full max-w-5xl flex-col gap-4 pt-1">
+        <AiProfileCard
+          avatar={<AppIcon className="size-12" />}
+          name="TodeX"
+          subtitle={t('usage.profileSummary', { records: filtered.length, models: new Set(filtered.map((record) => record.model)).size })}
+          badge={<Badge color="neutral">{provider === 'all' ? t('usage.allAgents') : titleCase(provider)}</Badge>}
+          actions={(
+            <>
+              <Select
+                aria-label="Agent"
+                size="sm"
+                className="w-36"
+                triggerClassName="w-full"
+                popoverClassName="w-56"
+                selectedKey={provider}
+                onSelectionChange={(key) => { if (typeof key === 'string') { setProvider(key); setModel('all'); } }}
+              >
+                <SelectItem id="all" textValue={t('usage.allAgents')}>{t('usage.allAgents')}</SelectItem>
+                {providers.map((item) => <SelectItem key={item} id={item} textValue={titleCase(item)}>{titleCase(item)}</SelectItem>)}
+              </Select>
+              <Select
+                aria-label={t('usage.modelLabel')}
+                size="sm"
+                className="w-36"
+                triggerClassName="w-full"
+                popoverClassName="w-56"
+                selectedKey={models.includes(model) ? model : 'all'}
+                onSelectionChange={(key) => { if (typeof key === 'string') setModel(key); }}
+              >
+                <SelectItem id="all" textValue={t('usage.allModels')}>{t('usage.allModels')}</SelectItem>
+                {models.map((item) => <SelectItem key={item} id={item} textValue={item}>{item}</SelectItem>)}
+              </Select>
+            </>
+          )}
+          headlineLabel={t('usage.totalLabel')}
+          headline={totals.totalTokens}
+          formatHeadline={formatTokens}
+          chip={cacheRate === null ? undefined : <Chip variant="bold" color="purple">{t('usage.cacheChip', { rate: cacheRate })}</Chip>}
+          stats={[
+            { value: formatTokens(totals.inputTokens), label: t('usage.inputLabel') },
+            { value: formatTokens(totals.outputTokens), label: t('usage.outputLabel') },
+            { value: formatTokens(totals.cachedInputTokens), label: t('usage.cacheReadLabel') },
+            { value: formatTokens(totals.cacheWriteTokens), label: t('usage.cacheWriteLabel') },
+          ]}
+          activityLabel={t('usage.activity')}
+          cells={cells}
+        />
 
-      <AgentsChartCard
-        title={t('usage.activeConversations')}
-        total={monthConversations}
-        days={conversationDays}
-        formatValue={(value) => t('usage.conversationCount', { count: value })}
-        dayLabel={(index) => shortDate(dayDates[index])}
-        periodLabel={monthLabel}
-        onPrev={() => setMonthOffset((offset) => offset - 1)}
-        onNext={() => setMonthOffset((offset) => Math.min(0, offset + 1))}
-        prevLabel={t('usage.previousMonth')}
-        nextLabel={t('usage.nextMonth')}
-        startLabel={shortDate(dayDates[0])}
-        endLabel={monthOffset === 0 ? t('usage.today') : shortDate(dayDates[dayDates.length - 1])}
-      />
+        <div className="grid w-full gap-4 lg:grid-cols-2">
+          <AgentsChartCard
+            title={t('usage.activeConversations')}
+            total={monthConversations}
+            days={conversationDays}
+            formatValue={(value) => t('usage.conversationCount', { count: value })}
+            dayLabel={(index) => shortDate(dayDates[index])}
+            periodLabel={monthLabel}
+            onPrev={() => setMonthOffset((offset) => offset - 1)}
+            onNext={() => setMonthOffset((offset) => Math.min(0, offset + 1))}
+            prevLabel={t('usage.previousMonth')}
+            nextLabel={t('usage.nextMonth')}
+            startLabel={shortDate(dayDates[0])}
+            endLabel={monthOffset === 0 ? t('usage.today') : shortDate(dayDates[dayDates.length - 1])}
+          />
 
-      <TokensChartCard
-        title={t('usage.last30Days')}
-        series={trend}
-        total={trendTotal}
-        change={change === null ? '' : `${change >= 0 ? '+' : '−'}${Math.abs(change).toFixed(1)}%`}
-        formatValue={(value) => t('usage.tokensValue', { value: formatTokens(value) })}
-        startLabel={trend[0].label}
-        endLabel={t('usage.today')}
-      />
-
-      <section className="flex w-full flex-col gap-2.5 rounded-[20px] bg-background-secondary-default px-2.5 py-3">
-        <div className="flex flex-col gap-0.5 px-1.5 pt-1">
-          <p className="text-body-medium text-text-secondary">{provider === 'all' ? t('usage.byAgent') : t('usage.byModel')}</p>
-          <p className="text-body-2-regular text-text-tertiary">{t('usage.chartHint')}</p>
+          <TokensChartCard
+            title={t('usage.last30Days')}
+            series={trend}
+            total={trendTotal}
+            change={change === null ? '' : `${change >= 0 ? '+' : '−'}${Math.abs(change).toFixed(1)}%`}
+            formatValue={(value) => t('usage.tokensValue', { value: formatTokens(value) })}
+            startLabel={trend[0].label}
+            endLabel={t('usage.today')}
+          />
         </div>
-        {breakdown.length ? (
-          <div className="flex flex-col gap-1">
-            {breakdown.slice(0, 12).map((row) => {
-              const width = breakdownMax ? Math.max((row.total / breakdownMax) * 100, 2) : 0;
-              return (
-                <div key={row.name} className="group relative flex h-9 items-center justify-between gap-3 rounded-lg px-2.5">
-                  <div
-                    aria-hidden
-                    className="absolute inset-y-0 start-0 rounded-lg bg-chart-agents-bar/40 transition-[width,background-color] duration-500 ease-out group-hover:bg-chart-agents-bar/70 motion-reduce:transition-none"
-                    style={{ width: mounted ? `${width}%` : 0 }}
-                  />
-                  <span className="relative min-w-0 truncate text-body-regular text-text-primary" title={row.name}>{row.name}</span>
-                  <span className="relative shrink-0 text-body-medium text-text-primary tabular-nums">{formatTokens(row.total)}</span>
-                </div>
-              );
-            })}
+
+        <section className="flex w-full flex-col gap-2.5 rounded-[20px] bg-background-secondary-default px-2.5 py-3">
+          <div className="flex flex-col gap-0.5 px-1.5 pt-1">
+            <p className="text-body-medium text-text-secondary">{provider === 'all' ? t('usage.byAgent') : t('usage.byModel')}</p>
+            <p className="text-body-2-regular text-text-tertiary">{t('usage.chartHint')}</p>
           </div>
-        ) : (
-          <EmptyState className="min-h-40" size="sm" icon={RiBarChartBoxLine} title={t('usage.emptyTitle')} description={t('usage.emptyHint')} />
-        )}
-      </section>
-    </div>
+          {breakdown.length ? (
+            <div className="flex flex-col gap-1">
+              {breakdown.slice(0, 12).map((row) => {
+                const width = breakdownMax ? Math.max((row.total / breakdownMax) * 100, 2) : 0;
+                return (
+                  <div key={row.name} className="group relative flex h-9 items-center justify-between gap-3 rounded-lg px-2.5">
+                    <div
+                      aria-hidden
+                      className="absolute inset-y-0 start-0 rounded-lg bg-chart-agents-bar/40 transition-[width,background-color] duration-500 ease-out group-hover:bg-chart-agents-bar/70 motion-reduce:transition-none"
+                      style={{ width: mounted ? `${width}%` : 0 }}
+                    />
+                    <span className="relative min-w-0 truncate text-body-regular text-text-primary" title={row.name}>{row.name}</span>
+                    <span className="relative shrink-0 text-body-medium text-text-primary tabular-nums">{formatTokens(row.total)}</span>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <EmptyState className="min-h-40" size="sm" icon={RiBarChartBoxLine} title={t('usage.emptyTitle')} description={t('usage.emptyHint')} />
+          )}
+        </section>
+      </div>
+    </ScrollArea>
   );
 }

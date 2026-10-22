@@ -1,4 +1,4 @@
-import { RiPushpin2Fill, RiLockLine, RiAddLine, RiArrowRightSLine, RiCheckLine, RiFolderReduceLine, RiFoldersLine, RiFolderTransferLine, RiPencilLine, RiEdit2Line, RiErrorWarningLine, RiFolder3Line, RiFolderOpenLine, RiGitBranchLine, RiDeleteBinLine, RiArrowDownSLine, RiBarChartBoxLine, RiBookOpenLine, RiKanbanView2, RiMoreLine, RiPaletteLine, RiPriceTag3Line, RiSettings3Line, RiTerminalLine, RiTimeLine, RiTimerLine, RiVipCrownLine } from '@remixicon/react';
+import { RiPushpin2Fill, RiLockLine, RiAddLine, RiArrowRightSLine, RiCheckLine, RiFolderReduceLine, RiFoldersLine, RiFolderTransferLine, RiPencilLine, RiEdit2Line, RiErrorWarningLine, RiFolder3Line, RiFolderOpenLine, RiGitBranchLine, RiDeleteBinLine, RiArrowDownSLine, RiBookOpenLine, RiKanbanView2, RiMoreLine, RiPaletteLine, RiPriceTag3Line, RiSettings3Line, RiTerminalLine, RiTimeLine, RiTimerLine, RiUser3Line } from '@remixicon/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { MouseEvent, ReactNode } from 'react';
 import {
@@ -77,8 +77,7 @@ type Props = {
    * the picked agent (the default one when absent). */
   onCreateScheduledConversation: (workspaceId: string, at: string, options: { provider?: ProviderKind }) => Promise<boolean>;
   onOpenSettings: () => void;
-  onOpenUsage: () => void;
-  onOpenQuota: () => void;
+  onOpenProfile: () => void;
   onOpenKanban: () => void;
   /** Toggles the SSH view (hosts, keys, SSH terminals, remote files). */
   onOpenTerminal: () => void;
@@ -330,8 +329,7 @@ export function AppSidebar({
   onCreateConversation,
   onCreateScheduledConversation,
   onOpenSettings,
-  onOpenUsage,
-  onOpenQuota,
+  onOpenProfile,
   onOpenKanban,
   onOpenTerminal,
   terminalActive = false,
@@ -1151,14 +1149,21 @@ export function AppSidebar({
     { key: 'settings', label: t('app.settings'), icon: RiSettings3Line, isSelected: false, onClick: onOpenSettings },
   ];
 
-  // The TodeX menu (formerly the identity menu): usage. Settings (with About,
-  // CLI management and cleanup) sits right above it as its own row.
+  // The TodeX menu (formerly the identity menu): the profile page. Settings
+  // (with About, CLI management and cleanup) sits right above it as its own row.
   const teamMenuGroups: DashboardTeamMenuGroup[] = [
     {
-      id: 'usage',
+      id: 'profile',
       items: [
-        { id: 'usage', icon: RiBarChartBoxLine, label: t('app.usage'), onSelect: onOpenUsage },
-        { id: 'quota', icon: RiVipCrownLine, label: t('usage.quotaTitle'), onSelect: onOpenQuota },
+        {
+          id: 'profile',
+          icon: RiUser3Line,
+          label: t('app.profile'),
+          onSelect: () => {
+            if (mobile) onCloseMobile?.();
+            onOpenProfile();
+          },
+        },
       ],
     },
   ];

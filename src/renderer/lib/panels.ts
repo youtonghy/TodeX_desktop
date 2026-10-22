@@ -2,8 +2,8 @@ import type { RemoteFilesBinding } from '../session/fileSources';
 
 export type DesktopPanel =
   | 'settings'
-  | 'usage'
-  | 'quota'
+  /** The user's profile (usage); renders as the main content inside AppLayout. */
+  | 'profile'
   | 'slash-commands'
   | 'slash-action'
   | 'git-diff'
@@ -48,10 +48,11 @@ export function panelFromRoute(name: string): DesktopPanel | null {
   switch (name) {
     case 'Settings':
       return 'settings';
+    // Plan quota shows on each agent's context card in the composer now.
+    case 'Profile':
     case 'Usage':
-      return 'usage';
     case 'Quota':
-      return 'quota';
+      return 'profile';
     case 'SlashCommands':
       return 'slash-commands';
     case 'SlashCommandAction':
