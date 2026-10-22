@@ -41,13 +41,9 @@ import { useFeatureModes } from './session/featureToggles';
 // Secondary surfaces load on demand so the main bundle stays small.
 const SettingsPanel = lazy(() => import('./screens/SettingsPanel').then((module) => ({ default: module.SettingsPanel })));
 const AsidePanel = lazy(() => import('./screens/AsidePanel').then((module) => ({ default: module.AsidePanel })));
-const CapabilitiesPanel = lazy(() => import('./screens/CapabilitiesPanel').then((module) => ({ default: module.CapabilitiesPanel })));
 const WorkbenchPanel = lazy(() => import('./screens/WorkbenchPanel').then((module) => ({ default: module.WorkbenchPanel })));
 const UsagePanel = lazy(() => import('./screens/UsagePanel').then((module) => ({ default: module.UsagePanel })));
 const QuotaPanel = lazy(() => import('./screens/QuotaPanel').then((module) => ({ default: module.QuotaPanel })));
-const CliManagerPanel = lazy(() => import('./screens/CliManagerPanel').then((module) => ({ default: module.CliManagerPanel })));
-const AgentProvidersPanel = lazy(() => import('./screens/AgentProvidersPanel').then((module) => ({ default: module.AgentProvidersPanel })));
-const CleanupPanel = lazy(() => import('./screens/CleanupPanel').then((module) => ({ default: module.CleanupPanel })));
 const KanbanPanel = lazy(() => import('./screens/KanbanPanel').then((module) => ({ default: module.KanbanPanel })));
 const SshPanel = lazy(() => import('./screens/SshPanel').then((module) => ({ default: module.SshPanel })));
 
@@ -158,7 +154,6 @@ export function App() {
   const [sidebarOpen, setSidebarOpen] = useState(() => readLayoutOpen().sidebarOpen);
   const [createOpen, setCreateOpen] = useState(false);
   const [editingWorkspaceId, setEditingWorkspaceId] = useState<string | null>(null);
-  const [capabilitiesOpen, setCapabilitiesOpen] = useState(false);
   const [gitOpen, setGitOpen] = useState(false);
 
   const [panelMotion, setPanelMotion] = useState(false);
@@ -253,9 +248,12 @@ export function App() {
   );
 
   const openPanel = useCallback((name: string, params?: OpenPanelOptions) => {
-    // About is a settings category now; the route still opens it.
-    if (name === 'About') {
-      setSettingsSectionRequest({ section: 'about', at: Date.now() });
+    // About and CLI management (with each agent's skills and MCPs, accounts
+    // and cleanup) are settings categories now; their routes still open them.
+    const section = name === 'About' ? 'about'
+      : name === 'CliManager' || name === 'AgentProviders' || name === 'Cleanup' || name === 'Capabilities' ? 'cli' : null;
+    if (section) {
+      setSettingsSectionRequest({ section, at: Date.now() });
       setPanel('settings');
       return;
     }
@@ -270,14 +268,14 @@ export function App() {
     if (isWorkbenchTab(next)) {
       setWorkbenchTab(next);
     }
-    if (next !== 'settings' && next !== 'usage' && next !== 'quota' && next !== 'cli-manager' && next !== 'agent-providers' && next !== 'cleanup') {
+    if (next !== 'settings' && next !== 'usage' && next !== 'quota') {
       persistAsideOpen(true);
     }
   }, [persistAsideOpen, scopeKey, setPanelTarget, setWorkbenchTab]);
   openPanelHandlerRef.current = openPanel;
 
   useEffect(() => {
-    setPanel(current => current && ['settings', 'usage', 'quota', 'cli-manager', 'agent-providers', 'cleanup', 'kanban', 'ssh'].includes(current) ? current : null);
+    setPanel(current => current && ['settings', 'usage', 'quota', 'kanban', 'ssh'].includes(current) ? current : null);
     setSlashCommand(undefined);
   }, [scopeKey]);
 
@@ -465,10 +463,7 @@ export function App() {
   useEffect(() => { if (!settingsOpen) setSettingsSectionRequest(undefined); }, [settingsOpen]);
   const usageOpen = panel === 'usage';
   const quotaOpen = panel === 'quota';
-  const cliManagerOpen = panel === 'cli-manager';
-  const agentProvidersOpen = panel === 'agent-providers';
-  const cleanupOpen = panel === 'cleanup';
-  const modalPanel = settingsOpen || usageOpen || quotaOpen || cliManagerOpen || agentProvidersOpen || cleanupOpen;
+  const modalPanel = settingsOpen || usageOpen || quotaOpen;
   const overlayPanel = panelScopeRef.current === scopeKey && panel && panel !== 'kanban' && panel !== 'ssh' && !modalPanel && !isWorkbenchTab(panel) ? panel : null;
 
   const asideContent = (
@@ -608,10 +603,6 @@ export function App() {
         return Boolean(record);
       }}
       onOpenSettings={() => setPanel('settings')}
-      onOpenCapabilities={() => setCapabilitiesOpen(true)}
-      onOpenCliManager={() => { persistAsideOpen(false); setPanel('cli-manager'); }}
-      onOpenAgentProviders={() => { persistAsideOpen(false); setPanel('agent-providers'); }}
-      onOpenCleanup={() => { persistAsideOpen(false); setPanel('cleanup'); }}
       onOpenUsage={() => setPanel('usage')}
       onOpenQuota={() => setPanel('quota')}
       onOpenKanban={() => { setPanel('kanban'); persistAsideOpen(false); }}
@@ -712,18 +703,6 @@ export function App() {
       </Modal>
       <Modal isOpen={quotaOpen} onOpenChange={closePanel('quota')} title={t('usage.quotaTitle')} size="2xl" className="max-h-[90vh]" bodyClassName="overflow-y-auto">
         <PanelBoundary><QuotaPanel session={session} /></PanelBoundary>
-      </Modal>
-      <Modal isOpen={cliManagerOpen} onOpenChange={closePanel('cli-manager')} title={t('app.cliManager')} size="3xl" className="max-h-[92vh]" bodyClassName="overflow-y-auto">
-        <PanelBoundary><CliManagerPanel session={session} /></PanelBoundary>
-      </Modal>
-      <Modal isOpen={agentProvidersOpen} onOpenChange={closePanel('agent-providers')} title={t('app.agentProviders')} size="3xl" className="max-h-[92vh]" bodyClassName="overflow-y-auto">
-        <PanelBoundary><AgentProvidersPanel session={session} /></PanelBoundary>
-      </Modal>
-      <Modal isOpen={cleanupOpen} onOpenChange={closePanel('cleanup')} title={t('app.cleanup')} size="3xl" className="max-h-[92vh]" bodyClassName="overflow-y-auto">
-        <PanelBoundary><CleanupPanel session={session} /></PanelBoundary>
-      </Modal>
-      <Modal isOpen={capabilitiesOpen} onOpenChange={setCapabilitiesOpen} title={t('app.mcpSkillManager')} size="2xl" className="max-h-[90vh]" bodyClassName="overflow-y-auto">
-        <PanelBoundary><CapabilitiesPanel inDialog workspacePath={session.activeWorkspace?.path ?? session.settings.defaultWorkspacePath} providers={session.v2Providers} catalogs={session.capabilityCatalogs} onRefresh={(provider) => void session.refreshCapabilityCatalog(provider)} conversationId={session.activeConversation?.id} selectedSkills={session.activeConversation ? session.selectedSkills[session.activeConversation.id] ?? [] : []} canInvoke={Boolean(session.activeConversation?.v2ConversationId)} onToggleSkill={(skill, provider) => session.activeConversation && session.toggleCatalogSkill(session.activeConversation.id, skill, provider)} onPreviewSkill={(skill, provider) => session.previewSkillResource(provider, skill.resourceId)} onLoadMcpConfig={(server) => session.getMcpServerConfig(server.provider, server.resourceId)} manager={session.capabilityManager} /></PanelBoundary>
       </Modal>
       <GitActionsModal key={session.activeConversation?.id} session={session} isOpen={gitOpen} onOpenChange={setGitOpen} />
       {createOpen ? <CreateWorkspaceModal

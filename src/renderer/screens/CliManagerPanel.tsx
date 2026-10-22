@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { RiArrowDownSLine, RiDeleteBin6Line, RiDownload2Line, RiDownloadCloud2Line, RiFileList3Line, RiRefreshLine, RiServerLine, RiSettings3Line, RiTerminalBoxLine } from '@remixicon/react';
+import { RiArrowDownSLine, RiDeleteBin6Line, RiDownload2Line, RiDownloadCloud2Line, RiFileList3Line, RiPuzzle2Line, RiRefreshLine, RiServerLine, RiSettings3Line, RiTerminalBoxLine } from '@remixicon/react';
 import { Chip, type ChipProps } from '@/components/base/badges/chip';
 import { Button } from '@/components/base/buttons/button';
 import { Divider } from '@/components/base/divider/divider';
@@ -13,13 +13,12 @@ import {
   type CliOperationAction,
   type CliUpgradeOperation,
   type CliVersionInfo,
-  type CliSettingsProvider,
   type CliVersionStatus,
   type ManagedCliProvider,
 } from '@todex/protocol/v2';
-import { CliSettingsModal } from '../components/cli/CliSettingsModal';
+import { CliAgentPage, cliPageTabs, SharedCapabilitiesPage, type CliPage } from '../components/cli/CliAgentPage';
 import { InstructionPresetsModal } from '../components/cli/InstructionPresetsModal';
-import { hasCliSettings } from '../lib/cliSettings';
+import { SettingsCard, SettingsEntry } from '../components/settings/SettingsRows';
 import { ProviderIcon } from '../components/ProviderIcon';
 import { NoticeToast } from '../components/NoticeToast';
 import { t, useT, type MessageKey } from '../i18n';
@@ -40,7 +39,17 @@ const STATUS: Record<CliVersionStatus, { labelKey: MessageKey; color: ChipColor 
   external: { labelKey: 'cli.statusExternal', color: 'neutral' },
 };
 
-export function CliManagerPanel({ session }: { session: TodeXSession }) {
+/**
+ * The CLIs on a picked backend, as a settings category. Each installed CLI
+ * opens its own page (settings, skills and MCPs, accounts, cleanup), which
+ * replaces the list while `page` is set; this component stays mounted across
+ * pages so the picked backend is kept.
+ */
+export function CliManagerPanel({ session, page = null, onPageChange = () => {} }: {
+  session: TodeXSession;
+  page?: CliPage | null;
+  onPageChange?: (page: CliPage | null) => void;
+}) {
   const t = useT();
   const [clis, setClis] = useState<CliVersionInfo[]>([]);
   const [operation, setOperation] = useState<CliUpgradeOperation>();
@@ -127,7 +136,6 @@ export function CliManagerPanel({ session }: { session: TodeXSession }) {
     }
   };
 
-  const [settingsProvider, setSettingsProvider] = useState<CliSettingsProvider | null>(null);
   const [presetsOpen, setPresetsOpen] = useState(false);
   const [removingIntegration, setRemovingIntegration] = useState(false);
   // TodeX keeps a PreToolUse hook and its MCP servers in Antigravity's global
@@ -160,7 +168,7 @@ export function CliManagerPanel({ session }: { session: TodeXSession }) {
     // upgrade; everything else just reports where the CLI stands.
     const upgradable = cli.kind === 'managed' && cli.upgradeSupported && (cli.status === 'updateAvailable' || cli.status === 'unknown');
     const target = cli.status === 'updateAvailable' ? cli.latestVersion : undefined;
-    const settingsId = hasCliSettings(cli.id) ? cli.id : null;
+    const hasPage = cli.kind === 'managed' && cliPageTabs(session, cli.id).length > 0;
     return (
       <div key={cli.id} className="flex flex-col">
         {index ? <Divider /> : null}
@@ -183,7 +191,7 @@ export function CliManagerPanel({ session }: { session: TodeXSession }) {
           ) : (
             <Chip variant="caption" color={status.color}>{t(status.labelKey)}</Chip>
           )}
-          {settingsId || cli.id === 'antigravity' ? (
+          {hasPage || cli.id === 'antigravity' ? (
             <div className="flex shrink-0 items-center gap-0.5">
               {cli.id === 'antigravity' ? (
                 <IconAction
@@ -196,8 +204,8 @@ export function CliManagerPanel({ session }: { session: TodeXSession }) {
                   onClick={() => void removeAntigravityIntegration()}
                 />
               ) : null}
-              {settingsId ? (
-                <IconAction icon={RiSettings3Line} size="sm" aria-label={t('cliSettings.title', { name: cli.name })} tooltip={t('cliSettings.open')} onClick={() => setSettingsProvider(settingsId)} />
+              {hasPage ? (
+                <IconAction icon={RiSettings3Line} size="sm" aria-label={t('cliSettings.title', { name: cli.name })} tooltip={t('cliSettings.open')} onClick={() => onPageChange(cli.id)} />
               ) : null}
             </div>
           ) : null}
@@ -208,8 +216,21 @@ export function CliManagerPanel({ session }: { session: TodeXSession }) {
     );
   };
 
+  // A page whose CLI went away (another backend, uninstalled) closes.
+  const pageCli = page && page !== 'shared' ? installed.find((cli) => cli.id === page) : undefined;
+  const pageGone = page !== null && page !== 'shared' && !loading && (!pageCli || pageCli.kind !== 'managed' || !cliPageTabs(session, pageCli.id).length);
+  useEffect(() => {
+    if (pageGone) onPageChange(null);
+  }, [pageGone]);
+  const sharedAvailable = session.v2Providers.some((item) => item.available);
+
+  if (page === 'shared') return <SharedCapabilitiesPage session={session} onBack={() => onPageChange(null)} />;
+  if (pageCli?.kind === 'managed' && !pageGone) {
+    return <CliAgentPage key={`${backend.backendId}:${pageCli.id}`} session={session} backend={backend} api={api} id={pageCli.id} name={pageCli.name} onBack={() => onPageChange(null)} />;
+  }
+
   return (
-    <div className="flex flex-col gap-4 py-1">
+    <div className="flex flex-col gap-4">
       <div className="flex min-w-0 items-center gap-3">
         <div className="flex size-10 shrink-0 items-center justify-center rounded-2lg bg-badge-new-background text-badge-new-text">
           <RiServerLine aria-hidden className="size-5" />
@@ -222,6 +243,12 @@ export function CliManagerPanel({ session }: { session: TodeXSession }) {
         <Button size="small" variant="secondary" leadingIcon={RiFileList3Line} onClick={() => setPresetsOpen(true)}>{t('instructionPresets.open')}</Button>
         <IconAction icon={RiRefreshLine} size="md" aria-label={t('cli.refreshAria')} disabled={loading} onClick={() => void refresh()} />
       </div>
+
+      {sharedAvailable ? (
+        <SettingsCard className="overflow-hidden ps-0">
+          <SettingsEntry icon={RiPuzzle2Line} title={t('cliPage.shared')} description={t('cliPage.sharedHint')} onPress={() => onPageChange('shared')} />
+        </SettingsCard>
+      ) : null}
 
       {loading ? (
         <div className="flex min-h-48 items-center justify-center"><Spinner size="md" aria-label={t('cli.reading')} /></div>
@@ -290,7 +317,6 @@ export function CliManagerPanel({ session }: { session: TodeXSession }) {
           ) : null}
         </>
       )}
-      <CliSettingsModal provider={settingsProvider} onClose={() => setSettingsProvider(null)} api={api} />
       <InstructionPresetsModal isOpen={presetsOpen} onClose={() => setPresetsOpen(false)} api={api} />
     </div>
   );

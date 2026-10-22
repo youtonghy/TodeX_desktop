@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Chip } from '@/components/base/badges/chip';
-import { Tab, TabList, TabPanel, Tabs } from '@/components/base/tabs/tabs';
+import { BackendSelect } from '@/components/ui/backend-select';
 import { toast } from '@/components/ui/toast';
-import type { ConversationStorageEntry, HistoryCleanupPolicyResponse, NativeHistoryProvider } from '@todex/protocol/v2';
+import type { ConversationStorageEntry, HistoryCleanupPolicyResponse } from '@todex/protocol/v2';
 import {
   CleanupPolicyCard,
   formatDateTime,
@@ -11,24 +11,28 @@ import {
   SelectableHistoryList,
   StorageSummaryCard,
   type HistoryListItem,
-} from '../components/cleanup/CleanupParts';
-import { NativeHistoryTab } from '../components/cleanup/NativeHistoryTab';
-import { ProviderIcon } from '../components/ProviderIcon';
-import { useT } from '../i18n';
-import { backendApi } from '../session/helpers';
-import { usePanelBackend, type PanelBackend } from '../session/panelBackend';
-import { BackendSelect } from '@/components/ui/backend-select';
-import type { TodeXSession } from '../session/useTodeXSession';
+} from './CleanupParts';
+import { useT } from '../../i18n';
+import { backendApi } from '../../session/helpers';
+import { usePanelBackend, type PanelBackend } from '../../session/panelBackend';
+import type { TodeXSession } from '../../session/useTodeXSession';
 
 const ACTIVE_STATUSES = new Set(['running', 'waiting_permission']);
-const NATIVE_TABS: Array<{ id: NativeHistoryProvider; label: string }> = [
-  { id: 'claude-code', label: 'Claude Code' },
-  { id: 'pi', label: 'Pi' },
-  { id: 'codex', label: 'Codex' },
-  { id: 'grok-build', label: 'Grok Build' },
-  { id: 'devin', label: 'Devin' },
-];
-type TabKey = 'todex' | NativeHistoryProvider;
+
+/** TodeX's own conversation history on a picked backend. Agents' own
+ * session history is cleaned on each agent's page in CLI management. */
+export function TodexHistoryCleanup({ session }: { session: TodeXSession }) {
+  const backend = usePanelBackend(session);
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex justify-end">
+        <BackendSelect profiles={session.backendConnections} linkStates={session.backendLinkStatus} selectedId={backend.backendId} onChange={backend.setBackendId} />
+      </div>
+      {/* Keyed by backend so a switch starts from that backend's own data. */}
+      <TodexHistoryTab key={backend.backendId} session={session} backend={backend} />
+    </div>
+  );
+}
 
 /** TodeX's own conversations on the picked backend: usage, the backend's
  * automatic cleanup policy, and manual (multi-)selection cleanup. */
@@ -122,43 +126,5 @@ function TodexHistoryTab({ session, backend }: { session: TodeXSession; backend:
         }}
       />
     </div>
-  );
-}
-
-/** Cleanup: TodeX's own conversation history, and the session history the
- * supported agents keep themselves. */
-export function CleanupPanel({ session }: { session: TodeXSession }) {
-  const t = useT();
-  const [tab, setTab] = useState<TabKey>('todex');
-  const backend = usePanelBackend(session);
-  // Only agents installed on the picked backend's machine get a tab.
-  const nativeTabs = useMemo(
-    () => NATIVE_TABS.filter((item) => backend.providers.some((provider) => provider.id === item.id && provider.available)),
-    [backend.providers],
-  );
-  // An agent missing on the picked backend falls back to TodeX's own tab.
-  const selected: TabKey = nativeTabs.some((item) => item.id === tab) ? tab : 'todex';
-  return (
-    <Tabs selectedKey={selected} onSelectionChange={(key) => setTab(String(key) as TabKey)} className="gap-4 py-1">
-      <div className="flex min-w-0 items-center gap-3">
-        {/* The tabs scroll on their own so the backend picker never leaves the row. */}
-        <div className="min-w-0 flex-1 overflow-x-auto">
-          <TabList aria-label={t('app.cleanup')}>
-            <Tab id="todex">{t('cleanup.tabTodex')}</Tab>
-            {nativeTabs.map((item) => (
-              <Tab key={item.id} id={item.id}>
-                <span className="flex items-center gap-1.5"><ProviderIcon provider={item.id} className="size-4" />{item.label}</span>
-              </Tab>
-            ))}
-          </TabList>
-        </div>
-        <BackendSelect profiles={session.backendConnections} linkStates={session.backendLinkStatus} selectedId={backend.backendId} onChange={backend.setBackendId} />
-      </div>
-      {/* Keyed by backend so a switch starts from that backend's own data. */}
-      <TabPanel id="todex"><TodexHistoryTab key={backend.backendId} session={session} backend={backend} /></TabPanel>
-      {nativeTabs.map((item) => (
-        <TabPanel key={item.id} id={item.id}><NativeHistoryTab key={backend.backendId} backend={backend} provider={item.id} label={item.label} /></TabPanel>
-      ))}
-    </Tabs>
   );
 }

@@ -1,4 +1,4 @@
-import { RiPushpin2Fill, RiLockLine, RiAddLine, RiArrowRightSLine, RiCheckLine, RiFolderReduceLine, RiFoldersLine, RiFolderTransferLine, RiPencilLine, RiEdit2Line, RiErrorWarningLine, RiFolder3Line, RiFolderOpenLine, RiGitBranchLine, RiDeleteBinLine, RiArrowDownSLine, RiBarChartBoxLine, RiBookOpenLine, RiBrush3Line, RiKanbanView2, RiMoreLine, RiPaletteLine, RiPriceTag3Line, RiPuzzle2Line, RiSettings3Line, RiTerminalBoxLine, RiTerminalLine, RiTimeLine, RiTimerLine, RiUserSettingsLine, RiVipCrownLine } from '@remixicon/react';
+import { RiPushpin2Fill, RiLockLine, RiAddLine, RiArrowRightSLine, RiCheckLine, RiFolderReduceLine, RiFoldersLine, RiFolderTransferLine, RiPencilLine, RiEdit2Line, RiErrorWarningLine, RiFolder3Line, RiFolderOpenLine, RiGitBranchLine, RiDeleteBinLine, RiArrowDownSLine, RiBarChartBoxLine, RiBookOpenLine, RiKanbanView2, RiMoreLine, RiPaletteLine, RiPriceTag3Line, RiSettings3Line, RiTerminalLine, RiTimeLine, RiTimerLine, RiVipCrownLine } from '@remixicon/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { MouseEvent, ReactNode } from 'react';
 import {
@@ -77,10 +77,6 @@ type Props = {
    * the picked agent (the default one when absent). */
   onCreateScheduledConversation: (workspaceId: string, at: string, options: { provider?: ProviderKind }) => Promise<boolean>;
   onOpenSettings: () => void;
-  onOpenCapabilities: () => void;
-  onOpenCliManager: () => void;
-  onOpenAgentProviders: () => void;
-  onOpenCleanup: () => void;
   onOpenUsage: () => void;
   onOpenQuota: () => void;
   onOpenKanban: () => void;
@@ -334,10 +330,6 @@ export function AppSidebar({
   onCreateConversation,
   onCreateScheduledConversation,
   onOpenSettings,
-  onOpenCapabilities,
-  onOpenCliManager,
-  onOpenAgentProviders,
-  onOpenCleanup,
   onOpenUsage,
   onOpenQuota,
   onOpenKanban,
@@ -1159,42 +1151,9 @@ export function AppSidebar({
     { key: 'settings', label: t('app.settings'), icon: RiSettings3Line, isSelected: false, onClick: onOpenSettings },
   ];
 
-  // The TodeX menu (formerly the identity menu), grouped: management, then
-  // usage. Settings (with About) sits right above it as its own row.
+  // The TodeX menu (formerly the identity menu): usage. Settings (with About,
+  // CLI management and cleanup) sits right above it as its own row.
   const teamMenuGroups: DashboardTeamMenuGroup[] = [
-    {
-      id: 'manage',
-      items: [
-        { id: 'capabilities', icon: RiPuzzle2Line, label: t('app.mcpSkillManager'), onSelect: onOpenCapabilities },
-        {
-          id: 'cli-manager',
-          icon: RiTerminalBoxLine,
-          label: t('app.cliManager'),
-          onSelect: () => {
-            if (mobile) onCloseMobile?.();
-            onOpenCliManager();
-          },
-        },
-        {
-          id: 'agent-providers',
-          icon: RiUserSettingsLine,
-          label: t('app.agentProviders'),
-          onSelect: () => {
-            if (mobile) onCloseMobile?.();
-            onOpenAgentProviders();
-          },
-        },
-        {
-          id: 'cleanup',
-          icon: RiBrush3Line,
-          label: t('app.cleanup'),
-          onSelect: () => {
-            if (mobile) onCloseMobile?.();
-            onOpenCleanup();
-          },
-        },
-      ],
-    },
     {
       id: 'usage',
       items: [

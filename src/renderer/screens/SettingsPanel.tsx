@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ComponentType, type ReactNode, type Ref } from 'react';
 import { Tab, TabList, TabPanel, Tabs } from 'react-aria-components';
-import { RiApps2Line, RiComputerLine, RiInformationLine, RiNotification3Line, RiPaletteLine, RiServerLine, RiSettings3Line, RiTeamLine, RiTerminalBoxLine } from '@remixicon/react';
+import { RiApps2Line, RiCodeBoxLine, RiComputerLine, RiHistoryLine, RiInformationLine, RiNotification3Line, RiPaletteLine, RiServerLine, RiSettings3Line, RiTeamLine, RiTerminalBoxLine } from '@remixicon/react';
 import { Select, SelectItem } from '@/components/base/select/select';
 import { Switch } from '@/components/base/switch/switch';
 import { cx } from '@/utils/cx';
@@ -9,15 +9,18 @@ import { AgentDesktopSettings, type AgentDesktopPage } from '../components/Agent
 import { BackendConnectionSettings } from '../components/settings/BackendConnectionSettings';
 import { AppearanceSettings } from '../components/AppearanceSettings';
 import { FeatureSettings } from '../components/FeatureSettings';
-import { SettingsCard, SettingsGroup, SettingsRow } from '../components/settings/SettingsRows';
+import { SettingsCard, SettingsEntry, SettingsGroup, SettingsRow, SettingsSubpage } from '../components/settings/SettingsRows';
 import { SshConnectionSettings } from '../components/settings/SshConnectionSettings';
+import { TodexHistoryCleanup } from '../components/cleanup/TodexHistoryCleanup';
+import type { CliPage } from '../components/cli/CliAgentPage';
 import { AboutPanel } from './AboutPanel';
+import { CliManagerPanel } from './CliManagerPanel';
 import { ScrollArea } from '../components/ui/scroll-area';
 import { toast } from '../components/ui/toast';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { LOCALE_LABELS, SUPPORTED_LOCALES, getLocalePreference, isLocale, setLocalePreference, useT, type LocalePreference } from '../i18n';
 
-export type SettingsSection = 'general' | 'features' | 'appearance' | 'connection' | 'ssh' | 'notifications' | 'agent' | 'agent-calling' | 'about';
+export type SettingsSection = 'general' | 'features' | 'appearance' | 'connection' | 'cli' | 'ssh' | 'notifications' | 'agent' | 'agent-calling' | 'about';
 /** Show a category on open or while open; `at` makes a repeat request distinct. */
 export type SettingsSectionRequest = { section: SettingsSection; at: number };
 
@@ -41,12 +44,24 @@ export function SettingsPanel({ session, historyRecoverySetup = false, repairPai
   const [agentPage, setAgentPage] = useState<AgentDesktopPage | null>(null);
   // The backend whose own page replaces the backend list.
   const [backendPage, setBackendPage] = useState<string | null>(null);
+  // A CLI's own page (or the shared skills and MCPs) in place of the CLI list.
+  const [cliPage, setCliPage] = useState<CliPage | null>(null);
+  // TodeX's conversation history cleanup in place of the general page.
+  const [historyPage, setHistoryPage] = useState(false);
   const [section, setSection] = useState<SettingsSection>(sectionRequest?.section ?? 'general');
   useEffect(() => {
     if (sectionRequest) setSection(sectionRequest.section);
   }, [sectionRequest]);
+  // CLI management talks to the backend as soon as it mounts, so it waits
+  // for its first visit instead of mounting with the other pages.
+  const [cliVisited, setCliVisited] = useState(section === 'cli');
+  useEffect(() => {
+    if (section === 'cli') setCliVisited(true);
+  }, [section]);
   const agentPanel = useRef<HTMLDivElement>(null);
   const backendPanel = useRef<HTMLDivElement>(null);
+  const cliPanel = useRef<HTMLDivElement>(null);
+  const generalPanel = useRef<HTMLDivElement>(null);
   // Re-pairing and recovery-key setup both live on the page of the backend
   // that asked for them: the focused one when the request was made.
   const focusBackendIdRef = useRef(session.activeBackendConnectionId);
@@ -71,12 +86,19 @@ export function SettingsPanel({ session, historyRecoverySetup = false, repairPai
   useEffect(() => {
     backendPanel.current?.scrollTo({ top: 0 });
   }, [backendPage]);
+  useEffect(() => {
+    cliPanel.current?.scrollTo({ top: 0 });
+  }, [cliPage]);
+  useEffect(() => {
+    generalPanel.current?.scrollTo({ top: 0 });
+  }, [historyPage]);
 
   const sections: Array<{ id: SettingsSection; label: string; icon: ComponentType<{ className?: string; 'aria-hidden'?: boolean | 'true' | 'false' }> }> = [
     { id: 'general', label: t('settings.general'), icon: RiSettings3Line },
     { id: 'features', label: t('settings.features'), icon: RiApps2Line },
     { id: 'appearance', label: t('settings.appearance'), icon: RiPaletteLine },
     { id: 'connection', label: t('settings.backendConnections'), icon: RiServerLine },
+    { id: 'cli', label: t('app.cliManager'), icon: RiCodeBoxLine },
     { id: 'ssh', label: t('settings.ssh'), icon: RiTerminalBoxLine },
     { id: 'notifications', label: t('settings.notifications'), icon: RiNotification3Line },
     { id: 'agent', label: t('agentDesktop.title'), icon: RiComputerLine },
@@ -115,7 +137,12 @@ export function SettingsPanel({ session, historyRecoverySetup = false, repairPai
         </TabList>
       </div>
       <div className="flex min-w-0 flex-1 flex-col">
-        <SettingsPage id="general" title={titleOf('general')}>
+        <SettingsPage id="general" title={titleOf('general')} viewportRef={generalPanel}>
+          {historyPage ? (
+            <SettingsSubpage title={t('cleanup.todexTitle')} onBack={() => setHistoryPage(false)}>
+              <TodexHistoryCleanup session={session} />
+            </SettingsSubpage>
+          ) : <>
           <SettingsCard>
             <SettingsRow label={t('common.language')} description={t('settings.languageHint')}>
               <Select
@@ -158,6 +185,12 @@ export function SettingsPanel({ session, historyRecoverySetup = false, repairPai
               </SettingsRow>
             </SettingsCard>
           </SettingsGroup>
+          <SettingsGroup label={t('settings.storage')}>
+            <SettingsCard className="overflow-hidden ps-0">
+              <SettingsEntry icon={RiHistoryLine} title={t('cleanup.todexTitle')} description={t('settings.todexHistoryEntry')} onPress={() => setHistoryPage(true)} />
+            </SettingsCard>
+          </SettingsGroup>
+          </>}
         </SettingsPage>
 
         <SettingsPage id="features" title={titleOf('features')}>
@@ -177,6 +210,10 @@ export function SettingsPanel({ session, historyRecoverySetup = false, repairPai
             pairingAutoStart={pairingAutoStart}
             historyRecoverySetup={historyRecoverySetup}
           />
+        </SettingsPage>
+
+        <SettingsPage id="cli" title={titleOf('cli')} viewportRef={cliPanel}>
+          {cliVisited ? <CliManagerPanel session={session} page={cliPage} onPageChange={setCliPage} /> : null}
         </SettingsPage>
 
         <SettingsPage id="ssh" title={titleOf('ssh')}>

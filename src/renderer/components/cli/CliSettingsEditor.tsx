@@ -8,8 +8,6 @@ import { Tab, TabList, TabPanel, Tabs } from '@/components/base/tabs/tabs';
 import { Textarea } from '@/components/base/textarea/textarea';
 import { Alert } from '@/components/ui/alert';
 import { IconAction } from '@/components/ui/icon-action';
-import { Modal } from '@/components/ui/modal';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { Spinner } from '@/components/ui/spinner';
 import { toast } from '@/components/ui/toast';
 import { SettingsCard, SettingsGroup, SETTINGS_ROW } from '@/components/settings/SettingsRows';
@@ -40,33 +38,13 @@ type EnvRow = { key: number; name: string; value: string; revealed: boolean };
 
 const key = (value: string) => value as MessageKey;
 
-/** A CLI's user settings file on the backend host; open while `provider` is set. */
-export function CliSettingsModal({ provider, onClose, api }: {
-  provider: CliSettingsProvider | null;
-  onClose: () => void;
-  api: () => V2ApiClient;
-}) {
-  const t = useT();
-  // Keeps the last schema while the modal animates out.
-  const lastProvider = useRef<CliSettingsProvider>('claude-code');
-  if (provider) lastProvider.current = provider;
-  const schema = CLI_SETTINGS[lastProvider.current];
-  return (
-    <Modal
-      isOpen={provider !== null}
-      onOpenChange={(open) => { if (!open) onClose(); }}
-      title={t('cliSettings.title', { name: schema.name })}
-      size="2xl"
-      className="h-[min(760px,calc(100dvh-32px))]"
-      isDismissable={false}
-      bodyClassName="flex flex-col overflow-hidden pb-0"
-    >
-      {provider ? <CliSettingsEditor key={provider} schema={schema} api={api} onClose={onClose} /> : null}
-    </Modal>
-  );
+/** A CLI's user settings file on the backend host, shown on the CLI's own
+ * page in CLI management (the page scrolls; the save bar stays in view). */
+export function CliSettingsEditor({ provider, api }: { provider: CliSettingsProvider; api: () => V2ApiClient }) {
+  return <CliSettingsForm key={provider} schema={CLI_SETTINGS[provider]} api={api} />;
 }
 
-function CliSettingsEditor({ schema, api, onClose }: { schema: CliSettingsSchema; api: () => V2ApiClient; onClose: () => void }) {
+function CliSettingsForm({ schema, api }: { schema: CliSettingsSchema; api: () => V2ApiClient }) {
   const { provider, envPath } = schema;
   const t = useT();
   const [doc, setDoc] = useState<CliSettingsDocument>();
@@ -210,10 +188,10 @@ function CliSettingsEditor({ schema, api, onClose }: { schema: CliSettingsSchema
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-3">
+    <div className="flex flex-col gap-3">
       {/* The AGENTS.md tab names its own file. */}
       <p className={cx('truncate text-body-2-regular text-text-secondary', editingAgents && 'invisible')} dir="ltr" title={doc.path}>{doc.path}</p>
-      <Tabs selectedKey={tab} onSelectionChange={(next) => setTab(TAB_IDS.find((id) => id === next) ?? 'form')} className="min-h-0 flex-1 gap-0">
+      <Tabs selectedKey={tab} onSelectionChange={(next) => setTab(TAB_IDS.find((id) => id === next) ?? 'form')} className="gap-0">
         <TabList aria-label={t('cliSettings.tabsLabel')}>
           {hasForm ? <Tab id="form" isDisabled={!saved}>{t('cliSettings.tabForm')}</Tab> : null}
           {envPath ? <Tab id="env" isDisabled={!saved} count={env.length || undefined}>{t('cliSettings.tabEnv')}</Tab> : null}
@@ -223,7 +201,7 @@ function CliSettingsEditor({ schema, api, onClose }: { schema: CliSettingsSchema
           <Tab id="raw">{t('cliSettings.tabRaw')}</Tab>
           <Tab id="agents">AGENTS.md</Tab>
         </TabList>
-        <ScrollArea surface="full" className="-mx-6 flex-1" contentClassName="px-6 pt-4 pb-4">
+        <div className="pt-4 pb-4">
           {hasForm ? <TabPanel id="form" className="flex flex-col gap-5">
             <p className="px-3 text-body-2-regular text-text-secondary">
               {doc.exists ? t(schema.hints.scope) : t('cliSettings.missingHint')}
@@ -302,13 +280,14 @@ function CliSettingsEditor({ schema, api, onClose }: { schema: CliSettingsSchema
           <TabPanel id="agents">
             <CliInstructionsPanel state={instructions} />
           </TabPanel>
-        </ScrollArea>
+        </div>
       </Tabs>
-      <div className="flex shrink-0 flex-wrap items-center justify-end gap-2.5 border-t border-separator-border pt-4 pb-6">
+      {/* The settings page scrolls with 2rem of bottom padding; sticking at
+          -2rem keeps the save bar on the page's bottom edge. */}
+      <div className="sticky -bottom-8 z-10 -mb-8 flex flex-wrap items-center justify-end gap-2.5 border-t border-separator-border bg-background-full pt-4 pb-6">
         {unsavedElsewhere ? (
           <span className="me-auto text-body-2-regular text-text-secondary">{t(unsavedElsewhere)}</span>
         ) : null}
-        <Button variant="secondary" onClick={onClose} disabled={saving || instructions.busy || plugins.saving || mcp.busy}>{t('common.close')}</Button>
         <Button onClick={() => void save()} disabled={!canSave} aria-busy={(editingAgents ? instructions.busy : editingPlugins ? plugins.saving : saving) || undefined}>{t('common.save')}</Button>
       </div>
     </div>

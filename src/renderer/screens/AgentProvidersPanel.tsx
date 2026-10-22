@@ -7,7 +7,7 @@ import {
   Select as AriaSelect,
   SelectValue as AriaSelectValue,
 } from 'react-aria-components';
-import { RiAddLine, RiArrowDownSLine, RiCheckLine, RiCloseLine, RiDeleteBinLine, RiDownload2Line, RiEdit2Line, RiRefreshLine, RiUpload2Line, RiUserSettingsLine } from '@remixicon/react';
+import { RiAddLine, RiArrowDownSLine, RiCheckLine, RiCloseLine, RiDeleteBinLine, RiDownload2Line, RiEdit2Line, RiRefreshLine, RiUpload2Line } from '@remixicon/react';
 import { Chip } from '@/components/base/badges/chip';
 import { Button } from '@/components/base/buttons/button';
 import { ButtonGroup, ButtonGroupItem } from '@/components/base/buttons/button-group';
@@ -17,7 +17,6 @@ import { Label } from '@/components/base/input/label';
 import { SegmentedControl, SegmentedControlItem } from '@/components/base/segmented-control/segmented-control';
 import { Select, SelectItem } from '@/components/base/select/select';
 import { Switch } from '@/components/base/switch/switch';
-import { PillTab, PillTabList } from '@/components/base/tabs/pill-tab';
 import { Textarea } from '@/components/base/textarea/textarea';
 import { ChevronDownSmall } from '@/components/foundations/icons/chevrons';
 import { Alert } from '@/components/ui/alert';
@@ -29,7 +28,6 @@ import { toast } from '@/components/ui/toast';
 import { cx } from '@/utils/cx';
 import {
   AGENT_PROVIDER_TRANSFER_FORMAT,
-  MANAGED_PROVIDER_AGENTS,
   PROVIDER_DISPLAY_NAMES,
   type AgentProviderBucket,
   type AgentProviderProfile,
@@ -60,9 +58,7 @@ import {
   type ProviderFormValues,
 } from '../lib/agentProviders';
 import { useT } from '../i18n';
-import type { TodeXSession } from '../session/useTodeXSession';
-import { usePanelBackend } from '../session/panelBackend';
-import { BackendSelect } from '@/components/ui/backend-select';
+import type { PanelBackend } from '../session/panelBackend';
 import { backendApi } from '../session/helpers';
 
 type EditorState =
@@ -86,16 +82,15 @@ const PI_API_KINDS = [
   'pi-messages',
 ];
 
-export function AgentProvidersPanel({ session }: { session: TodeXSession }) {
+/** One agent's provider accounts on the backend picked in CLI management. */
+export function AgentProvidersPanel({ backend, agent }: { backend: PanelBackend; agent: ManagedProviderAgent }) {
   const t = useT();
-  const [agent, setAgent] = useState<ManagedProviderAgent>('codex');
   const [agents, setAgents] = useState<AgentProvidersResponse['agents']>({});
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string>();
   const [editor, setEditor] = useState<EditorState>(null);
   const requestGeneration = useRef(0);
   const importInput = useRef<HTMLInputElement>(null);
-  const backend = usePanelBackend(session);
   const { settings } = backend;
   const api = useCallback(() => backendApi(settings), [settings.deviceSecret, settings.encryptionProtocol, settings.encryptionPublicKey, settings.transportVerified, settings.serverUrl]);
 
@@ -124,22 +119,6 @@ export function AgentProvidersPanel({ session }: { session: TodeXSession }) {
     void refresh();
     return () => { requestGeneration.current += 1; };
   }, [refresh]);
-
-  // Only agents installed on the backend's machine; until the provider list
-  // arrives every managed agent stays listed so the panel is never empty.
-  const installedAgents = useMemo(() => {
-    const { providers } = backend;
-    if (!providers.length) return MANAGED_PROVIDER_AGENTS;
-    return MANAGED_PROVIDER_AGENTS.filter((id) => providers.some((item) => item.id === id && item.available));
-  }, [backend.providers]);
-
-  // A selected agent that is not installed falls back to the first one that is.
-  useEffect(() => {
-    if (installedAgents.length && !installedAgents.includes(agent)) {
-      setAgent(installedAgents[0]);
-      setEditor(null);
-    }
-  }, [agent, installedAgents]);
 
   const bucket: AgentProviderBucket | undefined = agents[agent];
 
@@ -209,7 +188,6 @@ export function AgentProvidersPanel({ session }: { session: TodeXSession }) {
     });
   };
 
-  const activeBackend = backend.profile;
   const additiveAgent = isAdditiveAgent(agent);
   const additive = bucket?.mode === 'additive';
   const live = bucket?.live;
@@ -246,36 +224,14 @@ export function AgentProvidersPanel({ session }: { session: TodeXSession }) {
   ) : null;
 
   return (
-    <div className="flex flex-col gap-4 py-1">
-      <div className="flex min-w-0 items-center gap-3">
-        <div className="flex size-10 shrink-0 items-center justify-center rounded-2lg bg-badge-new-background text-badge-new-text">
-          <RiUserSettingsLine aria-hidden className="size-5" />
-        </div>
-        <div className="min-w-0 flex-1">
-          <h2 className="truncate text-headline-semibold text-text-primary">{activeBackend?.name || t('cli.currentBackend')}</h2>
-          <p className="truncate text-caption-1-regular text-text-secondary" title={settings.serverUrl}>{settings.serverUrl}</p>
-        </div>
-        <BackendSelect profiles={session.backendConnections} linkStates={session.backendLinkStatus} selectedId={backend.backendId} onChange={backend.setBackendId} />
-        <IconAction icon={RiRefreshLine} size="md" aria-label={t('ap.refresh')} disabled={loading} onClick={() => void refresh()} />
+    <div className="flex flex-col gap-4">
+      <div className="flex items-start gap-3">
+        <p className="min-w-0 flex-1 text-caption-1-regular text-text-secondary">{t(additiveAgent ? 'ap.globalNoteAdditive' : 'ap.globalNote')}</p>
+        <IconAction icon={RiRefreshLine} size="sm" aria-label={t('ap.refresh')} disabled={loading} onClick={() => void refresh()} />
       </div>
-
-      <p className="-mt-2 text-caption-1-regular text-text-secondary">{t(additiveAgent ? 'ap.globalNoteAdditive' : 'ap.globalNote')}</p>
-
-      <PillTabList className="flex-wrap">
-        {installedAgents.map((id) => (
-          <PillTab key={id} variant="gray" isSelected={agent === id} onSelect={() => { setAgent(id); setEditor(null); }}>
-            <span className="inline-flex items-center gap-1.5">
-              <ProviderIcon provider={id} className="size-4" />
-              {PROVIDER_DISPLAY_NAMES[id]}
-            </span>
-          </PillTab>
-        ))}
-      </PillTabList>
 
       {loading ? (
         <div className="flex min-h-48 items-center justify-center"><Spinner size="md" aria-label={t('cli.reading')} /></div>
-      ) : !installedAgents.length ? (
-        <p className="py-10 text-center text-body-regular text-text-secondary">{t('ap.noInstalledAgents')}</p>
       ) : !bucket ? (
         <p className="py-10 text-center text-body-regular text-text-secondary">{t('ap.unsupported')}</p>
       ) : (

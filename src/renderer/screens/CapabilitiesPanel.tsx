@@ -50,10 +50,12 @@ type Props = {
   manager?: CapabilityManager;
   /** Hosted in a dialog whose heading already names the panel. */
   inDialog?: boolean;
+  /** Shows only this agent's (or the shared) catalog, without the agent switcher. */
+  lockedProvider?: ProviderChoice;
 };
 
 type ViewMode = 'skills' | 'mcp';
-type ProviderChoice = ProviderKind | 'common';
+export type ProviderChoice = ProviderKind | 'common';
 type PendingDelete =
   | { kind: 'skill'; provider: ProviderKind; skill: SkillCatalogDescriptor }
   | { kind: 'mcp'; server: McpServerCatalogDescriptor };
@@ -75,10 +77,12 @@ export function CapabilitiesPanel({
   onLoadMcpConfig,
   manager,
   inDialog = false,
+  lockedProvider,
 }: Props) {
   const t = useT();
   const [viewMode, setViewMode] = useState<ViewMode>('skills');
-  const [providerChoice, setProviderChoice] = useState<ProviderChoice>('common');
+  const [pickedProvider, setProviderChoice] = useState<ProviderChoice>('common');
+  const providerChoice = lockedProvider ?? pickedProvider;
   const [previews, setPreviews] = useState<Record<string, string>>({});
   const [mcpConfigs, setMcpConfigs] = useState<Record<string, McpServerConfig>>({});
   const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null);
@@ -170,7 +174,7 @@ export function CapabilitiesPanel({
           <IconAction icon={RiRefreshLine} size="sm" aria-label={t('workbench.refresh')} onClick={refresh} />
         </div>
       </div>
-      <PillTabList className="mb-3 flex-wrap">
+      {lockedProvider ? null : <PillTabList className="mb-3 flex-wrap">
         <PillTab variant="gray" isSelected={choice === 'common'} onSelect={() => setProviderChoice('common')}>{t('cap.common')}</PillTab>
         {availableProviders.map((item) => (
           <PillTab key={item.id} variant="gray" isSelected={choice === item.id} onSelect={() => setProviderChoice(item.id)}>
@@ -180,7 +184,7 @@ export function CapabilitiesPanel({
             </span>
           </PillTab>
         ))}
-      </PillTabList>
+      </PillTabList>}
       <Tabs
         selectedKey={viewMode}
         onSelectionChange={(key) => setViewMode(key === 'mcp' ? 'mcp' : 'skills')}

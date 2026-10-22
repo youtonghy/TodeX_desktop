@@ -4,7 +4,6 @@ import { Switch } from '@/components/base/switch/switch';
 import { Textarea } from '@/components/base/textarea/textarea';
 import { Card } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import type { ProviderKind } from '@todex/protocol/v2';
 import type { DesktopPanel } from '../lib/panels';
 import type { TodeXSession } from '../session/useTodeXSession';
 import {
@@ -18,7 +17,6 @@ import {
   terminalStatusLabel,
 } from '../session/helpers';
 import { XtermTerminal } from '../components/XtermTerminal';
-import { CapabilitiesPanel } from './CapabilitiesPanel';
 import { GitDiffText } from '../components/GitDiffText';
 import { useT } from '../i18n';
 import { cx } from '@/utils/cx';
@@ -42,31 +40,6 @@ export function AsidePanel({ session, panel, slashCommand, onBack }: Props) {
 
   if (panel === 'settings') {
     return null;
-  }
-
-  if (panel === 'capabilities') {
-    return (
-      <div className="flex h-full min-h-0 flex-col">
-        {back}
-        <CapabilitiesPanel
-        workspacePath={workspace?.path ?? session.settings.defaultWorkspacePath}
-        providers={session.v2Providers}
-        catalogs={session.capabilityCatalogs}
-        onRefresh={(provider: ProviderKind) => void session.refreshCapabilityCatalog(provider)}
-        conversationId={conversation?.id}
-        selectedSkills={conversation ? session.selectedSkills[conversation.id] ?? [] : []}
-        canInvoke={Boolean(conversation?.v2ConversationId)}
-        onToggleSkill={(skill, provider) => {
-          if (conversation) {
-            session.toggleCatalogSkill(conversation.id, skill, provider);
-          }
-        }}
-        onPreviewSkill={(skill, provider) => session.previewSkillResource(provider, skill.resourceId)}
-        onLoadMcpConfig={(server) => session.getMcpServerConfig(server.provider, server.resourceId)}
-        manager={session.capabilityManager}
-      />
-      </div>
-    );
   }
 
   if (panel === 'experimental') {
