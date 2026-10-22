@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Focusable } from 'react-aria-components';
-import { RiAddLine, RiDeleteBinLine, RiEdit2Line, RiFileCopyLine, RiLinkM, RiLinkUnlink, RiRouterLine } from '@remixicon/react';
+import { RiAddLine, RiDeleteBinLine, RiEdit2Line, RiFileCopyLine, RiLinkM, RiLinkUnlink, RiRouterLine, RiSettings3Line } from '@remixicon/react';
 import {
   SSH_IP_POOL_IDLE_MINUTES_RANGE, validateSshIpPoolCidr,
   type SshIpPoolCidrError,
@@ -17,6 +17,7 @@ import { Tooltip, TooltipTrigger } from '@/components/base/tooltip/tooltip';
 import { Alert } from '@/components/ui/alert';
 import { CodeBlock } from '@/components/ui/code-block';
 import { IconAction } from '@/components/ui/icon-action';
+import { Modal } from '@/components/ui/modal';
 import { SpinnerIcon } from '@/components/ui/spinner';
 import { toast } from '@/components/ui/toast';
 
@@ -57,30 +58,30 @@ type Props = {
   onRemoveAssignment: (assignment: SshIpAssignment) => void;
 };
 
-/**
- * Loopback IP pool: every assigned IP listens on its port set on the backend
- * machine and forwards each connection to the same port on the host.
- */
-export function SshIpPoolSection({ api, backendId, hosts, pool, askPassword, rememberPassword, onPoolChange, onReload, onAssign, onEditAssignment, onRemoveAssignment }: Props) {
+/** Pool-wide settings: the on/off switch, the address range and the idle timeout. */
+function SshIpPoolSettingsDialog({ api, pool, onPoolChange, onClose }: {
+  api: SshApi;
+  pool: SshIpPool;
+  onPoolChange: (pool: SshIpPool) => void;
+  onClose: () => void;
+}) {
   const t = useT();
+  const [enabled, setEnabled] = useState(pool.enabled);
   const [cidr, setCidr] = useState(pool.cidr);
   const [idleMinutes, setIdleMinutes] = useState(String(pool.idleMinutes));
-  const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [busy, setBusy] = useState<Record<string, boolean>>({});
 
-  // Polling refreshes the form until the user edits it.
-  useEffect(() => {
-    if (dirty) return;
-    setCidr(pool.cidr);
-    setIdleMinutes(String(pool.idleMinutes));
-  }, [dirty, pool.cidr, pool.idleMinutes]);
-
-  const saveConfig = async (next: { enabled: boolean; cidr: string; idleMinutes: number }) => {
+  const submit = async () => {
+    const minutes = Number(idleMinutes.trim());
+    const { min, max } = SSH_IP_POOL_IDLE_MINUTES_RANGE;
+    if (!Number.isInteger(minutes) || minutes < min || minutes > max) return toast.danger(t('ssh.ipPool.idleInvalid', { min, max }));
+    if (!cidr.trim()) return toast.danger(t('ssh.ipPool.cidrRequired'));
+    const cidrError = validateSshIpPoolCidr(cidr);
+    if (cidrError) return toast.danger(t(CIDR_ERROR_KEYS[cidrError]));
     setSaving(true);
     try {
-      onPoolChange(await api().updateSshIpPool(next));
-      setDirty(false);
+      onPoolChange(await api().updateSshIpPool({ enabled, cidr: cidr.trim(), idleMinutes: minutes }));
+      onClose();
     } catch (error) {
       toast.danger(errorMessage(error, t('ssh.ipPool.settingsFailed')));
     } finally {
@@ -88,16 +89,82 @@ export function SshIpPoolSection({ api, backendId, hosts, pool, askPassword, rem
     }
   };
 
-  const submitSettings = () => {
-    const minutes = Number(idleMinutes.trim());
-    const { min, max } = SSH_IP_POOL_IDLE_MINUTES_RANGE;
-    if (!Number.isInteger(minutes) || minutes < min || minutes > max) return toast.danger(t('ssh.ipPool.idleInvalid', { min, max }));
-    if (!cidr.trim()) return toast.danger(t('ssh.ipPool.cidrRequired'));
-    const cidrError = validateSshIpPoolCidr(cidr);
-    if (cidrError) return toast.danger(t(CIDR_ERROR_KEYS[cidrError]));
-    void saveConfig({ enabled: pool.enabled, cidr: cidr.trim(), idleMinutes: minutes });
-  };
+  return (
+    <Modal
+      isOpen
+      onOpenChange={(open) => { if (!open) onClose(); }}
+      title={t('ssh.ipPool.settingsTitle')}
+      description={t('ssh.ipPool.intro')}
+      size="lg"
+      bodyClassName="flex flex-col gap-4"
+      footer={(
+        <>
+          <Button variant="secondary" onClick={onClose}>{t('common.cancel')}</Button>
+          <Button disabled={saving} leadingIcon={saving ? SpinnerIcon : undefined} aria-busy={saving || undefined} onClick={() => void submit()}>
+            {t('common.save')}
+          </Button>
+        </>
+      )}
+    >
+      {!pool.supported ? (
+        <Alert status="warning" title={t('ssh.ipPool.unsupported')} description={pool.unsupportedReason} />
+      ) : null}
+      <div className="flex min-w-0 items-center gap-3">
+        <div className="min-w-0 flex-1">
+          <p className="text-body-medium text-text-primary">{t('ssh.ipPool.enable')}</p>
+          <p className="text-body-2-regular text-text-secondary">{t('ssh.ipPool.enableHint')}</p>
+        </div>
+        <Switch
+          size="sm"
+          aria-label={t('ssh.ipPool.enable')}
+          isSelected={enabled}
+          isDisabled={!pool.supported && !pool.enabled}
+          onChange={setEnabled}
+        />
+      </div>
+      <div className="flex min-w-0 flex-wrap items-start gap-3">
+        <Input
+          className="min-w-48 flex-1"
+          label={t('ssh.ipPool.cidr')}
+          hint={t('ssh.ipPool.cidrHint')}
+          inputDir="ltr"
+          value={cidr}
+          onChange={setCidr}
+        />
+        <Input
+          className="w-36"
+          label={t('ssh.ipPool.idleMinutes')}
+          hint={t('ssh.ipPool.idleHint', { min: SSH_IP_POOL_IDLE_MINUTES_RANGE.min, max: SSH_IP_POOL_IDLE_MINUTES_RANGE.max })}
+          inputMode="numeric"
+          value={idleMinutes}
+          onChange={setIdleMinutes}
+        />
+      </div>
+    </Modal>
+  );
+}
 
+/**
+ * Assigned loopback IPs: each one listens on its port set on the backend
+ * machine and forwards every connection to the same port on the host. The
+ * pool settings that govern them open from the section header.
+ */
+export function SshIpPoolSection({ api, backendId, hosts, pool, askPassword, rememberPassword, onPoolChange, onReload, onAssign, onEditAssignment, onRemoveAssignment }: Props) {
+  const t = useT();
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [enabling, setEnabling] = useState(false);
+  const [busy, setBusy] = useState<Record<string, boolean>>({});
+
+  const enablePool = async () => {
+    setEnabling(true);
+    try {
+      onPoolChange(await api().updateSshIpPool({ enabled: true, cidr: pool.cidr, idleMinutes: pool.idleMinutes }));
+    } catch (error) {
+      toast.danger(errorMessage(error, t('ssh.ipPool.settingsFailed')));
+    } finally {
+      setEnabling(false);
+    }
+  };
   const setAssignmentBusy = (ip: string, value: boolean) => setBusy((current) => ({ ...current, [ip]: value }));
 
   const connect = async (assignment: SshIpAssignment) => {
@@ -138,62 +205,30 @@ export function SshIpPoolSection({ api, backendId, hosts, pool, askPassword, rem
 
   return (
     <section className="flex flex-col gap-3">
-      <div className="flex flex-col gap-1">
-        <h3 className="text-body-semibold text-text-primary">{t('ssh.ipPool.title')}</h3>
-        <p className="text-caption-1-regular text-text-tertiary">{t('ssh.ipPool.intro')}</p>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="flex min-w-0 flex-1 flex-col gap-1">
+          <h3 className="text-body-semibold text-text-primary">{t('ssh.ipPool.assignmentsTitle')}</h3>
+          <p className="text-caption-1-regular text-text-tertiary">{t('ssh.ipPool.intro')}</p>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button size="small" variant="secondary" leadingIcon={RiSettings3Line} onClick={() => setSettingsOpen(true)}>{t('ssh.ipPool.settings')}</Button>
+          <Button size="small" variant="secondary" leadingIcon={RiAddLine} disabled={!pool.supported} onClick={onAssign}>{t('ssh.ipPool.assign')}</Button>
+        </div>
       </div>
       {!pool.supported ? (
         <Alert status="warning" title={t('ssh.ipPool.unsupported')} description={pool.unsupportedReason} />
-      ) : null}
-      <div className={GROUP}>
-        <div className="flex min-h-[52px] min-w-0 items-center gap-3 border-b border-separator-border py-2.5 pe-2.5">
-          <div className="min-w-0 flex-1">
-            <p className="text-body-medium text-text-primary">{t('ssh.ipPool.enable')}</p>
-            <p className="text-body-2-regular text-text-secondary">{t('ssh.ipPool.enableHint')}</p>
-          </div>
-          <Switch
-            size="sm"
-            aria-label={t('ssh.ipPool.enable')}
-            isSelected={pool.enabled}
-            isDisabled={saving || (!pool.supported && !pool.enabled)}
-            onChange={(enabled) => void saveConfig({ enabled, cidr: pool.cidr, idleMinutes: pool.idleMinutes })}
-          />
-        </div>
-        <div className="flex min-w-0 flex-wrap items-start gap-3 py-2.5 pe-2.5">
-          <Input
-            className="min-w-48 flex-1"
-            label={t('ssh.ipPool.cidr')}
-            hint={t('ssh.ipPool.cidrHint')}
-            inputDir="ltr"
-            value={cidr}
-            onChange={(value) => { setCidr(value); setDirty(true); }}
-          />
-          <Input
-            className="w-36"
-            label={t('ssh.ipPool.idleMinutes')}
-            hint={t('ssh.ipPool.idleHint', { min: SSH_IP_POOL_IDLE_MINUTES_RANGE.min, max: SSH_IP_POOL_IDLE_MINUTES_RANGE.max })}
-            inputMode="numeric"
-            value={idleMinutes}
-            onChange={(value) => { setIdleMinutes(value); setDirty(true); }}
-          />
-          <div className="mt-6 flex gap-2">
-            {dirty ? <Button variant="secondary" onClick={() => setDirty(false)}>{t('common.cancel')}</Button> : null}
-            <Button
-              disabled={!dirty || saving}
-              leadingIcon={saving ? SpinnerIcon : undefined}
-              aria-busy={saving || undefined}
-              onClick={submitSettings}
-            >
-              {t('common.save')}
+      ) : !pool.enabled ? (
+        <Alert
+          status="neutral"
+          title={t('ssh.ipPool.disabledTitle')}
+          description={t('ssh.ipPool.disabledHint')}
+          actions={(
+            <Button size="small" disabled={enabling} leadingIcon={enabling ? SpinnerIcon : undefined} aria-busy={enabling || undefined} onClick={() => void enablePool()}>
+              {t('ssh.ipPool.enableAction')}
             </Button>
-          </div>
-        </div>
-      </div>
-
-      <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
-        <h4 className="text-body-semibold text-text-primary">{t('ssh.ipPool.assignmentsTitle')}</h4>
-        <Button size="small" variant="secondary" leadingIcon={RiAddLine} disabled={!pool.supported} onClick={onAssign}>{t('ssh.ipPool.assign')}</Button>
-      </div>
+          )}
+        />
+      ) : null}
       {pool.assignments.length === 0 ? (
         <p className="text-caption-1-regular text-text-tertiary">{t('ssh.ipPool.assignmentsEmpty')}</p>
       ) : (
@@ -307,6 +342,7 @@ export function SshIpPoolSection({ api, backendId, hosts, pool, askPassword, rem
           })}
         </div>
       )}
+      {settingsOpen ? <SshIpPoolSettingsDialog api={api} pool={pool} onPoolChange={onPoolChange} onClose={() => setSettingsOpen(false)} /> : null}
     </section>
   );
 }
