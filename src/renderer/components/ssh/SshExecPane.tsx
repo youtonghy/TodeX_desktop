@@ -3,10 +3,12 @@ import { RiArrowDownLine, RiDeleteBinLine, RiFileCopyLine, RiShieldKeyholeLine }
 import {
   isSshFailureKind,
   isSshLoginPending,
+  maskSshExecOutput,
   summarizeAgentOutputRedactions,
   type AgentOutputFilterCategory,
   type AgentOutputRedactions,
   type SshExecLogin,
+  type SshExecRedactedValue,
   type SshExecRun,
 } from '@todex/protocol/ssh';
 import { SSH_FAILURE_HINT_KEYS, SSH_FAILURE_LABEL_KEYS } from './sshShared';
@@ -29,6 +31,7 @@ import { LinkButton } from '@/components/base/buttons/link-button';
 import { SegmentedControl, SegmentedControlItem } from '@/components/base/segmented-control/segmented-control';
 import { Switch } from '@/components/base/switch/switch';
 import { IconAction } from '@/components/ui/icon-action';
+import { ScratchReveal } from '@/components/ui/scratch-reveal';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Spinner } from '@/components/ui/spinner';
 import { toast } from '@/components/ui/toast';
@@ -107,6 +110,12 @@ const REDACTION_LABEL_KEYS: Record<AgentOutputFilterCategory, MessageKey> = {
   publicIp: 'sshExec.redaction.publicIp',
 };
 
+/** The kind of a hidden value, as the redactions line names it. */
+function redactionKind(value: SshExecRedactedValue): string {
+  const key = REDACTION_LABEL_KEYS[value.category as AgentOutputFilterCategory];
+  return key ? t(key) : t('sshExec.redactedValueGeneric');
+}
+
 /** What the privacy filter kept from the agent; the output above stays raw. */
 function SshExecRedactionsLine({ redactions }: { redactions: AgentOutputRedactions }) {
   const t = useT();
@@ -136,8 +145,13 @@ const SshExecCard = memo(function SshExecCard({ run }: { run: SshExecRun }) {
   const output = useMemo(() => {
     const chunks = run.output.map(chunk => ({ stream: chunk.stream, data: stripAnsi(chunk.data) }));
     const text = chunks.map(chunk => chunk.data).join('');
-    return { chunks, text, lines: countLines(text) };
-  }, [run.output]);
+    // Values hidden from the agent sit behind a scratch-off cover.
+    const segments = maskSshExecOutput(chunks, run.redactedValues);
+    return { chunks, segments, text, lines: countLines(text) };
+  }, [run.output, run.redactedValues]);
+  // Bumped by "cover again" to remount every cover.
+  const [coverRound, setCoverRound] = useState(0);
+  const [revealed, setRevealed] = useState(false);
   const collapsible = output.lines > SSH_EXEC_COLLAPSED_LINES;
   const clamped = collapsible && !expanded;
   // A collapsed running call shows its newest lines, like a terminal tail.
@@ -189,7 +203,18 @@ const SshExecCard = memo(function SshExecCard({ run }: { run: SshExecRun }) {
               style={clamped ? { maxHeight: `calc(${SSH_EXEC_COLLAPSED_LINES} * 1lh + 1rem)`, overflowY: 'hidden' } : undefined}
             >
               {output.chunks.map((chunk, index) => (
-                <span key={index} data-stream={chunk.stream} className={chunk.stream === 'stderr' ? 'text-text-error-primary' : undefined}>{chunk.data}</span>
+                <span key={index} data-stream={chunk.stream} className={chunk.stream === 'stderr' ? 'text-text-error-primary' : undefined}>
+                  {output.segments[index].map((segment, part) => segment.redacted ? (
+                    <ScratchReveal
+                      key={`${coverRound}:${part}`}
+                      text={segment.text}
+                      label={t('sshExec.redactedValue', { kind: redactionKind(segment.redacted) })}
+                      hint={t('sshExec.redactedValueHint')}
+                      tone={chunk.stream === 'stderr' ? 'error' : 'default'}
+                      onReveal={() => setRevealed(true)}
+                    />
+                  ) : <Fragment key={part}>{segment.text}</Fragment>)}
+                </span>
               ))}
             </pre>
           ) : (
@@ -210,6 +235,9 @@ const SshExecCard = memo(function SshExecCard({ run }: { run: SshExecRun }) {
         ) : null}
         {run.command ? <LinkButton size="xs" onClick={() => copyText(run.command, t('sshExec.commandCopied'))}>{t('sshExec.copyCommand')}</LinkButton> : null}
         {!running && output.text ? <LinkButton size="xs" onClick={() => copyText(output.text, t('sshExec.outputCopied'))}>{t('sshExec.copyOutput')}</LinkButton> : null}
+        {revealed ? (
+          <LinkButton size="xs" onClick={() => { setCoverRound(round => round + 1); setRevealed(false); }}>{t('sshExec.coverAgain')}</LinkButton>
+        ) : null}
       </div>
     </article>
   );

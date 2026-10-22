@@ -591,3 +591,59 @@ body {
   }
 
 }
+
+/* ------------------------------------------------------- Scratch reveal
+ * <ScratchReveal>: a value behind a silver foil. Two layers share the wipe
+ * position --scratch: the ink, clipped to the text, shows left of it; the
+ * foil, a token sheen, covers the rest. Clicking animates --scratch to 100%,
+ * so the text appears exactly where the foil is scratched away. Each line of
+ * a wrapped value gets its own foil (box-decoration-break). */
+@property --scratch {
+  syntax: "<percentage>";
+  inherits: false;
+  initial-value: 0%;
+}
+
+.scratch-cover {
+  --scratch: 0%;
+  --scratch-ink: var(--color-text-primary);
+  color: transparent;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+  background-image:
+    linear-gradient(90deg, var(--scratch-ink) var(--scratch), transparent var(--scratch)),
+    linear-gradient(
+      90deg,
+      transparent var(--scratch),
+      var(--color-background-tertiary-default) var(--scratch),
+      var(--color-background-tertiary-hover) 50%,
+      var(--color-background-tertiary-default)
+    );
+  -webkit-background-clip: text, padding-box;
+  background-clip: text, padding-box;
+  transition: filter 150ms ease;
+}
+
+.scratch-cover:hover {
+  filter: brightness(0.97);
+}
+
+.scratch-cover[data-tone="error"] {
+  --scratch-ink: var(--color-text-error-primary);
+}
+
+.scratch-cover[data-scratching] {
+  animation: scratch-off 300ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@keyframes scratch-off {
+  to {
+    --scratch: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scratch-cover[data-scratching] {
+    animation: none;
+  }
+}
