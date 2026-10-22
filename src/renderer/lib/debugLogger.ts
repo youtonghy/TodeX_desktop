@@ -59,7 +59,7 @@ function installWebSocketTracing(): void {
     const socketId = `ws-${++sequence}`;
     debugLog('websocket.create', { socketId, url: redactUrlQuery(String(url)), protocols: protocols ? '[provided]' : undefined });
     const nativeSend = socket.send.bind(socket);
-    socket.send = (data: string | ArrayBufferLike | Blob | ArrayBufferView) => {
+    socket.send = (data: Parameters<WebSocket['send']>[0]) => {
       // Frames arrive many times per second during a live session; logging the
       // (encrypted) payload once per frame dominated the debug log. The byte
       // count still shows frame rate and direction.

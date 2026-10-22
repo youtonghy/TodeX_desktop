@@ -13,25 +13,24 @@
     "types": [
       "node"
     ],
-    "baseUrl": ".",
     "paths": {
       "@todex/protocol/*": [
-        "../TodeX_protocol/src/*"
+        "./../TodeX_protocol/src/*"
       ],
       "@noble/ciphers/*": [
-        "node_modules/@noble/ciphers/*"
+        "./node_modules/@noble/ciphers/*"
       ],
       "@noble/curves/*": [
-        "node_modules/@noble/curves/*"
+        "./node_modules/@noble/curves/*"
       ],
       "@noble/hashes/*": [
-        "node_modules/@noble/hashes/*"
+        "./node_modules/@noble/hashes/*"
       ],
       "@noble/post-quantum/*": [
-        "node_modules/@noble/post-quantum/*"
+        "./node_modules/@noble/post-quantum/*"
       ],
       "@react-native-community/netinfo": [
-        "src/renderer/stubs/netinfo.ts"
+        "./src/renderer/stubs/netinfo.ts"
       ]
     }
   },
