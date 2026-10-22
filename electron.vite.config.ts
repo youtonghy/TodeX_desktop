@@ -1,5 +1,5 @@
 import { resolve } from 'node:path';
-import { defineConfig, externalizeDepsPlugin } from 'electron-vite';
+import { defineConfig } from 'electron-vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import type { Plugin } from 'vite';
@@ -52,18 +52,16 @@ export default defineConfig({
         '@react-native-community/netinfo': resolve(desktopRoot, 'src/renderer/stubs/netinfo.ts'),
       },
     },
-    plugins: [externalizeDepsPlugin()],
   },
   preload: {
     define: {
       __TODEX_BUILD_VERSION__: JSON.stringify(buildVersion),
     },
-    plugins: [externalizeDepsPlugin()],
     build: {
-      rollupOptions: {
+      rolldownOptions: {
         output: {
           format: 'cjs',
-          inlineDynamicImports: true,
+          codeSplitting: false,
           entryFileNames: '[name].cjs',
           chunkFileNames: '[name].cjs',
           assetFileNames: '[name].[ext]',
@@ -72,14 +70,6 @@ export default defineConfig({
     },
   },
   renderer: {
-    esbuild: {
-      tsconfigRaw: JSON.stringify({
-        compilerOptions: {
-          jsx: 'react-jsx',
-          useDefineForClassFields: true,
-        },
-      }),
-    },
     define: {
       __TODEX_BUILD_VERSION__: JSON.stringify(buildVersion),
     },
