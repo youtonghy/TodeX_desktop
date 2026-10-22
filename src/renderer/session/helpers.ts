@@ -1611,8 +1611,6 @@ export type PersistedSettings = Omit<ConnectionSettings, 'deviceSecret'>;
 
 export const SETTINGS_STORAGE_KEY = 'todex.desktop.settings.v1';
 export const BACKEND_CONNECTIONS_STORAGE_KEY = 'todex.desktop.backendConnections.v1';
-/** Backend profile id new None-workspace conversations start on. */
-export const NO_WORKSPACE_BACKEND_STORAGE_KEY = 'todex.desktop.noWorkspaceBackend.v1';
 export const WORKSPACES_STORAGE_KEY = 'todex.desktop.workspaces.v1';
 export const CONVERSATIONS_STORAGE_KEY = 'todex.desktop.conversations.v1';
 export const TIMELINE_STORAGE_KEY = 'todex.desktop.timeline.v1';

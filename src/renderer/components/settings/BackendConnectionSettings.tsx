@@ -5,7 +5,6 @@ import { normalizeServerUrl } from '@todex/protocol/todex';
 import { Chip } from '@/components/base/badges/chip';
 import { Button } from '@/components/base/buttons/button';
 import { Input } from '@/components/base/input/input';
-import { Select, SelectItem } from '@/components/base/select/select';
 import { cx } from '@/utils/cx';
 import { BACKEND_LABEL_COLORS, backendLabelColor, type BackendConnectionProfile } from '../../session/backendColors';
 import { UNPAIRED_TRANSPORT, connectionStateLabel, healthLabelOf, isVersionMismatch } from '../../session/helpers';
@@ -19,9 +18,6 @@ import { SettingsCard, SettingsEntry, SettingsGroup, SettingsRow, SettingsSubpag
 
 /** `page` value of the config sync page (backend ids never take this form). */
 export const CONFIG_SYNC_PAGE = '__config-sync__';
-
-/** Compact select trigger for the right side of a settings row. */
-const ROW_SELECT_TRIGGER = 'h-8 w-auto gap-1 rounded-lg px-2 py-1.5';
 
 const STATE_COLORS = { open: 'lime', connecting: 'yellow', error: 'rose', closed: 'neutral', idle: 'neutral' } as const;
 
@@ -97,7 +93,6 @@ export function BackendConnectionSettings({ session, page, onPageChange, deviceN
                 description={item.tenantId ? `${item.serverUrl} · ${item.tenantId}` : item.serverUrl}
                 trailing={(
                   <>
-                    {item.id === session.noWorkspaceDefaultBackendId ? <Chip variant="caption" color="neutral">{t('settings.noWorkspaceTag')}</Chip> : null}
                     {mismatch ? <Chip variant="caption" color="yellow">{t('conn.versionMismatchShort')}</Chip> : null}
                     <Chip variant="caption" color={item.deviceSecret ? 'neutral' : 'yellow'}>
                       {item.deviceSecret ? t('settings.backendPaired') : t('settings.backendUnpaired')}
@@ -111,20 +106,6 @@ export function BackendConnectionSettings({ session, page, onPageChange, deviceN
           })}
         </SettingsCard>
       </SettingsGroup>
-      <SettingsCard>
-        <SettingsRow label={t('settings.noWorkspaceBackend')} description={t('settings.noWorkspaceBackendHint')}>
-          <Select
-            aria-label={t('settings.noWorkspaceBackend')}
-            selectedKey={session.noWorkspaceDefaultBackendId}
-            triggerClassName={ROW_SELECT_TRIGGER}
-            onSelectionChange={(key) => { if (typeof key === 'string') session.setNoWorkspaceBackendId(key); }}
-          >
-            {session.backendConnections.map((item) => (
-              <SelectItem key={item.id} id={item.id} textValue={item.name}>{item.name}</SelectItem>
-            ))}
-          </Select>
-        </SettingsRow>
-      </SettingsCard>
       <SettingsCard>
         <SettingsEntry
           icon={RiArrowLeftRightLine}

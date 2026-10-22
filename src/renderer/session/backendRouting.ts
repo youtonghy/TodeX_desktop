@@ -12,8 +12,8 @@ type ConversationLike = { workspaceId: string; backendConnectionId?: string | nu
 type TombstoneLike = { backendConnectionId?: string | null };
 
 /** The backend new None-workspace conversations start on: the first of the
- * preferred ids (the None row in view, then the one picked in Settings) that
- * still exists, otherwise the first backend added. */
+ * preferred ids (the open None conversation's, then the None row last picked)
+ * that still exists, otherwise the first backend added. */
 export function resolveNoWorkspaceBackendId(profiles: readonly ProfileLike[], ...preferredIds: Array<string | null | undefined>): string {
   const preferred = preferredIds.find((id) => id && profiles.some((profile) => profile.id === id));
   if (preferred) return preferred;

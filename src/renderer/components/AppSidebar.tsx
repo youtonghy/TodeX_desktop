@@ -376,16 +376,14 @@ export function AppSidebar({
 
   // Workspaces of every configured backend are live and editable here; only
   // those left behind by a removed backend profile render read-only below.
-  // None becomes one row per backend, the Settings default first.
+  // None becomes one row per backend, in the order they were added.
   const ownWorkspaces = useMemo(() => {
     const listed = session.workspaces.filter((workspace) => !isNoneWorkspaceId(workspace.id) && (
       !workspace.backendConnectionId || session.backendConnections.some((profile) => profile.id === workspace.backendConnectionId)
     ));
     const none = session.workspaces.find((workspace) => isNoneWorkspaceId(workspace.id));
     if (!none) return listed;
-    const defaultId = session.noWorkspaceDefaultBackendId;
-    const profiles = [...session.backendConnections]
-      .sort((a, b) => Number(b.id === defaultId) - Number(a.id === defaultId) || a.createdAt - b.createdAt);
+    const profiles = [...session.backendConnections].sort((a, b) => a.createdAt - b.createdAt);
     const rows = profiles.map((profile, index): WorkspaceRecord => ({
       ...none,
       id: noneWorkspaceRowId(profile.id),
@@ -394,7 +392,7 @@ export function AppSidebar({
       sortOrder: index,
     }));
     return [...rows, ...listed];
-  }, [session.workspaces, session.backendConnections, session.noWorkspaceDefaultBackendId]);
+  }, [session.workspaces, session.backendConnections]);
   const openWorkspaceRow = (rowId: string) => {
     const noneBackendId = noneWorkspaceRowBackendId(rowId);
     if (noneBackendId === null) session.selectWorkspace(rowId);
