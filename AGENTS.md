@@ -29,6 +29,7 @@ TodeX lives in sibling checkouts under the same parent directory:
 
 - `../TodeX_backend` — Rust backend/API server (`docs/API.md` holds the API contract)
 - `../TodeX_web` — Web client; the Dual-Client Synchronization rules below apply in both directions
+- `../TodeX_container` — Docker image (`todex-agentd` + agent CLIs) that the clients pair with; its pairing, config-sync and path-mapping flows are described in its `docs/PLAN.md`
 
 When a task requires it — the Dual-Client Synchronization rules, aligning client calls with the backend API contract, or a change that explicitly spans repos — read and edit those sibling repositories directly at their paths, even though they sit outside this repository. Follow each repo's own `AGENTS.md` while working inside it. Commit and push in each repository separately per its Git delivery rules; never mix another repo's changes into this repository's commits.
 
