@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Radio, RadioGroup } from 'react-aria-components';
 import { RiArrowLeftRightLine } from '@remixicon/react';
+import { isIpcServerUrl } from '@todex/protocol/ipcServerUrl';
 import { normalizeServerUrl } from '@todex/protocol/todex';
 import { Chip } from '@/components/base/badges/chip';
 import { Button } from '@/components/base/buttons/button';
@@ -253,7 +254,8 @@ function BackendDetail({ session, profile, deviceName, pairingAutoStart, history
               ))}
             </RadioGroup>
           </SettingsRow>
-          {managed ? (
+          {/* A local IPC backend's address is set by the Local backend page. */}
+          {managed || isIpcServerUrl(profile.serverUrl) ? (
             <SettingsRow label={t('settings.serverUrl')}>
               <span className="w-64 truncate text-body-regular text-text-secondary">{profile.serverUrl}</span>
             </SettingsRow>

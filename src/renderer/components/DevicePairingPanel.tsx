@@ -16,6 +16,7 @@ import { normalizeServerUrl, type BackendConnectionProfile } from '@todex/protoc
 import type { TodeXSession } from '../session/useTodeXSession';
 import { useT } from '../i18n';
 import { useNoticeToast } from './NoticeToast';
+import { approveContainerPairing } from '../lib/localApproval';
 import { SETTINGS_ROW, SettingsCard, SettingsValueField } from './settings/SettingsRows';
 import { Spinner, SpinnerIcon } from './ui/spinner';
 import { CodeBlock } from './ui/code-block';
@@ -212,6 +213,21 @@ export function DevicePairingPanel({ session, backendId, deviceName, autoStartNo
     }
   };
 
+  // A container on this machine whose socket is not shared (Docker Desktop):
+  // run the approval command shown below ourselves, once per request.
+  const [dockerApproval, setDockerApproval] = useState<{ code: string; state: 'running' | 'failed'; error?: string } | null>(null);
+  useEffect(() => {
+    if (phase !== 'pending' || deployment !== 'container' || !verificationCode || !profile) return;
+    if (dockerApproval?.code === verificationCode) return;
+    const code = verificationCode;
+    setDockerApproval({ code, state: 'running' });
+    void approveContainerPairing(profile.serverUrl, code).then((attempted) => {
+      if (!attempted) setDockerApproval(null);
+    }).catch((cause: unknown) => {
+      setDockerApproval({ code, state: 'failed', error: cause instanceof Error ? cause.message : String(cause) });
+    });
+  }, [phase, deployment, verificationCode, profile?.serverUrl]);
+
   const waiting = phase === 'requesting' || phase === 'pending';
   const status = profile ? transportStatus(profile) : null;
   const paired = Boolean(deviceIdentityFromSecret(profile?.deviceSecret)) || status?.state !== 'unpaired';
@@ -269,6 +285,12 @@ export function DevicePairingPanel({ session, backendId, deviceName, autoStartNo
         <SettingsCard>
           <div className={cx('flex flex-col gap-2', SETTINGS_ROW, 'py-3')}>
             <p className="text-body-medium text-text-primary">{t('pair.containerTitle')}</p>
+            {dockerApproval?.code === verificationCode && dockerApproval.state === 'running' ? (
+              <p role="status" className="flex items-center gap-2 text-body-2-regular text-text-secondary"><Spinner size="sm" />{t('localBackend.dockerApproving')}</p>
+            ) : null}
+            {dockerApproval?.code === verificationCode && dockerApproval.state === 'failed' ? (
+              <p role="alert" className="text-body-2-regular text-status-yellow-text">{t('localBackend.dockerApproveFailed', { error: dockerApproval.error ?? '' })}</p>
+            ) : null}
             <p className="text-body-2-regular text-text-secondary">{t('pair.containerHint')}</p>
             {containerApprovalCommands(verificationCode).map((command) => (
               <CodeBlock key={command} code={command} language="bash" title="shell" copyLabel={t('pair.copyCommand')} />

@@ -1,4 +1,16 @@
 import { contextBridge, ipcRenderer } from 'electron';
+import type {
+  LocalAdminStatus,
+  LocalBackendConfig,
+  LocalBackendConfigPatch,
+  LocalBackendDiscovery,
+  LocalPairedDevice,
+  LocalPairingRequest,
+  LocalDockerContainer,
+  LocalSocketEvent,
+} from './localBackendTypes';
+
+export type * from './localBackendTypes';
 
 type WindowState = { maximized: boolean; fullScreen: boolean };
 
@@ -156,6 +168,56 @@ const api = {
     info: () => ipcRenderer.invoke('debug:info') as Promise<DesktopDebugLogInfo>,
     log: (level: string, event: string, data?: unknown) => {
       ipcRenderer.send('debug:log', { level, event, data });
+    },
+  },
+  /** The backend on this machine (and TodeX containers sharing their socket), driven by the main process. */
+  localBackend: {
+    available: true,
+    discover: () => ipcRenderer.invoke('localBackend:discover') as Promise<LocalBackendDiscovery>,
+    install: () => ipcRenderer.invoke('localBackend:install') as Promise<string>,
+    start: () => ipcRenderer.invoke('localBackend:start') as Promise<void>,
+    stop: () => ipcRenderer.invoke('localBackend:stop') as Promise<void>,
+    restart: () => ipcRenderer.invoke('localBackend:restart') as Promise<void>,
+    switchVersion: () => ipcRenderer.invoke('localBackend:switchVersion') as Promise<void>,
+    setAutostart: (enabled: boolean) => ipcRenderer.invoke('localBackend:setAutostart', enabled) as Promise<void>,
+    logTail: () => ipcRenderer.invoke('localBackend:logTail') as Promise<string>,
+    status: (instance: string) => ipcRenderer.invoke('localBackend:status', instance) as Promise<LocalAdminStatus>,
+    getConfig: (instance: string) => ipcRenderer.invoke('localBackend:getConfig', instance) as Promise<LocalBackendConfig>,
+    setConfig: (instance: string, patch: Partial<LocalBackendConfigPatch>) => ipcRenderer.invoke('localBackend:setConfig', instance, patch) as Promise<LocalBackendConfig>,
+    pairingRequests: (instance: string) => ipcRenderer.invoke('localBackend:pairingRequests', instance) as Promise<LocalPairingRequest[]>,
+    decidePairing: (instance: string, requestId: string, approved: boolean, verificationCode: string) =>
+      ipcRenderer.invoke('localBackend:decidePairing', instance, requestId, approved, verificationCode) as Promise<void>,
+    devices: (instance: string) => ipcRenderer.invoke('localBackend:devices', instance) as Promise<LocalPairedDevice[]>,
+    revokeDevice: (instance: string, deviceId: string) => ipcRenderer.invoke('localBackend:revokeDevice', instance, deviceId) as Promise<void>,
+    reset: (instance: string, target: 'devices' | 'encryption') => ipcRenderer.invoke('localBackend:reset', instance, target) as Promise<{ ok: boolean; restartRequired: boolean }>,
+    approveOwnPairing: (instance: string, requestId: string, verificationCode: string) =>
+      ipcRenderer.invoke('localBackend:approveOwnPairing', instance, requestId, verificationCode) as Promise<void>,
+    dockerApprove: (container: string, verificationCode: string) =>
+      ipcRenderer.invoke('localBackend:dockerApprove', container, verificationCode) as Promise<void>,
+    dockerContainers: () => ipcRenderer.invoke('localBackend:dockerContainers') as Promise<LocalDockerContainer[]>,
+    onProgress: (listener: (progress: { version: string; received: number; total: number }) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, progress: { version: string; received: number; total: number }) => listener(progress);
+      ipcRenderer.on('localBackend:progress', handler);
+      return () => {
+        ipcRenderer.removeListener('localBackend:progress', handler);
+      };
+    },
+    /** Low-level WebSocket relay over the local channel; `IpcWebSocket` in the renderer wraps it. */
+    socket: {
+      open: (url: string) => ipcRenderer.invoke('localBackend:wsOpen', url) as Promise<number>,
+      send: (id: number, data: string | Uint8Array) => {
+        ipcRenderer.send('localBackend:wsSend', id, data);
+      },
+      close: (id: number, code?: number, reason?: string) => {
+        ipcRenderer.send('localBackend:wsClose', id, code, reason);
+      },
+      onEvent: (listener: (event: LocalSocketEvent) => void) => {
+        const handler = (_event: Electron.IpcRendererEvent, payload: LocalSocketEvent) => listener(payload);
+        ipcRenderer.on('localBackend:wsEvent', handler);
+        return () => {
+          ipcRenderer.removeListener('localBackend:wsEvent', handler);
+        };
+      },
     },
   },
   updates: {

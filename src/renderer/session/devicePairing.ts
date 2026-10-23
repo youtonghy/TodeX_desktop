@@ -23,6 +23,7 @@ export type DevicePairingResult =
   | { status: 'approved'; deviceId: string; pin: DevicePairingPin };
 
 export type DevicePairingRequest = {
+  requestId: string;
   verificationCode: string;
   /** Fingerprint of the transport key the code authenticates (`'none'` for loopback plaintext). */
   transportFingerprint: string;
@@ -85,6 +86,9 @@ function decode(value: unknown, length?: number): Uint8Array {
 }
 
 /** The create response's transport key, validated before anything is derived from it. */
+/** Pairing runs over HTTP(S), or a local IPC backend's socket (`todex-ipc:`). */
+const PAIRING_PROTOCOLS = ['http:', 'https:', 'todex-ipc:'];
+
 function pairingTransport(response: Record<string, unknown>, serverUrl: string): DevicePairingTransport {
   try {
     return parseDevicePairingTransport(response, serverUrl);
@@ -106,7 +110,7 @@ function object(value: unknown): Record<string, unknown> {
 // the `/v2/sealed` tunnel.
 async function post(serverUrl: string, action: string, body: unknown, signal?: AbortSignal): Promise<Record<string, unknown>> {
   const url = new URL(buildHttpUrl(serverUrl, `/v2/device-pairing/${action}`));
-  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) {
+  if (!PAIRING_PROTOCOLS.includes(url.protocol) || url.username || url.password) {
     throw new Error(t('pair.errInvalidUrl'));
   }
   const controller = new AbortController();
@@ -190,7 +194,7 @@ async function post(serverUrl: string, action: string, body: unknown, signal?: A
  * backend omits it. */
 export async function fetchBackendDeployment(serverUrl: string, signal?: AbortSignal): Promise<BackendDeployment> {
   const url = new URL(buildHttpUrl(serverUrl, '/v2/version'));
-  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) return 'host';
+  if (!PAIRING_PROTOCOLS.includes(url.protocol) || url.username || url.password) return 'host';
   const controller = new AbortController();
   const abort = () => controller.abort();
   signal?.addEventListener('abort', abort, { once: true });
@@ -286,6 +290,7 @@ export async function beginDevicePairing(serverUrl: string, deviceName: string, 
       wipe();
     };
     return {
+      requestId,
       verificationCode: material.verificationCode,
       transportFingerprint: transportFingerprint(transport.protocol, transport.publicKeyRaw),
       expiresAt,

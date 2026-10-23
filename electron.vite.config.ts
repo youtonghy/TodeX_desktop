@@ -11,7 +11,7 @@ const buildVersion = process.env.TODEX_BUILD_VERSION?.trim() || 'DEV0.0.0';
  * Content Security Policy of the bundled renderer. Scripts only come from the
  * app bundle ('wasm-unsafe-eval' lets Shiki compile its bundled Oniguruma
  * WebAssembly; it does not allow JS eval); connections go to whatever backend the user configured (any
- * http/https/ws/wss host). Images allow remote http(s) for Markdown in chat.
+ * http/https/ws/wss host, or a local IPC backend at todex-ipc:). Images allow remote http(s) for Markdown in chat.
  * Styles keep 'unsafe-inline' because React Aria, motion and xterm inject inline styles.
  * Build-only: the dev server needs inline React Refresh code and its HMR socket.
  */
@@ -19,9 +19,9 @@ const RENDERER_CSP = [
   "default-src 'self'",
   "script-src 'self' 'wasm-unsafe-eval'",
   "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: blob: http: https:",
+  "img-src 'self' data: blob: http: https: todex-ipc:",
   "font-src 'self' data:",
-  "connect-src 'self' data: blob: http: https: ws: wss:",
+  "connect-src 'self' data: blob: http: https: ws: wss: todex-ipc:",
   "media-src 'self' data: blob:",
   "worker-src 'self' blob:",
   "object-src 'none'",

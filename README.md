@@ -120,7 +120,7 @@ Built with **Electron 44**, **React 19**, **Vite 7**, **Tailwind CSS v4**, and *
 
 - **Node.js**: 22.0.0 or higher
 - **pnpm**: 11.0.0 or higher
-- **TodeX Backend**: Running instance of `todex-agentd` (default `http://127.0.0.1:7345`)
+- **TodeX Backend**: A `todex-agentd` instance. Settings → **Local backend** can deploy one on this machine (see below), or connect to any running instance (default `http://127.0.0.1:7345`).
 - **BoardUI Pro key (optional)**: BoardUI components are committed as source, so installing dependencies needs no key. Only adding a BoardUI Pro component needs one, read from `BOARDUI_KEY`.
 
 ### 1. Check Out the Shared Protocol
@@ -203,6 +203,16 @@ repository is private, configure a `PROTOCOL_REPO_TOKEN` Actions secret with rea
 access.
 
 ---
+
+## Local Backend
+
+Settings → **Local backend** runs `todex-agentd` on this computer without a terminal:
+
+- **Deploy and connect** downloads the backend release with the same version as this Desktop (the latest release for dev builds) from GitHub, checks it against the release's `SHA256SUMS` and its `--version`, keeps it under `userData/backend/bin/<version>/`, and starts the daemon with the shared data directory `~/.todex-agent` (the same one the backend CLI and TUI use). A daemon that is already running is adopted instead.
+- Desktop talks to it over a local IPC channel (a Unix socket, or a named pipe on Windows), not TCP: profiles of these backends have the URL `todex-ipc://local`. Pairing is approved automatically through the backend's socket-only local-admin API, which accepts only processes of the same OS user.
+- A Desktop-managed daemon does not self-update; when Desktop updates, **Switch to matching version** restarts it on the matching build.
+- The page mirrors the backend TUI: listen address and port, pairing encryption, workspace roots, start at login, resets, the pairing QR code and transport fingerprint, and approving, rejecting or revoking devices. The listener stays on `127.0.0.1` until you change it; set `0.0.0.0` or an interface IP (and restart) to let other TodeX clients pair with this machine.
+- TodeX containers started with `todexc` on Linux share their socket under `~/.config/todex-container/<name>/ipc/` and appear on the same page. On Docker Desktop (macOS/Windows) the socket cannot cross the VM, so pair those over TCP under Backend connections; Desktop approves the request with `docker exec … pair approve`.
 
 ## Connection & Troubleshooting
 

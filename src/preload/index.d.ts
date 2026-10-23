@@ -1,3 +1,7 @@
+import type { LocalDockerContainer, LocalSocketEvent, PairingEncryption, LocalAdminStatus, LocalBackendConfigPatch, LocalBackendConfig, LocalPairingRequest, LocalPairedDevice, LocalDaemonStatus, LocalBackendDiscovery } from './localBackendTypes';
+
+export type { LocalDockerContainer, LocalSocketEvent, PairingEncryption, LocalAdminStatus, LocalBackendConfigPatch, LocalBackendConfig, LocalPairingRequest, LocalPairedDevice, LocalDaemonStatus, LocalBackendDiscovery };
+
 export type TodeXDesktopApi = {
   store: {
     get: (key: string) => Promise<unknown>;
@@ -64,6 +68,41 @@ export type TodeXDesktopApi = {
   debug: {
     info: () => Promise<DesktopDebugLogInfo>;
     log: (level: string, event: string, data?: unknown) => void;
+  };
+  /** The backend on this machine (and TodeX containers sharing their socket), driven by the main process. */
+  localBackend: {
+    /** False in the browser bridge (no local IPC there). */
+    available: boolean;
+    discover: () => Promise<LocalBackendDiscovery>;
+    /** Downloads the backend build matching this desktop (latest for dev builds); resolves its path. */
+    install: () => Promise<string>;
+    start: () => Promise<void>;
+    stop: () => Promise<void>;
+    restart: () => Promise<void>;
+    /** Restarts the daemon from the managed build of this desktop's version. */
+    switchVersion: () => Promise<void>;
+    setAutostart: (enabled: boolean) => Promise<void>;
+    logTail: () => Promise<string>;
+    status: (instance: string) => Promise<LocalAdminStatus>;
+    getConfig: (instance: string) => Promise<LocalBackendConfig>;
+    setConfig: (instance: string, patch: Partial<LocalBackendConfigPatch>) => Promise<LocalBackendConfig>;
+    pairingRequests: (instance: string) => Promise<LocalPairingRequest[]>;
+    decidePairing: (instance: string, requestId: string, approved: boolean, verificationCode: string) => Promise<void>;
+    devices: (instance: string) => Promise<LocalPairedDevice[]>;
+    revokeDevice: (instance: string, deviceId: string) => Promise<void>;
+    reset: (instance: string, target: 'devices' | 'encryption') => Promise<{ ok: boolean; restartRequired: boolean }>;
+    /** Approves a pairing request this app itself created over the instance's socket. */
+    approveOwnPairing: (instance: string, requestId: string, verificationCode: string) => Promise<void>;
+    /** `docker exec … pair approve <code>` in a running TodeX container (no shared socket). */
+    dockerApprove: (container: string, verificationCode: string) => Promise<void>;
+    dockerContainers: () => Promise<LocalDockerContainer[]>;
+    onProgress: (listener: (progress: { version: string; received: number; total: number }) => void) => () => void;
+    socket: {
+      open: (url: string) => Promise<number>;
+      send: (id: number, data: string | Uint8Array) => void;
+      close: (id: number, code?: number, reason?: string) => void;
+      onEvent: (listener: (event: LocalSocketEvent) => void) => () => void;
+    };
   };
   /** Release auto-updates (GitHub Releases), driven by the main process. */
   updates: {

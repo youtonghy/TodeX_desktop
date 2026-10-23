@@ -5,6 +5,7 @@ import { TemplateCopyProvider } from '@/components/foundations/template-copy/tem
 import { App } from './App';
 import { WindowControlBar } from './components/WindowControlBar';
 import { installBrowserDesktopBridge } from './lib/browserDesktop';
+import { installIpcWebSocket } from './lib/ipcWebSocket';
 import { installRendererDebugLogging } from './lib/debugLogger';
 import { getLocale, subscribeLocale, t } from './i18n';
 import { applyAppearance } from './lib/appearance';
@@ -52,6 +53,7 @@ async function boot() {
   }
 
   installBrowserDesktopBridge();
+  installIpcWebSocket();
   installRendererDebugLogging();
   applyAppearance();
 

@@ -119,6 +119,41 @@ export function installBrowserDesktopBridge(): void {
       info: async () => ({ enabled: false, buildVersion: 'browser', configPath: '', logPath: '', chromiumLogPath: '' }),
       log: () => undefined,
     },
+    // A browser tab cannot run or reach a local backend over IPC.
+    localBackend: (() => {
+      const unavailable = async (): Promise<never> => {
+        throw new Error(t('localBackend.unavailable'));
+      };
+      return {
+        available: false,
+        discover: unavailable,
+        install: unavailable,
+        start: unavailable,
+        stop: unavailable,
+        restart: unavailable,
+        switchVersion: unavailable,
+        setAutostart: unavailable,
+        logTail: unavailable,
+        status: unavailable,
+        getConfig: unavailable,
+        setConfig: unavailable,
+        pairingRequests: unavailable,
+        decidePairing: unavailable,
+        devices: unavailable,
+        revokeDevice: unavailable,
+        reset: unavailable,
+        approveOwnPairing: unavailable,
+        dockerApprove: unavailable,
+        dockerContainers: async () => [],
+        onProgress: () => () => undefined,
+        socket: {
+          open: unavailable,
+          send: () => undefined,
+          close: () => undefined,
+          onEvent: () => () => undefined,
+        },
+      };
+    })(),
     updates: (() => {
       const state = { status: 'unsupported' as const, currentVersion: __TODEX_BUILD_VERSION__, autoDownload: false, reason: 'dev' as const };
       return {

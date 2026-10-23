@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState, type ComponentType, type ReactNode, type Ref } from 'react';
 import { Tab, TabList, TabPanel, Tabs } from 'react-aria-components';
-import { RiApps2Line, RiCodeBoxLine, RiComputerLine, RiHistoryLine, RiInformationLine, RiNotification3Line, RiPaletteLine, RiServerLine, RiSettings3Line, RiTeamLine, RiTerminalBoxLine } from '@remixicon/react';
+import { RiApps2Line, RiCodeBoxLine, RiComputerLine, RiHardDrive3Line, RiHistoryLine, RiInformationLine, RiNotification3Line, RiPaletteLine, RiServerLine, RiSettings3Line, RiTeamLine, RiTerminalBoxLine } from '@remixicon/react';
 import { Select, SelectItem } from '@/components/base/select/select';
 import { Switch } from '@/components/base/switch/switch';
 import { cx } from '@/utils/cx';
 import { AgentCallingSettings } from '../components/AgentCallingSettings';
 import { AgentDesktopSettings, type AgentDesktopPage } from '../components/AgentDesktopSettings';
 import { BackendConnectionSettings } from '../components/settings/BackendConnectionSettings';
+import { LocalBackendSettings } from '../components/settings/LocalBackendSettings';
 import { AppearanceSettings } from '../components/AppearanceSettings';
 import { TerminalSettings } from '../components/settings/TerminalSettings';
 import { FeatureSettings } from '../components/FeatureSettings';
@@ -21,7 +22,7 @@ import { toast } from '../components/ui/toast';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { LOCALE_LABELS, SUPPORTED_LOCALES, getLocalePreference, isLocale, setLocalePreference, useT, type LocalePreference } from '../i18n';
 
-export type SettingsSection = 'general' | 'features' | 'appearance' | 'connection' | 'cli' | 'ssh' | 'notifications' | 'agent' | 'agent-calling' | 'about';
+export type SettingsSection = 'general' | 'features' | 'appearance' | 'connection' | 'local-backend' | 'cli' | 'ssh' | 'notifications' | 'agent' | 'agent-calling' | 'about';
 /** Show a category on open or while open; `at` makes a repeat request distinct. */
 export type SettingsSectionRequest = { section: SettingsSection; at: number };
 
@@ -58,6 +59,11 @@ export function SettingsPanel({ session, historyRecoverySetup = false, repairPai
   const [cliVisited, setCliVisited] = useState(section === 'cli');
   useEffect(() => {
     if (section === 'cli') setCliVisited(true);
+  }, [section]);
+  // Discovery runs CLI commands and polls the backend, so it too waits for a visit.
+  const [localBackendVisited, setLocalBackendVisited] = useState(section === 'local-backend');
+  useEffect(() => {
+    if (section === 'local-backend') setLocalBackendVisited(true);
   }, [section]);
   const agentPanel = useRef<HTMLDivElement>(null);
   const backendPanel = useRef<HTMLDivElement>(null);
@@ -99,6 +105,8 @@ export function SettingsPanel({ session, historyRecoverySetup = false, repairPai
     { id: 'features', label: t('settings.features'), icon: RiApps2Line },
     { id: 'appearance', label: t('settings.appearance'), icon: RiPaletteLine },
     { id: 'connection', label: t('settings.backendConnections'), icon: RiServerLine },
+    // Running a backend on this machine needs the desktop's main process.
+    ...(window.todexDesktop.localBackend?.available ? [{ id: 'local-backend' as const, label: t('localBackend.title'), icon: RiHardDrive3Line }] : []),
     { id: 'cli', label: t('app.cliManager'), icon: RiCodeBoxLine },
     { id: 'ssh', label: t('settings.ssh'), icon: RiTerminalBoxLine },
     { id: 'notifications', label: t('settings.notifications'), icon: RiNotification3Line },
@@ -213,6 +221,12 @@ export function SettingsPanel({ session, historyRecoverySetup = false, repairPai
             historyRecoverySetup={historyRecoverySetup}
           />
         </SettingsPage>
+
+        {localBackendVisited ? (
+          <SettingsPage id="local-backend" title={titleOf('local-backend')}>
+            <LocalBackendSettings session={session} deviceName="TodeX Desktop" />
+          </SettingsPage>
+        ) : null}
 
         <SettingsPage id="cli" title={titleOf('cli')} viewportRef={cliPanel}>
           {cliVisited ? <CliManagerPanel session={session} page={cliPage} onPageChange={setCliPage} /> : null}

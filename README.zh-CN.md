@@ -122,7 +122,7 @@
 
 - **Node.js**：22.0.0 或更高版本
 - **pnpm**：11.0.0 或更高版本
-- **TodeX 后端**：正在运行的 `todex-agentd` 实例（默认 `http://127.0.0.1:7345`）
+- **TodeX 后端**：一个 `todex-agentd` 实例。可在 设置 → **本机 Backend** 中一键部署到本机（见下文），也可连接任意正在运行的实例（默认 `http://127.0.0.1:7345`）。
 - **BoardUI Pro 密钥（可选）**：BoardUI 组件以源码形式提交在仓库中，安装依赖不需要密钥。只有添加 BoardUI Pro 组件时才需要，从 `BOARDUI_KEY` 读取。
 
 ### 1. 检出共享协议库
@@ -197,6 +197,17 @@ SmartScreen 或 Gatekeeper。由于桌面端直接共享移动端协议源码，
 该仓库是私有仓库，需要配置具有只读权限的 `PROTOCOL_REPO_TOKEN` Actions Secret。
 
 ---
+
+
+## 本机 Backend
+
+设置 → **本机 Backend** 无需终端即可在这台电脑上运行 `todex-agentd`：
+
+- **部署并连接**：从 GitHub 下载与当前 Desktop 同版本的 backend（开发版取最新发布），用发布附带的 `SHA256SUMS` 和 `--version` 校验后存放在 `userData/backend/bin/<版本>/`，并使用与 backend CLI、TUI 共用的数据目录 `~/.todex-agent` 启动守护进程。已经在运行的守护进程会被直接接管。
+- Desktop 通过本机 IPC（Unix socket，Windows 为命名管道）而非 TCP 与它通信，这类连接的地址是 `todex-ipc://local`。配对由 backend 仅在 socket 上提供的本地管理接口自动批准，该接口只接受同一系统用户的进程。
+- 由 Desktop 管理的守护进程不会自更新；Desktop 升级后，用 **切换到同版本** 以匹配的构建重启它。
+- 页面与 backend TUI 一一对应：监听地址和端口、配对加密、工作区根目录、登录自启、重置、配对二维码与传输公钥指纹，以及批准、拒绝、吊销设备。监听地址默认保持 `127.0.0.1`；改为 `0.0.0.0` 或网卡 IP 并重启后，其他 TodeX 客户端即可与这台机器配对。
+- 在 Linux 上用 `todexc` 启动的 TodeX 容器会把 socket 共享到 `~/.config/todex-container/<名称>/ipc/`，并出现在同一页面。Docker Desktop（macOS/Windows）的 socket 无法穿过虚拟机，请在 后端连接 中通过 TCP 配对，Desktop 会用 `docker exec … pair approve` 自动批准。
 
 ## 连接与故障排查
 

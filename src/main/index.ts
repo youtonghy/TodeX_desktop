@@ -9,6 +9,8 @@ import { checkForUpdates, downloadUpdate, installUpdate, refreshUpdateMenu, setA
 import { syncDesktopEntry } from './desktopEntry';
 import { PREVIEW_PARTITION, PreviewViews, type InspectColors, type PreviewTarget } from './previewViews';
 import { PreviewProxy, type PreviewBackend } from './previewProxy';
+import { LocalBackendManager, registerIpcScheme } from './localBackend';
+import { setIpcFetchImpl } from '@todex/protocol/ipcServerUrl';
 import { isMainLocale, mainT, setMainLocale } from './i18n';
 import { openPathRefusal, shellPathRefusal, type PathInfo, type ShellPathRefusal } from './shellPolicy';
 import {
@@ -704,6 +706,12 @@ if (process.platform === 'linux' && !app.commandLine.hasSwitch('password-store')
   }
 }
 
+// Privileged schemes must be registered before the app is ready.
+registerIpcScheme();
+const LOCAL_BACKEND_PREFS_KEY = 'todex.desktop.localBackend.v1';
+let localBackend: LocalBackendManager | null = null;
+let localBackendStopped = false;
+
 app.whenReady().then(() => {
   setMainLocale(app.getLocale());
   debugLog('info', 'app.ready', { readyAt: new Date().toISOString() });
@@ -714,6 +722,17 @@ app.whenReady().then(() => {
     console.error(`[${APP_IDENTITY}] ${error instanceof Error ? error.message : error}`);
   }
   installSessionPolicy();
+  localBackend = new LocalBackendManager({
+    buildVersion: BUILD_VERSION,
+    appOrigin: DESKTOP_APP_ORIGIN,
+    isRendererOrigin: isRendererEntryOrigin,
+    isRendererUrl: isRendererEntryUrl,
+    stopOnQuit: () => (readStore()[LOCAL_BACKEND_PREFS_KEY] as { stopOnQuit?: unknown } | undefined)?.stopOnQuit === true,
+    log: (level, event, data) => debugLog(level, event, data ?? {}),
+  });
+  localBackend.installProtocol();
+  localBackend.register(handleIpc);
+  setIpcFetchImpl(localBackend.fetch);
   void probeDefaultBackend();
   ipcMain.on('debug:log', (event, payload: { level?: unknown; event?: unknown; data?: unknown }) => {
     if (!DEBUG_BUILD) return;
@@ -1010,9 +1029,17 @@ app.whenReady().then(() => {
   });
 });
 
-app.on('before-quit', () => {
+app.on('before-quit', (event) => {
   debugLog('info', 'app.before-quit');
   flushStore();
+  // "Stop when TodeX quits": hold the quit until `daemon stop` returns.
+  if (localBackend && !localBackendStopped) {
+    localBackendStopped = true;
+    event.preventDefault();
+    void localBackend.stopForQuit()
+      .catch((error) => debugLog('error', 'localBackend.stopForQuit.failed', { error }))
+      .finally(() => app.quit());
+  }
 });
 app.on('child-process-gone', (_event, details) => debugLog('error', 'app.child-process-gone', { details }));
 app.on('window-all-closed', () => {
