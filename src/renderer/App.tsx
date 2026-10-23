@@ -29,7 +29,11 @@ import { AppIcon } from './components/AppIcon';
 import { ChatPanel } from './screens/ChatPanel';
 import { HistoryRecoveryNotice } from './components/HistoryRecoveryNotice';
 import { Field } from './components/Field';
-import { connectionStateLabel, conversationDisplayTitle, createWorkspaceDirectory, fetchWorkspaceDirectorySnapshot } from './session/helpers';
+import { connectionStateLabel, conversationDisplayTitle, createWorkspaceDirectory, fetchWorkspaceDirectorySnapshot, isUnmountedPathError } from './session/helpers';
+import { pickedHostPathToBackend } from './session/hostPaths';
+import { WorkspaceMountHint } from './components/WorkspaceMountHint';
+import { isLoopbackUrl } from '@todex/protocol/mobileParity';
+import { mapHostPathToBackend } from '@todex/protocol/pathMapping';
 import { isWorkbenchTab, panelFromRoute, type DesktopPanel, type OpenPanelOptions, type WorkbenchItem, type WorkbenchRequest, type WorkbenchTab } from './lib/panels';
 import type { RemoteFilesBinding } from './session/fileSources';
 import { ShortcutHint, useAppShortcuts, useShortcutHintTracking } from './lib/shortcuts';
@@ -737,6 +741,11 @@ function CreateWorkspaceModal({
   const [activeRoot, setActiveRoot] = useState('');
   const [newFolderName, setNewFolderName] = useState<string | null>(null);
   const [creatingFolder, setCreatingFolder] = useState(false);
+  // The folder last picked on this machine and the backend path it became,
+  // so the mount hint names the host folder rather than the mapped path.
+  const [localPick, setLocalPick] = useState<{ host: string; backend: string } | null>(null);
+  // Host folder a container backend cannot see ('' hides the hint).
+  const [mountHint, setMountHint] = useState('');
   const settingsForBackend = (id: string) => {
     const profile = session.backendConnections.find((candidate) => candidate.id === id);
     return profile ? { ...session.settings, serverUrl: profile.serverUrl, deviceSecret: profile.deviceSecret, tenantId: profile.tenantId, encryptionProtocol: profile.encryptionProtocol, encryptionPublicKey: profile.encryptionPublicKey, transportVerified: profile.transportVerified } : session.settings;
@@ -746,6 +755,7 @@ function CreateWorkspaceModal({
   const browseRequest = useRef(0);
 
   const applySnapshot = (snapshot: Awaited<ReturnType<typeof fetchWorkspaceDirectorySnapshot>>) => {
+    setMountHint('');
     setPath(snapshot.current);
     setEntries(snapshot.entries.map((entry) => entry.path));
     setRoots(snapshot.roots);
@@ -785,6 +795,12 @@ function CreateWorkspaceModal({
   }, [isOpen, workspace, session.activeBackendConnectionId, session.settings]);
 
   const readFailed = (error: unknown) => toast.danger(error instanceof Error ? error.message : t('app.workspaceReadFailed'));
+  const serverVersion = session.backendLinkStatus[workspace?.backendConnectionId ?? backendId]?.serverVersion;
+  // A container backend that cannot see the folder gets the mount hint instead of the raw error.
+  const pathFailed = (error: unknown) => {
+    if (isUnmountedPathError(serverVersion?.deployment, error)) setMountHint(localPick?.backend === path ? localPick.host : path);
+    else readFailed(error);
+  };
 
   const submitNewFolder = async () => {
     const folderName = newFolderName?.trim();
@@ -826,7 +842,7 @@ function CreateWorkspaceModal({
                 try {
                   validatedPath = (await fetchWorkspaceDirectorySnapshot(directorySettings, path)).current;
                 } catch (error) {
-                  readFailed(error);
+                  pathFailed(error);
                   return;
                 }
               }
@@ -858,7 +874,8 @@ function CreateWorkspaceModal({
       >
         {session.backendConnections.map((profile) => <SelectItem key={profile.id} id={profile.id} textValue={profile.name}>{profile.name} · {profile.serverUrl}</SelectItem>)}
       </Select>
-      <Field label={t('app.workspaceDirectory')} value={path} onChange={setPath} />
+      <Field label={t('app.workspaceDirectory')} value={path} onChange={(value) => { setPath(value); setMountHint(''); }} />
+      {mountHint ? <WorkspaceMountHint path={mountHint} /> : null}
       {roots.length > 1 ? (
         <Select
           label={t('app.workspaceRoot')}
@@ -880,7 +897,17 @@ function CreateWorkspaceModal({
           variant="secondary"
           onClick={async () => {
             const selected = await window.todexDesktop.dialog.openDirectory();
-            if (selected) setPath(selected);
+            if (!selected) return;
+            // A container backend sees host folders at its own paths.
+            const picked = pickedHostPathToBackend({
+              loopback: isLoopbackUrl(directorySettings.serverUrl),
+              deployment: serverVersion?.deployment ?? 'host',
+              pathMappings: serverVersion?.pathMappings ?? [],
+              windows: window.todexDesktop.shell.platform === 'win32',
+            }, selected, mapHostPathToBackend);
+            setPath(picked.path);
+            setLocalPick({ host: selected, backend: picked.path });
+            setMountHint(picked.unmounted ? selected : '');
           }}
         >
           {t('app.workspacePickLocal')}
@@ -891,7 +918,7 @@ function CreateWorkspaceModal({
             try {
               applySnapshot(await fetchWorkspaceDirectorySnapshot(directorySettings, path));
             } catch (error) {
-              readFailed(error);
+              pathFailed(error);
             }
           }}
         >

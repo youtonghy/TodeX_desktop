@@ -5,17 +5,20 @@ import {
   DevicePairingRetryableError,
   PAIRING_POLL_INTERVAL_MS,
   beginDevicePairing,
+  fetchBackendDeployment,
   nextPairingPollDelayMs,
   type DevicePairingRequest,
 } from '../session/devicePairing';
 import { deviceIdentityFromSecret, generateDeviceIdentity } from '@todex/protocol/deviceAuth';
 import { transportFingerprint } from '@todex/protocol/secureChannel';
+import type { BackendDeployment } from '@todex/protocol/pathMapping';
 import { normalizeServerUrl, type BackendConnectionProfile } from '@todex/protocol/todex';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { useT } from '../i18n';
 import { useNoticeToast } from './NoticeToast';
 import { SETTINGS_ROW, SettingsCard, SettingsValueField } from './settings/SettingsRows';
 import { Spinner, SpinnerIcon } from './ui/spinner';
+import { CodeBlock } from './ui/code-block';
 import { cx } from '@/utils/cx';
 
 type Props = { session: TodeXSession; backendId: string; deviceName: string; autoStartNonce?: number };
@@ -29,6 +32,17 @@ type Attempt = {
   expiryTimer?: ReturnType<typeof setTimeout>;
   clockTimer?: ReturnType<typeof setInterval>;
 };
+
+/** Default container name of `todexc up`; the hint says to change it otherwise. */
+const CONTAINER_NAME = 'todex';
+
+/** The commands that approve `code` on a container backend's host. Only a
+ * plain code (letters, digits, `-`) is put into a command line. */
+function containerApprovalCommands(code: string): string[] {
+  const commands = ['todexc pair'];
+  if (/^[A-Za-z0-9-]+$/.test(code)) commands.push(`docker exec -u todex ${CONTAINER_NAME} todex-agentd pair approve ${code}`);
+  return commands;
+}
 
 const STATUS_ROW = cx('flex min-h-[52px] items-center justify-between gap-4', SETTINGS_ROW);
 
@@ -64,6 +78,8 @@ export function DevicePairingPanel({ session, backendId, deviceName, autoStartNo
   const [remaining, setRemaining] = useState(0);
   const [error, setError] = useState('');
   const [fingerprint, setFingerprint] = useState('');
+  // Read before pairing (unauthenticated): a container shows how to approve.
+  const [deployment, setDeployment] = useState<BackendDeployment>('host');
   // A device key generated for a profile that has none is kept only in memory
   // until approval, so retries for the same backend enroll the same key.
   const pendingDeviceSecret = useRef<{ scope: string; secret: string } | null>(null);
@@ -82,6 +98,7 @@ export function DevicePairingPanel({ session, backendId, deviceName, autoStartNo
     setVerificationCode('');
     setFingerprint('');
     setError('');
+    setDeployment('host');
     return () => { if (active.current) dispose(active.current, true); };
   }, [profile?.id, profile?.serverUrl]);
 
@@ -120,6 +137,9 @@ export function DevicePairingPanel({ session, backendId, deviceName, autoStartNo
     setError('');
     setVerificationCode('');
     setFingerprint('');
+    void fetchBackendDeployment(attempt.serverUrl, attempt.controller.signal).then((kind) => {
+      if (isCurrent(attempt)) setDeployment(kind);
+    });
     try {
       const request = await beginDevicePairing(attempt.serverUrl, deviceName, device, attempt.controller.signal);
       attempt.request = request;
@@ -242,6 +262,18 @@ export function DevicePairingPanel({ session, backendId, deviceName, autoStartNo
             <p className="text-body-2-regular text-text-secondary">{t('pair.codeFingerprint')} <span className="font-mono break-all">{fingerprint}</span></p>
             <p role="status" className="flex items-center gap-2 text-body-regular text-text-secondary"><Spinner size="sm" />{t('pair.waiting')}</p>
             <p className="text-body-2-regular text-text-tertiary">{t('pair.remaining', { seconds: remaining })}</p>
+          </div>
+        </SettingsCard>
+      ) : null}
+      {phase === 'pending' && deployment === 'container' ? (
+        <SettingsCard>
+          <div className={cx('flex flex-col gap-2', SETTINGS_ROW, 'py-3')}>
+            <p className="text-body-medium text-text-primary">{t('pair.containerTitle')}</p>
+            <p className="text-body-2-regular text-text-secondary">{t('pair.containerHint')}</p>
+            {containerApprovalCommands(verificationCode).map((command) => (
+              <CodeBlock key={command} code={command} language="bash" title="shell" copyLabel={t('pair.copyCommand')} />
+            ))}
+            <p className="text-body-2-regular text-text-tertiary">{t('pair.containerNameHint')}</p>
           </div>
         </SettingsCard>
       ) : null}

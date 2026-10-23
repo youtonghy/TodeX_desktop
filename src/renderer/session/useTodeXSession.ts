@@ -169,6 +169,7 @@ import {
   settingsFromProfile,
   UNPAIRED_TRANSPORT,
   PERMISSION_PRESETS,
+  normalizeServerVersion,
   type ServerVersion,
   type ConversationRecord,
   type PendingThreadList,
@@ -481,9 +482,11 @@ export type BackendLinkStatus = {
   starting: boolean;
   /** Last connection failure of this backend ('' once it connects). */
   error: string;
+  /** When the socket last opened (ms, this session); 0 before that. */
+  openedAt: number;
 };
 
-const IDLE_BACKEND_LINK: BackendLinkStatus = { state: 'idle', epoch: 0, health: defaultConnectionHealth, serverVersion: null, starting: false, error: '' };
+const IDLE_BACKEND_LINK: BackendLinkStatus = { state: 'idle', epoch: 0, health: defaultConnectionHealth, serverVersion: null, starting: false, error: '', openedAt: 0 };
 
 type ProviderModelCatalog = Partial<Record<ProviderKind, ProviderModelDescriptor[]>>;
 // Stable fallbacks for a backend whose catalogs have not loaded yet, so the
@@ -4120,7 +4123,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       if (!response.ok) {
         throw new Error(`version endpoint returned ${response.status}`);
       }
-      const json = (await response.json()) as ServerVersion;
+      const json = normalizeServerVersion((await response.json()) as Record<string, unknown>);
       patchLinkStatus(backendId, { serverVersion: json });
       terminalSnapshotRef.current.set(backendId, (json.terminalSnapshot ?? 0) >= 1);
       noteTerminalReplayRef.current(backendId, (json.terminalReplay ?? 0) >= 1);
@@ -4270,6 +4273,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         workspace_root: probe.version.workspaceRoot || '',
         scratch_workspace_root: probe.version.scratchWorkspaceRoot || '',
         historyEncryption: probe.version.historyEncryption,
+        deployment: probe.version.deployment,
+        pathMappings: probe.version.pathMappings,
       } : null;
       if (!probe.ok || probe.error) {
         const error = probe.error ?? ConnectionError.unreachable('backend probe failed');
@@ -4330,7 +4335,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         }
         link.reconnectAttempt = 0;
         link.lastFailureRetryable = true;
-        patchLinkStatus(backendId, (current) => ({ state: 'open', epoch: current.epoch + 1, error: '' }));
+        patchLinkStatus(backendId, (current) => ({ state: 'open', epoch: current.epoch + 1, error: '', openedAt: Date.now() }));
         sendSessionResume(backendId, getSessionCursorSnapshot(backendId));
         void checkConnectionHealth(backendId);
         void refreshServerVersion(backendId);

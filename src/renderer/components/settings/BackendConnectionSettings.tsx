@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Radio, RadioGroup } from 'react-aria-components';
 import { RiArrowLeftRightLine } from '@remixicon/react';
 import { normalizeServerUrl } from '@todex/protocol/todex';
@@ -7,7 +7,8 @@ import { Button } from '@/components/base/buttons/button';
 import { Input } from '@/components/base/input/input';
 import { cx } from '@/utils/cx';
 import { BACKEND_LABEL_COLORS, backendLabelColor, type BackendConnectionProfile } from '../../session/backendColors';
-import { UNPAIRED_TRANSPORT, connectionStateLabel, healthLabelOf, isVersionMismatch } from '../../session/helpers';
+import { UNPAIRED_TRANSPORT, backendApi, connectionStateLabel, healthLabelOf, isVersionMismatch } from '../../session/helpers';
+import type { ConfigSyncPreset } from '../../session/useConfigSync';
 import type { BackendLinkStatus, TodeXSession } from '../../session/useTodeXSession';
 import { useT } from '../../i18n';
 import { DevicePairingPanel } from '../DevicePairingPanel';
@@ -18,6 +19,10 @@ import { SettingsCard, SettingsEntry, SettingsGroup, SettingsRow, SettingsSubpag
 
 /** `page` value of the config sync page (backend ids never take this form). */
 export const CONFIG_SYNC_PAGE = '__config-sync__';
+
+/** What "sync agent config to a new backend" preselects; SSH hosts are
+ * left out because the target rarely holds the matching private keys. */
+const AGENT_CONFIG_CATEGORIES: ConfigSyncPreset['categories'] = ['accounts', 'settings', 'mcp', 'skills'];
 
 const STATE_COLORS = { open: 'lime', connecting: 'yellow', error: 'rose', closed: 'neutral', idle: 'neutral' } as const;
 
@@ -51,8 +56,10 @@ export function BackendConnectionSettings({ session, page, onPageChange, deviceN
   managed?: boolean;
 }) {
   const t = useT();
+  // Set by a backend's "sync agent config" card; the overview entry clears it.
+  const [syncPreset, setSyncPreset] = useState<ConfigSyncPreset | undefined>();
   if (page === CONFIG_SYNC_PAGE) {
-    return <ConfigSyncSettings session={session} onBack={() => onPageChange(null)} />;
+    return <ConfigSyncSettings session={session} preset={syncPreset} onBack={() => onPageChange(null)} />;
   }
   const profile = page ? session.backendConnections.find((item) => item.id === page) : undefined;
   if (profile) {
@@ -65,6 +72,7 @@ export function BackendConnectionSettings({ session, page, onPageChange, deviceN
         historyRecoverySetup={historyRecoverySetup}
         managed={managed}
         onBack={() => onPageChange(null)}
+        onSyncAgentConfig={(preset) => { setSyncPreset(preset); onPageChange(CONFIG_SYNC_PAGE); }}
       />
     );
   }
@@ -112,7 +120,7 @@ export function BackendConnectionSettings({ session, page, onPageChange, deviceN
           title={t('configSync.title')}
           description={session.backendConnections.length < 2 ? t('configSync.needTwoBackends') : t('configSync.entryHint')}
           isDisabled={session.backendConnections.length < 2}
-          onPress={() => onPageChange(CONFIG_SYNC_PAGE)}
+          onPress={() => { setSyncPreset(undefined); onPageChange(CONFIG_SYNC_PAGE); }}
         />
       </SettingsCard>
       {footer}
@@ -120,8 +128,64 @@ export function BackendConnectionSettings({ session, page, onPageChange, deviceN
   );
 }
 
+/** The backend to copy agent config from: the paired backend other than
+ * `targetId` that connected most recently, else the first paired one. */
+function agentConfigSource(session: TodeXSession, targetId: string): BackendConnectionProfile | undefined {
+  const candidates = session.backendConnections.filter(item => item.id !== targetId && item.deviceSecret);
+  const openedAt = (item: BackendConnectionProfile) => linkOf(session, item.id)?.openedAt ?? 0;
+  return candidates.reduce<BackendConnectionProfile | undefined>(
+    (best, item) => (!best || openedAt(item) > openedAt(best) ? item : best),
+    undefined,
+  );
+}
+
+/**
+ * Offers to copy agent config to a paired, connected backend that has no
+ * CLI accounts yet (typically a fresh container) from another paired one.
+ */
+function AgentConfigSyncSuggestion({ session, profile, onSync }: {
+  session: TodeXSession;
+  profile: BackendConnectionProfile;
+  onSync: (preset: ConfigSyncPreset) => void;
+}) {
+  const t = useT();
+  const link = linkOf(session, profile.id);
+  const open = link?.state === 'open';
+  const paired = Boolean(profile.deviceSecret);
+  const source = agentConfigSource(session, profile.id);
+  const [empty, setEmpty] = useState<{ key: string; value: boolean } | null>(null);
+  const key = `${profile.id}:${link?.epoch ?? 0}`;
+  const { serverUrl, deviceSecret, encryptionProtocol, encryptionPublicKey, transportVerified } = session.settingsForBackend(profile.id);
+  useEffect(() => {
+    if (!open || !paired || !source) return;
+    let cancelled = false;
+    backendApi({ serverUrl, deviceSecret, encryptionProtocol, encryptionPublicKey, transportVerified })
+      .listAgentProviders()
+      .then((response) => {
+        const count = Object.values(response.agents ?? {}).reduce((sum, bucket) => sum + (bucket?.providers?.length ?? 0), 0);
+        if (!cancelled) setEmpty({ key, value: count === 0 });
+      })
+      .catch(() => {
+        // Only a suggestion: without the list, show nothing.
+        if (!cancelled) setEmpty({ key, value: false });
+      });
+    return () => { cancelled = true; };
+  }, [key, open, paired, Boolean(source), serverUrl, deviceSecret, encryptionProtocol, encryptionPublicKey, transportVerified]);
+  if (!open || !paired || !source || empty?.key !== key || !empty.value) return null;
+  return (
+    <SettingsCard>
+      <SettingsEntry
+        icon={RiArrowLeftRightLine}
+        title={t('configSync.suggestTitle', { name: source.name })}
+        description={t('configSync.suggestHint')}
+        onPress={() => onSync({ sourceId: source.id, targetIds: [profile.id], categories: AGENT_CONFIG_CATEGORIES })}
+      />
+    </SettingsCard>
+  );
+}
+
 /** One backend's own page: connection, device pairing, history encryption. */
-function BackendDetail({ session, profile, deviceName, pairingAutoStart, historyRecoverySetup, managed, onBack }: {
+function BackendDetail({ session, profile, deviceName, pairingAutoStart, historyRecoverySetup, managed, onBack, onSyncAgentConfig }: {
   session: TodeXSession;
   profile: BackendConnectionProfile;
   deviceName: string;
@@ -129,6 +193,7 @@ function BackendDetail({ session, profile, deviceName, pairingAutoStart, history
   historyRecoverySetup: boolean;
   managed: boolean;
   onBack: () => void;
+  onSyncAgentConfig: (preset: ConfigSyncPreset) => void;
 }) {
   const t = useT();
   const [confirmRemove, setConfirmRemove] = useState(false);
@@ -160,6 +225,7 @@ function BackendDetail({ session, profile, deviceName, pairingAutoStart, history
         ) : null}
       </div>
       {link?.error ? <p role="alert" className="text-body-2-regular text-text-error-primary">{link.error}</p> : null}
+      <AgentConfigSyncSuggestion session={session} profile={profile} onSync={onSyncAgentConfig} />
       <SettingsGroup label={t('settings.connection')}>
         <SettingsCard>
           <SettingsRow label={t('settings.name')}>

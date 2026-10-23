@@ -14,7 +14,7 @@ import { Checkbox } from '@/components/base/checkbox/checkbox';
 import { cx } from '@/utils/cx';
 import { useT, type MessageKey } from '../../i18n';
 import { backendLabelColor } from '../../session/backendColors';
-import { useConfigSync, type ConfigSyncIneligible, type ConfigSyncTargetPlan } from '../../session/useConfigSync';
+import { useConfigSync, type ConfigSyncIneligible, type ConfigSyncPreset, type ConfigSyncTargetPlan } from '../../session/useConfigSync';
 import type { TodeXSession } from '../../session/useTodeXSession';
 import { BackendSelect } from '../ui/backend-select';
 import { ProgressBar } from '../ui/progress-bar';
@@ -169,9 +169,14 @@ function TargetPreview({ t, plan, name, locked, onToggle }: {
  * settings, MCP servers, skills and key-auth SSH hosts from one backend to
  * others, writing only what changed and never deleting.
  */
-export function ConfigSyncSettings({ session, onBack }: { session: TodeXSession; onBack: () => void }) {
+export function ConfigSyncSettings({ session, onBack, preset }: {
+  session: TodeXSession;
+  onBack: () => void;
+  /** Initial source, targets and categories; read once on mount. */
+  preset?: ConfigSyncPreset;
+}) {
   const t = useT();
-  const sync = useConfigSync(session);
+  const sync = useConfigSync(session, preset);
   const profiles = session.backendConnections;
   const nameOf = useMemo(() => new Map(profiles.map(profile => [profile.id, profile.name])), [profiles]);
   const sourceBlocked = sync.ineligibility(sync.sourceId);

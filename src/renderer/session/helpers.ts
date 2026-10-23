@@ -94,6 +94,7 @@ import {
 import { TransportCryptoError, TransportPayloadTooLargeError } from '@todex/protocol/secureChannel';
 import { SocketVerificationError } from '@todex/protocol/socketVerification';
 import { V2ApiClient, type V2ApiOptions } from '@todex/protocol/v2';
+import { parseBackendDeployment, parsePathMappings, type BackendDeployment, type PathMapping } from '@todex/protocol/pathMapping';
 import {
   cursorFromEvent as transportCursorFromEvent,
   sessionIdFromEvent as transportSessionIdFromEvent,
@@ -126,7 +127,48 @@ export type ServerVersion = {
   terminalReplay?: number;
   /** `1` when an attach that cannot continue sends a screen snapshot. */
   terminalSnapshot?: number;
+  /** Where the backend runs; `host` on backends that predate it. */
+  deployment: BackendDeployment;
+  /** Host ↔ backend folder pairs; empty when the backend publishes none. */
+  pathMappings: PathMapping[];
 };
+
+/** `/v2/version`'s JSON with the container fields normalized (older
+ * backends omit them: a host backend without mappings). */
+export function normalizeServerVersion(json: Record<string, unknown>): ServerVersion {
+  return {
+    ...(json as Omit<ServerVersion, 'deployment' | 'pathMappings'>),
+    deployment: parseBackendDeployment(json.deployment),
+    pathMappings: parsePathMappings(json.pathMappings),
+  };
+}
+
+/** A failed workspace directory request, keeping the backend's error code. */
+export class WorkspaceDirectoryError extends Error {
+  readonly code: string;
+  constructor(message: string, code: string) {
+    super(message);
+    this.name = 'WorkspaceDirectoryError';
+    this.code = code;
+  }
+}
+
+/** Whether a workspace path failure on this backend means the folder is not
+ * mounted into its container: outside the workspace roots, or missing there
+ * (an unmounted host folder usually does not exist in the container). */
+export function isUnmountedPathError(deployment: BackendDeployment | undefined, error: unknown): boolean {
+  return deployment === 'container'
+    && error instanceof WorkspaceDirectoryError
+    && (error.code === 'WORKSPACE_PATH_OUTSIDE_ROOT' || error.code === 'WORKSPACE_PATH_NOT_FOUND');
+}
+
+/** `todexc mount add <path>`. Paths with anything but plain characters
+ * (spaces, Windows backslashes) are single-quoted, which POSIX shells and
+ * PowerShell both read literally. */
+export function containerMountCommand(path: string): string {
+  const quoted = /^[\w@%+=:,./-]+$/.test(path) ? path : `'${path.replace(/'/g, `'\\''`)}'`;
+  return `todexc mount add ${quoted}`;
+}
 
 // Dev builds report "DEV0.0.0" (backend and clients) or a bare "0.0.0"; warning
 // on those would fire on every development connection.
@@ -3034,10 +3076,9 @@ async function readWorkspaceDirectoryResponse(
 ): Promise<WorkspaceDirectorySnapshot> {
   const body = await response.json().catch(() => null);
   if (!response.ok) {
-    const message = body && typeof body === 'object' && !Array.isArray(body)
-      ? stringFromUnknown((body as Record<string, unknown>).message)
-      : '';
-    throw new Error(message || t(failureKey, { status: response.status }));
+    const record = body && typeof body === 'object' && !Array.isArray(body) ? body as Record<string, unknown> : {};
+    const message = stringFromUnknown(record.message);
+    throw new WorkspaceDirectoryError(message || t(failureKey, { status: response.status }), stringFromUnknown(record.code));
   }
   const snapshot = parseWorkspaceDirectorySnapshot(body);
   if (!snapshot.current) {

@@ -2,6 +2,7 @@ import { xchacha20poly1305 } from '@noble/ciphers/chacha.js';
 import { x25519 } from '@noble/curves/ed25519.js';
 import { buildHttpUrl } from '@todex/protocol/todex';
 import { decodeBase64Url, type DeviceIdentity } from '@todex/protocol/deviceAuth';
+import { parseBackendDeployment, type BackendDeployment } from '@todex/protocol/pathMapping';
 import {
   DEVICE_PAIRING_V3_NONCE_LENGTH,
   DevicePairingTransportError,
@@ -177,6 +178,40 @@ async function post(serverUrl: string, action: string, body: unknown, signal?: A
   } catch (error) {
     if (controller.signal.aborted && !signal?.aborted) throw new DevicePairingRetryableError(t('pair.errTimeout'));
     throw error;
+  } finally {
+    clearTimeout(timeout);
+    signal?.removeEventListener('abort', abort);
+  }
+}
+
+/** Where the backend runs, from the unauthenticated part of `/v2/version`
+ * (a bootstrap route the backend serves directly, like pairing). Used only
+ * to tell the user how to approve; `host` when it cannot be read or an older
+ * backend omits it. */
+export async function fetchBackendDeployment(serverUrl: string, signal?: AbortSignal): Promise<BackendDeployment> {
+  const url = new URL(buildHttpUrl(serverUrl, '/v2/version'));
+  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) return 'host';
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  signal?.addEventListener('abort', abort, { once: true });
+  if (signal?.aborted) controller.abort();
+  const timeout = setTimeout(abort, REQUEST_TIMEOUT_MS);
+  try {
+    const response = await fetch(url, {
+      headers: { Accept: 'application/json' },
+      signal: controller.signal,
+      credentials: 'omit',
+      cache: 'no-store',
+      redirect: 'error',
+    });
+    if (!response.ok) return 'host';
+    const text = await response.text();
+    if (text.length > MAX_RESPONSE_BYTES) return 'host';
+    const body = JSON.parse(text) as unknown;
+    return parseBackendDeployment(body && typeof body === 'object' ? (body as Record<string, unknown>).deployment : undefined);
+  } catch {
+    // Only a hint for the approval instructions; pairing itself goes on.
+    return 'host';
   } finally {
     clearTimeout(timeout);
     signal?.removeEventListener('abort', abort);

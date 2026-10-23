@@ -48,6 +48,8 @@ import { SubagentsPanel } from './SubagentsPanel';
 import { AgentCallsPanel } from './AgentCallsPanel';
 import { isActiveAgentCallStatus, type AgentCallSession } from '@todex/protocol/agentCalling';
 import { isLoopbackUrl } from '@todex/protocol/mobileParity';
+import { mapBackendPathToHost } from '@todex/protocol/pathMapping';
+import { systemShellPathResolver } from '../session/hostPaths';
 import { resolveTerminalPath } from '@todex/protocol/terminalText';
 import { patchTerminalActivity, forgetTerminalActivity, terminalActivity, useTerminalActivity } from '../session/terminalActivity';
 import { postCompletionNotification } from '../session/completionNotifications';
@@ -1390,10 +1392,21 @@ function FilesPane({ session, target, onTargetChange, remote, remoteBackendId, o
   const api = useCallback(() => backendApi({ serverUrl, deviceSecret, encryptionProtocol, encryptionPublicKey, transportVerified }), [deviceSecret, encryptionProtocol, encryptionPublicKey, serverUrl, transportVerified]);
   const workspacePath = session.activeWorkspace?.path || '';
   // shell.openPath/showItemInFolder act on the desktop's own filesystem, so
-  // the menu only makes sense when the backend runs on this machine.
+  // the menu only makes sense when the backend runs on this machine; a
+  // container backend's paths go through its published mappings, and
+  // without any the menu stays hidden.
+  const filesServerVersion = session.backendLinkStatus[filesBackendId]?.serverVersion;
+  const filesDeployment = filesServerVersion?.deployment ?? 'host';
+  const filesPathMappings = filesServerVersion?.pathMappings;
+  const hostPathFor = useMemo(() => systemShellPathResolver({
+    loopback: isLoopbackUrl(serverUrl),
+    deployment: filesDeployment,
+    pathMappings: filesPathMappings ?? [],
+    windows: window.todexDesktop.shell.platform === 'win32',
+  }, mapBackendPathToHost), [filesDeployment, filesPathMappings, serverUrl]);
   const source: FileSource = useMemo(
-    () => (remote ? remoteFileSource(api, remote) : workspaceFileSource(api, workspacePath, isLoopbackUrl(serverUrl))),
-    [api, remote, serverUrl, workspacePath],
+    () => (remote ? remoteFileSource(api, remote) : workspaceFileSource(api, workspacePath, Boolean(hostPathFor))),
+    [api, hostPathFor, remote, workspacePath],
   );
   const remoteConnector = useRemoteConnector(api, filesBackendId);
   const [entries, setEntries] = useState<FileTreeEntry[]>([]);
@@ -1554,7 +1567,7 @@ function FilesPane({ session, target, onTargetChange, remote, remoteBackendId, o
     setCurrentPath(trimmed);
   };
 
-  const [contextMenu, setContextMenu] = useState<{ path: string; x: number; y: number } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ hostPath: string; x: number; y: number } | null>(null);
   const closeContextMenu = useCallback(() => setContextMenu(null), []);
   const canUseSystemShell = source.canUseSystemShell;
   const revealInManagerLabel = window.todexDesktop.shell.platform === 'darwin'
@@ -1598,11 +1611,13 @@ function FilesPane({ session, target, onTargetChange, remote, remoteBackendId, o
     event.stopPropagation();
     if (findFileTreeEntry(entries, path)) void handleAction(path);
     else setSelected(path);
-    setContextMenu({ path, x: event.clientX, y: event.clientY });
+    // A container path no mapping covers does not exist on this machine.
+    const hostPath = hostPathFor?.(path);
+    if (hostPath) setContextMenu({ hostPath, x: event.clientX, y: event.clientY });
   };
 
   const runFileContextAction = async (action: 'open' | 'open-with' | 'reveal') => {
-    const path = contextMenu?.path;
+    const path = contextMenu?.hostPath;
     setContextMenu(null);
     if (!path) return;
     try {

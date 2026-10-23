@@ -31,6 +31,13 @@ export type ConfigSyncTargetPlan = {
   errors: ConfigSyncError[];
 };
 
+/** Where the sync page starts (e.g. "sync agent config to this backend"). */
+export type ConfigSyncPreset = {
+  sourceId: string;
+  targetIds: string[];
+  categories: ConfigSyncCategory[];
+};
+
 /** Baselines per `source → target` pair. */
 type StoredBaselines = Record<string, ConfigSyncBaseline>;
 
@@ -42,7 +49,7 @@ const pairKey = (sourceId: string, targetId: string) => `${sourceId}->${targetId
  * Values read from the backends (secrets included) live in memory only; the
  * stored baseline holds content hashes.
  */
-export function useConfigSync(session: TodeXSession) {
+export function useConfigSync(session: TodeXSession, preset?: ConfigSyncPreset) {
   const { backendConnections, backendLinkStatus, settingsForBackend } = session;
 
   const ineligibility = useCallback((backendId: string): ConfigSyncIneligible => {
@@ -53,9 +60,11 @@ export function useConfigSync(session: TodeXSession) {
     return null;
   }, [backendConnections, backendLinkStatus]);
 
-  const [sourceId, setSourceIdState] = useState<string>(() => backendConnections[0]?.id ?? '');
-  const [targetIds, setTargetIds] = useState<string[]>([]);
-  const [categories, setCategories] = useState<ConfigSyncCategory[]>([...CONFIG_SYNC_CATEGORIES]);
+  const [sourceId, setSourceIdState] = useState<string>(() => preset?.sourceId ?? backendConnections[0]?.id ?? '');
+  const [targetIds, setTargetIds] = useState<string[]>(() => preset?.targetIds.filter(id => id !== preset.sourceId) ?? []);
+  const [categories, setCategories] = useState<ConfigSyncCategory[]>(
+    () => (preset ? CONFIG_SYNC_CATEGORIES.filter(category => preset.categories.includes(category)) : [...CONFIG_SYNC_CATEGORIES]),
+  );
   const [phase, setPhase] = useState<ConfigSyncPhase>('idle');
   const [plans, setPlans] = useState<ConfigSyncTargetPlan[]>([]);
   const [sourceErrors, setSourceErrors] = useState<ConfigSyncError[]>([]);

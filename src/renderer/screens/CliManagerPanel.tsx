@@ -39,6 +39,10 @@ const STATUS: Record<CliVersionStatus, { labelKey: MessageKey; color: ChipColor 
   external: { labelKey: 'cli.statusExternal', color: 'neutral' },
 };
 
+/** Installed and updated with the container image: no upgrade or install here. */
+const IMAGE_MANAGED_STATUS: { labelKey: MessageKey; color: ChipColor } = { labelKey: 'cli.statusImageManaged', color: 'neutral' };
+const isImageManaged = (cli: CliVersionInfo) => cli.managedBy === 'image';
+
 /**
  * The CLIs on a picked backend, as a settings category. Each installed CLI
  * opens its own page (settings, skills and MCPs, accounts, cleanup), which
@@ -206,7 +210,7 @@ export function CliManagerPanel({ session, page = null, onPageChange = () => {} 
   const [moreOpen, setMoreOpen] = useState(false);
   const showAvailable = moreOpen || !installed.length || available.some((cli) => isRunning(cli.id));
   // Only CLIs with a known newer release join "update all".
-  const updatable = installed.filter((cli) => cli.kind === 'managed' && cli.upgradeSupported && cli.status === 'updateAvailable' && !isBusy(cli.id));
+  const updatable = installed.filter((cli) => cli.kind === 'managed' && cli.upgradeSupported && !isImageManaged(cli) && cli.status === 'updateAvailable' && !isBusy(cli.id));
   const updateAll = () => {
     for (const cli of updatable) if (cli.kind === 'managed') void startOperation(cli.id, 'upgrade');
   };
@@ -215,12 +219,12 @@ export function CliManagerPanel({ session, page = null, onPageChange = () => {} 
     : undefined;
 
   const renderInstalled = (cli: CliVersionInfo, index: number) => {
-    const status = STATUS[cli.status] ?? { labelKey: 'cli.statusUnknown' as MessageKey, color: 'neutral' as const };
+    const status = isImageManaged(cli) ? IMAGE_MANAGED_STATUS : STATUS[cli.status] ?? { labelKey: 'cli.statusUnknown' as MessageKey, color: 'neutral' as const };
     const operation = operations[cli.id as ManagedCliProvider];
     const running = operation?.status === 'running';
     // Only an available update, or an unknown latest version, offers the
     // upgrade; everything else just reports where the CLI stands.
-    const upgradable = cli.kind === 'managed' && cli.upgradeSupported && (cli.status === 'updateAvailable' || cli.status === 'unknown');
+    const upgradable = cli.kind === 'managed' && cli.upgradeSupported && !isImageManaged(cli) && (cli.status === 'updateAvailable' || cli.status === 'unknown');
     const target = cli.status === 'updateAvailable' ? cli.latestVersion : undefined;
     const hasPage = cli.kind === 'managed' && cliPageTabs(session, cli.id).length > 0;
     return (
@@ -365,7 +369,9 @@ export function CliManagerPanel({ session, page = null, onPageChange = () => {} 
                               {t('cli.latestVersion')} {cli.latestVersion || t('cli.notFetched')}
                             </p>
                           </div>
-                          {cli.kind === 'managed' ? (
+                          {isImageManaged(cli) ? (
+                            <Chip variant="caption" color={IMAGE_MANAGED_STATUS.color}>{t(IMAGE_MANAGED_STATUS.labelKey)}</Chip>
+                          ) : cli.kind === 'managed' ? (
                             <Button
                               size="small"
                               variant="secondary"
