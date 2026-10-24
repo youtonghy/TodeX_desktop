@@ -5,7 +5,16 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { WebSocketServer } from 'ws';
-import { checksumFor, matchingBackendVersion, parseVersionOutput, platformLabel, releaseAssetName } from '../src/main/localBackend/releaseAssets.ts';
+import {
+  checksumFor,
+  matchingBackendVersion,
+  parseVersionOutput,
+  platformLabel,
+  releaseAssetName,
+  releaseIsSigned,
+  releaseSignatureValid,
+  RELEASE_SIGNING_KEYS,
+} from '../src/main/localBackend/releaseAssets.ts';
 import { socketFetch, socketJson, socketWebSocket } from '../src/main/localBackend/socketHttp.ts';
 
 test('release assets follow the backend build matrix', () => {
@@ -15,6 +24,33 @@ test('release assets follow the backend build matrix', () => {
   assert.equal(platformLabel('darwin', 'x64'), null);
   assert.equal(releaseAssetName('2.3.6', 'linux-x64-gnu'), 'todex-agentd-v2.3.6-linux-x64-gnu.bin');
   assert.equal(releaseAssetName('2.3.6', 'windows-x64'), 'todex-agentd-v2.3.6-windows-x64.exe');
+});
+
+test('backend releases after v2.3.6 must be signed by the release key for their tag', () => {
+  assert.equal(releaseIsSigned('2.3.6'), false);
+  assert.equal(releaseIsSigned('2.3.7'), true);
+  assert.equal(releaseIsSigned('3.0.0'), true);
+  assert.equal(releaseIsSigned('2.2.10'), false);
+  // Signed by `openssl pkeyutl -sign -rawin` with a throwaway key, the way
+  // the backend release workflow signs (the backend updater tests use it too).
+  const key = `-----BEGIN PUBLIC KEY-----
+MCowBQYDK2VwAyEAsbGbf0A8YCNCbJ+lEI7FeayIGzTxCU/OPwBsaAx1GS4=
+-----END PUBLIC KEY-----
+`;
+  const manifest = new TextEncoder().encode('abc  todex-agentd-v9.9.9-linux-x64.bin\n');
+  const signature = Uint8Array.from(
+    Buffer.from('4SRLsnVHZxYTNojV198uqeFn4WpPsHoU80dxwxE6LKW5MKIw/iBpfpkP2rgd0pQEIA3sVu/ymr6zb+xiZrykCg==', 'base64'),
+  );
+  assert.equal(releaseSignatureValid('v9.9.9', manifest, signature, [key]), true);
+  assert.equal(releaseSignatureValid('v9.9.8', manifest, signature, [key]), false);
+  assert.equal(releaseSignatureValid('v9.9.9', new TextEncoder().encode('abd'), signature, [key]), false);
+  const flipped = signature.slice();
+  flipped[0] ^= 1;
+  assert.equal(releaseSignatureValid('v9.9.9', manifest, flipped, [key]), false);
+  assert.equal(releaseSignatureValid('v9.9.9', manifest, new Uint8Array(), [key]), false);
+  // The shipped release key did not sign it, and is a usable key.
+  assert.equal(releaseSignatureValid('v9.9.9', manifest, signature), false);
+  assert.equal(releaseSignatureValid('v9.9.9', manifest, signature, [...RELEASE_SIGNING_KEYS, key]), true);
 });
 
 test('a desktop release downloads the same backend version; dev builds take the latest', () => {

@@ -6,7 +6,16 @@ import { homedir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { promisify } from 'node:util';
 import { net } from 'electron';
-import { STABLE_VERSION, checksumFor, matchingBackendVersion, parseVersionOutput, platformLabel, releaseAssetName } from './releaseAssets';
+import {
+  STABLE_VERSION,
+  checksumFor,
+  matchingBackendVersion,
+  parseVersionOutput,
+  platformLabel,
+  releaseAssetName,
+  releaseIsSigned,
+  releaseSignatureValid,
+} from './releaseAssets';
 
 export { matchingBackendVersion, platformLabel } from './releaseAssets';
 
@@ -64,7 +73,21 @@ export class BackendBinaries {
     const asset = releaseAssetName(version, label);
     const sumsResponse = await net.fetch(`${RELEASES_URL}/v${version}/SHA256SUMS`);
     if (!sumsResponse.ok) throw new Error(`SHA256SUMS for v${version}: HTTP ${sumsResponse.status}`);
-    const expected = checksumFor(await sumsResponse.text(), asset);
+    const sums = new Uint8Array(await sumsResponse.arrayBuffer());
+    // The checksums are trusted only once the release key signed them, so
+    // a release published without the key (a leaked token) is refused.
+    // v2.3.6 and earlier predate signing and only have their checksums.
+    if (releaseIsSigned(version)) {
+      const signatureResponse = await net.fetch(`${RELEASES_URL}/v${version}/SHA256SUMS.sig`);
+      if (!signatureResponse.ok) {
+        throw Object.assign(new Error(`SHA256SUMS.sig for v${version}: HTTP ${signatureResponse.status}`), { code: 'signature_invalid' });
+      }
+      const signature = new Uint8Array(await signatureResponse.arrayBuffer());
+      if (!releaseSignatureValid(`v${version}`, sums, signature)) {
+        throw Object.assign(new Error(`SHA256SUMS of v${version} is not signed by the TodeX release key`), { code: 'signature_invalid' });
+      }
+    }
+    const expected = checksumFor(new TextDecoder().decode(sums), asset);
     if (!expected) throw new Error(`SHA256SUMS of v${version} has no entry for ${asset}`);
 
     const response = await net.fetch(`${RELEASES_URL}/v${version}/${asset}`);

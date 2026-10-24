@@ -1,4 +1,5 @@
 /** Pure helpers for the backend's GitHub release assets (TodeX_backend build-binaries.yml). */
+import { verify } from 'node:crypto';
 
 export const STABLE_VERSION = /^\d+\.\d+\.\d+$/;
 
@@ -35,4 +36,55 @@ export function checksumFor(sums: string, name: string): string | null {
 export function parseVersionOutput(output: string): string | null {
   const match = output.trim().match(/^todex-agentd\s+v?(\S+)/m);
   return match ? match[1] : null;
+}
+
+/** The backend release signing key: a copy of TodeX_backend's
+ * `ci/release-signing.pub.pem` (see its docs/RELEASING.md for rotation). */
+export const RELEASE_SIGNING_KEYS: readonly string[] = [
+  `-----BEGIN PUBLIC KEY-----
+MCowBQYDK2VwAyEAdKUgyyGFfByhDCxXFpvqlEO09bcxzYudjsoH5ise5Z0=
+-----END PUBLIC KEY-----
+`,
+];
+
+/** Releases up to this one were published before signing; they have no `SHA256SUMS.sig`. */
+export const LAST_UNSIGNED_VERSION = '2.3.6';
+
+function compareVersions(left: string, right: string): number {
+  const a = left.split('.').map(Number);
+  const b = right.split('.').map(Number);
+  for (let index = 0; index < 3; index += 1) {
+    if ((a[index] ?? 0) !== (b[index] ?? 0)) return (a[index] ?? 0) - (b[index] ?? 0);
+  }
+  return 0;
+}
+
+/** Whether `version` must come with a valid `SHA256SUMS.sig` (every release after v2.3.6). */
+export function releaseIsSigned(version: string): boolean {
+  return compareVersions(version, LAST_UNSIGNED_VERSION) > 0;
+}
+
+/** Whether `signature` (`SHA256SUMS.sig`) is a release key's Ed25519 signature over
+ * `"todex-release-v1\0" + tag + "\0" + manifest`, exactly as the release workflow signs. */
+export function releaseSignatureValid(
+  tag: string,
+  manifest: Uint8Array,
+  signature: Uint8Array,
+  keys: readonly string[] = RELEASE_SIGNING_KEYS,
+): boolean {
+  if (signature.byteLength !== 64) return false;
+  const encoder = new TextEncoder();
+  const message = Buffer.concat([
+    encoder.encode('todex-release-v1\0'),
+    encoder.encode(tag),
+    new Uint8Array([0]),
+    manifest,
+  ]);
+  return keys.some((key) => {
+    try {
+      return verify(null, message, key, signature);
+    } catch {
+      return false;
+    }
+  });
 }
