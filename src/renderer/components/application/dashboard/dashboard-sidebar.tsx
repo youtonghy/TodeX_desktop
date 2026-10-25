@@ -327,17 +327,21 @@ export function DashboardSidebar({
   useEffect(() => {
     if (!searchActive) return;
 
-    // An empty field closes on any outside click; a query stays applied (it
+    // An empty field closes on any outside press; a query stays applied (it
     // filters the content below) until it is cleared or Escape is pressed.
-    const onOutsideClick = (event: MouseEvent) => {
+    // `pointerdown`, not `click`: React flushes this effect while the click
+    // that opened the field is still bubbling, and the trigger it landed on
+    // has already been swapped for the field, so that click counted as
+    // outside and shut the field again at once.
+    const onOutsidePress = (event: PointerEvent) => {
       const target = event.target;
       if (target instanceof Node && searchFieldRef.current?.contains(target)) return;
       if (searchRef.current?.value.trim()) return;
       deactivateSearch(false);
     };
 
-    document.addEventListener("click", onOutsideClick);
-    return () => document.removeEventListener("click", onOutsideClick);
+    document.addEventListener("pointerdown", onOutsidePress);
+    return () => document.removeEventListener("pointerdown", onOutsidePress);
   }, [deactivateSearch, searchActive]);
 
   const fieldProps = search

@@ -293,6 +293,23 @@ function RowContent({ rail, indent, title, children }: { rail: boolean; indent?:
   );
 }
 
+/** A quick-search content excerpt with the matched text (`query`, already
+ * lowercased) brought forward. */
+function SearchSnippet({ snippet, query }: { snippet: string; query: string }) {
+  const at = snippet.toLocaleLowerCase().indexOf(query);
+  return (
+    <span className="truncate text-caption-1-regular text-text-tertiary">
+      {at < 0 ? snippet : (
+        <>
+          {snippet.slice(0, at)}
+          <span className="text-text-primary">{snippet.slice(at, at + query.length)}</span>
+          {snippet.slice(at + query.length)}
+        </>
+      )}
+    </span>
+  );
+}
+
 const DOCS_URL = 'https://todex.dev/docs';
 
 /** "5 分钟前" / "2 hours ago"; a minute or less reads as just now. */
@@ -671,14 +688,33 @@ export function AppSidebar({
 
   // A search covers the conversations of every workspace (except those whose
   // directory is missing on the backend); titles are only resolved for every
-  // conversation while it runs.
+  // conversation while it runs. Besides titles it matches the preview and the
+  // prompts and replies cached on this device, ranking title matches first.
   const workspaceById = useMemo(() => new Map(session.workspaces.map((workspace) => [workspace.id, workspace])), [session.workspaces]);
-  const matchedConversations = useMemo(() => {
-    if (!query) return sortedConversations;
+  const { matchedConversations, searchSnippets } = useMemo(() => {
+    if (!query) return { matchedConversations: sortedConversations, searchSnippets: new Map<string, string>() };
     const hidden = new Set(session.workspaces.filter((workspace) => workspace.pathMissing).map((workspace) => workspace.id));
-    return searchConversations(session.conversations, query, (conversation) => conversationDisplayTitle(conversation, session.timeline), hidden)
-      .filter((conversation) => workspaceById.has(conversation.workspaceId))
-      .sort(compareConversations);
+    const messagesById = new Map<string, string[]>();
+    for (const entry of session.timeline) {
+      if (!entry.conversationId || !entry.subtitle) continue;
+      const message = entry.kind === 'outgoing'
+        || (entry.kind === 'incoming' && (!entry.category || entry.category === 'assistant_final' || entry.category === 'assistant_progress'));
+      if (!message) continue;
+      const texts = messagesById.get(entry.conversationId);
+      if (texts) texts.push(entry.subtitle);
+      else messagesById.set(entry.conversationId, [entry.subtitle]);
+    }
+    const hits = searchConversations(
+      session.conversations.filter((conversation) => workspaceById.has(conversation.workspaceId)).sort(compareConversations),
+      query,
+      (conversation) => conversationDisplayTitle(conversation, session.timeline),
+      hidden,
+      (conversation) => [conversation.preview ?? '', ...(messagesById.get(conversation.id) ?? [])],
+    );
+    return {
+      matchedConversations: hits.map((hit) => hit.conversation),
+      searchSnippets: new Map(hits.flatMap((hit) => (hit.snippet ? [[hit.conversation.id, hit.snippet] as const] : []))),
+    };
   }, [sortedConversations, query, session.conversations, session.workspaces, session.timeline, workspaceById, compareConversations]);
 
   const displayedConversations = useMemo(() => {
@@ -1470,6 +1506,7 @@ export function AppSidebar({
                     const running = isConversationHighlighted(conversation, session.activeConversationId, session.turnIds);
                     // Search results come from every workspace, so each names its own.
                     const resultWorkspace = query ? rowById.get(rowIdOf(conversation)) ?? workspaceById.get(conversation.workspaceId) : undefined;
+                    const resultSnippet = query ? searchSnippets.get(conversation.id) : undefined;
                     return (
                       <GridListItem
                         key={conversation.id}
@@ -1504,6 +1541,7 @@ export function AppSidebar({
                                 </span>
                               ) : null}
                             </span>
+                            {resultSnippet ? <SearchSnippet snippet={resultSnippet} query={query} /> : null}
                             {resultWorkspace ? (
                               <span className="truncate text-caption-1-regular text-text-tertiary">{workspaceDisplayName(resultWorkspace)}</span>
                             ) : null}
