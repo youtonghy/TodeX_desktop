@@ -454,6 +454,9 @@ export function XtermTerminal({ stream, isActive, isDisabled = false, ...handler
         event.preventDefault();
         return false;
       }
+      // Ctrl+1…9 select right panel tabs, so they skip xterm's legacy control
+      // codes (Ctrl+2 → NUL, Ctrl+3 → ESC…) and bubble to the app shortcuts.
+      if (!IS_MAC && event.ctrlKey && !event.shiftKey && !event.altKey && !event.metaKey && /^Digit[1-9]$/.test(event.code)) return false;
       if (mod && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
         actions.jumpToPrompt(event.key === 'ArrowUp' ? -1 : 1);
         event.preventDefault();

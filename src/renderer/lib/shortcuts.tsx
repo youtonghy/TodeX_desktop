@@ -13,7 +13,12 @@ export type ShortcutId =
   | 'gitActions'
   | 'toggleSidebar'
   | 'toggleAside'
-  | 'quickSearch';
+  | 'quickSearch'
+  | 'newWorkbenchTab'
+  | WorkbenchTabShortcutId;
+
+const TAB_DIGITS = [1, 2, 3, 4, 5, 6, 7, 8, 9] as const;
+type WorkbenchTabShortcutId = `workbenchTab${typeof TAB_DIGITS[number]}`;
 
 type ShortcutCombo = {
   /** Physical key, compared against KeyboardEvent.code (e.g. 'KeyN'). */
@@ -38,9 +43,18 @@ const COMBOS: Record<ShortcutId, ShortcutCombo> = {
   kanban: { code: 'KeyK', label: 'K', mod: true, shift: true },
   sshTerminal: { code: 'KeyT', label: 'T', mod: true, shift: true },
   quickSearch: { code: 'KeyL', label: 'L', mod: true, outsideEditors: true },
+  newWorkbenchTab: { code: 'KeyN', label: 'N', mod: true, alt: true },
+  // ⌘1…⌘9 / Ctrl+1…Ctrl+9 select the right panel's tabs by position.
+  ...Object.fromEntries(TAB_DIGITS.map(digit => [`workbenchTab${digit}`, { code: `Digit${digit}`, label: String(digit), mod: true }])) as Record<WorkbenchTabShortcutId, ShortcutCombo>,
 };
 
+/** The shortcut that selects the right panel tab at `index`, for the first nine tabs. */
+export function workbenchTabShortcut(index: number): ShortcutId | null {
+  return index >= 0 && index < TAB_DIGITS.length ? `workbenchTab${TAB_DIGITS[index]}` : null;
+}
+
 const MODIFIER_KEY = isMacLike ? 'Meta' : 'Control';
+const MODIFIER_KEYS = new Set(['Meta', 'Control', 'Shift', 'Alt', 'AltGraph']);
 const HINT_DELAY_MS = 250;
 
 function isEditableTarget(target: EventTarget | null): boolean {
@@ -82,6 +96,13 @@ export function useShortcutHintTracking(): void {
           timer = null;
           root.dataset.shortcutHints = 'on';
         }, HINT_DELAY_MS);
+        return;
+      }
+      // Another key during the delay makes this a chord (Ctrl+C held down),
+      // not a peek at the hints.
+      if (timer !== null && !MODIFIER_KEYS.has(event.key)) {
+        window.clearTimeout(timer);
+        timer = null;
         return;
       }
       // Safety net: if the modifier keyup was lost (menu focus, IME), the next
@@ -130,18 +151,21 @@ export function useAppShortcuts(handlers: Partial<Record<ShortcutId, () => void>
 }
 
 /** The key combination as shown to the user: ⌥ ⇧ ⌘ glyphs on macOS (the
- * platform's own modifier order), spelled-out modifiers elsewhere. */
-export function shortcutKeys(id: ShortcutId): string {
+ * platform's own modifier order), Ctrl+Alt+Shift+key elsewhere. `omitMod`
+ * leaves out ⌘ / Ctrl for badges that only show while it is held. */
+export function shortcutKeys(id: ShortcutId, { omitMod = false }: { omitMod?: boolean } = {}): string {
   const combo = COMBOS[id];
+  const mod = combo.mod && !omitMod;
   return isMacLike
-    ? `${combo.alt ? '⌥' : ''}${combo.shift ? '⇧' : ''}${combo.mod ? '⌘' : ''}${combo.label}`
-    : [combo.alt && 'Alt', combo.shift && 'Shift', combo.mod && 'Ctrl', combo.label].filter(Boolean).join('+');
+    ? `${combo.alt ? '⌥' : ''}${combo.shift ? '⇧' : ''}${mod ? '⌘' : ''}${combo.label}`
+    : [mod && 'Ctrl', combo.alt && 'Alt', combo.shift && 'Shift', combo.label].filter(Boolean).join('+');
 }
 
-export function ShortcutHint({ id, className }: { id: ShortcutId; className?: string }) {
+/** `compact` drops the held modifier, for badges too small for the full combination. */
+export function ShortcutHint({ id, compact = false, className }: { id: ShortcutId; compact?: boolean; className?: string }) {
   return (
     <span aria-hidden="true" className={cx('shortcut-hint', className)}>
-      <Kbd className="shortcut-hint__kbd">{shortcutKeys(id)}</Kbd>
+      <Kbd className="shortcut-hint__kbd">{shortcutKeys(id, { omitMod: compact })}</Kbd>
     </span>
   );
 }
