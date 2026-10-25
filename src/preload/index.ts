@@ -4,6 +4,7 @@ import type {
   LocalBackendConfig,
   LocalBackendConfigPatch,
   LocalBackendDiscovery,
+  LocalNativeEndpoint,
   LocalPairedDevice,
   LocalPairingRequest,
   LocalDockerContainer,
@@ -174,6 +175,7 @@ const api = {
   localBackend: {
     available: true,
     discover: () => ipcRenderer.invoke('localBackend:discover') as Promise<LocalBackendDiscovery>,
+    nativeEndpoint: () => ipcRenderer.invoke('localBackend:nativeEndpoint') as Promise<LocalNativeEndpoint>,
     install: () => ipcRenderer.invoke('localBackend:install') as Promise<string>,
     start: () => ipcRenderer.invoke('localBackend:start') as Promise<void>,
     stop: () => ipcRenderer.invoke('localBackend:stop') as Promise<void>,

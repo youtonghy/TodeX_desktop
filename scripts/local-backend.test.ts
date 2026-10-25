@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -16,6 +16,7 @@ import {
   RELEASE_SIGNING_KEYS,
 } from '../src/main/localBackend/releaseAssets.ts';
 import { socketFetch, socketJson, socketWebSocket } from '../src/main/localBackend/socketHttp.ts';
+import { daemonRecord } from '../src/main/localBackend/cli.ts';
 
 test('release assets follow the backend build matrix', () => {
   assert.equal(platformLabel('linux', 'x64'), 'linux-x64-gnu');
@@ -137,4 +138,38 @@ test('local-admin paths are recognized however they are spelled', async () => {
     assert.equal(isLocalAdminPath(path), true, path);
   }
   for (const path of ['/v2/version', '/v2/local-adminx', '/v2/sealed']) assert.equal(isLocalAdminPath(path), false, path);
+});
+
+test('daemon.json stands in for daemon status on backends without --format json', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'todex-daemon-record-'));
+  try {
+    assert.equal(await daemonRecord(dir), null);
+    writeFileSync(join(dir, 'daemon.json'), JSON.stringify({
+      pid: process.pid,
+      host: '0.0.0.0',
+      port: 7345,
+      data_dir: dir,
+      started_at: '2026-10-25T05:36:53Z',
+      executable: '/opt/todex-agentd',
+      ipc_path: join(dir, 'agentd.sock'),
+    }));
+    assert.deepEqual(await daemonRecord(dir), {
+      running: true,
+      pid: process.pid,
+      host: '0.0.0.0',
+      port: 7345,
+      startedAt: '2026-10-25T05:36:53Z',
+      executable: '/opt/todex-agentd',
+      ipcPath: join(dir, 'agentd.sock'),
+      outdated: false,
+      apiListen: null,
+    });
+    // A pid nobody runs any more: the daemon is gone.
+    writeFileSync(join(dir, 'daemon.json'), JSON.stringify({ pid: 2 ** 22 + 12345, port: 7345 }));
+    assert.equal((await daemonRecord(dir))?.running, false);
+    writeFileSync(join(dir, 'daemon.json'), 'not json');
+    assert.equal(await daemonRecord(dir), null);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

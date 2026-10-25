@@ -11,6 +11,7 @@ import { IconAction } from '@/components/ui/icon-action';
 import { Modal } from '@/components/ui/modal';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { ToastViewport, toast } from '@/components/ui/toast';
+import { useNativeIpcReminder } from './session/useNativeIpcReminder';
 import { cx } from '@/utils/cx';
 import { ConversationSplit, useMediaQuery } from './components/ConversationSplit';
 import { useWorkbenchLayout } from './session/useWorkbenchLayout';
@@ -182,6 +183,7 @@ export function App() {
   const openPanelHandlerRef = useRef<(name: string, params?: OpenPanelOptions) => void>(() => {});
   const forwardOpenPanel = useCallback((name: string, params?: OpenPanelOptions) => openPanelHandlerRef.current(name, params), []);
   const session = useTodeXSession(forwardOpenPanel);
+  useNativeIpcReminder(session, 'TodeX Desktop');
   // The SSH view swaps the main content but keeps sidebar and Workbench; its
   // Workbench tabs (SSH terminals, remote files) live in a per-backend scope.
   const sshActive = panel === 'ssh';

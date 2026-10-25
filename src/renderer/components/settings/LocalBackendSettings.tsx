@@ -15,7 +15,15 @@ import type {
   PairingEncryption,
 } from '../../../preload/localBackendTypes';
 import type { TodeXSession } from '../../session/useTodeXSession';
-import { ensureManagedConnection, managedProfile } from '../../session/localPairing';
+import {
+  LOCAL_BACKEND_PREFS_KEY,
+  NATIVE_INSTANCE,
+  ensureManagedConnection,
+  managedProfile,
+  nativeIpcCandidate,
+  switchToNativeIpc,
+  type LocalBackendPrefs,
+} from '../../session/localPairing';
 import { useT } from '../../i18n';
 import { loadJson, saveJson } from '../../lib/storage';
 import { RecoveryQrCode } from '../HistoryEncryptionPanel';
@@ -26,13 +34,9 @@ import { Spinner } from '../ui/spinner';
 import { toast } from '../ui/toast';
 import { SettingsCard, SettingsGroup, SettingsNote, SettingsRow, SettingsValueField } from './SettingsRows';
 
-const PREFS_KEY = 'todex.desktop.localBackend.v1';
-const NATIVE_INSTANCE = 'local';
 const ADMIN_POLL_MS = 3000;
 const ROW_SELECT_TRIGGER = 'h-8 w-auto gap-1 rounded-lg px-2 py-1.5';
 const ENCRYPTIONS: PairingEncryption[] = ['ml-kem-768', 'x25519', 'none'];
-
-type Prefs = { stopOnQuit?: boolean };
 
 const STATE_LABELS = {
   notInstalled: 'localBackend.state.notInstalled',
@@ -61,7 +65,7 @@ export function LocalBackendSettings({ session, deviceName }: { session: TodeXSe
   const [progress, setProgress] = useState<{ received: number; total: number } | null>(null);
   const [error, setError] = useState('');
   const [log, setLog] = useState<string | null>(null);
-  const [prefs, setPrefs] = useState<Prefs>({});
+  const [prefs, setPrefs] = useState<LocalBackendPrefs>({});
   const sessionRef = useRef(session);
   sessionRef.current = session;
 
@@ -75,7 +79,7 @@ export function LocalBackendSettings({ session, deviceName }: { session: TodeXSe
 
   useEffect(() => {
     void refresh();
-    void loadJson<Prefs>(PREFS_KEY, {}).then(setPrefs);
+    void loadJson<LocalBackendPrefs>(LOCAL_BACKEND_PREFS_KEY, {}).then(setPrefs);
     return api.onProgress(({ received, total }) => setProgress({ received, total }));
   }, [api, refresh]);
 
@@ -102,6 +106,14 @@ export function LocalBackendSettings({ session, deviceName }: { session: TodeXSe
   const versionMismatch = Boolean(native?.expectedVersion && native.binary?.version && native.binary.version !== native.expectedVersion);
   const profile = managedProfile(session.backendConnections, NATIVE_INSTANCE);
   const link = profile ? session.backendLinkStatus[profile.id] : undefined;
+  // A loopback TCP connection to this daemon, which also serves IPC.
+  const ipcCandidate = native?.daemon ? nativeIpcCandidate(
+    session.backendConnections,
+    { running: daemonRunning, port: native.daemon.port, ipcPath: native.ipcPath },
+    (id) => session.backendLinkStatus[id]?.state === 'open',
+  ) : undefined;
+  // An older daemon runs but cannot be paired or managed over IPC.
+  const ipcBlocked = daemonRunning && native?.ipcSupported === false;
 
   const deploy = () => run('deploy', async () => {
     if (!native?.binary || versionMismatch && !daemonRunning) await api.install();
@@ -110,10 +122,10 @@ export function LocalBackendSettings({ session, deviceName }: { session: TodeXSe
     toast.success(t('localBackend.deployed'));
   });
 
-  const updatePrefs = (patch: Prefs) => {
+  const updatePrefs = (patch: LocalBackendPrefs) => {
     const next = { ...prefs, ...patch };
     setPrefs(next);
-    void saveJson(PREFS_KEY, next);
+    void saveJson(LOCAL_BACKEND_PREFS_KEY, next);
   };
 
   if (!discovery) {
@@ -152,7 +164,20 @@ export function LocalBackendSettings({ session, deviceName }: { session: TodeXSe
               <SettingsValueField mono title={native.ipcPath}>{native.ipcPath}</SettingsValueField>
             </SettingsRow>
           ) : null}
-          {native?.statusError ? <SettingsNote tone="warning">{t('localBackend.binaryTooOld', { error: native.statusError })}</SettingsNote> : null}
+          {native?.binary && !native.ipcSupported ? (
+            <SettingsNote tone="warning">{t('localBackend.binaryTooOld', { version: native.binary.version ?? '-', path: native.binary.path })}</SettingsNote>
+          ) : null}
+          {ipcCandidate ? (
+            <SettingsNote>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span>{t('localBackend.ipcSuggestBody', { name: ipcCandidate.name, url: ipcCandidate.serverUrl })}</span>
+                <Button size="small" variant="secondary" disabled={busy !== null} onClick={() => void run('switchIpc', async () => {
+                  await switchToNativeIpc(sessionRef.current, ipcCandidate.id, deviceName);
+                  toast.success(t('localBackend.switchedToIpc'));
+                })}>{t('localBackend.switchToIpc')}</Button>
+              </div>
+            </SettingsNote>
+          ) : null}
           {!native?.platformSupported && !native?.binary ? <SettingsNote tone="warning">{t('localBackend.unsupportedPlatform')}</SettingsNote> : null}
           {versionMismatch ? (
             <SettingsNote tone="warning">
@@ -171,7 +196,7 @@ export function LocalBackendSettings({ session, deviceName }: { session: TodeXSe
           {error ? <SettingsNote tone="danger" role="alert">{error}</SettingsNote> : null}
         </SettingsCard>
         <div className="flex flex-wrap gap-2 px-3">
-          {state !== 'connected' ? (
+          {state !== 'connected' && !ipcBlocked ? (
             <Button size="small" disabled={busy !== null || (!native?.binary && !native?.platformSupported)} onClick={deploy}>
               {busy === 'deploy' ? t('localBackend.deploying') : state === 'notInstalled' ? t('localBackend.deploy') : t('localBackend.startAndConnect')}
             </Button>
@@ -180,7 +205,7 @@ export function LocalBackendSettings({ session, deviceName }: { session: TodeXSe
             <>
               <Button size="small" variant="secondary" disabled={busy !== null} onClick={() => void run('restart', () => api.restart())}>{t('localBackend.restart')}</Button>
               <Button size="small" variant="secondary" disabled={busy !== null} onClick={() => void run('stop', () => api.stop())}>{t('localBackend.stop')}</Button>
-              <Button size="small" variant="secondary" disabled={busy !== null} onClick={() => void run('repair', () => connectInstance(NATIVE_INSTANCE, t('localBackend.profileName'), true))}>{t('localBackend.repair')}</Button>
+              {!ipcBlocked ? <Button size="small" variant="secondary" disabled={busy !== null} onClick={() => void run('repair', () => connectInstance(NATIVE_INSTANCE, t('localBackend.profileName'), true))}>{t('localBackend.repair')}</Button> : null}
             </>
           ) : null}
           {native?.binary ? (
@@ -204,6 +229,9 @@ export function LocalBackendSettings({ session, deviceName }: { session: TodeXSe
             </SettingsRow>
             <SettingsRow label={t('localBackend.stopOnQuit')} description={t('localBackend.stopOnQuitHint')}>
               <Switch size="sm" aria-label={t('localBackend.stopOnQuit')} isSelected={prefs.stopOnQuit === true} onChange={(stopOnQuit) => updatePrefs({ stopOnQuit })} />
+            </SettingsRow>
+            <SettingsRow label={t('localBackend.suggestIpc')} description={t('localBackend.suggestIpcHint')}>
+              <Switch size="sm" aria-label={t('localBackend.suggestIpc')} isSelected={prefs.suggestIpc !== false} onChange={(suggestIpc) => updatePrefs({ suggestIpc })} />
             </SettingsRow>
           </SettingsCard>
         </SettingsGroup>

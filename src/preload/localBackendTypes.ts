@@ -64,6 +64,9 @@ export type LocalDaemonStatus = {
   apiListen: string | null;
 };
 
+/** Mirror of the main process's NativeEndpoint: where the native daemon listens. */
+export type LocalNativeEndpoint = { running: boolean; port: number | null; ipcPath: string | null };
+
 /** Mirror of the main process's DiscoverResult (src/main/localBackend/index.ts). */
 export type LocalBackendDiscovery = {
   desktopVersion: string;
@@ -74,7 +77,9 @@ export type LocalBackendDiscovery = {
     binary: { path: string; version: string | null; managed: boolean } | null;
     managedVersions: string[];
     daemon: LocalDaemonStatus | null;
-    /** Why `daemon status --format json` failed (a backend without IPC support), else null. */
+    /** False when the binary predates the IPC listener (no `daemon status --format json`). */
+    ipcSupported: boolean;
+    /** Why `daemon status --format json` failed, else null. */
     statusError: string | null;
     ipcPath: string | null;
     admin: LocalAdminStatus | null;

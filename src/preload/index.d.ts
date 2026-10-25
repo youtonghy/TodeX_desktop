@@ -1,4 +1,4 @@
-import type { LocalDockerContainer, LocalSocketEvent, PairingEncryption, LocalAdminStatus, LocalBackendConfigPatch, LocalBackendConfig, LocalPairingRequest, LocalPairedDevice, LocalDaemonStatus, LocalBackendDiscovery } from './localBackendTypes';
+import type { LocalDockerContainer, LocalSocketEvent, PairingEncryption, LocalAdminStatus, LocalBackendConfigPatch, LocalBackendConfig, LocalPairingRequest, LocalPairedDevice, LocalDaemonStatus, LocalBackendDiscovery, LocalNativeEndpoint } from './localBackendTypes';
 
 export type { LocalDockerContainer, LocalSocketEvent, PairingEncryption, LocalAdminStatus, LocalBackendConfigPatch, LocalBackendConfig, LocalPairingRequest, LocalPairedDevice, LocalDaemonStatus, LocalBackendDiscovery };
 
@@ -74,6 +74,8 @@ export type TodeXDesktopApi = {
     /** False in the browser bridge (no local IPC there). */
     available: boolean;
     discover: () => Promise<LocalBackendDiscovery>;
+    /** Whether the native daemon runs, its TCP port and (when it has one) its IPC socket. */
+    nativeEndpoint: () => Promise<LocalNativeEndpoint>;
     /** Downloads the backend build matching this desktop (latest for dev builds); resolves its path. */
     install: () => Promise<string>;
     start: () => Promise<void>;

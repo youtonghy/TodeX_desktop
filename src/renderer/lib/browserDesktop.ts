@@ -127,6 +127,7 @@ export function installBrowserDesktopBridge(): void {
       return {
         available: false,
         discover: unavailable,
+        nativeEndpoint: async () => ({ running: false, port: null, ipcPath: null }),
         install: unavailable,
         start: unavailable,
         stop: unavailable,

@@ -1,4 +1,6 @@
 import { execFile } from 'node:child_process';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 
 export type DaemonStatus = {
   running: boolean;
@@ -13,8 +15,11 @@ export type DaemonStatus = {
 };
 
 export class BackendCliError extends Error {
-  constructor(message: string, readonly exitCode: number | null) {
+  readonly exitCode: number | null;
+
+  constructor(message: string, exitCode: number | null) {
     super(message);
+    this.exitCode = exitCode;
   }
 }
 
@@ -51,6 +56,39 @@ export async function daemonStatus(binary: string, dataDir: string): Promise<Dae
     outdated: raw.outdated === true,
     apiListen: typeof raw.apiListen === 'string' ? raw.apiListen : null,
   };
+}
+
+/** The daemon's own record (`<dataDir>/daemon.json`), for backends whose
+ * `daemon status` has no `--format json`: running when its pid is alive. */
+export async function daemonRecord(dataDir: string): Promise<DaemonStatus | null> {
+  let raw: Record<string, unknown>;
+  try {
+    raw = JSON.parse(await readFile(join(dataDir, 'daemon.json'), 'utf8')) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+  const pid = typeof raw.pid === 'number' && Number.isInteger(raw.pid) && raw.pid > 0 ? raw.pid : null;
+  return {
+    running: pid !== null && processAlive(pid),
+    pid,
+    host: typeof raw.host === 'string' ? raw.host : null,
+    port: typeof raw.port === 'number' ? raw.port : null,
+    startedAt: typeof raw.started_at === 'string' ? raw.started_at : null,
+    executable: typeof raw.executable === 'string' ? raw.executable : null,
+    ipcPath: typeof raw.ipc_path === 'string' ? raw.ipc_path : null,
+    outdated: false,
+    apiListen: null,
+  };
+}
+
+function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    // EPERM: alive, owned by another user.
+    return (error as NodeJS.ErrnoException).code === 'EPERM';
+  }
 }
 
 export function daemonCommand(binary: string, dataDir: string, action: 'start' | 'stop' | 'restart'): Promise<string> {

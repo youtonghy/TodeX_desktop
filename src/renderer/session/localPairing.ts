@@ -1,6 +1,8 @@
 import { deviceIdentityFromSecret, generateDeviceIdentity } from '@todex/protocol/deviceAuth';
 import { ipcServerUrl } from '@todex/protocol/ipcServerUrl';
+import { isLoopbackHostname } from '@todex/protocol/loopback';
 import type { BackendConnectionProfile } from '@todex/protocol/todex';
+import type { LocalNativeEndpoint } from '../../preload/localBackendTypes';
 import { t } from '../i18n';
 import {
   DevicePairingRetryableError,
@@ -64,9 +66,17 @@ export async function pairWithLocalApproval(options: {
 type ManagedSession = {
   backendConnections: BackendConnectionProfile[];
   addBackendConnection: (profile?: Partial<BackendConnectionProfile>) => BackendConnectionProfile;
+  updateBackendConnection: (id: string, patch: Partial<BackendConnectionProfile>) => void;
   connect: (backendId: string) => void;
   onDevicePairingApproved: (profileId: string, credentials: PairingCredentials) => void;
 };
+
+/** The IPC instance of the backend on this machine. */
+export const NATIVE_INSTANCE = 'local';
+
+/** Preferences of the 本机 Backend settings page (also read by the IPC reminder). */
+export const LOCAL_BACKEND_PREFS_KEY = 'todex.desktop.localBackend.v1';
+export type LocalBackendPrefs = { stopOnQuit?: boolean; suggestIpc?: boolean };
 
 /** The connection profile of a local IPC backend instance, if one exists. */
 export function managedProfile(profiles: BackendConnectionProfile[], instance: string): BackendConnectionProfile | undefined {
@@ -104,4 +114,66 @@ export async function ensureManagedConnection(session: ManagedSession, options: 
   });
   session.onDevicePairingApproved(profile.id, credentials);
   return profile.id;
+}
+
+/** Whether `serverUrl` reaches this machine's daemon over TCP: a loopback
+ * host on the daemon's port (`0.0.0.0` listeners answer on loopback too). */
+function reachesNativePort(serverUrl: string, port: number): boolean {
+  let url: URL;
+  try {
+    url = new URL(serverUrl.trim());
+  } catch {
+    return false;
+  }
+  const defaultPort = url.protocol === 'https:' || url.protocol === 'wss:' ? 443 : url.protocol === 'http:' || url.protocol === 'ws:' ? 80 : null;
+  if (defaultPort === null || !isLoopbackHostname(url.hostname)) return false;
+  return (url.port ? Number(url.port) : defaultPort) === port;
+}
+
+/**
+ * The connected profile that reaches the native daemon over TCP although the
+ * daemon also serves IPC, i.e. the one worth switching to `todex-ipc://local`.
+ * None when an IPC profile for the daemon already exists.
+ */
+export function nativeIpcCandidate(
+  profiles: BackendConnectionProfile[],
+  endpoint: LocalNativeEndpoint,
+  isConnected: (profileId: string) => boolean,
+): BackendConnectionProfile | undefined {
+  const { port } = endpoint;
+  if (!endpoint.running || !endpoint.ipcPath || port === null) return undefined;
+  if (managedProfile(profiles, NATIVE_INSTANCE)) return undefined;
+  return profiles.find((profile) => isConnected(profile.id) && reachesNativePort(profile.serverUrl, port));
+}
+
+/**
+ * Re-points a loopback profile of the native daemon at its IPC socket, keeping
+ * the profile (and the conversations and workspaces filed under it). The
+ * daemon is the same, so are its device registry and transport key: the
+ * pinned credentials stay valid. An unpaired profile pairs over IPC instead.
+ */
+export async function switchToNativeIpc(session: ManagedSession, profileId: string, deviceName: string): Promise<void> {
+  const profile = session.backendConnections.find((item) => item.id === profileId);
+  if (!profile) throw new Error(t('localBackend.profileMissing'));
+  const serverUrl = ipcServerUrl(NATIVE_INSTANCE);
+  if (profile.transportVerified && deviceIdentityFromSecret(profile.deviceSecret)) {
+    const credentials: PairingCredentials = {
+      deviceSecret: profile.deviceSecret,
+      encryptionProtocol: profile.encryptionProtocol,
+      encryptionPublicKey: profile.encryptionPublicKey,
+      transportVerified: profile.transportVerified,
+    };
+    session.updateBackendConnection(profile.id, { serverUrl, ...credentials });
+    // Connects once the re-pointed profile is committed.
+    session.onDevicePairingApproved(profile.id, credentials);
+    return;
+  }
+  const credentials = await pairWithLocalApproval({
+    serverUrl,
+    deviceName,
+    deviceSecret: profile.deviceSecret,
+    approve: (request) => window.todexDesktop.localBackend.approveOwnPairing(NATIVE_INSTANCE, request.requestId, request.verificationCode),
+  });
+  session.updateBackendConnection(profile.id, { serverUrl, ...credentials });
+  session.onDevicePairingApproved(profile.id, credentials);
 }

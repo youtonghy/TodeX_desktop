@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { app, ipcMain, protocol, session, type IpcMainEvent, type IpcMainInvokeEvent, type WebContents } from 'electron';
 import type WebSocket from 'ws';
 import { BackendBinaries, binaryVersion, matchingBackendVersion, platformLabel } from './binary';
-import { autostartEnabled, daemonCommand, daemonStatus, dockerInstances, dockerPairApprove, setAutostart, type DaemonStatus, type DockerInstance } from './cli';
+import { autostartEnabled, daemonCommand, daemonRecord, daemonStatus, dockerInstances, dockerPairApprove, setAutostart, type DaemonStatus, type DockerInstance } from './cli';
 import { LOCAL_ADMIN_PREFIX, isLocalAdminPath } from './adminPath';
 import { socketFetch, socketJson, socketWebSocket } from './socketHttp';
 
@@ -44,8 +44,12 @@ export type NativeState = {
   expectedVersion: string | null;
   binary: { path: string; version: string | null; managed: boolean } | null;
   managedVersions: string[];
+  /** From `daemon status --format json`, else (a backend without IPC
+   * support) from the daemon's `daemon.json`. */
   daemon: DaemonStatus | null;
-  /** Why `daemon status --format json` failed (a backend without IPC support), else null. */
+  /** False when the binary has no `daemon status --format json`: it predates the IPC listener. */
+  ipcSupported: boolean;
+  /** Why `daemon status --format json` failed, else null. */
   statusError: string | null;
   ipcPath: string | null;
   admin: LocalAdminStatus | null;
@@ -63,6 +67,9 @@ export type ContainerState = {
 };
 
 export type DiscoverResult = { desktopVersion: string; native: NativeState; containers: ContainerState[] };
+
+/** The native daemon as far as the renderer's connection profiles care. */
+export type NativeEndpoint = { running: boolean; port: number | null; ipcPath: string | null };
 
 function defaultDataDir(): string {
   return join(homedir(), '.todex-agent');
@@ -306,12 +313,14 @@ export class LocalBackendManager {
   }
 
   /** The binary that runs (or would run) the native backend: the running
-   * daemon's executable, else the managed build matching this desktop, else
-   * the newest managed build, else a user-installed `todex-agentd`. */
+   * daemon's executable (from `daemon` or, without it, `daemon.json`), else
+   * the managed build matching this desktop, else the newest managed build,
+   * else a user-installed `todex-agentd`. */
   private async currentBinary(daemon: DaemonStatus | null): Promise<NativeState['binary']> {
     const managedRoot = join(app.getPath('userData'), 'backend', 'bin');
     const candidates: string[] = [];
-    if (daemon?.executable) candidates.push(daemon.executable);
+    const running = daemon ?? await daemonRecord(this.dataDir).then((record) => record?.running ? record : null);
+    if (running?.executable) candidates.push(running.executable);
     const expected = this.expectedVersion();
     if (expected) candidates.push(this.binaries.managedPath(expected));
     const versions = this.binaries.installedVersions().sort(compareVersions).reverse();
@@ -345,10 +354,12 @@ export class LocalBackendManager {
         // Backends from before the IPC listener have no `--format json`.
         statusError = errorMessage(error);
         this.host.log('warn', 'localBackend.status.failed', { error: statusError });
+        daemon = await daemonRecord(this.dataDir);
       }
       if (daemon?.executable && daemon.executable !== binary.path) binary = await this.currentBinary(daemon);
     }
-    this.nativeIpcPath = daemon?.running ? daemon.ipcPath : null;
+    const ipcSupported = Boolean(binary) && statusError === null;
+    this.nativeIpcPath = ipcSupported && daemon?.running ? daemon.ipcPath : null;
     const { admin, adminError } = await this.adminStatus(this.nativeIpcPath);
     let autostart: boolean | null = null;
     if (binary) {
@@ -378,6 +389,7 @@ export class LocalBackendManager {
         binary,
         managedVersions: this.binaries.installedVersions(),
         daemon,
+        ipcSupported,
         statusError,
         ipcPath: this.nativeIpcPath,
         admin,
@@ -386,6 +398,21 @@ export class LocalBackendManager {
       },
       containers,
     };
+  }
+
+  /** Whether the native daemon runs and where it listens, without the
+   * container and autostart probes of `discover`. */
+  async nativeEndpoint(): Promise<NativeEndpoint> {
+    const binary = await this.currentBinary(null);
+    if (!binary) return { running: false, port: null, ipcPath: null };
+    try {
+      const status = await daemonStatus(binary.path, this.dataDir);
+      this.nativeIpcPath = status.running ? status.ipcPath : null;
+      return { running: status.running, port: status.port, ipcPath: this.nativeIpcPath };
+    } catch {
+      const record = await daemonRecord(this.dataDir);
+      return { running: record?.running === true, port: record?.port ?? null, ipcPath: null };
+    }
   }
 
   /** One lifecycle operation at a time: `daemon start` and an install must not race. */
@@ -443,6 +470,12 @@ export class LocalBackendManager {
   /** Stops the running daemon and starts it again from the managed build of this desktop's version. */
   switchToMatchingVersion(sender: WebContents): Promise<void> {
     return this.install(sender).then((binary) => this.exclusive(async () => {
+      // Stop nothing for a build that could not be managed afterwards either.
+      try {
+        await daemonStatus(binary, this.dataDir);
+      } catch (error) {
+        throw Object.assign(new Error(`${binary} does not support local IPC: ${errorMessage(error)}`), { code: 'ipc_unsupported' });
+      }
       const running = await this.currentBinary(null);
       if (running) {
         try {
@@ -528,6 +561,7 @@ export class LocalBackendManager {
 
   register(handle: (channel: string, handler: (event: IpcMainInvokeEvent, ...args: any[]) => unknown) => void): void {
     handle('localBackend:discover', () => this.discover());
+    handle('localBackend:nativeEndpoint', () => this.nativeEndpoint());
     handle('localBackend:install', (event) => this.install(event.sender));
     handle('localBackend:start', () => this.start());
     handle('localBackend:stop', () => this.stop());
