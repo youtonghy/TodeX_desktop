@@ -109,7 +109,8 @@ export function LocalBackendSettings({ session, deviceName }: { session: TodeXSe
   // A loopback TCP connection to this daemon, which also serves IPC.
   const ipcCandidate = native?.daemon ? nativeIpcCandidate(
     session.backendConnections,
-    { running: daemonRunning, port: native.daemon.port, ipcPath: native.ipcPath },
+    // With the network off the recorded port only serves agent tools.
+    { running: daemonRunning, port: native.daemon.networkEnabled === false ? null : native.daemon.port, ipcPath: native.ipcPath },
     (id) => session.backendLinkStatus[id]?.state === 'open',
   ) : undefined;
   // An older daemon runs but cannot be paired or managed over IPC.
@@ -241,6 +242,7 @@ export function LocalBackendSettings({ session, deviceName }: { session: TodeXSe
         <InstanceAdmin
           instance={NATIVE_INSTANCE}
           status={native.admin}
+          ipcConnected={link?.state === 'open'}
           canRestart
           onRestart={() => run('restart', () => api.restart())}
           onRepair={() => connectInstance(NATIVE_INSTANCE, t('localBackend.profileName'), true)}
@@ -284,15 +286,17 @@ function ContainerCard({ session, container, busy, onConnect, onRepair }: {
         </SettingsRow>
         {container.adminError ? <SettingsNote tone="warning">{t('localBackend.containerSocketRefused', { error: container.adminError })}</SettingsNote> : null}
       </SettingsCard>
-      {container.admin ? <InstanceAdmin instance={container.id} status={container.admin} canRestart={false} onRepair={onRepair} /> : null}
+      {container.admin ? <InstanceAdmin instance={container.id} status={container.admin} ipcConnected={connected} canRestart={false} onRepair={onRepair} /> : null}
     </div>
   );
 }
 
 /** The TUI's settings, pairing QR, device approval and resets for one instance. */
-function InstanceAdmin({ instance, status: initialStatus, canRestart, onRestart, onRepair }: {
+function InstanceAdmin({ instance, status: initialStatus, ipcConnected, canRestart, onRestart, onRepair }: {
   instance: string;
   status: LocalAdminStatus;
+  /** This app is connected to the instance over IPC, so it survives the network listener going off. */
+  ipcConnected: boolean;
   canRestart: boolean;
   onRestart?: () => Promise<unknown>;
   onRepair: () => Promise<unknown>;
@@ -306,6 +310,7 @@ function InstanceAdmin({ instance, status: initialStatus, canRestart, onRestart,
   const [devices, setDevices] = useState<LocalPairedDevice[]>([]);
   const [error, setError] = useState('');
   const [confirmHost, setConfirmHost] = useState(false);
+  const [confirmNetworkOff, setConfirmNetworkOff] = useState(false);
   const [confirmReset, setConfirmReset] = useState<'devices' | 'encryption' | null>(null);
   const [confirmRevoke, setConfirmRevoke] = useState<LocalPairedDevice | null>(null);
 
@@ -369,7 +374,14 @@ function InstanceAdmin({ instance, status: initialStatus, canRestart, onRestart,
   };
 
   const editable = config?.editable === true;
-  const remote = !isLoopbackHostname(status.listen.host);
+  // Older daemons send no networkEnabled and always listen.
+  const networkSupported = config?.networkEnabled !== undefined;
+  const networkSaved = config?.networkEnabled !== false;
+  const networkRunning = status.networkEnabled !== false;
+  // Turning it off must leave this app a way in.
+  const canTurnNetworkOff = ipcConnected && Boolean(status.ipcPath);
+  const listenEditable = editable && networkSaved;
+  const remote = networkRunning && !isLoopbackHostname(status.listen.host);
   const listenDirty = config ? draft.host.trim() !== config.host || draft.port !== String(config.port) : false;
   // connectUrls can repeat a host (loopback, several ports/schemes); Select needs unique ids.
   const seenHosts = new Set(['127.0.0.1', '0.0.0.0']);
@@ -384,13 +396,27 @@ function InstanceAdmin({ instance, status: initialStatus, canRestart, onRestart,
     <>
       <SettingsGroup label={t('localBackend.listen')} description={editable ? t('localBackend.listenHint') : t('localBackend.managedByImage')}>
         <SettingsCard>
+          {networkSupported ? (
+            <SettingsRow
+              label={t('localBackend.network')}
+              description={!networkSaved ? t('localBackend.networkOffHint') : canTurnNetworkOff ? t('localBackend.networkHint') : t('localBackend.networkNeedsIpc')}
+            >
+              <Switch
+                size="sm"
+                aria-label={t('localBackend.network')}
+                isSelected={networkSaved}
+                isDisabled={!editable || (networkSaved && !canTurnNetworkOff)}
+                onChange={(enabled) => (enabled ? void saveConfig({ networkEnabled: true }) : setConfirmNetworkOff(true))}
+              />
+            </SettingsRow>
+          ) : null}
           <SettingsRow label={t('localBackend.host')} description={t('localBackend.hostHint')}>
-            <Input aria-label={t('localBackend.host')} size="small" className="w-44" isDisabled={!editable} value={draft.host} onChange={(host) => setDraft((value) => ({ ...value, host }))} />
+            <Input aria-label={t('localBackend.host')} size="small" className="w-44" isDisabled={!listenEditable} value={draft.host} onChange={(host) => setDraft((value) => ({ ...value, host }))} />
             <Select
               aria-label={t('localBackend.hostPresets')}
               triggerClassName={ROW_SELECT_TRIGGER}
               placeholder={t('localBackend.hostPresets')}
-              isDisabled={!editable}
+              isDisabled={!listenEditable}
               selectedKey={null}
               onSelectionChange={(key) => key && setDraft((value) => ({ ...value, host: String(key) }))}
             >
@@ -402,8 +428,8 @@ function InstanceAdmin({ instance, status: initialStatus, canRestart, onRestart,
             </Select>
           </SettingsRow>
           <SettingsRow label={t('localBackend.port')}>
-            <Input aria-label={t('localBackend.port')} size="small" className="w-28" inputMode="numeric" isDisabled={!editable} value={draft.port} onChange={(port) => setDraft((value) => ({ ...value, port }))} />
-            <Button size="small" variant="secondary" disabled={!editable || !listenDirty} onClick={saveListen}>{t('common.save')}</Button>
+            <Input aria-label={t('localBackend.port')} size="small" className="w-28" inputMode="numeric" isDisabled={!listenEditable} value={draft.port} onChange={(port) => setDraft((value) => ({ ...value, port }))} />
+            <Button size="small" variant="secondary" disabled={!listenEditable || !listenDirty} onClick={saveListen}>{t('common.save')}</Button>
           </SettingsRow>
           <SettingsRow label={t('localBackend.encryption')} description={t('localBackend.encryptionHint')}>
             <Select
@@ -447,7 +473,7 @@ function InstanceAdmin({ instance, status: initialStatus, canRestart, onRestart,
         </SettingsCard>
       </SettingsGroup>
 
-      <SettingsGroup label={t('localBackend.remoteAccess')} description={remote ? t('localBackend.remoteOn') : t('localBackend.remoteOff')}>
+      <SettingsGroup label={t('localBackend.remoteAccess')} description={!networkRunning ? t('localBackend.remoteNetworkOff') : remote ? t('localBackend.remoteOn') : t('localBackend.remoteOff')}>
         <SettingsCard>
           {remote ? (
             <>
@@ -516,6 +542,19 @@ function InstanceAdmin({ instance, status: initialStatus, canRestart, onRestart,
         onConfirm={() => {
           setConfirmHost(false);
           void saveConfig({ host: draft.host.trim(), port: Number(draft.port) });
+        }}
+      />
+      <ConfirmDialog
+        isOpen={confirmNetworkOff}
+        onOpenChange={setConfirmNetworkOff}
+        title={t('localBackend.networkOffTitle')}
+        description={t('localBackend.networkOffBody')}
+        confirmLabel={t('localBackend.networkOffConfirm')}
+        cancelLabel={t('common.cancel')}
+        tone="danger"
+        onConfirm={() => {
+          setConfirmNetworkOff(false);
+          void saveConfig({ networkEnabled: false });
         }}
       />
       <ConfirmDialog

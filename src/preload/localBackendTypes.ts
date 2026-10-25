@@ -16,6 +16,9 @@ export type LocalAdminStatus = {
   pid: number;
   startedAt: string;
   listen: { host: string; port: number };
+  /** False: clients connect over IPC only; `listen` is configured but unbound,
+   * `connectUrls` is empty and `pairingLink` is "". Absent from older daemons. */
+  networkEnabled?: boolean;
   connectUrls: Array<{ url: string; interface: string | null }>;
   advertiseUrl: string | null;
   pairingLink: string;
@@ -34,6 +37,8 @@ export type LocalAdminStatus = {
 export type LocalBackendConfigPatch = {
   host: string;
   port: number;
+  /** Absent from older daemons, which cannot turn the network listener off. */
+  networkEnabled?: boolean;
   pairingEncryption: PairingEncryption;
   workspaceRoots: string[];
   autoUpdate: boolean;
@@ -57,6 +62,8 @@ export type LocalDaemonStatus = {
   pid: number | null;
   host: string | null;
   port: number | null;
+  /** False: `host:port` only serves agent tools; null when unknown (older daemons). */
+  networkEnabled: boolean | null;
   startedAt: string | null;
   executable: string | null;
   ipcPath: string | null;

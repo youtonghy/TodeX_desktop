@@ -16,7 +16,7 @@ import {
   RELEASE_SIGNING_KEYS,
 } from '../src/main/localBackend/releaseAssets.ts';
 import { socketFetch, socketJson, socketWebSocket } from '../src/main/localBackend/socketHttp.ts';
-import { daemonRecord } from '../src/main/localBackend/cli.ts';
+import { clientPort, daemonRecord } from '../src/main/localBackend/cli.ts';
 
 test('release assets follow the backend build matrix', () => {
   assert.equal(platformLabel('linux', 'x64'), 'linux-x64-gnu');
@@ -158,12 +158,18 @@ test('daemon.json stands in for daemon status on backends without --format json'
       pid: process.pid,
       host: '0.0.0.0',
       port: 7345,
+      networkEnabled: null,
       startedAt: '2026-10-25T05:36:53Z',
       executable: '/opt/todex-agentd',
       ipcPath: join(dir, 'agentd.sock'),
       outdated: false,
       apiListen: null,
     });
+    // With the network off the recorded port only serves agent tools.
+    writeFileSync(join(dir, 'daemon.json'), JSON.stringify({ pid: process.pid, host: '127.0.0.1', port: 40123, network_enabled: false }));
+    const ipcOnly = await daemonRecord(dir);
+    assert.equal(ipcOnly?.networkEnabled, false);
+    assert.equal(ipcOnly && clientPort(ipcOnly), null);
     // A pid nobody runs any more: the daemon is gone.
     writeFileSync(join(dir, 'daemon.json'), JSON.stringify({ pid: 2 ** 22 + 12345, port: 7345 }));
     assert.equal((await daemonRecord(dir))?.running, false);

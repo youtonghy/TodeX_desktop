@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { app, ipcMain, protocol, session, type IpcMainEvent, type IpcMainInvokeEvent, type WebContents } from 'electron';
 import type WebSocket from 'ws';
 import { BackendBinaries, binaryVersion, matchingBackendVersion, platformLabel } from './binary';
-import { autostartEnabled, daemonCommand, daemonRecord, daemonStatus, dockerInstances, dockerPairApprove, setAutostart, type DaemonStatus, type DockerInstance } from './cli';
+import { autostartEnabled, clientPort, daemonCommand, daemonRecord, daemonStatus, dockerInstances, dockerPairApprove, setAutostart, type DaemonStatus, type DockerInstance } from './cli';
 import { LOCAL_ADMIN_PREFIX, isLocalAdminPath } from './adminPath';
 import { socketFetch, socketJson, socketWebSocket } from './socketHttp';
 
@@ -408,10 +408,10 @@ export class LocalBackendManager {
     try {
       const status = await daemonStatus(binary.path, this.dataDir);
       this.nativeIpcPath = status.running ? status.ipcPath : null;
-      return { running: status.running, port: status.port, ipcPath: this.nativeIpcPath };
+      return { running: status.running, port: clientPort(status), ipcPath: this.nativeIpcPath };
     } catch {
       const record = await daemonRecord(this.dataDir);
-      return { running: record?.running === true, port: record?.port ?? null, ipcPath: null };
+      return { running: record?.running === true, port: record ? clientPort(record) : null, ipcPath: null };
     }
   }
 

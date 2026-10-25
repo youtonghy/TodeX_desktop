@@ -207,6 +207,7 @@ SmartScreen 或 Gatekeeper。由于桌面端直接共享移动端协议源码，
 - Desktop 通过本机 IPC（Unix socket，Windows 为命名管道）而非 TCP 与它通信，这类连接的地址是 `todex-ipc://local`。配对由 backend 仅在 socket 上提供的本地管理接口自动批准，该接口只接受同一系统用户的进程。
 - 由 Desktop 管理的守护进程不会自更新；Desktop 升级后，用 **切换到同版本** 以匹配的构建重启它。
 - 页面与 backend TUI 一一对应：监听地址和端口、配对加密、工作区根目录、登录自启、重置、配对二维码与传输公钥指纹，以及批准、拒绝、吊销设备。监听地址默认保持 `127.0.0.1`；改为 `0.0.0.0` 或网卡 IP 并重启后，其他 TodeX 客户端即可与这台机器配对。
+- Desktop 通过 IPC 连接后，可以关闭 **网络接口**（重启后生效）：backend 不再监听 TCP 地址，其他设备、浏览器和 Web 端都无法连接，只剩 Desktop 的 IPC 连接；agent 工具经一个仅本机的内部端口照常工作。可随时在此或 backend TUI（按 `b`）重新打开。
 - 在 Linux 上用 `todexc` 启动的 TodeX 容器会把 socket 共享到 `~/.config/todex-container/<名称>/ipc/`，并出现在同一页面。Docker Desktop（macOS/Windows）的 socket 无法穿过虚拟机，请在 后端连接 中通过 TCP 配对，Desktop 会用 `docker exec … pair approve` 自动批准。
 
 ## 连接与故障排查

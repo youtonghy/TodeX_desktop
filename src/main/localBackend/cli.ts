@@ -7,6 +7,8 @@ export type DaemonStatus = {
   pid: number | null;
   host: string | null;
   port: number | null;
+  /** False: `host:port` only serves agent tools; clients use `ipcPath`. Null when unknown. */
+  networkEnabled: boolean | null;
   startedAt: string | null;
   executable: string | null;
   ipcPath: string | null;
@@ -50,12 +52,19 @@ export async function daemonStatus(binary: string, dataDir: string): Promise<Dae
     pid: typeof raw.pid === 'number' ? raw.pid : null,
     host: typeof raw.host === 'string' ? raw.host : null,
     port: typeof raw.port === 'number' ? raw.port : null,
+    networkEnabled: typeof raw.networkEnabled === 'boolean' ? raw.networkEnabled : null,
     startedAt: typeof raw.startedAt === 'string' ? raw.startedAt : null,
     executable: typeof raw.executable === 'string' ? raw.executable : null,
     ipcPath: typeof raw.ipcPath === 'string' ? raw.ipcPath : null,
     outdated: raw.outdated === true,
     apiListen: typeof raw.apiListen === 'string' ? raw.apiListen : null,
   };
+}
+
+/** The port clients reach the daemon on: none with the network listener off,
+ * where the recorded port only serves agent tools. */
+export function clientPort(status: DaemonStatus): number | null {
+  return status.networkEnabled === false ? null : status.port;
 }
 
 /** The daemon's own record (`<dataDir>/daemon.json`), for backends whose
@@ -73,6 +82,7 @@ export async function daemonRecord(dataDir: string): Promise<DaemonStatus | null
     pid,
     host: typeof raw.host === 'string' ? raw.host : null,
     port: typeof raw.port === 'number' ? raw.port : null,
+    networkEnabled: typeof raw.network_enabled === 'boolean' ? raw.network_enabled : null,
     startedAt: typeof raw.started_at === 'string' ? raw.started_at : null,
     executable: typeof raw.executable === 'string' ? raw.executable : null,
     ipcPath: typeof raw.ipc_path === 'string' ? raw.ipc_path : null,
