@@ -371,6 +371,14 @@ function InstanceAdmin({ instance, status: initialStatus, canRestart, onRestart,
   const editable = config?.editable === true;
   const remote = !isLoopbackHostname(status.listen.host);
   const listenDirty = config ? draft.host.trim() !== config.host || draft.port !== String(config.port) : false;
+  // connectUrls can repeat a host (loopback, several ports/schemes); Select needs unique ids.
+  const seenHosts = new Set(['127.0.0.1', '0.0.0.0']);
+  const interfaceHosts = status.connectUrls.flatMap((item) => {
+    const host = new URL(item.url.replace(/^ws/, 'http')).hostname.replace(/^\[|\]$/g, '');
+    if (!item.interface || seenHosts.has(host)) return [];
+    seenHosts.add(host);
+    return [{ host, name: item.interface }];
+  });
 
   return (
     <>
@@ -388,10 +396,9 @@ function InstanceAdmin({ instance, status: initialStatus, canRestart, onRestart,
             >
               <SelectItem id="127.0.0.1" textValue="127.0.0.1">{t('localBackend.hostLoopback')}</SelectItem>
               <SelectItem id="0.0.0.0" textValue="0.0.0.0">{t('localBackend.hostAll')}</SelectItem>
-              {status.connectUrls.filter((item) => item.interface).map((item) => {
-                const host = new URL(item.url.replace(/^ws/, 'http')).hostname.replace(/^\[|\]$/g, '');
-                return <SelectItem key={item.url} id={host} textValue={host}>{`${host} (${item.interface})`}</SelectItem>;
-              })}
+              {interfaceHosts.map(({ host, name }) => (
+                <SelectItem key={host} id={host} textValue={host}>{`${host} (${name})`}</SelectItem>
+              ))}
             </Select>
           </SettingsRow>
           <SettingsRow label={t('localBackend.port')}>
