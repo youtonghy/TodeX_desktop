@@ -13,7 +13,8 @@ export const IPC_SCHEME = 'todex-ipc';
 export const LOCAL_INSTANCE = 'local';
 const PAIRING_CREATE_PATH = '/v2/device-pairing/create';
 const LOG_TAIL_BYTES = 64 * 1024;
-const VERIFICATION_CODE = /^[0-9a-z]{4}-?[0-9a-z]{4}$/i;
+// The backend shows ten hex digits as XXXXX-XXXXX (src/device_pairing.rs).
+const VERIFICATION_CODE = /^[0-9a-f]{5}-?[0-9a-f]{5}$/i;
 
 /** Must run before `app` is ready: `todex-ipc://` behaves like an HTTPS
  * origin that `fetch` (streaming bodies included) and CORS work with. */
