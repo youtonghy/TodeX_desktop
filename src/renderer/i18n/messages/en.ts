@@ -1424,7 +1424,7 @@ export const en: Messages = {
   'cliPage.tabCleanup': 'Cleanup',
   'cliPage.shared': 'Shared MCPs / Skills',
   'cliPage.sharedHint': 'Skills and MCPs every agent shares',
-  'cliPage.capabilitiesBackend': "Skills and MCPs are read from the current workspace's backend ({name}), not the backend picked in CLI management.",
+  'cliPage.capabilitiesBackend': 'Showing the user-level Skills and MCPs on {name}. Attaching a Skill to a message works only on the current workspace\'s backend.',
   'settings.storage': 'Storage',
   'settings.todexHistoryEntry': 'Storage use, automatic cleanup and manual deletion',
   'cliSettings.reading': 'Reading settings',

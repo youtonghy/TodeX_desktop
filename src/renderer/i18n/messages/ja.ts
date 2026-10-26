@@ -1424,7 +1424,7 @@ export const ja: Messages = {
   'cliPage.tabCleanup': 'クリーンアップ',
   'cliPage.shared': '共有 MCP / Skill',
   'cliPage.sharedHint': 'すべてのエージェントで共有する Skill と MCP',
-  'cliPage.capabilitiesBackend': 'MCP / Skill は現在のワークスペースのバックエンド（{name}）から読み込みます。CLI 管理で選んだバックエンドではありません。',
+  'cliPage.capabilitiesBackend': '{name} のユーザーレベルの Skill と MCP を表示しています。Skill をメッセージに添付できるのは現在のワークスペースのバックエンドだけです。',
   'settings.storage': 'ストレージ',
   'settings.todexHistoryEntry': '使用量、自動クリーンアップ、手動削除',
   'cliSettings.reading': '設定を読み込み中',

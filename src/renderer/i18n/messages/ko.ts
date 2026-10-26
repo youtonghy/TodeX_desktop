@@ -1424,7 +1424,7 @@ export const ko: Messages = {
   'cliPage.tabCleanup': '정리',
   'cliPage.shared': '공유 MCP / Skill',
   'cliPage.sharedHint': '모든 에이전트가 공유하는 Skill 및 MCP',
-  'cliPage.capabilitiesBackend': 'MCP / Skill은 현재 워크스페이스의 백엔드({name})에서 읽습니다. CLI 관리에서 선택한 백엔드가 아닙니다.',
+  'cliPage.capabilitiesBackend': '{name}의 사용자 수준 Skill 및 MCP를 표시합니다. 메시지에 Skill을 첨부하는 것은 현재 워크스페이스의 백엔드에서만 가능합니다.',
   'settings.storage': '저장 공간',
   'settings.todexHistoryEntry': '사용량, 자동 정리, 수동 삭제',
   'cliSettings.reading': '설정을 읽는 중',

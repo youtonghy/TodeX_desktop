@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import { MANAGED_PROVIDER_AGENTS, type ManagedCliProvider, type ManagedProviderAgent, type NativeHistoryProvider, type ProviderKind, type V2ApiClient } from '@todex/protocol/v2';
 import { Tab, TabList, TabPanel, Tabs } from '@/components/base/tabs/tabs';
-import { SettingsNote, SettingsSubpage } from '@/components/settings/SettingsRows';
+import { SettingsSubpage } from '@/components/settings/SettingsRows';
 import { useT, type MessageKey } from '@/i18n';
 import { hasCliSettings } from '@/lib/cliSettings';
 import type { PanelBackend } from '@/session/panelBackend';
+import { useBackendCapabilities } from '@/session/useBackendCapabilities';
 import type { TodeXSession } from '@/session/useTodeXSession';
 import { AgentProvidersPanel } from '../../screens/AgentProvidersPanel';
 import { CapabilitiesPanel, type ProviderChoice } from '../../screens/CapabilitiesPanel';
@@ -26,17 +27,16 @@ const TAB_LABELS: Record<CliPageTab, MessageKey> = {
 
 const NATIVE_HISTORY: readonly NativeHistoryProvider[] = ['claude-code', 'pi', 'codex', 'grok-build', 'devin'];
 
-/** Skills and MCPs follow the active workspace, so they come from the
- * focused backend's agents rather than the backend picked for CLIs. */
-function capabilityProvider(session: TodeXSession, id: string): ProviderKind | undefined {
-  return session.v2Providers.find((item) => item.id === id && item.available)?.id;
+/** Skills and MCPs come from the picked backend's agents. */
+function capabilityProvider(backend: PanelBackend, id: string): ProviderKind | undefined {
+  return backend.providers.find((item) => item.id === id && item.available)?.id;
 }
 
 /** The tabs a CLI's page has; a CLI without any has no page. */
-export function cliPageTabs(session: TodeXSession, id: ManagedCliProvider): CliPageTab[] {
+export function cliPageTabs(backend: PanelBackend, id: ManagedCliProvider): CliPageTab[] {
   const tabs: CliPageTab[] = [];
   if (hasCliSettings(id)) tabs.push('settings');
-  if (capabilityProvider(session, id)) tabs.push('capabilities');
+  if (capabilityProvider(backend, id)) tabs.push('capabilities');
   if ((MANAGED_PROVIDER_AGENTS as string[]).includes(id)) tabs.push('accounts');
   if ((NATIVE_HISTORY as string[]).includes(id)) tabs.push('cleanup');
   return tabs;
@@ -51,7 +51,7 @@ export function CliAgentPage({ session, backend, api, id, name, onBack }: {
   onBack: () => void;
 }) {
   const t = useT();
-  const tabs = cliPageTabs(session, id);
+  const tabs = cliPageTabs(backend, id);
   const [picked, setPicked] = useState<CliPageTab>(tabs[0] ?? 'settings');
   const tab = tabs.includes(picked) ? picked : tabs[0];
   // A visited tab stays mounted (hidden), so unsaved settings edits survive
@@ -61,7 +61,7 @@ export function CliAgentPage({ session, backend, api, id, name, onBack }: {
     setPicked(next);
     setVisited((current) => (current.has(next) ? current : new Set([...current, next])));
   };
-  const provider = capabilityProvider(session, id);
+  const provider = capabilityProvider(backend, id);
   return (
     <SettingsSubpage
       title={<span className="flex items-center gap-2"><ProviderIcon provider={id} className="size-5" />{name}</span>}
@@ -75,16 +75,7 @@ export function CliAgentPage({ session, backend, api, id, name, onBack }: {
           <TabPanel key={item} id={item} shouldForceMount className="data-[inert=true]:hidden">
             {!visited.has(item) && item !== tab ? null
               : item === 'settings' && hasCliSettings(id) ? <CliSettingsEditor provider={id} api={api} />
-                : item === 'capabilities' && provider ? (
-                  <div className="flex flex-col gap-3">
-                    {backend.backendId !== session.activeBackendConnectionId ? (
-                      <SettingsNote tone="warning" className="border-b-0 px-3">
-                        {t('cliPage.capabilitiesBackend', { name: session.backendConnections.find((item) => item.id === session.activeBackendConnectionId)?.name ?? '' })}
-                      </SettingsNote>
-                    ) : null}
-                    <SessionCapabilities session={session} provider={provider} />
-                  </div>
-                )
+                : item === 'capabilities' && provider ? <BackendCapabilities session={session} backend={backend} provider={provider} />
                   : item === 'accounts' ? <AgentProvidersPanel key={backend.backendId} backend={backend} agent={id as ManagedProviderAgent} />
                     : item === 'cleanup' ? <NativeHistoryTab key={backend.backendId} backend={backend} provider={id as NativeHistoryProvider} label={name} />
                       : null}
@@ -96,12 +87,36 @@ export function CliAgentPage({ session, backend, api, id, name, onBack }: {
 }
 
 /** Skills and MCPs every agent shares. */
-export function SharedCapabilitiesPage({ session, onBack }: { session: TodeXSession; onBack: () => void }) {
+export function SharedCapabilitiesPage({ session, backend, onBack }: { session: TodeXSession; backend: PanelBackend; onBack: () => void }) {
   const t = useT();
   return (
     <SettingsSubpage title={t('cliPage.shared')} description={t('cliPage.sharedHint')} onBack={onBack}>
-      <SessionCapabilities session={session} provider="common" />
+      <BackendCapabilities session={session} backend={backend} provider="common" />
     </SettingsSubpage>
+  );
+}
+
+/** The focused backend's catalog is the session's, where skills attach to
+ * the active conversation; another backend's is read on its own and only
+ * browsed and edited. */
+function BackendCapabilities({ session, backend, provider }: { session: TodeXSession; backend: PanelBackend; provider: ProviderChoice }) {
+  const t = useT();
+  const focused = backend.backendId === session.activeBackendConnectionId;
+  const other = useBackendCapabilities(session, backend, !focused);
+  if (focused) return <SessionCapabilities session={session} provider={provider} />;
+  return (
+    <CapabilitiesPanel
+      inDialog
+      lockedProvider={provider}
+      workspacePath={other.workspacePath}
+      providers={backend.providers}
+      catalogs={other.catalogs}
+      onRefresh={(kind) => void other.refresh(kind)}
+      hint={t('cliPage.capabilitiesBackend', { name: backend.profile?.name ?? '' })}
+      onPreviewSkill={(skill, kind) => other.previewSkill(kind, skill.resourceId)}
+      onLoadMcpConfig={(server) => other.loadMcpConfig(server.provider, server.resourceId)}
+      manager={other.manager}
+    />
   );
 }
 

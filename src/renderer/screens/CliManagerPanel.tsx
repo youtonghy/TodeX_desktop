@@ -226,7 +226,7 @@ export function CliManagerPanel({ session, page = null, onPageChange = () => {} 
     // upgrade; everything else just reports where the CLI stands.
     const upgradable = cli.kind === 'managed' && cli.upgradeSupported && !isImageManaged(cli) && (cli.status === 'updateAvailable' || cli.status === 'unknown');
     const target = cli.status === 'updateAvailable' ? cli.latestVersion : undefined;
-    const hasPage = cli.kind === 'managed' && cliPageTabs(session, cli.id).length > 0;
+    const hasPage = cli.kind === 'managed' && cliPageTabs(backend, cli.id).length > 0;
     return (
       <div key={cli.id} className="flex flex-col">
         {index ? <Divider /> : null}
@@ -284,13 +284,13 @@ export function CliManagerPanel({ session, page = null, onPageChange = () => {} 
 
   // A page whose CLI went away (another backend, uninstalled) closes.
   const pageCli = page && page !== 'shared' ? installed.find((cli) => cli.id === page) : undefined;
-  const pageGone = page !== null && page !== 'shared' && !loading && (!pageCli || pageCli.kind !== 'managed' || !cliPageTabs(session, pageCli.id).length);
+  const pageGone = page !== null && page !== 'shared' && !loading && (!pageCli || pageCli.kind !== 'managed' || !cliPageTabs(backend, pageCli.id).length);
   useEffect(() => {
     if (pageGone) onPageChange(null);
   }, [pageGone]);
-  const sharedAvailable = session.v2Providers.some((item) => item.available);
+  const sharedAvailable = backend.providers.some((item) => item.available);
 
-  if (page === 'shared') return <SharedCapabilitiesPage session={session} onBack={() => onPageChange(null)} />;
+  if (page === 'shared') return <SharedCapabilitiesPage session={session} backend={backend} onBack={() => onPageChange(null)} />;
   if (pageCli?.kind === 'managed' && !pageGone) {
     return <CliAgentPage key={`${backend.backendId}:${pageCli.id}`} session={session} backend={backend} api={api} id={pageCli.id} name={pageCli.name} onBack={() => onPageChange(null)} />;
   }

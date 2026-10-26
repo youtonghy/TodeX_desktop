@@ -1424,7 +1424,7 @@ export const zhCN = {
   'cliPage.tabCleanup': '清理',
   'cliPage.shared': '共享 MCP / Skill',
   'cliPage.sharedHint': '所有 Agent 共用的 Skill 和 MCP',
-  'cliPage.capabilitiesBackend': 'MCP / Skill 读取自当前工作区的后端（{name}），不是 CLI 管理中选择的后端。',
+  'cliPage.capabilitiesBackend': '显示 {name} 上的用户级 Skill 和 MCP。附加 Skill 到消息只适用于当前工作区的后端。',
   'settings.storage': '存储',
   'settings.todexHistoryEntry': '占用空间、自动清理和手动删除',
   'cliSettings.reading': '正在读取设定',

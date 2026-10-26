@@ -52,6 +52,8 @@ type Props = {
   inDialog?: boolean;
   /** Shows only this agent's (or the shared) catalog, without the agent switcher. */
   lockedProvider?: ProviderChoice;
+  /** Replaces the line about attaching skills, e.g. where they cannot attach. */
+  hint?: string;
 };
 
 type ViewMode = 'skills' | 'mcp';
@@ -78,6 +80,7 @@ export function CapabilitiesPanel({
   manager,
   inDialog = false,
   lockedProvider,
+  hint,
 }: Props) {
   const t = useT();
   const [viewMode, setViewMode] = useState<ViewMode>('skills');
@@ -159,7 +162,9 @@ export function CapabilitiesPanel({
         <div className="min-w-0">
           {inDialog ? null : <h2 className="text-title-3-semibold text-text-primary">{t('cap.title')}</h2>}
           <p className={cx('text-caption-1-regular text-text-secondary', !inDialog && 'mt-1')}>{provider ? `${providerDisplayName(provider.id, provider.displayName)} · ${workspacePath}` : t('cap.commonPath', { path: workspacePath })}</p>
-          {conversationId && canInvoke ? (
+          {hint ? (
+            <p className="mt-1 text-caption-1-regular text-text-secondary">{hint}</p>
+          ) : conversationId && canInvoke ? (
             <p className="mt-1 text-caption-1-regular text-text-secondary">{t('cap.attachHint')}</p>
           ) : (
             <p className="mt-1 text-caption-1-regular text-text-secondary">{t('cap.needV2')}</p>
