@@ -1,8 +1,9 @@
 import { deviceIdentityFromSecret, generateDeviceIdentity } from '@todex/protocol/deviceAuth';
-import { ipcServerUrl } from '@todex/protocol/ipcServerUrl';
+import { ipcServerInstance, ipcServerUrl, isIpcServerUrl } from '@todex/protocol/ipcServerUrl';
 import { isLoopbackHostname } from '@todex/protocol/loopback';
 import type { BackendConnectionProfile } from '@todex/protocol/todex';
 import type { LocalNativeEndpoint } from '../../preload/localBackendTypes';
+import { ipcDaemonConflicts } from './backendRouting';
 import { t } from '../i18n';
 import {
   DevicePairingRetryableError,
@@ -67,6 +68,7 @@ type ManagedSession = {
   backendConnections: BackendConnectionProfile[];
   addBackendConnection: (profile?: Partial<BackendConnectionProfile>) => BackendConnectionProfile;
   updateBackendConnection: (id: string, patch: Partial<BackendConnectionProfile>) => void;
+  replaceBackendConnection: (loserId: string, winnerId: string) => void;
   connect: (backendId: string) => void;
   onDevicePairingApproved: (profileId: string, credentials: PairingCredentials) => void;
 };
@@ -101,6 +103,12 @@ export async function ensureManagedConnection(session: ManagedSession, options: 
   const profile = managedProfile(session.backendConnections, options.instance)
     ?? session.addBackendConnection({ name: options.name, serverUrl });
   const paired = profile.transportVerified && Boolean(deviceIdentityFromSecret(profile.deviceSecret));
+  // A disabled IPC profile takes its daemon back from the profile serving it.
+  const peer = profile.disabled ? daemonPeer(session.backendConnections, profile) : undefined;
+  if (peer && paired && !options.repair) {
+    session.replaceBackendConnection(peer.id, profile.id);
+    return profile.id;
+  }
   if (paired && !options.repair) {
     session.connect(profile.id);
     return profile.id;
@@ -113,6 +121,7 @@ export async function ensureManagedConnection(session: ManagedSession, options: 
     signal: options.signal,
   });
   session.onDevicePairingApproved(profile.id, credentials);
+  if (peer) session.replaceBackendConnection(peer.id, profile.id);
   return profile.id;
 }
 
@@ -128,6 +137,31 @@ function reachesNativePort(serverUrl: string, port: number): boolean {
   const defaultPort = url.protocol === 'https:' || url.protocol === 'wss:' ? 443 : url.protocol === 'http:' || url.protocol === 'ws:' ? 80 : null;
   if (defaultPort === null || !isLoopbackHostname(url.hostname)) return false;
   return (url.port ? Number(url.port) : defaultPort) === port;
+}
+
+/**
+ * The enabled profiles that reach a daemon an enabled IPC profile serves,
+ * each with the IPC profile that takes over (see `ipcDaemonConflicts`). With
+ * the native daemon's endpoint known, a loopback profile on its port counts
+ * even before the IPC profile pinned a key.
+ */
+export function daemonConflicts(profiles: BackendConnectionProfile[], endpoint: LocalNativeEndpoint | null) {
+  const port = endpoint?.running ? endpoint.port : null;
+  return ipcDaemonConflicts(profiles, isIpcServerUrl, (ipcUrl, serverUrl) => (
+    port !== null && ipcServerInstance(ipcUrl) === NATIVE_INSTANCE && reachesNativePort(serverUrl, port)
+  ));
+}
+
+/** The enabled profile serving the daemon of disabled `profile`: the one
+ * pinning the same transport key, else (for a TCP profile) the enabled
+ * native IPC profile. */
+export function daemonPeer(profiles: BackendConnectionProfile[], profile: BackendConnectionProfile): BackendConnectionProfile | undefined {
+  const enabled = profiles.filter((item) => item.id !== profile.id && !item.disabled);
+  const sameKey = profile.transportVerified && profile.encryptionPublicKey
+    ? enabled.find((item) => item.transportVerified && item.encryptionPublicKey === profile.encryptionPublicKey)
+    : undefined;
+  if (sameKey || isIpcServerUrl(profile.serverUrl)) return sameKey;
+  return enabled.find((item) => item.serverUrl === ipcServerUrl(NATIVE_INSTANCE));
 }
 
 /**

@@ -26,8 +26,10 @@ function BackendDot({ profile }: { profile?: BackendConnectionProfile }) {
  * color, name and URL, flagged when it is not connected. Renders nothing
  * with a single backend (and no `allLabel`), where there is nothing to pick.
  */
-export function BackendSelect({ profiles, linkStates, selectedId, onChange, allLabel, className }: BackendSelectProps) {
+export function BackendSelect({ profiles: allProfiles, linkStates, selectedId, onChange, allLabel, className }: BackendSelectProps) {
   const t = useT();
+  // A disabled profile's backend is picked through the profile serving it.
+  const profiles = allProfiles.filter((profile) => !profile.disabled);
   if (profiles.length < 2) return null;
   return (
     <Select

@@ -10,7 +10,7 @@ export type PanelBackend = ReturnType<typeof usePanelBackend>;
 
 export function usePanelBackend(session: TodeXSession) {
   const [picked, setPicked] = useState(session.activeBackendConnectionId);
-  const exists = session.backendConnections.some((profile) => profile.id === picked);
+  const exists = session.backendConnections.some((profile) => profile.id === picked && !profile.disabled);
   const backendId = exists ? picked : session.activeBackendConnectionId;
   const profile = session.backendConnections.find((item) => item.id === backendId);
   return {

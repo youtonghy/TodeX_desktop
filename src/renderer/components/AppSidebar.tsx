@@ -395,12 +395,17 @@ export function AppSidebar({
   // those left behind by a removed backend profile render read-only below.
   // None becomes one row per backend, in the order they were added.
   const ownWorkspaces = useMemo(() => {
+    // A disabled profile's backend is listed under the profile serving it.
+    const enabled = session.backendConnections.filter((profile) => !profile.disabled);
+    // Row ids are collection keys: a workspace id listed twice (two
+    // profiles of one daemon) keeps its first record rather than crash.
+    const seen = new Set<string>();
     const listed = session.workspaces.filter((workspace) => !isNoneWorkspaceId(workspace.id) && (
-      !workspace.backendConnectionId || session.backendConnections.some((profile) => profile.id === workspace.backendConnectionId)
-    ));
+      !workspace.backendConnectionId || enabled.some((profile) => profile.id === workspace.backendConnectionId)
+    ) && !seen.has(workspace.id) && Boolean(seen.add(workspace.id)));
     const none = session.workspaces.find((workspace) => isNoneWorkspaceId(workspace.id));
     if (!none) return listed;
-    const profiles = [...session.backendConnections].sort((a, b) => a.createdAt - b.createdAt);
+    const profiles = [...enabled].sort((a, b) => a.createdAt - b.createdAt);
     const rows = profiles.map((profile, index): WorkspaceRecord => ({
       ...none,
       id: noneWorkspaceRowId(profile.id),

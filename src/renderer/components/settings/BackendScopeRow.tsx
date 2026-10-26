@@ -8,7 +8,7 @@ import { SettingsCard, SettingsRow } from './SettingsRows';
  * nothing with a single backend. */
 export function BackendScopeRow({ session, backend }: { session: TodeXSession; backend: PanelBackend }) {
   const t = useT();
-  if (session.backendConnections.length < 2) return null;
+  if (session.backendConnections.filter((profile) => !profile.disabled).length < 2) return null;
   return (
     <SettingsCard>
       <SettingsRow label={t('backendSelect.label')} description={t('backendSelect.settingsHint')}>

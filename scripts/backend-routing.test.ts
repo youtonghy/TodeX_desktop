@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
+  ipcDaemonConflicts,
+  moveBackendRecords,
   ownerBackendId,
   resolveNoWorkspaceBackendId,
   tagLegacyBackendRecords,
@@ -62,3 +64,56 @@ test('tagging keeps the inputs when nothing is untagged', () => {
   assert.equal(tagLegacyBackendRecords(records, '').workspaces, records.workspaces);
 });
 
+
+const isIpc = (url: string) => url.startsWith('todex-ipc://');
+const daemonProfile = (id: string, serverUrl: string, key = '', extra: { disabled?: boolean } = {}) => ({
+  id, serverUrl, createdAt: 0, encryptionPublicKey: key, transportVerified: Boolean(key), ...extra,
+});
+
+test('an IPC profile takes over the TCP profiles of its daemon', () => {
+  const profiles = [
+    daemonProfile('http', 'http://127.0.0.1:7345', 'k1'),
+    daemonProfile('remote', 'https://remote.example', 'k2'),
+    daemonProfile('ipc', 'todex-ipc://local', 'k1'),
+  ];
+  assert.deepEqual(ipcDaemonConflicts(profiles, isIpc), [{ loserId: 'http', winnerId: 'ipc' }]);
+  // A disabled side is no conflict, so a swap back to TCP sticks.
+  assert.deepEqual(ipcDaemonConflicts([{ ...profiles[0] }, { ...profiles[2], disabled: true }], isIpc), []);
+  // Before the IPC profile pins a key, only the daemon's own listener counts.
+  const unpaired = [daemonProfile('http', 'http://127.0.0.1:7345'), daemonProfile('ipc', 'todex-ipc://local')];
+  assert.deepEqual(ipcDaemonConflicts(unpaired, isIpc), []);
+  assert.deepEqual(
+    ipcDaemonConflicts(unpaired, isIpc, (_ipc, url) => url === 'http://127.0.0.1:7345'),
+    [{ loserId: 'http', winnerId: 'ipc' }],
+  );
+});
+
+test('moved records keep one copy of each id the daemon issued', () => {
+  const moved = moveBackendRecords({
+    workspaces: [
+      { id: 'ws_a', backendConnectionId: 'http' },
+      { id: 'ws_b', backendConnectionId: 'http' },
+      { id: 'ws_a', backendConnectionId: 'ipc' },
+      { id: 'ws_c', backendConnectionId: 'other' },
+    ],
+    conversations: [
+      { id: 'c1', workspaceId: 'ws_a', backendConnectionId: 'http', v2ConversationId: 'v1' },
+      { id: 'c2', workspaceId: 'ws_b', backendConnectionId: 'http', v2ConversationId: 'v2' },
+      { id: 'c3', workspaceId: 'ws_a', backendConnectionId: 'ipc', v2ConversationId: 'v1' },
+      { id: 'c4', workspaceId: 'ws_b' },
+    ],
+    tombstones: [{ backendConnectionId: 'http' }],
+  }, 'http', 'ipc');
+  assert.deepEqual(moved.workspaces, [
+    { id: 'ws_b', backendConnectionId: 'ipc' },
+    { id: 'ws_a', backendConnectionId: 'ipc' },
+    { id: 'ws_c', backendConnectionId: 'other' },
+  ]);
+  assert.deepEqual(moved.conversations.map((item) => [item.id, item.backendConnectionId]), [
+    ['c2', 'ipc'],
+    ['c3', 'ipc'],
+    ['c4', undefined],
+  ]);
+  assert.deepEqual([...moved.conversationIds], [['c1', 'c3']]);
+  assert.deepEqual(moved.tombstones, [{ backendConnectionId: 'ipc' }]);
+});

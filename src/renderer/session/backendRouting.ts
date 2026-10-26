@@ -63,3 +63,77 @@ export function tagLegacyBackendRecords<W extends WorkspaceLike, C extends Conve
   };
 }
 
+
+type DaemonProfileLike = ProfileLike & {
+  serverUrl: string;
+  encryptionPublicKey: string;
+  transportVerified: boolean;
+  disabled?: boolean;
+};
+
+/**
+ * Profiles that reach a backend another profile already serves over IPC.
+ * Two profiles name the same daemon when both pinned the same transport key,
+ * or when `reachesSameDaemon` says the TCP address is the IPC daemon's
+ * listener. Each enabled TCP profile that does is paired with the IPC
+ * profile that takes over: one daemon, one enabled profile, so its records
+ * (whose ids the daemon issues) are listed once.
+ */
+export function ipcDaemonConflicts<P extends DaemonProfileLike>(
+  profiles: readonly P[],
+  isIpc: (serverUrl: string) => boolean,
+  reachesSameDaemon: (ipcUrl: string, serverUrl: string) => boolean = () => false,
+): Array<{ loserId: string; winnerId: string }> {
+  const enabled = profiles.filter((profile) => !profile.disabled);
+  const conflicts: Array<{ loserId: string; winnerId: string }> = [];
+  for (const winner of enabled) {
+    if (!isIpc(winner.serverUrl)) continue;
+    const pinned = winner.transportVerified && winner.encryptionPublicKey;
+    for (const loser of enabled) {
+      if (loser === winner || isIpc(loser.serverUrl) || conflicts.some((item) => item.loserId === loser.id)) continue;
+      const sameKey = Boolean(pinned) && loser.transportVerified && loser.encryptionPublicKey === winner.encryptionPublicKey;
+      if (sameKey || reachesSameDaemon(winner.serverUrl, loser.serverUrl)) conflicts.push({ loserId: loser.id, winnerId: winner.id });
+    }
+  }
+  return conflicts;
+}
+
+/**
+ * Files the records of backend `fromId` under `toId`, a profile of the same
+ * daemon. A workspace or conversation `toId` already lists (the daemon gave
+ * both profiles the same ids) keeps the `toId` record; `conversationIds`
+ * maps each dropped conversation id to the one kept in its place.
+ */
+export function moveBackendRecords<
+  W extends WorkspaceLike,
+  C extends ConversationLike & { id: string },
+  T extends TombstoneLike,
+>(
+  records: { workspaces: W[]; conversations: C[]; tombstones: T[] },
+  fromId: string,
+  toId: string,
+): { workspaces: W[]; conversations: C[]; tombstones: T[]; conversationIds: Map<string, string> } {
+  const targetWorkspaceIds = new Set(records.workspaces.filter((item) => item.backendConnectionId === toId).map((item) => item.id));
+  const workspaces = records.workspaces.flatMap((workspace) => {
+    if (workspace.backendConnectionId !== fromId) return [workspace];
+    return targetWorkspaceIds.has(workspace.id) ? [] : [{ ...workspace, backendConnectionId: toId }];
+  });
+  const targetConversations = new Map<string, string>();
+  for (const conversation of records.conversations) {
+    if (conversation.backendConnectionId === toId && conversation.v2ConversationId) targetConversations.set(conversation.v2ConversationId, conversation.id);
+  }
+  const conversationIds = new Map<string, string>();
+  const conversations = records.conversations.flatMap((conversation) => {
+    if (conversation.backendConnectionId !== fromId) return [conversation];
+    const kept = conversation.v2ConversationId ? targetConversations.get(conversation.v2ConversationId) : undefined;
+    if (kept) {
+      conversationIds.set(conversation.id, kept);
+      return [];
+    }
+    return [{ ...conversation, backendConnectionId: toId }];
+  });
+  const tombstones = records.tombstones.map((tombstone) => (
+    tombstone.backendConnectionId === fromId ? { ...tombstone, backendConnectionId: toId } : tombstone
+  ));
+  return { workspaces, conversations, tombstones, conversationIds };
+}

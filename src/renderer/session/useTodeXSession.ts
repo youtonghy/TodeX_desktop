@@ -1,5 +1,5 @@
 import { normalizeBackendLabelColor, type BackendConnectionProfile } from './backendColors';
-import { ownerBackendId, resolveNoWorkspaceBackendId, tagLegacyBackendRecords } from './backendRouting';
+import { ipcDaemonConflicts, moveBackendRecords, ownerBackendId, resolveNoWorkspaceBackendId, tagLegacyBackendRecords } from './backendRouting';
 import { useWorkbenchSharing } from './useWorkbenchSharing';
 import {
   completionNotificationBody,
@@ -12,6 +12,7 @@ import { addNotification } from './notificationFeed';
 import { bindSentAttachmentEvents, prepareSentAttachments, projectSentAttachments, pruneSentAttachmentRecords, type SentAttachmentRecord } from './sentAttachments';
 import { uploadPromptFile } from './promptUploads';
 import { uploadedPromptContent } from '@todex/protocol/promptUploads';
+import { isIpcServerUrl } from '@todex/protocol/ipcServerUrl';
 import { configureKanbanRouting, configureKanbanSync, syncKanbanTasksFromBackend, type KanbanTaskSchedule } from './kanbanTasks';
 import { t } from '../i18n';
 import { toast } from '../components/ui/toast';
@@ -694,8 +695,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   // The None backend in view: the backend of the open None conversation,
   // else the None row last picked, else the first backend added. New None
   // conversations and untagged None drafts belong to it.
+  const enabledBackendConnections = useMemo(() => backendConnections.filter((profile) => !profile.disabled), [backendConnections]);
   const noWorkspaceBackendId = resolveNoWorkspaceBackendId(
-    backendConnections,
+    enabledBackendConnections,
     isNoneWorkspaceId(activeConversationRecord?.workspaceId) ? activeConversationRecord?.backendConnectionId : null,
     noneBackendSelection,
   );
@@ -1511,12 +1513,27 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         conversations: normalizedConversations,
         tombstones: loadedTombstones,
       }, legacyProfile?.id ?? '');
-      workspaceTombstonesRef.current = tagged.tombstones;
+      // Profiles saved while an IPC profile and a TCP profile of the same
+      // daemon were both enabled list its records twice: the IPC profile
+      // takes over before the first render (useIpcDaemonConflicts covers
+      // later changes, and loopback profiles matched by address).
+      let resolvedProfiles = profiles;
+      let records: Pick<typeof tagged, 'workspaces' | 'conversations' | 'tombstones'> = tagged;
+      let restoredConversationId = firstConversationId;
+      let restoredNoneBackendId = typeof storedActiveSelection?.noneBackendId === 'string' ? storedActiveSelection.noneBackendId : '';
+      for (const { loserId, winnerId } of ipcDaemonConflicts(profiles, isIpcServerUrl)) {
+        const moved = moveBackendRecords(records, loserId, winnerId);
+        records = moved;
+        restoredConversationId = moved.conversationIds.get(restoredConversationId) ?? restoredConversationId;
+        if (restoredNoneBackendId === loserId) restoredNoneBackendId = winnerId;
+        resolvedProfiles = resolvedProfiles.map((profile) => (profile.id === loserId ? { ...profile, disabled: true } : profile));
+      }
+      workspaceTombstonesRef.current = records.tombstones;
       setPreferences(nextSettings);
-      setBackendConnections(profiles);
-      setWorkspaces(tagged.workspaces);
-      setWorkspaceTombstones(tagged.tombstones);
-      setConversations(tagged.conversations);
+      setBackendConnections(resolvedProfiles);
+      setWorkspaces(records.workspaces);
+      setWorkspaceTombstones(records.tombstones);
+      setConversations(records.conversations);
       setTimeline(storedTimeline.slice(0, MAX_TIMELINE_ITEMS));
       const attachmentRecords = pruneSentAttachmentRecords(Array.isArray(storedSentAttachments) ? storedSentAttachments : []);
       sentAttachmentRecordsRef.current = attachmentRecords;
@@ -1528,8 +1545,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       providerModelPreferencesRef.current = normalizedProviderModelPreferences;
       setProviderModelPreferences(normalizedProviderModelPreferences);
       setActiveWorkspaceId(firstWorkspaceId);
-      setActiveConversationId(firstConversationId);
-      setNoneBackendSelection(typeof storedActiveSelection?.noneBackendId === 'string' ? storedActiveSelection.noneBackendId : '');
+      setActiveConversationId(restoredConversationId);
+      setNoneBackendSelection(restoredNoneBackendId);
       setAutoConnectEnabled(hydratedProfiles.length > 0 || Boolean(storedSettings?.serverUrl?.trim()));
       setHydrated(true);
     })();
@@ -4197,6 +4214,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
 
   /** Open (or reopen) one backend's socket. */
   const connectBackend = useCallback((backendId: string) => {
+    // A disabled profile's backend is served by another profile.
+    if (profileFor(backendId)?.disabled) return;
     const link = linkFor(backendId);
     link.manualDisconnect = false;
     setAutoConnectEnabled(true);
@@ -4589,7 +4608,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     }
     autoConnectStartedRef.current = true;
     for (const profile of backendConnectionsRef.current) {
-      if (profile.serverUrl.trim() && !linksRef.current.has(profile.id)) connectBackend(profile.id);
+      if (profile.serverUrl.trim() && !profile.disabled && !linksRef.current.has(profile.id)) connectBackend(profile.id);
     }
   }, [autoConnectEnabled, connectBackend, hydrated]);
 
@@ -5159,6 +5178,50 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       setLastError(error instanceof Error ? error.message : t('history.keyFailed'));
     });
     setBackendConnections((current) => current.filter((profile) => profile.id !== id));
+  }, [closeSocket]);
+
+  /** Hands backend `loserId` over to `winnerId`, a profile of the same
+   * daemon (its IPC connection, say): the loser disconnects and stays
+   * disabled, the winner is enabled and connects, and the loser's workspaces
+   * and conversations move to the winner, so the ids the daemon issued are
+   * listed once. The loser keeps its device key and history key, so the
+   * swap can be undone the same way. */
+  const replaceBackendConnection = useCallback((loserId: string, winnerId: string) => {
+    const profiles = backendConnectionsRef.current;
+    const winner = profiles.find((profile) => profile.id === winnerId);
+    if (loserId === winnerId || !winner || !profiles.some((profile) => profile.id === loserId)) return;
+    // Drop the loser's link first: workspace saves only reach linked
+    // backends, so its emptied scope is never pushed to the daemon.
+    closeSocket(loserId, true);
+    linksRef.current.get(loserId)?.commands.dispose();
+    linksRef.current.delete(loserId);
+    configureKanbanSync(loserId, null);
+    setLinkStatusByBackend(({ [loserId]: _removed, ...rest }) => rest);
+    setV2ConversationsByBackend(({ [loserId]: _removed, ...rest }) => rest);
+    setDirectorySyncByBackend(({ [loserId]: _removed, ...rest }) => rest);
+    const moved = moveBackendRecords({
+      workspaces: workspacesRef.current,
+      conversations: conversationsRef.current,
+      tombstones: workspaceTombstonesRef.current,
+    }, loserId, winnerId);
+    workspacesRef.current = moved.workspaces;
+    conversationsRef.current = moved.conversations;
+    workspaceTombstonesRef.current = moved.tombstones;
+    setWorkspaces(moved.workspaces);
+    setConversations(moved.conversations);
+    setWorkspaceTombstones(moved.tombstones);
+    const keptConversationId = moved.conversationIds.get(activeConversationRef.current);
+    if (keptConversationId) setActiveConversationId(keptConversationId);
+    setNoneBackendSelection((current) => (current === loserId ? winnerId : current));
+    setBackendConnections((current) => current.map((profile) => {
+      if (profile.id === loserId) return { ...profile, disabled: true, updatedAt: Date.now() };
+      if (profile.id === winnerId && profile.disabled) {
+        const { disabled: _disabled, ...enabled } = profile;
+        return { ...enabled, updatedAt: Date.now() };
+      }
+      return profile;
+    }));
+    if (winner.disabled) pairingConnectPendingRef.current.add(winnerId);
   }, [closeSocket]);
 
   /** Opens a workspace. None is listed once per backend: `noneBackendId`
@@ -9623,6 +9686,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     updateBackendConnection,
     addBackendConnection,
     removeBackendConnection,
+    replaceBackendConnection,
     workspaces,
     conversations,
     activeWorkspaceId,
