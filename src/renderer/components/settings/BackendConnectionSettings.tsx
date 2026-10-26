@@ -24,7 +24,7 @@ export const CONFIG_SYNC_PAGE = '__config-sync__';
 
 /** What "sync agent config to a new backend" preselects; SSH hosts are
  * left out because the target rarely holds the matching private keys. */
-const AGENT_CONFIG_CATEGORIES: ConfigSyncPreset['categories'] = ['accounts', 'settings', 'mcp', 'skills'];
+export const AGENT_CONFIG_CATEGORIES: ConfigSyncPreset['categories'] = ['accounts', 'settings', 'mcp', 'skills'];
 
 const STATE_COLORS = { open: 'lime', connecting: 'yellow', error: 'rose', closed: 'neutral', idle: 'neutral' } as const;
 
@@ -134,7 +134,7 @@ export function BackendConnectionSettings({ session, page, onPageChange, deviceN
 
 /** The backend to copy agent config from: the paired backend other than
  * `targetId` that connected most recently, else the first paired one. */
-function agentConfigSource(session: TodeXSession, targetId: string): BackendConnectionProfile | undefined {
+export function agentConfigSource(session: TodeXSession, targetId: string): BackendConnectionProfile | undefined {
   const candidates = session.backendConnections.filter(item => item.id !== targetId && item.deviceSecret);
   const openedAt = (item: BackendConnectionProfile) => linkOf(session, item.id)?.openedAt ?? 0;
   return candidates.reduce<BackendConnectionProfile | undefined>(

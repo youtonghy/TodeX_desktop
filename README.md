@@ -213,7 +213,17 @@ Settings → **Local backend** runs `todex-agentd` on this computer without a te
 - A Desktop-managed daemon does not self-update; when Desktop updates, **Switch to matching version** restarts it on the matching build.
 - The page mirrors the backend TUI: listen address and port, pairing encryption, workspace roots, start at login, resets, the pairing QR code and transport fingerprint, and approving, rejecting or revoking devices. The listener stays on `127.0.0.1` until you change it; set `0.0.0.0` or an interface IP (and restart) to let other TodeX clients pair with this machine.
 - Once Desktop is connected over IPC, the **Network listener** switch can turn TCP off (after a restart): other devices, browsers and the web client can no longer connect, only Desktop's IPC connection remains, and agent tools keep working through an internal loopback-only port. Turn it back on here or in the backend TUI (press `b`).
-- TodeX containers started with `todexc` on Linux share their socket under `~/.config/todex-container/<name>/ipc/` and appear on the same page. On Docker Desktop (macOS/Windows) the socket cannot cross the VM, so pair those over TCP under Backend connections; Desktop approves the request with `docker exec … pair approve`.
+- TodeX containers are managed under Settings → **TodeX Container** (below).
+
+## TodeX Container
+
+Settings → **TodeX Container** runs agents in [TodeX containers](https://github.com/youtonghy/TodeX_container) on this machine's Docker:
+
+- **Docker environment** checks the `docker` CLI, the daemon (not installed, not running, or no permission — e.g. not in the `docker` group), Compose v2, whether containers can share their local socket, and which image tags are present.
+- **Containers** lists every container labeled `io.todex.instance`. Ones created by `todexc` or Desktop live under `~/.config/todex-container/<name>/` (`settings.env`, `mounts`, `compose.yaml`, in exactly the format `todexc` writes, so either tool can manage them) and can be started, stopped, restarted, upgraded (pull and recreate), remounted, inspected (logs) and deleted; deleting keeps the home volume `todex-<name>-home` unless you tick it. Plain `docker compose` containers can only be started, stopped, connected and inspected. Containers sharing their socket also get the backend admin cards of the Local backend page.
+- **Automatic cleanup** (a minute after start, then every 6 hours): remove TodeX image versions no container uses (on by default), remove containers stopped for 1/7/30 days (settings and home volume kept), unmount folders no workspace of this app uses once the container is idle, and stop Desktop-created containers when TodeX quits. Home volumes are never deleted automatically.
+- **New workspace → Container workspace** picks a host folder and a container (or a new one: free name `todex`, `todex-2`, … and port from 7345), mounts the folder (same path on Linux and macOS, `/workspace/<folder>` on Windows; a running container is recreated, after a confirmation when a turn runs there), waits for the backend, pairs and connects, and creates the workspace at the folder's container path. It then offers to install agent CLIs in the container and to copy agent config (accounts, settings, MCP, skills) from another connected backend with config sync.
+- On Linux, Desktop pairs over the container's shared socket (`todex-ipc://container-<name>`). Docker Desktop, rootless Docker, Podman and userns-remap cannot use it: Desktop connects to `http://127.0.0.1:<port>` and approves the pairing with `docker exec … todex-agentd pair approve`.
 
 ## Connection & Troubleshooting
 

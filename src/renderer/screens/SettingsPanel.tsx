@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ComponentType, type ReactNode, type Ref } from 'react';
 import { Tab, TabList, TabPanel, Tabs } from 'react-aria-components';
-import { RiApps2Line, RiCodeBoxLine, RiComputerLine, RiHardDrive3Line, RiHistoryLine, RiInformationLine, RiNotification3Line, RiPaletteLine, RiServerLine, RiSettings3Line, RiTeamLine, RiTerminalBoxLine } from '@remixicon/react';
+import { RiApps2Line, RiBox3Line, RiCodeBoxLine, RiComputerLine, RiHardDrive3Line, RiHistoryLine, RiInformationLine, RiNotification3Line, RiPaletteLine, RiServerLine, RiSettings3Line, RiTeamLine, RiTerminalBoxLine } from '@remixicon/react';
 import { Select, SelectItem } from '@/components/base/select/select';
 import { Switch } from '@/components/base/switch/switch';
 import { cx } from '@/utils/cx';
@@ -8,6 +8,7 @@ import { AgentCallingSettings } from '../components/AgentCallingSettings';
 import { AgentDesktopSettings, type AgentDesktopPage } from '../components/AgentDesktopSettings';
 import { BackendConnectionSettings } from '../components/settings/BackendConnectionSettings';
 import { LocalBackendSettings } from '../components/settings/LocalBackendSettings';
+import { ContainerSettings } from '../components/settings/ContainerSettings';
 import { AppearanceSettings } from '../components/AppearanceSettings';
 import { TerminalSettings } from '../components/settings/TerminalSettings';
 import { FeatureSettings } from '../components/FeatureSettings';
@@ -22,7 +23,7 @@ import { toast } from '../components/ui/toast';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { LOCALE_LABELS, SUPPORTED_LOCALES, getLocalePreference, isLocale, setLocalePreference, useT, type LocalePreference } from '../i18n';
 
-export type SettingsSection = 'general' | 'features' | 'appearance' | 'connection' | 'local-backend' | 'cli' | 'ssh' | 'notifications' | 'agent' | 'agent-calling' | 'about';
+export type SettingsSection = 'general' | 'features' | 'appearance' | 'connection' | 'local-backend' | 'container' | 'cli' | 'ssh' | 'notifications' | 'agent' | 'agent-calling' | 'about';
 /** Show a category on open or while open; `at` makes a repeat request distinct. */
 export type SettingsSectionRequest = { section: SettingsSection; at: number };
 
@@ -64,6 +65,11 @@ export function SettingsPanel({ session, historyRecoverySetup = false, repairPai
   const [localBackendVisited, setLocalBackendVisited] = useState(section === 'local-backend');
   useEffect(() => {
     if (section === 'local-backend') setLocalBackendVisited(true);
+  }, [section]);
+  // Docker checks run CLI commands too.
+  const [containerVisited, setContainerVisited] = useState(section === 'container');
+  useEffect(() => {
+    if (section === 'container') setContainerVisited(true);
   }, [section]);
   const agentPanel = useRef<HTMLDivElement>(null);
   const backendPanel = useRef<HTMLDivElement>(null);
@@ -107,6 +113,7 @@ export function SettingsPanel({ session, historyRecoverySetup = false, repairPai
     { id: 'connection', label: t('settings.backendConnections'), icon: RiServerLine },
     // Running a backend on this machine needs the desktop's main process.
     ...(window.todexDesktop.localBackend?.available ? [{ id: 'local-backend' as const, label: t('localBackend.title'), icon: RiHardDrive3Line }] : []),
+    ...(window.todexDesktop.container?.available ? [{ id: 'container' as const, label: t('container.title'), icon: RiBox3Line }] : []),
     { id: 'cli', label: t('app.cliManager'), icon: RiCodeBoxLine },
     { id: 'ssh', label: t('settings.ssh'), icon: RiTerminalBoxLine },
     { id: 'notifications', label: t('settings.notifications'), icon: RiNotification3Line },
@@ -225,6 +232,12 @@ export function SettingsPanel({ session, historyRecoverySetup = false, repairPai
         {localBackendVisited ? (
           <SettingsPage id="local-backend" title={titleOf('local-backend')}>
             <LocalBackendSettings session={session} deviceName="TodeX Desktop" />
+          </SettingsPage>
+        ) : null}
+
+        {containerVisited ? (
+          <SettingsPage id="container" title={titleOf('container')}>
+            <ContainerSettings session={session} deviceName="TodeX Desktop" />
           </SettingsPage>
         ) : null}
 

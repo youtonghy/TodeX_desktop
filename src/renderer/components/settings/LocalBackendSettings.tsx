@@ -56,7 +56,7 @@ function formatTime(ms: number | null | undefined): string {
 /** "Deploy this machine's backend": install the build matching this desktop,
  * run it with the shared data directory, pair over IPC and connect; then the
  * backend TUI's settings, remote access and device approval as a page. TodeX
- * containers sharing their socket get the same management cards. */
+ * containers are managed in Settings → TodeX Container. */
 export function LocalBackendSettings({ session, deviceName }: { session: TodeXSession; deviceName: string }) {
   const t = useT();
   const api = window.todexDesktop.localBackend;
@@ -249,50 +249,12 @@ export function LocalBackendSettings({ session, deviceName }: { session: TodeXSe
         />
       ) : null}
 
-      {discovery.containers.length ? (
-        <SettingsGroup label={t('localBackend.containers')} description={t('localBackend.containersHint')}>
-          {discovery.containers.map((container) => (
-            <ContainerCard
-              key={container.id}
-              session={session}
-              container={container}
-              busy={busy !== null}
-              onConnect={() => void run(`connect-${container.id}`, () => connectInstance(container.id, t('localBackend.containerProfileName', { name: container.name })))}
-              onRepair={() => connectInstance(container.id, t('localBackend.containerProfileName', { name: container.name }), true)}
-            />
-          ))}
-        </SettingsGroup>
-      ) : null}
     </div>
   );
 }
 
-function ContainerCard({ session, container, busy, onConnect, onRepair }: {
-  session: TodeXSession;
-  container: LocalBackendDiscovery['containers'][number];
-  busy: boolean;
-  onConnect: () => void;
-  onRepair: () => Promise<unknown>;
-}) {
-  const t = useT();
-  const profile = container.socketPath ? managedProfile(session.backendConnections, container.id) : undefined;
-  const connected = profile ? session.backendLinkStatus[profile.id]?.state === 'open' : false;
-  return (
-    <div className="flex flex-col gap-3">
-      <SettingsCard>
-        <SettingsRow label={container.name} description={container.socketPath ?? t('localBackend.containerNoSocket')}>
-          {container.admin ? <Chip variant="caption" color={connected ? 'lime' : 'blue'}>{connected ? t('localBackend.state.connected') : container.admin.version}</Chip> : null}
-          {container.socketPath && !connected ? <Button size="small" disabled={busy} onClick={onConnect}>{t('localBackend.connect')}</Button> : null}
-        </SettingsRow>
-        {container.adminError ? <SettingsNote tone="warning">{t('localBackend.containerSocketRefused', { error: container.adminError })}</SettingsNote> : null}
-      </SettingsCard>
-      {container.admin ? <InstanceAdmin instance={container.id} status={container.admin} ipcConnected={connected} canRestart={false} onRepair={onRepair} /> : null}
-    </div>
-  );
-}
-
-/** The TUI's settings, pairing QR, device approval and resets for one instance. */
-function InstanceAdmin({ instance, status: initialStatus, ipcConnected, canRestart, onRestart, onRepair }: {
+/** The TUI's settings, pairing QR, device approval and resets for one instance (also used by Settings → TodeX Container). */
+export function InstanceAdmin({ instance, status: initialStatus, ipcConnected, canRestart, onRestart, onRepair }: {
   instance: string;
   status: LocalAdminStatus;
   /** This app is connected to the instance over IPC, so it survives the network listener going off. */

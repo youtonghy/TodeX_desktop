@@ -208,7 +208,17 @@ SmartScreen 或 Gatekeeper。由于桌面端直接共享移动端协议源码，
 - 由 Desktop 管理的守护进程不会自更新；Desktop 升级后，用 **切换到同版本** 以匹配的构建重启它。
 - 页面与 backend TUI 一一对应：监听地址和端口、配对加密、工作区根目录、登录自启、重置、配对二维码与传输公钥指纹，以及批准、拒绝、吊销设备。监听地址默认保持 `127.0.0.1`；改为 `0.0.0.0` 或网卡 IP 并重启后，其他 TodeX 客户端即可与这台机器配对。
 - Desktop 通过 IPC 连接后，可以关闭 **网络接口**（重启后生效）：backend 不再监听 TCP 地址，其他设备、浏览器和 Web 端都无法连接，只剩 Desktop 的 IPC 连接；agent 工具经一个仅本机的内部端口照常工作。可随时在此或 backend TUI（按 `b`）重新打开。
-- 在 Linux 上用 `todexc` 启动的 TodeX 容器会把 socket 共享到 `~/.config/todex-container/<名称>/ipc/`，并出现在同一页面。Docker Desktop（macOS/Windows）的 socket 无法穿过虚拟机，请在 后端连接 中通过 TCP 配对，Desktop 会用 `docker exec … pair approve` 自动批准。
+- TodeX 容器在 设置 → **TodeX Container** 中管理（见下文）。
+
+## TodeX Container
+
+设置 → **TodeX Container** 在本机 Docker 上的 [TodeX 容器](https://github.com/youtonghy/TodeX_container)里运行 Agent：
+
+- **Docker 环境**检测 `docker` 命令、守护进程（未安装、未运行、没有权限，例如不在 `docker` 组）、Compose v2、容器能否共享本机 socket，以及本机已有的镜像版本。
+- **容器**列出所有带 `io.todex.instance` 标签的容器。由 `todexc` 或 Desktop 创建的容器保存在 `~/.config/todex-container/<名称>/`（`settings.env`、`mounts`、`compose.yaml`，格式与 `todexc` 完全一致，两边都能管理），可以启动、停止、重启、升级（拉取并重建）、修改挂载、查看日志和删除；删除时默认保留 home 卷 `todex-<名称>-home`。直接用 `docker compose` 启动的容器只能启动、停止、连接和查看日志。共享了 socket 的容器还会显示与本机 Backend 页相同的后端管理卡片。
+- **自动清理**（启动后一分钟一次，之后每 6 小时一次）：删除没有容器在用的旧镜像（默认开启）、删除停止超过 1/7/30 天的容器（保留设置和 home 卷）、在容器空闲时卸载本机工作区不再使用的目录、退出 TodeX 时停止由 Desktop 创建的容器。home 卷永远不会被自动删除。
+- **新建工作区 → 容器工作区**：选择本机目录和容器（或新建容器，名称自动取 `todex`、`todex-2`……，端口从 7345 起），把目录挂载进去（Linux、macOS 原路径挂载，Windows 挂到 `/workspace/<目录名>`；容器正在运行时会重建，若有进行中的回合会先确认），等待后端就绪，自动配对并连接，再用容器内路径创建工作区。之后询问要在容器里安装哪些 Agent CLI，以及是否从另一个已连接的后端同步 Agent 配置（账号、设置、MCP、技能）。
+- Linux 上 Desktop 通过容器共享的 socket 配对（`todex-ipc://container-<名称>`）。Docker Desktop、rootless Docker、Podman、userns-remap 用不了这个 socket：Desktop 连接 `http://127.0.0.1:<端口>`，并用 `docker exec … todex-agentd pair approve` 自动批准配对。
 
 ## 连接与故障排查
 

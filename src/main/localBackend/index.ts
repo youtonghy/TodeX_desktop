@@ -8,6 +8,7 @@ import { BackendBinaries, binaryVersion, matchingBackendVersion, platformLabel }
 import { autostartEnabled, clientPort, daemonCommand, daemonRecord, daemonStatus, dockerInstances, dockerPairApprove, setAutostart, type DaemonStatus, type DockerInstance } from './cli';
 import { LOCAL_ADMIN_PREFIX, isLocalAdminPath } from './adminPath';
 import { socketFetch, socketJson, socketWebSocket } from './socketHttp';
+import { ipcInstanceId } from '../container/instance';
 
 export const IPC_SCHEME = 'todex-ipc';
 export const LOCAL_INSTANCE = 'local';
@@ -98,7 +99,7 @@ function scanContainerSockets(): ContainerInstance[] {
   const found: ContainerInstance[] = [];
   for (const name of readdirSync(root)) {
     const socketPath = join(root, name, 'ipc', 'agentd.sock');
-    const id = `container-${name.toLowerCase().replace(/[^a-z0-9-]/g, '-')}`.slice(0, 64).replace(/-+$/, '');
+    const id = ipcInstanceId(name);
     if (isSocket(socketPath)) found.push({ id, name, socketPath });
   }
   return found;

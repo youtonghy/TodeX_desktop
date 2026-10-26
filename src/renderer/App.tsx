@@ -4,6 +4,7 @@ import { motion, useReducedMotion } from 'motion/react';
 import { Dialog, Modal as AriaModal, ModalOverlay } from 'react-aria-components';
 import { Input } from '@/components/base/input/input';
 import { Button } from '@/components/base/buttons/button';
+import { SegmentedControl, SegmentedControlItem } from '@/components/base/segmented-control/segmented-control';
 import { Select, SelectItem } from '@/components/base/select/select';
 import { useDirection } from '@/components/foundations/direction/direction';
 import { Alert } from '@/components/ui/alert';
@@ -34,6 +35,8 @@ import { Field } from './components/Field';
 import { connectionStateLabel, conversationDisplayTitle, createWorkspaceDirectory, fetchWorkspaceDirectorySnapshot, isUnmountedPathError } from './session/helpers';
 import { pickedHostPathToBackend } from './session/hostPaths';
 import { WorkspaceMountHint } from './components/WorkspaceMountHint';
+import { ContainerMountCleanup } from './components/container/ContainerMountCleanup';
+import { useContainerWorkspaceFlow } from './components/workspace/ContainerWorkspaceFlow';
 import { isLoopbackUrl } from '@todex/protocol/mobileParity';
 import { mapHostPathToBackend } from '@todex/protocol/pathMapping';
 import { isWorkbenchTab, panelFromRoute, type DesktopPanel, type OpenPanelOptions, type WorkbenchItem, type WorkbenchRequest, type WorkbenchTab } from './lib/panels';
@@ -699,6 +702,7 @@ export function App() {
         onRepair={() => { setRepairPairing(true); setPanel('settings'); }} />
       <DesktopAlertHost />
       {session.hydrated ? <SshLoginPrompter session={session} /> : null}
+      {session.hydrated && window.todexDesktop.container.available ? <ContainerMountCleanup session={session} /> : null}
       {session.hydrated ? (
         shell
       ) : (
@@ -720,6 +724,11 @@ export function App() {
         workspace={session.workspaces.find((workspace) => workspace.id === editingWorkspaceId)}
         isOpen={createOpen}
         onOpenChange={setCreateOpen}
+        onOpenContainerSettings={() => {
+          setCreateOpen(false);
+          setSettingsSectionRequest({ section: 'container', at: Date.now() });
+          setPanel('settings');
+        }}
       /> : null}
     </div>
   );
@@ -730,14 +739,28 @@ function CreateWorkspaceModal({
   workspace,
   isOpen,
   onOpenChange,
+  onOpenContainerSettings,
 }: {
   session: TodeXSession;
   workspace?: TodeXSession['workspaces'][number];
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
+  onOpenContainerSettings: () => void;
 }) {
   const t = useT();
   const [name, setName] = useState(workspace?.name ?? '');
+  // Container workspaces need Docker on this machine (desktop only) and are created, not edited.
+  const containerAvailable = window.todexDesktop.container.available && !workspace;
+  const [mode, setMode] = useState<'local' | 'container'>('local');
+  const containerFlow = useContainerWorkspaceFlow({
+    session,
+    enabled: containerAvailable && mode === 'container',
+    name,
+    setName,
+    deviceName: 'TodeX Desktop',
+    onDone: () => onOpenChange(false),
+    onOpenSettings: onOpenContainerSettings,
+  });
   const [path, setPath] = useState(workspace?.path ?? session.settings.defaultWorkspacePath);
   const [backendId, setBackendId] = useState(workspace?.backendConnectionId ?? session.activeBackendConnectionId);
   const [entries, setEntries] = useState<string[]>([]);
@@ -829,7 +852,7 @@ function CreateWorkspaceModal({
       title={workspace ? t('app.workspaceEditTitle') : t('app.workspaceCreateTitle')}
       size="lg"
       bodyClassName="flex flex-col gap-4"
-      footer={(
+      footer={mode === 'container' ? containerFlow.footer : (
         <>
           {workspace ? null : (
             <Button variant="secondary" className="me-auto" leadingIcon={RiFolderAddLine} onClick={() => setNewFolderName('')}>
@@ -863,7 +886,22 @@ function CreateWorkspaceModal({
         </>
       )}
     >
+      {containerAvailable ? (
+        <SegmentedControl
+          aria-label={t('app.workspaceKind')}
+          className="self-start"
+          selectedKeys={new Set([mode])}
+          onSelectionChange={(keys) => {
+            const next = [...keys][0];
+            if (next === 'local' || next === 'container') setMode(next);
+          }}
+        >
+          <SegmentedControlItem id="local">{t('app.workspaceKindLocal')}</SegmentedControlItem>
+          <SegmentedControlItem id="container">{t('app.workspaceKindContainer')}</SegmentedControlItem>
+        </SegmentedControl>
+      ) : null}
       <Field label={t('app.workspaceName')} value={name} onChange={setName} />
+      {mode === 'container' ? containerFlow.body : <>
       <Select
         label={t('app.workspaceBackend')}
         className="w-full"
@@ -943,6 +981,7 @@ function CreateWorkspaceModal({
           ))}
         </ScrollArea>
       ) : null}
+      </>}
       <Modal
         isOpen={newFolderName !== null}
         onOpenChange={(open) => { if (!open) setNewFolderName(null); }}

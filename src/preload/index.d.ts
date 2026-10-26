@@ -1,5 +1,8 @@
 import type { LocalDockerContainer, LocalSocketEvent, PairingEncryption, LocalAdminStatus, LocalBackendConfigPatch, LocalBackendConfig, LocalPairingRequest, LocalPairedDevice, LocalDaemonStatus, LocalBackendDiscovery, LocalNativeEndpoint } from './localBackendTypes';
 
+import type { ContainerInfo, ContainerMountResult, ContainerPrefs, ContainerProgress, DockerEnvironment } from './containerTypes';
+
+export type { ContainerInfo, ContainerMountResult, ContainerPrefs, ContainerProgress, DockerEnvironment };
 export type { LocalDockerContainer, LocalSocketEvent, PairingEncryption, LocalAdminStatus, LocalBackendConfigPatch, LocalBackendConfig, LocalPairingRequest, LocalPairedDevice, LocalDaemonStatus, LocalBackendDiscovery };
 
 export type TodeXDesktopApi = {
@@ -105,6 +108,32 @@ export type TodeXDesktopApi = {
       close: (id: number, code?: number, reason?: string) => void;
       onEvent: (listener: (event: LocalSocketEvent) => void) => () => void;
     };
+  };
+  /** TodeX containers on this machine's Docker (Settings → TodeX Container, container workspaces). */
+  container: {
+    /** False in the browser bridge. */
+    available: boolean;
+    /** Docker CLI, daemon, Compose and image checks; cached until `refresh`. */
+    environment: (refresh?: boolean) => Promise<DockerEnvironment>;
+    list: () => Promise<ContainerInfo[]>;
+    /** The last 500 log lines. */
+    logs: (name: string) => Promise<string>;
+    /** Creates an instance (free name and port when omitted) mounting `mounts`, starts it and waits until healthy. */
+    create: (options: { name?: string; mounts: string[]; sshAgent?: boolean; tag?: string }) => Promise<ContainerInfo>;
+    start: (name: string) => Promise<void>;
+    stop: (name: string) => Promise<void>;
+    restart: (name: string) => Promise<void>;
+    /** Pulls the image and recreates the container. */
+    upgrade: (name: string) => Promise<void>;
+    /** Removes the container and its settings; the home volume only with `deleteVolume`. */
+    remove: (name: string, deleteVolume: boolean) => Promise<void>;
+    /** Makes a host folder visible in the container (recreating it when a mount is added); resolves its container path. */
+    addMount: (name: string, hostPath: string) => Promise<ContainerMountResult>;
+    /** Keeps only these host folders mounted (never none); resolves the removed ones. */
+    setMounts: (name: string, keepHosts: string[]) => Promise<string[]>;
+    /** Runs the automatic cleanup now. */
+    cleanup: () => Promise<{ images: number; containers: number }>;
+    onProgress: (listener: (progress: ContainerProgress) => void) => () => void;
   };
   /** Release auto-updates (GitHub Releases), driven by the main process. */
   updates: {

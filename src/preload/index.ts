@@ -11,7 +11,10 @@ import type {
   LocalSocketEvent,
 } from './localBackendTypes';
 
+import type { ContainerInfo, ContainerMountResult, ContainerProgress, DockerEnvironment } from './containerTypes';
+
 export type * from './localBackendTypes';
+export type * from './containerTypes';
 
 type WindowState = { maximized: boolean; fullScreen: boolean };
 
@@ -220,6 +223,29 @@ const api = {
           ipcRenderer.removeListener('localBackend:wsEvent', handler);
         };
       },
+    },
+  },
+  /** TodeX containers on this machine's Docker, driven by the main process. */
+  container: {
+    available: true,
+    environment: (refresh = false) => ipcRenderer.invoke('container:environment', refresh) as Promise<DockerEnvironment>,
+    list: () => ipcRenderer.invoke('container:list') as Promise<ContainerInfo[]>,
+    logs: (name: string) => ipcRenderer.invoke('container:logs', name) as Promise<string>,
+    create: (options: { name?: string; mounts: string[]; sshAgent?: boolean; tag?: string }) => ipcRenderer.invoke('container:create', options) as Promise<ContainerInfo>,
+    start: (name: string) => ipcRenderer.invoke('container:start', name) as Promise<void>,
+    stop: (name: string) => ipcRenderer.invoke('container:stop', name) as Promise<void>,
+    restart: (name: string) => ipcRenderer.invoke('container:restart', name) as Promise<void>,
+    upgrade: (name: string) => ipcRenderer.invoke('container:upgrade', name) as Promise<void>,
+    remove: (name: string, deleteVolume: boolean) => ipcRenderer.invoke('container:remove', name, deleteVolume) as Promise<void>,
+    addMount: (name: string, hostPath: string) => ipcRenderer.invoke('container:addMount', name, hostPath) as Promise<ContainerMountResult>,
+    setMounts: (name: string, keepHosts: string[]) => ipcRenderer.invoke('container:setMounts', name, keepHosts) as Promise<string[]>,
+    cleanup: () => ipcRenderer.invoke('container:cleanup') as Promise<{ images: number; containers: number }>,
+    onProgress: (listener: (progress: ContainerProgress) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, progress: ContainerProgress) => listener(progress);
+      ipcRenderer.on('container:progress', handler);
+      return () => {
+        ipcRenderer.removeListener('container:progress', handler);
+      };
     },
   },
   updates: {

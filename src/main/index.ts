@@ -10,6 +10,7 @@ import { syncDesktopEntry } from './desktopEntry';
 import { PREVIEW_PARTITION, PreviewViews, type InspectColors, type PreviewTarget } from './previewViews';
 import { PreviewProxy, type PreviewBackend } from './previewProxy';
 import { LocalBackendManager, registerIpcScheme } from './localBackend';
+import { CONTAINER_PREFS_KEY, ContainerManager, type ContainerPrefs } from './container';
 import { setIpcFetchImpl } from '@todex/protocol/ipcServerUrl';
 import { isMainLocale, mainT, setMainLocale } from './i18n';
 import { openPathRefusal, shellPathRefusal, type PathInfo, type ShellPathRefusal } from './shellPolicy';
@@ -710,6 +711,7 @@ if (process.platform === 'linux' && !app.commandLine.hasSwitch('password-store')
 registerIpcScheme();
 const LOCAL_BACKEND_PREFS_KEY = 'todex.desktop.localBackend.v1';
 let localBackend: LocalBackendManager | null = null;
+let containers: ContainerManager | null = null;
 let localBackendStopped = false;
 
 app.whenReady().then(() => {
@@ -733,6 +735,12 @@ app.whenReady().then(() => {
   localBackend.installProtocol();
   localBackend.register(handleIpc);
   setIpcFetchImpl(localBackend.fetch);
+  containers = new ContainerManager({
+    prefs: () => (readStore()[CONTAINER_PREFS_KEY] as ContainerPrefs | undefined) ?? {},
+    log: (level, event, data) => debugLog(level, event, data ?? {}),
+  });
+  containers.register(handleIpc);
+  containers.scheduleCleanup();
   void probeDefaultBackend();
   ipcMain.on('debug:log', (event, payload: { level?: unknown; event?: unknown; data?: unknown }) => {
     if (!DEBUG_BUILD) return;
@@ -1032,13 +1040,14 @@ app.whenReady().then(() => {
 app.on('before-quit', (event) => {
   debugLog('info', 'app.before-quit');
   flushStore();
-  // "Stop when TodeX quits": hold the quit until `daemon stop` returns.
+  // "Stop when TodeX quits": hold the quit until `daemon stop` and the container stops return.
   if (localBackend && !localBackendStopped) {
     localBackendStopped = true;
     event.preventDefault();
-    void localBackend.stopForQuit()
-      .catch((error) => debugLog('error', 'localBackend.stopForQuit.failed', { error }))
-      .finally(() => app.quit());
+    void Promise.all([
+      localBackend.stopForQuit().catch((error) => debugLog('error', 'localBackend.stopForQuit.failed', { error })),
+      containers?.stopForQuit().catch((error) => debugLog('error', 'container.stopForQuit.failed', { error })),
+    ]).finally(() => app.quit());
   }
 });
 app.on('child-process-gone', (_event, details) => debugLog('error', 'app.child-process-gone', { details }));

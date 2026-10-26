@@ -155,6 +155,28 @@ export function installBrowserDesktopBridge(): void {
         },
       };
     })(),
+    // Docker on this machine is only reachable from the desktop's main process.
+    container: (() => {
+      const unavailable = async (): Promise<never> => {
+        throw new Error(t('container.unavailable'));
+      };
+      return {
+        available: false,
+        environment: unavailable,
+        list: async () => [],
+        logs: unavailable,
+        create: unavailable,
+        start: unavailable,
+        stop: unavailable,
+        restart: unavailable,
+        upgrade: unavailable,
+        remove: unavailable,
+        addMount: unavailable,
+        setMounts: unavailable,
+        cleanup: unavailable,
+        onProgress: () => () => undefined,
+      };
+    })(),
     updates: (() => {
       const state = { status: 'unsupported' as const, currentVersion: __TODEX_BUILD_VERSION__, autoDownload: false, reason: 'dev' as const };
       return {

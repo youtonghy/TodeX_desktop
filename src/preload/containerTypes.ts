@@ -1,0 +1,62 @@
+/** Shapes of the `container` bridge (main: src/main/container). */
+
+export type DockerProblem = 'missing' | 'permission' | 'daemonDown';
+
+/** Mirror of the main process's DockerEnvironment (src/main/container/docker.ts). */
+export type DockerEnvironment = {
+  clientVersion: string | null;
+  serverVersion: string | null;
+  /** Why the Docker daemon cannot be used, null when it can. */
+  problem: DockerProblem | null;
+  problemDetail: string | null;
+  composeVersion: string | null;
+  operatingSystem: string | null;
+  rootless: boolean;
+  userns: boolean;
+  podman: boolean;
+  /** Tags of the TodeX container image present locally. */
+  imageTags: string[];
+};
+
+export type ContainerMount = { host: string; target: string };
+
+/** Mirror of the main process's ContainerInfo (src/main/container/index.ts). */
+export type ContainerInfo = {
+  name: string;
+  /** Has a todexc instance directory: can be recreated, remounted, upgraded and removed. */
+  managed: boolean;
+  /** Created by Desktop. */
+  desktop: boolean;
+  container: string | null;
+  /** Docker's state (`running`, `exited`, …), or `removed` when only the instance settings are left. */
+  state: string;
+  health: 'healthy' | 'unhealthy' | 'starting' | null;
+  image: string | null;
+  listen: string | null;
+  port: number | null;
+  mounts: ContainerMount[];
+  sshAgent: boolean;
+  socketPath: string | null;
+  /** The local-backend IPC instance (`todex-ipc://<id>`) serving the shared socket. */
+  ipcInstance: string | null;
+  /** The IPC instance id the container's socket has whenever it is shared. */
+  ipcId: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+};
+
+export type ContainerProgress = { name: string; phase: 'pull' | 'start' | 'wait' | 'stop' | 'remove'; line?: string };
+
+export type ContainerMountResult = { target: string; backendPath: string; recreated: boolean };
+
+/** Settings → TodeX Container → Automatic cleanup (store key `todex.desktop.container.v1`). */
+export type ContainerPrefs = {
+  /** Default on: delete TodeX image versions no container uses after upgrades and on schedule. */
+  cleanupImages?: boolean;
+  /** Remove containers stopped for this many days (0/absent: never). Home volumes stay. */
+  removeStoppedDays?: number;
+  /** Unmount folders no workspace uses any more, once the container is idle. */
+  pruneMounts?: boolean;
+  /** Stop the containers Desktop created when TodeX quits. */
+  stopOnQuit?: boolean;
+};
