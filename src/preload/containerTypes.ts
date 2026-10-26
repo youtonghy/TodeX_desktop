@@ -49,6 +49,9 @@ export type ContainerProgress = { name: string; phase: 'pull' | 'start' | 'wait'
 
 export type ContainerMountResult = { target: string; backendPath: string; recreated: boolean };
 
+export type ContainerSetupOutput = { jobId: string; line: string };
+export type ContainerSetupDone = { jobId: string; ok: boolean; exitCode: number | null; error: string | null; cancelled: boolean };
+
 /** Settings → TodeX Container → Automatic cleanup (store key `todex.desktop.container.v1`). */
 export type ContainerPrefs = {
   /** Default on: delete TodeX image versions no container uses after upgrades and on schedule. */
@@ -59,4 +62,6 @@ export type ContainerPrefs = {
   pruneMounts?: boolean;
   /** Stop the containers Desktop created when TodeX quits. */
   stopOnQuit?: boolean;
+  /** Freeze (`docker pause`) a container after this many idle minutes; 0/absent: never. */
+  freezeIdleMinutes?: number;
 };

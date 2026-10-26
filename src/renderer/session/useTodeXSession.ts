@@ -509,6 +509,13 @@ export type TodeXSession = ReturnType<typeof useTodeXSession>;
 
 
 export type { CatalogState };
+/** Lets the desktop wake a backend it froze (see setBackendWakeGate). */
+export type BackendWakeGate = {
+  isFrozen: (backendId: string) => boolean;
+  /** Resolves once the backend is reachable again; the held action then runs. */
+  wake: (backendId: string) => Promise<void>;
+};
+
 export function useTodeXSession(openPanel: OpenPanelFn) {
   const workbenchSharingState = useWorkbenchSharing();
   const completionNotificationsState = useCompletionNotifications();
@@ -4156,6 +4163,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     const profile = profileFor(backendId);
     const link = linksRef.current.get(backendId);
     if (!profile?.serverUrl.trim() || !link || link.transportFailure || link.readyWait) return;
+    // A frozen (paused) daemon cannot answer; it is woken on demand instead.
+    if (backendWakeGateRef.current?.isFrozen(backendId)) return;
     const probeId = link.healthProbeSeq + 1;
     link.healthProbeSeq = probeId;
     const stale = () => link.healthProbeSeq !== probeId || link.transportFailure || Boolean(link.readyWait)
@@ -4930,12 +4939,27 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   }, [attachTerminal]);
   reattachTerminalsRef.current = reattachTerminals;
 
+  /** Wakes backends frozen for idleness (paused TodeX containers, see the
+   * desktop's ContainerFreezer) before a send or terminal open reaches them. */
+  const backendWakeGateRef = useRef<BackendWakeGate | null>(null);
+  const setBackendWakeGate = useCallback((gate: BackendWakeGate | null) => {
+    backendWakeGateRef.current = gate;
+  }, []);
+
   /**
    * Shows the terminal `options.terminalId`: joins it when the backend still
    * runs it, otherwise starts it (unless `autoStart` is false, which leaves
    * it idle). Backends without replay get the older status-then-start check.
    */
   const openTerminalSession = useCallback((target: TerminalTarget, options: TerminalStartOptions & { autoStart: boolean }) => {
+    const frozenBackend = terminalBackendId(target);
+    if (backendWakeGateRef.current?.isFrozen(frozenBackend)) {
+      void backendWakeGateRef.current.wake(frozenBackend).then(
+        () => openTerminalSessionRef.current(target, options),
+        (error: unknown) => setLastError(error instanceof Error ? error.message : String(error)),
+      );
+      return;
+    }
     const terminalId = seedTerminalState(target, { terminalId: options.terminalId, rows: options.rows, cols: options.cols });
     const backendId = terminalBackendId(target);
     const replay = terminalReplayFor(backendId);
@@ -9295,6 +9319,15 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       toast.danger(pendingUpload.uploadState === 'uploading' ? t('chat.uploadPending') : t('chat.uploadFailedBlocking', { name: pendingUpload.name }));
       return;
     }
+    // The draft stays in the composer while a frozen backend wakes, then this runs again.
+    const frozenBackend = backendIdForConversation(conversationId);
+    if (backendWakeGateRef.current?.isFrozen(frozenBackend)) {
+      void backendWakeGateRef.current.wake(frozenBackend).then(
+        () => submitChatRef.current(conversationId),
+        (error: unknown) => setLastError(error instanceof Error ? error.message : String(error)),
+      );
+      return;
+    }
     // Pasted-text capsules are sent as the text they stand for.
     const { text: expandedText, attachments } = expandTextCapsules(draftText, draftAttachments);
     const text = expandedText.trim();
@@ -9366,6 +9399,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     }
     sendSlashCommand(text, conversationId);
   }, [appendTimeline, chatDrafts, composerAttachments, controlConversation, getConversationContext, queueWhileBusy, rememberMentionReferences, selectedSkills, sendLocalTurn, sendSlashCommand, sendV2Prompt, setConversationAttachments, setConversationChatDraft, setConversationComposerSelection, setConversationSelectedSkills, thinkingConversations]);
+  const submitChatRef = useRef(submitChat);
+  submitChatRef.current = submitChat;
 
   const runWorkspaceCommand = useCallback((workspace: WorkspaceRecord, conversation: ConversationRecord, command: 'start' | 'status' | 'attach' | 'stop' | 'interrupt') => {
     if (command === 'start') {
@@ -9797,6 +9832,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     setConversationLabelColor,
     requestNativeThreadList,
     submitChat,
+    setBackendWakeGate,
     sendAgentMessage,
     setConversationChatDraft,
     pendingPluginDrafts,

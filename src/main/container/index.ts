@@ -1,7 +1,7 @@
 import { chmodSync, existsSync, mkdirSync, readdirSync, realpathSync, rmSync, statSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { homedir } from 'node:os';
-import { isAbsolute, join } from 'node:path';
+import { isAbsolute, join, posix } from 'node:path';
 import type { IpcMainInvokeEvent, WebContents } from 'electron';
 import {
   DockerError,
@@ -77,6 +77,15 @@ export type ContainerProgress = { name: string; phase: 'pull' | 'start' | 'wait'
 
 export type MountResult = { target: string; backendPath: string; recreated: boolean };
 
+/** Output and outcome of a workspace setup script run in a container. */
+export type SetupOutput = { jobId: string; line: string };
+export type SetupDone = { jobId: string; ok: boolean; exitCode: number | null; error: string | null; cancelled: boolean };
+
+/** Files whose presence suggests a setup template (see the renderer's containerSetup.ts). */
+const SETUP_MARKERS = ['pnpm-lock.yaml', 'package-lock.json', 'yarn.lock', 'package.json', 'uv.lock', 'pyproject.toml', 'requirements.txt', '.gitmodules'];
+const SETUP_SCRIPT_LIMIT = 16 * 1024;
+const SETUP_TIMEOUT_MS = 2 * 60 * 60 * 1000;
+
 function isSocket(path: string): boolean {
   try {
     return statSync(path).isSocket();
@@ -101,6 +110,8 @@ export class ContainerManager {
   private readonly root = configRoot(process.env, homedir());
   private readonly locks = new Map<string, Promise<unknown>>();
   private environmentCache: DockerEnvironment | null = null;
+  private readonly setupJobs = new Map<string, AbortController>();
+  private nextSetupJob = 1;
   private cleanupTimer: NodeJS.Timeout | null = null;
   private sender: WebContents | null = null;
 
@@ -292,7 +303,16 @@ export class ContainerManager {
     throw new Error(`the container did not become healthy (state: ${state || 'unknown'})${lines.length ? `\n${lines.join('\n')}` : ''}`);
   }
 
+  /** Stopping or recreating a frozen container thaws it first. */
+  private async thaw(name: string): Promise<void> {
+    const info = (await this.list()).find((item) => item.name === name);
+    if (info?.state !== 'paused' || !info.container) return;
+    if (info.managed) await this.compose(name, ['unpause'], 'start', 30_000);
+    else await runDocker(['unpause', info.container], { timeoutMs: 30_000 });
+  }
+
   private async up(name: string): Promise<void> {
+    await this.thaw(name);
     this.progress({ name, phase: 'start' });
     await this.compose(name, ['up', '-d', '--remove-orphans'], 'pull', UP_TIMEOUT_MS);
     await this.waitHealthy(name);
@@ -363,23 +383,92 @@ export class ContainerManager {
     if (!info?.container) return;
     this.progress({ name, phase: 'stop' });
     if (!info.managed) {
+      if (info.state === 'paused') await runDocker(['unpause', info.container], { timeoutMs: 30_000 });
       await runDocker(['stop', info.container], { timeoutMs: 60_000 });
       return;
     }
-    await this.exclusive(name, () => this.compose(name, ['stop'], 'stop'));
+    await this.exclusive(name, async () => {
+      await this.thaw(name);
+      await this.compose(name, ['stop'], 'stop');
+    });
   }
 
   async restart(name: string): Promise<void> {
     const info = (await this.list()).find((item) => item.name === name);
     if (!info?.container) throw new Error(`${name} has no container`);
     if (!info.managed) {
+      if (info.state === 'paused') await runDocker(['unpause', info.container], { timeoutMs: 30_000 });
       await runDocker(['restart', info.container], { timeoutMs: 90_000 });
       return;
     }
     await this.exclusive(name, async () => {
+      await this.thaw(name);
       await this.compose(name, ['restart'], 'start');
       await this.waitHealthy(name);
     });
+  }
+
+  /** Freezes (`docker pause`) or thaws the container: its processes and memory stay as they are. */
+  async setPaused(name: string, paused: boolean): Promise<void> {
+    const info = (await this.list()).find((item) => item.name === name);
+    if (!info?.container) throw new Error(`${name} has no container`);
+    if (paused ? info.state !== 'running' : info.state !== 'paused') return;
+    const action = paused ? 'pause' : 'unpause';
+    if (!info.managed) {
+      await runDocker([action, info.container], { timeoutMs: 30_000 });
+    } else {
+      await this.exclusive(name, () => this.compose(name, [action], paused ? 'stop' : 'start', 30_000));
+    }
+    this.host.log('info', paused ? 'container.pause' : 'container.unpause', { name });
+  }
+
+  /** Marker files present in `folder`, for picking a setup template. */
+  async detectSetup(folder: unknown): Promise<string[]> {
+    const dir = await this.realDirectory(folder);
+    return SETUP_MARKERS.filter((file) => existsSync(join(dir, file)));
+  }
+
+  /**
+   * Runs `script` with bash in `cwd` (a container path) as the todex user;
+   * output lines and the outcome go to the calling window. Resolves the job id.
+   */
+  runSetup(sender: WebContents, name: string, cwd: unknown, script: unknown): Promise<string> {
+    if (typeof cwd !== 'string' || !posix.isAbsolute(cwd) || /[\0\n]/.test(cwd)) throw new TypeError('cwd');
+    if (typeof script !== 'string' || !script.trim() || script.length > SETUP_SCRIPT_LIMIT) throw new TypeError('script');
+    return (async () => {
+      const info = (await this.list()).find((item) => item.name === name);
+      if (!info?.container || info.state !== 'running') throw new Error(`${name} is not running`);
+      const jobId = `setup-${this.nextSetupJob++}`;
+      const controller = new AbortController();
+      this.setupJobs.set(jobId, controller);
+      const send = (channel: string, payload: SetupOutput | SetupDone) => {
+        if (!sender.isDestroyed()) sender.send(channel, payload);
+      };
+      this.host.log('info', 'container.setup.start', { name, jobId });
+      // Not a login shell: Debian's /etc/profile resets PATH, dropping node and ~/.local/bin.
+      void runDocker(['exec', '-u', 'todex', '-w', cwd, info.container, 'bash', '-c', script], {
+        timeoutMs: SETUP_TIMEOUT_MS,
+        signal: controller.signal,
+        onLine: (line) => send('container:setupOutput', { jobId, line }),
+      }).then(
+        () => send('container:setupDone', { jobId, ok: true, exitCode: 0, error: null, cancelled: false }),
+        (error: unknown) => send('container:setupDone', {
+          jobId,
+          ok: false,
+          exitCode: error instanceof DockerError ? error.exitCode : null,
+          error: errorMessage(error),
+          cancelled: controller.signal.aborted,
+        }),
+      ).finally(() => {
+        this.setupJobs.delete(jobId);
+        this.host.log('info', 'container.setup.done', { name, jobId });
+      });
+      return jobId;
+    })();
+  }
+
+  cancelSetup(jobId: unknown): void {
+    if (typeof jobId === 'string') this.setupJobs.get(jobId)?.abort();
   }
 
   /** Pulls the image and recreates the container (todexc `upgrade`). */
@@ -401,6 +490,7 @@ export class ContainerManager {
     await this.exclusive(name, async () => {
       const instance = this.instance(name);
       this.progress({ name, phase: 'remove' });
+      await this.thaw(name);
       await this.compose(name, ['down', ...(deleteVolume ? ['-v'] : [])], 'remove');
       rmSync(instance.dir, { recursive: true, force: true });
       this.host.log('info', 'container.remove', { name, deleteVolume });
@@ -419,7 +509,8 @@ export class ContainerManager {
     return this.exclusive(name, async () => {
       const instance = this.instance(name);
       const covering = mountCovering(instance.mounts, host, windows);
-      const running = (await this.list()).find((item) => item.name === name)?.state === 'running';
+      const state = (await this.list()).find((item) => item.name === name)?.state;
+      const running = state === 'running' || state === 'paused';
       if (covering) {
         if (!running) {
           this.write(instance, false);
@@ -446,7 +537,8 @@ export class ContainerManager {
       const removed = instance.mounts.filter((mount) => !keep.includes(mount)).map((mount) => mount.host);
       this.write({ ...instance, mounts: keep }, false);
       this.host.log('info', 'container.mount.remove', { name, count: removed.length });
-      if ((await this.list()).find((item) => item.name === name)?.state === 'running') await this.up(name);
+      const state = (await this.list()).find((item) => item.name === name)?.state;
+      if (state === 'running' || state === 'paused') await this.up(name);
       return removed;
     });
   }
@@ -514,8 +606,8 @@ export class ContainerManager {
     if (this.cleanupTimer) clearInterval(this.cleanupTimer);
     const env = this.environmentCache ?? await this.environment();
     if (env.problem) return;
-    const running = (await this.list()).filter((item) => item.desktop && item.state === 'running');
-    await Promise.all(running.map((item) => this.compose(item.name, ['stop'], 'stop', 60_000).catch((error) => {
+    const running = (await this.list()).filter((item) => item.desktop && (item.state === 'running' || item.state === 'paused'));
+    await Promise.all(running.map((item) => this.thaw(item.name).then(() => this.compose(item.name, ['stop'], 'stop', 60_000)).catch((error) => {
       this.host.log('warn', 'container.stopOnQuit.failed', { name: item.name, error: errorMessage(error) });
     })));
   }
@@ -545,5 +637,10 @@ export class ContainerManager {
     handle('container:addMount', (event, value, hostPath: unknown) => from(event, () => this.addMount(name(value), hostPath)));
     handle('container:setMounts', (event, value, keepHosts: unknown) => from(event, () => this.setMounts(name(value), keepHosts)));
     handle('container:cleanup', () => this.cleanup());
+    handle('container:pause', (event, value) => from(event, () => this.setPaused(name(value), true)));
+    handle('container:unpause', (event, value) => from(event, () => this.setPaused(name(value), false)));
+    handle('container:detectSetup', (_event, folder: unknown) => this.detectSetup(folder));
+    handle('container:runSetup', (event, value, cwd: unknown, script: unknown) => this.runSetup(event.sender, name(value), cwd, script));
+    handle('container:cancelSetup', (_event, jobId: unknown) => this.cancelSetup(jobId));
   }
 }

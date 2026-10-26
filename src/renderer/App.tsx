@@ -35,8 +35,9 @@ import { Field } from './components/Field';
 import { connectionStateLabel, conversationDisplayTitle, createWorkspaceDirectory, fetchWorkspaceDirectorySnapshot, isUnmountedPathError } from './session/helpers';
 import { pickedHostPathToBackend } from './session/hostPaths';
 import { WorkspaceMountHint } from './components/WorkspaceMountHint';
+import { ContainerFreezer } from './components/container/ContainerFreezer';
 import { ContainerMountCleanup } from './components/container/ContainerMountCleanup';
-import { useContainerWorkspaceFlow } from './components/workspace/ContainerWorkspaceFlow';
+import { ContainerSetupNotices, useContainerWorkspaceFlow } from './components/workspace/ContainerWorkspaceFlow';
 import { isLoopbackUrl } from '@todex/protocol/mobileParity';
 import { mapHostPathToBackend } from '@todex/protocol/pathMapping';
 import { isWorkbenchTab, panelFromRoute, type DesktopPanel, type OpenPanelOptions, type WorkbenchItem, type WorkbenchRequest, type WorkbenchTab } from './lib/panels';
@@ -703,6 +704,8 @@ export function App() {
       <DesktopAlertHost />
       {session.hydrated ? <SshLoginPrompter session={session} /> : null}
       {session.hydrated && window.todexDesktop.container.available ? <ContainerMountCleanup session={session} /> : null}
+      {session.hydrated && window.todexDesktop.container.available ? <ContainerFreezer session={session} /> : null}
+      {window.todexDesktop.container.available ? <ContainerSetupNotices /> : null}
       {session.hydrated ? (
         shell
       ) : (

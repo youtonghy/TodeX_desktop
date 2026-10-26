@@ -10,6 +10,7 @@ import type { LocalAdminStatus } from '../../../preload/localBackendTypes';
 import { useT } from '../../i18n';
 import { backendBusy, connectContainer, containerProfiles } from '../../session/containerConnection';
 import { useContainerPrefs } from '../../session/containerPrefs';
+import { freezeContainer, wakeContainer } from '../../session/containerFreeze';
 import type { TodeXSession } from '../../session/useTodeXSession';
 import { CreateContainerDialog } from '../container/CreateContainerDialog';
 import { ContainerLogsDialog } from '../container/ContainerLogsDialog';
@@ -23,6 +24,7 @@ const README_URL = 'https://github.com/youtonghy/TodeX_container#readme';
 const DOCKER_INSTALL_URL = 'https://docs.docker.com/get-started/get-docker/';
 const ROW_SELECT_TRIGGER = 'h-8 w-auto gap-1 rounded-lg px-2 py-1.5';
 const STOPPED_DAYS = [0, 1, 7, 30];
+const FREEZE_MINUTES = [15, 30, 60, 120, 240];
 const PHASE_LABELS = {
   pull: 'container.phase.pull',
   start: 'container.phase.start',
@@ -54,6 +56,7 @@ function stateChip(t: T, item: ContainerInfo): { label: string; color: NonNullab
     if (item.health === 'unhealthy') return { label: t('container.state.unhealthy'), color: 'rose' };
     return { label: t('container.state.running'), color: 'lime' };
   }
+  if (item.state === 'paused') return { label: t('container.state.frozen'), color: 'cyan' };
   if (item.state === 'removed') return { label: t('container.state.removed'), color: 'neutral' };
   if (item.state === 'restarting') return { label: t('container.state.starting'), color: 'blue' };
   return { label: t('container.state.stopped'), color: 'neutral' };
@@ -242,8 +245,39 @@ export function ContainerSettings({ session, deviceName }: { session: TodeXSessi
             onRemove={() => { setDeleteVolume(false); setRemoving(item); }}
             onAddMount={() => void addMount(item)}
             onRemoveMount={(host) => removeMount(item, host)}
+            onFreeze={() => void run(item, 'freeze', () => freezeContainer(sessionRef.current, item))}
+            onWake={() => void run(item, 'wake', () => wakeContainer(() => sessionRef.current, item))}
           />
         ))}
+      </SettingsGroup>
+
+      <SettingsGroup label={t('container.freeze.title')} description={t('container.freeze.hint')}>
+        <SettingsCard>
+          <SettingsRow label={t('container.freeze.enabled')} description={t('container.freeze.enabledHint')}>
+            <Switch
+              size="sm"
+              aria-label={t('container.freeze.enabled')}
+              isSelected={(prefs.freezeIdleMinutes ?? 0) > 0}
+              onChange={(on) => updatePrefs({ freezeIdleMinutes: on ? 30 : 0 })}
+            />
+          </SettingsRow>
+          {(prefs.freezeIdleMinutes ?? 0) > 0 ? (
+            <SettingsRow label={t('container.freeze.idle')} description={t('container.freeze.idleHint')}>
+              <Select
+                aria-label={t('container.freeze.idle')}
+                triggerClassName={ROW_SELECT_TRIGGER}
+                selectedKey={String(prefs.freezeIdleMinutes)}
+                onSelectionChange={(key) => key !== null && updatePrefs({ freezeIdleMinutes: Number(key) })}
+              >
+                {[...new Set([...FREEZE_MINUTES, prefs.freezeIdleMinutes ?? 30])].sort((a, b) => a - b).map((minutes) => (
+                  <SelectItem key={minutes} id={String(minutes)} textValue={String(minutes)}>
+                    {minutes < 60 ? t('container.freeze.minutes', { count: minutes }) : t('container.freeze.hours', { count: minutes / 60 })}
+                  </SelectItem>
+                ))}
+              </Select>
+            </SettingsRow>
+          ) : null}
+        </SettingsCard>
       </SettingsGroup>
 
       <SettingsGroup label={t('container.cleanup.title')} description={t('container.cleanup.hint')}>
@@ -311,7 +345,7 @@ export function ContainerSettings({ session, deviceName }: { session: TodeXSessi
   );
 }
 
-function ContainerCard({ session, deviceName, item, busy, progress, error, onConnect, onStart, onStop, onRestart, onUpgrade, onLogs, onRemove, onAddMount, onRemoveMount }: {
+function ContainerCard({ session, deviceName, item, busy, progress, error, onConnect, onStart, onStop, onRestart, onUpgrade, onLogs, onRemove, onAddMount, onRemoveMount, onFreeze, onWake }: {
   session: TodeXSession;
   deviceName: string;
   item: ContainerInfo;
@@ -327,6 +361,8 @@ function ContainerCard({ session, deviceName, item, busy, progress, error, onCon
   onRemove: () => void;
   onAddMount: () => void;
   onRemoveMount: (host: string) => void;
+  onFreeze: () => void;
+  onWake: () => void;
 }) {
   const t = useT();
   const [adminOpen, setAdminOpen] = useState(false);
@@ -334,6 +370,7 @@ function ContainerCard({ session, deviceName, item, busy, progress, error, onCon
   const profiles = containerProfiles(session.backendConnections, item);
   const connected = profiles.some((profile) => session.backendLinkStatus[profile.id]?.state === 'open');
   const running = item.state === 'running';
+  const paused = item.state === 'paused';
   const chip = stateChip(t, item);
   const disabled = busy !== null;
 
@@ -376,7 +413,9 @@ function ContainerCard({ session, deviceName, item, busy, progress, error, onCon
       </SettingsCard>
       <div className="flex flex-wrap gap-2 px-3">
         {running && !connected ? <Button size="small" disabled={disabled} onClick={onConnect}>{t('localBackend.connect')}</Button> : null}
-        {!running ? <Button size="small" disabled={disabled} onClick={onStart}>{t('container.start')}</Button> : null}
+        {paused ? <Button size="small" disabled={disabled} onClick={onWake}>{t('container.freeze.wake')}</Button> : null}
+        {!running && !paused ? <Button size="small" disabled={disabled} onClick={onStart}>{t('container.start')}</Button> : null}
+        {running ? <Button size="small" variant="secondary" disabled={disabled} onClick={onFreeze}>{t('container.freeze.freeze')}</Button> : null}
         {running ? <Button size="small" variant="secondary" disabled={disabled} onClick={onStop}>{t('container.stop')}</Button> : null}
         {running ? <Button size="small" variant="secondary" disabled={disabled} onClick={onRestart}>{t('container.restart')}</Button> : null}
         {item.managed ? <Button size="small" variant="secondary" disabled={disabled} onClick={onAddMount}>{t('container.mountAdd')}</Button> : null}

@@ -218,6 +218,8 @@ SmartScreen 或 Gatekeeper。由于桌面端直接共享移动端协议源码，
 - **容器**列出所有带 `io.todex.instance` 标签的容器。由 `todexc` 或 Desktop 创建的容器保存在 `~/.config/todex-container/<名称>/`（`settings.env`、`mounts`、`compose.yaml`，格式与 `todexc` 完全一致，两边都能管理），可以启动、停止、重启、升级（拉取并重建）、修改挂载、查看日志和删除；删除时默认保留 home 卷 `todex-<名称>-home`。直接用 `docker compose` 启动的容器只能启动、停止、连接和查看日志。共享了 socket 的容器还会显示与本机 Backend 页相同的后端管理卡片。
 - **自动清理**（启动后一分钟一次，之后每 6 小时一次）：删除没有容器在用的旧镜像（默认开启）、删除停止超过 1/7/30 天的容器（保留设置和 home 卷）、在容器空闲时卸载本机工作区不再使用的目录、退出 TodeX 时停止由 Desktop 创建的容器。home 卷永远不会被自动删除。
 - **新建工作区 → 容器工作区**：选择本机目录和容器（或新建容器，名称自动取 `todex`、`todex-2`……，端口从 7345 起），把目录挂载进去（Linux、macOS 原路径挂载，Windows 挂到 `/workspace/<目录名>`；容器正在运行时会重建，若有进行中的回合会先确认），等待后端就绪，自动配对并连接，再用容器内路径创建工作区。之后询问要在容器里安装哪些 Agent CLI，以及是否从另一个已连接的后端同步 Agent 配置（账号、设置、MCP、技能）。
+- **初始化指令**（容器工作区第一步）：模板下拉框（按目录里的锁文件推荐：pnpm、npm、yarn、uv、requirements.txt、git 子模块）加可编辑的命令列表。工作区建好后，在容器里的工作区目录下以 `todex` 用户依次执行（`bash -c`，遇到失败就停止），实时显示输出；可以转到后台，结束时通知。
+- **自动冻结**（默认关闭，15 分钟到 4 小时）：在这台 Desktop 看来，容器的后端在设定时长内没有进行中或等待审批的回合、运行中的终端、排队或定时的消息，就用 `docker pause` 冻结它（进程和内存原样保留），并安静地断开连接。在它的会话里发消息、打开终端或它的工作区，或在设置页点 **恢复**，都会解冻并重连，刚才的消息随后发出。其他设备在用这个容器时，这台 Desktop 看不到。
 - Linux 上 Desktop 通过容器共享的 socket 配对（`todex-ipc://container-<名称>`）。Docker Desktop、rootless Docker、Podman、userns-remap 用不了这个 socket：Desktop 连接 `http://127.0.0.1:<端口>`，并用 `docker exec … todex-agentd pair approve` 自动批准配对。
 
 ## 连接与故障排查

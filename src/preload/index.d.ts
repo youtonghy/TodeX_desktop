@@ -1,8 +1,8 @@
 import type { LocalDockerContainer, LocalSocketEvent, PairingEncryption, LocalAdminStatus, LocalBackendConfigPatch, LocalBackendConfig, LocalPairingRequest, LocalPairedDevice, LocalDaemonStatus, LocalBackendDiscovery, LocalNativeEndpoint } from './localBackendTypes';
 
-import type { ContainerInfo, ContainerMountResult, ContainerPrefs, ContainerProgress, DockerEnvironment } from './containerTypes';
+import type { ContainerInfo, ContainerMountResult, ContainerPrefs, ContainerProgress, ContainerSetupDone, ContainerSetupOutput, DockerEnvironment } from './containerTypes';
 
-export type { ContainerInfo, ContainerMountResult, ContainerPrefs, ContainerProgress, DockerEnvironment };
+export type { ContainerInfo, ContainerMountResult, ContainerPrefs, ContainerProgress, ContainerSetupDone, ContainerSetupOutput, DockerEnvironment };
 export type { LocalDockerContainer, LocalSocketEvent, PairingEncryption, LocalAdminStatus, LocalBackendConfigPatch, LocalBackendConfig, LocalPairingRequest, LocalPairedDevice, LocalDaemonStatus, LocalBackendDiscovery };
 
 export type TodeXDesktopApi = {
@@ -133,6 +133,16 @@ export type TodeXDesktopApi = {
     setMounts: (name: string, keepHosts: string[]) => Promise<string[]>;
     /** Runs the automatic cleanup now. */
     cleanup: () => Promise<{ images: number; containers: number }>;
+    /** Freezes the container (`docker pause`); processes and memory are kept. */
+    pause: (name: string) => Promise<void>;
+    unpause: (name: string) => Promise<void>;
+    /** Which setup-template marker files (lockfiles, `.gitmodules`, …) a host folder has. */
+    detectSetup: (folder: string) => Promise<string[]>;
+    /** Runs a bash script in the container at `cwd` as the todex user; resolves a job id for the setup events. */
+    runSetup: (name: string, cwd: string, script: string) => Promise<string>;
+    cancelSetup: (jobId: string) => Promise<void>;
+    onSetupOutput: (listener: (output: ContainerSetupOutput) => void) => () => void;
+    onSetupDone: (listener: (done: ContainerSetupDone) => void) => () => void;
     onProgress: (listener: (progress: ContainerProgress) => void) => () => void;
   };
   /** Release auto-updates (GitHub Releases), driven by the main process. */

@@ -5,10 +5,13 @@ import { DEFAULT_IMAGE, INSTANCE_LABEL } from './instance.ts';
 
 export class DockerError extends Error {
   readonly code: DockerProblem | 'failed';
+  /** The command's exit status, when it ran and failed. */
+  readonly exitCode: number | null;
 
-  constructor(message: string, code: DockerProblem | 'failed' = 'failed') {
+  constructor(message: string, code: DockerProblem | 'failed' = 'failed', exitCode: number | null = null) {
     super(message);
     this.code = code;
+    this.exitCode = exitCode;
   }
 }
 
@@ -65,7 +68,7 @@ export function runDocker(args: string[], options: RunOptions = {}): Promise<str
       }
       const message = stderr.trim().split(/\r?\n/).filter(Boolean).slice(-6).join('\n')
         || (signal ? `docker ${args[0] ?? ''} was stopped (${signal})` : `docker ${args[0] ?? ''} exited with ${code}`);
-      reject(new DockerError(message, classifyDockerError(stderr)));
+      reject(new DockerError(message, classifyDockerError(stderr), code));
     });
   });
 }

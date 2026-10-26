@@ -11,7 +11,7 @@ import type {
   LocalSocketEvent,
 } from './localBackendTypes';
 
-import type { ContainerInfo, ContainerMountResult, ContainerProgress, DockerEnvironment } from './containerTypes';
+import type { ContainerInfo, ContainerMountResult, ContainerProgress, ContainerSetupDone, ContainerSetupOutput, DockerEnvironment } from './containerTypes';
 
 export type * from './localBackendTypes';
 export type * from './containerTypes';
@@ -240,6 +240,25 @@ const api = {
     addMount: (name: string, hostPath: string) => ipcRenderer.invoke('container:addMount', name, hostPath) as Promise<ContainerMountResult>,
     setMounts: (name: string, keepHosts: string[]) => ipcRenderer.invoke('container:setMounts', name, keepHosts) as Promise<string[]>,
     cleanup: () => ipcRenderer.invoke('container:cleanup') as Promise<{ images: number; containers: number }>,
+    pause: (name: string) => ipcRenderer.invoke('container:pause', name) as Promise<void>,
+    unpause: (name: string) => ipcRenderer.invoke('container:unpause', name) as Promise<void>,
+    detectSetup: (folder: string) => ipcRenderer.invoke('container:detectSetup', folder) as Promise<string[]>,
+    runSetup: (name: string, cwd: string, script: string) => ipcRenderer.invoke('container:runSetup', name, cwd, script) as Promise<string>,
+    cancelSetup: (jobId: string) => ipcRenderer.invoke('container:cancelSetup', jobId) as Promise<void>,
+    onSetupOutput: (listener: (output: ContainerSetupOutput) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, output: ContainerSetupOutput) => listener(output);
+      ipcRenderer.on('container:setupOutput', handler);
+      return () => {
+        ipcRenderer.removeListener('container:setupOutput', handler);
+      };
+    },
+    onSetupDone: (listener: (done: ContainerSetupDone) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, done: ContainerSetupDone) => listener(done);
+      ipcRenderer.on('container:setupDone', handler);
+      return () => {
+        ipcRenderer.removeListener('container:setupDone', handler);
+      };
+    },
     onProgress: (listener: (progress: ContainerProgress) => void) => {
       const handler = (_event: Electron.IpcRendererEvent, progress: ContainerProgress) => listener(progress);
       ipcRenderer.on('container:progress', handler);

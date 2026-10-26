@@ -81,7 +81,7 @@ export async function connectContainer(session: ContainerSession, container: Con
 }
 
 /** Resolves once `profileId`'s link is open; rejects after `timeoutMs`. */
-export async function waitForLink(read: () => ContainerSession, profileId: string, timeoutMs = 30_000, signal?: AbortSignal): Promise<void> {
+export async function waitForLink(read: () => Pick<ContainerSession, 'backendLinkStatus'>, profileId: string, timeoutMs = 30_000, signal?: AbortSignal): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (read().backendLinkStatus[profileId]?.state !== 'open') {
     if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
