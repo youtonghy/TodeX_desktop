@@ -38,7 +38,7 @@ import { WorkspaceMountHint } from './components/WorkspaceMountHint';
 import { ContainerFreezer } from './components/container/ContainerFreezer';
 import { ContainerMountCleanup } from './components/container/ContainerMountCleanup';
 import { ContainerSetupNotices, useContainerWorkspaceFlow } from './components/workspace/ContainerWorkspaceFlow';
-import { isLoopbackUrl } from '@todex/protocol/mobileParity';
+import { isLocalBackendUrl } from '@todex/protocol/mobileParity';
 import { mapHostPathToBackend } from '@todex/protocol/pathMapping';
 import { isWorkbenchTab, panelFromRoute, type DesktopPanel, type OpenPanelOptions, type WorkbenchItem, type WorkbenchRequest, type WorkbenchTab } from './lib/panels';
 import type { RemoteFilesBinding } from './session/fileSources';
@@ -945,7 +945,7 @@ function CreateWorkspaceModal({
             if (!selected) return;
             // A container backend sees host folders at its own paths.
             const picked = pickedHostPathToBackend({
-              loopback: isLoopbackUrl(directorySettings.serverUrl),
+              loopback: isLocalBackendUrl(directorySettings.serverUrl),
               deployment: serverVersion?.deployment ?? 'host',
               pathMappings: serverVersion?.pathMappings ?? [],
               windows: window.todexDesktop.shell.platform === 'win32',

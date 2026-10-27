@@ -48,7 +48,7 @@ import type { SubagentRun } from '@todex/protocol/v2';
 import { SubagentsPanel } from './SubagentsPanel';
 import { AgentCallsPanel } from './AgentCallsPanel';
 import { isActiveAgentCallStatus, type AgentCallSession } from '@todex/protocol/agentCalling';
-import { isLoopbackUrl } from '@todex/protocol/mobileParity';
+import { isLocalBackendUrl, isLoopbackUrl } from '@todex/protocol/mobileParity';
 import { mapBackendPathToHost } from '@todex/protocol/pathMapping';
 import { systemShellPathResolver } from '../session/hostPaths';
 import { resolveTerminalPath } from '@todex/protocol/terminalText';
@@ -1420,7 +1420,7 @@ function FilesPane({ session, target, onTargetChange, remote, remoteBackendId, o
   const filesDeployment = filesServerVersion?.deployment ?? 'host';
   const filesPathMappings = filesServerVersion?.pathMappings;
   const hostPathFor = useMemo(() => systemShellPathResolver({
-    loopback: isLoopbackUrl(serverUrl),
+    loopback: isLocalBackendUrl(serverUrl),
     deployment: filesDeployment,
     pathMappings: filesPathMappings ?? [],
     windows: window.todexDesktop.shell.platform === 'win32',

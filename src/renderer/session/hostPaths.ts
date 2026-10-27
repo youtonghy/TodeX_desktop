@@ -1,7 +1,7 @@
 // Where a backend's paths live on this machine. Local features (the
 // directory picker, Open / Open With / Reveal) only apply to a backend
-// reached over loopback; a container backend's paths differ from this
-// machine's unless its published path mappings say how they correspond.
+// reached over loopback HTTP(S) or IPC; a container backend's paths differ
+// from this machine's unless its published path mappings say how they correspond.
 //
 // Pure (types only from the protocol, the mapper passed in) so node can test
 // it without the `@todex/protocol` alias.
@@ -10,7 +10,7 @@ import type { BackendDeployment, PathMapping, PathMappingOptions } from '@todex/
 export type PathMapper = (path: string, mappings: readonly PathMapping[], options: PathMappingOptions) => string | null;
 
 export type HostPathContext = {
-  /** The backend URL is loopback: it runs on (or is published to) this machine. */
+  /** The backend URL is loopback or IPC: it runs on (or is published to) this machine. */
   loopback: boolean;
   deployment: BackendDeployment;
   pathMappings: readonly PathMapping[];
