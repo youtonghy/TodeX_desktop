@@ -30,6 +30,7 @@ import {
   type PiPluginCategory,
   type PiRpcSupport,
 } from '@/lib/piPlugins';
+import { PiSubagentTemplateEditor, PiSubagentTemplatesSection, usePiSubagentTemplates } from './PiSubagentTemplates';
 import { SettingsField } from './SettingsFields';
 
 const key = (value: string) => value as MessageKey;
@@ -48,7 +49,8 @@ type Page = {
 /**
  * The Pi packages and built-in extensions of `settings.json`, and the
  * settings page of one known extension. Switches, installs and removals
- * apply at once; a settings page is saved through the modal's Save button.
+ * apply at once; a settings page is saved through the modal's Save button,
+ * as is the subagent template open on the subagents page.
  * `onSettingsChanged` runs after `settings.json` changed here.
  */
 export function usePiPlugins(active: boolean, api: () => V2ApiClient, onSettingsChanged: () => void) {
@@ -61,6 +63,8 @@ export function usePiPlugins(active: boolean, api: () => V2ApiClient, onSettings
   const [operation, setOperation] = useState<PiPackageOperation>();
   const changed = useRef(onSettingsChanged);
   changed.current = onSettingsChanged;
+  const templates = usePiSubagentTemplates(active && page?.config === 'subagents', api);
+  const editingTemplate = Boolean(templates.editor);
 
   const load = useCallback(async () => {
     setLoadError(undefined);
@@ -193,10 +197,11 @@ export function usePiPlugins(active: boolean, api: () => V2ApiClient, onSettings
     openPage,
     closePage: () => setPage(null),
     setDraft: (update: (draft: SettingsObject) => SettingsObject) => setPage((current) => (current ? { ...current, draft: update(current.draft) } : current)),
-    dirty,
-    saving,
-    canSave: Boolean(page?.doc?.settings) && dirty && !saving,
-    save,
+    templates,
+    dirty: dirty || templates.dirty,
+    saving: editingTemplate ? templates.saving : saving,
+    canSave: editingTemplate ? templates.canSave : Boolean(page?.doc?.settings) && dirty && !saving,
+    save: editingTemplate ? templates.save : save,
   };
 }
 
@@ -216,6 +221,7 @@ export function PiPluginsPanel({ state }: { state: PiPluginsState }) {
   const [confirm, setConfirm] = useState<{ action: PiPackageOperation['action']; source: string } | null>(null);
   const running = state.operation?.status === 'running';
 
+  if (page && state.templates.editor) return <PiSubagentTemplateEditor state={state.templates} />;
   if (page) return <PluginPage state={state} page={page} />;
   if (loadError) {
     return (
@@ -408,6 +414,7 @@ function PluginPage({ state, page }: { state: PiPluginsState; page: Page }) {
             </SettingsGroup>
           )) : null}
           <p className="px-3 text-body-2-regular text-text-secondary">{t('piPlugins.pageApplies')}</p>
+          {page.config === 'subagents' ? <PiSubagentTemplatesSection state={state.templates} /> : null}
         </>
       )}
     </SettingsSubpage>

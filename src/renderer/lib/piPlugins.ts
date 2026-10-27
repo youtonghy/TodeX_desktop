@@ -278,3 +278,34 @@ export const PI_PLUGIN_PAGES: Record<PiPluginConfigId, PiPluginPage> = {
     ],
   },
 };
+
+/** A `@tintinweb/pi-subagents` template's file name, as the backend accepts it. */
+export const PI_SUBAGENT_TEMPLATE_FILE = /^(?!\.)[A-Za-z0-9._-]{1,100}$/;
+
+/** The template form; other front matter keys are edited in the source view and kept by form saves. */
+export const PI_SUBAGENT_TEMPLATE_GROUPS: FieldGroup[] = [
+  {
+    id: 'identity',
+    fields: [
+      { kind: 'text', path: ['display_name'], placeholder: 'Security Auditor' },
+      { kind: 'longtext', path: ['description'] },
+      { kind: 'enum', path: ['color'], options: ['red', 'blue', 'green', 'yellow', 'purple', 'orange', 'pink', 'cyan'] },
+      { kind: 'switch', path: ['enabled'], default: true },
+    ],
+  },
+  {
+    id: 'run',
+    fields: [
+      { kind: 'model', path: ['model'], format: 'string' },
+      { kind: 'enum', path: ['thinking'], options: THINKING },
+      { kind: 'text', path: ['tools'], placeholder: 'read, grep, find, ls' },
+      { kind: 'integer', path: ['max_turns'], min: 0, max: 10000 },
+      { kind: 'enum', path: ['prompt_mode'], options: ['replace', 'append'], default: 'replace' },
+      { kind: 'bool', path: ['run_in_background'] },
+      { kind: 'enum', path: ['isolation'], options: ['worktree', 'off'] },
+    ],
+  },
+];
+
+/** What a new template's source view starts from. */
+export const PI_SUBAGENT_TEMPLATE_SKELETON = '---\ndescription: \ntools: read, grep, find, ls\n---\n\n';

@@ -246,6 +246,93 @@ function demoDshPluginsRoute(method: string, path: string, body: Record<string, 
   return null;
 }
 
+/** `@tintinweb/pi-subagents` templates: front matter written one `key: value` line each (strings as JSON). */
+const DEMO_PI_BUILT_IN_SUBAGENTS = ['general-purpose', 'Explore', 'Plan'];
+const demoPiSubagentTemplates = new Map<string, { frontMatter: SettingsObject; body: string }>([
+  ['auditor', { frontMatter: { display_name: 'Security Auditor', description: 'Reviews code for vulnerabilities', color: 'red', tools: 'read, grep, find, ls', thinking: 'high' }, body: 'You are a security auditor. Report findings with file paths and severity.' }],
+]);
+
+function demoPiSubagentTemplateDocument(file: string) {
+  const template = demoPiSubagentTemplates.get(file)!;
+  const lines = Object.entries(template.frontMatter).map(([name, value]) => `${name}: ${typeof value === 'string' ? JSON.stringify(value) : String(value)}`);
+  const content = `${lines.length ? `---\n${lines.join('\n')}\n---\n\n` : ''}${template.body}\n`;
+  return { file, path: `/home/demo/.pi/agent/agents/${file}.md`, revision: demoRevision(content), content, frontMatter: template.frontMatter, body: template.body };
+}
+
+function demoPiSubagentTemplateList() {
+  const isStub = (file: string) => {
+    const template = demoPiSubagentTemplates.get(file)!;
+    return DEMO_PI_BUILT_IN_SUBAGENTS.includes(file) && !template.body && Object.keys(template.frontMatter).length === 1 && template.frontMatter.enabled === false;
+  };
+  const templates = [...demoPiSubagentTemplates.keys()].filter((file) => !isStub(file)).sort().map((file) => {
+    const { frontMatter } = demoPiSubagentTemplates.get(file)!;
+    const text = (name: string) => (typeof frontMatter[name] === 'string' && frontMatter[name] ? frontMatter[name] as string : undefined);
+    const name = text('name') ?? file;
+    return { file, name, displayName: text('display_name'), description: text('description'), color: text('color'), model: text('model'), enabled: frontMatter.enabled !== false, overridesBuiltIn: DEMO_PI_BUILT_IN_SUBAGENTS.includes(name) };
+  });
+  const builtIns = DEMO_PI_BUILT_IN_SUBAGENTS.map((name) => {
+    const overriding = templates.find((template) => template.name === name);
+    if (overriding) return { name, state: 'overridden' as const, file: overriding.file };
+    return demoPiSubagentTemplates.has(name) && isStub(name) ? { name, state: 'disabled' as const, file: name } : { name, state: 'enabled' as const };
+  });
+  return { dir: '/home/demo/.pi/agent/agents', templates, builtIns };
+}
+
+/** Parses the demo's own `key: value` front matter; enough for text typed in the source view. */
+function demoParseTemplate(content: string): { frontMatter: SettingsObject; body: string } {
+  const match = content.replace(/\r\n?/g, '\n').match(/^---\n([\s\S]*?)\n---(?:\n|$)([\s\S]*)$/);
+  if (!match) return { frontMatter: {}, body: content.trim() };
+  const frontMatter: SettingsObject = {};
+  for (const line of match[1].split('\n')) {
+    const at = line.indexOf(':');
+    if (at <= 0) continue;
+    const raw = line.slice(at + 1).trim();
+    let value: unknown = raw;
+    try { value = JSON.parse(raw); } catch { /* a bare string */ }
+    if (raw !== '') frontMatter[line.slice(0, at).trim()] = value;
+  }
+  return { frontMatter, body: match[2].trim() };
+}
+
+function demoPiSubagentTemplatesRoute(method: string, path: string, body: Record<string, unknown>): SecureResponse | null {
+  const base = '/v2/providers/pi/subagent-templates';
+  const conflict = (message: string) => json({ error: { code: 'CONFLICT', message } }, 409);
+  const notFound = (file: string) => json({ error: { code: 'NOT_FOUND', message: `${file}.md does not exist` } }, 404);
+  const input = (previous?: SettingsObject) => (typeof body.content === 'string'
+    ? demoParseTemplate(body.content)
+    : { frontMatter: applyMergePatch(previous ?? {}, body.frontMatter as SettingsObject), body: String(body.body ?? '').trim() });
+  if (path === base && method === 'GET') return json(demoPiSubagentTemplateList());
+  if (path === base && method === 'POST') {
+    const file = String(body.file);
+    if (demoPiSubagentTemplates.has(file)) return conflict(`${file}.md already exists`);
+    demoPiSubagentTemplates.set(file, input());
+    return json(demoPiSubagentTemplateDocument(file));
+  }
+  const builtIn = path.startsWith(`${base}/built-ins/`) ? decodeURIComponent(path.slice(`${base}/built-ins/`.length)) : null;
+  if (builtIn !== null && method === 'PUT') {
+    const state = demoPiSubagentTemplateList().builtIns.find((item) => item.name === builtIn);
+    if (!state) return notFound(builtIn);
+    if (state.state === 'overridden') return conflict(`${builtIn} is replaced by ${state.file}.md`);
+    if (body.enabled) demoPiSubagentTemplates.delete(builtIn);
+    else demoPiSubagentTemplates.set(builtIn, { frontMatter: { enabled: false }, body: '' });
+    return json(demoPiSubagentTemplateList());
+  }
+  const file = path.startsWith(`${base}/`) ? decodeURIComponent(path.slice(base.length + 1)) : null;
+  if (file === null) return null;
+  if (!demoPiSubagentTemplates.has(file)) return notFound(file);
+  if (method === 'GET') return json(demoPiSubagentTemplateDocument(file));
+  if (method === 'PUT') {
+    if (body.revision !== demoPiSubagentTemplateDocument(file).revision) return conflict(`${file}.md changed on disk`);
+    demoPiSubagentTemplates.set(file, input(demoPiSubagentTemplates.get(file)!.frontMatter));
+    return json(demoPiSubagentTemplateDocument(file));
+  }
+  if (method === 'DELETE') {
+    demoPiSubagentTemplates.delete(file);
+    return json({ file });
+  }
+  return null;
+}
+
 function demoPiPluginsRoute(method: string, path: string, body: Record<string, unknown>): SecureResponse | null {
   const file = demoCliSettings.pi;
   const save = (settings: SettingsObject) => Object.assign(file, demoSettingsFile(file.path, 'json', settings));
@@ -308,6 +395,8 @@ function demoPiPluginsRoute(method: string, path: string, body: Record<string, u
       return json(document());
     }
   }
+  const templates = demoPiSubagentTemplatesRoute(method, path, body);
+  if (templates) return templates;
   if (path === '/v2/providers/pi/mcp') {
     const document = () => {
       const text = demoPiMcp ? JSON.stringify(demoPiMcp) : null;
