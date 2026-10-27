@@ -168,6 +168,7 @@ export function SshPanel({ session, backendId, onBackendChange, scopeKey, workbe
                   hosts={hosts.hosts}
                   ftpSites={hosts.ftpSites}
                   keys={keys?.keys ?? []}
+                  localTerminal={hosts.localTerminal === true}
                   onReload={() => void reloadHosts()}
                   onConnect={onOpenSshTerminal}
                   onOpenFiles={(target) => void openFiles(target)}

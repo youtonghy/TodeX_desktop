@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { Button as AriaButton, Focusable } from 'react-aria-components';
 import {
-  RiAddLine, RiArrowLeftRightLine, RiDeleteBinLine, RiEdit2Line, RiFileCopyLine, RiFolder3Line, RiLinkUnlink, RiMore2Line,
+  RiAddLine, RiArrowLeftRightLine, RiComputerLine, RiDeleteBinLine, RiEdit2Line, RiFileCopyLine, RiFolder3Line, RiLinkUnlink, RiMore2Line,
   RiPlugLine, RiPulseLine, RiRouterLine, RiServerLine, RiTerminalBoxLine,
 } from '@remixicon/react';
-import { sshHostEndpoint, type FtpSite, type SshHost, type SshKey, type SshTestResult } from '@todex/protocol/ssh';
+import { LOCAL_TERMINAL_HOST, isLocalTerminalHost, sshHostEndpoint, type FtpSite, type SshHost, type SshKey, type SshTestResult } from '@todex/protocol/ssh';
 import { useT } from '../../i18n';
 import { FtpSiteFormDialog, SshHostFormDialog, SshImportDialog } from './SshHostDialogs';
 import type { EnteredPassword, RemoteConnectTarget } from './useRemoteConnector';
@@ -35,6 +35,8 @@ type Props = {
   hosts: SshHost[];
   ftpSites: FtpSite[];
   keys: SshKey[];
+  /** The backend offers the `Local` terminal (`ssh localhost`, Linux/macOS only). */
+  localTerminal: boolean;
   onReload: () => void;
   onConnect: (host: string) => void;
   onOpenFiles: (target: RemoteConnectTarget) => void;
@@ -46,7 +48,7 @@ type Props = {
 
 type PendingDelete = { kind: 'host'; alias: string } | { kind: 'ftp'; site: FtpSite };
 
-export function SshHostsTab({ api, backendId, askPassword, rememberPassword, hosts, ftpSites, keys, onReload, onConnect, onOpenFiles, onNewForward, onAssignIp }: Props) {
+export function SshHostsTab({ api, backendId, askPassword, rememberPassword, hosts, ftpSites, keys, localTerminal, onReload, onConnect, onOpenFiles, onNewForward, onAssignIp }: Props) {
   const t = useT();
   const [hostDialog, setHostDialog] = useState<{ host?: SshHost } | null>(null);
   const [importOpen, setImportOpen] = useState(false);
@@ -128,14 +130,34 @@ export function SshHostsTab({ api, backendId, askPassword, rememberPassword, hos
             <Button size="small" leadingIcon={RiAddLine} onClick={() => setHostDialog({})}>{t('ssh.hosts.add')}</Button>
           </div>
         </div>
-        {hosts.length === 0 ? (
-          <EmptyState size="sm" icon={RiServerLine} title={t('ssh.hosts.emptyTitle')} description={t('ssh.hosts.emptyHint')} />
-        ) : (
+        {localTerminal || hosts.length > 0 ? (
           <div className="grid gap-3 xl:grid-cols-2">
+            {localTerminal ? (
+              <Card className="min-w-0">
+                <div className="flex items-start gap-3">
+                  <div className={ICON_TILE}>
+                    <RiComputerLine className="size-5" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h4 className="truncate text-body-semibold text-text-primary">{LOCAL_TERMINAL_HOST}</h4>
+                      <Chip variant="caption" color="purple">{t('ssh.hosts.localChip')}</Chip>
+                    </div>
+                    <p className="mt-1 truncate font-mono text-caption-1-regular text-text-secondary">localhost</p>
+                    <p className="mt-1 text-caption-1-regular text-text-tertiary">{t('ssh.hosts.localHint')}</p>
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button size="small" leadingIcon={RiTerminalBoxLine} onClick={() => onConnect(LOCAL_TERMINAL_HOST)}>{t('ssh.hosts.connect')}</Button>
+                </div>
+              </Card>
+            ) : null}
             {hosts.map((host) => {
               const result = testResults[host.alias];
               const managed = host.source === 'managed';
               const passwordAuth = host.managed?.authMethod === 'password';
+              // The backend opens the Local terminal for this alias instead.
+              const shadowed = localTerminal && isLocalTerminalHost(host.alias);
               return (
                 <Card key={host.alias} className="min-w-0">
                   <div className="flex items-start gap-3">
@@ -189,6 +211,7 @@ export function SshHostsTab({ api, backendId, askPassword, rememberPassword, hos
                       </MenuPopover>
                     </MenuTrigger>
                   </div>
+                  {shadowed ? <Alert status="warning" title={t('ssh.hosts.localShadowed')} /> : null}
                   {result ? (
                     <Alert
                       status={result.ok ? 'success' : 'danger'}
@@ -243,7 +266,10 @@ export function SshHostsTab({ api, backendId, askPassword, rememberPassword, hos
               );
             })}
           </div>
-        )}
+        ) : null}
+        {hosts.length === 0 ? (
+          <EmptyState size="sm" icon={RiServerLine} title={t('ssh.hosts.emptyTitle')} description={t('ssh.hosts.emptyHint')} />
+        ) : null}
       </section>
 
       <section className="flex flex-col gap-3">

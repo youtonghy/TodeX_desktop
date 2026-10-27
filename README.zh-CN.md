@@ -41,7 +41,7 @@
     - **能力目录（Capabilities）**：实时查看当前生效的 Skills 与 MCP Servers。
     - **浏览器（Browser）**：以原生视图打开回环页面与工作区 HTML 文件（独立的 `persist:todex-preview` 分区），元素拾取会把引用写入聊天草稿。`localhost` 指后端所在电脑：所有回环请求都经后端的 `POST /v2/browser/proxy`（走加密传输）转发，远程后端主机上的开发服务器也能以原 origin 打开。WebSocket（开发服务器热更新）暂不转发，请手动刷新。
     - **Agent 浏览器**：开启 Agent 桌面工具后，实时显示当前会话的 Agent 在后端所在电脑上操作的浏览器标签（经会话连接推送画面），附最新一步操作与“停止”按钮。
-  - **终端视图（侧边栏）**：管理后端主机的 SSH 主机（自动读取 `~/.ssh/config`、手动添加/导入、连接测试、按主机开启 Agent 访问）、SSH 密钥（查看、导入、生成）与 FTP 站点；在右侧工作台中打开 SSH 终端和 SFTP/FTP 文件浏览。
+  - **终端视图（侧边栏）**：管理后端主机的 SSH 主机（自动读取 `~/.ssh/config`、手动添加/导入、连接测试、按主机开启 Agent 访问；Linux/macOS 后端另有内置的 `Local` 主机，通过 `ssh localhost` 打开后端机器的登录终端）、SSH 密钥（查看、导入、生成）与 FTP 站点；在右侧工作台中打开 SSH 终端和 SFTP/FTP 文件浏览。
     - **实验特性（Experiments）**：特性开关与开发者诊断面板。
 - **配对与连接管理**：
   - 查看当前后端连接的 Codex、Pi、Claude Code、Grok Build 与 ACP CLI，比较当前/最新版本，一键安装缺失的 CLI 或升级受管 CLI。
