@@ -47,7 +47,11 @@ export function ScrollArea({ children, className, contentClassName, surface = 'p
         {...props}
         ref={ref}
         onScroll={(event) => { update(); props.onScroll?.(event); }}
-        className={cx('h-full max-h-[inherit] overflow-y-auto overscroll-contain', contentClassName)}
+        // `relative` makes the viewport the containing block of absolute
+        // descendants (e.g. react-aria's visually hidden switch inputs), so
+        // they scroll and clip with the content instead of overflowing the
+        // wrapper, where focusing one would scroll an overflow-hidden ancestor.
+        className={cx('relative h-full max-h-[inherit] overflow-y-auto overscroll-contain', contentClassName)}
       >
         {children}
       </div>
