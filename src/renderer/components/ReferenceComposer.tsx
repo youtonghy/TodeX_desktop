@@ -173,6 +173,15 @@ function lengthOfRange(root: HTMLElement, node: Node, offset: number): number {
   return serializeInline(range.cloneContents()).length;
 }
 
+function isOverDirectText(root: HTMLElement, x: number, y: number): boolean {
+  const range = document.createRange();
+  return Array.from(root.childNodes).some((node) => {
+    if (node.nodeType !== Node.TEXT_NODE) return false;
+    range.selectNodeContents(node);
+    return Array.from(range.getClientRects()).some((rect) => x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom);
+  });
+}
+
 type TextPos = { node: Node; offset: number };
 
 function locate(node: Node, remaining: number): TextPos {
@@ -379,8 +388,10 @@ export const ReferenceComposer = forwardRef<ReferenceComposerHandle, {
           clickRef.current?.(kind, capsule.dataset.ref);
           return;
         }
-        if (target === rootRef.current) {
-          // Keep clicks on the padding area inside the editor focusable.
+        if (target === rootRef.current && !isOverDirectText(rootRef.current, event.clientX, event.clientY)) {
+          // Keep clicks on the padding area inside the editor focusable. Text
+          // typed after select-all + delete sits directly in the root, so a
+          // click on it also targets the root and must keep native caret placement.
           event.preventDefault();
           rootRef.current.focus();
           applyCaret(valueRef.current.length);
