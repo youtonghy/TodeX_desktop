@@ -23,6 +23,8 @@ const RESERVED_PREFIXES = ['/home/todex/', '/opt/todex/', '/opt/node/', '/usr/',
 
 export type InstanceSettings = {
   port: number;
+  /** Publishes `port` on the host (todexc `--no-publish` turns it off: Desktop then connects over the shared socket only). */
+  publish: boolean;
   listen: string;
   image: string;
   tag: string;
@@ -61,7 +63,7 @@ export function ipcInstanceId(name: string): string {
 }
 
 export function defaultSettings(uid: string, gid: string): InstanceSettings {
-  return { port: DEFAULT_PORT, listen: '127.0.0.1', image: DEFAULT_IMAGE, tag: 'latest', extraAgents: 'claude-code', sshAgent: false, uid, gid };
+  return { port: DEFAULT_PORT, publish: true, listen: '127.0.0.1', image: DEFAULT_IMAGE, tag: 'latest', extraAgents: 'claude-code', sshAgent: false, uid, gid };
 }
 
 // ---- settings.env ---------------------------------------------------------
@@ -119,6 +121,7 @@ export function parseSettingsEnv(text: string, defaults: InstanceSettings): Inst
   return {
     port: Number.isInteger(port) && port > 0 && port < 65536 ? port : defaults.port,
     listen: values.get('TODEX_LISTEN') || defaults.listen,
+    publish: values.has('TODEX_PUBLISH') ? values.get('TODEX_PUBLISH') !== '0' : defaults.publish,
     image: values.get('TODEX_IMAGE') || defaults.image,
     tag: values.get('TODEX_TAG') || defaults.tag,
     extraAgents: values.has('TODEX_EXTRA_AGENTS') ? values.get('TODEX_EXTRA_AGENTS')! : defaults.extraAgents,
@@ -132,6 +135,7 @@ export function formatSettingsEnv(settings: InstanceSettings): string {
   const entries: Array<[string, string]> = [
     ['TODEX_PORT', String(settings.port)],
     ['TODEX_LISTEN', settings.listen],
+    ['TODEX_PUBLISH', settings.publish ? '1' : '0'],
     ['TODEX_IMAGE', settings.image],
     ['TODEX_TAG', settings.tag],
     ['TODEX_EXTRA_AGENTS', settings.extraAgents],
@@ -255,14 +259,13 @@ export function generateCompose({ name, settings, mounts, ipcDir, sshAgentSocket
     '    restart: unless-stopped',
     '    labels:',
     `      ${INSTANCE_LABEL}: ${quote(name)}`,
-    '    ports:',
-    `      - ${quote(`${settings.listen}:${settings.port}:7345`)}`,
+    ...(settings.publish ? ['    ports:', `      - ${quote(`${settings.listen}:${settings.port}:7345`)}`] : []),
     '    environment:',
     `      TODEX_UID: ${quote(settings.uid)}`,
     `      TODEX_GID: ${quote(settings.gid)}`,
     `      TODEX_AGENTD_WORKSPACE_ROOTS: ${quote(roots)}`,
     `      TODEX_AGENTD_PATH_MAPPINGS: ${quote(mappings)}`,
-    `      TODEX_AGENTD_ADVERTISE_URL: ${quote(`http://${advertiseHost}:${settings.port}`)}`,
+    ...(settings.publish ? [`      TODEX_AGENTD_ADVERTISE_URL: ${quote(`http://${advertiseHost}:${settings.port}`)}`] : []),
     `      TODEX_EXTRA_AGENTS: ${quote(settings.extraAgents)}`,
     ...(ssh ? ['      SSH_AUTH_SOCK: "/run/host-ssh-agent.sock"'] : []),
     '    volumes:',

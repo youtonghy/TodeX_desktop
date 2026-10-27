@@ -12,6 +12,8 @@ import { ipcInstanceId } from '../container/instance';
 
 export const IPC_SCHEME = 'todex-ipc';
 export const LOCAL_INSTANCE = 'local';
+/** todex-agentd's default `port`. */
+const NATIVE_DEFAULT_PORT = 7345;
 const PAIRING_CREATE_PATH = '/v2/device-pairing/create';
 const LOG_TAIL_BYTES = 64 * 1024;
 // The backend shows ten hex digits as XXXXX-XXXXX (src/device_pairing.rs).
@@ -415,6 +417,12 @@ export class LocalBackendManager {
       const record = await daemonRecord(this.dataDir);
       return { running: record?.running === true, port: record ? clientPort(record) : null, ipcPath: null };
     }
+  }
+
+  /** The host port the native backend uses, or will once started (7345 when unknown); null when it is not installed. */
+  async reservedPort(): Promise<number | null> {
+    if (!await this.currentBinary(null)) return null;
+    return (await this.nativeEndpoint()).port ?? NATIVE_DEFAULT_PORT;
   }
 
   /** One lifecycle operation at a time: `daemon start` and an install must not race. */

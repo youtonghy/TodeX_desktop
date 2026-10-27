@@ -133,6 +133,8 @@ export type TodeXDesktopApi = {
     setMounts: (name: string, keepHosts: string[]) => Promise<string[]>;
     /** Runs the automatic cleanup now. */
     cleanup: () => Promise<{ images: number; containers: number }>;
+    /** Publishes a socket-only container on a free host port (recreating it), for when its socket refuses this user. */
+    enablePublish: (name: string) => Promise<ContainerInfo>;
     /** Freezes the container (`docker pause`); processes and memory are kept. */
     pause: (name: string) => Promise<void>;
     unpause: (name: string) => Promise<void>;

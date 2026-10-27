@@ -174,6 +174,7 @@ export function installBrowserDesktopBridge(): void {
         addMount: unavailable,
         setMounts: unavailable,
         cleanup: unavailable,
+        enablePublish: unavailable,
         pause: unavailable,
         unpause: unavailable,
         detectSetup: async () => [],

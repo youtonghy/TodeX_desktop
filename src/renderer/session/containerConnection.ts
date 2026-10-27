@@ -3,6 +3,7 @@ import { ipcServerUrl } from '@todex/protocol/ipcServerUrl';
 import type { BackendConnectionProfile } from '@todex/protocol/todex';
 import type { ContainerInfo } from '../../preload/containerTypes';
 import { t } from '../i18n';
+import { backendTransport } from './helpers';
 import { daemonPeer, ensureManagedConnection, pairWithLocalApproval } from './localPairing';
 
 type ContainerSession = Parameters<typeof ensureManagedConnection>[0] & {
@@ -34,6 +35,54 @@ export function containerProfiles(profiles: BackendConnectionProfile[], containe
   return profiles.filter((profile) => profile.serverUrl === ipc || (tcp !== null && sameUrl(profile.serverUrl, tcp)));
 }
 
+const MOVE_PROBE_TIMEOUT_MS = 8000;
+// Profile id + port pairs already checked, so a profile of another daemon is probed once per run.
+const probedMoves = new Set<string>();
+
+/**
+ * Re-points the paired loopback profiles still aimed at a port Desktop moved
+ * `container` off, keeping each profile (and the workspaces filed under it)
+ * like `switchToNativeIpc` does. The URL alone cannot tell which daemon a
+ * profile belongs to (the native backend may now own the old port), so a
+ * profile only moves when a sealed request with its pinned key and device
+ * succeeds against the new port. Resolves the re-pointed profile ids.
+ */
+export async function followMovedPort(session: ContainerSession, container: Pick<ContainerInfo, 'name' | 'port' | 'formerPorts' | 'state'>): Promise<string[]> {
+  const serverUrl = containerTcpUrl(container);
+  if (!serverUrl || container.state !== 'running' || !container.formerPorts.length) return [];
+  if (session.backendConnections.some((profile) => sameUrl(profile.serverUrl, serverUrl))) return [];
+  const formerUrls = container.formerPorts.map((port) => `http://127.0.0.1:${port}`);
+  const moved: string[] = [];
+  for (const profile of session.backendConnections) {
+    if (profile.disabled || !profile.transportVerified || !deviceIdentityFromSecret(profile.deviceSecret)) continue;
+    if (!formerUrls.some((url) => sameUrl(profile.serverUrl, url))) continue;
+    const key = `${profile.id}:${container.port}`;
+    if (probedMoves.has(key)) continue;
+    probedMoves.add(key);
+    try {
+      const response = await backendTransport({ ...profile, serverUrl }).fetch({ method: 'GET', path: '/v2/version', signal: AbortSignal.timeout(MOVE_PROBE_TIMEOUT_MS) });
+      if (response.status !== 200) continue;
+    } catch (error) {
+      // Unreachable (still starting): try again on a later pass.
+      if (error instanceof TypeError) probedMoves.delete(key);
+      continue;
+    }
+    const credentials = {
+      deviceSecret: profile.deviceSecret,
+      encryptionProtocol: profile.encryptionProtocol,
+      encryptionPublicKey: profile.encryptionPublicKey,
+      transportVerified: profile.transportVerified,
+    };
+    session.updateBackendConnection(profile.id, { serverUrl, ...credentials });
+    // Connects once the re-pointed profile is committed.
+    session.onDevicePairingApproved(profile.id, credentials);
+    window.todexDesktop.debug.log('info', 'container.profile.portFollowed', { name: container.name, profileId: profile.id, port: container.port });
+    moved.push(profile.id);
+    break;
+  }
+  return moved;
+}
+
 /**
  * Connects this app to `container`'s backend, pairing when needed: over the
  * shared socket (the request is approved through local-admin) when the
@@ -48,9 +97,19 @@ export async function connectContainer(session: ContainerSession, container: Con
       return await ensureManagedConnection(session, { instance: container.ipcInstance, name, deviceName, repair, signal });
     } catch (error) {
       // rootless Docker, Podman and userns-remap map the UID: the socket refuses this user.
-      if (signal?.aborted || !container.port) throw error;
+      if (signal?.aborted || (!container.port && !container.managed)) throw error;
       window.todexDesktop.debug.log('warn', 'container.connect.ipcFailed', { name: container.name, error: error instanceof Error ? error.message : String(error) });
     }
+  }
+  // A socket-only container whose socket is missing or refuses this user gets a host port.
+  if (!container.port && container.managed) {
+    container = await window.todexDesktop.container.enablePublish(container.name);
+    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+  }
+  // The profile of a container Desktop moved to another port follows it, still paired.
+  if (!repair) {
+    const [followed] = await followMovedPort(session, container);
+    if (followed) return followed;
   }
   const serverUrl = containerTcpUrl(container);
   if (!serverUrl || !container.container) throw new Error(t('container.noEndpoint', { name: container.name }));

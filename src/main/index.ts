@@ -738,9 +738,11 @@ app.whenReady().then(() => {
   containers = new ContainerManager({
     prefs: () => (readStore()[CONTAINER_PREFS_KEY] as ContainerPrefs | undefined) ?? {},
     log: (level, event, data) => debugLog(level, event, data ?? {}),
+    nativePort: () => localBackend?.reservedPort() ?? Promise.resolve(null),
   });
   containers.register(handleIpc);
   containers.scheduleCleanup();
+  void containers.releaseNativePort().catch((error) => debugLog('warn', 'container.port.releaseFailed', { error: error instanceof Error ? error.message : String(error) }));
   void probeDefaultBackend();
   ipcMain.on('debug:log', (event, payload: { level?: unknown; event?: unknown; data?: unknown }) => {
     if (!DEBUG_BUILD) return;

@@ -33,7 +33,10 @@ export type ContainerInfo = {
   health: 'healthy' | 'unhealthy' | 'starting' | null;
   image: string | null;
   listen: string | null;
+  /** The published host port; null when the container is reached over its shared socket only. */
   port: number | null;
+  /** Host ports Desktop moved the container off (newest last); profiles still pointing there are re-pointed. */
+  formerPorts: number[];
   mounts: ContainerMount[];
   sshAgent: boolean;
   socketPath: string | null;
@@ -64,4 +67,8 @@ export type ContainerPrefs = {
   stopOnQuit?: boolean;
   /** Freeze (`docker pause`) a container after this many idle minutes; 0/absent: never. */
   freezeIdleMinutes?: number;
+  /** First host port containers are published on, where they need one (default 17345). */
+  portStart?: number;
+  /** How many ports from `portStart` to choose from (default 100). */
+  portCount?: number;
 };

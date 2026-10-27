@@ -1,5 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, readdirSync, realpathSync, rmSync, statSync } from 'node:fs';
-import { createServer } from 'node:net';
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { isAbsolute, join, posix } from 'node:path';
 import type { IpcMainInvokeEvent, WebContents } from 'electron';
@@ -15,7 +14,6 @@ import {
 } from './docker.ts';
 import {
   DEFAULT_IMAGE,
-  DEFAULT_PORT,
   backendPathFor,
   configRoot,
   containerName,
@@ -30,10 +28,11 @@ import {
   type InstanceMount,
   type InstanceSettings,
 } from './instance.ts';
+import { pickPort, portAvailable, portRange } from './ports.ts';
 
 /** Preferences of Settings → TodeX Container (renderer store key, read here for cleanup). */
 export const CONTAINER_PREFS_KEY = 'todex.desktop.container.v1';
-export type ContainerPrefs = { cleanupImages?: boolean; removeStoppedDays?: number; pruneMounts?: boolean; stopOnQuit?: boolean };
+export type ContainerPrefs = { cleanupImages?: boolean; removeStoppedDays?: number; pruneMounts?: boolean; stopOnQuit?: boolean; portStart?: number; portCount?: number };
 
 const HEALTH_TIMEOUT_MS = 180_000;
 const CLEANUP_FIRST_DELAY_MS = 60_000;
@@ -45,6 +44,8 @@ const UP_TIMEOUT_MS = 30 * 60 * 1000;
 export type ContainerHost = {
   prefs(): ContainerPrefs;
   log(level: 'info' | 'warn' | 'error', event: string, data?: Record<string, unknown>): void;
+  /** The host port the native backend listens on (or will, once started); null without one. */
+  nativePort(): Promise<number | null>;
 };
 
 /** One TodeX container instance as the settings page shows it. */
@@ -60,7 +61,10 @@ export type ContainerInfo = {
   health: InspectedContainer['health'];
   image: string | null;
   listen: string | null;
+  /** The published host port; null when the container is reached over its shared socket only. */
   port: number | null;
+  /** Host ports this instance published before Desktop moved it (newest last): profiles still pointing there are re-pointed. */
+  formerPorts: number[];
   mounts: InstanceMount[];
   sshAgent: boolean;
   /** The shared local socket, when present. */
@@ -98,13 +102,8 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function portFree(port: number): Promise<boolean> {
-  return new Promise((resolve) => {
-    const server = createServer();
-    server.once('error', () => resolve(false));
-    server.listen(port, '127.0.0.1', () => server.close(() => resolve(true)));
-  });
-}
+const FORMER_PORTS_FILE = 'former-ports';
+const FORMER_PORTS_KEPT = 5;
 
 export class ContainerManager {
   private readonly root = configRoot(process.env, homedir());
@@ -179,7 +178,8 @@ export class ContainerManager {
         health: container?.health ?? null,
         image: container?.image ?? `${instance.settings.image}:${instance.settings.tag}`,
         listen: instance.settings.listen,
-        port: instance.settings.port,
+        port: instance.settings.publish ? instance.settings.port : null,
+        formerPorts: this.formerPorts(instance.dir),
         mounts: instance.mounts,
         sshAgent: instance.settings.sshAgent,
         socketPath: shared ? socketPath : null,
@@ -201,6 +201,7 @@ export class ContainerManager {
         image: container.image,
         listen: container.ports[0]?.hostIp ?? null,
         port: container.ports[0]?.hostPort ?? null,
+        formerPorts: [],
         mounts: container.binds,
         sshAgent: false,
         socketPath: null,
@@ -276,11 +277,51 @@ export class ContainerManager {
     return socket;
   }
 
-  private write(instance: { name: string; settings: InstanceSettings; mounts: InstanceMount[] }, markDesktop: boolean): void {
+  private formerPorts(dir: string): number[] {
+    try {
+      return readFileSync(join(dir, FORMER_PORTS_FILE), 'utf8').split('\n').map(Number).filter((port) => Number.isInteger(port) && port > 0 && port < 65536);
+    } catch {
+      return [];
+    }
+  }
+
+  /** Host ports an instance other than `except` must not take: the native backend's and the other containers'. */
+  private async reservedPorts(except: string): Promise<Set<number>> {
+    const reserved = new Set<number>();
+    const native = await this.host.nativePort().catch(() => null);
+    if (native !== null) reserved.add(native);
+    for (const item of await this.list()) if (item.name !== except && item.port !== null) reserved.add(item.port);
+    return reserved;
+  }
+
+  /**
+   * Keeps a published instance off ports it must not use: one that is reserved
+   * (the native backend's, another container's), or one something else took
+   * while the container was down. The new port comes from the configured range;
+   * the old one is remembered so connection profiles can follow.
+   */
+  private async checkPort(instance: { name: string; settings: InstanceSettings }): Promise<InstanceSettings> {
+    const { settings } = instance;
+    if (!settings.publish) return settings;
+    const reserved = await this.reservedPorts(instance.name);
+    const info = (await this.list()).find((item) => item.name === instance.name);
+    const holdsPort = (info?.state === 'running' || info?.state === 'paused') && info.port === settings.port;
+    if (!reserved.has(settings.port) && (holdsPort || await portAvailable(settings.port))) return settings;
+    const port = await pickPort(portRange(this.host.prefs()), reserved);
+    const dir = join(this.root, instance.name);
+    const former = [...this.formerPorts(dir).filter((item) => item !== settings.port && item !== port), settings.port].slice(-FORMER_PORTS_KEPT);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, FORMER_PORTS_FILE), `${former.join('\n')}\n`);
+    this.host.log('info', 'container.port.moved', { name: instance.name, from: settings.port, to: port });
+    return { ...settings, port };
+  }
+
+  /** Writes the instance files (todexc's layout), moving a published port off a conflicting one first. */
+  private async write(instance: { name: string; settings: InstanceSettings; mounts: InstanceMount[] }, markDesktop: boolean): Promise<void> {
     if (instance.settings.uid === '0' || instance.settings.gid === '0') throw new Error('refusing to run agents as root; start TodeX as your normal user');
     writeInstance(join(this.root, instance.name), {
       name: instance.name,
-      settings: instance.settings,
+      settings: await this.checkPort(instance),
       mounts: instance.mounts,
       ipcDir: this.prepareIpcDir(instance.name),
       sshAgentSocket: this.sshAgentSocket(instance.settings),
@@ -325,12 +366,10 @@ export class ContainerManager {
     return real;
   }
 
-  private async freePort(): Promise<number> {
-    const taken = new Set((await this.list()).map((item) => item.port).filter((port): port is number => port !== null));
-    for (let port = DEFAULT_PORT; port < DEFAULT_PORT + 100; port += 1) {
-      if (!taken.has(port) && await portFree(port)) return port;
-    }
-    throw new Error('no free port between 7345 and 7444');
+  /** A host port for a new instance; Linux hosts publish none and connect over the shared socket. */
+  private async newPort(name: string): Promise<{ port: number; publish: boolean }> {
+    if (process.platform === 'linux') return { port: portRange(this.host.prefs()).start, publish: false };
+    return { port: await pickPort(portRange(this.host.prefs()), await this.reservedPorts(name)), publish: true };
   }
 
   private freeName(): string {
@@ -354,9 +393,9 @@ export class ContainerManager {
         if (mountCovering(mounts, host, process.platform === 'win32')) continue;
         mounts.push({ host, target: mountTargetFor(host, process.platform, mounts) });
       }
-      const settings: InstanceSettings = { ...this.defaults(), port: await this.freePort(), tag, extraAgents: '', sshAgent: options.sshAgent === true };
-      this.write({ name, settings, mounts }, true);
-      this.host.log('info', 'container.create', { name, port: settings.port, mounts: mounts.length });
+      const settings: InstanceSettings = { ...this.defaults(), ...await this.newPort(name), tag, extraAgents: '', sshAgent: options.sshAgent === true };
+      await this.write({ name, settings, mounts }, true);
+      this.host.log('info', 'container.create', { name, port: settings.publish ? settings.port : null, mounts: mounts.length });
       await this.up(name);
       return (await this.list()).find((item) => item.name === name)!;
     });
@@ -373,7 +412,7 @@ export class ContainerManager {
     await this.exclusive(name, async () => {
       // Regenerated like todexc's `upgrade`, so a removed container comes back from its settings.
       const instance = this.instance(name);
-      this.write(instance, false);
+      await this.write(instance, false);
       await this.up(name);
     });
   }
@@ -471,12 +510,50 @@ export class ContainerManager {
     if (typeof jobId === 'string') this.setupJobs.get(jobId)?.abort();
   }
 
+  /**
+   * Publishes an unpublished instance on a free port of the configured range
+   * and recreates it: for hosts where its shared socket refuses this user
+   * (rootless Docker, Podman, userns-remap). Resolves the updated instance.
+   */
+  async enablePublish(name: string): Promise<ContainerInfo> {
+    await this.requireDocker();
+    return this.exclusive(name, async () => {
+      const instance = this.instance(name);
+      if (!instance.settings.publish) {
+        const port = await pickPort(portRange(this.host.prefs()), await this.reservedPorts(name));
+        await this.write({ ...instance, settings: { ...instance.settings, publish: true, port } }, false);
+        this.host.log('info', 'container.publish', { name, port });
+        await this.up(name);
+      }
+      return (await this.list()).find((item) => item.name === name)!;
+    });
+  }
+
+  /**
+   * Moves running instances off the native backend's port (Docker restarts
+   * them at boot, before the native backend can bind it): each is recreated
+   * on a free port of the configured range.
+   */
+  async releaseNativePort(): Promise<void> {
+    const env = await this.environment();
+    if (env.problem || !env.composeVersion) return;
+    const native = await this.host.nativePort().catch(() => null);
+    if (native === null) return;
+    for (const item of await this.list()) {
+      if (!item.managed || item.port !== native || item.state !== 'running') continue;
+      await this.exclusive(item.name, async () => {
+        await this.write(this.instance(item.name), false);
+        await this.up(item.name);
+      }).catch((error) => this.host.log('warn', 'container.port.releaseFailed', { name: item.name, error: errorMessage(error) }));
+    }
+  }
+
   /** Pulls the image and recreates the container (todexc `upgrade`). */
   async upgrade(name: string): Promise<void> {
     await this.requireDocker();
     await this.exclusive(name, async () => {
       const instance = this.instance(name);
-      this.write(instance, false);
+      await this.write(instance, false);
       this.progress({ name, phase: 'pull' });
       await this.compose(name, ['pull', 'todex'], 'pull', UP_TIMEOUT_MS);
       await this.up(name);
@@ -513,13 +590,13 @@ export class ContainerManager {
       const running = state === 'running' || state === 'paused';
       if (covering) {
         if (!running) {
-          this.write(instance, false);
+          await this.write(instance, false);
           await this.up(name);
         }
         return { target: covering.target, backendPath: backendPathFor(covering, host, windows), recreated: false };
       }
       const mount = { host, target: mountTargetFor(host, process.platform, instance.mounts) };
-      this.write({ ...instance, mounts: [...instance.mounts, mount] }, false);
+      await this.write({ ...instance, mounts: [...instance.mounts, mount] }, false);
       this.host.log('info', 'container.mount.add', { name });
       await this.up(name);
       return { target: mount.target, backendPath: mount.target, recreated: running };
@@ -535,7 +612,7 @@ export class ContainerManager {
       const keep = instance.mounts.filter((mount) => (keepHosts as string[]).includes(mount.host));
       if (!keep.length || keep.length === instance.mounts.length) return [];
       const removed = instance.mounts.filter((mount) => !keep.includes(mount)).map((mount) => mount.host);
-      this.write({ ...instance, mounts: keep }, false);
+      await this.write({ ...instance, mounts: keep }, false);
       this.host.log('info', 'container.mount.remove', { name, count: removed.length });
       const state = (await this.list()).find((item) => item.name === name)?.state;
       if (state === 'running' || state === 'paused') await this.up(name);
@@ -637,6 +714,7 @@ export class ContainerManager {
     handle('container:addMount', (event, value, hostPath: unknown) => from(event, () => this.addMount(name(value), hostPath)));
     handle('container:setMounts', (event, value, keepHosts: unknown) => from(event, () => this.setMounts(name(value), keepHosts)));
     handle('container:cleanup', () => this.cleanup());
+    handle('container:enablePublish', (event, value) => from(event, () => this.enablePublish(name(value))));
     handle('container:pause', (event, value) => from(event, () => this.setPaused(name(value), true)));
     handle('container:unpause', (event, value) => from(event, () => this.setPaused(name(value), false)));
     handle('container:detectSetup', (_event, folder: unknown) => this.detectSetup(folder));

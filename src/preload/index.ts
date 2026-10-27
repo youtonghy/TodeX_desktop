@@ -240,6 +240,7 @@ const api = {
     addMount: (name: string, hostPath: string) => ipcRenderer.invoke('container:addMount', name, hostPath) as Promise<ContainerMountResult>,
     setMounts: (name: string, keepHosts: string[]) => ipcRenderer.invoke('container:setMounts', name, keepHosts) as Promise<string[]>,
     cleanup: () => ipcRenderer.invoke('container:cleanup') as Promise<{ images: number; containers: number }>,
+    enablePublish: (name: string) => ipcRenderer.invoke('container:enablePublish', name) as Promise<ContainerInfo>,
     pause: (name: string) => ipcRenderer.invoke('container:pause', name) as Promise<void>,
     unpause: (name: string) => ipcRenderer.invoke('container:unpause', name) as Promise<void>,
     detectSetup: (folder: string) => ipcRenderer.invoke('container:detectSetup', folder) as Promise<string[]>,

@@ -19,6 +19,8 @@ import {
   writeInstance,
 } from '../src/main/container/instance.ts';
 import { classifyDockerError, parseInspect } from '../src/main/container/docker.ts';
+import { createServer } from 'node:net';
+import { pickPort, portAvailable, portRange } from '../src/main/container/ports.ts';
 
 // Written by `todexc --name dev up --mount "/tmp/todexc-fixture/work/a b"
 // --mount /tmp/todexc-fixture/work/c:/workspace/c --port 7400 --agents ""`
@@ -29,7 +31,7 @@ const read = (name: string) => readFileSync(join(fixture, name), 'utf8');
 test('instance files match what todexc writes', () => {
   const defaults = defaultSettings('1000', '1000');
   const settings = parseSettingsEnv(read('settings.env'), defaults);
-  assert.deepEqual(settings, { port: 7400, listen: '127.0.0.1', image: 'ghcr.io/youtonghy/todex_container', tag: 'latest', extraAgents: '', sshAgent: false, uid: '1000', gid: '1000' });
+  assert.deepEqual(settings, { port: 7400, publish: true, listen: '127.0.0.1', image: 'ghcr.io/youtonghy/todex_container', tag: 'latest', extraAgents: '', sshAgent: false, uid: '1000', gid: '1000' });
   assert.equal(formatSettingsEnv(settings), read('settings.env'));
   const mounts = parseMounts(read('mounts'));
   assert.deepEqual(mounts, [
@@ -39,6 +41,19 @@ test('instance files match what todexc writes', () => {
   assert.equal(formatMounts(mounts), read('mounts'));
   const compose = generateCompose({ name: 'dev', settings, mounts, ipcDir: '/tmp/todexc-fixture/config/todex-container/dev/ipc', sshAgentSocket: null });
   assert.equal(compose, read('compose.yaml'));
+});
+
+// `todexc --name ipconly up --no-publish --mount /tmp/todexc-fixture/work/c --agents ""`.
+test('unpublished instances match todexc --no-publish', () => {
+  const dir = join(import.meta.dirname, 'fixtures', 'todexc-ipconly');
+  const settings = parseSettingsEnv(readFileSync(join(dir, 'settings.env'), 'utf8'), defaultSettings('1000', '1000'));
+  assert.equal(settings.publish, false);
+  assert.equal(formatSettingsEnv(settings), readFileSync(join(dir, 'settings.env'), 'utf8'));
+  const mounts = parseMounts(readFileSync(join(dir, 'mounts'), 'utf8'));
+  const compose = generateCompose({ name: 'ipconly', settings, mounts, ipcDir: '/tmp/todexc-fixture/config/todex-container/ipconly/ipc', sshAgentSocket: null });
+  assert.equal(compose, readFileSync(join(dir, 'compose.yaml'), 'utf8'));
+  // Instances written before TODEX_PUBLISH existed keep publishing.
+  assert.equal(parseSettingsEnv('TODEX_PORT=7345\n', defaultSettings('1000', '1000')).publish, true);
 });
 
 test('settings.env values round-trip through bash quoting', () => {
@@ -115,4 +130,34 @@ test('docker errors and inspect output are classified', () => {
   assert.deepEqual(container.binds, [{ host: '/home/me/git', target: '/home/me/git' }]);
   assert.equal(container.composeFile, '/home/me/.config/todex-container/todex/compose.yaml');
   assert.equal(parseInspect([{ Id: 'x', Config: { Labels: {} } }]).length, 0);
+});
+
+test('port range falls back to the default for unusable settings', () => {
+  assert.deepEqual(portRange({}), { start: 17345, count: 100 });
+  assert.deepEqual(portRange({ portStart: 20000, portCount: 10 }), { start: 20000, count: 10 });
+  assert.deepEqual(portRange({ portStart: 80, portCount: 0 }), { start: 17345, count: 100 });
+  assert.deepEqual(portRange({ portStart: 65530, portCount: 100 }), { start: 65530, count: 6 });
+});
+
+test('picked ports skip reserved and busy ones, in random order', async () => {
+  const range = { start: 7345, count: 4 };
+  const busy = new Set([7347]);
+  const available = async (port: number) => !busy.has(port);
+  assert.equal(await pickPort(range, new Set([7345, 7346]), available, () => 0), 7348);
+  const seen = new Set<number>();
+  for (const value of [0, 0.4, 0.99]) seen.add(await pickPort(range, new Set([7345]), available, () => value));
+  assert.ok([...seen].every((port) => port === 7346 || port === 7348));
+  await assert.rejects(pickPort(range, new Set([7345, 7346, 7348]), available), /no free port between 7345 and 7348/);
+});
+
+test('a port held on the wildcard address is not available', async () => {
+  const server = createServer();
+  await new Promise<void>((resolve) => server.listen(0, '0.0.0.0', resolve));
+  const { port } = server.address() as { port: number };
+  try {
+    assert.equal(await portAvailable(port), false);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+  assert.equal(await portAvailable(port), true);
 });

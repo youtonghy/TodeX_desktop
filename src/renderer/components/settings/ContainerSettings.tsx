@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { RiAddLine, RiDeleteBinLine, RiExternalLinkLine, RiRefreshLine } from '@remixicon/react';
 import { Chip, type ChipProps } from '@/components/base/badges/chip';
 import { Button } from '@/components/base/buttons/button';
+import { Input } from '@/components/base/input/input';
 import { Checkbox } from '@/components/base/checkbox/checkbox';
 import { Select, SelectItem } from '@/components/base/select/select';
 import { Switch } from '@/components/base/switch/switch';
@@ -25,6 +26,9 @@ const DOCKER_INSTALL_URL = 'https://docs.docker.com/get-started/get-docker/';
 const ROW_SELECT_TRIGGER = 'h-8 w-auto gap-1 rounded-lg px-2 py-1.5';
 const STOPPED_DAYS = [0, 1, 7, 30];
 const FREEZE_MINUTES = [15, 30, 60, 120, 240];
+// Mirrors src/main/container/ports.ts.
+const PORT_START_DEFAULT = 17345;
+const PORT_COUNT_DEFAULT = 100;
 const PHASE_LABELS = {
   pull: 'container.phase.pull',
   start: 'container.phase.start',
@@ -34,6 +38,44 @@ const PHASE_LABELS = {
 } as const satisfies Record<ContainerProgress['phase'], string>;
 
 type T = ReturnType<typeof useT>;
+
+/** A whole number in [min, max], committed on blur or Enter; anything else snaps back. */
+function PortNumberRow({ label, description, value, min, max, onCommit }: {
+  label: string;
+  description: string;
+  value: number;
+  min: number;
+  max: number;
+  onCommit: (value: number) => void;
+}) {
+  const [typed, setTyped] = useState(String(value));
+  useEffect(() => setTyped(String(value)), [value]);
+  const commit = () => {
+    const next = Number(typed.trim());
+    if (Number.isInteger(next) && next >= min && next <= max) {
+      if (next !== value) onCommit(next);
+      setTyped(String(next));
+    } else {
+      setTyped(String(value));
+    }
+  };
+  return (
+    <SettingsRow label={label} description={description}>
+      <Input
+        aria-label={label}
+        size="small"
+        className="w-28"
+        inputMode="numeric"
+        value={typed}
+        onChange={setTyped}
+        onBlur={commit}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') commit();
+        }}
+      />
+    </SettingsRow>
+  );
+}
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -280,6 +322,27 @@ export function ContainerSettings({ session, deviceName }: { session: TodeXSessi
         </SettingsCard>
       </SettingsGroup>
 
+      <SettingsGroup label={t('container.ports.title')} description={t('container.ports.hint')}>
+        <SettingsCard>
+          <PortNumberRow
+            label={t('container.ports.start')}
+            description={t('container.ports.startHint')}
+            value={prefs.portStart ?? PORT_START_DEFAULT}
+            min={1024}
+            max={65535}
+            onCommit={(portStart) => updatePrefs({ portStart })}
+          />
+          <PortNumberRow
+            label={t('container.ports.count')}
+            description={t('container.ports.countHint')}
+            value={prefs.portCount ?? PORT_COUNT_DEFAULT}
+            min={1}
+            max={1000}
+            onCommit={(portCount) => updatePrefs({ portCount })}
+          />
+        </SettingsCard>
+      </SettingsGroup>
+
       <SettingsGroup label={t('container.cleanup.title')} description={t('container.cleanup.hint')}>
         <SettingsCard>
           <SettingsRow label={t('container.cleanup.images')} description={t('container.cleanup.imagesHint')}>
@@ -389,7 +452,7 @@ function ContainerCard({ session, deviceName, item, busy, progress, error, onCon
       <SettingsCard>
         <SettingsRow
           label={item.name}
-          description={[item.image, item.port ? `${item.listen ?? '127.0.0.1'}:${item.port}` : null].filter(Boolean).join(' · ')}
+          description={[item.image, item.port ? `${item.listen ?? '127.0.0.1'}:${item.port}` : item.managed ? t('container.socketOnly') : null].filter(Boolean).join(' · ')}
         >
           {busy ? <Spinner aria-label={t('container.working')} /> : null}
           <Chip variant="caption" color={chip.color}>{chip.label}</Chip>

@@ -3,6 +3,7 @@ import type { ContainerPrefs } from '../../../preload/containerTypes';
 import { useT } from '../../i18n';
 import { loadJson } from '../../lib/storage';
 import { enabledProfileIds, freezeContainer, isFrozenProfile, noteContainerState, wakeProfile } from '../../session/containerFreeze';
+import { followMovedPort } from '../../session/containerConnection';
 import { backendActive, idleExpired } from '../../session/containerIdle';
 import { CONTAINER_PREFS_KEY } from '../../session/containerPrefs';
 import type { TodeXSession } from '../../session/useTodeXSession';
@@ -11,9 +12,11 @@ import { toast } from '../ui/toast';
 const SAMPLE_MS = 30_000;
 
 /**
- * Settings → TodeX Container → Auto-freeze: pauses a container once nothing
- * ran on its backend (as this app sees it) for the chosen time, and wakes it
- * for a send, a terminal, or opening one of its workspaces. Renders nothing.
+ * Samples the containers every 30 s: re-points the profiles of containers
+ * moved to another host port, and runs Settings → TodeX Container →
+ * Auto-freeze, which pauses a container once nothing ran on its backend (as
+ * this app sees it) for the chosen time, and wakes it for a send, a terminal,
+ * or opening one of its workspaces. Renders nothing.
  */
 export function ContainerFreezer({ session }: { session: TodeXSession }) {
   const t = useT();
@@ -54,6 +57,8 @@ export function ContainerFreezer({ session }: { session: TodeXSession }) {
         const current = sessionRef.current;
         noteContainerState(current, item);
         if (item.state !== 'running') continue;
+        // Profiles follow a container Desktop moved off a conflicting port (e.g. at launch).
+        if (item.formerPorts.length) await followMovedPort(current, item);
         const profiles = enabledProfileIds(current.backendConnections, item);
         // Only containers this app uses: it cannot see who else might.
         if (!profiles.length || !profiles.some((id) => current.backendLinkStatus[id]?.state === 'open')) {
