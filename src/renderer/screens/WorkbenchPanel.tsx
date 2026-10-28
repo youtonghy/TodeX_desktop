@@ -1435,10 +1435,7 @@ function FilesPane({ session, target, onTargetChange, remote, remoteBackendId, o
       else if (action === 'open-with') await files.openWith(path);
       else await files.reveal(path);
     } catch (reason) {
-      const message = reason instanceof Error
-        ? reason.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
-        : '';
-      toast.danger(message || t('workbench.openFailed'));
+      toast.danger((reason instanceof Error && reason.message) || t('workbench.openFailed'));
     }
   };
 

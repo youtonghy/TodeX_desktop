@@ -387,7 +387,8 @@ function useSetupRunStep({ active, target, script, workspaceName, onFinish }: {
   }, [api, target, script]);
 
   useEffect(() => api.onSetupOutput((output) => {
-    if (output.jobId === jobRef.current) setLines((current) => [...current, output.line].slice(-SETUP_LOG_LINES));
+    // Output arrives in batches of lines.
+    if (output.jobId === jobRef.current) setLines((current) => [...current, ...output.lines].slice(-SETUP_LOG_LINES));
   }), [api]);
   useEffect(() => api.onSetupDone((done) => {
     if (done.jobId !== jobRef.current) return;

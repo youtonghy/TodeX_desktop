@@ -341,9 +341,4 @@ contextBridge.executeInMainWorld({
   args: [api],
 });
 
-export type TodeXDesktopApi = typeof api & {
-  /** @deprecated The desktop bridge has no `git` API any more; this optional
-   * slot only keeps the browser bridge's leftover stub type-checking until it
-   * is removed there. */
-  git?: unknown;
-};
+export type TodeXDesktopApi = typeof api;

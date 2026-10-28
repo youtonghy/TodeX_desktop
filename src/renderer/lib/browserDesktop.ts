@@ -91,10 +91,6 @@ export function installBrowserDesktopBridge(): void {
     locale: {
       set: () => undefined,
     },
-    git: {
-      scan: async () => [],
-      run: async () => ({ output: t('storage.browserGit') }),
-    },
     theme: browserTheme(),
     // No Electron: no native preview or agent browser views, no executor.
     preview: {
