@@ -55,6 +55,9 @@ export function sortFileEntries<T extends FileSourceEntry>(entries: T[]): T[] {
   return [...entries].sort((left, right) => Number(right.kind === 'directory') - Number(left.kind === 'directory') || NAME_COLLATOR.compare(left.name, right.name));
 }
 
+/** Entries a remote (SSH) listing returns at most (the backend's cap). */
+export const REMOTE_LIST_LIMIT = 5000;
+
 /** Entries a workspace listing returns at most; a full page may be cut off. */
 export const WORKSPACE_LIST_LIMIT = 100;
 
@@ -163,6 +166,9 @@ export function remoteFileSource(api: () => V2ApiClient, binding: RemoteFilesBin
     rootPath: binding.homeDirectory || '/',
     canAddReference: false,
     canUseSystemShell: false,
+    // The backend lists at most this many entries (then flags `truncated`),
+    // so a full listing gets the tree's "more not shown" note.
+    listLimit: REMOTE_LIST_LIMIT,
     list: async (directory) => (await api().listRemoteEntries(id, directory)).entries,
     read: (path) => api().readRemoteFile(id, path),
     save: (path, text, expectedText) => api().saveRemoteFile(id, path, text, expectedText),

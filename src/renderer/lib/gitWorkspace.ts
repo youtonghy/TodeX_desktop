@@ -62,6 +62,13 @@ export class GitWorkspaceError extends Error {
   }
 }
 
+/** `pathname` relative to the server URL: the transport adds the server's
+ * own path (a proxied `https://host/backend/<id>`) itself. */
+function apiPath(serverUrl: string, pathname: string): string {
+  const base = new URL(buildHttpUrl(serverUrl, '/')).pathname.replace(/\/+$/, '');
+  return base && pathname.startsWith(`${base}/`) ? pathname.slice(base.length) : pathname;
+}
+
 async function request<T>(settings: ConnectionSettings, url: string, operation?: GitWorkspaceOperation,
   workspacePath?: string, externalSignal?: AbortSignal): Promise<T> {
   const controller = new AbortController();
@@ -73,7 +80,7 @@ async function request<T>(settings: ConnectionSettings, url: string, operation?:
     const parsedUrl = new URL(url);
     const response = await backendFetch(settings, {
       method: operation ? 'POST' : 'GET',
-      path: parsedUrl.pathname,
+      path: apiPath(settings.serverUrl, parsedUrl.pathname),
       query: parsedUrl.search,
       headers: operation ? { 'content-type': 'application/json', accept: 'application/json' } : { accept: 'application/json' },
       body: operation ? JSON.stringify({ workspacePath, operation }) : undefined,

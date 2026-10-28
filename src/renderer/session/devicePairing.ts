@@ -27,7 +27,11 @@ export type DevicePairingRequest = {
   verificationCode: string;
   /** Fingerprint of the transport key the code authenticates (`'none'` for loopback plaintext). */
   transportFingerprint: string;
+  /** When it expires on this device's clock (the server's time, corrected
+   * by the skew its `Date` header shows). */
   expiresAt: number;
+  /** How often the server asks to be polled. */
+  pollIntervalMs: number;
   poll: (signal?: AbortSignal) => Promise<DevicePairingResult>;
   cancel: (signal?: AbortSignal) => Promise<void>;
 };
@@ -108,7 +112,7 @@ function object(value: unknown): Record<string, unknown> {
 // Pairing runs before a transport key is pinned, so its routes are called
 // directly (they are on the backend's plaintext allow-list), never through
 // the `/v2/sealed` tunnel.
-async function post(serverUrl: string, action: string, body: unknown, signal?: AbortSignal): Promise<Record<string, unknown>> {
+async function post(serverUrl: string, action: string, body: unknown, signal?: AbortSignal, meta?: { serverTime?: number }): Promise<Record<string, unknown>> {
   const url = new URL(buildHttpUrl(serverUrl, `/v2/device-pairing/${action}`));
   if (!PAIRING_PROTOCOLS.includes(url.protocol) || url.username || url.password) {
     throw new Error(t('pair.errInvalidUrl'));
@@ -137,8 +141,12 @@ async function post(serverUrl: string, action: string, body: unknown, signal?: A
     } catch (error) {
       throw networkFailure(error);
     }
+    const serverTime = Date.parse(response.headers.get('date') ?? '');
+    if (meta && Number.isFinite(serverTime)) meta.serverTime = serverTime;
     if (!response.ok) {
       if (response.status === 404) throw new Error(t('pair.errUnsupported'));
+      // A repeated reveal or a request decided meanwhile.
+      if (response.status === 409) throw new Error(t('pair.errConflict'));
       if (response.status === 429) {
         throw new DevicePairingRetryableError(t('pair.errTooMany'), retryAfterMs(response.headers.get('Retry-After')));
       }
@@ -192,6 +200,30 @@ async function post(serverUrl: string, action: string, body: unknown, signal?: A
  * (a bootstrap route the backend serves directly, like pairing). Used only
  * to tell the user how to approve; `host` when it cannot be read or an older
  * backend omits it. */
+/** The body as text, or null once it passes `limit` bytes (reading stops). */
+async function readTextCapped(response: Response, limit: number): Promise<string | null> {
+  const reader = response.body?.getReader();
+  if (!reader) return '';
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.length;
+      if (size > limit) {
+        await reader.cancel();
+        return null;
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const decoder = new TextDecoder();
+  return chunks.map((chunk, index) => decoder.decode(chunk, { stream: index < chunks.length - 1 })).join('');
+}
+
 export async function fetchBackendDeployment(serverUrl: string, signal?: AbortSignal): Promise<BackendDeployment> {
   const url = new URL(buildHttpUrl(serverUrl, '/v2/version'));
   if (!PAIRING_PROTOCOLS.includes(url.protocol) || url.username || url.password) return 'host';
@@ -209,8 +241,11 @@ export async function fetchBackendDeployment(serverUrl: string, signal?: AbortSi
       redirect: 'error',
     });
     if (!response.ok) return 'host';
-    const text = await response.text();
-    if (text.length > MAX_RESPONSE_BYTES) return 'host';
+    // Refused before reading when the length is declared too large; the
+    // body itself is read only up to the cap.
+    if (Number(response.headers.get('content-length')) > MAX_RESPONSE_BYTES) return 'host';
+    const text = await readTextCapped(response, MAX_RESPONSE_BYTES);
+    if (text === null) return 'host';
     const body = JSON.parse(text) as unknown;
     return parseBackendDeployment(body && typeof body === 'object' ? (body as Record<string, unknown>).deployment : undefined);
   } catch {
@@ -246,18 +281,28 @@ export async function beginDevicePairing(serverUrl: string, deviceName: string, 
   const devicePublicKey = decodeBase64Url(device.publicKey);
   const boundName = normalizeDevicePairingName(deviceName, 'TodeX');
   try {
+    const meta: { serverTime?: number } = {};
+    const sentAt = Date.now();
     const response = await post(serverUrl, 'create', {
       transportBinding: 1,
       deviceNameBinding: 1,
       clientCommitment: encode(devicePairingV3Commitment(keys.publicKey, clientNonce)),
       devicePublicKey: device.publicKey,
       deviceName: boundName,
-    }, signal);
-    const { requestId, expiresAt } = response;
+    }, signal, meta);
+    const { requestId, expiresAt: serverExpiresAt } = response;
     if (typeof requestId !== 'string' || !uuidPattern.test(requestId)
-      || typeof expiresAt !== 'number' || !Number.isSafeInteger(expiresAt) || expiresAt <= Date.now()) {
+      || typeof serverExpiresAt !== 'number' || !Number.isSafeInteger(serverExpiresAt)) {
       throw new Error(t('pair.errInvalidRequest'));
     }
+    // `expiresAt` is on the server's clock: a client clock running ahead
+    // would otherwise expire every request on arrival.
+    const skew = meta.serverTime === undefined ? 0 : meta.serverTime - sentAt;
+    const expiresAt = serverExpiresAt - skew;
+    if (expiresAt <= Date.now()) throw new Error(t('pair.errInvalidRequest'));
+    const pollIntervalMs = typeof response.pollIntervalMs === 'number' && Number.isFinite(response.pollIntervalMs)
+      ? Math.min(Math.max(response.pollIntervalMs, 250), PAIRING_POLL_MAX_BACKOFF_MS)
+      : PAIRING_POLL_INTERVAL_MS;
     const serverKey = decode(response.serverPublicKey, 32);
     const transport = pairingTransport(response, serverUrl);
     try {
@@ -294,6 +339,7 @@ export async function beginDevicePairing(serverUrl: string, deviceName: string, 
       verificationCode: material.verificationCode,
       transportFingerprint: transportFingerprint(transport.protocol, transport.publicKeyRaw),
       expiresAt,
+      pollIntervalMs,
       async poll(pollSignal) {
         if (finished || Date.now() >= expiresAt) { dispose(); return { status: 'expired' }; }
         if (polling) throw new Error(t('pair.errPolling'));

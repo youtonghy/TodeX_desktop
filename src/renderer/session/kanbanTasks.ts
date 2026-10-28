@@ -14,7 +14,8 @@ import {
   type KanbanTimeZone,
 } from '@todex/protocol/todex';
 import { loadJson, saveJson } from '../lib/storage';
-import { KANBAN_TASKS_STORAGE_KEY, WORKSPACE_SYNC_DEBOUNCE_MS, backendFetch, type BackendTransportProfile } from './helpers';
+import { KANBAN_TASKS_STORAGE_KEY, WORKSPACE_SYNC_DEBOUNCE_MS, backendFetch, readBackendError, type BackendTransportProfile } from './helpers';
+import { toast } from '../components/ui/toast';
 import { t } from '../i18n';
 
 export type { KanbanTask, KanbanTaskPriority, KanbanTaskSchedule, KanbanTaskStatus, KanbanTimeZone };
@@ -71,6 +72,8 @@ type KanbanSyncLink = {
   pushAgain: boolean;
   // Zone of the backend, which runs schedules in its own local time.
   timeZone: KanbanTimeZone | null;
+  // The last refusal shown, so a push retried every poll warns once.
+  shownError?: string;
 };
 const syncLinks = new Map<string, KanbanSyncLink>();
 // The backend the UI focuses (its zone is shown), and which backend owns a
@@ -204,9 +207,14 @@ export async function syncKanbanTasksFromBackend(backendConnectionId?: string): 
     if (!response.ok) {
       throw new Error(`kanban task sync returned ${response.status}`);
     }
-    applyRemoteResponse(await response.json(), link);
-    // Upload local additions and tombstones the backend does not know yet.
-    scheduleKanbanBackendPush(link);
+    const body: unknown = await response.json();
+    applyRemoteResponse(body, link);
+    // Upload local additions and tombstones the backend does not know yet;
+    // an unchanged board is not sent back on every poll.
+    const remote = parseKanbanSyncResponse(body).map((task) => ({ ...task, backendConnectionId }));
+    if (JSON.stringify(prepareKanbanSyncPayload(tasksForConnection(backendConnectionId))) !== JSON.stringify(prepareKanbanSyncPayload(remote))) {
+      scheduleKanbanBackendPush(link);
+    }
   } catch (error) {
     console.warn('kanban task sync failed', error);
   }
@@ -261,8 +269,16 @@ async function pushKanbanTasksToBackend(link: KanbanSyncLink): Promise<void> {
       return;
     }
     if (!response.ok) {
-      throw new Error(`kanban task sync returned ${response.status}`);
+      const error = await readBackendError(response, t('kanban.syncFailed'));
+      // The backend refused the board itself (too many tasks, an invalid
+      // field): retrying cannot help, so the user is told once.
+      if (response.status >= 400 && response.status < 500 && link.shownError !== error.message) {
+        link.shownError = error.message;
+        toast.danger(error.message);
+      }
+      throw error;
     }
+    link.shownError = undefined;
     applyRemoteResponse(await response.json(), link);
   } catch (error) {
     console.warn('kanban task sync failed', error);

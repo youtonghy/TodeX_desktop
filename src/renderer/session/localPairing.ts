@@ -37,34 +37,51 @@ export async function pairWithLocalApproval(options: {
     : generateDeviceIdentity().secretKey;
   const device = deviceIdentityFromSecret(deviceSecret)!;
   const request = await beginDevicePairing(options.serverUrl, options.deviceName, device, options.signal);
+  // Any way out but approval withdraws the request, so an approval that
+  // lands after an abort enrolls no key nobody holds.
+  let approved = false;
   try {
     await options.approve(request);
-  } catch (error) {
-    await request.cancel().catch(() => undefined);
-    throw error;
-  }
-  let delay = 0;
-  for (;;) {
-    if (options.signal?.aborted) throw new DOMException('Aborted', 'AbortError');
-    if (Date.now() >= request.expiresAt) throw new Error(t('localBackend.pairExpired'));
-    if (delay) await new Promise((resolve) => setTimeout(resolve, delay));
-    try {
-      const result = await request.poll(options.signal);
-      if (result.status === 'approved') {
-        return {
-          deviceSecret,
-          encryptionProtocol: result.pin.encryptionProtocol,
-          encryptionPublicKey: result.pin.encryptionPublicKey,
-          transportVerified: true,
-        };
+    let delay = 0;
+    for (;;) {
+      if (options.signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+      if (Date.now() >= request.expiresAt) throw new Error(t('localBackend.pairExpired'));
+      if (delay) await abortableDelay(delay, options.signal);
+      try {
+        const result = await request.poll(options.signal);
+        if (result.status === 'approved') {
+          approved = true;
+          return {
+            deviceSecret,
+            encryptionProtocol: result.pin.encryptionProtocol,
+            encryptionPublicKey: result.pin.encryptionPublicKey,
+            transportVerified: true,
+          };
+        }
+        if (result.status !== 'pending') throw new Error(t(result.status === 'rejected' ? 'localBackend.pairRejected' : 'localBackend.pairExpired'));
+        delay = delay ? (request.pollIntervalMs || PAIRING_POLL_INTERVAL_MS) : 300;
+      } catch (error) {
+        if (!(error instanceof DevicePairingRetryableError)) throw error;
+        delay = nextPairingPollDelayMs(delay || request.pollIntervalMs || PAIRING_POLL_INTERVAL_MS, error);
       }
-      if (result.status !== 'pending') throw new Error(t(result.status === 'rejected' ? 'localBackend.pairRejected' : 'localBackend.pairExpired'));
-      delay = delay ? PAIRING_POLL_INTERVAL_MS : 300;
-    } catch (error) {
-      if (!(error instanceof DevicePairingRetryableError)) throw error;
-      delay = nextPairingPollDelayMs(delay || PAIRING_POLL_INTERVAL_MS, error);
     }
+  } finally {
+    if (!approved) await request.cancel().catch(() => undefined);
   }
+}
+
+function abortableDelay(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new DOMException('Aborted', 'AbortError'));
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
 }
 
 type ManagedSession = {

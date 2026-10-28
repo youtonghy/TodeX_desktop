@@ -2196,9 +2196,39 @@ function withLocalizedRequestLimits(transport: SecureTransport): SecureTransport
   return wrapped;
 }
 
-/** A signed backend request through the profile's transport, answered as a standard `Response`. */
+/** How long a request without its own signal may take, as V2ApiClient allows. */
+export const BACKEND_FETCH_TIMEOUT_MS = 30_000;
+
+/** A signed backend request through the profile's transport, answered as a
+ * standard `Response`. Without a caller signal it gives up after
+ * `BACKEND_FETCH_TIMEOUT_MS`, so a stalled backend cannot hold a sync. */
 export async function backendFetch(settings: BackendTransportProfile, request: SecureRequest): Promise<Response> {
-  return toFetchResponse(await backendTransport(settings).fetch(request));
+  const signal = request.signal ?? AbortSignal.timeout(BACKEND_FETCH_TIMEOUT_MS);
+  return toFetchResponse(await backendTransport(settings).fetch({ ...request, signal }));
+}
+
+/** A failed backend request: the server's `code` and message when it sent one. */
+export class BackendRequestError extends Error {
+  constructor(message: string, readonly status: number, readonly code?: string) {
+    super(message);
+    this.name = 'BackendRequestError';
+  }
+
+  /** 401 / UNAUTHENTICATED: the device is not (or no longer) paired. */
+  get unauthenticated(): boolean {
+    return this.status === 401 || this.code === 'UNAUTHENTICATED';
+  }
+}
+
+/** Reads the backend's error body (`{ code, message }`, or local-admin's
+ * `{ error: { code, message } }`) into a `BackendRequestError`; `fallback`
+ * names the request when the body says nothing. */
+export async function readBackendError(response: Response, fallback: string): Promise<BackendRequestError> {
+  const body = await response.json().catch(() => null) as Record<string, unknown> | null;
+  const error = body && typeof body.error === 'object' && body.error ? body.error as Record<string, unknown> : body;
+  const message = typeof error?.message === 'string' && error.message.trim() ? error.message : '';
+  const code = typeof error?.code === 'string' ? error.code : undefined;
+  return new BackendRequestError(message ? `${fallback}: ${message}` : `${fallback} (HTTP ${response.status})`, response.status, code);
 }
 
 /**
@@ -3483,19 +3513,27 @@ export function createDefaultConversation(workspace: WorkspaceRecord): Conversat
   };
 }
 
+/** The conversations of `workspaces`, newest first; a workspace without any
+ * gets a draft (only those in `draftsFor` when given). Returns
+ * `conversations` itself when that is already the result, so a periodic sync
+ * does not re-render. */
 export function conversationsForWorkspaceSnapshot(
   workspaces: WorkspaceRecord[],
   conversations: ConversationRecord[],
+  draftsFor?: ReadonlySet<string>,
 ): ConversationRecord[] {
   const workspaceIds = new Set(workspaces.map((workspace) => workspace.id));
   const next = conversations.filter((conversation) => workspaceIds.has(conversation.workspaceId));
   const existingWorkspaceIds = new Set(next.map((conversation) => conversation.workspaceId));
   for (const workspace of workspaces) {
-    if (!existingWorkspaceIds.has(workspace.id)) {
+    if (!existingWorkspaceIds.has(workspace.id) && (!draftsFor || draftsFor.has(workspace.id))) {
       next.push(createDefaultConversation(workspace));
     }
   }
-  return next.sort((left, right) => right.updatedAt - left.updatedAt);
+  next.sort((left, right) => right.updatedAt - left.updatedAt);
+  return next.length === conversations.length && next.every((conversation, index) => conversation === conversations[index])
+    ? conversations
+    : next;
 }
 
 export function forkConversationRecord(conversation: ConversationRecord, title?: string): ConversationRecord {

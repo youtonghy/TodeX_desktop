@@ -227,6 +227,7 @@ import {
   fromPersistedSettings,
   backendApi,
   backendFetch,
+  readBackendError,
   backendTransport,
   describeTransportFailure,
   sendSocketText,
@@ -517,6 +518,15 @@ export type BackendWakeGate = {
   /** Resolves once the backend is reachable again; the held action then runs. */
   wake: (backendId: string) => Promise<void>;
 };
+
+/** How long an opened socket may take to become ready (hello, or open over IPC). */
+const SOCKET_OPEN_TIMEOUT_MS = 20_000;
+
+/** `record` with `key` set to `value`; the same object when nothing changes,
+ * so per-event status writes skip the re-render. */
+function withEntry<Value>(record: Record<string, Value>, key: string, value: Value): Record<string, Value> {
+  return record[key] === value ? record : { ...record, [key]: value };
+}
 
 /** Slash commands a v2 conversation runs in the client (pickers, drafts,
  * views) rather than through the legacy local Codex session. */
@@ -914,6 +924,29 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const [earlierHistory, setEarlierHistory] = useState<Record<string, EarlierHistoryStatus>>({});
   const [submissionStatusByConversation, setSubmissionStatusByConversation] = useState<Record<string, 'sending' | 'running' | 'unknown' | undefined>>({});
   const settledV2TurnsRef = useRef(new Map<string, string>());
+  /** Drops per-conversation state the app rebuilds when a conversation is
+   * opened again (diff text, subagent and agent-call lists, memories); with
+   * `drafts`, also what only a deleted conversation can lose (composer text,
+   * attachments that may hold image data). Keeps long sessions bounded. */
+  const pruneConversationState = useCallback((ids: readonly string[], { drafts = false }: { drafts?: boolean } = {}) => {
+    if (!ids.length) return;
+    const without = <T,>(current: Record<string, T>) => {
+      if (!ids.some((id) => id in current)) return current;
+      const next = { ...current };
+      for (const id of ids) delete next[id];
+      return next;
+    };
+    setGitDiffByConversation(without);
+    setSubagentsByConversation(without);
+    setAgentCallsByConversation(without);
+    setMemoryEntriesByConversation(without);
+    if (drafts) {
+      setChatDrafts(without);
+      setComposerSelections(without);
+      setComposerAttachments(without);
+      setSelectedSkills(without);
+    }
+  }, [setChatDrafts]);
   // Runtime entries keep their identity until an event changes them; reuse
   // the stamped copy so chat rows stay memoized while other rows stream.
   const stampedTimelineEntriesRef = useRef(new WeakMap<TimelineEntry, TimelineEntry>());
@@ -986,6 +1019,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   ])), [backendConnections]);
   const directorySyncStatus = directorySyncByBackend[activeBackendConnectionId] ?? (hydrated ? 'ready' : 'loading');
 
+  // A conversation list requested before a create, fork or delete on its
+  // backend is stale: merging it would drop the new conversation (or bring
+  // the deleted one back) until the next poll, so it is skipped.
+  const manifestEpochsRef = useRef(new Map<string, number>());
+  const manifestEpoch = (backendId: string) => manifestEpochsRef.current.get(backendId) ?? 0;
+  const bumpManifestEpoch = (backendId: string) => { manifestEpochsRef.current.set(backendId, manifestEpoch(backendId) + 1); };
+
   // Every backend's agents and conversation list, refreshed over HTTP.
   useEffect(() => {
     if (!hydrated) return;
@@ -996,12 +1036,15 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       const backendId = profile.id;
       let active = true;
       setDirectorySyncByBackend((current) => ({ ...current, [backendId]: 'loading' }));
+      const firstEpoch = manifestEpoch(backendId);
       void Promise.all([api.listProviders(), api.listConversations()])
         .then(([providers, conversations]) => {
           if (!active) return;
           setBackendProviders(backendId, providers.providers);
-          setBackendManifests(backendId, conversations.conversations);
-          setConversations((current) => mergeManifestConversations(current, withDecryptedTitles(backendId, conversations.conversations), workspacesRef.current, backendId, manifestRunModes(backendId, providers.providers)));
+          if (manifestEpoch(backendId) === firstEpoch) {
+            setBackendManifests(backendId, conversations.conversations);
+            setConversations((current) => mergeManifestConversations(current, withDecryptedTitles(backendId, conversations.conversations), workspacesRef.current, backendId, manifestRunModes(backendId, providers.providers)));
+          }
           setDirectorySyncByBackend((current) => ({ ...current, [backendId]: 'ready' }));
         })
         .catch(() => {
@@ -1011,8 +1054,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           setBackendManifests(backendId, []);
         });
       const refreshTimer = setInterval(() => {
+        if (document.visibilityState === 'hidden') return;
+        const epoch = manifestEpoch(backendId);
         void api.listConversations().then((response) => {
-          if (!active) return;
+          if (!active || manifestEpoch(backendId) !== epoch) return;
           setBackendManifests(backendId, response.conversations);
           setConversations((current) => mergeManifestConversations(current, withDecryptedTitles(backendId, response.conversations), workspacesRef.current, backendId, manifestRunModes(backendId)));
         }).catch(() => undefined);
@@ -1357,6 +1402,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     link.verified = false;
     link.healthProbeSeq += 1;
     link.commands.disconnect();
+    // Replays requested over this socket will never be answered.
+    legacyRecoveryRef.current.resetRequests();
     if (manual) {
       link.manualDisconnect = true;
       patchLinkStatus(backendId, { state: 'closed' });
@@ -1736,11 +1783,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           headers: { 'content-type': 'application/json', accept: 'application/json' },
           body,
         });
-        if (!response.ok) {
-          const errorBody = await response.json().catch(() => null) as { message?: unknown } | null;
-          const message = typeof errorBody?.message === 'string' ? errorBody.message : '';
-          throw new Error(message ? `workspace sync failed: ${message}` : `workspace sync returned ${response.status}`);
-        }
+        if (!response.ok) throw await readBackendError(response, t('sess.workspaceSyncFailed'));
         const payload = await response.json().catch(() => null);
         applyWorkspaceSyncRejections(backendId, parseWorkspaceSyncRejected(payload));
         return true;
@@ -1782,11 +1825,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         path: '/v2/workspaces',
         headers: { accept: 'application/json' },
       });
-      if (!response.ok) {
-        const errorBody = await response.json().catch(() => null) as { message?: unknown } | null;
-        const message = typeof errorBody?.message === 'string' ? errorBody.message : '';
-        throw new Error(message ? `workspace sync failed: ${message}` : `workspace sync returned ${response.status}`);
-      }
+      if (!response.ok) throw await readBackendError(response, t('sess.workspaceSyncFailed'));
       const syncBody = await response.json().catch(() => null);
       const remoteWorkspaces = parseWorkspaceSyncResponse(syncBody);
       const remoteRejections = parseWorkspaceSyncRejected(syncBody);
@@ -1851,31 +1890,45 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       ];
 
       if (nextWorkspaces.length > 0) {
+        const remappedFrom = conversationsRef.current;
         const remappedConversations = remapWorkspaceScopedRecords(
-          conversationsRef.current,
+          remappedFrom,
           localScopedWorkspaces,
           nextScopedWorkspaces,
         );
-        const nextConversations = conversationsForWorkspaceSnapshot(nextWorkspaces, remappedConversations);
         const remappedActive = remapWorkspaceScopedRecords(
           [{ workspaceId: activeWorkspaceRef.current }],
           localScopedWorkspaces,
           nextScopedWorkspaces,
         )[0]?.workspaceId ?? activeWorkspaceRef.current;
-        workspaceBackendSkipNextSaveRef.current.add(backendId);
+        // Only the workspace left in view gets a draft: drafts elsewhere are
+        // dropped as unused right after, so adding them re-rendered every sync.
+        const viewedWorkspaceId = nextWorkspaces.some((workspace) => workspace.id === remappedActive) ? remappedActive : nextWorkspaces[0]?.id ?? '';
+        const nextConversations = conversationsForWorkspaceSnapshot(nextWorkspaces, remappedConversations, new Set([viewedWorkspaceId]));
         workspacesRef.current = nextWorkspaces;
         conversationsRef.current = nextConversations;
         // Splice this backend's scope into the latest list, so updates queued
         // meanwhile (another backend's sync, rejection flags) are kept.
         const scoped = nextWorkspaces.filter((workspace) => !isNoneWorkspaceId(workspace.id) && workspace.backendConnectionId === backendId);
-        setWorkspaces((latest) => [
-          ...[
-            ...latest.filter((workspace) => !isNoneWorkspaceId(workspace.id) && workspace.backendConnectionId !== backendId),
-            ...scoped,
-          ].sort((left, right) => right.updatedAt - left.updatedAt),
-          ...latest.filter((workspace) => isNoneWorkspaceId(workspace.id)),
-        ]);
-        setConversations(nextConversations);
+        setWorkspaces((latest) => {
+          const next = [
+            ...[
+              ...latest.filter((workspace) => !isNoneWorkspaceId(workspace.id) && workspace.backendConnectionId !== backendId),
+              ...scoped,
+            ].sort((left, right) => right.updatedAt - left.updatedAt),
+            ...latest.filter((workspace) => isNoneWorkspaceId(workspace.id)),
+          ];
+          // An unchanged directory keeps the list (and every consumer) as is;
+          // a changed one came from the backend, so it is not pushed back.
+          if (JSON.stringify(next) === JSON.stringify(latest)) return latest;
+          workspaceBackendSkipNextSaveRef.current.add(backendId);
+          return next;
+        });
+        // Computed from the latest list: updates queued since the refs were
+        // read (sequence marks, read marks, renames) must not be lost.
+        setConversations((latest) => (latest === remappedFrom
+          ? nextConversations
+          : conversationsForWorkspaceSnapshot(nextWorkspaces, remapWorkspaceScopedRecords(latest, localScopedWorkspaces, nextScopedWorkspaces), new Set([viewedWorkspaceId]))));
         setTimeline((current) => remapWorkspaceScopedRecords(current, localScopedWorkspaces, nextScopedWorkspaces));
         setMentionHistory((current) => remapWorkspaceScopedRecords(current, localScopedWorkspaces, nextScopedWorkspaces));
         if (remappedActive !== activeWorkspaceRef.current) {
@@ -1893,9 +1946,12 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       link.workspaceReady = true;
       if (listConversations) {
         try {
+          const epoch = manifestEpoch(backendId);
           const conversationResponse = await backendApi(profile).listConversations();
-          setBackendManifests(backendId, conversationResponse.conversations);
-          setConversations((current) => mergeManifestConversations(current, withDecryptedTitles(backendId, conversationResponse.conversations), workspacesRef.current, backendId, manifestRunModes(backendId)));
+          if (manifestEpoch(backendId) === epoch) {
+            setBackendManifests(backendId, conversationResponse.conversations);
+            setConversations((current) => mergeManifestConversations(current, withDecryptedTitles(backendId, conversationResponse.conversations), workspacesRef.current, backendId, manifestRunModes(backendId)));
+          }
         } catch (error) {
           setLastError(error instanceof Error ? error.message : t('sess.conversationDirSyncFailed'));
         }
@@ -1931,6 +1987,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     }
     if (!openIds.size) return;
     const timer = setInterval(() => {
+      // A hidden window catches up on its next tick after it is shown again.
+      if (document.visibilityState === 'hidden') return;
       for (const backendId of openIds) {
         void syncWorkspacesFromBackend(backendId, { listConversations: false });
         void syncKanbanTasksFromBackend(backendId);
@@ -2030,6 +2088,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const refreshCapabilityCatalog = useCallback(async (provider: ProviderKind) => {
     const workspacePath = activeWorkspace?.path || settings.defaultWorkspacePath;
     if (!workspacePath) return;
+    // Catalogs are keyed by provider only: a reply for the workspace (or
+    // backend) left meanwhile must not land in the new one as `ready`.
+    const scope = capabilityWorkspaceRef.current;
     setCapabilityCatalogs((current) => ({ ...current, [provider]: { ...(current[provider] ?? {}), status: 'loading', error: undefined } }));
     const api = backendApi(settings);
     try {
@@ -2037,8 +2098,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         discoveryLimit(() => api.listSkillCatalog(provider, workspacePath)),
         discoveryLimit(() => api.listMcpCatalog(provider, workspacePath)),
       ]);
+      if (capabilityWorkspaceRef.current !== scope) return;
       setCapabilityCatalogs((current) => ({ ...current, [provider]: { status: 'ready', skills, mcp } }));
     } catch (error) {
+      if (capabilityWorkspaceRef.current !== scope) return;
       setCapabilityCatalogs((current) => ({
         ...current,
         [provider]: { ...(current[provider] ?? {}), status: 'error', error: error instanceof Error ? error.message : t('sess.catalogReadFailed') },
@@ -2280,10 +2343,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     }
     if (state.pendingControl) {
       controlRequestsRef.current.set(localId, state.pendingControl.requestId);
-      setControlStatusByConversation(current => ({ ...current, [localId]: state.pendingControl!.status }));
+      setControlStatusByConversation(current => withEntry(current, localId, state.pendingControl!.status));
     } else if (!state.activeTurnId) {
       controlRequestsRef.current.delete(localId);
-      setControlStatusByConversation(current => ({ ...current, [localId]: undefined }));
+      setControlStatusByConversation(current => withEntry(current, localId, undefined));
     }
     setRecoveringConversations((current) => (current[localId] === recovering ? current : { ...current, [localId]: recovering }));
     const boundAttachments = bindSentAttachmentEvents(sentAttachmentRecordsRef.current, localId, appliedEvents);
@@ -2350,12 +2413,12 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         controlDraftsRef.current.delete(id);
       }
       if (type === 'control.unknown' && data.requestId === controlRequestsRef.current.get(localId)) {
-        setControlStatusByConversation(current => ({ ...current, [localId]: 'unknown' }));
+        setControlStatusByConversation(current => withEntry(current, localId, 'unknown'));
       }
       if ((type === 'control.completed' || type === 'control.rejected')
         && data.requestId === controlRequestsRef.current.get(localId)) {
         controlRequestsRef.current.delete(localId);
-        setControlStatusByConversation(current => ({ ...current, [localId]: undefined }));
+        setControlStatusByConversation(current => withEntry(current, localId, undefined));
         if (type === 'control.rejected') setLastError(typeof data.message === 'string' ? data.message : t('sess.agentControlRejected'));
       }
       if (['turn.completed', 'turn.cancelled', 'turn.failed', 'turn.interrupted'].includes(type)) {
@@ -2559,6 +2622,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       setRecoveringConversations(withoutReleased);
       setOpenStatusByConversation(withoutReleased);
       setEarlierHistory(withoutReleased);
+      pruneConversationState(released);
     }
     // Agent extension state and command catalogs are rebuilt on demand.
     extensionEffectsRef.current.reset();
@@ -2631,6 +2695,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     setRecoveringConversations(withoutReleased);
     setOpenStatusByConversation(withoutReleased);
     setEarlierHistory(withoutReleased);
+    pruneConversationState(released);
     setTimeline((current) => current.some((entry) => entry.conversationId && releasedIds.has(entry.conversationId))
       ? current.filter((entry) => !entry.conversationId || !releasedIds.has(entry.conversationId)) : current);
   }, []);
@@ -2757,12 +2822,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
 
   // Read marking goes through a dedicated path: bumping updatedAt or
   // lastCompletedAt would disturb sidebar ordering and turn bookkeeping.
-  const markConversationRead = useCallback((conversationId: string) => {
+  const markConversationRead = useCallback((conversationId: string, seenUntil = Date.now()) => {
     setConversations((current) => {
       const index = current.findIndex((item) => item.id === conversationId);
       if (index < 0) return current;
       const readAt = Date.now();
-      if ((current[index].lastReadAt ?? 0) >= readAt) return current;
+      // Already read past everything it shows: no write, no re-render.
+      if ((current[index].lastReadAt ?? 0) >= Math.min(seenUntil, readAt)) return current;
       const next = [...current];
       next[index] = { ...next[index], lastReadAt: readAt };
       return next;
@@ -2775,12 +2841,21 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
 
   // A conversation counts as read while it is on screen in a focused window:
   // opening it, refocusing the app, or watching replies stream in all clear
-  // the unread marker. Activity that lands while hidden stays unread.
+  // the unread marker. Activity that lands while hidden stays unread. Only
+  // new activity (a later row, completion or status) re-marks it, so
+  // streaming into an existing row writes nothing.
+  const activeAttentionAt = useMemo(() => {
+    let latest = Math.max(activeConversationRecord?.updatedAt ?? 0, activeConversationRecord?.lastCompletedAt ?? 0);
+    for (const entry of timeline) {
+      if (entry.conversationId === activeConversationId && entry.at > latest) latest = entry.at;
+    }
+    return latest;
+  }, [activeConversationId, activeConversationRecord?.lastCompletedAt, activeConversationRecord?.updatedAt, timeline]);
   useEffect(() => {
     const markActiveRead = () => {
       if (!activeConversationId) return;
       if (document.visibilityState !== 'visible' || !document.hasFocus()) return;
-      markConversationRead(activeConversationId);
+      markConversationRead(activeConversationId, activeAttentionAt || Date.now());
     };
     markActiveRead();
     window.addEventListener('focus', markActiveRead);
@@ -2789,7 +2864,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       window.removeEventListener('focus', markActiveRead);
       document.removeEventListener('visibilitychange', markActiveRead);
     };
-  }, [activeConversationId, timeline, turnIds, markConversationRead]);
+  }, [activeConversationId, activeAttentionAt, markConversationRead]);
 
   const upsertNativeThreads = useCallback((workspaceId: string, sessionId: string, threads: CodexNativeThread[]) => {
     if (!threads.length) {
@@ -4188,7 +4263,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       controlDraftsRef.current.set(requestId, { conversationId, text: control.text });
       if (controlDraftsRef.current.size > 64) controlDraftsRef.current.delete(controlDraftsRef.current.keys().next().value!);
     }
-    setControlStatusByConversation(current => ({ ...current, [conversationId]: 'pending' }));
+    setControlStatusByConversation(current => withEntry(current, conversationId, 'pending'));
     try {
       const result = await sendProtocolCommand({ id: requestId, type: 'conversation.control', payload: {
         conversationId: conversation.v2ConversationId, expectedTurnId: turnId, control,
@@ -4196,14 +4271,14 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       if (result.status === 'targetUnavailable') throw new Error(t('sess.turnEndedNotApplied'));
       if (controlRequestsRef.current.get(conversationId) === requestId) {
         controlRequestsRef.current.delete(conversationId);
-        setControlStatusByConversation(current => ({ ...current, [conversationId]: undefined }));
+        setControlStatusByConversation(current => withEntry(current, conversationId, undefined));
       }
       return true;
     } catch (error) {
       const unknown = error instanceof ProtocolCommandError && error.state === 'unknown';
       if (controlRequestsRef.current.get(conversationId) === requestId) {
         if (!unknown) controlRequestsRef.current.delete(conversationId);
-        setControlStatusByConversation(current => ({ ...current, [conversationId]: unknown ? 'unknown' : undefined }));
+        setControlStatusByConversation(current => withEntry(current, conversationId, unknown ? 'unknown' : undefined));
       }
       setLastError(error instanceof Error ? error.message : t('sess.agentControlFailed'));
       if (unknown) await recoverConversation(conversationId);
@@ -4241,9 +4316,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         path: '/v2/version',
         headers: { accept: 'application/json' },
       });
-      if (!response.ok) {
-        throw new Error(`version endpoint returned ${response.status}`);
-      }
+      if (!response.ok) throw await readBackendError(response, '/v2/version');
       const json = normalizeServerVersion((await response.json()) as Record<string, unknown>);
       patchLinkStatus(backendId, { serverVersion: json });
       terminalSnapshotRef.current.set(backendId, (json.terminalSnapshot ?? 0) >= 1);
@@ -4270,13 +4343,17 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), CONNECTION_HEALTH_TIMEOUT_MS);
 
-    patchLinkStatus(backendId, (current) => ({
-      health: { ...current.health, status: current.health.status === 'online' ? 'online' : 'checking', error: '' },
-    }));
+    patchLinkStatus(backendId, (current) => {
+      const status = current.health.status === 'online' ? 'online' : 'checking';
+      // Online stays online while the probe runs: no new object, no render.
+      return current.health.status === status && !current.health.error ? {} : { health: { ...current.health, status, error: '' } };
+    });
 
     try {
       const response = await fetch(buildHttpUrl(profile.serverUrl, '/health'), {
         cache: 'no-store',
+        credentials: 'omit',
+        redirect: 'error',
         signal: controller.signal,
       });
       const latencyMs = Date.now() - startedAt;
@@ -4316,13 +4393,17 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     if (!hydrated) {
       return;
     }
+    // A hidden window shows no badge: probing pauses and resumes on return.
     const probeAll = () => {
+      if (document.visibilityState === 'hidden') return;
       for (const backendId of linksRef.current.keys()) void checkConnectionHealth(backendId);
     };
     probeAll();
     const intervalId = setInterval(probeAll, CONNECTION_HEALTH_INTERVAL_MS);
+    document.addEventListener('visibilitychange', probeAll);
     return () => {
       clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', probeAll);
     };
   }, [backendEndpointsKey, checkConnectionHealth, hydrated]);
 
@@ -4640,6 +4721,21 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         return;
       }
       link.socket = socket;
+      // An endpoint that accepts the upgrade but never opens (no hello, a
+      // lost IPC open event) would otherwise stay "connecting" for good:
+      // give up and let the reconnect backoff try again.
+      const openTimer = setTimeout(() => {
+        if (!isSocketCurrent() || socket.ready) return;
+        link.socket = null;
+        link.verified = false;
+        link.lastFailureRetryable = true;
+        attempt.abort();
+        link.commands.disconnect();
+        socket.close();
+        patchLinkStatus(backendId, { state: 'closed' });
+        reportLinkError(backendId, t('sess.socketOpenTimeout'));
+      }, SOCKET_OPEN_TIMEOUT_MS);
+      attempt.signal.addEventListener('abort', () => clearTimeout(openTimer), { once: true });
     })().catch((error: unknown) => {
       if (!isAttemptCurrent()) return;
       link.lastFailureRetryable = true;
@@ -4706,6 +4802,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           if (state === 'open') patchLinkStatus(backendId, { state: 'closed' });
           // Never connected, or waiting for Connect after a re-point.
           if (!state || state === 'idle' || state === 'connecting' || !link.lastFailureRetryable) continue;
+          // A scheduled reconnect keeps its jittered backoff.
+          if (link.reconnectTimer) continue;
           connectBackend(backendId);
           continue;
         }
@@ -5561,9 +5659,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         void backendFetch(ownerProfile, {
           method: 'DELETE',
           path: `/v2/workspaces/${encodeURIComponent(workspaceId)}`,
-        }).then((response) => {
+        }).then(async (response) => {
           // 404 means the backend holds no matching record — the desired state.
-          if (!response.ok && response.status !== 404) throw new Error(`workspace delete returned ${response.status}`);
+          if (!response.ok && response.status !== 404) throw await readBackendError(response, t('sess.workspaceDeleteSyncFailed'));
         }).catch((error) => setLastError(error instanceof Error ? error.message : t('sess.workspaceDeleteSyncFailed')));
       }
       const removedConversationIds = conversations
@@ -6881,31 +6979,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     });
   }, [getConversationContext]);
 
-  const loadNativeThreadHistory = useCallback((conversationId: string, force = false) => {
-    const context = getConversationContext(conversationId);
-    if (!context) {
-      return false;
-    }
-    const threadId = normalizeThreadId(context.conversation.threadId);
-    if (!threadId) {
-      return false;
-    }
-    const loadedAt = loadedNativeThreadHistoryRef.current.get(threadId) ?? 0;
-    if (!force && loadedAt >= context.conversation.updatedAt) {
-      return true;
-    }
-    if (!force && unmaterializedNativeThreadIdsRef.current.has(threadId)) {
-      return true;
-    }
-    void sendNativeThreadAction(
-      conversationId,
-      'read',
-      'thread/read',
-      (currentThreadId) => ({ threadId: currentThreadId, includeTurns: true }),
-      { restoreHistory: true },
-    );
-    return true;
-  }, [getConversationContext, sendNativeThreadAction]);
 
   // Only local, never-started placeholders are disposable. A remote ID may
   // represent history that has not been loaded yet.
@@ -7231,6 +7304,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           // The fork lives on the source conversation's backend; its sealed
           // title is decrypted, else the title this device asked for stays.
           const backendId = backendIdForConversation(conversation.id);
+          bumpManifestEpoch(backendId);
           const fetched = await withDecryptedManifest(backendId, await v2ApiForConversation(conversation.id).getConversation(result.conversationId));
           if (!fetched.title) historyEncryptionRef.current?.rememberTitle(backendId, fetched, forkTitle);
           const created = fetched.title ? fetched : { ...fetched, title: forkTitle };
@@ -7443,6 +7517,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
             ? conversation.providerProfile
             : provider.profiles[0],
         });
+        if (backendConnectionId) bumpManifestEpoch(backendConnectionId);
         const latestConversation = conversationsRef.current.find((item) => item.id === conversationId)
           ?? conversation;
         // The backend seals the title; keep the one asked for (or the local
@@ -8248,7 +8323,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       setActiveConversationId(nextActive?.id ?? '');
     }
     setConversations((current) => current.filter((item) => !removedIds.has(item.id)));
-  }, [unsubscribeV2Conversation]);
+    pruneConversationState([...removedIds], { drafts: true });
+  }, [pruneConversationState, unsubscribeV2Conversation]);
 
   /** Deletes backend conversations for good (unlike removeConversation,
    * which archives) and drops their local records right away. */
@@ -8272,6 +8348,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     }
     const backendId = backendIdForConversation(conversationId);
     const result = await purgeConversations([v2ConversationId], backendId);
+    bumpManifestEpoch(backendId);
     const skip = result.skipped.find((item) => item.conversationId === v2ConversationId) ?? result.skipped[0];
     if (!result.deleted.includes(v2ConversationId)) {
       return { status: 'skipped', code: skip?.code ?? '', message: skip?.message ?? '' };
@@ -8547,21 +8624,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     [activeBackendConnectionId, getConversationContext, rememberProviderModelSelection, resolveRememberedProviderSelection, updateConversation],
   );
 
-  const applyDefaultModelSelection = useCallback(
-    (model: string, reasoningEffort: string | null) => {
-      const nextModel = model.trim();
-      if (!nextModel) {
-        return;
-      }
-      const nextReasoningEffort = normalizeReasoningEffort(reasoningEffort) ?? defaultReasoningForModel(nextModel, modelCatalog);
-      setSettings((current) => ({
-        ...current,
-        defaultModel: nextModel,
-        defaultReasoningEffort: nextReasoningEffort,
-      }));
-    },
-    [modelCatalog],
-  );
 
   const openThreadCommandPrompt = useCallback((conversationId: string, command: ThreadCommandPromptState['command']) => {
     if (command === 'metadata') {
@@ -9810,9 +9872,21 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     }
   }, [sendNativeThreadAction, sendTrackedLocalMethod]);
 
-  const visibleTimeline = useMemo(() => timeline.map((entry) =>
-    projectSentAttachments([entry], sentAttachmentRecords, entry.conversationId ?? '')[0]),
-  [timeline, sentAttachmentRecords]);
+  // Only outgoing rows carry attachments; each is projected once per records
+  // version, so a streamed delta neither rescans every record nor hands the
+  // chat a new object for rows that did not change.
+  const projectedEntriesRef = useRef(new WeakMap<TimelineEntry, { records: typeof sentAttachmentRecords; projected: TimelineEntry }>());
+  const visibleTimeline = useMemo(() => {
+    const cache = projectedEntriesRef.current;
+    return timeline.map((entry) => {
+      if (entry.kind !== 'outgoing') return entry;
+      const hit = cache.get(entry);
+      if (hit?.records === sentAttachmentRecords) return hit.projected;
+      const projected = projectSentAttachments([entry], sentAttachmentRecords, entry.conversationId ?? '')[0];
+      cache.set(entry, { records: sentAttachmentRecords, projected });
+      return projected;
+    });
+  }, [timeline, sentAttachmentRecords]);
 
   // Backend/app release versions are expected to ship in lockstep; dev builds
   // (DEV0.0.0 / 0.0.0) on either side skip the check entirely.

@@ -329,7 +329,7 @@ export function useHistoryEncryption({ backends, focusBackendId, sendCommand, on
 
   /** Reads the backend state and, when `register`, makes sure this device's
    * history key exists and is registered (§3.3). */
-  const refresh = useCallback(async (backendId: string, register = false) => {
+  const readState = useCallback(async (backendId: string, register = false) => {
     const link = live.current.backends[backendId];
     // Nothing to ask before the socket is up; an old backend never is asked.
     if (!link?.connected || link.supported === undefined) return;
@@ -389,6 +389,19 @@ export function useHistoryEncryption({ backends, focusBackendId, sendCommand, on
     setView(backendId, () => ({ backendId, status: 'ready', state, localRid, keyError, accessRevoked: revoked }));
   }, [decryptorFor, markRevoked, send, setView]);
 
+  // Registration runs once at a time per backend: two overlapping runs could
+  // each create a key for a fresh profile, and the second would replace the
+  // first the backend already wrapped history for.
+  const registering = useRef(new Map<string, Promise<void>>());
+  const refresh = useCallback((backendId: string, register = false): Promise<void> => {
+    if (!register) return readState(backendId, false);
+    const running = registering.current.get(backendId);
+    if (running) return running;
+    const run = readState(backendId, true).finally(() => { registering.current.delete(backendId); });
+    registering.current.set(backendId, run);
+    return run;
+  }, [readState]);
+
   // Register on every (re)connect of each backend: history is always
   // encrypted, so a write needs this device's key among the recipients.
   // Backend → the `supported` value it was registered with; a socket that
@@ -411,15 +424,8 @@ export function useHistoryEncryption({ backends, focusBackendId, sendCommand, on
   }, [backends, refresh]);
 
   /** A write failed with HISTORY_KEY_REQUIRED: registers this device's key
-   * with that backend again, once at a time. */
-  const reregistering = useRef(new Map<string, Promise<void>>());
-  const keyRequired = useCallback((backendId: string) => {
-    const running = reregistering.current.get(backendId);
-    if (running) return running;
-    const run = refresh(backendId, true).finally(() => { reregistering.current.delete(backendId); });
-    reregistering.current.set(backendId, run);
-    return run;
-  }, [refresh]);
+   * with that backend again (joining a registration already running). */
+  const keyRequired = useCallback((backendId: string) => refresh(backendId, true), [refresh]);
 
   /** Runs a settings action that answers with the encryption state. */
   const applyState = useCallback(async (backendId: string, frame: HistoryCommandFrame) => {

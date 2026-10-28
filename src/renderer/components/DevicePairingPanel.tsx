@@ -2,8 +2,8 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Chip } from '@/components/base/badges/chip';
 import { Button } from '@/components/base/buttons/button';
 import {
-  DevicePairingRetryableError,
   PAIRING_POLL_INTERVAL_MS,
+  DevicePairingRetryableError,
   beginDevicePairing,
   fetchBackendDeployment,
   nextPairingPollDelayMs,
@@ -161,7 +161,9 @@ export function DevicePairingPanel({ session, backendId, deviceName, autoStartNo
       attempt.expiryTimer = setTimeout(expire, request.expiresAt - Date.now());
       // Transient failures (429, 5xx, network) back off and keep polling
       // until the request expires; anything else ends the attempt.
-      let pollDelay = PAIRING_POLL_INTERVAL_MS;
+      // The server's interval (older backends send none).
+      const pollInterval = request.pollIntervalMs > 0 ? request.pollIntervalMs : PAIRING_POLL_INTERVAL_MS;
+      let pollDelay = pollInterval;
       const schedulePoll = () => { attempt.pollTimer = setTimeout(() => { void poll(); }, pollDelay); };
       const poll = async () => {
         if (!isCurrent(attempt)) return;
@@ -171,7 +173,7 @@ export function DevicePairingPanel({ session, backendId, deviceName, autoStartNo
           if (request.expiresAt <= Date.now()) { expire(); return; }
           if (result.status === 'pending') {
             // Schedule only after the previous request settles; never overlap polls.
-            pollDelay = PAIRING_POLL_INTERVAL_MS;
+            pollDelay = pollInterval;
             schedulePoll();
             return;
           }
