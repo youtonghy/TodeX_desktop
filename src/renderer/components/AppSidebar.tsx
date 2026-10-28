@@ -56,7 +56,7 @@ import { AppIcon } from './AppIcon';
 import { WORKSPACE_ICON_CHOICES, WORKSPACE_RING_STYLES, WorkspaceStatusRing, ringStyleKey, workspaceIconComponent } from './WorkspaceIcon';
 import type { TodeXSession } from '../session/useTodeXSession';
 import type { ProviderKind } from '@todex/protocol/v2';
-import { connectionStateLabel, conversationDisplayTitle, formatResetInstant, getConversationStatus, healthLabelOf, isConversationHighlighted, isListedConversation, isNoneWorkspaceId, NONE_WORKSPACE_ID, noneWorkspaceRowBackendId, noneWorkspaceRowId, workspaceDisplayName } from '../session/helpers';
+import { connectionStateLabel, conversationDisplayTitle, isReadOnlyConversation, formatResetInstant, getConversationStatus, healthLabelOf, isConversationHighlighted, isListedConversation, isNoneWorkspaceId, NONE_WORKSPACE_ID, noneWorkspaceRowBackendId, noneWorkspaceRowId, workspaceDisplayName } from '../session/helpers';
 import { ownerBackendId } from '../session/backendRouting';
 import { ShortcutHint, shortcutKeys, useAppShortcuts, type ShortcutId } from '../lib/shortcuts';
 import { useT } from '../i18n';
@@ -933,9 +933,9 @@ export function AppSidebar({
 
   // The built-in None workspace keeps only pin and icon actions.
   const contextIsNone = menu?.kind === 'workspace' && isNoneRowId(menu.id);
-  // Legacy plaintext history is read-only: no rename or fork.
+  // Read-only history (legacy plaintext, retired local Codex): no rename or fork.
   const contextReadOnly = menu?.kind === 'conversation'
-    && session.conversations.find((item) => item.id === menu.id)?.legacyPlaintext === true;
+    && isReadOnlyConversation(session.conversations.find((item) => item.id === menu.id));
   const runContextAction = (action: 'rename' | 'edit' | 'tags' | 'fork' | 'pin' | 'delete' | 'schedule') => {
     if (!menu || menu.kind === 'group') return;
     if (action === 'schedule') {
@@ -1754,7 +1754,7 @@ export function AppSidebar({
                           </span>
                           <span className={cx('flex min-w-0 flex-1 flex-col', rail && 'hidden')}>
                             <span className={cx('flex min-w-0 items-center gap-1 text-body-medium', isSelected ? 'text-text-primary' : tasksDone ? 'text-text-tertiary' : 'text-text-secondary')}>
-                              {conversation.legacyPlaintext ? <span className="inline-flex shrink-0 text-foreground-icon-tertiary" role="img" title={t('history.readOnlyBadge')} aria-label={t('history.readOnlyBadge')}><RiLockLine className="size-3" aria-hidden="true" /></span> : null}
+                              {isReadOnlyConversation(conversation) ? <span className="inline-flex shrink-0 text-foreground-icon-tertiary" role="img" title={t('history.readOnlyBadge')} aria-label={t('history.readOnlyBadge')}><RiLockLine className="size-3" aria-hidden="true" /></span> : null}
                               <span className="truncate">{title}</span>
                               {pins.conversation.includes(conversation.id) ? <RiPushpin2Fill className="size-3 shrink-0 text-foreground-icon-tertiary" aria-label={t('sidebar.pinned')} /> : null}
                               {taskMeta ? (

@@ -75,6 +75,7 @@ import {
   inferMimeType,
   isImageMimeType,
   isStepProgressEntry,
+  isReadOnlyConversation,
   isV2Conversation,
   liveComposerAttachments,
   MAX_COMPOSER_ATTACHMENTS,
@@ -563,7 +564,7 @@ function AgentMessageActions({
   const provider = session.v2Providers.find(item => item.id === conversation?.provider);
   const canFork = provider?.capabilities.controlActions?.includes('fork') === true;
   // Legacy plaintext history is read-only and can never be forked.
-  const readOnly = conversation?.legacyPlaintext === true;
+  const readOnly = isReadOnlyConversation(conversation);
   const records = entry.turnId ? session.usageRecords.filter(record =>
     (record.conversationId === conversationId || record.conversationId === conversation?.v2ConversationId)
     && record.turnId === entry.turnId) : [];
@@ -1340,7 +1341,7 @@ export function ChatPanel({ session }: Props) {
       : { state: 'failed', title: uploadBlobsRef.current.has(item.id) ? t('chat.uploadFailedRetry', { name: item.name, error: item.uploadError ?? '' }) : item.uploadError };
   }
   const currentProvider = isV2Conversation(conversation) ? conversation.provider || '' : '';
-  const agentProvider = conversation.provider || (isV2Conversation(conversation) ? '' : 'codex');
+  const agentProvider = conversation.provider || '';
   const slashTrigger = draft.trim().startsWith('/') ? draft.trim() : '';
   // Pi reads its session's own catalog (extensions add commands); other
   // agents use the backend's per-provider list.
@@ -1356,8 +1357,7 @@ export function ChatPanel({ session }: Props) {
       category: 'context' as const,
     }))
     : currentProvider === 'pi' ? [] : SLASH_COMMANDS;
-  const canCompact = !isV2Conversation(conversation)
-    || session.v2Providers.find(item => item.id === currentProvider)?.capabilities.controlActions?.includes('compact') === true;
+  const canCompact = session.v2Providers.find(item => item.id === currentProvider)?.capabilities.controlActions?.includes('compact') === true;
   const slashCatalog = currentProvider === 'pi' ? [...providerSlashCatalog, ...piTodexCommands] : [
     ...(canCompact ? [{ command: '/compact', title: t('chat.compactTitle'), description: t('chat.compactDescription'), category: 'thread' as const }] : []),
     // The synthetic /compact item already covers the catalog entry when the
@@ -1503,8 +1503,9 @@ export function ChatPanel({ session }: Props) {
   const submissionStatus = session.submissionStatusByConversation[conversation.id];
   const executionUnknown = submissionStatus === 'unknown';
   // Legacy plaintext history (stored before history became end-to-end
-  // encrypted): viewable, exportable, archivable and deletable, nothing else.
-  const readOnly = conversation.legacyPlaintext === true;
+  // encrypted) and retired local Codex history: viewable, exportable,
+  // archivable and deletable, nothing else.
+  const readOnly = isReadOnlyConversation(conversation);
   const runtime = session.conversationRuntimeById[conversation.id];
   const sessionPermissionIds = new Set((runtime?.pendingPermissions ?? []).filter(item => item.scope === 'session').map(item => item.id));
   const pendingPermissionIds = new Set((runtime?.pendingPermissions ?? []).map(item => item.id));
@@ -1556,7 +1557,6 @@ export function ChatPanel({ session }: Props) {
     ?? null;
   const reasoningIndex = Math.max(0, supportedReasoningEfforts.indexOf(displayedReasoningEffort ?? ''));
   const displayedEffortLevel = normalizeReasoningEffort(displayedReasoningEffort) ?? undefined;
-  const fastEnabled = workspace.serviceTier === 'priority' || workspace.serviceTier === 'fast';
   const contextUsage = session.contextUsageByConversation[conversation.id];
   const contextModelId = contextUsage?.model || currentModel;
   const currentContextWindow = contextUsage?.contextWindow
@@ -1862,7 +1862,7 @@ export function ChatPanel({ session }: Props) {
           contentClassName="px-5 py-5"
         >
         <div ref={messagesRef} className="mx-auto flex max-w-2xl flex-col gap-3">
-          {readOnly ? <Alert status="warning" description={t('history.readOnlyBanner')} /> : null}
+          {readOnly ? <Alert status="warning" description={t(conversation.legacyCodex ? 'history.legacyCodexBanner' : 'history.readOnlyBanner')} /> : null}
           {earlierHistoryStatus?.loading ? (
             <p className="flex items-center justify-center gap-2 py-2 text-caption-1-regular text-text-tertiary" role="status">
               <Spinner size="xs" />
@@ -2232,7 +2232,7 @@ export function ChatPanel({ session }: Props) {
                     ref={composerRef}
                     value={draft}
                     isDisabled={readOnly || executionUnknown}
-                    placeholder={readOnly ? t('history.readOnlyPlaceholder')
+                    placeholder={readOnly ? t(conversation.legacyCodex ? 'history.legacyCodexPlaceholder' : 'history.readOnlyPlaceholder')
                       : t('chat.placeholderFull')}
                     onChange={(value) => {
                       setSuggestionIndex(0);
@@ -2332,9 +2332,6 @@ export function ChatPanel({ session }: Props) {
                         supportedReasoningEfforts={supportedReasoningEfforts}
                         currentReasoningEffort={currentReasoningEffort}
                         displayedReasoningEffort={displayedReasoningEffort}
-                        fastEnabled={fastEnabled}
-                        canToggleFast={agentProvider === 'codex'}
-                        onToggleFast={() => session.toggleFastServiceTier(conversation.id)}
                         onSelectModel={(modelId) => {
                           session.applyConversationModelSelection(conversation.id, modelId, null);
                         }}

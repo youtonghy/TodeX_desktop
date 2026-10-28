@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type Ref } from 'react';
-import { RiArrowDownSLine, RiArrowRightSLine, RiCloseCircleFill, RiFlashlightFill, RiFlashlightLine, RiSearchLine } from '@remixicon/react';
+import { RiArrowDownSLine, RiArrowRightSLine, RiCloseCircleFill, RiSearchLine } from '@remixicon/react';
 import { motion, useReducedMotion } from 'motion/react';
 import {
   Button as AriaButton,
@@ -18,7 +18,6 @@ import { MENU_POPOVER_SURFACE } from '@/components/base/dropdown/menu-styles';
 import { InputBase, TextField } from '@/components/base/input/input';
 import { RadioDot } from '@/components/base/radio/radio';
 import { EmptyState } from '@/components/ui/empty-state';
-import { IconAction } from '@/components/ui/icon-action';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cx } from '@/utils/cx';
 import type { TodeXSession } from '../session/useTodeXSession';
@@ -136,9 +135,6 @@ interface ModelReasoningCardProps {
   supportedReasoningEfforts: string[];
   currentReasoningEffort: string | null;
   displayedReasoningEffort: string | null;
-  fastEnabled?: boolean;
-  canToggleFast?: boolean;
-  onToggleFast?: () => void;
   onSelectModel: (modelId: string) => void;
   onSelectReasoningEffort: (effort: string) => void;
 }
@@ -151,9 +147,6 @@ export function ModelReasoningCard({
   supportedReasoningEfforts,
   currentReasoningEffort,
   displayedReasoningEffort,
-  fastEnabled = false,
-  canToggleFast = false,
-  onToggleFast,
   onSelectModel,
   onSelectReasoningEffort,
 }: ModelReasoningCardProps) {
@@ -358,22 +351,8 @@ export function ModelReasoningCard({
 
   return (
     <div className="composer-model-card flex flex-col gap-3 px-3 pt-2.5 pb-3" data-effort={effortLevel}>
-      {/* Top row: Fast toggle & Model + Reasoning Trigger */}
+      {/* Top row: Model + Reasoning Trigger */}
       <div className="relative flex min-h-8 items-center justify-center">
-        {canToggleFast ? (
-          <IconAction
-            icon={fastEnabled ? RiFlashlightFill : RiFlashlightLine}
-            size="md"
-            aria-label={fastEnabled ? '关闭 Fast 模式' : '启用 Fast 模式'}
-            tooltip={fastEnabled ? '关闭 Fast' : '启用 Fast'}
-            tooltipPlacement="top"
-            onClick={onToggleFast}
-            className={cx(
-              'absolute start-0 top-1/2 z-10 -translate-y-1/2',
-              fastEnabled && 'bg-pill-tab-blue-selected-background text-accent-500 hover:bg-pill-tab-blue-hover-background hover:text-accent-500',
-            )}
-          />
-        ) : null}
 
         {/* Model picker: a nested dialog popover (search field plus menus).
             A MenuTrigger here opened on pointer down and fought the outer
@@ -385,7 +364,6 @@ export function ModelReasoningCard({
               'flex min-w-0 max-w-full cursor-pointer items-center justify-center gap-0.5 rounded-xl py-1 ps-2 pe-1 outline-none',
               'transition-colors duration-150 ease hover:bg-background-primary-hover data-[pressed]:bg-background-primary-active',
               'focus-visible:ring-2 focus-visible:ring-border-focus-ring',
-              canToggleFast && 'max-w-[calc(100%-5rem)]',
             )}
           >
             <span className="flex min-w-0 items-baseline gap-1.5 px-0.5 text-headline-semibold">

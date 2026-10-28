@@ -13,7 +13,7 @@ import { bindSentAttachmentEvents, prepareSentAttachments, projectSentAttachment
 import { uploadPromptFile } from './promptUploads';
 import { uploadedPromptContent } from '@todex/protocol/promptUploads';
 import { isIpcServerUrl } from '@todex/protocol/ipcServerUrl';
-import { configureKanbanRouting, configureKanbanSync, syncKanbanTasksFromBackend, type KanbanTaskSchedule } from './kanbanTasks';
+import { configureKanbanRouting, configureKanbanSync, syncKanbanTasksFromBackend } from './kanbanTasks';
 import { t } from '../i18n';
 import { toast } from '../components/ui/toast';
 import { piExtensionPlainText } from '../components/piExtensionPresentation';
@@ -22,7 +22,6 @@ import { commandContextKey, routePiSlashCommand, type ProviderCommandCatalog } f
 import { platform } from '../platform';
 import { migrateLegacyFollowUps, restoreQueuedFollowUps, type LegacyAddResult, type LegacyFollowUps, type LegacyQueueTarget } from './queuedFollowUps';
 import { backendRateLimitState } from './sessionRateLimit';
-import { LegacyEventRecovery } from './legacyEventRecovery';
 import { ConversationRecovery, isConversationRuntimeBusy, type ConversationOpenStatus, type EarlierHistoryResult } from './conversationRecovery';
 import { CONVERSATION_WARM_ID_PREFIX, isConversationWarmRequestId, shouldWarmConversation } from './conversationWarm';
 import {
@@ -61,28 +60,19 @@ import { retryWithDelays } from '@todex/protocol/retry';
 import { probeBackendConnection, nextReconnectDelayMs, inspectServerUrl, credentialMatchesOrigin } from '@todex/protocol/connectionProbe';
 import {
   ConnectionSettings,
-  CodexMemorySettings,
-  CodexModelCatalogItem,
-  CodexNativeThread,
-  CodexServiceTierOption,
-  LocalAdapterState,
+    LocalAdapterState,
   PendingRequest,
   PermissionOption,
   ServerEvent,
   WorkspaceRecord,
   type WorkspaceSyncRejection,
   type WorkspaceTombstone,
-  approvalResponsePayload,
   buildHttpUrl,
   classifyPendingRequest,
   permissionDecision,
   createRequestId,
   displayNameFromPath,
-  eventId,
   eventPayloadData,
-  extractThreadIdFromEvent,
-  inferApprovalResponseType,
-  isThreadNotMaterializedHistoryError,
   normalizeReasoningEffort,
   normalizeThreadId,
   normalizeServerUrl,
@@ -93,22 +83,8 @@ import {
   remapWorkspaceScopedRecords,
   prepareWorkspaceSyncPayload,
   parseWorkspaceSyncRejected,
-  parseCodexModelListResponse,
-  parseCodexNativeThread,
-  parseCodexNativeThreadListResponse,
-  parseCodexNativeThreadReadResponse,
-  parseHooksListResponse,
-  parseMemorySettingsResponse,
-  parseMcpServerStatusListResponse,
-  parsePermissionProfileListResponse,
-  parsePluginListResponse,
   parseWorkspaceSyncResponse,
   workspaceMatchesTombstone,
-  findCapabilityHashTrigger,
-  insertCapabilityReference,
-  sandboxPolicyForMode,
-  shortJson,
-  type CodexThreadHistoryEntry,
 } from '@todex/protocol/todex';
 import { loadJson, loadSecret, removeSecret, saveJson, saveSecret } from '../lib/storage';
 import { ConnectionError } from '@todex/protocol/connectionError';
@@ -116,7 +92,7 @@ import { desktopAlert } from '../lib/desktopAlert';
 import { gitDiffUnsupported, readGitWorkingTreeDiff } from '../lib/gitWorkspace';
 import { loadSshPassword } from '../lib/sshPasswordStore';
 import { createConcurrencyLimit } from '../lib/concurrencyLimit';
-import { panelFromRoute, type DesktopPanel, type OpenPanelOptions } from '../lib/panels';
+import { type OpenPanelOptions } from '../lib/panels';
 import type { CapabilityManager, CatalogState } from '../screens/CapabilitiesPanel';
 import {
   DEFAULT_COMPOSER_SELECTION,
@@ -127,7 +103,6 @@ import {
   TIMELINE_STORAGE_KEY,
   ACTIVE_SELECTION_STORAGE_KEY,
   MENTION_HISTORY_STORAGE_KEY,
-  SESSION_CURSORS_STORAGE_KEY,
   EXPERIMENTAL_FEATURES_STORAGE_KEY,
   USAGE_RECORDS_STORAGE_KEY,
   PROVIDER_MODEL_PREFERENCES_STORAGE_KEY,
@@ -135,7 +110,6 @@ import {
   DEVICE_ORIGIN_STORAGE_KEY,
   BACKEND_CONNECTIONS_STORAGE_KEY,
   JSON_SAVE_DEBOUNCE_MS,
-  SESSION_CURSOR_SAVE_DEBOUNCE_MS,
   WORKSPACE_SYNC_DEBOUNCE_MS,
   WORKSPACE_TOMBSTONES_STORAGE_KEY,
   SOCKET_EVENT_BATCH_SIZE,
@@ -144,27 +118,16 @@ import {
   MAX_PENDING_SOCKET_FRAMES,
   nextSocketBacklogStreak,
   type SocketBacklogStreak,
-  MAX_TRANSPORT_HELLO_SESSION_CURSORS,
-  MAX_TIMELINE_ITEMS,
+    MAX_TIMELINE_ITEMS,
   capTimelinePerConversation,
   type EarlierHistoryStatus,
   mergeSequenceRanges,
   MAX_USAGE_RECORDS,
   MAX_WORKSPACE_TOMBSTONES,
-  MAX_EVENTS,
-  TERMINAL_STREAM_EVENT_TYPES,
   TERMINAL_ATTACH_TIMEOUT_MS,
-  CHAT_ATTACH_REPLAY_LIMIT,
   evictIdleTerminalStates,
   DEFAULT_TERMINAL_ROWS,
   DEFAULT_TERMINAL_COLS,
-  LOCAL_SESSION_IDLE_SUSPEND_MS,
-  LOCAL_SESSION_IDLE_SWEEP_MS,
-  SLASH_COMMANDS,
-  EXPERIMENTAL_FEATURES,
-  SLASH_COMMAND_CATEGORY_ORDER,
-  SLASH_COMMAND_CATEGORY_LABELS,
-  DIRECT_SLASH_COMMANDS,
   defaultSettings,
   defaultConnectionHealth,
   normalizeBackendConnectionProfile,
@@ -175,54 +138,28 @@ import {
   normalizeServerVersion,
   type ServerVersion,
   type ConversationRecord,
-  type PendingThreadList,
   type ExperimentalFeatureSettings,
   type GitDiffState,
-  type McpInventoryState,
-  type PermissionProfilesState,
-  type HooksCatalogState,
-  type PluginsCatalogState,
-  type MemorySettingsState,
   type TerminalClientState,
   type TerminalStartOptions,
   type TerminalTarget,
-  type PendingThreadAction,
   type ComposerSelection,
   type ComposerAttachmentDraft,
   type QueuedChatSubmission,
-  type PendingLocalStart,
-  type PendingThreadStart,
-  type PendingModelList,
-  type PendingSkillList,
   type PendingJsonSave,
   type PendingSocketFrame,
   type ConversationContext,
-  type ModelCommandPromptState,
-  type ModelPickerPromptState,
-  type ThreadInfoModalState,
-  type ThreadCommandPromptState,
-  type SkillListStatus,
-  type SkillListItem,
   type SelectedSkillAttachment,
   type TimelineTarget,
   type ConnectionState,
   type ConnectionHealth,
-  type RuntimeStatusState,
   type TerminalLifecycleState,
-  type PermissionPreset,
   type TimelineEntry,
-  type SlashCommand,
   type WorkspaceMentionHistory,
   type MentionReference,
-  type ThreadMenuAction,
   type PersistedSettings,
-  type WorkspaceDirectorySnapshot,
   type ProviderModelPreferences,
   canonicalSlashCommand,
-  slashCommandDefinition,
-  slashCommandNeedsActionPage,
-  serviceTierCommandForModel,
-  serviceTierSlashCommandsForModel,
   toPersistedSettings,
   fromPersistedSettings,
   backendApi,
@@ -235,99 +172,33 @@ import {
   workspaceSyncPayloadEquals,
   createSessionId,
   terminalIdForConversation,
-  terminalStatusLabel,
-  connectionStateLabel,
-  healthLabelOf,
-  modeLabelOf,
-  compactGoalLabel,
-  conversationTitleFromNativeThread,
-  conversationPatchFromNativeThread,
   fetchWorkspaceDirectorySnapshot,
-  progressTextFromData,
-  isLifecycleProgressText,
   isVersionMismatch,
-  objectPayloadOf,
-  sessionIdFromEvent,
   mergeModelCatalog,
   normalizeExperimentalFeatures,
-  itemTypeOf,
-  itemIdOf,
-  textFromContent,
-  textFromItem,
   attachmentPrompt,
   attachmentTextBlock,
-  codexInputFromComposer,
   attachmentSummary,
   liveComposerAttachments,
   expandTextCapsules,
   selectedSkillSummary,
-  skillIdFromPath,
-  parseSkillListItems,
   extractProtocolError,
-  reasoningEffortLabel,
-  modelDisplayLabel,
-  reasoningOptionsForModel,
-  defaultReasoningForModel,
   normalizeProviderModelPreferences,
   providerModelPreferenceKey,
   resolveProviderModel,
   resolveProviderReasoningEffort,
-  serviceTiersForModel,
-  fastServiceTierForModel,
-  serviceTierLabel,
-  modelCommandInitialValue,
-  parseModelCommandArgs,
-  attachmentId,
-  formatBytes,
   formatResetInstant,
-  fileNameFromUri,
-  inferMimeType,
-  isImageMimeType,
-  isTextAttachment,
-  mimeTypeFromDataUrl,
-  base64FromDataUrl,
-  dataUrlFromBase64,
-  estimatedBytesFromBase64,
-  localConversationStateOf,
-  shouldAutoStartLocalAdapter,
-  sessionIdForConversation,
-  commandWorkspaceForConversation,
-  isLocalAdapterAlreadyRunning,
-  isLocalAdapterFailed,
-  isThreadNotFound,
-  localTurnErrorMessage,
-  nowLabel,
-  latencyLabelOf,
-  threadDateLabel,
-  parseThreadMetadataArgs,
-  parseThreadMetadataPrompt,
-  parseThreadMemoryMode,
-  parsePositiveLimit,
-  parseJsonArrayPrompt,
-  nativeThreadPatchFromNotification,
-  findMentionTrigger,
-  insertMention,
   parseMentionReferences,
   summarizeMentionReferences,
-  stringFromUnknown,
-  parseWorkspaceDirectorySnapshot,
   permissionPresetForProfile,
   conversationPermissionCapabilities,
   conversationPermissionMode,
   rememberedRunModes,
-  permissionProfileLabel,
-  permissionPresetSelected,
-  approvalsReviewerValue,
-  makeOutgoingEntry,
   makeSystemEntry,
-  classifyProgressEvent,
-  classifyChatEvent,
-  shouldAppendV2ConversationEvent,
-  reduceV2ConversationEvents,
   connectionErrorText,
-  mergeConversationTimeline,
   conversationFromManifest,
   mergeManifestConversations,
+  isReadOnlyConversation,
   isV2Conversation,
   activeConversationSchedule,
   hasBackendQueue,
@@ -336,15 +207,6 @@ import {
   providerHasBackendQueueControl,
   canSwitchConversationAgent,
   resolveCreateConversationAgent,
-  isTurnTerminalEvent,
-  timelineEntryFromNativeHistoryEntry,
-  isVisibleConversationEntry,
-  conversationPreviewText,
-  isStepProgressEntry,
-  isThinkingProgressEntry,
-  isCollapsibleProgressEntry,
-  executionGroupId,
-  buildConversationRenderItems,
   buildConversationCancelMessage,
   isStaleCancelResult,
   type ConversationContextUsage,
@@ -353,25 +215,11 @@ import {
   createDefaultConversation,
   createNoneWorkspace,
   isNoneWorkspaceId,
-  NONE_WORKSPACE_ID,
   withNoneWorkspace,
   workspaceForConversation,
   conversationsForWorkspaceSnapshot,
   forkConversationRecord,
   isDefaultConversationTitle,
-  STREAMING_REPLY_PLACEHOLDER,
-  formatThreadSummary,
-  formatThreadActionResult,
-  resultThreadFromValue,
-  goalPatchFromEventData,
-  turnIdFromEventData,
-  turnStatusFromEventData,
-  textFromLocalTurnPayload,
-  cursorFromEvent,
-  threadIdFromEventData,
-  personalityLabel,
-  FEEDBACK_CATEGORIES,
-  PERSONALITY_OPTIONS,
   CONNECTION_HEALTH_INTERVAL_MS,
   CONNECTION_HEALTH_TIMEOUT_MS,
   SOCKET_WATCHDOG_INTERVAL_MS,
@@ -380,7 +228,6 @@ import {
   BACKEND_READY_NOTICE_DELAY_MS,
   BACKEND_READY_TIMEOUT_MS,
   SOCKET_LIVENESS_MAX_FAILURES,
-  MAX_COMPOSER_ATTACHMENTS,
   scheduleMessageTask,
   cancelMessageTask,
 } from './helpers';
@@ -528,13 +375,6 @@ function withEntry<Value>(record: Record<string, Value>, key: string, value: Val
   return record[key] === value ? record : { ...record, [key]: value };
 }
 
-/** Slash commands a v2 conversation runs in the client (pickers, drafts,
- * views) rather than through the legacy local Codex session. */
-const V2_CLIENT_SLASH_COMMANDS = new Set([
-  'permissions', 'fast', 'model', 'approve', 'approval', 'clear', 'new', 'mention', 'copy', 'plan', 'diff',
-  'experimental', 'hooks', 'hook', 'plugins', 'plugin', 'personality', 'feedback',
-]);
-
 export function useTodeXSession(openPanel: OpenPanelFn) {
   const workbenchSharingState = useWorkbenchSharing();
   const completionNotificationsState = useCompletionNotifications();
@@ -591,11 +431,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const requestTerminalStatusRef = useRef<(target: TerminalTarget, terminalId?: string) => boolean>(() => false);
   const providerModelPreferencesRef = useRef<ProviderModelPreferences>({});
   const providerModelsByBackendRef = useRef<Record<string, ProviderModelCatalog>>({});
-  const pendingLocalStartsRef = useRef(new Map<string, PendingLocalStart>());
-  const autoStartedLocalConversationsRef = useRef(new Set<string>());
-  const pendingThreadStartsRef = useRef(new Map<string, PendingThreadStart>());
-  const pendingThreadListsRef = useRef(new Map<string, PendingThreadList>());
-  const pendingThreadActionsRef = useRef(new Map<string, PendingThreadAction>());
   const pendingV2ConversationCreatesRef = useRef(new Map<string, Promise<ConversationRecord | null>>());
   const pendingV2FirstPromptsRef = useRef(new Set<string>());
   const pendingV2SubmissionsRef = useRef(new Map<string, SubmissionDraft & {
@@ -612,8 +447,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     || (heldFollowUpsRef.current.get(localId)?.length ?? 0) > 0;
   // Set during render (like rawProtocolSenderRef) so earlier effects can reach it.
   const subscribeV2ConversationRef = useRef<(v2ConversationId: string, options?: { afterSequence?: number; limit?: number }) => boolean>(() => false);
-  const pendingSkillListsRef = useRef(new Map<string, PendingSkillList>());
-  const pendingModelListRef = useRef<PendingModelList | null>(null);
   const pendingJsonSavesRef = useRef(new Map<string, PendingJsonSave>());
   const pendingServerEventsRef = useRef<ServerEvent[]>([]);
   const pendingServerEventFrameRef = useRef<number | null>(null);
@@ -628,15 +461,11 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const modelDiscoveryRef = useRef<DiscoveryProgress>(emptyDiscoveryProgress(''));
   const commandDiscoveryRef = useRef<DiscoveryProgress>(emptyDiscoveryProgress(''));
   const capabilityRetryEpochRef = useRef(0);
-  const legacyRecoveryRef = useRef(new LegacyEventRecovery<ServerEvent>());
-  const sessionCursorsRef = useRef(new Map<string, number>());
   // Backends whose own sync just wrote the workspace list: their next save
   // would only echo it back.
   const workspaceBackendSkipNextSaveRef = useRef(new Set<string>());
   const workspaceTombstonesRef = useRef<WorkspaceTombstone[]>([]);
   const workspaceMissingNotifiedRef = useRef(new Set<string>());
-  const loadedNativeThreadHistoryRef = useRef(new Map<string, number>());
-  const unmaterializedNativeThreadIdsRef = useRef(new Set<string>());
 
   const [hydrated, setHydrated] = useState(false);
   // A fresh install waits for the first Connect; afterwards every backend
@@ -767,9 +596,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const connectionHealth = focusLink.health;
   const serverVersion = focusLink.serverVersion;
   const backendStarting = focusLink.starting;
-  const [remoteModelCatalog, setRemoteModelCatalog] = useState<CodexModelCatalogItem[]>([]);
-  const [modelCatalogStatus, setModelCatalogStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
-  const [modelCatalogError, setModelCatalogError] = useState('');
   const [lastError, setLastErrorState] = useState('');
   // The same failure reported again within two seconds (retries, parallel
   // requests) is shown once.
@@ -787,17 +613,15 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   /** Legacy plaintext conversations are read-only: writes are refused here
    * (the backend would answer HISTORY_READ_ONLY). */
   const refuseReadOnlyWrite = (conversation: ConversationRecord | null | undefined): boolean => {
-    if (!conversation?.legacyPlaintext) return false;
-    setLastError(t('history.readOnlyError'));
+    if (!isReadOnlyConversation(conversation)) return false;
+    setLastError(t(conversation?.legacyCodex ? 'sess.legacyCodexReadOnly' : 'history.readOnlyError'));
     return true;
   };
-  const [events, setEvents] = useState<ServerEvent[]>([]);
   const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
   const [sentAttachmentRecords, setSentAttachmentRecords] = useState<SentAttachmentRecord[]>([]);
   const sentAttachmentRecordsRef = useRef<SentAttachmentRecord[]>([]);
   const [mentionHistory, setMentionHistory] = useState<WorkspaceMentionHistory[]>([]);
   const [experimentalFeatures, setExperimentalFeatures] = useState<ExperimentalFeatureSettings>(EXPERIMENTAL_FEATURE_DEFAULTS);
-  const [selectedRequestId, setSelectedRequestId] = useState('');
   const [chatDrafts, setChatDraftsState] = useState<Record<string, string>>({});
   const chatDraftsRef = useRef<Record<string, string>>({});
   const setChatDrafts = useCallback((value: SetStateAction<Record<string, string>>) => {
@@ -826,26 +650,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const [composerAttachments, setComposerAttachments] = useState<Record<string, ComposerAttachmentDraft[]>>({});
   const [composerSelections, setComposerSelections] = useState<Record<string, ComposerSelection>>({});
   const [selectedSkills, setSelectedSkills] = useState<Record<string, SelectedSkillAttachment[]>>({});
-  const [skillListVisible, setSkillListVisible] = useState(false);
-  const [skillListConversationId, setSkillListConversationId] = useState('');
-  const [skillListStatus, setSkillListStatus] = useState<SkillListStatus>('idle');
-  const [skillListError, setSkillListError] = useState('');
-  const [skillListItems, setSkillListItems] = useState<SkillListItem[]>([]);
-  const [modelCommandPrompt, setModelCommandPrompt] = useState<ModelCommandPromptState | null>(null);
-  const [modelPickerPrompt, setModelPickerPrompt] = useState<ModelPickerPromptState | null>(null);
-  const [threadInfoModal, setThreadInfoModal] = useState<ThreadInfoModalState | null>(null);
-  const [threadCommandPrompt, setThreadCommandPrompt] = useState<ThreadCommandPromptState | null>(null);
   const [turnIds, setTurnIds] = useState<Record<string, string>>({});
   const [thinkingConversations, setThinkingConversations] = useState<Record<string, boolean>>({});
-  const [threadListStatusByWorkspace, setThreadListStatusByWorkspace] = useState<Record<string, 'idle' | 'loading' | 'ready' | 'error'>>({});
-  const [threadListErrorByWorkspace, setThreadListErrorByWorkspace] = useState<Record<string, string>>({});
   const [gitDiffByConversation, setGitDiffByConversation] = useState<Record<string, GitDiffState>>({});
   const [selectedGitRepoByWorkspace, setSelectedGitRepoByWorkspace] = useState<Record<string, string>>({});
-  const [mcpInventoryByConversation, setMcpInventoryByConversation] = useState<Record<string, McpInventoryState>>({});
-  const [permissionProfilesByConversation, setPermissionProfilesByConversation] = useState<Record<string, PermissionProfilesState>>({});
-  const [hooksCatalogByConversation, setHooksCatalogByConversation] = useState<Record<string, HooksCatalogState>>({});
-  const [pluginsCatalogByConversation, setPluginsCatalogByConversation] = useState<Record<string, PluginsCatalogState>>({});
-  const [memorySettingsByConversation, setMemorySettingsByConversation] = useState<Record<string, MemorySettingsState>>({});
   const [terminalById, setTerminalById] = useState<Record<string, TerminalClientState>>({});
   // Output goes with the terminal records evicted or removed.
   useEffect(() => {
@@ -1091,16 +899,16 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const editFollowUpQueueRef = useRef<(conversationId: string, operation: 'remove' | 'clear' | 'resume' | 'pause', itemId?: string) => Promise<boolean>>(async () => false);
   const flushHeldFollowUpsRef = useRef<(conversationId: string) => Promise<void>>(async () => undefined);
 
-  const activeTurnId = activeConversationId ? turnIds[activeConversationId] ?? '' : '';
+  // Display names for model ids an agent does not describe itself.
   const modelCatalog = useMemo(
     () => mergeModelCatalog(
-      remoteModelCatalog,
+      [],
       [
         settings.defaultModel,
         ...workspaces.map((workspace) => workspace.model),
       ],
     ),
-    [remoteModelCatalog, settings.defaultModel, workspaces],
+    [settings.defaultModel, workspaces],
   );
 
   // Records without a backend tag belong to whichever backend is active.
@@ -1335,60 +1143,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     pendingJsonSavesRef.current.set(key, { timeoutId, value });
   }, []);
 
-  const persistSessionCursors = useCallback(() => {
-    const cursors = Object.fromEntries(sessionCursorsRef.current.entries());
-    scheduleJsonSave(SESSION_CURSORS_STORAGE_KEY, cursors, SESSION_CURSOR_SAVE_DEBOUNCE_MS);
-  }, [scheduleJsonSave]);
 
-  /** Legacy session cursors to resume on one backend's socket: sessions of
-   * its own conversations, and sessions no conversation claims. */
-  const getSessionCursorSnapshot = useCallback((backendId: string) => {
-    const owners = new Map<string, string>();
-    for (const conversation of conversationsRef.current) {
-      if (conversation.sessionId) owners.set(conversation.sessionId, backendIdForConversation(conversation.id));
-    }
-    const cursors = new Map([...sessionCursorsRef.current].filter(([sessionId]) => (owners.get(sessionId) ?? backendId) === backendId));
-    if (cursors.size <= MAX_TRANSPORT_HELLO_SESSION_CURSORS) {
-      return Object.fromEntries(cursors.entries());
-    }
-
-    const selected = new Map<string, number>();
-    const activeConversationId = activeConversationRef.current;
-    const rankedConversations = conversationsRef.current
-      .filter((conversation) => conversation.sessionId && cursors.has(conversation.sessionId))
-      .sort((left, right) => {
-        const activeRank =
-          (right.id === activeConversationId ? 1 : 0) -
-          (left.id === activeConversationId ? 1 : 0);
-        if (activeRank !== 0) {
-          return activeRank;
-        }
-        return right.updatedAt - left.updatedAt;
-      });
-
-    for (const conversation of rankedConversations) {
-      if (selected.size >= MAX_TRANSPORT_HELLO_SESSION_CURSORS) {
-        break;
-      }
-      const cursor = cursors.get(conversation.sessionId);
-      if (cursor !== undefined) {
-        selected.set(conversation.sessionId, cursor);
-      }
-    }
-
-    if (selected.size < MAX_TRANSPORT_HELLO_SESSION_CURSORS) {
-      for (const [sessionId, cursor] of cursors.entries()) {
-        if (selected.size >= MAX_TRANSPORT_HELLO_SESSION_CURSORS) {
-          break;
-        }
-        if (!selected.has(sessionId)) {
-          selected.set(sessionId, cursor);
-        }
-      }
-    }
-
-    return Object.fromEntries(selected.entries());
-  }, []);
 
   const closeSocket = useCallback((backendId: string, manual = true) => {
     const link = linksRef.current.get(backendId);
@@ -1402,8 +1157,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     link.verified = false;
     link.healthProbeSeq += 1;
     link.commands.disconnect();
-    // Replays requested over this socket will never be answered.
-    legacyRecoveryRef.current.resetRequests();
     if (manual) {
       link.manualDisconnect = true;
       patchLinkStatus(backendId, { state: 'closed' });
@@ -1487,7 +1240,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         storedSentAttachments,
         storedActiveSelection,
         storedMentionHistory,
-        storedSessionCursors,
         storedExperimentalFeatures,
         storedUsageRecords,
         storedBackendConnections,
@@ -1503,7 +1255,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         loadJson<SentAttachmentRecord[]>(SENT_ATTACHMENTS_STORAGE_KEY, []),
         loadJson<{ workspaceId?: string; conversationId?: string; noneBackendId?: string } | null>(ACTIVE_SELECTION_STORAGE_KEY, null),
         loadJson<WorkspaceMentionHistory[]>(MENTION_HISTORY_STORAGE_KEY, []),
-        loadJson<Record<string, number>>(SESSION_CURSORS_STORAGE_KEY, {}),
         loadJson<Partial<ExperimentalFeatureSettings> | null>(EXPERIMENTAL_FEATURES_STORAGE_KEY, null),
         loadJson<unknown>(USAGE_RECORDS_STORAGE_KEY, []),
         loadJson<BackendConnectionProfile[]>(BACKEND_CONNECTIONS_STORAGE_KEY, []),
@@ -1547,6 +1298,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       const existingWorkspaceIds = new Set(normalizedWorkspaces.map((workspace) => workspace.id));
       const seenSessionIds = new Set<string>();
       const seenThreadIds = new Set<string>();
+      // Conversations of the removed local Codex path with anything to show
+      // stay as read-only history; empty drafts get an agent when opened.
+      const conversationsWithHistory = new Set(storedTimeline.map((entry) => entry.conversationId).filter(Boolean));
       const normalizedConversations =
         storedConversations.length > 0
           ? storedConversations
@@ -1568,8 +1322,12 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
                   seenThreadIds.add(threadId);
                 }
 
+                const legacyCodex = !isV2Conversation(conversation) && (conversation.legacyCodex === true
+                  || Boolean(normalizeThreadId(conversation.threadId)) || Boolean(conversation.preview?.trim())
+                  || conversationsWithHistory.has(conversation.id));
                 return {
                   ...conversation,
+                  ...(legacyCodex ? { legacyCodex: true } : {}),
                   sessionId,
                   threadId,
                   preview: conversation.preview || '',
@@ -1593,10 +1351,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       const firstWorkspaceId = storedConversation?.workspaceId ?? storedWorkspace?.id ?? normalizedWorkspaces[0]?.id ?? '';
       const firstConversationId =
         storedConversation?.id ?? normalizedConversations.find((conversation) => conversation.workspaceId === firstWorkspaceId)?.id ?? '';
-      sessionCursorsRef.current = new Map(
-        Object.entries(storedSessionCursors)
-          .filter((entry): entry is [string, number] => typeof entry[1] === 'number' && Number.isFinite(entry[1]) && entry[1] > 0),
-      );
 
       const loadedTombstones = (Array.isArray(storedWorkspaceTombstones) ? storedWorkspaceTombstones : [])
         .map(normalizeWorkspaceTombstone)
@@ -2710,12 +2464,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     releaseIdleConversationRuntimes();
   }, [releaseIdleConversationRuntimes, v2Conversations]);
 
-  const runtimeStatus = useMemo<RuntimeStatusState>(() => ({
-    socket: connectionState,
-    daemon: connectionHealth.status,
-    codexAdapter: activeConversation?.localAdapterState ?? activeWorkspace?.localAdapterState ?? 'unknown',
-    turn: activeTurnId ? 'running' : 'idle',
-  }), [activeConversation?.localAdapterState, activeTurnId, activeWorkspace?.localAdapterState, connectionHealth.status, connectionState]);
 
   const getConversationContext = useCallback((conversationId = activeConversationRef.current): ConversationContext | null => {
     const conversation = conversationsRef.current.find((item) => item.id === conversationId) ?? null;
@@ -2725,26 +2473,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     return workspace && conversation ? { workspace: workspaceForConversation(workspace, conversation), conversation } : null;
   }, []);
 
+  // Open permission requests of every projected conversation (a resolved one
+  // leaves its runtime's `pendingPermissions`).
   const pendingRequests = useMemo<PendingRequest[]>(() => {
     const open = new Map<string, PendingRequest>();
-    const resolved = new Set<string>();
-
-    for (const event of events) {
-      if (event.type === 'conversation.permission.request') continue;
-      if (event.type === 'codex.serverRequest.resolved' || event.type === 'permission.resolved') {
-        const data = eventPayloadData(event);
-        const resolvedId = data.requestId ?? data.request_id ?? data.permissionId;
-        if (typeof resolvedId === 'string' && resolvedId) {
-          resolved.add(resolvedId);
-        }
-      }
-
-      const request = classifyPendingRequest(event);
-      if (request) {
-        open.set(request.requestId, request);
-      }
-    }
-
     for (const [localId, state] of Object.entries(conversationRuntimeById)) {
       if (recoveringConversations[localId] || state.appliedSequence < state.highWaterSequence) continue;
       const conversation = conversations.find((item) => item.id === localId);
@@ -2756,23 +2488,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         if (request) open.set(request.requestId, request);
       }
     }
-    return [...open.values()].filter((request) => !resolved.has(request.requestId));
-  }, [events, conversationRuntimeById, recoveringConversations, conversations]);
-
-  useEffect(() => {
-    if (!pendingRequests.length) {
-      setSelectedRequestId('');
-      return;
-    }
-    if (!selectedRequestId || !pendingRequests.some((request) => request.requestId === selectedRequestId)) {
-      setSelectedRequestId(pendingRequests[0].requestId);
-    }
-  }, [pendingRequests, selectedRequestId]);
-
-  const selectedRequest = useMemo(
-    () => pendingRequests.find((request) => request.requestId === selectedRequestId) ?? pendingRequests[0] ?? null,
-    [pendingRequests, selectedRequestId],
-  );
+    return [...open.values()];
+  }, [conversationRuntimeById, recoveringConversations, conversations]);
 
   const updateWorkspace = useCallback((id: string, patch: Partial<WorkspaceRecord>) => {
     setWorkspaces((current) =>
@@ -2811,11 +2528,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     setConversations((current) =>
       current.map((conversation) => {
         if (conversation.id !== id) return conversation;
-        // A native adapter leaving the running/starting state counts as a
-        // completed or stopped turn for sidebar ordering.
-        const finished = (conversation.localAdapterState === 'running' || conversation.localAdapterState === 'starting')
-          && (patch.localAdapterState === 'idle' || patch.localAdapterState === 'stopped' || patch.localAdapterState === 'error');
-        return { ...conversation, ...patch, updatedAt: Date.now(), ...(finished ? { lastCompletedAt: Date.now() } : null) };
+        return { ...conversation, ...patch, updatedAt: Date.now() };
       }),
     );
   }, []);
@@ -2866,63 +2579,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     };
   }, [activeConversationId, activeAttentionAt, markConversationRead]);
 
-  const upsertNativeThreads = useCallback((workspaceId: string, sessionId: string, threads: CodexNativeThread[]) => {
-    if (!threads.length) {
-      return;
-    }
-    setConversations((current) => {
-      const next = [...current];
-      for (const thread of threads) {
-        const threadId = normalizeThreadId(thread.id);
-        if (!threadId) {
-          continue;
-        }
-        const existingIndex = next.findIndex(
-          (conversation) =>
-            conversation.workspaceId === workspaceId &&
-            normalizeThreadId(conversation.threadId) === threadId,
-        );
-        const patch = conversationPatchFromNativeThread(thread);
-        if (existingIndex >= 0) {
-          next[existingIndex] = {
-            ...next[existingIndex],
-            ...patch,
-            createdAt: next[existingIndex].createdAt,
-            updatedAt: Math.max(next[existingIndex].updatedAt, patch.updatedAt ?? 0),
-            sessionId: next[existingIndex].sessionId || sessionId,
-          };
-          continue;
-        }
-        next.push({
-          id: createRequestId('thread'),
-          workspaceId,
-          title: patch.title || threadId,
-          preview: patch.preview || '',
-          nativeStatus: patch.nativeStatus || '',
-          archived: patch.archived === true,
-          sessionId: createSessionId(`${patch.title || threadId}_thread`),
-          threadId,
-          localAdapterState: 'idle',
-          mode: 'implement',
-          goalStatus: '',
-          goalObjective: '',
-          createdAt: patch.createdAt || Date.now(),
-          updatedAt: patch.updatedAt || Date.now(),
-        });
-      }
-      return next.sort((a, b) => b.updatedAt - a.updatedAt);
-    });
-  }, []);
 
-  const resetWorkspaceSession = useCallback(
-    (workspace: WorkspaceRecord) => {
-      updateWorkspace(workspace.id, {
-        sessionId: createSessionId(workspace.name),
-        localAdapterState: 'idle',
-      });
-    },
-    [updateWorkspace],
-  );
 
   const appendTimeline = useCallback((entry: TimelineEntry) => {
     setTimeline((current) => capTimelinePerConversation([entry, ...current]));
@@ -2952,258 +2609,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     });
   }, []);
 
-  const resolveTimelineTarget = useCallback((event: ServerEvent, data = eventPayloadData(event)) => {
-    const sessionId = sessionIdFromEvent(event, data);
-    const threadId = threadIdFromEventData(event, data);
-    const conversations = conversationsRef.current;
-    const byThread = threadId
-      ? conversations.find((conversation) => normalizeThreadId(conversation.threadId) === threadId)
-      : null;
-    const bySession = sessionId ? conversations.find((conversation) => conversation.sessionId === sessionId) : null;
-    if (sessionId && !bySession) {
-      return {
-        workspaceId: '',
-        conversationId: '',
-        conversation: null,
-        sessionId,
-        threadId,
-      };
-    }
-    const conversation = bySession ?? byThread ?? conversations.find((item) => item.id === activeConversationRef.current) ?? null;
 
-    return {
-      workspaceId: conversation?.workspaceId ?? activeWorkspaceRef.current,
-      conversationId: conversation?.id ?? activeConversationRef.current,
-      conversation,
-      sessionId,
-      threadId,
-    };
-  }, []);
 
-  const upsertChatTimeline = useCallback((entry: TimelineEntry, appendSubtitle = false) => {
-    setTimeline((current) => {
-      const index = current.findIndex(
-        (item) =>
-          item.id === entry.id &&
-          item.workspaceId === entry.workspaceId &&
-          item.conversationId === entry.conversationId,
-      );
 
-      if (index === -1) {
-        return capTimelinePerConversation([entry, ...current]);
-      }
 
-      const next = current.slice();
-      const previous = next[index];
-      next[index] = {
-        ...previous,
-        ...entry,
-        // Keep the entry anchored at its first (oldest) sequence and
-        // timestamp so rows do not swap positions while streaming.
-        sequence: previous.sequence !== undefined && (entry.sequence === undefined || previous.sequence <= entry.sequence)
-          ? previous.sequence
-          : entry.sequence,
-        at: previous.at || entry.at,
-        subtitle: appendSubtitle ? `${previous.subtitle === STREAMING_REPLY_PLACEHOLDER ? '' : previous.subtitle}${entry.subtitle}` : entry.subtitle,
-      };
-      return next;
-    });
-  }, []);
 
-  const settlePendingThreadStart = useCallback(
-    (pending: PendingThreadStart, threadId: string, errorMessage = '') => {
-      clearTimeout(pending.timeoutId);
-      pendingThreadStartsRef.current.delete(pending.conversationId);
 
-      if (errorMessage || !threadId) {
-        const error = new Error(errorMessage || t('sess.threadCreateFailed'));
-        pending.reject(error);
-        setLastError(error.message);
-        return;
-      }
 
-      setConversations((current) =>
-        current.map((conversation) =>
-          conversation.id === pending.conversationId ? { ...conversation, threadId, updatedAt: Date.now() } : conversation,
-        ),
-      );
-      pending.resolve(threadId);
-    },
-    [],
-  );
-
-  const finishPendingThreadList = useCallback((pending: PendingThreadList, errorMessage = '') => {
-    clearTimeout(pending.timeoutId);
-    pendingThreadListsRef.current.delete(pending.workspaceId);
-    setThreadListStatusByWorkspace((current) => ({
-      ...current,
-      [pending.workspaceId]: errorMessage ? 'error' : 'ready',
-    }));
-    setThreadListErrorByWorkspace((current) => ({
-      ...current,
-      [pending.workspaceId]: errorMessage,
-    }));
-    if (errorMessage) {
-      setLastError(errorMessage);
-    }
-  }, []);
-
-  const finishPendingSkillList = useCallback((pending: PendingSkillList, errorMessage = '') => {
-    clearTimeout(pending.timeoutId);
-    pendingSkillListsRef.current.delete(pending.requestId);
-    if (!errorMessage) {
-      setLastError('');
-      return;
-    }
-    setSkillListStatus('error');
-    setSkillListError(errorMessage);
-    setLastError(errorMessage);
-  }, []);
-
-  const finishPendingThreadAction = useCallback((pending: PendingThreadAction, errorMessage = '') => {
-    clearTimeout(pending.timeoutId);
-    pendingThreadActionsRef.current.delete(pending.requestId);
-    if (errorMessage) {
-      if (pending.action === 'fork' && pending.sourceConversationId && pending.conversationId !== pending.sourceConversationId) {
-        setConversations((current) => current.filter((conversation) => conversation.id !== pending.conversationId));
-      }
-      if (pending.action === 'mcp') {
-        setMcpInventoryByConversation((current) => ({
-          ...current,
-          [pending.conversationId]: {
-            ...(current[pending.conversationId] ?? {
-              status: 'idle',
-              detail: 'toolsAndAuthOnly',
-              servers: [],
-              raw: null,
-              error: '',
-              updatedAt: 0,
-            }),
-            status: 'error',
-            error: errorMessage,
-            updatedAt: Date.now(),
-          },
-        }));
-      } else if (pending.action === 'permissionProfiles') {
-        setPermissionProfilesByConversation((current) => ({
-          ...current,
-          [pending.conversationId]: {
-            ...(current[pending.conversationId] ?? {
-              status: 'idle',
-              profiles: [],
-              raw: null,
-              error: '',
-              updatedAt: 0,
-            }),
-            status: 'error',
-            error: errorMessage,
-            updatedAt: Date.now(),
-          },
-        }));
-      } else if (pending.action === 'hooks') {
-        setHooksCatalogByConversation((current) => ({
-          ...current,
-          [pending.conversationId]: {
-            ...(current[pending.conversationId] ?? {
-              status: 'idle',
-              entries: [],
-              raw: null,
-              error: '',
-              updatedAt: 0,
-            }),
-            status: 'error',
-            error: errorMessage,
-            updatedAt: Date.now(),
-          },
-        }));
-      } else if (pending.action === 'plugins') {
-        setPluginsCatalogByConversation((current) => ({
-          ...current,
-          [pending.conversationId]: {
-            ...(current[pending.conversationId] ?? {
-              status: 'idle',
-              catalog: { marketplaces: [], marketplaceLoadErrors: [], featuredPluginIds: [] },
-              raw: null,
-              error: '',
-              updatedAt: 0,
-            }),
-            status: 'error',
-            error: errorMessage,
-            updatedAt: Date.now(),
-          },
-        }));
-      } else if (pending.action === 'memorySettings') {
-        setMemorySettingsByConversation((current) => ({
-          ...current,
-          [pending.conversationId]: {
-            ...(current[pending.conversationId] ?? {
-              status: 'idle',
-              settings: { useMemories: false, generateMemories: false },
-              raw: null,
-              error: '',
-              updatedAt: 0,
-            }),
-            status: 'error',
-            error: errorMessage,
-            updatedAt: Date.now(),
-          },
-        }));
-      }
-      setLastError(errorMessage);
-      return;
-    }
-    setLastError('');
-  }, []);
-
-  const findPendingLocalStart = useCallback((event: ServerEvent, data: Record<string, unknown>) => {
-    const pendingStarts = [...pendingLocalStartsRef.current.values()];
-    const requestId = data.requestId ?? data.request_id;
-    if (typeof requestId === 'string' && requestId) {
-      const byRequestId = pendingStarts.find((item) => item.requestId === requestId);
-      if (byRequestId) {
-        return byRequestId;
-      }
-    }
-
-    const sessionId =
-      data.codexSessionId ??
-      data.codex_session_id ??
-      data.sessionId ??
-      data.session_id ??
-      event.codex_session_id;
-    if (typeof sessionId === 'string' && sessionId) {
-      return pendingStarts.find((item) => item.sessionId === sessionId) ?? null;
-    }
-
-    return pendingStarts.length === 1 ? pendingStarts[0] : null;
-  }, []);
-
-  const settlePendingLocalStart = useCallback(
-    (pending: PendingLocalStart, errorMessage = '') => {
-      clearTimeout(pending.timeoutId);
-      pendingLocalStartsRef.current.delete(pending.conversationId);
-
-      if (isLocalAdapterAlreadyRunning(errorMessage)) {
-        updateConversation(pending.conversationId, { localAdapterState: 'running' });
-        setLastError('');
-        pending.resolve();
-        return;
-      }
-
-      if (errorMessage) {
-        updateConversation(pending.conversationId, { localAdapterState: 'error' });
-        const error = new Error(localTurnErrorMessage(errorMessage));
-        pending.reject(error);
-        setLastError(error.message);
-        appendTimeline({ ...makeSystemEntry(t('sess.localStartFailed'), error.message, activeWorkspaceRef.current, activeConversationRef.current), marker: 'error' });
-        return;
-      }
-
-      updateConversation(pending.conversationId, { localAdapterState: 'running' });
-      pending.resolve();
-    },
-    [appendTimeline, updateConversation],
-  );
 
   /** Shows an error inside the terminal, in red, like the backend's own errors. */
   const appendTerminalError = useCallback((terminalId: string, text: string) => {
@@ -3455,421 +2867,15 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     return true;
   }, [appendTerminalError, settings.tenantId]);
 
-  const projectLegacyEvent = useCallback(
-    (event: ServerEvent) => {
-      const data = eventPayloadData(event);
-      const sessionId = sessionIdFromEvent(event, data);
-      // Terminal streams are not kept: they would push everything else out.
-      if (!TERMINAL_STREAM_EVENT_TYPES.has(event.type)) {
-        setEvents((current) => [event, ...current].slice(0, MAX_EVENTS));
-      }
-      if (handleTerminalEvent(event, data)) {
-        return;
-      }
-      const target = resolveTimelineTarget(event, data);
-      const targetConversationId = target.conversationId || target.conversation?.id || (target.sessionId ? '' : activeConversationRef.current);
-      const hasTimelineTarget = Boolean(targetConversationId);
-      const goalPatch = goalPatchFromEventData(data);
-      if (
-        target.conversation &&
-        goalPatch &&
-        (
-          /goal/i.test(event.type) ||
-          data.method === 'thread/goal/set' ||
-          data.method === 'thread/goal/get' ||
-          data.method === 'thread/goal/clear'
-        )
-      ) {
-        updateConversation(target.conversation.id, goalPatch);
-      }
-      const threadPatch = nativeThreadPatchFromNotification(event.type, data);
-      const threadPatchId = threadPatch ? threadIdFromEventData(event, data) : '';
-      if (threadPatch && threadPatchId) {
-        const existing = conversationsRef.current.find((conversation) => normalizeThreadId(conversation.threadId) === threadPatchId);
-        if (existing) {
-          updateConversation(existing.id, threadPatch);
-        }
-      }
-      const chatEntry = hasTimelineTarget ? classifyChatEvent(event, target.workspaceId, targetConversationId) : null;
-      if (chatEntry) {
-        upsertChatTimeline(chatEntry, event.type === 'codex.item.agentMessage.delta');
-        if (event.type === 'codex.item.completed') {
-          setConversationThinking(targetConversationId, false);
-        }
-      }
-      const protocolError = extractProtocolError(event.type, data);
-      const pendingLocalStartForError = event.type === 'codex.control.error'
-        ? findPendingLocalStart(event, data)
-        : null;
-      const suppressProgressError =
-        Boolean(pendingLocalStartForError) ||
-        (protocolError ? isThreadNotMaterializedHistoryError(protocolError) : false);
-      const progressEntry = hasTimelineTarget ? classifyProgressEvent(event, target.workspaceId, targetConversationId) : null;
-      if (progressEntry && !suppressProgressError) {
-        upsertChatTimeline(progressEntry, false);
-      }
-      if (hasTimelineTarget && event.type === 'codex.control.request.accepted' && data.operation === 'codex.local.turn') {
-        setConversationThinking(targetConversationId, true);
-      }
-      const maybeModelListRequestId = data.requestId ?? data.request_id;
-      const pendingModelList = pendingModelListRef.current;
-      if (
-        pendingModelList &&
-        typeof maybeModelListRequestId === 'string' &&
-        maybeModelListRequestId === pendingModelList.requestId
-      ) {
-        if (event.type === 'codex.control.response') {
-          const models = parseCodexModelListResponse(data.result ?? data);
-          if (models.length) {
-            setRemoteModelCatalog(models);
-            setModelCatalogStatus('ready');
-            setModelCatalogError('');
-          } else {
-            setModelCatalogStatus('error');
-            setModelCatalogError(t('sess.modelListEmpty'));
-          }
-          clearTimeout(pendingModelList.timeoutId);
-          pendingModelListRef.current = null;
-        } else if (protocolError || event.type === 'codex.control.error') {
-          setModelCatalogStatus('error');
-          setModelCatalogError(localTurnErrorMessage(protocolError || t('sess.modelListFailed')));
-          clearTimeout(pendingModelList.timeoutId);
-          pendingModelListRef.current = null;
-        }
-      }
-      const maybeThreadRequestId = typeof maybeModelListRequestId === 'string' ? maybeModelListRequestId : '';
-      const pendingSkillList = maybeThreadRequestId ? pendingSkillListsRef.current.get(maybeThreadRequestId) ?? null : null;
-      if (pendingSkillList) {
-        if (event.type === 'codex.control.response') {
-          const items = parseSkillListItems(data.result ?? data);
-          setSkillListItems(items);
-          setSkillListStatus('ready');
-          setSkillListError('');
-          appendTimeline(makeSystemEntry(
-            'Skills loaded',
-            items.length ? `${items.length} skills available` : 'No skills returned for this workspace',
-            pendingSkillList.workspaceId,
-            pendingSkillList.conversationId,
-          ));
-          finishPendingSkillList(pendingSkillList);
-        } else if (protocolError || event.type === 'codex.control.error') {
-          finishPendingSkillList(pendingSkillList, localTurnErrorMessage(protocolError || t('sess.skillsListFailed')));
-        }
-      }
-      const pendingThreadList = maybeThreadRequestId
-        ? [...pendingThreadListsRef.current.values()].find((item) => item.requestId === maybeThreadRequestId)
-        : null;
-      if (pendingThreadList) {
-        if (event.type === 'codex.control.response') {
-          const threads = parseCodexNativeThreadListResponse(data.result ?? data);
-          upsertNativeThreads(pendingThreadList.workspaceId, pendingThreadList.sessionId, threads);
-          finishPendingThreadList(pendingThreadList);
-        } else if (protocolError || event.type === 'codex.control.error') {
-          finishPendingThreadList(pendingThreadList, localTurnErrorMessage(protocolError || t('sess.threadListFailed')));
-        }
-      }
-      const pendingThreadAction = maybeThreadRequestId
-        ? pendingThreadActionsRef.current.get(maybeThreadRequestId) ?? null
-        : null;
-      if (pendingThreadAction) {
-        if (event.type === 'codex.control.response') {
-          const responseValue = data.result ?? data;
-          if (pendingThreadAction.action === 'mcp') {
-            const servers = parseMcpServerStatusListResponse(responseValue);
-            setMcpInventoryByConversation((current) => ({
-              ...current,
-              [pendingThreadAction.conversationId]: {
-                status: 'ready',
-                detail: pendingThreadAction.resultDetail === 'full' ? 'full' : 'toolsAndAuthOnly',
-                servers,
-                raw: responseValue,
-                error: '',
-                updatedAt: Date.now(),
-              },
-            }));
-          } else if (pendingThreadAction.action === 'permissionProfiles') {
-            const profiles = parsePermissionProfileListResponse(responseValue);
-            setPermissionProfilesByConversation((current) => ({
-              ...current,
-              [pendingThreadAction.conversationId]: {
-                status: 'ready',
-                profiles,
-                raw: responseValue,
-                error: '',
-                updatedAt: Date.now(),
-              },
-            }));
-          } else if (pendingThreadAction.action === 'hooks') {
-            const entries = parseHooksListResponse(responseValue);
-            setHooksCatalogByConversation((current) => ({
-              ...current,
-              [pendingThreadAction.conversationId]: {
-                status: 'ready',
-                entries,
-                raw: responseValue,
-                error: '',
-                updatedAt: Date.now(),
-              },
-            }));
-          } else if (pendingThreadAction.action === 'plugins') {
-            const catalog = parsePluginListResponse(responseValue);
-            setPluginsCatalogByConversation((current) => ({
-              ...current,
-              [pendingThreadAction.conversationId]: {
-                status: 'ready',
-                catalog,
-                raw: responseValue,
-                error: '',
-                updatedAt: Date.now(),
-              },
-            }));
-          } else if (pendingThreadAction.action === 'memorySettings') {
-            const settings = pendingThreadAction.memorySettings ?? parseMemorySettingsResponse(responseValue);
-            setMemorySettingsByConversation((current) => ({
-              ...current,
-              [pendingThreadAction.conversationId]: {
-                status: 'ready',
-                settings,
-                raw: responseValue,
-                error: '',
-                updatedAt: Date.now(),
-              },
-            }));
-          }
-          const nativeThread = parseCodexNativeThread(responseValue);
-          const nativeThreadRead = pendingThreadAction.restoreHistory
-            ? parseCodexNativeThreadReadResponse(responseValue)
-            : null;
-          const responseThread = resultThreadFromValue(responseValue);
-          const displayThread = nativeThread || responseThread;
-          if (nativeThread) {
-            if (pendingThreadAction.action === 'fork') {
-              const source = conversationsRef.current.find((item) => item.id === pendingThreadAction.sourceConversationId);
-              const targetConversation = conversationsRef.current.find((item) => item.id === pendingThreadAction.conversationId);
-              setConversations((current) =>
-                [
-                  {
-                    ...(source ?? {
-                      id: pendingThreadAction.conversationId,
-                      workspaceId: pendingThreadAction.workspaceId,
-                      title: conversationTitleFromNativeThread(nativeThread),
-                      sessionId: sessionIdFromEvent(event, data),
-                      threadId: nativeThread.id,
-                      localAdapterState: 'idle' as LocalAdapterState,
-                      mode: 'implement' as ConversationRecord['mode'],
-                      goalStatus: '',
-                      goalObjective: '',
-                      createdAt: nativeThread.createdAt || Date.now(),
-                      updatedAt: nativeThread.updatedAt || Date.now(),
-                    }),
-                    id: pendingThreadAction.conversationId,
-                    workspaceId: pendingThreadAction.workspaceId,
-                    sessionId: targetConversation?.sessionId || createSessionId(`${conversationTitleFromNativeThread(nativeThread)}_fork`),
-                    localAdapterState: 'idle' as LocalAdapterState,
-                    mode: source?.mode ?? 'implement',
-                    goalStatus: '',
-                    goalObjective: '',
-                    ...conversationPatchFromNativeThread(nativeThread),
-                  },
-                  ...current.filter((conversation) => conversation.id !== pendingThreadAction.conversationId),
-                ].sort((a, b) => b.updatedAt - a.updatedAt),
-              );
-              setActiveWorkspaceId(pendingThreadAction.workspaceId);
-              setActiveConversationId(pendingThreadAction.conversationId);
-            } else {
-              upsertNativeThreads(
-                pendingThreadAction.workspaceId,
-                sessionIdFromEvent(event, data) || conversationsRef.current.find((item) => item.id === pendingThreadAction.conversationId)?.sessionId || '',
-                [nativeThread],
-              );
-            }
-          }
-          if (nativeThreadRead) {
-            if (nativeThreadRead.history.length > 0) {
-              unmaterializedNativeThreadIdsRef.current.delete(nativeThreadRead.thread.id);
-            }
-            const restored = nativeThreadRead.history
-              .map((entry) =>
-                timelineEntryFromNativeHistoryEntry(
-                  entry,
-                  pendingThreadAction.workspaceId,
-                  pendingThreadAction.conversationId,
-                ),
-              )
-              .reverse();
-            setTimeline((current) => {
-              const remaining = current.filter((entry) => entry.conversationId !== pendingThreadAction.conversationId);
-              return capTimelinePerConversation([...restored, ...remaining]);
-            });
-            loadedNativeThreadHistoryRef.current.set(
-              nativeThreadRead.thread.id,
-              nativeThreadRead.thread.updatedAt,
-            );
-          }
-          if (pendingThreadAction.action === 'archive') {
-            updateConversation(pendingThreadAction.conversationId, { archived: true, nativeStatus: 'archived' });
-          } else if (pendingThreadAction.action === 'unarchive') {
-            updateConversation(pendingThreadAction.conversationId, { archived: false });
-          } else if (pendingThreadAction.action === 'rename' && pendingThreadAction.title) {
-            updateConversation(pendingThreadAction.conversationId, { title: pendingThreadAction.title });
-          } else if (pendingThreadAction.action === 'unsubscribe') {
-            updateConversation(pendingThreadAction.conversationId, { nativeStatus: 'unsubscribed' });
-          } else if (pendingThreadAction.action === 'memory') {
-            updateConversation(pendingThreadAction.conversationId, { nativeStatus: pendingThreadAction.resultDetail || 'memory updated' });
-          }
-          if (displayThread && displayThread !== nativeThread) {
-            upsertNativeThreads(
-              pendingThreadAction.workspaceId,
-              sessionIdFromEvent(event, data) || conversationsRef.current.find((item) => item.id === pendingThreadAction.conversationId)?.sessionId || '',
-              [displayThread],
-            );
-          }
-          if (pendingThreadAction.showResult) {
-            const title = pendingThreadAction.resultTitle || `${pendingThreadAction.action} result`;
-            const detail = pendingThreadAction.resultDetail || formatThreadActionResult(pendingThreadAction, responseValue);
-            setThreadInfoModal({
-              title,
-              detail,
-              raw: responseValue,
-            });
-            appendTimeline(makeSystemEntry(title, detail.slice(0, 500), pendingThreadAction.workspaceId, pendingThreadAction.conversationId));
-          }
-          finishPendingThreadAction(pendingThreadAction);
-        } else if (protocolError || event.type === 'codex.control.error') {
-          if (pendingThreadAction.restoreHistory && protocolError && isThreadNotMaterializedHistoryError(protocolError)) {
-            finishPendingThreadAction(pendingThreadAction);
-          } else {
-            finishPendingThreadAction(pendingThreadAction, localTurnErrorMessage(protocolError || t('sess.requestFailed', { method: pendingThreadAction.action })));
-          }
-        }
-      }
-      const turnId = turnIdFromEventData(data);
-      const turnStatus = turnStatusFromEventData(data);
-      const turnIsStarting = event.type === 'codex.turn.started' || /^inprogress$/i.test(turnStatus.replace(/[^a-z]/gi, ''));
-      const turnIsTerminal = isTurnTerminalEvent(event) || /^(completed|interrupted|failed)$/i.test(turnStatus);
-      if (hasTimelineTarget && turnIsTerminal) {
-        setConversationTurnId(targetConversationId, '');
-      } else if (hasTimelineTarget && turnId) {
-        setConversationTurnId(targetConversationId, turnId);
-      }
-      if (hasTimelineTarget && turnIsStarting) {
-        setConversationThinking(targetConversationId, true);
-      }
-      if (hasTimelineTarget && turnIsTerminal) {
-        setConversationThinking(targetConversationId, false);
-      }
-      if (event.type === 'codex.control.stopped') {
-        const sessionId = target.sessionId || sessionIdFromEvent(event, data);
-        if (typeof sessionId === 'string') {
-          const conversation = conversationsRef.current.find((item) => item.sessionId === sessionId);
-          if (conversation) {
-            updateConversation(conversation.id, { localAdapterState: 'stopped' });
-          }
-        }
-      }
-      if (event.type === 'codex.control.ready') {
-        const pending = findPendingLocalStart(event, data);
-        if (pending) {
-          settlePendingLocalStart(pending);
-        }
-      } else if (event.type === 'codex.control.error') {
-        const pending = pendingLocalStartForError ?? findPendingLocalStart(event, data);
-        if (pending) {
-          settlePendingLocalStart(pending, protocolError || t('sess.localStartFailed'));
-        }
-      } else if (event.type === 'codex.serverRequest.resolved' && protocolError) {
-        const pending = findPendingLocalStart(event, data);
-        if (pending) {
-          settlePendingLocalStart(pending, protocolError);
-        }
-      }
-      const threadStartRequestId = data.requestId ?? data.request_id;
-      if (typeof threadStartRequestId === 'string' && threadStartRequestId) {
-        const pendingThread = [...pendingThreadStartsRef.current.values()].find((item) => item.requestId === threadStartRequestId);
-        if (pendingThread) {
-          const threadId = extractThreadIdFromEvent(event);
-          if (protocolError || event.type === 'codex.control.request.rejected') {
-            settlePendingThreadStart(pendingThread, '', localTurnErrorMessage(protocolError || t('sess.threadCreateFailed')));
-          } else if (threadId) {
-            settlePendingThreadStart(pendingThread, threadId);
-          }
-        }
-      } else {
-        const threadId = extractThreadIdFromEvent(event);
-        if (threadId && pendingThreadStartsRef.current.size === 1) {
-          const pendingThread = [...pendingThreadStartsRef.current.values()][0];
-          settlePendingThreadStart(pendingThread, threadId);
-        }
-      }
-      if (protocolError && isLocalAdapterFailed(protocolError)) {
-        const sessionId = target.sessionId || sessionIdFromEvent(event, data);
-        if (typeof sessionId === 'string') {
-          const workspace = workspacesRef.current.find((item) => item.sessionId === sessionId);
-          const conversation = conversationsRef.current.find((item) => item.sessionId === sessionId);
-          if (conversation) {
-            updateConversation(conversation.id, {
-              sessionId: createSessionId(conversation.title),
-              threadId: '',
-              localAdapterState: 'idle',
-            });
-          } else if (workspace) {
-            resetWorkspaceSession(workspace);
-          }
-        }
-      }
-      if (protocolError && isThreadNotFound(protocolError)) {
-        const sessionId = target.sessionId || sessionIdFromEvent(event, data);
-        const requestId = data.requestId ?? data.request_id;
-        const conversation =
-          typeof sessionId === 'string'
-            ? conversationsRef.current.find((item) => item.sessionId === sessionId)
-            : activeConversationRef.current
-              ? conversationsRef.current.find((item) => item.id === activeConversationRef.current)
-              : null;
-        if (conversation) {
-          updateConversation(conversation.id, { threadId: '' });
-          appendTimeline(makeSystemEntry(
-            t('sess.invalidatedThreadTitle'),
-            localTurnErrorMessage(protocolError),
-            conversation.workspaceId,
-            conversation.id,
-          ));
-        }
-        if (typeof requestId === 'string') {
-          const pendingThread = [...pendingThreadStartsRef.current.values()].find((item) => item.requestId === requestId);
-          if (pendingThread) {
-            settlePendingThreadStart(pendingThread, '', localTurnErrorMessage(protocolError));
-          }
-        }
-        const resetConversationId = conversation?.id ?? targetConversationId;
-        if (resetConversationId) {
-          setConversationThinking(resetConversationId, false);
-        }
-      }
-      if (protocolError && !isLocalAdapterAlreadyRunning(protocolError) && !isThreadNotMaterializedHistoryError(protocolError)) {
-        setLastError(localTurnErrorMessage(protocolError));
-      }
-    },
-    [appendTimeline, findPendingLocalStart, finishPendingSkillList, finishPendingThreadAction, finishPendingThreadList, handleTerminalEvent, persistSessionCursors, resetWorkspaceSession, resolveTimelineTarget, settlePendingLocalStart, settlePendingThreadStart, setConversationThinking, setConversationTurnId, updateConversation, upsertChatTimeline, upsertNativeThreads],
-  );
-
-  const appendEvent = useCallback((event: ServerEvent) => {
-    const sessionId = sessionIdFromEvent(event, eventPayloadData(event));
-    const cursor = cursorFromEvent(event);
-    if (!sessionId || cursor === null) {
-      projectLegacyEvent(event);
-      return;
-    }
-    legacyRecoveryRef.current.receive(sessionId, cursor, event,
-      () => sessionCursorsRef.current.get(sessionId) ?? 0,
-      projectLegacyEvent,
-      (next) => { sessionCursorsRef.current.set(sessionId, next); persistSessionCursors(); },
-      (after) => rawProtocolSenderRef.current(
-        backendIdForPayload({ sessionId }),
-        { id: createRequestId('resume'), type: 'session.resume', payload: { sessionCursors: { [sessionId]: after } } },
-      ),
-    );
-  }, [persistSessionCursors, projectLegacyEvent]);
+  /** Frames outside the conversation event stream: terminal output, and
+   * the backend's top-level `error` events (a stream that lagged or closed,
+   * a frame it could not parse). */
+  const projectServerEvent = useCallback((event: ServerEvent) => {
+    const data = eventPayloadData(event);
+    if (handleTerminalEvent(event, data)) return;
+    const protocolError = extractProtocolError(event.type, data);
+    if (protocolError) setLastError(protocolError);
+  }, [handleTerminalEvent]);
 
   const scheduleServerEventDrain = useCallback(() => {
     if (pendingServerEventFrameRef.current !== null) {
@@ -3879,13 +2885,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     pendingServerEventFrameRef.current = scheduleMessageTask(() => {
       pendingServerEventFrameRef.current = null;
       const batch = pendingServerEventsRef.current.splice(0, SOCKET_EVENT_BATCH_SIZE);
-      batch.forEach(appendEvent);
+      batch.forEach(projectServerEvent);
 
       if (pendingServerEventsRef.current.length > 0) {
         scheduleServerEventDrain();
       }
     });
-  }, [appendEvent]);
+  }, [projectServerEvent]);
 
   const enqueueServerEvent = useCallback((event: ServerEvent) => {
     pendingServerEventsRef.current.push(event);
@@ -4005,7 +3011,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     } catch (error) {
       setLastError(error instanceof Error ? error.message : 'failed to parse websocket message');
     }
-  }, [enqueueServerEvent, setConversationThinking, setConversationTurnId, updateConversation, upsertChatTimeline]);
+  }, [enqueueServerEvent]);
 
   const scheduleSocketFrameDrain = useCallback(() => {
     if (pendingSocketFrameDrainRef.current !== null) {
@@ -4286,17 +3292,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     }
   }, [recoverConversation, sendProtocolCommand]);
 
-  const sendSessionResume = useCallback((backendId: string, sessionCursors: Record<string, number>) => {
-    try {
-      sendRawProtocolFrame({
-        id: createRequestId('resume'),
-        type: 'session.resume',
-        payload: { sessionCursors },
-      }, backendId);
-    } catch (error: unknown) {
-      setLastError(error instanceof ConnectionError ? connectionErrorText(error) : t('sess.resumeFailed'));
-    }
-  }, [sendRawProtocolFrame]);
 
   const pushSystem = useCallback(
     (title: string, subtitle = '') => {
@@ -4566,7 +3561,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         link.reconnectAttempt = 0;
         link.lastFailureRetryable = true;
         patchLinkStatus(backendId, (current) => ({ state: 'open', epoch: current.epoch + 1, error: '', openedAt: Date.now() }));
-        sendSessionResume(backendId, getSessionCursorSnapshot(backendId));
         void checkConnectionHealth(backendId);
         void refreshServerVersion(backendId);
         // Only the open conversation replays history eagerly. Other
@@ -4744,7 +3738,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       reportLinkError(backendId, message);
       setHealth({ status: 'offline', latencyMs: null, lastCheckedAt: Date.now(), error: message, code: 'backend_unreachable' });
     });
-  }, [checkConnectionHealth, closeSocket, enqueueSocketFrame, getSessionCursorSnapshot, openConversation, patchLinkStatus, reconcilePendingSubmission, refreshServerVersion, reportLinkError, sendSessionResume, setBackendProviders, subscribeV2Conversation, syncWorkspacesFromBackend]);
+  }, [checkConnectionHealth, closeSocket, enqueueSocketFrame, openConversation, patchLinkStatus, reconcilePendingSubmission, refreshServerVersion, reportLinkError, setBackendProviders, subscribeV2Conversation, syncWorkspacesFromBackend]);
 
   /** Connect a backend (the focused one when none is named). */
   const connect = useCallback((backendId = activeBackendConnectionIdRef.current) => connectBackend(backendId), [connectBackend]);
@@ -4883,13 +3877,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       if (!message) {
         setLastError(t('sess.connectBackendFirst'));
         return false;
-      }
-      if (type === 'codex.local.turn') {
-        appendTimeline(makeOutgoingEntry(
-          message,
-          target?.workspaceId ?? activeWorkspaceRef.current,
-          target?.conversationId ?? activeConversationRef.current,
-        ));
       }
       return true;
     },
@@ -5253,48 +4240,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     }
   }, [sendProtocolMessage]);
 
-  const requestModelCatalog = useCallback(() => {
-    const sessionId =
-      activeWorkspaceRef.current
-        ? workspacesRef.current.find((workspace) => workspace.id === activeWorkspaceRef.current)?.sessionId
-        : workspacesRef.current[0]?.sessionId;
-    if (!sessionId) {
-      setModelCatalogStatus('ready');
-      return false;
-    }
-    const requestId = createRequestId('model-list');
-    if (pendingModelListRef.current) {
-      clearTimeout(pendingModelListRef.current.timeoutId);
-    }
-    const timeoutId = setTimeout(() => {
-      if (pendingModelListRef.current?.requestId !== requestId) {
-        return;
-      }
-      pendingModelListRef.current = null;
-      setModelCatalogStatus('error');
-      setModelCatalogError(t('sess.modelListTimeout'));
-    }, 8000);
-    pendingModelListRef.current = { requestId, timeoutId };
-    setModelCatalogStatus('loading');
-    setModelCatalogError('');
-    const sent = sendProtocolMessage('codex.local.request', {
-      codexSessionId: sessionId,
-      tenantId: settings.tenantId,
-      method: 'model/list',
-      params: {
-        limit: 50,
-        includeHidden: false,
-      },
-    }, requestId);
-    if (!sent) {
-      clearTimeout(timeoutId);
-      pendingModelListRef.current = null;
-      setModelCatalogStatus('error');
-      setModelCatalogError(t('sess.modelListNeedBackend'));
-      return false;
-    }
-    return true;
-  }, [sendProtocolMessage, settings.tenantId]);
 
   const createWorkspace = useCallback(
     (nameDraft: string, pathDraft: string, backendConnectionId = activeBackendConnectionIdRef.current) => {
@@ -5757,915 +4702,20 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     return { workspace: nextWorkspace, conversation: nextConversations[0] ?? null };
   }, [clearWorkspaceTombstone, conversations, workspaces]);
 
-  const sendWorkspaceCommand = useCallback(
-    (workspace: WorkspaceRecord, type: string, extra: Record<string, unknown> = {}, conversation?: ConversationRecord | null) => {
-      const sessionId = conversation ? sessionIdForConversation(workspace, conversation) : workspace.sessionId;
-      const payload = {
-        codexSessionId: sessionId,
-        tenantId: workspace.tenantId,
-        ...extra,
-      };
-      return sendProtocolMessage(type, payload);
-    },
-    [sendProtocolMessage],
-  );
 
-  const attachWorkspaceConversation = useCallback((workspace: WorkspaceRecord, conversation: ConversationRecord) => {
-    if (isV2Conversation(conversation)) {
-      if (!conversation.v2ConversationId) {
-        return true;
-      }
-      return subscribeV2Conversation(conversation.v2ConversationId, {
-        afterSequence: 0,
-        limit: CHAT_ATTACH_REPLAY_LIMIT,
-      });
-    }
-    const sessionId = sessionIdForConversation(workspace, conversation);
-    const afterCursor = sessionCursorsRef.current.get(sessionId) ?? null;
-    return sendWorkspaceCommand(workspace, 'codex.local.attach', {
-      afterCursor,
-      replayLimit: CHAT_ATTACH_REPLAY_LIMIT,
-    }, conversation);
-  }, [sendWorkspaceCommand, subscribeV2Conversation]);
 
-  const sendLocalMethodRequest = useCallback((
-    workspace: WorkspaceRecord,
-    conversation: ConversationRecord,
-    method: string,
-    params: Record<string, unknown> | null,
-    requestId = createRequestId('local-method'),
-  ) => {
-    return sendProtocolMessage('codex.local.request', {
-      codexSessionId: sessionIdForConversation(workspace, conversation),
-      tenantId: workspace.tenantId,
-      method,
-      params,
-    }, requestId, {
-      workspaceId: workspace.id,
-      conversationId: conversation.id,
-    });
-  }, [sendProtocolMessage]);
 
-  const startLocalAdapter = useCallback(
-    (workspace: WorkspaceRecord, conversation: ConversationRecord) => {
-      const sessionId = sessionIdForConversation(workspace, conversation);
-      const currentState = localConversationStateOf(conversation);
-      const existingPending = pendingLocalStartsRef.current.get(conversation.id);
 
-      if (currentState === 'running' && !existingPending) {
-        return Promise.resolve(true);
-      }
 
-      if (existingPending) {
-        return existingPending.promise.then(() => true);
-      }
 
-      return new Promise<boolean>((resolve, reject) => {
-        const requestId = createRequestId('local-start');
-        let settleResolve: () => void = () => {};
-        let settleReject: (reason: Error) => void = () => {};
-        const promise = new Promise<void>((innerResolve, innerReject) => {
-          settleResolve = innerResolve;
-          settleReject = innerReject;
-        });
-        // The shared entry rejects even when no concurrent waiter attached;
-        // mark it handled so a timeout can't surface as an unhandled rejection.
-        void promise.catch(() => {});
-        const timeoutId = setTimeout(() => {
-          pendingLocalStartsRef.current.delete(conversation.id);
-          updateConversation(conversation.id, { localAdapterState: 'error' });
-          const error = new Error(t('chat.localStartTimeoutDetail'));
-          setLastError(error.message);
-          pushSystem('本地会话启动超时', error.message);
-          settleReject(error);
-          reject(error);
-        }, 15000);
 
-        pendingLocalStartsRef.current.set(conversation.id, {
-          workspaceId: workspace.id,
-          conversationId: conversation.id,
-          sessionId,
-          requestId,
-          promise,
-          resolve: () => {
-            settleResolve();
-            resolve(true);
-          },
-          reject: (reason) => {
-            settleReject(reason);
-            reject(reason);
-          },
-          timeoutId,
-        });
 
-        updateConversation(conversation.id, { sessionId, localAdapterState: 'starting' });
 
-        const sent = sendProtocolMessage('codex.local.start', {
-          codexSessionId: sessionId,
-          tenantId: workspace.tenantId,
-          cwd: workspace.path,
-          model: workspace.model || settings.defaultModel || undefined,
-          approvalPolicy: workspace.approvalPolicy,
-          approvalsReviewer: workspace.approvalsReviewer || settings.approvalsReviewer || undefined,
-          sandboxMode: workspace.sandboxMode,
-          configOverrides: {
-            reasoningEffort: workspace.reasoningEffort || settings.defaultReasoningEffort || undefined,
-          },
-        }, requestId);
 
-        if (!sent) {
-          clearTimeout(timeoutId);
-          pendingLocalStartsRef.current.delete(conversation.id);
-          updateConversation(conversation.id, { localAdapterState: 'error' });
-          const error = new Error(t('sess.connectBackendFirst'));
-          reject(error);
-        }
-      });
-    },
-    [pushSystem, sendProtocolMessage, settings.approvalsReviewer, settings.defaultModel, settings.defaultReasoningEffort, updateConversation],
-  );
 
-  const ensureThreadId = useCallback(
-    (workspace: WorkspaceRecord, conversation: ConversationRecord, forceNewThread = false) => {
-      const sessionId = sessionIdForConversation(workspace, conversation);
-      const currentThreadId = normalizeThreadId(conversation.threadId);
-      if (!forceNewThread && currentThreadId) {
-        return Promise.resolve(currentThreadId);
-      }
-      if (forceNewThread) {
-        setConversations((current) =>
-          current.map((item) =>
-            item.id === conversation.id ? { ...item, threadId: '', updatedAt: Date.now() } : item,
-          ),
-        );
-      }
 
-      const existingPending = pendingThreadStartsRef.current.get(conversation.id);
-      if (existingPending) {
-        return existingPending.promise;
-      }
 
-      return new Promise<string>((resolve, reject) => {
-        const requestId = createRequestId('thread-start');
-        let settleResolve: (threadId: string) => void = () => {};
-        let settleReject: (reason: Error) => void = () => {};
-        const promise = new Promise<string>((innerResolve, innerReject) => {
-          settleResolve = innerResolve;
-          settleReject = innerReject;
-        });
-        const timeoutId = setTimeout(() => {
-          pendingThreadStartsRef.current.delete(conversation.id);
-          const error = new Error(t('sess.threadCreateTimeout'));
-          setLastError(error.message);
-          settleReject(error);
-          reject(error);
-        }, 15000);
 
-        pendingThreadStartsRef.current.set(conversation.id, {
-          conversationId: conversation.id,
-          requestId,
-          promise,
-          resolve: (threadId) => {
-            settleResolve(threadId);
-            resolve(threadId);
-          },
-          reject: (reason) => {
-            settleReject(reason);
-            reject(reason);
-          },
-          timeoutId,
-        });
-
-        const sent = sendProtocolMessage('codex.local.request', {
-          codexSessionId: sessionId,
-          tenantId: workspace.tenantId,
-          method: 'thread/start',
-          params: {
-            cwd: workspace.path,
-            model: workspace.model || settings.defaultModel || undefined,
-            reasoningEffort: workspace.reasoningEffort || settings.defaultReasoningEffort || undefined,
-            approvalPolicy: workspace.approvalPolicy || settings.approvalPolicy || undefined,
-            approvalsReviewer: workspace.approvalsReviewer || settings.approvalsReviewer || undefined,
-            sandbox: workspace.permissionProfile ? undefined : workspace.sandboxMode || settings.sandboxMode || undefined,
-            permissions: workspace.permissionProfile || undefined,
-            serviceTier: workspace.serviceTier || undefined,
-          },
-        }, requestId);
-
-        if (!sent) {
-          clearTimeout(timeoutId);
-          pendingThreadStartsRef.current.delete(conversation.id);
-          const error = new Error(t('sess.connectBackendFirst'));
-          settleReject(error);
-          reject(error);
-        }
-      });
-    },
-    [sendProtocolMessage, settings.approvalPolicy, settings.approvalsReviewer, settings.defaultModel, settings.defaultReasoningEffort, settings.sandboxMode],
-  );
-
-  const requestNativeThreadList = useCallback(async (workspaceId: string, includeArchived = false) => {
-    const workspace = workspacesRef.current.find((item) => item.id === workspaceId);
-    const conversation =
-      conversationsRef.current.find((item) => item.workspaceId === workspaceId) ??
-      (workspace ? createDefaultConversation(workspace) : null);
-    if (!workspace || !conversation) {
-      setLastError(t('sess.workspaceNotFoundRefresh'));
-      return false;
-    }
-    try {
-      await startLocalAdapter(workspace, conversation);
-    } catch (error) {
-      setLastError(error instanceof Error ? localTurnErrorMessage(error.message) : t('sess.localNotStarted'));
-      return false;
-    }
-    const existing = pendingThreadListsRef.current.get(workspaceId);
-    if (existing) {
-      clearTimeout(existing.timeoutId);
-    }
-    const requestId = createRequestId('thread-list');
-    const sessionId = sessionIdForConversation(workspace, conversation);
-    const timeoutId = setTimeout(() => {
-      const pending = pendingThreadListsRef.current.get(workspaceId);
-      if (pending?.requestId !== requestId) {
-        return;
-      }
-      finishPendingThreadList(pending, t('sess.requestTimeout', { method: 'thread/list' }));
-    }, 10000);
-    pendingThreadListsRef.current.set(workspaceId, {
-      workspaceId,
-      sessionId,
-      requestId,
-      timeoutId,
-    });
-    setThreadListStatusByWorkspace((current) => ({ ...current, [workspaceId]: 'loading' }));
-    setThreadListErrorByWorkspace((current) => ({ ...current, [workspaceId]: '' }));
-    const sent = sendLocalMethodRequest(workspace, conversation, 'thread/list', {
-      cwd: workspace.path,
-      archived: includeArchived ? true : false,
-      limit: 100,
-      sortKey: 'updated_at',
-      sortDirection: 'desc',
-      sourceKinds: ['cli', 'vscode', 'appServer'],
-    }, requestId);
-    if (!sent) {
-      finishPendingThreadList(pendingThreadListsRef.current.get(workspaceId)!, t('sess.connectBackendFirst'));
-      return false;
-    }
-    return true;
-  }, [finishPendingThreadList, sendLocalMethodRequest, startLocalAdapter]);
-
-  const sendNativeThreadAction = useCallback(async (
-    conversationId: string,
-    action: PendingThreadAction['action'],
-    method: string,
-    paramsBuilder: (threadId: string, workspace: WorkspaceRecord, conversation: ConversationRecord) => Record<string, unknown>,
-    options: {
-      title?: string;
-      selectResult?: boolean;
-      resultConversationId?: string;
-      restoreHistory?: boolean;
-      showResult?: boolean;
-      resultTitle?: string;
-      resultDetail?: string;
-    } = {},
-  ) => {
-    const context = getConversationContext(conversationId);
-    if (!context) {
-      desktopAlert(t('alert.noConversation'), t('alert.pickThread'));
-      return false;
-    }
-    const { workspace, conversation } = context;
-    try {
-      await startLocalAdapter(workspace, conversation);
-    } catch (error) {
-      setLastError(error instanceof Error ? localTurnErrorMessage(error.message) : t('sess.localNotStarted'));
-      return false;
-    }
-    let threadId = normalizeThreadId(conversation.threadId);
-    const canCreateThreadForAction = ![
-      'archive',
-      'fork',
-      'resume',
-      'rollback',
-      'unarchive',
-      'unsubscribe',
-    ].includes(action);
-    if (!threadId && canCreateThreadForAction) {
-      try {
-        threadId = await ensureThreadId(workspace, conversation, true);
-      } catch (error) {
-        setLastError(error instanceof Error ? localTurnErrorMessage(error.message) : t('sess.threadCreateFailed'));
-        return false;
-      }
-    }
-    if (!threadId) {
-      setLastError(t('sess.noNativeThreadId'));
-      return false;
-    }
-    const requestId = createRequestId(`thread-${action}`);
-    const timeoutId = setTimeout(() => {
-      const pending = pendingThreadActionsRef.current.get(requestId);
-      if (!pending) {
-        return;
-      }
-      finishPendingThreadAction(pending, t('sess.requestTimeout', { method }));
-    }, 10000);
-    pendingThreadActionsRef.current.set(requestId, {
-      workspaceId: workspace.id,
-      conversationId: options.resultConversationId ?? (options.selectResult && action === 'fork' ? createRequestId('thread') : conversation.id),
-      requestId,
-      action,
-      timeoutId,
-      sourceConversationId: conversation.id,
-      title: options.title,
-      restoreHistory: options.restoreHistory,
-      showResult: options.showResult,
-      resultTitle: options.resultTitle,
-      resultDetail: options.resultDetail,
-    });
-    const sent = sendLocalMethodRequest(workspace, conversation, method, paramsBuilder(threadId, workspace, conversation), requestId);
-    if (!sent) {
-      const pending = pendingThreadActionsRef.current.get(requestId);
-      if (pending) {
-        finishPendingThreadAction(pending, t('sess.connectBackendFirst'));
-      }
-      return false;
-    }
-    return true;
-  }, [ensureThreadId, finishPendingThreadAction, getConversationContext, sendLocalMethodRequest, startLocalAdapter]);
-
-  const sendTrackedLocalMethod = useCallback(async (
-    conversationId: string,
-    action: PendingThreadAction['action'],
-    method: string,
-    params: Record<string, unknown> | null | undefined,
-    title: string,
-    detail = '',
-  ) => {
-    const context = getConversationContext(conversationId);
-    if (!context) {
-      desktopAlert(t('alert.noConversation'), t('alert.pickThread'));
-      return false;
-    }
-    const { workspace, conversation } = context;
-    try {
-      await startLocalAdapter(workspace, conversation);
-    } catch (error) {
-      setLastError(error instanceof Error ? localTurnErrorMessage(error.message) : t('sess.localNotStarted'));
-      return false;
-    }
-    const requestId = createRequestId(`thread-${action}`);
-    const timeoutId = setTimeout(() => {
-      const pending = pendingThreadActionsRef.current.get(requestId);
-      if (!pending) {
-        return;
-      }
-      finishPendingThreadAction(pending, t('sess.requestTimeout', { method }));
-    }, 10000);
-    pendingThreadActionsRef.current.set(requestId, {
-      workspaceId: workspace.id,
-      conversationId: conversation.id,
-      requestId,
-      action,
-      timeoutId,
-      sourceConversationId: conversation.id,
-      showResult: true,
-      resultTitle: title,
-      resultDetail: detail,
-    });
-    const sent = sendLocalMethodRequest(workspace, conversation, method, params === undefined ? {} : params, requestId);
-    if (!sent) {
-      const pending = pendingThreadActionsRef.current.get(requestId);
-      if (pending) {
-        finishPendingThreadAction(pending, t('sess.connectBackendFirst'));
-      }
-      return false;
-    }
-    return true;
-  }, [finishPendingThreadAction, getConversationContext, sendLocalMethodRequest, startLocalAdapter]);
-
-  const requestMcpInventory = useCallback(async (
-    conversationId = activeConversationRef.current,
-    detail: McpInventoryState['detail'] = 'toolsAndAuthOnly',
-  ) => {
-    const context = getConversationContext(conversationId);
-    if (!context) {
-      desktopAlert(t('alert.noConversation'), t('alert.pickCodexConversation'));
-      return false;
-    }
-    const { workspace, conversation } = context;
-    setMcpInventoryByConversation((current) => ({
-      ...current,
-      [conversation.id]: {
-        ...(current[conversation.id] ?? {
-          status: 'idle',
-          detail,
-          servers: [],
-          raw: null,
-          error: '',
-          updatedAt: 0,
-        }),
-        status: 'loading',
-        detail,
-        error: '',
-      },
-    }));
-    try {
-      await startLocalAdapter(workspace, conversation);
-      const threadId = await ensureThreadId(workspace, conversation, !normalizeThreadId(conversation.threadId));
-      const requestId = createRequestId('mcp-status');
-      const timeoutId = setTimeout(() => {
-        const pending = pendingThreadActionsRef.current.get(requestId);
-        if (pending) {
-          finishPendingThreadAction(pending, t('sess.requestTimeout', { method: 'mcpServerStatus/list' }));
-        }
-      }, 15000);
-      pendingThreadActionsRef.current.set(requestId, {
-        workspaceId: workspace.id,
-        conversationId: conversation.id,
-        requestId,
-        action: 'mcp',
-        timeoutId,
-        sourceConversationId: conversation.id,
-        showResult: false,
-        resultDetail: detail,
-      });
-      const sent = sendLocalMethodRequest(workspace, conversation, 'mcpServerStatus/list', {
-        cursor: null,
-        limit: null,
-        detail,
-        threadId,
-      }, requestId);
-      if (!sent) {
-        const pending = pendingThreadActionsRef.current.get(requestId);
-        if (pending) {
-          finishPendingThreadAction(pending, t('sess.connectBackendFirst'));
-        }
-        return false;
-      }
-      return true;
-    } catch (error) {
-      const message = error instanceof Error ? localTurnErrorMessage(error.message) : t('sess.mcpStatusFailed');
-      setMcpInventoryByConversation((current) => ({
-        ...current,
-        [conversation.id]: {
-          ...(current[conversation.id] ?? {
-            status: 'idle',
-            detail,
-            servers: [],
-            raw: null,
-            error: '',
-            updatedAt: 0,
-          }),
-          status: 'error',
-          detail,
-          error: message,
-          updatedAt: Date.now(),
-        },
-      }));
-      setLastError(message);
-      return false;
-    }
-  }, [ensureThreadId, finishPendingThreadAction, getConversationContext, sendLocalMethodRequest, startLocalAdapter]);
-
-  const requestPermissionProfiles = useCallback(async (conversationId = activeConversationRef.current) => {
-    const context = getConversationContext(conversationId);
-    if (!context) {
-      desktopAlert(t('alert.noConversation'), t('alert.pickCodexConversation'));
-      return false;
-    }
-    const { workspace, conversation } = context;
-    setPermissionProfilesByConversation((current) => ({
-      ...current,
-      [conversation.id]: {
-        ...(current[conversation.id] ?? {
-          status: 'idle',
-          profiles: [],
-          raw: null,
-          error: '',
-          updatedAt: 0,
-        }),
-        status: 'loading',
-        error: '',
-      },
-    }));
-    try {
-      await startLocalAdapter(workspace, conversation);
-    } catch (error) {
-      const message = error instanceof Error ? localTurnErrorMessage(error.message) : t('sess.localNotStarted');
-      setPermissionProfilesByConversation((current) => ({
-        ...current,
-        [conversation.id]: {
-          ...(current[conversation.id] ?? {
-            status: 'idle',
-            profiles: [],
-            raw: null,
-            error: '',
-            updatedAt: 0,
-          }),
-          status: 'error',
-          error: message,
-          updatedAt: Date.now(),
-        },
-      }));
-      setLastError(message);
-      return false;
-    }
-    const requestId = createRequestId('permission-profiles');
-    const timeoutId = setTimeout(() => {
-      const pending = pendingThreadActionsRef.current.get(requestId);
-      if (pending) {
-        finishPendingThreadAction(pending, t('sess.requestTimeout', { method: 'permissionProfile/list' }));
-      }
-    }, 15000);
-    pendingThreadActionsRef.current.set(requestId, {
-      workspaceId: workspace.id,
-      conversationId: conversation.id,
-      requestId,
-      action: 'permissionProfiles',
-      timeoutId,
-      sourceConversationId: conversation.id,
-      showResult: false,
-    });
-    const sent = sendLocalMethodRequest(workspace, conversation, 'permissionProfile/list', {
-      cursor: null,
-      limit: null,
-      cwd: workspace.path,
-    }, requestId);
-    if (!sent) {
-      const pending = pendingThreadActionsRef.current.get(requestId);
-      if (pending) {
-        finishPendingThreadAction(pending, t('sess.connectBackendFirst'));
-      }
-      return false;
-    }
-    return true;
-  }, [finishPendingThreadAction, getConversationContext, sendLocalMethodRequest, startLocalAdapter]);
-
-  const requestHooksCatalog = useCallback(async (conversationId = activeConversationRef.current) => {
-    const context = getConversationContext(conversationId);
-    if (!context) {
-      desktopAlert(t('alert.noConversation'), t('alert.pickCodexConversation'));
-      return false;
-    }
-    const { workspace, conversation } = context;
-    setHooksCatalogByConversation((current) => ({
-      ...current,
-      [conversation.id]: {
-        ...(current[conversation.id] ?? {
-          status: 'idle',
-          entries: [],
-          raw: null,
-          error: '',
-          updatedAt: 0,
-        }),
-        status: 'loading',
-        error: '',
-      },
-    }));
-    try {
-      await startLocalAdapter(workspace, conversation);
-    } catch (error) {
-      const message = error instanceof Error ? localTurnErrorMessage(error.message) : t('sess.localNotStarted');
-      setHooksCatalogByConversation((current) => ({
-        ...current,
-        [conversation.id]: {
-          ...(current[conversation.id] ?? {
-            status: 'idle',
-            entries: [],
-            raw: null,
-            error: '',
-            updatedAt: 0,
-          }),
-          status: 'error',
-          error: message,
-          updatedAt: Date.now(),
-        },
-      }));
-      setLastError(message);
-      return false;
-    }
-    const requestId = createRequestId('hooks');
-    const timeoutId = setTimeout(() => {
-      const pending = pendingThreadActionsRef.current.get(requestId);
-      if (pending) {
-        finishPendingThreadAction(pending, t('sess.requestTimeout', { method: 'hooks/list' }));
-      }
-    }, 15000);
-    pendingThreadActionsRef.current.set(requestId, {
-      workspaceId: workspace.id,
-      conversationId: conversation.id,
-      requestId,
-      action: 'hooks',
-      timeoutId,
-      sourceConversationId: conversation.id,
-      showResult: false,
-    });
-    const sent = sendLocalMethodRequest(workspace, conversation, 'hooks/list', {
-      cwds: [workspace.path],
-    }, requestId);
-    if (!sent) {
-      const pending = pendingThreadActionsRef.current.get(requestId);
-      if (pending) {
-        finishPendingThreadAction(pending, t('sess.connectBackendFirst'));
-      }
-      return false;
-    }
-    return true;
-  }, [finishPendingThreadAction, getConversationContext, sendLocalMethodRequest, startLocalAdapter]);
-
-  const requestPluginsCatalog = useCallback(async (conversationId = activeConversationRef.current) => {
-    const context = getConversationContext(conversationId);
-    if (!context) {
-      desktopAlert(t('alert.noConversation'), t('alert.pickCodexConversation'));
-      return false;
-    }
-    const { workspace, conversation } = context;
-    setPluginsCatalogByConversation((current) => ({
-      ...current,
-      [conversation.id]: {
-        ...(current[conversation.id] ?? {
-          status: 'idle',
-          catalog: { marketplaces: [], marketplaceLoadErrors: [], featuredPluginIds: [] },
-          raw: null,
-          error: '',
-          updatedAt: 0,
-        }),
-        status: 'loading',
-        error: '',
-      },
-    }));
-    try {
-      await startLocalAdapter(workspace, conversation);
-    } catch (error) {
-      const message = error instanceof Error ? localTurnErrorMessage(error.message) : t('sess.localNotStarted');
-      setPluginsCatalogByConversation((current) => ({
-        ...current,
-        [conversation.id]: {
-          ...(current[conversation.id] ?? {
-            status: 'idle',
-            catalog: { marketplaces: [], marketplaceLoadErrors: [], featuredPluginIds: [] },
-            raw: null,
-            error: '',
-            updatedAt: 0,
-          }),
-          status: 'error',
-          error: message,
-          updatedAt: Date.now(),
-        },
-      }));
-      setLastError(message);
-      return false;
-    }
-    const requestId = createRequestId('plugins');
-    const timeoutId = setTimeout(() => {
-      const pending = pendingThreadActionsRef.current.get(requestId);
-      if (pending) {
-        finishPendingThreadAction(pending, t('sess.requestTimeout', { method: 'plugin/list' }));
-      }
-    }, 15000);
-    pendingThreadActionsRef.current.set(requestId, {
-      workspaceId: workspace.id,
-      conversationId: conversation.id,
-      requestId,
-      action: 'plugins',
-      timeoutId,
-      sourceConversationId: conversation.id,
-      showResult: false,
-    });
-    const sent = sendLocalMethodRequest(workspace, conversation, 'plugin/list', {
-      cwds: [workspace.path],
-      extraUserRoots: [],
-    }, requestId);
-    if (!sent) {
-      const pending = pendingThreadActionsRef.current.get(requestId);
-      if (pending) {
-        finishPendingThreadAction(pending, t('sess.connectBackendFirst'));
-      }
-      return false;
-    }
-    return true;
-  }, [finishPendingThreadAction, getConversationContext, sendLocalMethodRequest, startLocalAdapter]);
-
-  const requestMemorySettings = useCallback(async (conversationId = activeConversationRef.current) => {
-    const context = getConversationContext(conversationId);
-    if (!context) {
-      desktopAlert(t('alert.noConversation'), t('alert.pickCodexConversation'));
-      return false;
-    }
-    const { workspace, conversation } = context;
-    setMemorySettingsByConversation((current) => ({
-      ...current,
-      [conversation.id]: {
-        ...(current[conversation.id] ?? {
-          status: 'idle',
-          settings: { useMemories: false, generateMemories: false },
-          raw: null,
-          error: '',
-          updatedAt: 0,
-        }),
-        status: 'loading',
-        error: '',
-      },
-    }));
-    try {
-      await startLocalAdapter(workspace, conversation);
-    } catch (error) {
-      const message = error instanceof Error ? localTurnErrorMessage(error.message) : t('sess.localNotStarted');
-      setMemorySettingsByConversation((current) => ({
-        ...current,
-        [conversation.id]: {
-          ...(current[conversation.id] ?? {
-            status: 'idle',
-            settings: { useMemories: false, generateMemories: false },
-            raw: null,
-            error: '',
-            updatedAt: 0,
-          }),
-          status: 'error',
-          error: message,
-          updatedAt: Date.now(),
-        },
-      }));
-      setLastError(message);
-      return false;
-    }
-    const requestId = createRequestId('memory-settings');
-    const timeoutId = setTimeout(() => {
-      const pending = pendingThreadActionsRef.current.get(requestId);
-      if (pending) {
-        finishPendingThreadAction(pending, t('sess.requestTimeout', { method: 'config/read' }));
-      }
-    }, 15000);
-    pendingThreadActionsRef.current.set(requestId, {
-      workspaceId: workspace.id,
-      conversationId: conversation.id,
-      requestId,
-      action: 'memorySettings',
-      timeoutId,
-      sourceConversationId: conversation.id,
-      showResult: false,
-    });
-    const sent = sendLocalMethodRequest(workspace, conversation, 'config/read', {
-      cwd: workspace.path,
-    }, requestId);
-    if (!sent) {
-      const pending = pendingThreadActionsRef.current.get(requestId);
-      if (pending) {
-        finishPendingThreadAction(pending, t('sess.connectBackendFirst'));
-      }
-      return false;
-    }
-    return true;
-  }, [finishPendingThreadAction, getConversationContext, sendLocalMethodRequest, startLocalAdapter]);
-
-  const updateMemorySettings = useCallback(async (
-    conversationId: string,
-    patch: Partial<CodexMemorySettings>,
-  ) => {
-    const context = getConversationContext(conversationId);
-    if (!context) {
-      desktopAlert(t('alert.noConversation'), t('alert.pickCodexConversation'));
-      return false;
-    }
-    const { workspace, conversation } = context;
-    const previousSettings = memorySettingsByConversation[conversation.id]?.settings ?? {
-      useMemories: false,
-      generateMemories: false,
-    };
-    const nextMemorySettings: CodexMemorySettings = {
-      ...previousSettings,
-      ...patch,
-    };
-    const edits = [
-      patch.useMemories === undefined
-        ? null
-        : { keyPath: 'memories.use_memories', value: patch.useMemories, mergeStrategy: 'replace' },
-      patch.generateMemories === undefined
-        ? null
-        : { keyPath: 'memories.generate_memories', value: patch.generateMemories, mergeStrategy: 'replace' },
-    ].filter((edit): edit is { keyPath: string; value: boolean; mergeStrategy: string } => Boolean(edit));
-    if (!edits.length) {
-      return true;
-    }
-    setMemorySettingsByConversation((current) => ({
-      ...current,
-      [conversation.id]: {
-        ...(current[conversation.id] ?? {
-          raw: null,
-          error: '',
-          updatedAt: 0,
-        }),
-        status: 'saving',
-        settings: nextMemorySettings,
-        error: '',
-        updatedAt: Date.now(),
-      },
-    }));
-    try {
-      await startLocalAdapter(workspace, conversation);
-      if (
-        patch.generateMemories !== undefined &&
-        patch.generateMemories !== previousSettings.generateMemories
-      ) {
-        const threadId = await ensureThreadId(workspace, conversation, !normalizeThreadId(conversation.threadId));
-        sendLocalMethodRequest(workspace, conversation, 'thread/memoryMode/set', {
-          threadId,
-          mode: patch.generateMemories ? 'enabled' : 'disabled',
-        }, createRequestId('memory-mode'));
-      }
-    } catch (error) {
-      const message = error instanceof Error ? localTurnErrorMessage(error.message) : t('sess.memorySetFailed');
-      setMemorySettingsByConversation((current) => ({
-        ...current,
-        [conversation.id]: {
-          ...(current[conversation.id] ?? {
-            settings: nextMemorySettings,
-            raw: null,
-            error: '',
-            updatedAt: 0,
-          }),
-          status: 'error',
-          error: message,
-          updatedAt: Date.now(),
-        },
-      }));
-      setLastError(message);
-      return false;
-    }
-    const requestId = createRequestId('memory-settings-save');
-    const timeoutId = setTimeout(() => {
-      const pending = pendingThreadActionsRef.current.get(requestId);
-      if (pending) {
-        finishPendingThreadAction(pending, t('sess.requestTimeout', { method: 'config/batchWrite' }));
-      }
-    }, 15000);
-    pendingThreadActionsRef.current.set(requestId, {
-      workspaceId: workspace.id,
-      conversationId: conversation.id,
-      requestId,
-      action: 'memorySettings',
-      timeoutId,
-      sourceConversationId: conversation.id,
-      showResult: false,
-      memorySettings: nextMemorySettings,
-    });
-    const sent = sendLocalMethodRequest(workspace, conversation, 'config/batchWrite', {
-      edits,
-      reloadUserConfig: true,
-    }, requestId);
-    if (!sent) {
-      const pending = pendingThreadActionsRef.current.get(requestId);
-      if (pending) {
-        finishPendingThreadAction(pending, t('sess.connectBackendFirst'));
-      }
-      return false;
-    }
-    return true;
-  }, [ensureThreadId, finishPendingThreadAction, getConversationContext, memorySettingsByConversation, sendLocalMethodRequest, startLocalAdapter]);
-
-  const resetMemories = useCallback(async (conversationId: string) => {
-    const context = getConversationContext(conversationId);
-    if (!context) {
-      desktopAlert(t('alert.noConversation'), t('alert.pickCodexConversation'));
-      return false;
-    }
-    const { workspace, conversation } = context;
-    try {
-      await startLocalAdapter(workspace, conversation);
-    } catch (error) {
-      const message = error instanceof Error ? localTurnErrorMessage(error.message) : t('sess.localNotStarted');
-      setLastError(message);
-      return false;
-    }
-    const requestId = createRequestId('memory-reset');
-    const timeoutId = setTimeout(() => {
-      const pending = pendingThreadActionsRef.current.get(requestId);
-      if (pending) {
-        finishPendingThreadAction(pending, t('sess.requestTimeout', { method: 'memory/reset' }));
-      }
-    }, 15000);
-    pendingThreadActionsRef.current.set(requestId, {
-      workspaceId: workspace.id,
-      conversationId: conversation.id,
-      requestId,
-      action: 'memoryReset',
-      timeoutId,
-      sourceConversationId: conversation.id,
-      showResult: false,
-    });
-    const sent = sendLocalMethodRequest(workspace, conversation, 'memory/reset', null, requestId);
-    if (!sent) {
-      const pending = pendingThreadActionsRef.current.get(requestId);
-      if (pending) {
-        finishPendingThreadAction(pending, t('sess.connectBackendFirst'));
-      }
-      return false;
-    }
-    appendTimeline(makeSystemEntry('Memory reset requested', t('sess.memoryResetRequested'), workspace.id, conversation.id));
-    return true;
-  }, [appendTimeline, finishPendingThreadAction, getConversationContext, sendLocalMethodRequest, startLocalAdapter]);
 
   const applyConversationPermissionMode = useCallback(async (
     conversationId: string,
@@ -6729,111 +4779,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       preset.id === 'full-access' ? 'full-access' : preset.id === 'auto-review' ? 'auto' : 'ask');
   }, [applyConversationPermissionMode]);
 
-  const setWorkspaceServiceTier = useCallback((conversationId: string, nextTier: string, title: string) => {
-    const context = getConversationContext(conversationId);
-    if (!context) {
-      desktopAlert(t('alert.noConversation'), t('alert.pickCodexConversation'));
-      return false;
-    }
-    const { workspace, conversation } = context;
-    const model = workspace.model || settings.defaultModel;
-    updateWorkspace(workspace.id, { serviceTier: nextTier });
-    appendTimeline(makeSystemEntry(
-      title,
-      `${modelDisplayLabel(model, modelCatalog)} · ${serviceTierLabel(nextTier)}`,
-      workspace.id,
-      conversation.id,
-    ));
-    const threadId = normalizeThreadId(conversation.threadId);
-    if (threadId) {
-      sendLocalMethodRequest(workspace, conversation, 'thread/settings/update', {
-        threadId,
-        serviceTier: nextTier,
-      }, createRequestId('service-tier'));
-    }
-    return true;
-  }, [appendTimeline, getConversationContext, modelCatalog, sendLocalMethodRequest, settings.defaultModel, updateWorkspace]);
 
-  const applyServiceTier = useCallback((conversationId: string, serviceTier: CodexServiceTierOption) => {
-    return setWorkspaceServiceTier(conversationId, serviceTier.id, `${serviceTierLabel(serviceTier.id)} service tier enabled`);
-  }, [setWorkspaceServiceTier]);
 
-  const toggleFastServiceTier = useCallback((conversationId: string) => {
-    const context = getConversationContext(conversationId);
-    if (!context) {
-      desktopAlert(t('alert.noConversation'), t('alert.pickCodexConversation'));
-      return false;
-    }
-    const { workspace } = context;
-    const model = workspace.model || settings.defaultModel;
-    const fastTier = fastServiceTierForModel(model, modelCatalog);
-    const currentTier = workspace.serviceTier || null;
-    const fastEnabled = currentTier === fastTier.id || currentTier === 'fast';
-    const nextTier = fastEnabled ? 'default' : fastTier.id;
-    return setWorkspaceServiceTier(
-      conversationId,
-      nextTier,
-      nextTier === fastTier.id ? 'Fast mode enabled' : 'Fast mode disabled',
-    );
-  }, [getConversationContext, modelCatalog, setWorkspaceServiceTier, settings.defaultModel]);
 
-  const applyPersonality = useCallback((conversationId: string, personality: string) => {
-    const context = getConversationContext(conversationId);
-    if (!context) {
-      desktopAlert(t('alert.noConversation'), t('alert.pickCodexConversation'));
-      return false;
-    }
-    const { workspace, conversation } = context;
-    const normalized = personality.toLowerCase();
-    updateWorkspace(workspace.id, { personality: normalized });
-    appendTimeline(makeSystemEntry(
-      `Personality set to ${personalityLabel(normalized)}`,
-      normalized,
-      workspace.id,
-      conversation.id,
-    ));
-    const threadId = normalizeThreadId(conversation.threadId);
-    if (threadId) {
-      sendLocalMethodRequest(workspace, conversation, 'thread/settings/update', {
-        threadId,
-        personality: normalized,
-      }, createRequestId('personality'));
-    }
-    return true;
-  }, [appendTimeline, getConversationContext, sendLocalMethodRequest, updateWorkspace]);
 
-  const submitFeedback = useCallback((
-    conversationId: string,
-    classification: string,
-    reason: string,
-    includeLogs: boolean,
-  ) => {
-    const context = getConversationContext(conversationId);
-    if (!context) {
-      desktopAlert(t('alert.noConversation'), t('alert.pickCodexConversation'));
-      return false;
-    }
-    const { workspace, conversation } = context;
-    const trimmedReason = reason.trim();
-    const threadId = normalizeThreadId(conversation.threadId);
-    const sent = sendLocalMethodRequest(workspace, conversation, 'feedback/upload', {
-      classification,
-      reason: trimmedReason || undefined,
-      threadId: threadId || undefined,
-      includeLogs,
-    }, createRequestId('feedback'));
-    if (!sent) {
-      setLastError(t('sess.connectBackendFirst'));
-      return false;
-    }
-    appendTimeline(makeSystemEntry(
-      'Feedback submitted',
-      `${classification}${trimmedReason ? ` · ${trimmedReason}` : ''}${includeLogs ? ' · with logs' : ''}`,
-      workspace.id,
-      conversation.id,
-    ));
-    return true;
-  }, [appendTimeline, getConversationContext, sendLocalMethodRequest, setLastError]);
 
   // The latest diff request per conversation; older answers are dropped.
   const gitDiffRequestRef = useRef(new Map<string, number>());
@@ -6920,52 +4869,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     }
   }, [getConversationContext, requestTerminalStatus, seedTerminalState]);
 
-  const requestSkillList = useCallback(async (conversationId = activeConversationRef.current, forceReload = false) => {
-    const context = getConversationContext(conversationId);
-    if (!context) {
-      desktopAlert(t('alert.noConversation'), t('alert.pickCodexConversation'));
-      return false;
-    }
-    const { workspace, conversation } = context;
-    setSkillListConversationId(conversation.id);
-    setSkillListVisible(true);
-    setSkillListStatus('loading');
-    setSkillListError('');
-    try {
-      await startLocalAdapter(workspace, conversation);
-    } catch (error) {
-      const message = error instanceof Error ? localTurnErrorMessage(error.message) : t('sess.localNotStarted');
-      setSkillListStatus('error');
-      setSkillListError(message);
-      setLastError(message);
-      return false;
-    }
-    const requestId = createRequestId('skills');
-    const timeoutId = setTimeout(() => {
-      const pending = pendingSkillListsRef.current.get(requestId);
-      if (pending) {
-        finishPendingSkillList(pending, t('sess.requestTimeout', { method: 'skills/list' }));
-      }
-    }, 15000);
-    pendingSkillListsRef.current.set(requestId, {
-      workspaceId: workspace.id,
-      conversationId: conversation.id,
-      requestId,
-      timeoutId,
-    });
-    const sent = sendLocalMethodRequest(workspace, conversation, 'skills/list', {
-      cwds: [workspace.path],
-      forceReload,
-    }, requestId);
-    if (!sent) {
-      const pending = pendingSkillListsRef.current.get(requestId);
-      if (pending) {
-        finishPendingSkillList(pending, t('sess.connectBackendFirst'));
-      }
-      return false;
-    }
-    return true;
-  }, [finishPendingSkillList, getConversationContext, sendLocalMethodRequest, startLocalAdapter]);
 
   const openExperimentalFeatures = useCallback((conversationId = activeConversationRef.current) => {
     const context = getConversationContext(conversationId);
@@ -7086,27 +4989,62 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     return placeholder;
   }, [backendConnections, isUnusedConversation, resolveRememberedProviderSelection]);
 
-  // None conversations always run through a provider, which creates their
-  // folder. The generic default draft has no provider (it would take the
-  // legacy local path in the scratch root), so swap an unused one for a
-  // provider draft once the backend's agents are known.
+  /** Gives a draft without an agent the one a new conversation there would
+   * start with (its backend's agents, remembered model and run modes), in
+   * place, so typed text and attachments stay. Every conversation runs
+   * through an agent; the old local Codex path is gone. Resolves the record
+   * to send with, or null (with an alert unless `quiet`) when no agent is
+   * available or the record is retired local Codex history. */
+  const ensureConversationAgent = useCallback((conversationId: string, { quiet = false }: { quiet?: boolean } = {}): ConversationRecord | null => {
+    const conversation = conversationsRef.current.find((item) => item.id === conversationId);
+    if (!conversation) return null;
+    if (isV2Conversation(conversation)) return conversation;
+    if (conversation.legacyCodex) {
+      if (!quiet) setLastError(t('sess.legacyCodexReadOnly'));
+      return null;
+    }
+    const workspace = workspacesRef.current.find((item) => item.id === conversation.workspaceId);
+    const backendConnectionId = conversation.backendConnectionId
+      ?? workspace?.backendConnectionId
+      ?? (isNoneWorkspaceId(conversation.workspaceId) ? noWorkspaceBackendIdRef.current || null : null);
+    const providers = (backendConnectionId ? v2ProvidersByBackendRef.current[backendConnectionId] : undefined) ?? v2ProvidersRef.current;
+    const agent = resolveCreateConversationAgent({
+      providers,
+      conversations: conversationsRef.current,
+      activeConversationId: activeConversationRef.current,
+      workspaceId: conversation.workspaceId,
+    });
+    if (!agent) {
+      if (!quiet) desktopAlert(t('alert.noAgent'), t('alert.noAgentHint'));
+      return null;
+    }
+    const rememberedSelection = resolveRememberedProviderSelection(backendConnectionId, agent.provider);
+    const runModes = rememberedRunModes(
+      providerModelPreferencesRef.current[providerModelPreferenceKey(backendConnectionId, agent.provider)],
+      providers.find((item) => item.id === agent.provider)?.capabilities.permissionConfig,
+    );
+    const record: ConversationRecord = {
+      ...conversation,
+      provider: agent.provider,
+      providerProfile: agent.providerProfile,
+      permissionMode: runModes.permissionMode,
+      mode: runModes.mode,
+      backendConnectionId,
+      model: rememberedSelection.model || undefined,
+      reasoningEffort: rememberedSelection.reasoningEffort,
+    };
+    conversationsRef.current = conversationsRef.current.map((item) => (item.id === conversationId ? record : item));
+    setConversations((current) => current.map((item) => (item.id === conversationId ? record : item)));
+    return record;
+  }, [resolveRememberedProviderSelection]);
+
+  // The draft in view gets its agent as soon as its backend lists one, so
+  // the composer shows that agent's models, permissions and commands.
   useEffect(() => {
     const conversation = conversations.find((item) => item.id === activeConversationId);
-    if (
-      !conversation
-      || !isNoneWorkspaceId(conversation.workspaceId)
-      || isV2Conversation(conversation)
-      || !isUnusedConversation(conversation)
-      || !v2Providers.some((provider) => provider.available)
-    ) {
-      return;
-    }
-    if (!createConversation(NONE_WORKSPACE_ID, { fresh: true })) {
-      return;
-    }
-    conversationsRef.current = conversationsRef.current.filter((item) => item.id !== conversation.id);
-    setConversations((current) => current.filter((item) => item.id !== conversation.id));
-  }, [activeConversationId, conversations, createConversation, isUnusedConversation, v2Providers]);
+    if (!conversation || isV2Conversation(conversation) || conversation.legacyCodex) return;
+    ensureConversationAgent(conversation.id, { quiet: true });
+  }, [activeConversationId, conversations, ensureConversationAgent, v2Providers, v2ProvidersByBackend]);
 
   /** Open a backend-validated worktree as a separate workspace/conversation. */
   const openGitWorktree = useCallback((path: string, sourceConversationId: string): {
@@ -7265,16 +5203,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           toast.danger(t('sess.renameFailed'), { description: error instanceof Error ? error.message : undefined });
         }
       })();
-      return;
     }
-    void sendNativeThreadAction(
-      conversationId,
-      'rename',
-      'thread/name/set',
-      (threadId) => ({ threadId, name: nextTitle }),
-      { title: nextTitle },
-    );
-  }, [getConversationContext, sendNativeThreadAction, updateConversation, v2ApiForConversation]);
+    // A draft without an agent only has its local title.
+  }, [getConversationContext, updateConversation, v2ApiForConversation]);
 
   const forkConversation = useCallback((conversationId: string) => {
     const context = getConversationContext(conversationId);
@@ -7324,37 +5255,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       })();
       return null;
     }
-    const threadId = normalizeThreadId(conversation.threadId);
-    if (!threadId) {
-      setLastError(t('sess.noForkableThread'));
-      return null;
-    }
-
-    const nextConversation = {
-      ...forkConversationRecord(conversation),
-      workspaceId: workspace.id,
-      title: `${conversation.title || 'Thread'} fork`,
-    };
-    setConversations((current) => [nextConversation, ...current]);
-    setActiveWorkspaceId(workspace.id);
-    setActiveConversationId(nextConversation.id);
-    void sendNativeThreadAction(
-      conversation.id,
-      'fork',
-      'thread/fork',
-      (sourceThreadId) => ({
-        threadId: sourceThreadId,
-        cwd: workspace.path,
-        model: workspace.model || settings.defaultModel || undefined,
-        approvalPolicy: workspace.approvalPolicy || settings.approvalPolicy || undefined,
-        approvalsReviewer: workspace.approvalsReviewer || settings.approvalsReviewer || undefined,
-        sandbox: workspace.permissionProfile ? undefined : workspace.sandboxMode || settings.sandboxMode || undefined,
-        permissions: workspace.permissionProfile || undefined,
-      }),
-      { selectResult: true, resultConversationId: nextConversation.id },
-    );
-    return nextConversation;
-  }, [getConversationContext, recoverConversation, sendProtocolCommand, settings.serverUrl, settings.deviceSecret, settings.encryptionProtocol, settings.encryptionPublicKey, settings.transportVerified, sendNativeThreadAction, settings.approvalPolicy, settings.approvalsReviewer, settings.defaultModel, settings.sandboxMode, subscribeV2Conversation]);
+    // Only an agent conversation the backend holds can be forked.
+    setLastError(t('sess.forkUnsupported'));
+    return null;
+  }, [getConversationContext, recoverConversation, sendProtocolCommand, settings.serverUrl, settings.deviceSecret, settings.encryptionProtocol, settings.encryptionPublicKey, settings.transportVerified, subscribeV2Conversation]);
 
   const removeConversation = useCallback((conversationId: string) => {
     const context = getConversationContext(conversationId);
@@ -7404,10 +5308,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     if (conversation.v2ConversationId) {
       unsubscribeV2Conversation(conversation.v2ConversationId);
     }
-    if (normalizeThreadId(conversation.threadId)) {
-      void sendNativeThreadAction(conversationId, 'archive', 'thread/archive', (threadId) => ({ threadId }));
-    }
-  }, [getConversationContext, sendNativeThreadAction, unsubscribeV2Conversation, updateConversation]);
+  }, [getConversationContext, unsubscribeV2Conversation, updateConversation]);
 
   const promptSkillsFromAttachments = useCallback((skills: SelectedSkillAttachment[]): PromptSkillRef[] => {
     return skills
@@ -8068,7 +5969,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     void migrateLegacyFollowUps(legacy, {
       resolve: (conversationId): LegacyQueueTarget => {
         const conversation = conversationsRef.current.find((item) => item.id === conversationId);
-        if (!conversation || conversation.legacyPlaintext) return { kind: 'gone' };
+        if (!conversation || isReadOnlyConversation(conversation)) return { kind: 'gone' };
         // Each backend's queue is migrated once that backend is connected.
         if (!conversation.v2ConversationId || linkStatusRef.current[backendIdForConversation(conversation.id)]?.state !== 'open'
           || !providerHasBackendQueue(providersForConversation(conversation), conversation.provider)) return { kind: 'wait' };
@@ -8097,113 +5998,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     }).finally(() => { migratingFollowUpsRef.current = false; });
   }, [addFollowUp, appendTimeline, connectionState, hydrated, legacyFollowUpsLoaded, setLastError, v2Providers]);
 
-  const sendLocalTurn = useCallback(
-    async (
-      text: string,
-      mode: ConversationRecord['mode'] = 'implement',
-      conversationId = activeConversationRef.current,
-      rawAttachments: ComposerAttachmentDraft[] = [],
-      skills: SelectedSkillAttachment[] = [],
-    ) => {
-      const context = getConversationContext(conversationId);
-      if (!context) {
-        desktopAlert(t('alert.noConversation'), t('alert.pickWorkspaceAndConversation'));
-        return false;
-      }
-
-      const { workspace, conversation } = context;
-      const attachments = liveComposerAttachments(text, rawAttachments);
-      const permissionMode = resolvePermissionMode(conversation, workspace);
-      const preset = PERMISSION_PRESETS.find((item) => item.id === (permissionMode === 'ask' ? 'default' : permissionMode === 'auto' ? 'auto-review' : permissionMode));
-      if (!preset) {
-        setLastError(t('sess.permissionSelectSupported'));
-        return false;
-      }
-      const workMode = conversation.mode ?? mode;
-      if (workMode === 'plan' && !conversationPermissionCapabilities(conversation, providersForConversation(conversation))?.supportsPlan) {
-        setLastError(t('sess.planModeUnsupported'));
-        return false;
-      }
-      const sessionId = sessionIdForConversation(workspace, conversation);
-      const commandWorkspace = commandWorkspaceForConversation(workspace, conversation);
-      const conversationThreadId = normalizeThreadId(conversation.threadId);
-      try {
-        await startLocalAdapter(workspace, conversation);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : t('sess.localNotStarted');
-        setLastError(localTurnErrorMessage(message));
-        return false;
-      }
-
-      let threadId = '';
-      try {
-        threadId = await ensureThreadId(workspace, conversation, !conversationThreadId);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : t('sess.threadCreateFailed');
-        setLastError(message);
-        return false;
-      }
-
-      setConversationThinking(conversation.id, true);
-      appendTimeline(makeSystemEntry(t('sess.thinkingStart'), t('sess.thinkingStartHint'), workspace.id, conversation.id));
-
-      const payload = {
-        codexSessionId: sessionId,
-        tenantId: workspace.tenantId,
-        threadId,
-        input: codexInputFromComposer(text, attachments, skills),
-        approvalPolicy: preset.approvalPolicy,
-        approvalsReviewer: preset.approvalsReviewer,
-        sandboxPolicy: preset.profileId ? undefined : sandboxPolicyForMode(preset.sandboxMode),
-        permissions: preset.profileId,
-        serviceTier: workspace.serviceTier || undefined,
-        collaborationMode: {
-          mode: workMode === 'plan' ? 'plan' : 'default',
-          settings: {
-            model: workspace.model || settings.defaultModel,
-            reasoningEffort: workspace.reasoningEffort || settings.defaultReasoningEffort || undefined,
-            developerInstructions: null,
-          },
-        },
-      };
-
-      const requestId = createRequestId('msg');
-      if (attachments.length) {
-        const previews = await prepareSentAttachments(attachments);
-        updateSentAttachmentRecords([...sentAttachmentRecordsRef.current, {
-          conversationId: conversation.id, requestId, eventId: requestId, text, attachments: previews,
-        }]);
-      }
-      if (sendProtocolMessage('codex.local.turn', payload, requestId, {
-        workspaceId: workspace.id,
-        conversationId: conversation.id,
-      })) {
-        unmaterializedNativeThreadIdsRef.current.delete(threadId);
-        setConversations((current) =>
-          current.map((conversation) =>
-            conversation.id === context.conversation.id
-              ? {
-                  ...conversation,
-                  sessionId: commandWorkspace.sessionId,
-                  threadId,
-                  mode: workMode,
-                  permissionMode: permissionMode ?? undefined,
-                  title: isDefaultConversationTitle(conversation.title) ? text.slice(0, 18) || attachmentPrompt(attachments).slice(0, 18) || selectedSkillSummary(skills).slice(0, 18) || conversation.title : conversation.title,
-                  updatedAt: Date.now(),
-                }
-              : conversation,
-          ),
-        );
-        return true;
-      }
-
-      setConversationThinking(conversation.id, false);
-      updateSentAttachmentRecords(sentAttachmentRecordsRef.current.filter((record) =>
-        record.conversationId !== conversation.id || record.requestId !== requestId));
-      return false;
-    },
-    [updateSentAttachmentRecords, appendTimeline, ensureThreadId, getConversationContext, sendProtocolMessage, setConversationThinking, settings.approvalPolicy, settings.approvalsReviewer, settings.defaultModel, settings.defaultReasoningEffort, settings.sandboxMode, startLocalAdapter],
-  );
 
   // Action menus send a separate message without replacing the composer's draft.
   const sendAgentMessage = useCallback(async (text: string, conversationId: string): Promise<'sent' | 'queued' | false> => {
@@ -8218,30 +6012,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       return await queueWhileBusy(conversationId, { id: createRequestId('queued'), text, attachments: [], skills: [] })
         ? 'queued' : false;
     }
-    const accepted = isV2Conversation(context.conversation)
-      ? await sendV2Prompt(text, conversationId)
-      : await sendLocalTurn(text, context.conversation.mode ?? 'implement', conversationId);
-    return accepted ? 'sent' : false;
-  }, [getConversationContext, queueWhileBusy, sendLocalTurn, sendV2Prompt]);
+    if (!ensureConversationAgent(conversationId)) return false;
+    return await sendV2Prompt(text, conversationId) ? 'sent' : false;
+  }, [ensureConversationAgent, getConversationContext, queueWhileBusy, sendV2Prompt]);
 
-  const toggleSelectedSkill = useCallback((conversationId: string, skill: SkillListItem) => {
-    if (!skill.enabled) {
-      desktopAlert(t('alert.skillDisabled'), t('alert.skillDisabledBody'));
-      return;
-    }
-    const nextSkill: SelectedSkillAttachment = {
-      name: skill.name,
-      path: skill.path,
-      displayName: skill.displayName,
-    };
-    setConversationSelectedSkills(conversationId, (current) => {
-      const exists = current.some((item) => item.name === skill.name && item.path === skill.path);
-      if (exists) {
-        return current.filter((item) => item.name !== skill.name || item.path !== skill.path);
-      }
-      return [...current, nextSkill];
-    });
-  }, [setConversationSelectedSkills]);
 
   const toggleCatalogSkill = useCallback((conversationId: string, skill: SkillCatalogDescriptor, provider: ProviderKind) => {
     if (!skill.valid) {
@@ -8335,13 +6109,22 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   }, [forgetDeletedConversations, settingsForBackend]);
 
   /** The sidebar's "delete": a backend conversation is deleted for good with
-   * its Agent Calling children; a legacy local record is archived. Resolves
+   * its Agent Calling children; retired local Codex history (only on this
+   * device) is deleted here; a draft not created yet is archived. Resolves
    * a skip (e.g. `CONFLICT` while it runs) instead of throwing for it. */
   const deleteConversation = useCallback(async (conversationId: string): Promise<
     { status: 'deleted' | 'archived' } | { status: 'skipped'; code: string; message: string }
   > => {
     const conversation = conversationsRef.current.find((item) => item.id === conversationId);
     const v2ConversationId = conversation?.v2ConversationId;
+    if (conversation?.legacyCodex) {
+      removeConversation(conversationId);
+      conversationsRef.current = conversationsRef.current.filter((item) => item.id !== conversationId);
+      setConversations((current) => current.filter((item) => item.id !== conversationId));
+      setTimeline((current) => current.filter((entry) => entry.conversationId !== conversationId));
+      pruneConversationState([conversationId], { drafts: true });
+      return { status: 'deleted' };
+    }
     if (!conversation || !isV2Conversation(conversation) || !v2ConversationId) {
       removeConversation(conversationId);
       return { status: 'archived' };
@@ -8433,47 +6216,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         });
         return true;
       }
-      const requestSessionId = sessionIdFromEvent(request.event, data);
-      const conversation = requestSessionId
-        ? conversationsRef.current.find((item) => item.sessionId === requestSessionId) ?? null
-        : null;
-      const workspace = conversation
-        ? workspacesRef.current.find((item) => item.id === conversation.workspaceId) ?? null
-        : null;
-
-      if (!requestSessionId || !workspace || !conversation) {
-        desktopAlert(t('alert.noWorkspace'), t('alert.pickWorkspace'));
-        return false;
-      }
-      return sendProtocolMessage('codex.local.approval.respond', {
-        codexSessionId: requestSessionId,
-        tenantId: workspace.tenantId,
-        requestId: request.requestId,
-        responseType: inferApprovalResponseType(request.requestType),
-        response: approvalResponsePayload(
-          request,
-          typeof selection === 'boolean'
-            ? selection
-            : selection.kind === 'allow_once' || selection.kind === 'allow_always' || selection.kind === 'answer',
-        ),
-      }, createRequestId('msg'), {
-        workspaceId: workspace.id,
-        conversationId: conversation.id,
-      });
+      // Only agent conversations ask for permission now.
+      desktopAlert(t('alert.invalidPermissionRequest'), t('alert.invalidPermissionRequestBody'));
+      return false;
     },
-    [recoverConversation, sendProtocolCommand, sendProtocolMessage],
+    [recoverConversation, sendProtocolCommand],
   );
 
-  const applyPermissionPreset = useCallback(
-    (preset: PermissionPreset) => {
-      if (!activeConversation) {
-        desktopAlert(t('alert.noWorkspace'), t('alert.pickWorkspace'));
-        return;
-      }
-      void applyPermissionProfile(activeConversation.id, preset.profileId, preset.description, preset.approvalsReviewer);
-    },
-    [activeConversation, applyPermissionProfile],
-  );
 
   const openPermissionsMenu = useCallback((conversationId = activeConversationRef.current) => {
     const context = getConversationContext(conversationId);
@@ -8496,97 +6245,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     );
   }, [applyConversationPermissionMode, getConversationContext]);
 
-  const openModelPicker = useCallback((conversationId = activeConversationRef.current) => {
-    setModelPickerPrompt({
-      target: 'workspace',
-      conversationId,
-    });
-    if (connectionState === 'open' && modelCatalogStatus !== 'loading') {
-      requestModelCatalog();
-    }
-  }, [connectionState, modelCatalogStatus, requestModelCatalog]);
 
-  const applyModelCommand = useCallback(
-    (conversationId: string, args: string[], promptWhenEmpty = true) => {
-      const context = getConversationContext(conversationId);
-      if (!context) {
-        desktopAlert(t('alert.noWorkspace'), t('alert.pickWorkspace'));
-        return;
-      }
 
-      const { workspace, conversation } = context;
-      const { model, reasoningEffort, invalidReasoningEffort } = parseModelCommandArgs(args);
-      if (invalidReasoningEffort) {
-        desktopAlert(
-          t('alert.invalidEffort'),
-          t('alert.invalidEffortBody'),
-        );
-        return;
-      }
-
-      if (!model && !reasoningEffort) {
-        if (promptWhenEmpty) {
-          setModelCommandPrompt({
-            conversationId: conversation.id,
-            initialValue: modelCommandInitialValue(workspace, settings),
-          });
-        } else {
-          desktopAlert('Model', t('alert.modelInputHint'));
-        }
-        return;
-      }
-
-      const nextModel = model || workspace.model || settings.defaultModel;
-      const nextReasoningEffort = reasoningEffort ?? normalizeReasoningEffort(workspace.reasoningEffort ?? settings.defaultReasoningEffort);
-      updateWorkspace(workspace.id, {
-        ...(model ? { model: nextModel } : {}),
-        ...(reasoningEffort ? { reasoningEffort: nextReasoningEffort } : {}),
-      });
-
-      const detail = [
-        `Model: ${nextModel || t('session.modelUnset')}`,
-        `Reasoning: ${nextReasoningEffort || t('sess.defaultValue')}`,
-      ].join('\n');
-      appendTimeline(makeSystemEntry(
-        'Model settings updated',
-        t('sess.modelAppliedDetail', { detail }),
-        workspace.id,
-        conversation.id,
-      ));
-    },
-    [appendTimeline, getConversationContext, settings, updateWorkspace],
-  );
-
-  const applyWorkspaceModelSelection = useCallback(
-    (conversationId: string, model: string, reasoningEffort: string | null) => {
-      const context = getConversationContext(conversationId);
-      if (!context) {
-        desktopAlert(t('alert.noWorkspace'), t('alert.pickWorkspace'));
-        return;
-      }
-      const nextModel = model.trim();
-      if (!nextModel) {
-        desktopAlert(t('alert.missingModel'), t('alert.missingModelBody'));
-        return;
-      }
-      const nextReasoningEffort = normalizeReasoningEffort(reasoningEffort) ?? defaultReasoningForModel(nextModel, modelCatalog);
-      updateWorkspace(context.workspace.id, {
-        model: nextModel,
-        reasoningEffort: nextReasoningEffort,
-      });
-      appendTimeline(makeSystemEntry(
-        'Model settings updated',
-        [
-          `Model: ${nextModel}`,
-          `Reasoning: ${reasoningEffortLabel(nextReasoningEffort)}`,
-          t('sess.modelAppliedFooter'),
-        ].join('\n'),
-        context.workspace.id,
-        context.conversation.id,
-      ));
-    },
-    [appendTimeline, getConversationContext, modelCatalog, updateWorkspace],
-  );
 
   const applyConversationModelSelection = useCallback(
     (conversationId: string, model: string, reasoningEffort: string | null) => {
@@ -8625,72 +6285,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   );
 
 
-  const openThreadCommandPrompt = useCallback((conversationId: string, command: ThreadCommandPromptState['command']) => {
-    if (command === 'metadata') {
-      setThreadCommandPrompt({
-        conversationId,
-        command,
-        title: 'Thread metadata',
-        placeholder: 'branch main sha abc123 origin https://...',
-        initialValue: '',
-      });
-      return;
-    }
-    if (command === 'memory') {
-      setThreadCommandPrompt({
-        conversationId,
-        command,
-        title: 'Thread memory',
-        placeholder: 'on / off / reset',
-        initialValue: '',
-        warning: t('sess.memoryResetWarning'),
-      });
-      return;
-    }
-    if (command === 'shell') {
-      setThreadCommandPrompt({
-        conversationId,
-        command,
-        title: 'Thread shell command',
-        placeholder: 'pwd && git status --short',
-        initialValue: '',
-        warning: t('sess.unsandboxedWarning'),
-        multiline: true,
-      });
-      return;
-    }
-    if (command === 'items') {
-      setThreadCommandPrompt({
-        conversationId,
-        command,
-        title: 'Turn items',
-        placeholder: 'turn_id',
-        initialValue: turnIds[conversationId] || '',
-      });
-      return;
-    }
-    if (command === 'inject') {
-      setThreadCommandPrompt({
-        conversationId,
-        command,
-        title: 'Inject raw items',
-        placeholder: '[{"type":"message","role":"user","content":[{"type":"input_text","text":"note"}]}]',
-        initialValue: '[]',
-        warning: t('sess.injectWarning'),
-        multiline: true,
-      });
-      return;
-    }
-    setThreadCommandPrompt({
-      conversationId,
-      command,
-      title: 'Approve denied action',
-      placeholder: '{"event":{...}}',
-      initialValue: '',
-      warning: t('sess.guardianWarning'),
-      multiline: true,
-    });
-  }, [turnIds]);
 
   const openSlashCommandActionPage = useCallback((workspace: WorkspaceRecord, conversation: ConversationRecord, command: string) => {
     openPanel('SlashCommandAction', {
@@ -8746,9 +6340,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     (input: string, conversationId = activeConversationRef.current) => {
       const trimmed = input.trim();
       if (!trimmed.startsWith('/')) {
-        const conversation = conversationsRef.current.find((item) => item.id === conversationId);
-        if (isV2Conversation(conversation)) { void sendV2Prompt(trimmed, conversationId); return; }
-        void sendLocalTurn(trimmed, 'implement', conversationId);
+        if (ensureConversationAgent(conversationId)) void sendV2Prompt(trimmed, conversationId);
         return;
       }
 
@@ -8761,8 +6353,11 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         return;
       }
 
-      const { workspace, conversation } = context;
-      if (conversation.provider === 'pi' && isV2Conversation(conversation)) {
+      const { workspace } = context;
+      // Every command runs in an agent conversation: a draft gets its agent first.
+      const conversation = ensureConversationAgent(conversationId);
+      if (!conversation) return;
+      if (conversation.provider === 'pi') {
         const route = routePiSlashCommand(input, getProviderCommandCatalog(conversation.id));
         if (route.kind === 'blocked') { toast.warning(t('sess.piCommand'), { description: route.message }); return; }
         if (route.kind === 'native') {
@@ -8774,110 +6369,80 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         if (route.command === 'commands') { refreshProviderCommands(); return; }
         lower = route.command;
       }
-      if (isV2Conversation(conversation)) {
-        if (lower === 'memory' || lower === 'memories') {
-          openSlashCommandActionPage(workspace, conversation, '/memory');
-          return;
-        }
-        if (lower === 'compact' || lower === 'retry' || lower === 'resume') {
-          const provider = providersForConversation(conversation).find((item) => item.id === conversation.provider);
-          const nativeAction = provider?.capabilities.controlActions?.includes(lower) === true;
-          // Some providers expose these as catalog commands instead of control
-          // actions (e.g. Claude /compact runs as a literal prompt).
-          const promptCommand = conversation.provider
-            ? providerCommands[conversation.provider as ProviderKind]?.find(
-                (item) => item.name.toLowerCase() === lower && item.invocation === 'prompt')
-            : undefined;
-          if (!conversation.v2ConversationId || (!nativeAction && !promptCommand)) {
-            setLastError(lower === 'resume' ? t('sess.resumeNeedsMessage') : t('sess.operationUnsupported'));
-            return;
-          }
-          if (!nativeAction) {
-            void sendV2Prompt(trimmed, conversation.id);
-            return;
-          }
-          // An e2e backend cannot read the original request back (§7): retry
-          // returns the `retryRequest` the latest user message carries, read
-          // in full detail since summary pages leave it out. Messages written
-          // before it existed fall back to the text this device decrypted.
-          const v2Id = conversation.v2ConversationId;
-          const retryFields = async (): Promise<Record<string, unknown> | null> => {
-            if (lower !== 'retry' || !historyEncryptionRef.current?.e2eFor(backendIdForConversation(conversation.id))) return {};
-            const timeline = conversationRecoveryRef.current?.get(v2Id)?.timeline ?? [];
-            const sequence = historyRetrySequence(timeline);
-            if (sequence === null) return null;
-            const page = await decryptedHistoryReplay(v2Id, v2ApiForConversation(v2Id).replayEvents(v2Id, sequence - 1, 1), 'full');
-            const request = historyRetryRequest(page.events.find((event) => event.sequence === sequence)?.payload);
-            if (request) return { text: request.text, content: request.content };
-            const prompt = historyRetryPrompt(timeline);
-            return prompt === null ? null : { prompt };
-          };
-          void retryFields().then((fields) => {
-            if (fields === null) {
-              setLastError(t('history.retryNeedsPrompt'));
-              return;
-            }
-            return sendProtocolCommand({ id: createRequestId(lower), type: `conversation.${lower}`, payload: {
-              conversationId: v2Id,
-              ...fields,
-            } }).then(() => recoverConversation(conversation.id));
-          }).catch((error: unknown) => {
-            setLastError(error instanceof Error ? error.message : t('sess.operationFailed'));
-            void recoverConversation(conversation.id);
-          });
-          return;
-        }
-        // The agent's own prompt commands go to it as prompts; a few TodeX
-        // commands map to v2 actions. The legacy Codex commands below would
-        // start a local Codex session beside this conversation instead.
+      if (lower === 'memory' || lower === 'memories') {
+        openSlashCommandActionPage(workspace, conversation, '/memory');
+        return;
+      }
+      if (lower === 'compact' || lower === 'retry' || lower === 'resume') {
+        const provider = providersForConversation(conversation).find((item) => item.id === conversation.provider);
+        const nativeAction = provider?.capabilities.controlActions?.includes(lower) === true;
+        // Some providers expose these as catalog commands instead of control
+        // actions (e.g. Claude /compact runs as a literal prompt).
         const promptCommand = conversation.provider
           ? providerCommands[conversation.provider as ProviderKind]?.find(
-            (item) => item.name.toLowerCase() === lower && item.invocation === 'prompt')
+              (item) => item.name.toLowerCase() === lower && item.invocation === 'prompt')
           : undefined;
-        if (promptCommand) {
+        if (!conversation.v2ConversationId || (!nativeAction && !promptCommand)) {
+          setLastError(lower === 'resume' ? t('sess.resumeNeedsMessage') : t('sess.operationUnsupported'));
+          return;
+        }
+        if (!nativeAction) {
           void sendV2Prompt(trimmed, conversation.id);
           return;
         }
-        if (lower === 'fork') {
-          forkConversation(conversation.id);
-          return;
-        }
-        if (lower === 'rename') {
-          renameConversation(conversation.id, rest.join(' '));
-          return;
-        }
-        if (lower === 'archive') {
-          removeConversation(conversation.id);
-          return;
-        }
-        if (!V2_CLIENT_SLASH_COMMANDS.has(lower)) {
-          setLastError(t('sess.operationUnsupported'));
-          return;
-        }
-      }
-
-      const addCommandNotice = (title: string, detail: string) => {
-        appendTimeline(makeSystemEntry(title, detail, workspace.id, conversation.id));
-      };
-
-      const sendLocalMethod = (method: string, params: Record<string, unknown>, title: string, detail: string) => {
-        if (sendWorkspaceCommand(workspace, 'codex.local.request', { method, params }, conversation)) {
-          addCommandNotice(title, detail);
-        }
-      };
-
-      const sendThreadMethod = (method: string, makeParams: (threadId: string) => Record<string, unknown>, title: string, detail: string) => {
-        void (async () => {
-          try {
-            await startLocalAdapter(workspace, conversation);
-            const threadId = await ensureThreadId(workspace, conversation, !normalizeThreadId(conversation.threadId));
-            sendLocalMethod(method, makeParams(threadId), title, detail);
-          } catch (error) {
-            const message = error instanceof Error ? error.message : t('sess.actionFailed', { title });
-            setLastError(message);
+        // An e2e backend cannot read the original request back (§7): retry
+        // returns the `retryRequest` the latest user message carries, read
+        // in full detail since summary pages leave it out. Messages written
+        // before it existed fall back to the text this device decrypted.
+        const v2Id = conversation.v2ConversationId;
+        const retryFields = async (): Promise<Record<string, unknown> | null> => {
+          if (lower !== 'retry' || !historyEncryptionRef.current?.e2eFor(backendIdForConversation(conversation.id))) return {};
+          const timeline = conversationRecoveryRef.current?.get(v2Id)?.timeline ?? [];
+          const sequence = historyRetrySequence(timeline);
+          if (sequence === null) return null;
+          const page = await decryptedHistoryReplay(v2Id, v2ApiForConversation(v2Id).replayEvents(v2Id, sequence - 1, 1), 'full');
+          const request = historyRetryRequest(page.events.find((event) => event.sequence === sequence)?.payload);
+          if (request) return { text: request.text, content: request.content };
+          const prompt = historyRetryPrompt(timeline);
+          return prompt === null ? null : { prompt };
+        };
+        void retryFields().then((fields) => {
+          if (fields === null) {
+            setLastError(t('history.retryNeedsPrompt'));
+            return;
           }
-        })();
-      };
+          return sendProtocolCommand({ id: createRequestId(lower), type: `conversation.${lower}`, payload: {
+            conversationId: v2Id,
+            ...fields,
+          } }).then(() => recoverConversation(conversation.id));
+        }).catch((error: unknown) => {
+          setLastError(error instanceof Error ? error.message : t('sess.operationFailed'));
+          void recoverConversation(conversation.id);
+        });
+        return;
+      }
+      // The agent's own prompt commands go to it as prompts; a few TodeX
+      // commands map to v2 actions, and the rest run in the client.
+      const promptCommand = conversation.provider
+        ? providerCommands[conversation.provider as ProviderKind]?.find(
+          (item) => item.name.toLowerCase() === lower && item.invocation === 'prompt')
+        : undefined;
+      if (promptCommand) {
+        void sendV2Prompt(trimmed, conversation.id);
+        return;
+      }
+      if (lower === 'fork') {
+        forkConversation(conversation.id);
+        return;
+      }
+      if (lower === 'rename') {
+        renameConversation(conversation.id, rest.join(' '));
+        return;
+      }
+      if (lower === 'archive') {
+        removeConversation(conversation.id);
+        return;
+      }
 
       if (lower === 'permissions') {
         const presetName = rest[0]?.toLowerCase() ?? '';
@@ -8890,28 +6455,12 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         return;
       }
 
-      if (lower === 'fast') {
-        toggleFastServiceTier(conversation.id);
-        return;
-      }
-
-      if (lower === 'model') {
-        if (rest.length) {
-          applyModelCommand(conversation.id, rest);
-        } else {
-          openModelPicker(conversation.id);
-        }
-        return;
-      }
-
       if (lower === 'approve' || lower === 'approval') {
-        if (/^(guardian|denied|override)$/i.test(rest[0] ?? '')) {
-          openThreadCommandPrompt(conversation.id, 'guardian');
-          return;
-        }
         const deny = /^(deny|decline|reject|no)$/i.test(rest[0] ?? '');
-        const requestId = rest[1] || selectedRequest?.requestId || '';
-        const target = pendingRequests.find((request) => request.requestId === requestId) ?? selectedRequest;
+        // The named request, else this conversation's oldest open one.
+        const target = rest[1]
+          ? pendingRequests.find((request) => request.requestId === rest[1])
+          : pendingRequests.find((request) => request.data.conversationId === conversation.v2ConversationId);
         if (!target) {
           desktopAlert(t('alert.noPendingRequests'), t('alert.noPendingRequestsBody'));
           return;
@@ -8920,253 +6469,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         return;
       }
 
-      if (lower === 'skills') {
-        void requestSkillList(conversation.id, /reload|refresh|true|1/i.test(rest[0] ?? ''));
-        return;
-      }
-
-      if (lower === 'hooks' || lower === 'hook') {
-        openSlashCommandActionPage(workspace, conversation, '/hooks');
-        return;
-      }
-
-      if (lower === 'plugins' || lower === 'plugin') {
-        openSlashCommandActionPage(workspace, conversation, '/plugins');
-        return;
-      }
-
-      if (lower === 'apps') {
-        sendLocalMethod('app/list', { limit: 50, forceRefetch: /reload|refresh|true|1/i.test(rest[0] ?? '') }, 'Apps requested', t('sess.appsRequested'));
-        return;
-      }
-
-      if (lower === 'mcp') {
-        const subcommand = rest[0]?.toLowerCase() ?? '';
-        if (!subcommand) {
-          openSlashCommandActionPage(workspace, conversation, '/mcp');
-          return;
-        }
-        if (subcommand === 'verbose') {
-          void requestMcpInventory(conversation.id, 'full');
-          addCommandNotice('MCP inventory requested', t('sess.mcpInventoryDetail'));
-          return;
-        }
-        if (/^(status|list|tools|refresh)$/i.test(subcommand)) {
-          void requestMcpInventory(conversation.id, 'toolsAndAuthOnly');
-          addCommandNotice('MCP inventory requested', t('sess.mcpInventory'));
-          return;
-        }
-        desktopAlert('MCP', 'Usage: /mcp [verbose]');
-        return;
-      }
-
-      if (lower === 'compact') {
-        setCompactionByConversation((current) => ({ ...current, [conversation.id]: { ...current[conversation.id], status: 'running', updatedAt: new Date().toISOString() } }));
-        sendThreadMethod('thread/compact/start', (threadId) => ({ threadId }), 'Compact started', t('sess.compactStarted'));
-        return;
-      }
-
-      if (lower === 'goal') {
-        const subcommand = rest[0]?.toLowerCase() ?? '';
-        if (!subcommand || subcommand === 'edit') {
-          openSlashCommandActionPage(workspace, conversation, '/goal');
-          return;
-        }
-        if (subcommand === 'pause' || subcommand === 'resume') {
-          const status = subcommand === 'pause' ? 'paused' : 'active';
-          updateConversation(conversation.id, {
-            goalStatus: status,
-          });
-          sendThreadMethod(
-            'thread/goal/set',
-            (threadId) => ({ threadId, status }),
-            'Goal command sent',
-            t('sess.sentGoalSet', { status }),
-          );
-          return;
-        }
-        const objective = subcommand === 'set' ? rest.slice(1).join(' ').trim() : rest.join(' ').trim();
-        if (subcommand === 'set' && !objective) {
-          desktopAlert('Goal', 'Usage: /goal <objective>');
-          return;
-        }
-        const method =
-          subcommand === 'clear'
-            ? 'thread/goal/clear'
-            : /^(get|show|view)$/i.test(subcommand)
-              ? 'thread/goal/get'
-              : 'thread/goal/set';
-        if (method === 'thread/goal/set') {
-          updateConversation(conversation.id, {
-            goalStatus: 'active',
-            goalObjective: objective,
-          });
-        } else if (method === 'thread/goal/clear') {
-          updateConversation(conversation.id, {
-            goalStatus: '',
-            goalObjective: '',
-          });
-        }
-        sendThreadMethod(
-          method,
-          (threadId) => (method === 'thread/goal/set' ? { threadId, objective } : { threadId }),
-          'Goal command sent',
-          t('sess.sentMethod', { method }),
-        );
-        return;
-      }
-
-      if (lower === 'rename') {
-        const nextTitle = rest.join(' ').trim();
-        if (!nextTitle) {
-          desktopAlert('Rename', t('alert.conversationTitleBody'));
-          return;
-        }
-        updateConversation(conversation.id, { title: nextTitle });
-        if (conversation.threadId) {
-          sendLocalMethod('thread/name/set', { threadId: conversation.threadId, name: nextTitle }, 'Thread rename sent', nextTitle);
-        } else {
-          addCommandNotice('Conversation renamed', nextTitle);
-        }
-        return;
-      }
-
-      if (lower === 'logout') {
-        sendLocalMethod('account/logout', {}, 'Logout requested', t('sess.logoutRequested'));
-        return;
-      }
-
-      if (lower === 'start') {
-        void startLocalAdapter(workspace, conversation).catch(() => undefined);
-        return;
-      }
-
-      if (lower === 'status') {
-        const statusScope = rest[0]?.toLowerCase() ?? '';
-        if (/^(thread|detail)$/i.test(statusScope)) {
-          void sendNativeThreadAction(conversation.id, 'detail', 'thread/read', (threadId) => ({ threadId, includeTurns: false }), {
-            showResult: true,
-            resultTitle: 'Thread details',
-          });
-          return;
-        }
-        if (/^(history|read)$/i.test(statusScope)) {
-          void sendNativeThreadAction(conversation.id, 'read', 'thread/read', (threadId) => ({ threadId, includeTurns: true }), {
-            restoreHistory: true,
-            showResult: true,
-            resultTitle: 'Thread history',
-          });
-          return;
-        }
-        if (/^(turns|turn)$/i.test(statusScope)) {
-          void sendNativeThreadAction(conversation.id, 'turns', 'thread/turns/list', (threadId) => ({
-            threadId,
-            limit: parsePositiveLimit(rest[1], 20),
-            sortDirection: 'desc',
-            itemsView: 'summary',
-          }), {
-            showResult: true,
-            resultTitle: 'Thread turns',
-          });
-          return;
-        }
-        if (/^(items|item)$/i.test(statusScope)) {
-          if (rest[1]) {
-            void sendNativeThreadAction(conversation.id, 'items', 'thread/turns/items/list', (threadId) => ({
-              threadId,
-              turnId: rest[1],
-              limit: parsePositiveLimit(rest[2], 50),
-              sortDirection: 'asc',
-            }), {
-              showResult: true,
-              resultTitle: 'Turn items',
-            });
-          } else {
-            openThreadCommandPrompt(conversation.id, 'items');
-          }
-          return;
-        }
-        if (/^(loaded|loaded-threads)$/i.test(statusScope)) {
-          void sendTrackedLocalMethod(conversation.id, 'loaded', 'thread/loaded/list', { limit: parsePositiveLimit(rest[1], 100) }, 'Loaded threads');
-          return;
-        }
-        sendWorkspaceCommand(workspace, 'codex.local.status', {}, conversation);
-        return;
-      }
-
-      if (lower === 'stop') {
-        if (conversation.threadId) {
-          sendLocalMethod('thread/backgroundTerminals/clean', { threadId: conversation.threadId }, 'Background terminals clean requested', t('sess.cleanTerminalsRequested'));
-        }
-        if (sendWorkspaceCommand(workspace, 'codex.local.stop', { force: false }, conversation)) {
-          const pending = pendingLocalStartsRef.current.get(conversation.id);
-          if (pending) {
-            clearTimeout(pending.timeoutId);
-            pendingLocalStartsRef.current.delete(conversation.id);
-            pending.reject(new Error(t('sess.localSessionStopped')));
-          }
-          updateConversation(conversation.id, { localAdapterState: 'stopped' });
-        }
-        return;
-      }
-
-      if (lower === 'clean') {
-        void sendNativeThreadAction(conversation.id, 'clean', 'thread/backgroundTerminals/clean', (threadId) => ({ threadId }), {
-          showResult: true,
-          resultTitle: 'Background terminals clean',
-        });
-        if (sendWorkspaceCommand(workspace, 'codex.local.stop', { force: false }, conversation)) {
-          updateConversation(conversation.id, { localAdapterState: 'stopped' });
-        }
-        return;
-      }
-
       if (lower === 'clear' || lower === 'new') {
         createConversation(workspace.id);
-        return;
-      }
-
-      if (lower === 'archive') {
-        desktopAlert('Archive thread', 'Archive this conversation and leave it from the active list?', [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Archive', style: 'destructive', onPress: () => removeConversation(conversation.id) },
-        ]);
-        return;
-      }
-
-      if (lower === 'resume') {
-        if (!normalizeThreadId(conversation.threadId)) {
-          setLastError(t('sess.noResumableThread'));
-          return;
-        }
-        void sendNativeThreadAction(
-          conversation.id,
-          'resume',
-          'thread/resume',
-          (threadId) => ({ threadId }),
-          { restoreHistory: true },
-        );
-        return;
-      }
-
-      if (lower === 'fork' || lower === 'side' || lower === 'btw') {
-        void sendNativeThreadAction(
-          conversation.id,
-          'fork',
-          'thread/fork',
-          (threadId) => ({
-            threadId,
-            cwd: workspace.path,
-            model: workspace.model || settings.defaultModel || undefined,
-            approvalPolicy: workspace.approvalPolicy || settings.approvalPolicy || undefined,
-            approvalsReviewer: workspace.approvalsReviewer || settings.approvalsReviewer || undefined,
-            sandbox: workspace.permissionProfile ? undefined : workspace.sandboxMode || settings.sandboxMode || undefined,
-            permissions: workspace.permissionProfile || undefined,
-            ephemeral: lower === 'side' || lower === 'btw',
-          }),
-          { selectResult: true },
-        );
-        addCommandNotice('Thread fork sent', lower === 'side' || lower === 'btw' ? t('sess.sideThreadRequested') : t('sess.forkThreadRequested'));
         return;
       }
 
@@ -9176,57 +6480,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         return;
       }
 
-      if (lower === 'attach') {
-        attachWorkspaceConversation(workspace, conversation);
-        return;
-      }
-
-      if (lower === 'replay') {
-        sendWorkspaceCommand(workspace, 'codex.local.replay', {
-          afterCursor: null,
-          limit: 200,
-        }, conversation);
-        return;
-      }
-
-      if (lower === 'interrupt') {
-        const threadId = normalizeThreadId(conversation.threadId);
-        if (!threadId) {
-          setLastError(t('sess.noInterruptibleThreadInConversation'));
-          return;
-        }
-        sendWorkspaceCommand(workspace, 'codex.local.interrupt', {
-          threadId,
-          turnId: turnIds[conversation.id] || '',
-        }, conversation);
-        return;
-      }
-
-      if (lower === 'review') {
-        const instructions = rest.join(' ').trim();
-        sendThreadMethod(
-          'review/start',
-          (threadId) => ({
-            threadId,
-            target: instructions ? { type: 'custom', instructions } : { type: 'uncommittedChanges' },
-            delivery: 'inline',
-          }),
-          'Review started',
-          instructions || 'Review uncommitted changes.',
-        );
-        return;
-      }
-
-      if (lower === 'init') {
-        sendLocalTurn('create or update an AGENTS.md file with concise project instructions for Codex', 'implement', conversation.id);
-        return;
-      }
-
       if (lower === 'plan') {
         void applyConversationWorkMode(conversation.id, 'plan').then((selected) => {
           if (!selected || rest.length === 0) return;
-          if (isV2Conversation(conversation)) void sendV2Prompt(rest.join(' '), conversation.id);
-          else void sendLocalTurn(rest.join(' '), 'plan', conversation.id);
+          void sendV2Prompt(rest.join(' '), conversation.id);
         });
         return;
       }
@@ -9241,130 +6498,40 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         return;
       }
 
-      if (lower === 'ps') {
-        if (/^(clean|clear|stop)$/i.test(rest[0] ?? '')) {
-          void sendNativeThreadAction(conversation.id, 'clean', 'thread/backgroundTerminals/clean', (threadId) => ({ threadId }), {
-            showResult: true,
-            resultTitle: 'Background terminals clean',
-          });
-          return;
-        }
-        void sendTrackedLocalMethod(conversation.id, 'loaded', 'thread/loaded/list', { limit: 100 }, 'Loaded threads');
-        return;
-      }
-
-      if (lower === 'personality') {
-        openSlashCommandActionPage(workspace, conversation, '/personality');
-        return;
-      }
-
-      if (lower === 'feedback') {
-        openSlashCommandActionPage(workspace, conversation, '/feedback');
-        return;
-      }
-
       if (lower === 'copy') {
         void copyLastAgentMessage(conversation.id);
         return;
       }
 
-      if (lower === 'memories') {
-        if (rest.length) {
-          const mode = parseThreadMemoryMode(rest.join(' '));
-          if (mode === 'reset') {
-            void sendTrackedLocalMethod(conversation.id, 'memoryReset', 'memory/reset', null, 'Memory reset');
-            return;
-          }
-          if (mode) {
-            void sendNativeThreadAction(conversation.id, 'memory', 'thread/memoryMode/set', (threadId) => ({ threadId, mode }), {
-              showResult: true,
-              resultTitle: 'Thread memory',
-              resultDetail: `memory mode: ${mode}`,
-            });
-            return;
-          }
-        }
-        openSlashCommandActionPage(workspace, conversation, '/memories');
-        return;
-      }
-
-      const dynamicCommand = conversation.provider
-        ? providerCommands[conversation.provider as ProviderKind]?.find(
-        (item) => item.name.toLowerCase() === lower && item.invocation === 'prompt',
-          )
-        : undefined;
-      if (dynamicCommand) {
-        void sendV2Prompt(trimmed, conversation.id);
-        return;
-      }
-
-      if (lower === 'quit' || lower === 'exit') {
-        if (sendWorkspaceCommand(workspace, 'codex.local.stop', { force: false }, conversation)) {
-          updateConversation(conversation.id, { localAdapterState: 'stopped' });
-          addCommandNotice(`/${lower} recognized`, t('sess.localSessionStoppedNotice'));
-        }
-        return;
-      }
-
-      const serviceTierCommand = serviceTierCommandForModel(lower, workspace.model || settings.defaultModel, modelCatalog);
-      if (serviceTierCommand) {
-        applyServiceTier(conversation.id, serviceTierCommand);
-        return;
-      }
-
-      addCommandNotice(`/${lower} recognized`, t('sess.commandNotBuiltin'));
+      setLastError(t('sess.operationUnsupported'));
     },
     [
-      applyPermissionProfile,
       applyConversationWorkMode,
-      openPermissionsMenu,
-      applyServiceTier,
-      applyModelCommand,
-      appendTimeline,
+      applyPermissionProfile,
       copyLastAgentMessage,
       createConversation,
-      ensureThreadId,
-      getConversationContext,
-      openModelPicker,
-      openExperimentalFeatures,
-      openSlashCommandActionPage,
-      openThreadCommandPrompt,
-      pendingRequests,
-      requestMcpInventory,
-      requestSkillList,
-      removeConversation,
-      selectConversation,
-      selectedRequest,
-      sendApprovalResponse,
-      sendLocalTurn,
-      sendNativeThreadAction,
-      requestGitDiff,
-      openGitDiff,
-      sendTrackedLocalMethod,
-      startLocalAdapter,
-      sendWorkspaceCommand,
-      attachWorkspaceConversation,
-      settings,
-      modelCatalog,
-      openPanel,
-      providerCommands,
-      sendV2Prompt,
-      sendProtocolCommand,
-      recoverConversation,
       decryptedHistoryReplay,
-      v2ApiForConversation,
+      ensureConversationAgent,
+      forkConversation,
+      getConversationContext,
+      getProviderCommandCatalog,
+      openExperimentalFeatures,
+      openGitDiff,
+      openPermissionsMenu,
+      openSlashCommandActionPage,
+      pendingRequests,
+      providerCommands,
+      recoverConversation,
+      refreshProviderCommands,
+      removeConversation,
+      renameConversation,
+      sendApprovalResponse,
+      sendProtocolCommand,
+      sendV2Prompt,
       setConversationChatDraft,
       setConversationComposerSelection,
       setLastError,
-      toggleFastServiceTier,
-      turnIds,
-      updateConversation,
-      updateWorkspace,
-      getProviderCommandCatalog,
-      refreshProviderCommands,
-      forkConversation,
-      renameConversation,
-      removeConversation,
+      v2ApiForConversation,
     ],
   );
 
@@ -9408,97 +6575,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     setActiveConversationId(nextConversation.id);
   }, [activeConversationId, activeWorkspaceId, conversations, hydrated, workspaces]);
 
-  // At most one automatic start per conversation and connection: a failed
-  // start used to flip the state to 'error', re-run this effect and start
-  // again on every round trip.
-  useEffect(() => {
-    if (connectionState !== 'open') autoStartedLocalConversationsRef.current.clear();
-  }, [connectionState]);
-
-  useEffect(() => {
-    if (
-      !hydrated ||
-      connectionState !== 'open' ||
-      !activeWorkspace ||
-      !shouldAutoStartLocalAdapter(activeConversation) ||
-      pendingLocalStartsRef.current.has(activeConversation!.id) ||
-      autoStartedLocalConversationsRef.current.has(activeConversation!.id)
-    ) {
-      return;
-    }
-    autoStartedLocalConversationsRef.current.add(activeConversation!.id);
-    void startLocalAdapter(activeWorkspace, activeConversation!).catch(() => undefined);
-  }, [
-    activeConversation?.archived,
-    activeConversation?.id,
-    activeConversation?.localAdapterState,
-    activeConversation?.provider,
-    activeConversation?.sessionId,
-    activeConversation?.threadId,
-    activeConversation?.v2ConversationId,
-    activeWorkspace?.approvalPolicy,
-    activeWorkspace?.approvalsReviewer,
-    activeWorkspace?.id,
-    activeWorkspace?.model,
-    activeWorkspace?.path,
-    activeWorkspace?.reasoningEffort,
-    activeWorkspace?.sandboxMode,
-    connectionState,
-    hydrated,
-    startLocalAdapter,
-  ]);
-
-  useEffect(() => {
-    if (!hydrated || connectionState !== 'open') {
-      return;
-    }
-    const suspendIdleSessions = () => {
-      const now = Date.now();
-      const activeConversationId = activeConversationRef.current;
-      conversationsRef.current.forEach((conversation) => {
-        if (
-          conversation.id === activeConversationId ||
-          conversation.archived === true ||
-          localConversationStateOf(conversation) !== 'running' ||
-          now - conversation.updatedAt < LOCAL_SESSION_IDLE_SUSPEND_MS ||
-          pendingLocalStartsRef.current.has(conversation.id) ||
-          pendingThreadStartsRef.current.has(conversation.id) ||
-          turnIdsRef.current[conversation.id] ||
-          thinkingConversationsRef.current[conversation.id]
-        ) {
-          return;
-        }
-        const hasPendingThreadAction = [...pendingThreadActionsRef.current.values()].some(
-          (pending) =>
-            pending.conversationId === conversation.id ||
-            pending.sourceConversationId === conversation.id,
-        );
-        if (hasPendingThreadAction) {
-          return;
-        }
-        const hasActiveTerminal = Object.values(terminalByIdRef.current).some(
-          (terminal) =>
-            terminal.conversationId === conversation.id &&
-            (terminal.status === 'starting' || terminal.status === 'running' || terminal.status === 'stopping'),
-        );
-        if (hasActiveTerminal) {
-          return;
-        }
-        const workspace = workspacesRef.current.find((item) => item.id === conversation.workspaceId) ?? null;
-        // Only through its own backend's open socket: a closed one would
-        // otherwise be reconnected out of its backoff.
-        if (!workspace || linkStatusRef.current[backendIdForConversation(conversation.id)]?.state !== 'open') {
-          return;
-        }
-        if (sendWorkspaceCommand(workspace, 'codex.local.stop', { force: false }, conversation)) {
-          updateConversation(conversation.id, { localAdapterState: 'stopped' });
-        }
-      });
-    };
-    const intervalId = setInterval(suspendIdleSessions, LOCAL_SESSION_IDLE_SWEEP_MS);
-    return () => clearInterval(intervalId);
-  }, [connectionState, hydrated, sendWorkspaceCommand, updateConversation]);
-
   const stopThinking = useCallback((conversationId: string) => {
     const conversation = conversationsRef.current.find((item) => item.id === conversationId) ?? null;
     const workspace = conversation
@@ -9529,17 +6605,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         setLastError(error instanceof Error ? error.message : t('sess.stopUnconfirmed'));
         void recoverConversation(conversation.id);
       });
-      return;
     }
-    const threadId = normalizeThreadId(conversation.threadId);
-    if (!threadId) {
-      setLastError(t('sess.noInterruptibleThread'));
-      return;
-    }
-    if (sendWorkspaceCommand(workspace, 'codex.local.interrupt', { threadId, turnId: turnIds[conversationId] || '' }, conversation)) {
-      appendTimeline(makeSystemEntry(t('sess.stopSent'), t('sess.stopRequested'), workspace.id, conversation.id));
-    }
-  }, [appendTimeline, recoverConversation, sendProtocolCommand, sendWorkspaceCommand, turnIds]);
+  }, [appendTimeline, recoverConversation, sendProtocolCommand]);
 
   const submitChat = useCallback((conversationId: string) => {
     const draftText = (chatDrafts[conversationId] ?? '').trim();
@@ -9570,7 +6637,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       desktopAlert(t('alert.noWorkspace'), t('alert.pickWorkspace'));
       return;
     }
-    const { workspace, conversation } = context;
+    const { workspace } = context;
+    // A draft without an agent gets one before anything is sent.
+    const conversation = ensureConversationAgent(conversationId);
+    if (!conversation) return;
     const isThinking = thinkingConversations[conversationId] === true;
     if (conversation.provider === 'pi' && text.startsWith('/')) {
       const route = routePiSlashCommand(text, getProviderCommandCatalog(conversation.id));
@@ -9624,253 +6694,15 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         .then((queued) => { if (queued) clearSubmittedComposer(); });
       return;
     }
-    if (isV2Conversation(conversation)) {
-      void sendV2Prompt(text, conversationId, skills, attachments).then((accepted) => {
-        if (accepted) clearSubmittedComposer();
-      });
-      return;
-    }
-    clearSubmittedComposer();
-    if (attachments.length > 0 || skills.length > 0) {
-      void sendLocalTurn(text, 'implement', conversationId, attachments, skills);
-      return;
-    }
-    sendSlashCommand(text, conversationId);
-  }, [appendTimeline, chatDrafts, composerAttachments, controlConversation, getConversationContext, queueWhileBusy, rememberMentionReferences, selectedSkills, sendLocalTurn, sendSlashCommand, sendV2Prompt, setConversationAttachments, setConversationChatDraft, setConversationComposerSelection, setConversationSelectedSkills, thinkingConversations, getProviderCommandCatalog]);
+    void sendV2Prompt(text, conversationId, skills, attachments).then((accepted) => {
+      if (accepted) clearSubmittedComposer();
+    });
+  }, [appendTimeline, chatDrafts, composerAttachments, controlConversation, ensureConversationAgent, getConversationContext, queueWhileBusy, rememberMentionReferences, selectedSkills, sendSlashCommand, sendV2Prompt, setConversationAttachments, setConversationChatDraft, setConversationComposerSelection, setConversationSelectedSkills, thinkingConversations, getProviderCommandCatalog]);
   const submitChatRef = useRef(submitChat);
   submitChatRef.current = submitChat;
 
-  const runWorkspaceCommand = useCallback((workspace: WorkspaceRecord, conversation: ConversationRecord, command: 'start' | 'status' | 'attach' | 'stop' | 'interrupt') => {
-    if (command === 'start') {
-      void startLocalAdapter(workspace, conversation).catch(() => undefined);
-      return;
-    }
-    if (command === 'status') {
-      sendWorkspaceCommand(workspace, 'codex.local.status', {}, conversation);
-      return;
-    }
-    if (command === 'attach') {
-      attachWorkspaceConversation(workspace, conversation);
-      return;
-    }
-    if (command === 'interrupt') {
-      const threadId = normalizeThreadId(conversation.threadId);
-      if (!threadId) {
-        setLastError(t('sess.noInterruptibleThreadInConversation'));
-        return;
-      }
-      sendWorkspaceCommand(workspace, 'codex.local.interrupt', {
-        threadId,
-        turnId: turnIds[conversation.id] || '',
-      }, conversation);
-      return;
-    }
-    if (sendWorkspaceCommand(workspace, 'codex.local.stop', { force: false }, conversation)) {
-      const pending = pendingLocalStartsRef.current.get(conversation.id);
-      if (pending) {
-        clearTimeout(pending.timeoutId);
-        pendingLocalStartsRef.current.delete(conversation.id);
-        pending.reject(new Error(t('sess.localSessionStopped')));
-      }
-      updateConversation(conversation.id, { localAdapterState: 'stopped' });
-    }
-  }, [attachWorkspaceConversation, sendWorkspaceCommand, turnIds, updateConversation, startLocalAdapter]);
 
-  const runThreadMenuAction = useCallback((conversationId: string, action: ThreadMenuAction) => {
-    if (action === 'fork') {
-      forkConversation(conversationId);
-      return;
-    }
-    if (action === 'archive') {
-      removeConversation(conversationId);
-      return;
-    }
-    const conversation = conversationsRef.current.find((item) => item.id === conversationId);
-    if (conversation && isV2Conversation(conversation)) {
-      if (action === 'compact' || action === 'resume') {
-        sendSlashCommand(`/${action}`, conversationId);
-      } else if (action === 'history' || action === 'detail' || action === 'turns') {
-        void recoverConversation(conversationId);
-      } else {
-        setLastError(t('sess.conversationActionUnsupported'));
-      }
-      return;
-    }
-    if (action === 'resume') {
-      void sendNativeThreadAction(conversationId, 'resume', 'thread/resume', (threadId) => ({ threadId }), { restoreHistory: true });
-      return;
-    }
-    if (action === 'rollback') {
-      void sendNativeThreadAction(conversationId, 'rollback', 'thread/rollback', (threadId) => ({ threadId, numTurns: 1 }));
-      return;
-    }
-    if (action === 'compact') {
-      setCompactionByConversation((current) => ({ ...current, [conversationId]: { ...current[conversationId], status: 'running', updatedAt: new Date().toISOString() } }));
-      void sendNativeThreadAction(conversationId, 'read', 'thread/compact/start', (threadId) => ({ threadId }), {
-        showResult: true,
-        resultTitle: 'Compact started',
-      });
-      return;
-    }
-    if (action === 'detail') {
-      void sendNativeThreadAction(conversationId, 'detail', 'thread/read', (threadId) => ({ threadId, includeTurns: false }), {
-        showResult: true,
-        resultTitle: 'Thread details',
-      });
-      return;
-    }
-    if (action === 'history') {
-      void sendNativeThreadAction(conversationId, 'read', 'thread/read', (threadId) => ({ threadId, includeTurns: true }), {
-        restoreHistory: true,
-        showResult: true,
-        resultTitle: 'Thread history',
-      });
-      return;
-    }
-    if (action === 'turns') {
-      void sendNativeThreadAction(conversationId, 'turns', 'thread/turns/list', (threadId) => ({
-        threadId,
-        limit: 20,
-        sortDirection: 'desc',
-        itemsView: 'summary',
-      }), {
-        showResult: true,
-        resultTitle: 'Thread turns',
-      });
-      return;
-    }
-    if (action === 'unarchive') {
-      void sendNativeThreadAction(conversationId, 'unarchive', 'thread/unarchive', (threadId) => ({ threadId }), {
-        showResult: true,
-        resultTitle: 'Thread unarchived',
-      });
-      return;
-    }
-    if (action === 'unsubscribe') {
-      void sendNativeThreadAction(conversationId, 'unsubscribe', 'thread/unsubscribe', (threadId) => ({ threadId }), {
-        showResult: true,
-        resultTitle: 'Thread unsubscribe',
-      });
-      return;
-    }
-    if (action === 'loaded') {
-      void sendTrackedLocalMethod(conversationId, 'loaded', 'thread/loaded/list', { limit: 100 }, 'Loaded threads');
-      return;
-    }
-    if (action === 'clean') {
-      void sendNativeThreadAction(conversationId, 'clean', 'thread/backgroundTerminals/clean', (threadId) => ({ threadId }), {
-        showResult: true,
-        resultTitle: 'Background terminals clean',
-      });
-      return;
-    }
-    openThreadCommandPrompt(conversationId, action);
-  }, [forkConversation, openThreadCommandPrompt, recoverConversation, removeConversation, sendNativeThreadAction, sendSlashCommand, sendTrackedLocalMethod]);
 
-  const submitThreadCommandPrompt = useCallback((prompt: ThreadCommandPromptState, value: string) => {
-    const trimmed = value.trim();
-    if (prompt.command === 'metadata') {
-      const parsed = parseThreadMetadataPrompt(trimmed);
-      if (parsed.error) {
-        desktopAlert('Metadata', parsed.error);
-        return;
-      }
-      void sendNativeThreadAction(prompt.conversationId, 'metadata', 'thread/metadata/update', (threadId) => ({
-        threadId,
-        gitInfo: parsed.gitInfo,
-      }), {
-        showResult: true,
-        resultTitle: 'Thread metadata updated',
-      });
-      setThreadCommandPrompt(null);
-      return;
-    }
-    if (prompt.command === 'memory') {
-      const mode = parseThreadMemoryMode(trimmed);
-      if (!mode) {
-        desktopAlert('Memory', t('alert.memoryArgs'));
-        return;
-      }
-      if (mode === 'reset') {
-        void sendTrackedLocalMethod(prompt.conversationId, 'memoryReset', 'memory/reset', null, 'Memory reset');
-      } else {
-        void sendNativeThreadAction(prompt.conversationId, 'memory', 'thread/memoryMode/set', (threadId) => ({
-          threadId,
-          mode,
-        }), {
-          showResult: true,
-          resultTitle: 'Thread memory',
-          resultDetail: `memory mode: ${mode}`,
-        });
-      }
-      setThreadCommandPrompt(null);
-      return;
-    }
-    if (prompt.command === 'shell') {
-      if (!trimmed) {
-        desktopAlert('Shell command', t('alert.shellCommand'));
-        return;
-      }
-      void sendNativeThreadAction(prompt.conversationId, 'shell', 'thread/shellCommand', (threadId) => ({
-        threadId,
-        command: trimmed,
-      }), {
-        showResult: true,
-        resultTitle: 'Shell command sent',
-        resultDetail: trimmed,
-      });
-      setThreadCommandPrompt(null);
-      return;
-    }
-    if (prompt.command === 'items') {
-      if (!trimmed) {
-        desktopAlert('Turn items', t('alert.turnId'));
-        return;
-      }
-      void sendNativeThreadAction(prompt.conversationId, 'items', 'thread/turns/items/list', (threadId) => ({
-        threadId,
-        turnId: trimmed,
-        limit: 50,
-        sortDirection: 'asc',
-      }), {
-        showResult: true,
-        resultTitle: 'Turn items',
-      });
-      setThreadCommandPrompt(null);
-      return;
-    }
-    if (prompt.command === 'inject') {
-      const items = parseJsonArrayPrompt(trimmed);
-      if (!items) {
-        desktopAlert('Inject items', t('alert.jsonArray'));
-        return;
-      }
-      void sendNativeThreadAction(prompt.conversationId, 'inject', 'thread/inject_items', (threadId) => ({
-        threadId,
-        items,
-      }), {
-        showResult: true,
-        resultTitle: 'Items injected',
-      });
-      setThreadCommandPrompt(null);
-      return;
-    }
-    if (prompt.command === 'guardian') {
-      try {
-        const event = JSON.parse(trimmed);
-        void sendNativeThreadAction(prompt.conversationId, 'guardian', 'thread/approveGuardianDeniedAction', (threadId) => ({
-          threadId,
-          event,
-        }), {
-          showResult: true,
-          resultTitle: 'Guardian action approved',
-        });
-        setThreadCommandPrompt(null);
-      } catch {
-        desktopAlert('Guardian', t('alert.validJson'));
-      }
-    }
-  }, [sendNativeThreadAction, sendTrackedLocalMethod]);
 
   // Only outgoing rows carry attachments; each is projected once per records
   // version, so a streamed delta neither rescans every record nor hands the
@@ -9979,22 +6811,16 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     connectionState,
     connectionHealth,
     backendStarting,
-    remoteModelCatalog,
     modelCatalog,
-    modelCatalogStatus,
-    modelCatalogError,
     lastError,
     serverVersion,
     versionMismatch,
-    events,
     timeline: visibleTimeline,
     hydrateProcessGroup,
     historyEncryption,
     mentionHistory,
     experimentalFeatures,
     setExperimentalFeatures,
-    selectedRequestId,
-    setSelectedRequestId,
     chatDrafts,
     editFollowUpQueue,
     scheduleConversation,
@@ -10006,31 +6832,11 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     composerAttachments,
     composerSelections,
     selectedSkills,
-    skillListVisible,
-    skillListConversationId,
-    skillListStatus,
-    skillListError,
-    skillListItems,
-    modelCommandPrompt,
-    setModelCommandPrompt,
-    modelPickerPrompt,
-    setModelPickerPrompt,
-    threadInfoModal,
-    setThreadInfoModal,
-    threadCommandPrompt,
-    setThreadCommandPrompt,
     turnIds,
     thinkingConversations,
-    threadListStatusByWorkspace,
-    threadListErrorByWorkspace,
     gitDiffByConversation,
     selectedGitRepoByWorkspace,
     selectGitRepo,
-    mcpInventoryByConversation,
-    permissionProfilesByConversation,
-    hooksCatalogByConversation,
-    pluginsCatalogByConversation,
-    memorySettingsByConversation,
     terminalById,
     v2Providers,
     v2ProvidersByBackend,
@@ -10055,7 +6861,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     memoryEntriesByConversation,
     usageRecords,
     pendingRequests,
-    selectedRequest,
     activeWorkspace,
     activeConversation,
     connect,
@@ -10082,7 +6887,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     forgetDeletedConversations,
     getHistoryStorage,
     setConversationLabelColor,
-    requestNativeThreadList,
     submitChat,
     setBackendWakeGate,
     sendAgentMessage,
@@ -10102,7 +6906,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     startTerminalSession,
     stopTerminalSession,
     sendTerminalInput,
-    requestSkillList,
     refreshCapabilityCatalog,
     toggleCatalogSkill,
     previewSkillResource,
@@ -10114,32 +6917,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     fetchWorkspaceEntries,
     fetchSshHosts,
     fetchHostApps,
-    openModelPicker,
-    applyModelCommand,
-    applyWorkspaceModelSelection,
     applyConversationModelSelection,
     sendSlashCommand,
     openSlashCommandActionPage,
     copyLastAgentMessage,
     exportConversationMarkdown,
     uploadComposerFile,
-    runWorkspaceCommand,
-    runThreadMenuAction,
-    submitThreadCommandPrompt,
     stopThinking,
-    openPermissionsMenu,
-    applyPermissionPreset,
-    applyPersonality,
-    applyServiceTier,
-    toggleFastServiceTier,
-    requestMcpInventory,
-    requestPermissionProfiles,
-    requestHooksCatalog,
-    requestPluginsCatalog,
-    requestMemorySettings,
-    updateMemorySettings,
-    resetMemories,
-    applyPermissionProfile,
     applyConversationPermissionMode,
     resolvePermissionMode,
     applyConversationWorkMode,
@@ -10150,8 +6934,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     clearTerminalOutput,
     terminalStreams: terminalStreamsRef.current,
     requestTerminalSnapshot,
-    setSkillListVisible,
-    toggleSelectedSkill,
     autoConnectEnabled,
     openPanel,
   };

@@ -1,18 +1,9 @@
 import { normalizeBackendLabelColor, type BackendConnectionProfile } from './backendColors';
 import { isLoopbackUrl, normalizeUsageRecords as normalizeSharedUsageRecords } from '@todex/protocol/mobileParity';
 import type {
-  CodexHooksListEntry,
-  CodexMcpServerStatus,
-  CodexMemorySettings,
   CodexModelCatalogItem,
-  CodexNativeThread,
-  CodexPermissionProfileSummary,
-  CodexPluginListResult,
-  CodexReasoningEffortOption,
-  CodexServiceTierOption,
   ConnectionSettings,
   LocalAdapterState,
-  PendingRequest,
   ServerEvent,
   WorkspaceRecord,
 } from '@todex/protocol/todex';
@@ -62,22 +53,14 @@ import { matchesMessage, t, type MessageKey } from '../i18n';
 export const STREAMING_REPLY_PLACEHOLDER = '正在回复...';
 import {
   createRequestId,
-  eventId,
   eventPayloadData,
-  extractThreadIdFromEvent,
   DEFAULT_REASONING_EFFORT_OPTIONS,
   FAST_SERVICE_TIER,
   FALLBACK_CODEX_MODELS,
-  mergeWorkspaceRecords,
   normalizeReasoningEffort,
   normalizeServerUrl,
-  parseMcpServerStatusListResponse,
-  parsePermissionProfileListResponse,
   normalizeThreadId,
-  parseCodexNativeThread,
   prepareWorkspaceSyncPayload,
-  shortJson,
-  type CodexThreadHistoryEntry,
 } from '@todex/protocol/todex';
 import { deviceIdentityFromSecret, type DeviceIdentity } from '@todex/protocol/deviceAuth';
 import {
@@ -107,7 +90,6 @@ import {
   isStepProgressEntry as sharedIsStepProgressEntry,
   isThinkingProgressEntry as sharedIsThinkingProgressEntry,
   shouldAppendV2ConversationEvent as sharedShouldAppendV2ConversationEvent,
-  reduceConversationEvents as sharedReduceConversationEvents,
   type ConversationBlockCategory,
   type ConversationBlockPhase,
   type ProviderNotice,
@@ -212,6 +194,9 @@ export type ConversationRecord = {
   /** Stored before history became end-to-end encrypted: read-only (the
    * backend rejects writes with HISTORY_READ_ONLY). */
   legacyPlaintext?: boolean;
+  /** History of the removed local Codex path (no agent, no backend journal):
+   * kept to read, archive and delete; it can no longer send. */
+  legacyCodex?: boolean;
   /** Scheduled conversation (manifest `schedule`): the backend holds what is
    * sent to it until `at`. */
   schedule?: ConversationSchedule;
@@ -303,12 +288,6 @@ export function resolveProviderReasoningEffort(
   )) ?? (model.supportedReasoningEfforts.includes('medium') ? 'medium' : model.supportedReasoningEfforts[0] ?? null);
 }
 
-export type PendingThreadList = {
-  workspaceId: string;
-  sessionId: string;
-  requestId: string;
-  timeoutId: ReturnType<typeof setTimeout>;
-};
 
 export type ExperimentalFeatureId =
   | 'gitDiffViewer'
@@ -337,46 +316,10 @@ export type GitDiffState = {
   truncated?: boolean;
 };
 
-export type McpInventoryState = {
-  status: 'idle' | 'loading' | 'ready' | 'error';
-  detail: 'toolsAndAuthOnly' | 'full';
-  servers: CodexMcpServerStatus[];
-  raw: unknown;
-  error: string;
-  updatedAt: number;
-};
 
-export type PermissionProfilesState = {
-  status: 'idle' | 'loading' | 'ready' | 'error';
-  profiles: CodexPermissionProfileSummary[];
-  raw: unknown;
-  error: string;
-  updatedAt: number;
-};
 
-export type HooksCatalogState = {
-  status: 'idle' | 'loading' | 'ready' | 'error';
-  entries: CodexHooksListEntry[];
-  raw: unknown;
-  error: string;
-  updatedAt: number;
-};
 
-export type PluginsCatalogState = {
-  status: 'idle' | 'loading' | 'ready' | 'error';
-  catalog: CodexPluginListResult;
-  raw: unknown;
-  error: string;
-  updatedAt: number;
-};
 
-export type MemorySettingsState = {
-  status: 'idle' | 'loading' | 'ready' | 'saving' | 'error';
-  settings: CodexMemorySettings;
-  raw: unknown;
-  error: string;
-  updatedAt: number;
-};
 
 export type TerminalLifecycleState = 'idle' | 'starting' | 'running' | 'stopping' | 'exited' | 'error';
 
@@ -425,46 +368,6 @@ export type TerminalStartOptions = {
   interactive?: boolean;
 };
 
-export type PendingThreadAction = {
-  workspaceId: string;
-  conversationId: string;
-  requestId: string;
-  action:
-    | 'start'
-    | 'resume'
-    | 'fork'
-    | 'archive'
-    | 'unarchive'
-    | 'rename'
-    | 'rollback'
-    | 'read'
-    | 'detail'
-    | 'turns'
-    | 'items'
-    | 'metadata'
-    | 'memory'
-    | 'memoryReset'
-    | 'unsubscribe'
-    | 'shell'
-    | 'guardian'
-    | 'clean'
-    | 'loaded'
-    | 'hooks'
-    | 'plugins'
-    | 'mcp'
-    | 'permission'
-    | 'permissionProfiles'
-    | 'memorySettings'
-    | 'inject';
-  timeoutId: ReturnType<typeof setTimeout>;
-  sourceConversationId?: string;
-  title?: string;
-  restoreHistory?: boolean;
-  showResult?: boolean;
-  resultTitle?: string;
-  resultDetail?: string;
-  memorySettings?: CodexMemorySettings;
-};
 
 export type ComposerSelection = { start: number; end: number };
 
@@ -503,37 +406,9 @@ export type QueuedChatSubmission = {
   skills: SelectedSkillAttachment[];
 };
 
-export type PendingLocalStart = {
-  workspaceId: string;
-  conversationId: string;
-  sessionId: string;
-  requestId: string;
-  promise: Promise<void>;
-  resolve: () => void;
-  reject: (reason: Error) => void;
-  timeoutId: ReturnType<typeof setTimeout>;
-};
 
-export type PendingThreadStart = {
-  conversationId: string;
-  requestId: string;
-  promise: Promise<string>;
-  resolve: (threadId: string) => void;
-  reject: (reason: Error) => void;
-  timeoutId: ReturnType<typeof setTimeout>;
-};
 
-export type PendingModelList = {
-  requestId: string;
-  timeoutId: ReturnType<typeof setTimeout>;
-};
 
-export type PendingSkillList = {
-  workspaceId: string;
-  conversationId: string;
-  requestId: string;
-  timeoutId: ReturnType<typeof setTimeout>;
-};
 
 export type PendingJsonSave = {
   timeoutId: ReturnType<typeof setTimeout>;
@@ -553,45 +428,11 @@ export type ConversationContext = {
   conversation: ConversationRecord;
 };
 
-export type ModelCommandPromptState = {
-  conversationId: string;
-  initialValue: string;
-  target?: 'workspace' | 'settings';
-};
 
-export type ModelPickerPromptState = {
-  target: 'workspace' | 'settings';
-  conversationId?: string;
-};
 
-export type ThreadInfoModalState = {
-  title: string;
-  detail: string;
-  raw?: unknown;
-};
 
-export type ThreadCommandPromptState = {
-  conversationId: string;
-  command: 'metadata' | 'memory' | 'shell' | 'items' | 'inject' | 'guardian';
-  title: string;
-  placeholder: string;
-  initialValue: string;
-  warning?: string;
-  multiline?: boolean;
-};
 
-export type SkillListStatus = 'idle' | 'loading' | 'ready' | 'error';
 
-export type SkillListItem = {
-  id: string;
-  name: string;
-  displayName: string;
-  description: string;
-  shortDescription: string;
-  scope: string;
-  path: string;
-  enabled: boolean;
-};
 
 export type SelectedSkillAttachment = {
   name: string;
@@ -601,24 +442,6 @@ export type SelectedSkillAttachment = {
   provider?: ProviderKind | string;
 };
 
-export type ThreadMenuAction =
-  | 'resume'
-  | 'fork'
-  | 'archive'
-  | 'unarchive'
-  | 'rollback'
-  | 'compact'
-  | 'detail'
-  | 'history'
-  | 'turns'
-  | 'items'
-  | 'metadata'
-  | 'memory'
-  | 'shell'
-  | 'unsubscribe'
-  | 'loaded'
-  | 'clean'
-  | 'inject';
 
 export type TimelineTarget = {
   workspaceId: string;
@@ -627,12 +450,6 @@ export type TimelineTarget = {
 
 export type ConnectionState = 'idle' | 'connecting' | 'open' | 'closed' | 'error';
 
-export type RuntimeStatusState = {
-  socket: ConnectionState;
-  daemon: ConnectionHealth['status'];
-  codexAdapter: LocalAdapterState | 'unknown';
-  turn: 'idle' | 'running';
-};
 
 export type ConnectionHealth = {
   status: 'unknown' | 'checking' | 'online' | 'offline';
@@ -692,20 +509,7 @@ export const MAX_COMPOSER_ATTACHMENTS = 8;
 export const MAX_IMAGE_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 export const MAX_FILE_ATTACHMENT_BYTES = 512 * 1024;
 
-export function localConversationStateOf(conversation: ConversationRecord | null): LocalAdapterState {
-  return conversation?.localAdapterState ?? 'idle';
-}
 
-/** Whether showing this conversation should start its local Codex adapter
- * right away. Only a legacy native thread needs it; v2 conversations run on
- * the backend's providers and unsent drafts become v2 on their first prompt.
- * Every legacy command still starts the adapter on demand. */
-export function shouldAutoStartLocalAdapter(conversation: ConversationRecord | null | undefined): boolean {
-  if (!conversation || conversation.archived === true || isV2Conversation(conversation)) return false;
-  if (!normalizeThreadId(conversation.threadId)) return false;
-  const state = localConversationStateOf(conversation);
-  return state !== 'running' && state !== 'starting';
-}
 
 const CONNECTION_FAILURE_LABELS: Record<ConnectionFailureCode, MessageKey> = {
   backend_unreachable: 'conn.failure.backend_unreachable',
@@ -769,9 +573,6 @@ export function getConversationStatus(
   return null;
 }
 
-export function sessionIdForConversation(workspace: WorkspaceRecord, conversation: ConversationRecord): string {
-  return conversation.sessionId || workspace.sessionId || createSessionId(workspace.name);
-}
 
 /** Built-in "None" workspace. Each of its conversations works in a folder the
  * backend creates under `scratch_workspace_root`; the record's own path is
@@ -845,42 +646,10 @@ export function filesWorkspaceForConversation(
   return workspaceForConversation(workspace, conversation);
 }
 
-export function commandWorkspaceForConversation(workspace: WorkspaceRecord, conversation: ConversationRecord): WorkspaceRecord {
-  return {
-    ...workspace,
-    sessionId: sessionIdForConversation(workspace, conversation),
-    threadId: normalizeThreadId(conversation.threadId),
-    localAdapterState: localConversationStateOf(conversation),
-  };
-}
 
-export function isLocalAdapterAlreadyRunning(text: string): boolean {
-  return /adapter already owns this session/i.test(text);
-}
 
-export function isLocalAdapterFailed(text: string): boolean {
-  return /local Codex adapter is not ready;\s*current state is Failed/i.test(text);
-}
 
-export function isThreadNotFound(text: string): boolean {
-  return /thread not found/i.test(text);
-}
 
-export function localTurnErrorMessage(text: string): string {
-  if (isThreadNotFound(text)) {
-    return t('session.threadInvalid');
-  }
-  if (isLocalAdapterFailed(text)) {
-    return t('session.localStateInvalid');
-  }
-  if (isLocalAdapterAlreadyRunning(text)) {
-    return t('session.localAlreadyRunning');
-  }
-  if (/unsupported_action/i.test(text) || /not running for this session/i.test(text)) {
-    return t('session.localNotStarted');
-  }
-  return text;
-}
 
 export function attachmentId(): string {
   return createRequestId('att');
@@ -905,11 +674,6 @@ export function formatBytes(bytes: number | null | undefined): string {
   return `${Math.round(bytes / (1024 * 102.4)) / 10} MB`;
 }
 
-export function fileNameFromUri(uri: string, fallback: string): string {
-  const clean = uri.split('?')[0]?.split('#')[0] ?? uri;
-  const part = clean.split('/').filter(Boolean).pop();
-  return part ? decodeURIComponent(part) : fallback;
-}
 
 export type WorkspaceLinkTarget =
   | { kind: 'browser-url'; url: string }
@@ -998,46 +762,10 @@ export function isImageMimeType(mimeType: string): boolean {
   return mimeType.toLowerCase().startsWith('image/');
 }
 
-export function isTextAttachment(name: string, mimeType: string): boolean {
-  const lowerMime = mimeType.toLowerCase();
-  const lowerName = name.toLowerCase();
-  return (
-    lowerMime.startsWith('text/') ||
-    lowerMime === 'application/json' ||
-    lowerMime === 'application/xml' ||
-    lowerName.endsWith('.md') ||
-    lowerName.endsWith('.json') ||
-    lowerName.endsWith('.csv') ||
-    lowerName.endsWith('.xml') ||
-    lowerName.endsWith('.yaml') ||
-    lowerName.endsWith('.yml')
-  );
-}
 
-export function mimeTypeFromDataUrl(dataUrl: string): string | null {
-  const match = /^data:([^;,]+)[;,]/i.exec(dataUrl.trim());
-  return match?.[1] ?? null;
-}
 
-export function base64FromDataUrl(dataUrl: string): string {
-  const marker = ';base64,';
-  const index = dataUrl.indexOf(marker);
-  return index >= 0 ? dataUrl.slice(index + marker.length) : '';
-}
 
-export function dataUrlFromBase64(base64: string, mimeType: string): string {
-  const trimmed = base64.trim();
-  if (trimmed.startsWith('data:')) {
-    return trimmed;
-  }
-  return `data:${mimeType};base64,${trimmed}`;
-}
 
-export function estimatedBytesFromBase64(base64: string): number {
-  const normalized = base64.replace(/\s/g, '');
-  const padding = normalized.endsWith('==') ? 2 : normalized.endsWith('=') ? 1 : 0;
-  return Math.max(0, Math.floor((normalized.length * 3) / 4) - padding);
-}
 
 export function attachmentPrompt(attachments: ComposerAttachmentDraft[]): string {
   if (attachments.length === 0) {
@@ -1079,43 +807,6 @@ export function attachmentTextBlock(attachment: ComposerAttachmentDraft): string
   return `${header}\nData URL:\n${attachment.dataUrl}`;
 }
 
-export function codexInputFromComposer(
-  text: string,
-  attachments: ComposerAttachmentDraft[],
-  skills: SelectedSkillAttachment[] = [],
-): Record<string, unknown>[] {
-  const trimmed = text.trim();
-  const items: Record<string, unknown>[] = [
-    { type: 'text', text: trimmed || attachmentPrompt(attachments) || (skills.length ? t('session.useSelectedSkills') : '') },
-  ];
-  skills.forEach((skill) => {
-    items.push({
-      type: 'skill',
-      name: skill.name,
-      path: skill.path,
-    });
-  });
-  attachments.forEach((attachment) => {
-    if (attachment.uploadedPath) {
-      items.push(attachment.kind === 'image'
-        ? { type: 'localImage', path: attachment.uploadedPath }
-        : { type: 'text', text: `[附件: ${attachment.name}]\nPath: ${attachment.uploadedPath}` });
-      return;
-    }
-    if (attachment.kind === 'image') {
-      items.push({
-        type: 'image',
-        url: attachment.dataUrl,
-        name: attachment.name,
-        mimeType: attachment.mimeType,
-        sizeBytes: attachment.sizeBytes ?? undefined,
-      });
-      return;
-    }
-    items.push({ type: 'text', text: attachmentTextBlock(attachment) });
-  });
-  return items;
-}
 
 /**
  * Inline composer capsules. Every attachment that the user picked or quoted
@@ -1258,65 +949,7 @@ export function selectedSkillSummary(skills: SelectedSkillAttachment[]): string 
   return skills.map((item) => `${item.displayName || item.name} (${item.name})`).join('\n');
 }
 
-export function skillIdFromPath(name: string, path: string): string {
-  return `${name}:${path}`;
-}
 
-export function parseSkillListItems(value: unknown): SkillListItem[] {
-  const root = value && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : {};
-  const entries = Array.isArray(root.data)
-    ? root.data
-    : Array.isArray(root.skills)
-      ? [{ skills: root.skills }]
-      : Array.isArray(value)
-        ? [{ skills: value }]
-        : [];
-  const byId = new Map<string, SkillListItem>();
-
-  entries.forEach((entry) => {
-    const entryRecord = entry && typeof entry === 'object' && !Array.isArray(entry)
-      ? entry as Record<string, unknown>
-      : {};
-    const skills = Array.isArray(entryRecord.skills) ? entryRecord.skills : [];
-    skills.forEach((skill) => {
-      if (!skill || typeof skill !== 'object' || Array.isArray(skill)) {
-        return;
-      }
-      const record = skill as Record<string, unknown>;
-      const name = stringFromUnknown(record.name).trim();
-      const path = stringFromUnknown(record.path).trim();
-      if (!name || !path) {
-        return;
-      }
-      const interfaceRecord = record.interface && typeof record.interface === 'object' && !Array.isArray(record.interface)
-        ? record.interface as Record<string, unknown>
-        : {};
-      const displayName = stringFromUnknown(interfaceRecord.displayName ?? interfaceRecord.display_name).trim() || name;
-      const shortDescription = stringFromUnknown(interfaceRecord.shortDescription ?? interfaceRecord.short_description).trim()
-        || stringFromUnknown(record.shortDescription ?? record.short_description).trim();
-      const description = shortDescription || stringFromUnknown(record.description).trim();
-      byId.set(skillIdFromPath(name, path), {
-        id: skillIdFromPath(name, path),
-        name,
-        displayName,
-        description,
-        shortDescription,
-        scope: stringFromUnknown(record.scope).trim() || 'unknown',
-        path,
-        enabled: record.enabled !== false,
-      });
-    });
-  });
-
-  return [...byId.values()].sort((left, right) => {
-    if (left.enabled !== right.enabled) {
-      return left.enabled ? -1 : 1;
-    }
-    return left.displayName.localeCompare(right.displayName);
-  });
-}
 
 export function extractProtocolError(eventType: string, data: Record<string, unknown>): string {
   const rawError = data.error;
@@ -1544,40 +1177,10 @@ export function modelDisplayLabel(model: string | null | undefined, catalog: Cod
   return catalog.find((item) => item.model === normalized)?.displayName || normalized;
 }
 
-export function reasoningOptionsForModel(
-  model: string | null | undefined,
-  catalog: CodexModelCatalogItem[],
-): CodexReasoningEffortOption[] {
-  const preset = catalog.find((item) => item.model === model);
-  return preset?.supportedReasoningEfforts.length ? preset.supportedReasoningEfforts : DEFAULT_REASONING_EFFORT_OPTIONS;
-}
 
-export function defaultReasoningForModel(model: string | null | undefined, catalog: CodexModelCatalogItem[]): string | null {
-  const preset = catalog.find((item) => item.model === model);
-  return preset?.defaultReasoningEffort ?? null;
-}
 
-export function serviceTiersForModel(model: string | null | undefined, catalog: CodexModelCatalogItem[]) {
-  const preset = catalog.find((item) => item.model === model);
-  return preset?.serviceTiers.length ? preset.serviceTiers : [FAST_SERVICE_TIER];
-}
 
-export function fastServiceTierForModel(model: string | null | undefined, catalog: CodexModelCatalogItem[]) {
-  return (
-    serviceTiersForModel(model, catalog).find((tier) => tier.name === 'fast' || tier.id === FAST_SERVICE_TIER.id) ??
-    FAST_SERVICE_TIER
-  );
-}
 
-export function serviceTierLabel(value: string | null | undefined): string {
-  if (!value || value === 'default') {
-    return 'Default';
-  }
-  if (value === FAST_SERVICE_TIER.id || value === 'fast') {
-    return 'Fast';
-  }
-  return value;
-}
 
 export function mergeModelCatalog(remoteModels: CodexModelCatalogItem[], currentModels: string[]): CodexModelCatalogItem[] {
   const byModel = new Map<string, CodexModelCatalogItem>();
@@ -1611,15 +1214,7 @@ export function normalizeExperimentalFeatures(value: Partial<ExperimentalFeature
   };
 }
 
-export function itemTypeOf(item: Record<string, unknown>): string {
-  const rawType = item.type ?? item.itemType ?? item.item_type;
-  return typeof rawType === 'string' ? rawType : '';
-}
 
-export function itemIdOf(item: Record<string, unknown>, fallback: string): string {
-  const rawId = item.id ?? item.itemId ?? item.item_id;
-  return typeof rawId === 'string' && rawId ? rawId : fallback;
-}
 
 export function textFromContent(value: unknown): string {
   if (typeof value === 'string') {
@@ -1665,7 +1260,6 @@ export const CONVERSATIONS_STORAGE_KEY = `${platform.storagePrefix}.conversation
 export const TIMELINE_STORAGE_KEY = `${platform.storagePrefix}.timeline.v1`;
 export const ACTIVE_SELECTION_STORAGE_KEY = `${platform.storagePrefix}.activeSelection.v1`;
 export const MENTION_HISTORY_STORAGE_KEY = `${platform.storagePrefix}.mentionHistory.v1`;
-export const SESSION_CURSORS_STORAGE_KEY = `${platform.storagePrefix}.sessionCursors.v1`;
 export const EXPERIMENTAL_FEATURES_STORAGE_KEY = `${platform.storagePrefix}.experimentalFeatures.v1`;
 export const USAGE_RECORDS_STORAGE_KEY = `${platform.storagePrefix}.usageRecords.v1`;
 export const PROVIDER_MODEL_PREFERENCES_STORAGE_KEY = `${platform.storagePrefix}.providerModelPreferences.v1`;
@@ -1676,7 +1270,6 @@ export const WORKSPACE_TOMBSTONES_STORAGE_KEY = `${platform.storagePrefix}.works
 /** Config-sync baselines: content hashes per source → target pair, never values. */
 export const CONFIG_SYNC_STORAGE_KEY = `${platform.storagePrefix}.configSync.v1`;
 export const JSON_SAVE_DEBOUNCE_MS = 350;
-export const SESSION_CURSOR_SAVE_DEBOUNCE_MS = 800;
 export const WORKSPACE_SYNC_DEBOUNCE_MS = 900;
 export const SOCKET_EVENT_BATCH_SIZE = 24;
 export const SOCKET_FRAME_DECODE_BATCH_SIZE = 8;
@@ -1717,15 +1310,11 @@ export const MAX_TIMELINE_ITEMS_LIVE = 5_000;
 export const MAX_CONVERSATION_TIMELINE_ITEMS = 5_000;
 export const MAX_USAGE_RECORDS = 2_000;
 export const MAX_WORKSPACE_TOMBSTONES = 100;
-export const MAX_EVENTS = 220;
 export const RECONNECT_DELAY_MS = 2000;
 export const RECONNECT_MAX_DELAY_MS = 30_000;
-export const CHAT_ATTACH_REPLAY_LIMIT = 200;
 export const CHAT_BOTTOM_FOLLOW_THRESHOLD = 72;
 /** An unanswered `terminal.attach` is sent again after this long. */
 export const TERMINAL_ATTACH_TIMEOUT_MS = 5000;
-/** Terminal events that stream output; kept out of the session's event list. */
-export const TERMINAL_STREAM_EVENT_TYPES: ReadonlySet<string> = new Set(['terminal.output', 'terminal.input.accepted', 'terminal.attached', 'terminal.resized']);
 /** At most this many non-live terminal records are kept (LRU by updatedAt);
  * live PTYs are never evicted. Mirrors the mobile client's maxTerminals = 8. */
 export const TERMINAL_MAX_CACHED_TERMINALS = 8;
@@ -1733,8 +1322,6 @@ const TERMINAL_LIVE_STATUSES: ReadonlySet<TerminalLifecycleState> = new Set(['st
 
 export const DEFAULT_TERMINAL_ROWS = 24;
 export const DEFAULT_TERMINAL_COLS = 80;
-export const LOCAL_SESSION_IDLE_SUSPEND_MS = 30 * 60 * 1000;
-export const LOCAL_SESSION_IDLE_SWEEP_MS = 2 * 60 * 1000;
 
 /** Mirrors the backend's MAX_WORKSPACE_TEXT_BYTES compare-and-save limit. */
 export const WORKSPACE_FILE_MAX_TEXT_BYTES = 1024 * 1024;
@@ -1750,43 +1337,23 @@ export function conflictMarkersRemain(text: string): boolean {
   return text.split('\n').some((line) => line.startsWith('<<<<<<<') || line.startsWith('>>>>>>>') || line.trim() === '=======');
 }
 
+/** TodeX's own commands, offered when the agent publishes no catalog of its
+ * own (agent commands come from `providerCommands`). */
 export const SLASH_COMMANDS: SlashCommand[] = [
-  { command: '/model', title: 'Model', description: 'choose what model and reasoning effort to use', category: 'settings' },
-  { command: '/fast', title: 'Fast', description: 'toggle fastest inference with increased plan usage', category: 'core' },
-  { command: '/permissions', title: 'Permissions', description: 'choose what Codex is allowed to do', category: 'settings' },
-  { command: '/personality', title: 'Personality', description: 'choose a communication style for Codex', category: 'settings' },
+  { command: '/permissions', title: 'Permissions', description: 'choose what the agent is allowed to do', category: 'settings' },
   { command: '/experimental', title: 'Experimental', description: 'toggle experimental features', category: 'settings' },
-  { command: '/approve', title: 'Approve', description: 'approve one retry of a recent auto-review denial', category: 'runtime' },
+  { command: '/approve', title: 'Approve', description: 'answer the open permission request', category: 'runtime' },
   { command: '/memories', title: 'Memories', description: 'configure memory use and generation', category: 'settings' },
-  { command: '/skills', title: 'Skills', description: 'use skills to improve how Codex performs specific tasks', category: 'context' },
-  { command: '/hooks', title: 'Hooks', description: 'view and manage lifecycle hooks', category: 'context' },
-  { command: '/review', title: 'Review', description: 'review my current changes and find issues', category: 'context' },
-  { command: '/rename', title: 'Rename', description: 'rename the current thread', category: 'thread' },
-  { command: '/new', title: 'New', description: 'start a new chat during a conversation', category: 'thread' },
-  { command: '/archive', title: 'Archive', description: 'archive this session and exit', category: 'thread' },
-  { command: '/resume', title: 'Resume', description: 'resume a saved chat', category: 'thread' },
-  { command: '/fork', title: 'Fork', description: 'fork the current chat', category: 'thread' },
-  { command: '/init', title: 'Init', description: 'create an AGENTS.md file with instructions for Codex', category: 'context' },
-  { command: '/compact', title: 'Compact', description: 'summarize conversation to prevent hitting the context limit', category: 'thread' },
+  { command: '/rename', title: 'Rename', description: 'rename the current conversation', category: 'thread' },
+  { command: '/new', title: 'New', description: 'start a new conversation', category: 'thread' },
+  { command: '/archive', title: 'Archive', description: 'archive this conversation', category: 'thread' },
+  { command: '/resume', title: 'Resume', description: 'resume the agent session', category: 'thread' },
+  { command: '/fork', title: 'Fork', description: 'fork the current conversation', category: 'thread' },
   { command: '/plan', title: 'Plan', description: 'switch to Plan mode', category: 'core' },
-  { command: '/goal', title: 'Goal', description: 'set or view the goal for a long-running task', category: 'thread' },
-  { command: '/side', title: 'Side', description: 'start a side conversation in an ephemeral fork', category: 'thread' },
-  { command: '/btw', title: 'BTW', description: 'alias for /side', category: 'thread' },
   { command: '/copy', title: 'Copy', description: 'copy last response as markdown', category: 'context' },
   { command: '/diff', title: 'Diff', description: 'show git diff including untracked files', category: 'context' },
   { command: '/mention', title: 'Mention', description: 'mention a file', category: 'context' },
-  { command: '/status', title: 'Status', description: 'show current session configuration and token usage', category: 'core' },
-  { command: '/mcp', title: 'MCP', description: 'list configured MCP tools; use /mcp verbose for details', category: 'context' },
-  { command: '/apps', title: 'Apps', description: 'manage apps', category: 'context' },
-  { command: '/plugins', title: 'Plugins', description: 'browse plugins', category: 'context' },
-  { command: '/feedback', title: 'Feedback', description: 'send logs to maintainers', category: 'settings' },
-  { command: '/logout', title: 'Logout', description: 'log out of Codex', category: 'settings' },
-  { command: '/quit', title: 'Quit', description: 'exit Codex', category: 'runtime' },
-  { command: '/exit', title: 'Exit', description: 'exit Codex', category: 'runtime' },
-  { command: '/ps', title: 'PS', description: 'list background terminals', category: 'runtime' },
-  { command: '/stop', title: 'Stop', description: 'stop all background terminals', category: 'runtime' },
-  { command: '/clean', title: 'Clean', description: 'alias for /stop', category: 'runtime' },
-  { command: '/clear', title: 'Clear', description: 'clear the terminal and start a new chat', category: 'thread' },
+  { command: '/clear', title: 'Clear', description: 'start a new conversation', category: 'thread' },
 ];
 
 export const EXPERIMENTAL_FEATURE_DEFAULTS: ExperimentalFeatureSettings = {
@@ -1827,12 +1394,6 @@ export const SLASH_COMMAND_CATEGORY_LABELS: Record<SlashCommandCategory, string>
   get debug() { return t('slashCat.debug'); },
 };
 
-export const DIRECT_SLASH_COMMANDS = new Set([
-  '/compact',
-  '/init',
-  '/mention',
-  '/copy',
-]);
 
 export function canonicalSlashCommand(command: string): string {
   const normalized = command.trim().toLowerCase();
@@ -1851,36 +1412,7 @@ export function canonicalSlashCommand(command: string): string {
   return normalized.startsWith('/') ? normalized : `/${normalized}`;
 }
 
-export function slashCommandDefinition(command: string): SlashCommand | null {
-  const canonical = canonicalSlashCommand(command);
-  return SLASH_COMMANDS.find((item) => canonicalSlashCommand(item.command) === canonical) ?? null;
-}
 
-export function slashCommandNeedsActionPage(command: string): boolean {
-  return !DIRECT_SLASH_COMMANDS.has(canonicalSlashCommand(command));
-}
-
-export function serviceTierCommandForModel(command: string, model: string | null | undefined, catalog: CodexModelCatalogItem[]): CodexServiceTierOption | null {
-  const normalized = command.replace(/^\//, '').trim().toLowerCase();
-  if (!normalized) {
-    return null;
-  }
-  return serviceTiersForModel(model, catalog).find(
-    (tier) => tier.name.toLowerCase() === normalized || tier.id.toLowerCase() === normalized,
-  ) ?? null;
-}
-
-export function serviceTierSlashCommandsForModel(model: string | null | undefined, catalog: CodexModelCatalogItem[]): SlashCommand[] {
-  const existingCommands = new Set(SLASH_COMMANDS.map((item) => canonicalSlashCommand(item.command)));
-  return serviceTiersForModel(model, catalog)
-    .filter((tier) => !existingCommands.has(canonicalSlashCommand(`/${tier.name}`)))
-    .map((tier) => ({
-      command: `/${tier.name}`,
-      title: tier.name === 'fast' ? 'Fast' : tier.name,
-      description: tier.description,
-      category: 'core',
-    }));
-}
 
 export const PERMISSION_PRESETS: PermissionPreset[] = [
   {
@@ -1935,49 +1467,11 @@ export function permissionPresetForProfile(
   );
 }
 
-export function permissionProfileLabel(profileId: string | null | undefined, approvalsReviewer?: string | null): string {
-  const preset = permissionPresetForProfile(profileId, approvalsReviewer);
-  return preset?.title ?? profileId ?? 'Legacy approval/sandbox';
-}
 
-export function approvalsReviewerValue(
-  workspace: WorkspaceRecord | null | undefined,
-  settings: ConnectionSettings,
-): string | null {
-  return workspace?.approvalsReviewer ?? settings.approvalsReviewer ?? null;
-}
 
-export function permissionPresetSelected(
-  preset: PermissionPreset,
-  workspace: WorkspaceRecord | null | undefined,
-  settings: ConnectionSettings,
-): boolean {
-  return (
-    workspace?.permissionProfile === preset.profileId &&
-    (approvalsReviewerValue(workspace, settings) || 'user') === preset.approvalsReviewer
-  );
-}
 
-// Codex `Personality` enum serializes lowercase: "none" | "friendly" | "pragmatic".
-export const PERSONALITY_OPTIONS: { id: string; title: string; description: string }[] = [
-  { id: 'friendly', title: 'Friendly', description: 'Warmer, more conversational communication style.' },
-  { id: 'pragmatic', title: 'Pragmatic', description: 'Direct, concise, action-oriented communication style.' },
-  { id: 'none', title: 'Default', description: 'Use the model default communication style.' },
-];
 
-export function personalityLabel(personality: string | null | undefined): string {
-  const normalized = (personality || 'none').toLowerCase();
-  return PERSONALITY_OPTIONS.find((option) => option.id === normalized)?.title ?? 'Default';
-}
 
-// Codex `feedback/upload` classification accepts these exact snake_case strings.
-export const FEEDBACK_CATEGORIES: { id: string; title: string; description: string }[] = [
-  { id: 'bad_result', title: 'Bad result', description: 'Codex produced an incorrect or unhelpful result.' },
-  { id: 'good_result', title: 'Good result', description: 'Codex did well — share positive feedback.' },
-  { id: 'bug', title: 'Bug', description: 'Something is broken in the app or Codex.' },
-  { id: 'safety_check', title: 'Safety check', description: 'A safety/approval concern to report.' },
-  { id: 'other', title: 'Other', description: 'Anything else worth telling the maintainers.' },
-];
 
 export const defaultSettings: ConnectionSettings = {
   serverUrl: 'http://127.0.0.1:7345',
@@ -2002,79 +1496,7 @@ export const defaultConnectionHealth: ConnectionHealth = {
   code: '',
 };
 
-export function modelCommandInitialValue(workspace: WorkspaceRecord, settings: ConnectionSettings): string {
-  return [workspace.model || settings.defaultModel, normalizeReasoningEffort(workspace.reasoningEffort)]
-    .filter(Boolean)
-    .join(' ');
-}
 
-export function parseModelCommandArgs(args: string[]): {
-  model: string;
-  reasoningEffort: string | null;
-  invalidReasoningEffort: string;
-} {
-  let model = '';
-  let reasoningEffort: string | null = null;
-  let invalidReasoningEffort = '';
-  let expected: 'model' | 'effort' | null = null;
-
-  for (const rawArg of args) {
-    const arg = rawArg.trim();
-    if (!arg) {
-      continue;
-    }
-    const lower = arg.toLowerCase();
-
-    if (lower === '--model' || lower === '-m' || lower === 'model') {
-      expected = 'model';
-      continue;
-    }
-    if (
-      lower === '--effort' ||
-      lower === '--reasoning' ||
-      lower === '--thinking' ||
-      lower === '-e' ||
-      lower === 'effort' ||
-      lower === 'reasoning' ||
-      lower === 'thinking'
-    ) {
-      expected = 'effort';
-      continue;
-    }
-
-    if (expected === 'model') {
-      model = arg;
-      expected = null;
-      continue;
-    }
-
-    const normalizedEffort = normalizeReasoningEffort(arg);
-    if (expected === 'effort') {
-      if (normalizedEffort) {
-        reasoningEffort = normalizedEffort;
-      } else {
-        invalidReasoningEffort = arg;
-      }
-      expected = null;
-      continue;
-    }
-
-    if (normalizedEffort) {
-      reasoningEffort = normalizedEffort;
-      continue;
-    }
-
-    if (!model) {
-      model = arg;
-    }
-  }
-
-  if (expected === 'effort') {
-    invalidReasoningEffort = invalidReasoningEffort || 'missing';
-  }
-
-  return { model, reasoningEffort, invalidReasoningEffort };
-}
 
 export function toPersistedSettings(settings: ConnectionSettings): PersistedSettings {
   const { deviceSecret: _deviceSecret, ...rest } = settings;
@@ -2364,12 +1786,6 @@ export function evictIdleTerminalStates(current: Record<string, TerminalClientSt
   return next;
 }
 
-export function nowLabel(timestamp: number): string {
-  return new Date(timestamp).toLocaleTimeString([], {
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
 
 export function connectionStateLabel(state: ConnectionState): string {
   switch (state) {
@@ -2406,6 +1822,11 @@ export function healthLabelOf(health: ConnectionHealth): string {
     default:
       return t('conn.waiting');
   }
+}
+
+/** History that can only be read (legacy plaintext or retired local Codex). */
+export function isReadOnlyConversation(conversation: Pick<ConversationRecord, 'legacyPlaintext' | 'legacyCodex'> | null | undefined): boolean {
+  return conversation?.legacyPlaintext === true || conversation?.legacyCodex === true;
 }
 
 export function isV2Conversation(conversation: ConversationRecord | null | undefined): boolean {
@@ -2661,309 +2082,28 @@ export function shouldAppendV2ConversationEvent(event: ConversationEvent): boole
   return sharedShouldAppendV2ConversationEvent(event);
 }
 
-export type V2ConversationReplayState = {
-  timeline: TimelineEntry[];
-  activeTurnId: string;
-  lastSequence: number;
-  missingSequences: number[];
-};
 
-export function reduceV2ConversationEvents(
-  events: ConversationEvent[],
-  workspaceId: string,
-): V2ConversationReplayState {
-  return sharedReduceConversationEvents(events, workspaceId);
-}
 
-export function mergeConversationTimeline(
-  replayed: readonly TimelineEntry[],
-  live: readonly TimelineEntry[],
-): TimelineEntry[] {
-  const merged = new Map<string, TimelineEntry>();
-  for (const entry of [...replayed, ...live]) {
-    const previous = merged.get(entry.id);
-    if (!previous || (entry.sequence ?? 0) >= (previous.sequence ?? 0)) {
-      merged.set(entry.id, entry);
-    }
-  }
-  return [...merged.values()].sort((left, right) => {
-    if (left.sequence !== undefined && right.sequence !== undefined && left.sequence !== right.sequence) {
-      return right.sequence - left.sequence;
-    }
-    if (left.at !== right.at) return right.at - left.at;
-    return right.id.localeCompare(left.id);
-  });
-}
 
-export function modeLabelOf(mode: ConversationRecord['mode']): string {
-  return mode === 'plan' ? 'Plan mode' : 'Implement mode';
-}
 
-export function compactGoalLabel(conversation: ConversationRecord): string {
-  if (!conversation.goalStatus && !conversation.goalObjective) {
-    return 'No goal';
-  }
-  if (conversation.goalObjective) {
-    return `Goal · ${conversation.goalObjective}`;
-  }
-  return `Goal · ${conversation.goalStatus}`;
-}
 
-export function conversationTitleFromNativeThread(thread: CodexNativeThread): string {
-  return thread.name || thread.preview || thread.title || thread.id;
-}
 
-export function conversationPatchFromNativeThread(thread: CodexNativeThread): Partial<ConversationRecord> {
-  return {
-    title: conversationTitleFromNativeThread(thread),
-    preview: thread.preview,
-    nativeStatus: thread.status,
-    archived: thread.archived,
-    threadId: thread.id,
-    updatedAt: thread.updatedAt || Date.now(),
-    createdAt: thread.createdAt || Date.now(),
-  };
-}
 
-export function threadDateLabel(timestamp: number): string {
-  if (!timestamp) {
-    return 'unknown';
-  }
-  return new Date(timestamp).toLocaleString();
-}
 
-export function formatThreadSummary(thread: CodexNativeThread): string {
-  const lines = [
-    `Thread: ${thread.id || 'unknown'}`,
-    `Title: ${conversationTitleFromNativeThread(thread)}`,
-    `Status: ${thread.status || 'unknown'}`,
-    `Archived: ${thread.archived ? 'yes' : 'no'}`,
-    `CWD: ${thread.cwd || 'unknown'}`,
-    `Model: ${thread.model || 'unknown'}`,
-    `Session: ${thread.sessionId || 'unknown'}`,
-    `Created: ${threadDateLabel(thread.createdAt)}`,
-    `Updated: ${threadDateLabel(thread.updatedAt)}`,
-  ];
-  if (thread.preview) {
-    lines.push('', thread.preview);
-  }
-  return lines.join('\n');
-}
 
-export function valueAtPath(value: unknown, path: string[]): unknown {
-  let current = value;
-  for (const part of path) {
-    if (!current || typeof current !== 'object' || Array.isArray(current)) {
-      return undefined;
-    }
-    current = (current as Record<string, unknown>)[part];
-  }
-  return current;
-}
 
-export function resultThreadFromValue(value: unknown): CodexNativeThread | null {
-  return (
-    parseCodexNativeThread(value) ||
-    parseCodexNativeThread(valueAtPath(value, ['thread'])) ||
-    parseCodexNativeThread(valueAtPath(value, ['result', 'thread'])) ||
-    null
-  );
-}
 
-export function formatThreadActionResult(action: PendingThreadAction, responseValue: unknown): string {
-  if (action.action === 'mcp') {
-    const servers = parseMcpServerStatusListResponse(responseValue);
-    if (!servers.length) {
-      return 'No MCP servers returned.';
-    }
-    return servers
-      .map((server) => `${server.name}: ${server.tools.length} tools, ${server.resources.length} resources, auth ${server.authStatus}`)
-      .join('\n');
-  }
-  if (action.action === 'permissionProfiles') {
-    const profiles = parsePermissionProfileListResponse(responseValue);
-    return profiles.length
-      ? profiles.map((profile) => `${profile.id}: ${profile.description}`).join('\n')
-      : 'No permission profiles returned.';
-  }
-  const thread = resultThreadFromValue(responseValue);
-  if (thread && (action.action === 'detail' || action.action === 'metadata' || action.action === 'rollback' || action.action === 'unarchive')) {
-    return formatThreadSummary(thread);
-  }
-  return shortJson(responseValue);
-}
 
-export function parseThreadMetadataArgs(args: string[]): { gitInfo: Record<string, string | null>; error?: string } {
-  const gitInfo: Record<string, string | null> = {};
-  let index = 0;
-  while (index < args.length) {
-    const rawKey = args[index]?.toLowerCase();
-    const key =
-      rawKey === 'origin' || rawKey === 'originurl' || rawKey === 'origin-url'
-        ? 'originUrl'
-        : rawKey === 'branch' || rawKey === 'sha'
-          ? rawKey
-          : '';
-    if (!key) {
-      return { gitInfo, error: t('metadata.unknownField', { field: args[index] ?? '' }) };
-    }
-    const next = args[index + 1];
-    if (!next) {
-      return { gitInfo, error: t('metadata.needsValue', { field: args[index] ?? '' }) };
-    }
-    gitInfo[key] = /^(clear|null|none|-)$/i.test(next) ? null : next;
-    index += 2;
-  }
-  if (Object.keys(gitInfo).length === 0) {
-    return { gitInfo, error: t('metadata.missing') };
-  }
-  return { gitInfo };
-}
 
-export function parseThreadMetadataPrompt(value: string): { gitInfo: Record<string, string | null>; error?: string } {
-  const args = value.trim().split(/\s+/).filter(Boolean);
-  return parseThreadMetadataArgs(args);
-}
 
-export function parseThreadMemoryMode(value: string): 'enabled' | 'disabled' | 'reset' | '' {
-  const normalized = value.trim().toLowerCase();
-  if (/^(on|enable|enabled|true|1)$/i.test(normalized)) {
-    return 'enabled';
-  }
-  if (/^(off|disable|disabled|false|0)$/i.test(normalized)) {
-    return 'disabled';
-  }
-  if (/^(reset|clear)$/i.test(normalized)) {
-    return 'reset';
-  }
-  return '';
-}
 
-export function parsePositiveLimit(value: string | undefined, fallback: number): number {
-  const parsed = Number.parseInt(value ?? '', 10);
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    return fallback;
-  }
-  return Math.min(parsed, 100);
-}
 
-export function parseJsonArrayPrompt(value: string): unknown[] | null {
-  try {
-    const parsed = JSON.parse(value);
-    return Array.isArray(parsed) ? parsed : null;
-  } catch {
-    return null;
-  }
-}
 
-export function nativeThreadPatchFromNotification(eventType: string, data: Record<string, unknown>): Partial<ConversationRecord> | null {
-  const threadId = threadIdFromEventData({ type: eventType, payload: data } as ServerEvent, data);
-  if (!threadId) {
-    return null;
-  }
-  if (eventType === 'codex.thread/archived' || eventType === 'codex.thread.archived' || data.method === 'thread/archived') {
-    return { archived: true, nativeStatus: 'archived', updatedAt: Date.now() };
-  }
-  if (eventType === 'codex.thread/unarchived' || eventType === 'codex.thread.unarchived' || data.method === 'thread/unarchived') {
-    return { archived: false, nativeStatus: '', updatedAt: Date.now() };
-  }
-  if (eventType === 'codex.thread/closed' || eventType === 'codex.thread.closed' || data.method === 'thread/closed') {
-    return { nativeStatus: 'closed', updatedAt: Date.now() };
-  }
-  if (eventType === 'codex.thread/status/changed' || eventType === 'codex.thread.status.changed' || data.method === 'thread/status/changed') {
-    const status = typeof data.status === 'string'
-      ? data.status
-      : data.status && typeof data.status === 'object' && !Array.isArray(data.status)
-        ? String((data.status as Record<string, unknown>).type ?? (data.status as Record<string, unknown>).state ?? '')
-        : '';
-    return { nativeStatus: status, updatedAt: Date.now() };
-  }
-  if (eventType === 'codex.thread/name/updated' || eventType === 'codex.thread.name.updated' || data.method === 'thread/name/updated') {
-    const title = typeof data.threadName === 'string'
-      ? data.threadName
-      : typeof data.thread_name === 'string'
-        ? data.thread_name
-        : '';
-    return title ? { title, updatedAt: Date.now() } : { title: '', updatedAt: Date.now() };
-  }
-  return null;
-}
 
-export function goalPatchFromEventData(data: Record<string, unknown>): Pick<ConversationRecord, 'goalStatus' | 'goalObjective'> | null {
-  const result = data.result;
-  const resultObject = result && typeof result === 'object' && !Array.isArray(result)
-    ? result as Record<string, unknown>
-    : null;
-  const goalValue = resultObject?.goal ?? data.goal;
-  const goal = goalValue && typeof goalValue === 'object' && !Array.isArray(goalValue)
-    ? goalValue as Record<string, unknown>
-    : null;
 
-  if (goal) {
-    return {
-      goalStatus: typeof goal.status === 'string' ? goal.status : 'active',
-      goalObjective: typeof goal.objective === 'string' ? goal.objective : '',
-    };
-  }
 
-  if (resultObject?.cleared === true || data.cleared === true) {
-    return {
-      goalStatus: '',
-      goalObjective: '',
-    };
-  }
 
-  return null;
-}
 
-export function turnObjectFromEventData(data: Record<string, unknown>): Record<string, unknown> | null {
-  const turn = data.turn;
-  return turn && typeof turn === 'object' && !Array.isArray(turn)
-    ? turn as Record<string, unknown>
-    : null;
-}
-
-export function turnIdFromEventData(data: Record<string, unknown>): string {
-  const turn = turnObjectFromEventData(data);
-  const value = data.turnId ?? data.turn_id ?? data.codexTurnId ?? data.codex_turn_id ?? turn?.id;
-  return typeof value === 'string' && value.trim() ? value.trim() : '';
-}
-
-export function turnStatusFromEventData(data: Record<string, unknown>): string {
-  const turn = turnObjectFromEventData(data);
-  const value = data.status ?? data.lifecycleState ?? data.lifecycle_state ?? turn?.status;
-  return typeof value === 'string' ? value : '';
-}
-
-export function textFromLocalTurnPayload(payload: Record<string, unknown>): string {
-  const input = payload.input;
-  if (!Array.isArray(input)) {
-    return shortJson(payload).slice(0, 240);
-  }
-
-  const text = input
-    .map((item) => {
-      if (!item || typeof item !== 'object') {
-        return '';
-      }
-      const record = item as Record<string, unknown>;
-      if (typeof record.text === 'string' && record.text) {
-        if (record.text.startsWith('[附件:')) {
-          return '';
-        }
-        return record.text;
-      }
-      if (record.type === 'image') {
-        const name = typeof record.name === 'string' && record.name ? record.name : 'image';
-        return t('chat.imageAttachmentBlock', { name });
-      }
-      return '';
-    })
-    .filter(Boolean)
-    .join('\n');
-
-  return text || shortJson(payload).slice(0, 240);
-}
 
 export function findMentionTrigger(text: string, cursor: number): MentionTrigger | null {
   const end = Math.max(0, Math.min(cursor, text.length));
@@ -3175,15 +2315,7 @@ export function progressTextFromData(data: Record<string, unknown>, item: Record
   return '';
 }
 
-export function isLifecycleProgressText(text: string): boolean {
-  return /^(starting|ready|started|completed|running|idle|busy)$/i.test(text.trim());
-}
 
-export function objectPayloadOf(event: ServerEvent): Record<string, unknown> {
-  return event.payload && typeof event.payload === 'object' && !Array.isArray(event.payload)
-    ? event.payload as Record<string, unknown>
-    : {};
-}
 
 export function sessionIdFromEvent(event: ServerEvent, data = eventPayloadData(event)): string {
   const direct = transportSessionIdFromEvent(event);
@@ -3204,152 +2336,9 @@ export function cursorFromEvent(event: ServerEvent): number | null {
   return transportCursorFromEvent(event);
 }
 
-export function threadIdFromEventData(event: ServerEvent, data = eventPayloadData(event)): string {
-  const threadId = extractThreadIdFromEvent(event);
-  if (threadId) {
-    return threadId;
-  }
-  const payload = objectPayloadOf(event);
-  const candidates = [
-    event.codex_thread_id,
-    payload.codexThreadId,
-    payload.codex_thread_id,
-    payload.threadId,
-    payload.thread_id,
-  ];
-  const value = candidates.find((candidate) => typeof candidate === 'string' && candidate.trim());
-  return typeof value === 'string' ? normalizeThreadId(value) : '';
-}
 
-export function classifyChatEvent(event: ServerEvent, workspaceId: string, conversationId: string): TimelineEntry | null {
-  const data = eventPayloadData(event);
-  const itemValue = data.item;
-  const item = itemValue && typeof itemValue === 'object' && !Array.isArray(itemValue)
-    ? itemValue as Record<string, unknown>
-    : null;
 
-  if (event.type === 'codex.item.agentMessage.delta') {
-    const itemId = typeof data.itemId === 'string'
-      ? data.itemId
-      : typeof data.item_id === 'string'
-        ? data.item_id
-        : eventId(event);
-    const delta = typeof data.delta === 'string' ? data.delta : '';
-    return {
-      id: itemId,
-      kind: 'incoming',
-      title: 'Codex',
-      subtitle: delta,
-      raw: shortJson(event),
-      at: Date.now(),
-      workspaceId,
-      conversationId,
-    };
-  }
 
-  if (!item || (event.type !== 'codex.item.started' && event.type !== 'codex.item.completed')) {
-    return null;
-  }
-
-  const itemType = itemTypeOf(item);
-  if (itemType !== 'agentMessage' && itemType !== 'agent_message') {
-    return null;
-  }
-
-  const text = textFromItem(item);
-  return {
-    id: itemIdOf(item, eventId(event)),
-    kind: 'incoming',
-    title: 'Codex',
-    subtitle: text || STREAMING_REPLY_PLACEHOLDER,
-    raw: shortJson(event),
-    at: Date.now(),
-    workspaceId,
-    conversationId,
-  };
-}
-
-export function classifyProgressEvent(event: ServerEvent, workspaceId: string, conversationId: string): TimelineEntry | null {
-  const data = eventPayloadData(event);
-  const itemValue = data.item;
-  const item = itemValue && typeof itemValue === 'object' && !Array.isArray(itemValue)
-    ? itemValue as Record<string, unknown>
-    : null;
-  const type = event.type;
-  const itemType = item ? itemTypeOf(item) : '';
-  const progressText = progressTextFromData(data, item);
-  const requestId = data.requestId ?? data.request_id;
-  const pendingRequestId = typeof requestId === 'string' && requestId ? requestId : undefined;
-
-  if (/reasoning|thinking|thought|analysis/i.test(type) || /reasoning|thinking|thought|analysis/i.test(itemType)) {
-    if (!progressText || isLifecycleProgressText(progressText)) {
-      return null;
-    }
-    return {
-      id: `progress-${eventId(event)}`,
-      kind: 'system',
-      title: t('progress.thinking'),
-      subtitle: progressText,
-      raw: shortJson(event),
-      at: Date.now(),
-      workspaceId,
-      conversationId,
-      category: 'reasoning',
-    };
-  }
-
-  if (type === 'codex.control.request.accepted' || type === 'codex.control.ready' || type === 'codex.control.response') {
-    return null;
-  }
-
-  if (/tool|command|mcp|approval|requestUserInput/i.test(type) || /tool|command|mcp|approval/i.test(itemType)) {
-    if ((!progressText || isLifecycleProgressText(progressText)) && !type.endsWith('.request')) {
-      return null;
-    }
-    return {
-      id: `progress-${eventId(event)}`,
-      kind: 'system',
-      title: type.endsWith('.request')
-        ? t('progress.requestApproval')
-        : type.endsWith('.completed') || /resolved|completed/i.test(type)
-          ? t('progress.stepDone')
-          : t('progress.stepRunning'),
-      subtitle: progressText || type,
-      raw: shortJson(event),
-      at: Date.now(),
-      workspaceId,
-      conversationId,
-      requestId: pendingRequestId,
-      category: type.endsWith('.request') ? 'approval' : 'status',
-    };
-  }
-
-  if (/interrupted|failed|error/i.test(type)) {
-    return {
-      id: `progress-${eventId(event)}`,
-      kind: 'system',
-      title: /interrupted/i.test(type) ? t('progress.stopped') : t('progress.error'),
-      subtitle: progressText || extractProtocolError(type, data) || type,
-      raw: shortJson(event),
-      at: Date.now(),
-      workspaceId,
-      conversationId,
-      ...(/interrupted/i.test(type) ? {} : { marker: 'error' }),
-    };
-  }
-
-  return null;
-}
-
-export function isTurnTerminalEvent(event: ServerEvent): boolean {
-  return (
-    event.type === 'codex.turn.completed' ||
-    event.type === 'codex.turn.interrupted' ||
-    event.type === 'codex.turn.failed' ||
-    event.type === 'codex.error' ||
-    event.type === 'codex.control.error'
-  );
-}
 
 /** Per-conversation state of paging older history into the chat. */
 export type EarlierHistoryStatus = {
@@ -3417,63 +2406,9 @@ export function makeSystemEntry(title: string, subtitle = '', workspaceId = '', 
   };
 }
 
-export function makeOutgoingEntry(
-  message: { id: string; type: string; payload: Record<string, unknown> },
-  workspaceId: string,
-  conversationId: string,
-): TimelineEntry {
-  return {
-    id: message.id,
-    kind: message.type === 'codex.local.turn' ? 'outgoing' : 'system',
-    title: message.type === 'codex.local.turn' ? 'You' : `sent ${message.type}`,
-    subtitle:
-      message.type === 'codex.local.turn'
-        ? textFromLocalTurnPayload(message.payload)
-        : shortJson(message.payload).slice(0, 220),
-    raw: shortJson(message),
-    at: Date.now(),
-    workspaceId,
-    conversationId,
-  };
-}
 
-export function timelineEntryFromNativeHistoryEntry(
-  entry: CodexThreadHistoryEntry,
-  workspaceId: string,
-  conversationId: string,
-): TimelineEntry {
-  return {
-    ...entry,
-    workspaceId,
-    conversationId,
-  };
-}
 
-export function isVisibleConversationEntry(entry: TimelineEntry): boolean {
-  if (entry.kind === 'outgoing' || entry.kind === 'incoming') {
-    return true;
-  }
 
-  if (/^sent codex\./i.test(entry.title)) {
-    return false;
-  }
-
-  if (entry.title === '协议指令' || entry.title === '已开始思考') {
-    return false;
-  }
-
-  if (isLifecycleProgressText(entry.subtitle)) {
-    return false;
-  }
-
-  return true;
-}
-
-export function conversationPreviewText(latest: TimelineEntry | undefined): string {
-  const raw = (latest?.subtitle || latest?.title || '').replace(/\s+/g, ' ').trim();
-  const text = raw === STREAMING_REPLY_PLACEHOLDER ? t('chat.replying') : raw;
-  return text || t('chat.newChatFallback');
-}
 
 export function isStepProgressEntry(entry: TimelineEntry): boolean {
   return sharedIsStepProgressEntry(entry);
