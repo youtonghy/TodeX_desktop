@@ -10,7 +10,38 @@ const MAX_RECORD_BYTES = 8 * 1024;
 const TRUNCATED_PREVIEW_BYTES = 1024;
 const MAX_STRING_LENGTH = 16 * 1024;
 const MAX_OBJECT_KEYS = 100;
-const SENSITIVE_KEY = /(authorization|access[_-]?token|refresh[_-]?token|api[_-]?key|password|passwd|secret|private[_-]?key|cookie|set-cookie)/i;
+const SENSITIVE_KEY = /(authorization|access[_-]?token|refresh[_-]?token|api[_-]?key|password|passwd|secret|private[_-]?key|cookie|set-cookie|signature|verification[_-]?code|pairing[_-]?code)/i;
+/** Keys ending in a `token` or `sig` word (`token`, `authToken`, `auth_sig`),
+ * but not counters such as `inputTokens` or words such as `signal`. */
+const SENSITIVE_KEY_WORD = /(?:^|_)(?:token|sig)$/i;
+/** `key=value` / `key: value` pairs in free text whose value is dropped. */
+const SENSITIVE_PAIR = /((?:authorization|access[_-]?token|refresh[_-]?token|auth[_-]?token|token|api[_-]?key|password|passwd|secret|private[_-]?key|cookie|set-cookie|signature|auth[_-]?sig|client[_-]?key|verification[_-]?code)\s*[=:]\s*)((?!\[redacted\])[^,\s;&]+)/gi;
+/** URLs with a query string inside free text (the query carries device auth). */
+const URL_WITH_QUERY = /\b([a-z][a-z0-9+.-]*:\/\/[^\s?#"'<>]*)\?([^\s#"'<>]*)/gi;
+
+export function isSensitiveLogKey(key: string): boolean {
+  return SENSITIVE_KEY.test(key) || SENSITIVE_KEY_WORD.test(key.replace(/([a-z0-9])([A-Z])/g, '$1_$2'));
+}
+
+/**
+ * A URL's shape without its query values: device-auth signatures, device ids
+ * and transport handshake keys (`client_key`) travel in the query string.
+ * (Main-process copy of src/renderer/lib/logRedaction.ts.)
+ */
+export function redactUrlQuery(raw: string): string {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    const queryStart = raw.indexOf('?');
+    return queryStart < 0 ? raw : `${raw.slice(0, queryStart)}?[redacted]`;
+  }
+  url.hash = '';
+  if (!url.search) return url.href;
+  const names = [...new Set(url.searchParams.keys())];
+  url.search = '';
+  return `${url.href}?${names.map((name) => `${encodeURIComponent(name)}=[redacted]`).join('&')}`;
+}
 
 export type DebugLogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal';
 
@@ -44,10 +75,9 @@ function redactString(value: string): string {
   const shortened = value.length > MAX_STRING_LENGTH
     ? `${value.slice(0, MAX_STRING_LENGTH)}… [truncated ${value.length - MAX_STRING_LENGTH} chars]`
     : value;
-  return shortened.replace(
-    /((?:authorization|access[_-]?token|refresh[_-]?token|api[_-]?key|password|passwd|secret|private[_-]?key|cookie|set-cookie)\s*[=:]\s*)([^,\s;]+)/gi,
-    '$1[REDACTED]',
-  );
+  return shortened
+    .replace(URL_WITH_QUERY, (_match, base: string, query: string) => redactUrlQuery(`${base}?${query}`))
+    .replace(SENSITIVE_PAIR, '$1[REDACTED]');
 }
 
 export function redactForLog(value: unknown, depth = 0, seen = new WeakSet<object>()): unknown {
@@ -66,7 +96,7 @@ export function redactForLog(value: unknown, depth = 0, seen = new WeakSet<objec
   if (Array.isArray(value)) return value.slice(0, MAX_OBJECT_KEYS).map((item) => redactForLog(item, depth + 1, seen));
   const output: Record<string, unknown> = {};
   for (const [key, item] of Object.entries(value).slice(0, MAX_OBJECT_KEYS)) {
-    output[key] = SENSITIVE_KEY.test(key) ? '[REDACTED]' : redactForLog(item, depth + 1, seen);
+    output[key] = isSensitiveLogKey(key) ? '[REDACTED]' : redactForLog(item, depth + 1, seen);
   }
   return output;
 }

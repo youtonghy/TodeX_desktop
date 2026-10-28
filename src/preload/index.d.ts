@@ -5,6 +5,13 @@ import type { ContainerInfo, ContainerMountResult, ContainerPrefs, ContainerProg
 export type { ContainerInfo, ContainerMountResult, ContainerPrefs, ContainerProgress, ContainerSetupDone, ContainerSetupOutput, DockerEnvironment };
 export type { LocalDockerContainer, LocalSocketEvent, PairingEncryption, LocalAdminStatus, LocalBackendConfigPatch, LocalBackendConfig, LocalPairingRequest, LocalPairedDevice, LocalDaemonStatus, LocalBackendDiscovery };
 
+/**
+ * How a `todexDesktop` call that reaches the main process rejects: an `Error`
+ * whose message is the main process's own (no "Error invoking remote method"
+ * prefix), with the failure's `code` and HTTP `status` when it had them.
+ */
+export type TodexIpcError = Error & { name: 'TodexIpcError'; code?: string; status?: number };
+
 export type TodeXDesktopApi = {
   store: {
     get: (key: string) => Promise<unknown>;

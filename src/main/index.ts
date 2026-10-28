@@ -22,6 +22,7 @@ import {
   installConsoleCapture,
   isDebugBuild,
   normalizeConfiguredLogPath,
+  redactUrlQuery,
   type DebugLogLevel,
 } from './debugLogger';
 
@@ -100,21 +101,66 @@ function redactIpcValue(value: unknown): unknown {
   return `[redacted ${typeof value}]`;
 }
 
+/** Arguments trace logs must not show: pairing verification codes and setup
+ * script bodies (index → replaced by its size). */
+const REDACTED_IPC_ARGS: Record<string, readonly number[]> = {
+  'localBackend:decidePairing': [3],
+  'localBackend:approveOwnPairing': [2],
+  'localBackend:dockerApprove': [1],
+  'container:runSetup': [2],
+};
+/** Arguments that are URLs whose query carries credentials (device id, signature, client key). */
+const URL_IPC_ARGS: Record<string, readonly number[]> = {
+  'localBackend:wsOpen': [0],
+};
+
+function loggedIpcArgs(channel: string, args: unknown[]): unknown[] {
+  const redacted = REDACTED_IPC_ARGS[channel] ?? [];
+  const urls = URL_IPC_ARGS[channel] ?? [];
+  if (SENSITIVE_IPC_CHANNELS.has(channel)) {
+    return args.map((arg, index) => (index === 0 ? summarizeIpcValue(arg) : redactIpcValue(arg)));
+  }
+  return args.map((arg, index) => {
+    if (redacted.includes(index)) return redactIpcValue(arg);
+    if (urls.includes(index) && typeof arg === 'string') return summarizeIpcValue(redactUrlQuery(arg));
+    return summarizeIpcValue(arg);
+  });
+}
+
+/**
+ * What a `handleIpc` channel resolves to. Electron forwards only a rejected
+ * error's message (prefixed with "Error invoking remote method …"), so
+ * failures travel as values and the preload turns them back into an `Error`
+ * with a clean message plus `code` / `status` (see src/preload/index.ts).
+ */
+type IpcEnvelope = { __todexIpc: 1; ok: true; value: unknown } | { __todexIpc: 1; ok: false; error: { message: string; code?: string; status?: number } };
+
+function ipcFailure(error: unknown): IpcEnvelope {
+  const details = error && typeof error === 'object' ? error as { message?: unknown; code?: unknown; status?: unknown } : {};
+  const message = error instanceof Error ? error.message : typeof details.message === 'string' ? details.message : String(error);
+  return {
+    __todexIpc: 1,
+    ok: false,
+    error: {
+      message,
+      ...(typeof details.code === 'string' ? { code: details.code } : {}),
+      ...(typeof details.status === 'number' ? { status: details.status } : {}),
+    },
+  };
+}
+
 function handleIpc(channel: string, handler: (event: Electron.IpcMainInvokeEvent, ...args: any[]) => unknown): void {
   const sensitive = SENSITIVE_IPC_CHANNELS.has(channel);
-  ipcMain.handle(channel, async (event, ...args: any[]) => {
+  ipcMain.handle(channel, async (event, ...args: any[]): Promise<IpcEnvelope> => {
     const started = Date.now();
-    const loggedArgs = sensitive
-      ? args.map((arg, index) => (index === 0 ? summarizeIpcValue(arg) : redactIpcValue(arg)))
-      : args.map(summarizeIpcValue);
-    debugLog('trace', 'ipc.request', { channel, senderId: event.sender.id, args: loggedArgs });
+    debugLog('trace', 'ipc.request', { channel, senderId: event.sender.id, args: loggedIpcArgs(channel, args) });
     try {
       const result = await handler(event, ...args);
       debugLog('trace', 'ipc.response', { channel, senderId: event.sender.id, durationMs: Date.now() - started, result: sensitive ? redactIpcValue(result) : summarizeIpcValue(result) });
-      return result;
+      return { __todexIpc: 1, ok: true, value: result };
     } catch (error) {
       debugLog('error', 'ipc.error', { channel, senderId: event.sender.id, durationMs: Date.now() - started, error });
-      throw error;
+      return ipcFailure(error);
     }
   });
 }
