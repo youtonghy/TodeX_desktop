@@ -4,10 +4,11 @@ import { Button } from '@/components/base/buttons/button';
 import { IconAction } from '@/components/ui/icon-action';
 import { toast } from '@/components/ui/toast';
 import { AppIcon } from '../components/AppIcon';
-import { UpdateSettings } from '../components/settings/UpdateSettings';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { connectionStateLabel } from '../session/helpers';
 import { useT } from '../i18n';
+import { platform } from '../platform';
+import { slots } from '../platform/slots';
 
 const PROJECT_URL = 'https://github.com/youtonghy/TodeX_desktop';
 
@@ -37,9 +38,10 @@ function InfoRow({ label, value, copyable = false }: { label: string; value: str
   );
 }
 
-/** The About page of settings: build, runtime, updates and project link. */
+/** The About page of settings: build, runtime, host extras (desktop updates) and project link. */
 export function AboutPanel({ session }: Props) {
   const t = useT();
+  const { AboutExtras } = slots;
   const connected = session.connectionState === 'open';
   const backendVersion = session.serverVersion
     ? `${session.serverVersion.name} ${session.serverVersion.version}`
@@ -51,7 +53,7 @@ export function AboutPanel({ session }: Props) {
         <AppIcon className="size-16" />
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <h2 className="text-title-2-semibold text-text-primary">TodeX Desktop</h2>
+            <h2 className="text-title-2-semibold text-text-primary">{platform.productName}</h2>
             <Chip variant="caption" color="neutral">v{__TODEX_BUILD_VERSION__}</Chip>
           </div>
           <p className="mt-1 text-body-regular text-text-secondary">{t('about.tagline')}</p>
@@ -75,7 +77,7 @@ export function AboutPanel({ session }: Props) {
         </dl>
       </section>
 
-      <UpdateSettings />
+      {AboutExtras ? <AboutExtras /> : null}
 
       <div className="flex min-h-[52px] items-center gap-2.5 rounded-2xl bg-background-secondary-default py-2.5 ps-3 pe-2.5">
         <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-stat-card-icon-background">

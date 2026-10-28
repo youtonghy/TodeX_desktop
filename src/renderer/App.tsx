@@ -12,8 +12,6 @@ import { IconAction } from '@/components/ui/icon-action';
 import { Modal } from '@/components/ui/modal';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { ToastViewport, toast } from '@/components/ui/toast';
-import { useIpcDaemonConflicts } from './session/useIpcDaemonConflicts';
-import { useNativeIpcReminder } from './session/useNativeIpcReminder';
 import { cx } from '@/utils/cx';
 import { ConversationSplit, useMediaQuery } from './components/ConversationSplit';
 import { useWorkbenchLayout } from './session/useWorkbenchLayout';
@@ -35,9 +33,8 @@ import { Field } from './components/Field';
 import { connectionStateLabel, conversationDisplayTitle, createWorkspaceDirectory, fetchWorkspaceDirectorySnapshot, isUnmountedPathError } from './session/helpers';
 import { pickedHostPathToBackend } from './session/hostPaths';
 import { WorkspaceMountHint } from './components/WorkspaceMountHint';
-import { ContainerFreezer } from './components/container/ContainerFreezer';
-import { ContainerMountCleanup } from './components/container/ContainerMountCleanup';
-import { ContainerSetupNotices, useContainerWorkspaceFlow } from './components/workspace/ContainerWorkspaceFlow';
+import { platform } from './platform';
+import { slots } from './platform/slots';
 import { isLocalBackendUrl } from '@todex/protocol/mobileParity';
 import { mapHostPathToBackend } from '@todex/protocol/pathMapping';
 import { isWorkbenchTab, panelFromRoute, type DesktopPanel, type OpenPanelOptions, type WorkbenchItem, type WorkbenchRequest, type WorkbenchTab } from './lib/panels';
@@ -122,8 +119,9 @@ function AsideSheet({ isOpen, onOpenChange, label, children }: {
   );
 }
 
-const LAYOUT_AUTO_SAVE_ID = 'todex-desktop-app-layout';
-const LAYOUT_OPEN_STORAGE_KEY = 'todex.desktop.layoutOpen.v3';
+// Names kept from before the shared platform interface, so layouts survive.
+const LAYOUT_AUTO_SAVE_ID = platform.kind === 'desktop' ? 'todex-desktop-app-layout' : 'todex.web.appLayout.v1';
+const LAYOUT_OPEN_STORAGE_KEY = `${platform.storagePrefix}.layoutOpen.v3`;
 
 type LayoutOpenState = {
   sidebarOpen: boolean;
@@ -136,21 +134,27 @@ function applyTheme(dark: boolean) {
 }
 
 function readLayoutOpen(): LayoutOpenState {
+  // A first web visit on a wide screen starts with the right panel open.
+  const wideDefault = platform.kind === 'web' && typeof window !== 'undefined' && window.matchMedia('(min-width: 1025px)').matches;
   try {
     const raw = window.localStorage.getItem(LAYOUT_OPEN_STORAGE_KEY);
-    if (!raw) return { sidebarOpen: true, asideOpen: false };
+    if (!raw) return { sidebarOpen: true, asideOpen: wideDefault };
     const parsed = JSON.parse(raw) as Partial<LayoutOpenState>;
     return {
       sidebarOpen: parsed.sidebarOpen !== false,
       asideOpen: parsed.asideOpen === true,
     };
   } catch {
-    return { sidebarOpen: true, asideOpen: false };
+    return { sidebarOpen: true, asideOpen: wideDefault };
   }
 }
 
 function writeLayoutOpen(next: LayoutOpenState) {
-  window.localStorage.setItem(LAYOUT_OPEN_STORAGE_KEY, JSON.stringify(next));
+  try {
+    window.localStorage.setItem(LAYOUT_OPEN_STORAGE_KEY, JSON.stringify(next));
+  } catch {
+    window.dispatchEvent(new CustomEvent('todex-storage-error', { detail: { key: LAYOUT_OPEN_STORAGE_KEY } }));
+  }
 }
 
 export function App() {
@@ -188,8 +192,8 @@ export function App() {
   const openPanelHandlerRef = useRef<(name: string, params?: OpenPanelOptions) => void>(() => {});
   const forwardOpenPanel = useCallback((name: string, params?: OpenPanelOptions) => openPanelHandlerRef.current(name, params), []);
   const session = useTodeXSession(forwardOpenPanel);
-  useNativeIpcReminder(session, 'TodeX Desktop');
-  useIpcDaemonConflicts(session);
+  const { AppOverlays } = slots;
+  slots.useSessionEffects(session);
   // The SSH view swaps the main content but keeps sidebar and Workbench; its
   // Workbench tabs (SSH terminals, remote files) live in a per-backend scope.
   const sshActive = panel === 'ssh';
@@ -379,42 +383,22 @@ export function App() {
     setPanelTarget({});
   }, [setWorkbenchTab, setPanelTarget]);
 
-  // The main process forwards Cmd+W as 'app:close-request'; close the active
-  // workbench tab when the aside is showing, otherwise fall back to closing
-  // the window so the platform shortcut keeps working.
+  // Cmd+W closes the active workbench tab when the aside is showing (the
+  // desktop otherwise closes the window, as the platform shortcut does).
   const workbenchCloseRef = useRef<() => boolean>(() => false);
   const asideOpenRef = useRef(asideOpen);
   asideOpenRef.current = asideOpen;
-  useEffect(() => window.todexDesktop.app.onCloseRequest(() => {
-    if (asideOpenRef.current && workbenchCloseRef.current()) return;
-    window.todexDesktop.app.closeWindow();
-  }), []);
+  useEffect(() => platform.app.onCloseShortcut(() => asideOpenRef.current && workbenchCloseRef.current()), []);
 
-  // The native "Check for Updates…" item shows the About settings page; a
-  // release downloaded in the background offers a restart once per version.
-  const updateToastVersionRef = useRef<string | undefined>(undefined);
-  const updateToastT = useRef(t);
-  updateToastT.current = t;
+  slots.useAppEffects((section) => {
+    setSettingsSectionRequest({ section, at: Date.now() });
+    setPanel('settings');
+  });
+
   useEffect(() => {
-    const { updates } = window.todexDesktop;
-    const offShow = updates.onShow(() => {
-      setSettingsSectionRequest({ section: 'about', at: Date.now() });
-      setPanel('settings');
-    });
-    const offState = updates.onState((state) => {
-      if (state.status !== 'downloaded' || !state.version || updateToastVersionRef.current === state.version) return;
-      updateToastVersionRef.current = state.version;
-      const tr = updateToastT.current;
-      toast.success(tr('updates.readyToast', { version: state.version }), {
-        description: tr('updates.downloadedHint'),
-        timeout: 0,
-        actionProps: { children: tr('updates.restart'), onPress: () => updates.install() },
-      });
-    });
-    return () => {
-      offShow();
-      offState();
-    };
+    const reportStorageFailure = () => toast.danger(t('app.storageQuota'));
+    window.addEventListener('todex-storage-error', reportStorageFailure);
+    return () => window.removeEventListener('todex-storage-error', reportStorageFailure);
   }, []);
 
   useShortcutHintTracking();
@@ -451,13 +435,13 @@ export function App() {
     },
   });
 
-  useEffect(() => window.todexDesktop.theme.onUpdated(applyTheme), []);
+  useEffect(() => platform.theme.onUpdated(applyTheme), []);
 
   // Hand the light/dark/system choice to the platform, then read the result
   // (`onUpdated` covers later system changes while following the system).
   useEffect(() => {
-    window.todexDesktop.theme.setSource(themeSource);
-    void window.todexDesktop.theme.shouldUseDark().then(applyTheme);
+    platform.theme.setSource(themeSource);
+    void platform.theme.shouldUseDark().then(applyTheme);
   }, [themeSource]);
 
   // The same title the sidebar shows (not the raw provider-name default).
@@ -467,7 +451,7 @@ export function App() {
     document.title = windowConversationTitle ? `TodeX · ${windowConversationTitle} · ${status}` : `TodeX · ${status}`;
   }, [windowConversationTitle, session.connectionState]);
 
-  const insetChrome = window.todexDesktop.app.windowChrome === 'hidden-inset';
+  const insetChrome = platform.windowChrome === 'hidden-inset';
   const settingsOpen = panel === 'settings';
   // The "no recovery key" notice opened settings to set one up.
   const [historyRecoverySetup, setHistoryRecoverySetup] = useState(false);
@@ -553,7 +537,7 @@ export function App() {
           onOpenSshTerminal={openSshTerminal}
           onOpenRemoteFiles={openRemoteFiles}
           onCloseWorkbenchItem={closeWorkbenchItem}
-          onOpenBrowser={openBrowserTab}
+          onOpenBrowser={slots.BrowserPane ? openBrowserTab : undefined}
         />
       </PanelBoundary>
     ) : session.historyEncryption.recoveryNoticeVisible ? (
@@ -703,9 +687,7 @@ export function App() {
         onRepair={() => { setRepairPairing(true); setPanel('settings'); }} />
       <DesktopAlertHost />
       {session.hydrated ? <SshLoginPrompter session={session} /> : null}
-      {session.hydrated && window.todexDesktop.container.available ? <ContainerMountCleanup session={session} /> : null}
-      {session.hydrated && window.todexDesktop.container.available ? <ContainerFreezer session={session} /> : null}
-      {window.todexDesktop.container.available ? <ContainerSetupNotices /> : null}
+      {AppOverlays ? <AppOverlays session={session} /> : null}
       {session.hydrated ? (
         shell
       ) : (
@@ -753,14 +735,14 @@ function CreateWorkspaceModal({
   const t = useT();
   const [name, setName] = useState(workspace?.name ?? '');
   // Container workspaces need Docker on this machine (desktop only) and are created, not edited.
-  const containerAvailable = window.todexDesktop.container.available && !workspace;
+  const containerAvailable = slots.containerWorkspaces && !workspace;
   const [mode, setMode] = useState<'local' | 'container'>('local');
-  const containerFlow = useContainerWorkspaceFlow({
+  const containerFlow = slots.useContainerWorkspaceFlow({
     session,
     enabled: containerAvailable && mode === 'container',
     name,
     setName,
-    deviceName: 'TodeX Desktop',
+    deviceName: platform.productName,
     onDone: () => onOpenChange(false),
     onOpenSettings: onOpenContainerSettings,
   });
@@ -938,17 +920,17 @@ function CreateWorkspaceModal({
         </Select>
       ) : null}
       <div className="flex gap-2">
-        <Button
+        {platform.files ? <Button
           variant="secondary"
           onClick={async () => {
-            const selected = await window.todexDesktop.dialog.openDirectory();
+            const selected = await platform.files?.pickDirectory();
             if (!selected) return;
             // A container backend sees host folders at its own paths.
             const picked = pickedHostPathToBackend({
               loopback: isLocalBackendUrl(directorySettings.serverUrl),
               deployment: serverVersion?.deployment ?? 'host',
               pathMappings: serverVersion?.pathMappings ?? [],
-              windows: window.todexDesktop.shell.platform === 'win32',
+              windows: platform.os === 'win32',
             }, selected, mapHostPathToBackend);
             setPath(picked.path);
             setLocalPick({ host: selected, backend: picked.path });
@@ -956,7 +938,7 @@ function CreateWorkspaceModal({
           }}
         >
           {t('app.workspacePickLocal')}
-        </Button>
+        </Button> : null}
         <Button
           variant="secondary"
           onClick={async () => {

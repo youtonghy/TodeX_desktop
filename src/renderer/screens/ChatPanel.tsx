@@ -1,8 +1,9 @@
 import { ConversationControls } from '../components/ConversationControls';
+import { PiExtensionPanel } from '../components/PiExtensionPanel';
+import { piCommandCompatibility, piTodexCommands } from '../session/providerCommands';
 import { ComputerLiveView } from '../components/ComputerLiveView';
 import { ConversationScheduleBar } from '../components/ConversationSchedule';
 import { NoticeToast } from '../components/NoticeToast';
-import { PiExtensionPanel } from '../components/PiExtensionPanel';
 import {
   RiArrowDownDoubleLine,
   RiArrowUpLine,
@@ -915,6 +916,15 @@ const ChatTimelineItem = memo(function ChatTimelineItem({
   && prev.onHydrateGroup === next.onHydrateGroup
   && prev.onApprove === next.onApprove);
 
+function isHttpUrl(href: string | undefined): boolean {
+  try {
+    const { protocol } = new URL(href?.trim() ?? '');
+    return protocol === 'http:' || protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
 export function ChatPanel({ session }: Props) {
   const t = useT();
   const conversation = session.activeConversation;
@@ -1106,10 +1116,15 @@ export function ChatPanel({ session }: Props) {
     ...baseMarkdownComponents,
     a: ({ href, children, node: _node, ref: _ref, ...props }) => {
       const target = workspaceLinkTarget(href, workspacePath);
+      // Loopback pages open in the Workbench browser tab (where the host has
+      // one) and workspace files in the Files preview; other http(s) links
+      // open outside the app (a new browser tab, or the system browser).
+      const external = !target && isHttpUrl(href);
       return (
         <a
           {...props}
           href={href}
+          {...(external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
           onClick={(event) => {
             if (!target) return;
             event.preventDefault();
@@ -1308,32 +1323,41 @@ export function ChatPanel({ session }: Props) {
   const currentProvider = isV2Conversation(conversation) ? conversation.provider || '' : '';
   const agentProvider = conversation.provider || (isV2Conversation(conversation) ? '' : 'codex');
   const slashTrigger = draft.trim().startsWith('/') ? draft.trim() : '';
-  const liveCommands = currentProvider ? (session.providerCommands[currentProvider as ProviderKind] ?? []) : [];
+  // Pi reads its session's own catalog (extensions add commands); other
+  // agents use the backend's per-provider list.
+  const commandCatalog = currentProvider === 'pi' ? session.getProviderCommandCatalog(conversation.id) : undefined;
+  const liveCommands = currentProvider === 'pi'
+    ? (commandCatalog?.status === 'ready' ? commandCatalog.commands : [])
+    : currentProvider ? (session.providerCommands[currentProvider as ProviderKind] ?? []) : [];
   const providerSlashCatalog = liveCommands.length > 0
     ? liveCommands.map((item) => ({
       command: `/${item.name}`,
       title: item.name,
-      description: item.description || `${item.source} command`,
+      description: `${item.description || `${item.source} command`}${currentProvider === 'pi' ? ` · ${piCommandCompatibility(item).label}` : ''}`,
       category: 'context' as const,
     }))
-    : SLASH_COMMANDS;
+    : currentProvider === 'pi' ? [] : SLASH_COMMANDS;
   const canCompact = !isV2Conversation(conversation)
     || session.v2Providers.find(item => item.id === currentProvider)?.capabilities.controlActions?.includes('compact') === true;
-  const slashCatalog = [
+  const slashCatalog = currentProvider === 'pi' ? [...providerSlashCatalog, ...piTodexCommands] : [
     ...(canCompact ? [{ command: '/compact', title: t('chat.compactTitle'), description: t('chat.compactDescription'), category: 'thread' as const }] : []),
     // The synthetic /compact item already covers the catalog entry when the
     // provider offers a native control action; otherwise keep the catalog's.
     ...providerSlashCatalog.filter(item => !canCompact || canonicalSlashCommand(item.command) !== '/compact'),
   ];
   const chooseSlashCommand = (command: string) => {
-    if (command === '/compact') {
+    if (command === '/compact' && currentProvider !== 'pi') {
       if (thinking || executionUnknown || submissionStatus === 'sending' || compaction?.status === 'running') return;
       session.sendSlashCommand(command, conversation.id);
       session.setConversationChatDraft(conversation.id, '');
     } else session.setConversationChatDraft(conversation.id, `${command} `);
   };
-  const slashSuggestions = slashTrigger
-    ? slashCatalog.filter((item) => canonicalSlashCommand(item.command).startsWith(canonicalSlashCommand(slashTrigger.split(/\s+/)[0] || slashTrigger)))
+  // Pi suggests only while the command word (or `/todex <command>`) is typed.
+  const selectingPiCommand = /^\/[^\s]*$/.test(draft.trimStart()) || /^\/todex [^\s]*$/.test(draft.trimStart());
+  const slashSuggestions = slashTrigger && (currentProvider !== 'pi' || selectingPiCommand)
+    ? slashCatalog.filter(item => currentProvider === 'pi'
+      ? item.command.startsWith(slashTrigger.startsWith('/todex ') ? slashTrigger : slashTrigger.split(/\s+/)[0])
+      : canonicalSlashCommand(item.command).startsWith(canonicalSlashCommand(slashTrigger.split(/\s+/)[0] || slashTrigger)))
     : [];
   // The conversation's own provider catalog leads the `#` list; the rest follow.
   const capabilityProviderOrder: ProviderKind[] = currentProvider
@@ -1778,7 +1802,7 @@ export function ChatPanel({ session }: Props) {
   const submitComposer = () => {
     if (!conversation) return;
     if (readOnly || executionUnknown || submissionStatus === 'sending') return;
-    if (draft.trim().startsWith('/')) {
+    if (currentProvider !== 'pi' && draft.trim().startsWith('/')) {
       session.sendSlashCommand(draft, conversation.id);
     } else {
       session.submitChat(conversation.id);
@@ -1959,6 +1983,12 @@ export function ChatPanel({ session }: Props) {
             onStopRuntime={providerDescriptor?.capabilities.runtimeStop ? () => { void session.stopProviderRuntime(conversation.id); } : undefined}
             isStopping={session.stoppingProviderRuntimes[conversation.id]}
             isConnected={session.connectionState === 'open'} /> : null}
+          {currentProvider === 'pi' && slashTrigger ? <div className="mb-2 flex items-center gap-2 text-caption-1-regular text-text-tertiary">
+            <span>{commandCatalog?.status === 'ready' ? (commandCatalog.source === 'session' ? t('chat.piCommandsSession') : t('chat.piCommandsWorkspace'))
+              : commandCatalog?.status === 'error' ? t('chat.commandCatalogFailed') : t('chat.piCommandsLoading')}</span>
+            <Button size="xs" variant="ghost" disabled={commandCatalog?.status === 'loading'}
+              onClick={session.refreshProviderCommands}>{t('chat.refreshCommands')}</Button>
+          </div> : null}
           {(slashSuggestions.length > 0 || referenceSuggestions.length > 0 || (mentionActive && referenceSuggestions.length === 0) || capabilityActive) ? (
             <motion.div
               ref={suggestionsPopoverRef}
@@ -1977,7 +2007,7 @@ export function ChatPanel({ session }: Props) {
                   }}
                 >
                   {slashSuggestions.slice(0, 12).map((item, index) => (
-                    <AriaListBoxItem key={item.command} id={item.command} isDisabled={item.command === '/compact' && (thinking || executionUnknown || submissionStatus === 'sending' || compaction?.status === 'running')} textValue={`${item.command} ${item.description}`} className={suggestionItemClass(index === suggestionIndex)}>
+                    <AriaListBoxItem key={item.command} id={item.command} isDisabled={currentProvider !== 'pi' && item.command === '/compact' && (thinking || executionUnknown || submissionStatus === 'sending' || compaction?.status === 'running')} textValue={`${item.command} ${item.description}`} className={suggestionItemClass(index === suggestionIndex)}>
                       <span className={suggestionCommand}>{item.command}</span>
                       <span className={suggestionDescription}>{item.description}</span>
                     </AriaListBoxItem>
@@ -2062,6 +2092,7 @@ export function ChatPanel({ session }: Props) {
             submissionStatus={submissionStatus}
             runtime={runtime}
             compaction={compaction}
+            automaticCompaction={agentProvider === 'codex'}
             onRecover={() => session.reconcilePendingSubmission(conversation.id)}
           />
           {conversation.v2ConversationId && !readOnly ? <ConversationControls
@@ -2101,6 +2132,13 @@ export function ChatPanel({ session }: Props) {
             onKeyDownCapture={(event) => {
               if (event.key === 'Enter' && (isComposingRef.current || isImeCompositionKey(event))) {
                 event.stopPropagation();
+                return;
+              }
+              // Resolve Pi suggestions first so choosing a command only fills the draft.
+              if (currentProvider === 'pi' && event.target instanceof HTMLElement
+                && (event.target instanceof HTMLTextAreaElement || event.target.isContentEditable)) {
+                handleComposerKeyDown(event);
+                if (event.defaultPrevented) event.stopPropagation();
               }
             }}
             onValueChange={(value: string) => { setSuggestionIndex(0); session.setConversationChatDraft(conversation.id, value); }}
@@ -2184,7 +2222,7 @@ export function ChatPanel({ session }: Props) {
                           : liveComposerAttachments(value, current));
                     }}
                     onSubmit={submitComposer}
-                    onKeyDown={handleComposerKeyDown}
+                    onKeyDown={currentProvider === 'pi' ? undefined : handleComposerKeyDown}
                     onSelectionChange={(selection) => session.setConversationComposerSelection(conversation.id, selection)}
                     onCompositionStart={() => { isComposingRef.current = true; }}
                     onCompositionEnd={() => { isComposingRef.current = false; }}

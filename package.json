@@ -16,7 +16,8 @@
     "package": "pnpm run build && electron-builder",
     "preview": "electron-vite preview",
     "test:updates": "node --experimental-strip-types --test scripts/update-policy.test.ts scripts/desktop-entry.test.ts scripts/log-redaction.test.ts scripts/shell-policy.test.ts scripts/queued-follow-ups.test.ts scripts/conversation-warm.test.ts scripts/backend-routing.test.ts scripts/permission-fallback.test.ts scripts/agent-providers.test.ts scripts/git-errors.test.ts scripts/conversation-search.test.ts scripts/git-log-paging.test.ts scripts/path-mapping.test.ts scripts/local-backend.test.ts scripts/container-instance.test.ts scripts/container-freeze.test.ts",
-    "typecheck": "tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.node.json"
+    "typecheck": "tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.node.json",
+    "check:sync": "node ./scripts/check-shared-sync.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

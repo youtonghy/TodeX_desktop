@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ButtonHTMLAttributes, ComponentType, MouseEvent as ReactMouseEvent, ReactNode, RefObject } from 'react';
-import { RiAppsLine, RiCloseLine, RiDeleteBinLine, RiDownload2Line, RiEdit2Line, RiFolderAddLine, RiLinksLine, RiLink, RiServerLine, RiTerminalBoxLine, RiTerminalWindowLine, RiUpload2Line, RiGitBranchLine, RiAddLine, RiArrowLeftDoubleLine, RiArrowLeftLine, RiArrowRightDoubleLine, RiExternalLinkLine, RiBracesLine, RiFileCodeLine, RiFileLine, RiFilePdf2Line, RiFileSettingsLine, RiFileTextLine, RiFileZipLine, RiImageLine, RiLockLine, RiMarkdownLine, RiFolder3Line, RiFolderOpenLine, RiGlobalLine, RiFocus3Line, RiLayoutColumnLine, RiLayoutRowLine, RiRefreshLine, RiRobot2Line, RiStopCircleLine, RiTeamLine } from '@remixicon/react';
+import { RiAppsLine, RiCloseLine, RiDeleteBinLine, RiDownload2Line, RiEdit2Line, RiFolderAddLine, RiLinksLine, RiLink, RiServerLine, RiTerminalBoxLine, RiTerminalWindowLine, RiUpload2Line, RiGitBranchLine, RiAddLine, RiArrowLeftDoubleLine, RiArrowRightDoubleLine, RiExternalLinkLine, RiBracesLine, RiFileCodeLine, RiFileLine, RiFilePdf2Line, RiFileSettingsLine, RiFileTextLine, RiFileZipLine, RiImageLine, RiLockLine, RiMarkdownLine, RiFolder3Line, RiFolderOpenLine, RiGlobalLine, RiLayoutColumnLine, RiLayoutRowLine, RiRefreshLine, RiRobot2Line, RiStopCircleLine, RiTeamLine } from '@remixicon/react';
 import { Focusable, Pressable } from 'react-aria-components';
 import type { Key, Selection } from 'react-aria-components';
 import { Badge } from '@/components/base/badges/badge';
@@ -10,7 +10,6 @@ import { Input } from '@/components/base/input/input';
 import { PillTabList } from '@/components/base/tabs/pill-tab';
 import { Tooltip, TooltipTrigger } from '@/components/base/tooltip/tooltip';
 import { TreeView, TreeViewItem } from '@/components/base/tree-view/tree-view';
-import { EmptyState } from '@/components/ui/empty-state';
 import { IconAction } from '@/components/ui/icon-action';
 import { ContextMenu, Menu, MenuItem, MenuPopover, MenuSeparator, MenuTrigger } from '@/components/ui/menu';
 import { ConfirmDialog, Modal } from '@/components/ui/modal';
@@ -25,7 +24,7 @@ import { GitDiffText } from '../components/GitDiffText';
 import { XtermTerminal, type XtermTerminalHandlers } from '../components/XtermTerminal';
 import { SshExecPane } from '../components/ssh/SshExecPane';
 import { AgentBrowserLiveView } from '../components/AgentBrowserLiveView';
-import { useNativeViewHost } from '../components/nativeViewHost';
+import { ExpandableAction } from '../components/ExpandableAction';
 import { rememberSessionSshExecTabs, sessionSshExecTabsFor, useSshExecClear, visibleSshExecs } from '../session/sshExecTabs';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { useRemoteConnector } from '../components/ssh/useRemoteConnector';
@@ -41,14 +40,14 @@ import {
 import { isSystemWorkbenchTab, type OpenPanelOptions, type WorkbenchItem, type WorkbenchRequest, type WorkbenchTab } from '../lib/panels';
 import { ShortcutHint, useAppShortcuts, workbenchTabShortcut, type ShortcutId } from '../lib/shortcuts';
 import { normalizeWorkbenchLayout } from '../session/workbenchLayout';
-import { SETTINGS_STORAGE_KEY, attachmentId, backendApi, previewBackendProfile, referenceToken, uniqueReferenceName } from '../session/helpers';
+import { SETTINGS_STORAGE_KEY, attachmentId, backendApi, referenceToken, uniqueReferenceName } from '../session/helpers';
 import { isConflictError } from '@todex/protocol/connectionError';
 import { isNotFoundError, type SshExecRun } from '@todex/protocol/ssh';
 import type { SubagentRun } from '@todex/protocol/v2';
 import { SubagentsPanel } from './SubagentsPanel';
 import { AgentCallsPanel } from './AgentCallsPanel';
 import { isActiveAgentCallStatus, type AgentCallSession } from '@todex/protocol/agentCalling';
-import { isLocalBackendUrl, isLoopbackUrl } from '@todex/protocol/mobileParity';
+import { isLocalBackendUrl } from '@todex/protocol/mobileParity';
 import { mapBackendPathToHost } from '@todex/protocol/pathMapping';
 import { systemShellPathResolver } from '../session/hostPaths';
 import { resolveTerminalPath } from '@todex/protocol/terminalText';
@@ -56,6 +55,8 @@ import { patchTerminalActivity, forgetTerminalActivity, terminalActivity, useTer
 import { postCompletionNotification } from '../session/completionNotifications';
 import { uploadTerminalImages } from '../session/terminalImagePaste';
 import { t, useT, type MessageKey } from '../i18n';
+import { platform } from '../platform';
+import { slots } from '../platform/slots';
 
 type Props = {
   scopeKey?: string;
@@ -85,7 +86,7 @@ type StoredWorkbenchState = {
 };
 
 /** Types written to the tab store; 'ssh-exec', 'subagents', 'agent-calls' and 'agent-browser' tabs are session-only. */
-const WORKBENCH_TYPES = new Set<WorkbenchTab>(['terminal', 'browser', 'files', 'git-diff']);
+const WORKBENCH_TYPES = new Set<WorkbenchTab>(['terminal', ...(slots.BrowserPane ? ['browser' as const] : []), 'files', 'git-diff']);
 
 const WORKBENCH_LABEL_KEYS: Record<WorkbenchTab, MessageKey> = {
   terminal: 'workbench.tabTerminal',
@@ -119,49 +120,6 @@ const REMOTE_ICONS = {
 type WorkbenchTabAxis = 'horizontal' | 'vertical';
 
 type IconComponent = ComponentType<{ className?: string; 'aria-hidden'?: boolean | 'true' | 'false' }>;
-
-const EXPANDABLE_TONES = {
-  secondary: 'border-border-button-default bg-background-primary-default text-text-primary shadow-xs enabled:hover:border-border-button-hover enabled:hover:bg-background-primary-hover enabled:active:bg-background-primary-active',
-  primary: 'border-transparent bg-accent-500 text-text-white shadow-xs enabled:hover:bg-accent-600 enabled:active:bg-accent-700',
-  danger: 'border-transparent bg-background-tertiary-error text-text-error-primary enabled:hover:bg-background-quaternary-error enabled:active:bg-background-quaternary-error',
-} as const;
-
-/** Toolbar pill that shows its icon and slides its label open on hover or
- * keyboard focus. */
-function ExpandableAction({ icon: Icon, label, tone = 'secondary', iconClassName, className, type = 'button', ...props }: Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'children'> & {
-  icon: IconComponent;
-  label: string;
-  tone?: keyof typeof EXPANDABLE_TONES;
-  iconClassName?: string;
-}) {
-  return (
-    <button
-      type={type}
-      {...props}
-      className={cx(
-        'group/expand inline-flex h-8 shrink-0 cursor-pointer items-center overflow-hidden rounded-full border',
-        'outline-none transition-colors duration-150 ease focus-visible:ring-2 focus-visible:ring-border-focus-ring',
-        'disabled:cursor-not-allowed disabled:opacity-50',
-        EXPANDABLE_TONES[tone],
-        className,
-      )}
-    >
-      <span className="inline-flex size-[30px] shrink-0 items-center justify-center">
-        <Icon aria-hidden className={cx('size-4', iconClassName)} />
-      </span>
-      <span
-        className={cx(
-          'max-w-0 overflow-hidden whitespace-nowrap text-caption-1-medium opacity-0',
-          'transition-[max-width,opacity,padding] duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none',
-          'group-hover/expand:max-w-24 group-hover/expand:pe-2.5 group-hover/expand:opacity-100',
-          'group-focus-visible/expand:max-w-24 group-focus-visible/expand:pe-2.5 group-focus-visible/expand:opacity-100',
-        )}
-      >
-        {label}
-      </span>
-    </button>
-  );
-}
 
 const WORKBENCH_TAB_AXIS_KEY = `${SETTINGS_STORAGE_KEY}.workbenchTabAxis.v1`;
 
@@ -227,6 +185,7 @@ function placeholderFiles(): Record<string, { title: string; language: string; b
 
 export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = session.activeConversation?.id || '', shown = true, onTargetConsumed, closeRequestRef, sshMode = false, sshBackendId: sshBackendProp, requests, onRequestsHandled, onItemsChange }: Props) {
   const t = useT();
+  const { BrowserPane } = slots;
   const storageKey = `${SETTINGS_STORAGE_KEY}.workbenchTabs.v1:${scopeKey}`;
   const [items, setItems] = useState<WorkbenchItem[]>([]);
   const [activeId, setActiveId] = useState('');
@@ -240,7 +199,7 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
 
   useEffect(() => {
     let cancelled = false;
-    void window.todexDesktop.store.get(storageKey)
+    void platform.store.get(storageKey)
       .then((value) => {
         if (cancelled) return;
         const stored = parseStoredWorkbenchState(value, sessionSshExecTabsFor(storageKey));
@@ -262,7 +221,7 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
     if (!restored) return;
     rememberSessionSshExecTabs(storageKey, items);
     const persisted = items.filter(item => WORKBENCH_TYPES.has(item.type)).map(normalizeWorkbenchItem);
-    void window.todexDesktop.store.set(storageKey, { items: persisted, activeId } satisfies StoredWorkbenchState)
+    void platform.store.set(storageKey, { items: persisted, activeId } satisfies StoredWorkbenchState)
       .catch((reason) => {
         console.error('Failed to persist workbench tabs', reason);
       });
@@ -442,7 +401,7 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
 
   useEffect(() => {
     let cancelled = false;
-    void window.todexDesktop.store.get(WORKBENCH_TAB_AXIS_KEY)
+    void platform.store.get(WORKBENCH_TAB_AXIS_KEY)
       .then((value) => {
         if (!cancelled && (value === 'horizontal' || value === 'vertical')) setAxis(value);
       })
@@ -457,7 +416,7 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
   const toggleAxis = () => {
     const next: WorkbenchTabAxis = vertical ? 'horizontal' : 'vertical';
     setAxis(next);
-    void window.todexDesktop.store.set(WORKBENCH_TAB_AXIS_KEY, next)
+    void platform.store.set(WORKBENCH_TAB_AXIS_KEY, next)
       .catch((reason) => {
         console.error('Failed to persist workbench tab axis', reason);
       });
@@ -559,7 +518,7 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
       <MenuPopover placement={vertical ? 'right top' : 'bottom end'}>
         <Menu aria-label={t('workbench.newTab')} onAction={(key) => addTab(String(key) as WorkbenchTab)}>
           <MenuItem id="terminal" icon={WORKBENCH_ICONS.terminal} textValue={t('workbench.tabTerminal')}>{t('workbench.tabTerminal')}</MenuItem>
-          <MenuItem id="browser" icon={WORKBENCH_ICONS.browser} textValue={t('workbench.tabBrowser')}>{t('workbench.tabBrowser')}</MenuItem>
+          {slots.BrowserPane ? <MenuItem id="browser" icon={WORKBENCH_ICONS.browser} textValue={t('workbench.tabBrowser')}>{t('workbench.tabBrowser')}</MenuItem> : null}
           <MenuItem id="files" icon={WORKBENCH_ICONS.files} textValue={t('workbench.tabFiles')}>{t('workbench.tabFiles')}</MenuItem>
           <MenuItem id="git-diff" icon={WORKBENCH_ICONS['git-diff']} textValue="Git Diff">Git Diff</MenuItem>
         </Menu>
@@ -625,7 +584,7 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
                 autoConnect={!item.ssh || freshSshTabsRef.current.has(item.id)}
               />
             ) : null}
-            {item.type === 'browser' ? <BrowserPane itemId={item.id} isActive={item.id === active?.id} workspacePath={session.activeWorkspace?.path} session={session} target={item.type === tab && item.id === active?.id && (target?.filePath || target?.url) ? target : item.target} onTargetChange={next => updateTabTarget(item.id, next)} /> : null}
+            {item.type === 'browser' && BrowserPane ? <BrowserPane itemId={item.id} isActive={item.id === active?.id} workspacePath={session.activeWorkspace?.path} session={session} target={item.type === tab && item.id === active?.id && (target?.filePath || target?.url) ? target : item.target} onTargetChange={next => updateTabTarget(item.id, next)} /> : null}
             {item.type === 'files' ? <FilesPane session={session} remote={item.remote} remoteBackendId={sshBackendId} onRemoteRebind={next => updateRemoteBinding(item.id, next)} target={item.type === tab && item.id === active?.id && (target?.filePath || target?.url) ? target : item.target} onTargetChange={next => updateTabTarget(item.id, next)} /> : null}
             {item.type === 'git-diff' ? <GitDiffPane session={session} /> : null}
             {item.type === 'ssh-exec' && item.sshExec ? <SshExecPane conversationId={item.sshExec.conversationId} runs={session.conversationRuntimeById[item.sshExec.conversationId]?.sshExecs ?? NO_SSH_EXECS} isActive={item.id === active?.id} /> : null}
@@ -1109,177 +1068,6 @@ function TerminalPane({ session, terminalId, isActive, shown, workspaceTarget, s
   );
 }
 
-/** A Workbench browser tab. The page is a native view drawn by the main
- * process (see `previewViews.ts`); this pane holds the address bar and the
- * rectangle the view fills. Only loopback pages and workspace HTML files load. */
-function BrowserPane({ itemId, isActive, workspacePath, session, target, onTargetChange }: { itemId: string; isActive: boolean; workspacePath?: string; session: TodeXSession; target?: OpenPanelOptions; onTargetChange?: (target: OpenPanelOptions) => void }) {
-  const t = useT();
-  const preview = window.todexDesktop.preview;
-  const targetChangeRef = useRef(onTargetChange);
-  targetChangeRef.current = onTargetChange;
-  // Every URL source (typed, chat link, restored layout) must stay loopback.
-  const targetUrl = target?.url && isLoopbackUrl(target.url) ? target.url : undefined;
-  // A new tab starts blank (address bar + empty state) and loads nothing
-  // until an address is entered.
-  const [draft, setDraft] = useState(targetUrl ?? '');
-  const [hasPage, setHasPage] = useState(false);
-  const [error, setError] = useState('');
-  const [inspect, setInspect] = useState(false);
-  const [canGoBack, setCanGoBack] = useState(false);
-  const loadedUrlRef = useRef('');
-  useNoticeToast(error, { variant: 'danger', scope: workspacePath });
-  const { hostRef, covered, still } = useNativeViewHost(hasPage ? itemId : undefined, isActive, preview);
-
-  // Loopback requests go through the backend, so a page served on its host
-  // loads here wherever the backend runs.
-  const backend = previewBackendProfile(session.settings);
-  const backendKey = JSON.stringify(backend);
-  const backendReady = useRef<Promise<void>>(Promise.resolve());
-  useEffect(() => {
-    backendReady.current = preview.setBackend(backend).catch(() => undefined);
-  }, [backendKey, preview]);
-
-  const load = useCallback((page: { url: string } | { html: string }) => {
-    setError('');
-    setHasPage(true);
-    void backendReady.current
-      .then(() => preview.open(itemId, page))
-      .catch((reason) => setError(reason instanceof Error ? reason.message : t('workbench.invalidUrl')));
-  }, [itemId, preview]);
-
-  const navigateTo = useCallback((input: string) => {
-    const trimmed = input.trim();
-    try {
-      const parsed = new URL(trimmed);
-      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error(t('workbench.httpOnly'));
-      if (!isLoopbackUrl(parsed)) throw new Error(t('workbench.loopbackOnly'));
-      setDraft(parsed.toString());
-      targetChangeRef.current?.({ url: parsed.toString() });
-      load({ url: parsed.toString() });
-    } catch (reason) {
-      toast.danger(reason instanceof Error ? reason.message : t('workbench.invalidUrl'));
-    }
-  }, [load]);
-
-  useEffect(() => {
-    if (target?.url) {
-      if (!isLoopbackUrl(target.url)) {
-        setError(t('workbench.loopbackOnly'));
-        return;
-      }
-      if (target.url === loadedUrlRef.current) return;
-      targetChangeRef.current?.(target);
-      setDraft(target.url);
-      load({ url: target.url });
-      return;
-    }
-    if (!target?.filePath) return;
-    targetChangeRef.current?.(target);
-    setDraft(target.filePath);
-    const api = backendApi(session.settings);
-    void api.readWorkspaceFile(target.filePath)
-      .then((file) => {
-        if (!file.text) throw new Error(t('workbench.webFileNotText'));
-        load({ html: file.text });
-      })
-      .catch((reason) => setError(reason instanceof Error ? reason.message : t('workbench.webFileReadFailed')));
-  }, [session.settings.deviceSecret, session.settings.serverUrl, target?.filePath, target?.url]);
-
-  // The page navigates on its own (links, redirects): follow it.
-  useEffect(() => preview.onState((state) => {
-    if (state.key !== itemId) return;
-    if (state.error) setError(state.error);
-    setCanGoBack(state.canGoBack);
-    if (state.url && state.url !== loadedUrlRef.current) {
-      loadedUrlRef.current = state.url;
-      setDraft(state.url);
-      targetChangeRef.current?.({ url: state.url });
-    }
-  }), [itemId, preview]);
-
-  const appendReference = useCallback((picked: { tag: string; id: string; text: string }) => {
-    const reference = t('workbench.webElement', { tag: picked.tag, id: picked.id ? `#${picked.id}` : '', text: picked.text ? `: ${picked.text}` : '' });
-    const conversationId = session.activeConversation?.id;
-    if (conversationId) {
-      session.setConversationChatDraft(conversationId, (current) => `${current}${current ? '\n' : ''}${reference}`);
-    }
-  }, [session.activeConversation?.id, session.setConversationChatDraft]);
-  useEffect(() => preview.onPicked((picked) => {
-    if (picked.key === itemId) appendReference(picked);
-  }), [appendReference, itemId, preview]);
-
-  useEffect(() => {
-    if (!hasPage) return;
-    const rootStyle = getComputedStyle(document.documentElement);
-    const tokenColor = (name: string) => rootStyle.getPropertyValue(name).trim() || '#128DDB';
-    void preview.inspect(itemId, inspect ? { hover: tokenColor('--color-chart-4'), selected: tokenColor('--color-accent-500') } : null)
-      .catch(() => toast.danger(t('workbench.inspectBlocked')));
-  }, [hasPage, inspect, itemId, preview]);
-
-  useEffect(() => () => { void preview.close(itemId); }, [itemId, preview]);
-
-  return (
-    <div className="flex h-full min-h-0 flex-col px-4 pb-4 pt-3">
-      <div className="mb-3 flex items-center justify-between gap-3">
-        {hasPage && canGoBack ? (
-          <ExpandableAction
-            icon={RiArrowLeftLine}
-            iconClassName="rtl:-scale-x-100"
-            label={t('workbench.back')}
-            onClick={() => { void preview.goBack(itemId); }}
-            aria-label={t('workbench.back')}
-          />
-        ) : null}
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            navigateTo(draft);
-          }}
-          className="min-w-0 flex-1"
-        >
-          <Input
-            aria-label={t('workbench.address')}
-            size="small"
-            value={draft}
-            onChange={setDraft}
-            placeholder="http://127.0.0.1:..."
-            inputClassName="text-caption-1-regular"
-          />
-        </form>
-        <div className="flex shrink-0 items-center gap-2">
-          <ExpandableAction
-            icon={RiRefreshLine}
-            label={t('workbench.refresh')}
-            disabled={!hasPage}
-            onClick={() => { void preview.reload(itemId); }}
-            aria-label={t('workbench.refreshPage')}
-          />
-          <ExpandableAction
-            tone={inspect ? 'primary' : 'secondary'}
-            icon={RiFocus3Line}
-            label={inspect ? t('workbench.exitInspect') : t('workbench.selectElement')}
-            disabled={!hasPage}
-            onClick={() => setInspect((current) => !current)}
-            aria-label={inspect ? t('workbench.exitInspect') : t('workbench.selectElement')}
-          />
-        </div>
-      </div>
-      {hasPage ? (
-        <div ref={hostRef} className="relative min-h-0 flex-1 overflow-hidden rounded-xl border border-border-button-default bg-background-primary-default" aria-label={t('workbench.webPreview')}>
-          {covered && still ? <img src={still} alt="" className="size-full object-contain object-top" /> : null}
-        </div>
-      ) : (
-        <EmptyState
-          size="sm"
-          icon={RiGlobalLine}
-          title={t('workbench.browserPreview')}
-          description={t('workbench.browserPreviewHint', { workspace: workspacePath || t('workbench.noWorkspace') })}
-          className="min-h-0 flex-1 rounded-2xl bg-background-secondary-default px-6"
-        />
-      )}
-    </div>
-  );
-}
 function GitDiffPane({ session }: { session: TodeXSession }) {
   const t = useT();
   const conversation = session.activeConversation;
@@ -1419,12 +1207,12 @@ function FilesPane({ session, target, onTargetChange, remote, remoteBackendId, o
   const filesServerVersion = session.backendLinkStatus[filesBackendId]?.serverVersion;
   const filesDeployment = filesServerVersion?.deployment ?? 'host';
   const filesPathMappings = filesServerVersion?.pathMappings;
-  const hostPathFor = useMemo(() => systemShellPathResolver({
+  const hostPathFor = useMemo(() => (platform.files ? systemShellPathResolver({
     loopback: isLocalBackendUrl(serverUrl),
     deployment: filesDeployment,
     pathMappings: filesPathMappings ?? [],
-    windows: window.todexDesktop.shell.platform === 'win32',
-  }, mapBackendPathToHost), [filesDeployment, filesPathMappings, serverUrl]);
+    windows: platform.os === 'win32',
+  }, mapBackendPathToHost) : null), [filesDeployment, filesPathMappings, serverUrl]);
   const source: FileSource = useMemo(
     () => (remote ? remoteFileSource(api, remote) : workspaceFileSource(api, workspacePath, Boolean(hostPathFor))),
     [api, hostPathFor, remote, workspacePath],
@@ -1591,9 +1379,9 @@ function FilesPane({ session, target, onTargetChange, remote, remoteBackendId, o
   const [contextMenu, setContextMenu] = useState<{ hostPath: string; x: number; y: number } | null>(null);
   const closeContextMenu = useCallback(() => setContextMenu(null), []);
   const canUseSystemShell = source.canUseSystemShell;
-  const revealInManagerLabel = window.todexDesktop.shell.platform === 'darwin'
+  const revealInManagerLabel = platform.os === 'darwin'
     ? t('workbench.revealInFinder')
-    : window.todexDesktop.shell.platform === 'win32'
+    : platform.os === 'win32'
       ? t('workbench.revealInExplorer')
       : t('workbench.revealInFileManager');
 
@@ -1640,11 +1428,12 @@ function FilesPane({ session, target, onTargetChange, remote, remoteBackendId, o
   const runFileContextAction = async (action: 'open' | 'open-with' | 'reveal') => {
     const path = contextMenu?.hostPath;
     setContextMenu(null);
-    if (!path) return;
+    const files = platform.files;
+    if (!path || !files) return;
     try {
-      if (action === 'open') await window.todexDesktop.shell.openPath(path);
-      else if (action === 'open-with') await window.todexDesktop.shell.openWith(path);
-      else await window.todexDesktop.shell.showItemInFolder(path);
+      if (action === 'open') await files.openPath(path);
+      else if (action === 'open-with') await files.openWith(path);
+      else await files.reveal(path);
     } catch (reason) {
       const message = reason instanceof Error
         ? reason.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')

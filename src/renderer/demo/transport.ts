@@ -1125,7 +1125,19 @@ function broadcast(event: ConversationEvent) {
   for (const socket of sockets) socket.emit({ type: 'conversation.event', payload: event });
 }
 
+/** One streamed event: delay from the prompt (ms), event type, payload. */
+export type DemoTurnStep = [number, string, Record<string, unknown>];
+/** A step whose function payload is read when it fires (null skips it). */
 type DemoStep = [number, string, Record<string, unknown> | (() => Record<string, unknown> | null)];
+
+// Web only: the landing page's autoplay answers its own prompt with a richer
+// scripted turn; anything else typed in the preview gets the canned one below.
+let turnScript: ((text: string, turnId: string) => DemoTurnStep[] | null) | null = null;
+
+export function setDemoTurnScript(script: typeof turnScript): void {
+  turnScript = script;
+}
+
 type DemoRun = { turnId: string; timers: ReturnType<typeof setTimeout>[]; onCancel?: () => void };
 /** Scripted turns still playing, by conversation id, so they can be cancelled. */
 const demoRuns = new Map<string, DemoRun>();
@@ -1177,6 +1189,11 @@ function cancelDemoTurn(journal: Journal, turnId?: string): boolean {
 /** Streams a short scripted turn so prompts typed in the preview get an answer. */
 function playCannedTurn(journal: Journal, text: string): string {
   const turnId = `${journal.manifest.id}-live-${Date.now()}`;
+  const scripted = turnScript?.(text, turnId);
+  if (scripted) {
+    scheduleDemoTurn(journal, turnId, scripted);
+    return turnId;
+  }
   if (/agent|调用/i.test(text) && !journal.manifest.parentConversationId) {
     playAgentCallTurn(journal, turnId, text);
     return turnId;

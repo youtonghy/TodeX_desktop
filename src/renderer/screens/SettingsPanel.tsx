@@ -1,14 +1,13 @@
 import { useEffect, useRef, useState, type ComponentType, type ReactNode, type Ref } from 'react';
 import { Tab, TabList, TabPanel, Tabs } from 'react-aria-components';
-import { RiApps2Line, RiBox3Line, RiCodeBoxLine, RiComputerLine, RiHardDrive3Line, RiHistoryLine, RiInformationLine, RiNotification3Line, RiPaletteLine, RiServerLine, RiSettings3Line, RiTeamLine, RiTerminalBoxLine } from '@remixicon/react';
+import { RiApps2Line, RiCodeBoxLine, RiComputerLine, RiHistoryLine, RiInformationLine, RiNotification3Line, RiPaletteLine, RiServerLine, RiSettings3Line, RiTeamLine, RiTerminalBoxLine } from '@remixicon/react';
+import { Button } from '@/components/base/buttons/button';
 import { Select, SelectItem } from '@/components/base/select/select';
 import { Switch } from '@/components/base/switch/switch';
 import { cx } from '@/utils/cx';
 import { AgentCallingSettings } from '../components/AgentCallingSettings';
 import { AgentDesktopSettings, type AgentDesktopPage } from '../components/AgentDesktopSettings';
 import { BackendConnectionSettings } from '../components/settings/BackendConnectionSettings';
-import { LocalBackendSettings } from '../components/settings/LocalBackendSettings';
-import { ContainerSettings } from '../components/settings/ContainerSettings';
 import { AppearanceSettings } from '../components/AppearanceSettings';
 import { TerminalSettings } from '../components/settings/TerminalSettings';
 import { FeatureSettings } from '../components/FeatureSettings';
@@ -21,6 +20,8 @@ import { CliManagerPanel } from './CliManagerPanel';
 import { ScrollArea } from '../components/ui/scroll-area';
 import { toast } from '../components/ui/toast';
 import type { TodeXSession } from '../session/useTodeXSession';
+import { platform } from '../platform';
+import { slots } from '../platform/slots';
 import { LOCALE_LABELS, SUPPORTED_LOCALES, getLocalePreference, isLocale, setLocalePreference, useT, type LocalePreference } from '../i18n';
 
 export type SettingsSection = 'general' | 'features' | 'appearance' | 'connection' | 'local-backend' | 'container' | 'cli' | 'ssh' | 'notifications' | 'agent' | 'agent-calling' | 'about';
@@ -61,15 +62,11 @@ export function SettingsPanel({ session, historyRecoverySetup = false, repairPai
   useEffect(() => {
     if (section === 'cli') setCliVisited(true);
   }, [section]);
-  // Discovery runs CLI commands and polls the backend, so it too waits for a visit.
-  const [localBackendVisited, setLocalBackendVisited] = useState(section === 'local-backend');
+  // Host sections (local backend discovery, Docker checks) run CLI commands,
+  // so they too wait for a visit.
+  const [hostVisited, setHostVisited] = useState<ReadonlySet<SettingsSection>>(() => new Set([section]));
   useEffect(() => {
-    if (section === 'local-backend') setLocalBackendVisited(true);
-  }, [section]);
-  // Docker checks run CLI commands too.
-  const [containerVisited, setContainerVisited] = useState(section === 'container');
-  useEffect(() => {
-    if (section === 'container') setContainerVisited(true);
+    setHostVisited((current) => (current.has(section) ? current : new Set([...current, section])));
   }, [section]);
   const agentPanel = useRef<HTMLDivElement>(null);
   const backendPanel = useRef<HTMLDivElement>(null);
@@ -111,9 +108,7 @@ export function SettingsPanel({ session, historyRecoverySetup = false, repairPai
     { id: 'features', label: t('settings.features'), icon: RiApps2Line },
     { id: 'appearance', label: t('settings.appearance'), icon: RiPaletteLine },
     { id: 'connection', label: t('settings.backendConnections'), icon: RiServerLine },
-    // Running a backend on this machine needs the desktop's main process.
-    ...(window.todexDesktop.localBackend?.available ? [{ id: 'local-backend' as const, label: t('localBackend.title'), icon: RiHardDrive3Line }] : []),
-    ...(window.todexDesktop.container?.available ? [{ id: 'container' as const, label: t('container.title'), icon: RiBox3Line }] : []),
+    ...slots.settingsSections.map((item) => ({ id: item.id, label: t(item.labelKey), icon: item.icon })),
     { id: 'cli', label: t('app.cliManager'), icon: RiCodeBoxLine },
     { id: 'ssh', label: t('settings.ssh'), icon: RiTerminalBoxLine },
     { id: 'notifications', label: t('settings.notifications'), icon: RiNotification3Line },
@@ -223,23 +218,19 @@ export function SettingsPanel({ session, historyRecoverySetup = false, repairPai
             session={session}
             page={backendPage}
             onPageChange={setBackendPage}
-            deviceName="TodeX Desktop"
+            deviceName={platform.productName}
             pairingAutoStart={pairingAutoStart}
             historyRecoverySetup={historyRecoverySetup}
+            managed={Boolean(platform.deployment)}
+            footer={platform.clearLocalData ? <ClearLocalData session={session} clear={platform.clearLocalData} /> : undefined}
           />
         </SettingsPage>
 
-        {localBackendVisited ? (
-          <SettingsPage id="local-backend" title={titleOf('local-backend')}>
-            <LocalBackendSettings session={session} deviceName="TodeX Desktop" />
+        {slots.settingsSections.map(({ id, Component }) => (hostVisited.has(id) ? (
+          <SettingsPage key={id} id={id} title={titleOf(id)}>
+            <Component session={session} deviceName={platform.productName} />
           </SettingsPage>
-        ) : null}
-
-        {containerVisited ? (
-          <SettingsPage id="container" title={titleOf('container')}>
-            <ContainerSettings session={session} deviceName="TodeX Desktop" />
-          </SettingsPage>
-        ) : null}
+        ) : null))}
 
         <SettingsPage id="cli" title={titleOf('cli')} viewportRef={cliPanel}>
           {cliVisited ? <CliManagerPanel session={session} page={cliPage} onPageChange={setCliPage} /> : null}
@@ -296,5 +287,29 @@ function SettingsPage({ id, title, viewportRef, children }: { id: SettingsSectio
         <div className="flex flex-col gap-6 pt-1">{children}</div>
       </ScrollArea>
     </TabPanel>
+  );
+}
+
+/** Web: forgets every key and secret this browser stored, then reloads. */
+function ClearLocalData({ session, clear }: { session: TodeXSession; clear: () => Promise<void> }) {
+  const t = useT();
+  return (
+    <SettingsCard>
+      <SettingsRow label={t('settings.localData')} description={t('settings.localDataHint')}>
+        <Button
+          size="small"
+          variant="danger"
+          onClick={() => {
+            if (!window.confirm(t('settings.localDataConfirm'))) return;
+            for (const profile of session.backendConnections) session.disconnect(profile.id);
+            void clear().catch((error: unknown) => {
+              toast.danger(error instanceof Error ? error.message : t('history.keyFailed'));
+            }).finally(() => window.location.reload());
+          }}
+        >
+          {t('settings.localDataClear')}
+        </Button>
+      </SettingsRow>
+    </SettingsCard>
   );
 }

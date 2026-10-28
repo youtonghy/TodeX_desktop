@@ -25,6 +25,7 @@ import { ContextMenu, Menu, MenuItem, MenuSeparator } from '@/components/ui/menu
 import { IconAction } from '@/components/ui/icon-action';
 import { cx } from '@/utils/cx';
 import { useT } from '../i18n';
+import { platform } from '../platform';
 import { terminalFontFamily, useTerminalPreferences } from '../session/terminalPreferences';
 
 export type TerminalCommandFinished = { exitCode: number | null; durationMs: number };
@@ -219,7 +220,7 @@ export function XtermTerminal({ stream, isActive, isDisabled = false, ...handler
     terminalRef.current?.focus();
     // Desktop: a native paste event, so no clipboard read permission is
     // needed; it reaches the paste listener like a keyboard paste.
-    const desktopPaste = (window as { todexDesktop?: { app?: { paste?: () => void } } }).todexDesktop?.app?.paste;
+    const desktopPaste = platform.app.paste;
     if (desktopPaste) {
       desktopPaste();
       return;

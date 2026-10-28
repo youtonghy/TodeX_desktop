@@ -8,6 +8,7 @@ import type { AgentDesktopSettings as Settings } from '@todex/protocol/agentDesk
 import { ConnectionError } from '@todex/protocol/connectionError';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { useT } from '../i18n';
+import { platform } from '../platform';
 import { backendApi } from '../session/helpers';
 import { usePanelBackend, type PanelBackend } from '../session/panelBackend';
 import { BackendScopeRow } from './settings/BackendScopeRow';
@@ -80,7 +81,7 @@ function BackendDesktopSettings({ session, backend, page, onPageChange }: {
     // Settings of another backend must not stand in while this one loads.
     setSettings(undefined);
     void refresh();
-    void window.todexDesktop.legacyAgentBrowser.hasData().then(setLegacyData);
+    void platform.legacyAgentBrowser?.hasData().then(setLegacyData);
     // Chromium downloads and host permissions change outside this screen.
     const timer = setInterval(() => {
       if (document.visibilityState === 'visible') void refresh();
@@ -117,7 +118,7 @@ function BackendDesktopSettings({ session, backend, page, onPageChange }: {
   const clearLegacyData = async () => {
     if (!window.confirm(t('agentDesktop.legacyDataConfirm'))) return;
     try {
-      await window.todexDesktop.legacyAgentBrowser.clear();
+      await platform.legacyAgentBrowser?.clear();
       setLegacyData(false);
     } catch (error) {
       toast.danger(error instanceof Error ? error.message : t('agentDesktop.saveFailed'));

@@ -1,5 +1,5 @@
 import { normalizeBackendLabelColor, type BackendConnectionProfile } from './backendColors';
-import { normalizeUsageRecords as normalizeSharedUsageRecords } from '@todex/protocol/mobileParity';
+import { isLoopbackUrl, normalizeUsageRecords as normalizeSharedUsageRecords } from '@todex/protocol/mobileParity';
 import type {
   CodexHooksListEntry,
   CodexMcpServerStatus,
@@ -18,6 +18,7 @@ import type {
 } from '@todex/protocol/todex';
 import type { ConversationEvent, ConversationManifest, ConversationSchedule, PermissionMode, ProviderDescriptor, ProviderKind, ProviderModelDescriptor } from '@todex/protocol/v2';
 import { isPermissionMode } from './permissions';
+import { platform } from '../platform';
 
 export type ResolvedSessionConfig = {
   model?: import('@todex/protocol/v2').ResolvedConfigValue<string>;
@@ -936,7 +937,9 @@ export function workspaceLinkTarget(href: string | undefined, workspacePath: str
   const raw = href.trim();
   try {
     const parsed = new URL(raw);
-    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+    // Only loopback pages load in the Workbench browser tab; other http(s)
+    // links (and every link where the host has no browser tab) open outside.
+    if ((parsed.protocol === 'http:' || parsed.protocol === 'https:') && platform.preview && isLoopbackUrl(parsed)) {
       return { kind: 'browser-url', url: parsed.toString() };
     }
     return null;
@@ -1650,23 +1653,23 @@ export function textFromItem(item: Record<string, unknown>): string {
 export type PersistedSettings = Omit<ConnectionSettings, 'deviceSecret'>;
 
 
-export const SETTINGS_STORAGE_KEY = 'todex.desktop.settings.v1';
-export const BACKEND_CONNECTIONS_STORAGE_KEY = 'todex.desktop.backendConnections.v1';
-export const WORKSPACES_STORAGE_KEY = 'todex.desktop.workspaces.v1';
-export const CONVERSATIONS_STORAGE_KEY = 'todex.desktop.conversations.v1';
-export const TIMELINE_STORAGE_KEY = 'todex.desktop.timeline.v1';
-export const ACTIVE_SELECTION_STORAGE_KEY = 'todex.desktop.activeSelection.v1';
-export const MENTION_HISTORY_STORAGE_KEY = 'todex.desktop.mentionHistory.v1';
-export const SESSION_CURSORS_STORAGE_KEY = 'todex.desktop.sessionCursors.v1';
-export const EXPERIMENTAL_FEATURES_STORAGE_KEY = 'todex.desktop.experimentalFeatures.v1';
-export const USAGE_RECORDS_STORAGE_KEY = 'todex.desktop.usageRecords.v1';
-export const PROVIDER_MODEL_PREFERENCES_STORAGE_KEY = 'todex.desktop.providerModelPreferences.v1';
-export const KANBAN_TASKS_STORAGE_KEY = 'todex.desktop.kanbanTasks.v1';
-export const DEVICE_SECRET_STORAGE_KEY = 'todex.desktop.deviceSecret.v1';
-export const DEVICE_ORIGIN_STORAGE_KEY = 'todex.desktop.deviceOrigin.v1';
-export const WORKSPACE_TOMBSTONES_STORAGE_KEY = 'todex.desktop.workspaceTombstones.v1';
+export const SETTINGS_STORAGE_KEY = `${platform.storagePrefix}.settings.v1`;
+export const BACKEND_CONNECTIONS_STORAGE_KEY = `${platform.storagePrefix}.backendConnections.v1`;
+export const WORKSPACES_STORAGE_KEY = `${platform.storagePrefix}.workspaces.v1`;
+export const CONVERSATIONS_STORAGE_KEY = `${platform.storagePrefix}.conversations.v1`;
+export const TIMELINE_STORAGE_KEY = `${platform.storagePrefix}.timeline.v1`;
+export const ACTIVE_SELECTION_STORAGE_KEY = `${platform.storagePrefix}.activeSelection.v1`;
+export const MENTION_HISTORY_STORAGE_KEY = `${platform.storagePrefix}.mentionHistory.v1`;
+export const SESSION_CURSORS_STORAGE_KEY = `${platform.storagePrefix}.sessionCursors.v1`;
+export const EXPERIMENTAL_FEATURES_STORAGE_KEY = `${platform.storagePrefix}.experimentalFeatures.v1`;
+export const USAGE_RECORDS_STORAGE_KEY = `${platform.storagePrefix}.usageRecords.v1`;
+export const PROVIDER_MODEL_PREFERENCES_STORAGE_KEY = `${platform.storagePrefix}.providerModelPreferences.v1`;
+export const KANBAN_TASKS_STORAGE_KEY = `${platform.storagePrefix}.kanbanTasks.v1`;
+export const DEVICE_SECRET_STORAGE_KEY = `${platform.storagePrefix}.deviceSecret.v1`;
+export const DEVICE_ORIGIN_STORAGE_KEY = `${platform.storagePrefix}.deviceOrigin.v1`;
+export const WORKSPACE_TOMBSTONES_STORAGE_KEY = `${platform.storagePrefix}.workspaceTombstones.v1`;
 /** Config-sync baselines: content hashes per source → target pair, never values. */
-export const CONFIG_SYNC_STORAGE_KEY = 'todex.desktop.configSync.v1';
+export const CONFIG_SYNC_STORAGE_KEY = `${platform.storagePrefix}.configSync.v1`;
 export const JSON_SAVE_DEBOUNCE_MS = 350;
 export const SESSION_CURSOR_SAVE_DEBOUNCE_MS = 800;
 export const WORKSPACE_SYNC_DEBOUNCE_MS = 900;

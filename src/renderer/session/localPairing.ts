@@ -4,6 +4,9 @@ import { isLoopbackHostname } from '@todex/protocol/loopback';
 import type { BackendConnectionProfile } from '@todex/protocol/todex';
 import type { LocalNativeEndpoint } from '../../preload/localBackendTypes';
 import { ipcDaemonConflicts } from './backendRouting';
+import { NATIVE_INSTANCE, daemonPeer } from './daemonPeers';
+
+export { daemonPeer };
 import { t } from '../i18n';
 import {
   DevicePairingRetryableError,
@@ -74,7 +77,7 @@ type ManagedSession = {
 };
 
 /** The IPC instance of the backend on this machine. */
-export const NATIVE_INSTANCE = 'local';
+export { NATIVE_INSTANCE };
 
 /** Preferences of the 本机 Backend settings page (also read by the IPC reminder). */
 export const LOCAL_BACKEND_PREFS_KEY = 'todex.desktop.localBackend.v1';
@@ -152,17 +155,6 @@ export function daemonConflicts(profiles: BackendConnectionProfile[], endpoint: 
   ));
 }
 
-/** The enabled profile serving the daemon of disabled `profile`: the one
- * pinning the same transport key, else (for a TCP profile) the enabled
- * native IPC profile. */
-export function daemonPeer(profiles: BackendConnectionProfile[], profile: BackendConnectionProfile): BackendConnectionProfile | undefined {
-  const enabled = profiles.filter((item) => item.id !== profile.id && !item.disabled);
-  const sameKey = profile.transportVerified && profile.encryptionPublicKey
-    ? enabled.find((item) => item.transportVerified && item.encryptionPublicKey === profile.encryptionPublicKey)
-    : undefined;
-  if (sameKey || isIpcServerUrl(profile.serverUrl)) return sameKey;
-  return enabled.find((item) => item.serverUrl === ipcServerUrl(NATIVE_INSTANCE));
-}
 
 /**
  * The connected profile that reaches the native daemon over TCP although the

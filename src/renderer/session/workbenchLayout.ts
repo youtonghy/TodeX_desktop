@@ -1,5 +1,6 @@
 import { SETTINGS_STORAGE_KEY } from './helpers';
 import type { OpenPanelOptions, WorkbenchTab } from '../lib/panels';
+import { platform } from '../platform';
 
 export function workbenchScopeKey(mode: 'conversation' | 'workspace', backendId: string, workspaceId: string, conversationId: string): string {
   if (!backendId || !workspaceId || (mode === 'conversation' && !conversationId)) return '';
@@ -27,7 +28,8 @@ function safeTarget(value: unknown): OpenPanelOptions {
   for (const key of ['workspaceId', 'conversationId', 'filePath'] as const) {
     if (typeof source[key] === 'string') target[key] = source[key];
   }
-  if (typeof source.url === 'string') {
+  // A URL only ever targets the browser tab, which not every host has.
+  if (typeof source.url === 'string' && platform.preview) {
     try {
       const url = new URL(source.url);
       if (url.protocol === 'http:' || url.protocol === 'https:') target.url = `${url.origin}${url.pathname}`;
@@ -38,8 +40,10 @@ function safeTarget(value: unknown): OpenPanelOptions {
 
 export function normalizeWorkbenchLayout(value: unknown): SavedLayout {
   const source = value && typeof value === 'object' ? value as Record<string, unknown> : {};
-  // 'ssh-exec', 'subagents', 'agent-calls' and 'agent-browser' tabs are session-only, so a saved layout never points at one.
-  const tab = ['terminal', 'browser', 'files', 'git-diff'].includes(String(source.tab)) ? source.tab as WorkbenchTab : 'terminal';
+  // 'ssh-exec', 'subagents', 'agent-calls' and 'agent-browser' tabs are session-only, so a saved layout never points at one;
+  // a 'browser' tab falls back to the terminal where the host has no browser tab.
+  const stored = ['terminal', 'files', 'git-diff', ...(platform.preview ? ['browser'] : [])];
+  const tab = stored.includes(String(source.tab)) ? source.tab as WorkbenchTab : 'terminal';
   return { isOpen: source.isOpen === true, tab, target: safeTarget(source.target) };
 }
 

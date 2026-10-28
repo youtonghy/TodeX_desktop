@@ -58,7 +58,7 @@ export function sortFileEntries<T extends FileSourceEntry>(entries: T[]): T[] {
 /** Entries a workspace listing returns at most; a full page may be cut off. */
 export const WORKSPACE_LIST_LIMIT = 100;
 
-export function workspaceFileSource(api: () => V2ApiClient, rootPath: string, canUseSystemShell: boolean): FileSource {
+export function workspaceFileSource(api: () => V2ApiClient, rootPath: string, canUseSystemShell = false): FileSource {
   return {
     key: `workspace:${rootPath}`,
     label: rootPath.split(/[/\\]/).filter(Boolean).pop() || rootPath || 'workspace',

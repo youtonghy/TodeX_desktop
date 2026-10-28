@@ -8,7 +8,7 @@ import { Button } from '@/components/base/buttons/button';
 import { Input } from '@/components/base/input/input';
 import { cx } from '@/utils/cx';
 import { BACKEND_LABEL_COLORS, backendLabelColor, type BackendConnectionProfile } from '../../session/backendColors';
-import { daemonPeer } from '../../session/localPairing';
+import { daemonPeer } from '../../session/daemonPeers';
 import { UNPAIRED_TRANSPORT, backendApi, connectionStateLabel, healthLabelOf, isVersionMismatch } from '../../session/helpers';
 import type { ConfigSyncPreset } from '../../session/useConfigSync';
 import type { BackendLinkStatus, TodeXSession } from '../../session/useTodeXSession';

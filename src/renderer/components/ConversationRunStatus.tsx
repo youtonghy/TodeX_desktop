@@ -31,9 +31,11 @@ type Props = {
   runtime?: ConversationRuntime;
   compaction?: ContextCompactionState & { recommended?: boolean };
   onRecover: () => Promise<void>;
+  /** Codex performs context compaction automatically when its window fills. */
+  automaticCompaction?: boolean;
 };
 
-export function ConversationRunStatus({ submissionStatus, runtime, compaction, onRecover }: Props) {
+export function ConversationRunStatus({ submissionStatus, runtime, compaction, onRecover, automaticCompaction = false }: Props) {
   const t = useT();
   const [recovering, setRecovering] = useState(false);
   const unknown = submissionStatus === 'unknown';
@@ -43,7 +45,7 @@ export function ConversationRunStatus({ submissionStatus, runtime, compaction, o
   });
   useNoticeToast(compaction?.status === 'failed' ? t('runStatus.compactionFailed')
     : compaction?.status === 'completed' ? t('runStatus.compactionDone')
-      : compaction?.recommended && compaction.status !== 'running' ? t('runStatus.compactionSuggested') : null, {
+      : !automaticCompaction && compaction?.recommended && compaction.status !== 'running' ? t('runStatus.compactionSuggested') : null, {
     variant: compaction?.status === 'failed' ? 'danger' : compaction?.status === 'completed' ? 'success' : 'info',
     description: compaction?.status === 'failed' ? compaction.error : undefined,
     scope: runtime?.conversationId,

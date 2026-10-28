@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { loadJson, saveJson } from '../lib/storage';
 import { SETTINGS_STORAGE_KEY, type TimelineEntry } from './helpers';
 import { t } from '../i18n';
+import { platform } from '../platform';
 import { permissionRequestSummary, type PendingRequest } from '@todex/protocol/todex';
 
 const STORAGE_KEY = `${SETTINGS_STORAGE_KEY}.completionNotifications.v1`;
@@ -55,7 +56,7 @@ export function postCompletionNotification(options: {
   try {
     const notification = new Notification(options.title, { body: options.body, tag: options.tag });
     notification.onclick = () => {
-      window.todexDesktop?.app?.focus?.();
+      platform.app.focus();
       options.onActivate?.();
     };
   } catch {

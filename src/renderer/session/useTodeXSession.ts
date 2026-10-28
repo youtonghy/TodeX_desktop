@@ -1,6 +1,5 @@
 import { normalizeBackendLabelColor, type BackendConnectionProfile } from './backendColors';
 import { ipcDaemonConflicts, moveBackendRecords, ownerBackendId, resolveNoWorkspaceBackendId, tagLegacyBackendRecords } from './backendRouting';
-import { isContainerProfile, useContainerProfileIds } from './containerProfileIds';
 import { useWorkbenchSharing } from './useWorkbenchSharing';
 import {
   completionNotificationBody,
@@ -19,6 +18,8 @@ import { t } from '../i18n';
 import { toast } from '../components/ui/toast';
 import { piExtensionPlainText } from '../components/piExtensionPresentation';
 import { PiExtensionEffects, canApplyPluginDraft } from './piExtensionEffects';
+import { commandContextKey, routePiSlashCommand, type ProviderCommandCatalog } from './providerCommands';
+import { platform } from '../platform';
 import { migrateLegacyFollowUps, restoreQueuedFollowUps, type LegacyAddResult, type LegacyFollowUps, type LegacyQueueTarget } from './queuedFollowUps';
 import { backendRateLimitState } from './sessionRateLimit';
 import { LegacyEventRecovery } from './legacyEventRecovery';
@@ -705,9 +706,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   // a container (containers get no None row). New None conversations and
   // untagged None drafts belong to it.
   const enabledBackendConnections = useMemo(() => backendConnections.filter((profile) => !profile.disabled), [backendConnections]);
-  const containerProfileIds = useContainerProfileIds();
+  const containerProfileIds = platform.containers.useProfileIds();
   const firstHostBackendId = useMemo(() => resolveNoWorkspaceBackendId(
-    enabledBackendConnections.filter((profile) => !isContainerProfile(profile, containerProfileIds)),
+    enabledBackendConnections.filter((profile) => !platform.containers.isContainerProfile(profile, containerProfileIds)),
   ), [containerProfileIds, enabledBackendConnections]);
   const noWorkspaceBackendId = resolveNoWorkspaceBackendId(
     enabledBackendConnections,
@@ -723,7 +724,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     activeConversationRecord,
     workspaces.find((item) => item.id === activeWorkspaceId),
     noWorkspaceBackendId,
-  ) || 'default-backend';
+  ) || (platform.deployment ? backendConnections[0]?.id : '') || 'default-backend';
   const activeBackendConnectionIdRef = useRef(activeBackendConnectionId);
   activeBackendConnectionIdRef.current = activeBackendConnectionId;
   const focusProfile = backendConnections.find((item) => item.id === activeBackendConnectionId);
@@ -752,7 +753,20 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const [remoteModelCatalog, setRemoteModelCatalog] = useState<CodexModelCatalogItem[]>([]);
   const [modelCatalogStatus, setModelCatalogStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
   const [modelCatalogError, setModelCatalogError] = useState('');
-  const [lastError, setLastError] = useState('');
+  const [lastError, setLastErrorState] = useState('');
+  // The same failure reported again within two seconds (retries, parallel
+  // requests) is shown once.
+  const lastErrorDedupeRef = useRef({ message: '', at: 0 });
+  const setLastError = useCallback((value: string | ((current: string) => string)) => {
+    setLastErrorState((current) => {
+      const next = typeof value === 'function' ? value(current) : value;
+      if (!next) return '';
+      const now = Date.now();
+      if (next === lastErrorDedupeRef.current.message && now - lastErrorDedupeRef.current.at < 2000) return current;
+      lastErrorDedupeRef.current = { message: next, at: now };
+      return next;
+    });
+  }, []);
   /** Legacy plaintext conversations are read-only: writes are refused here
    * (the backend would answer HISTORY_READ_ONLY). */
   const refuseReadOnlyWrite = (conversation: ConversationRecord | null | undefined): boolean => {
@@ -779,6 +793,12 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const extensionEffectsRef = useRef(new PiExtensionEffects());
   const [pendingPluginDrafts, setPendingPluginDrafts] = useState<Record<string, ExtensionEditorRequest | undefined>>({});
   const [stoppingProviderRuntimes, setStoppingProviderRuntimes] = useState<Record<string, boolean>>({});
+  // Per-conversation command catalogs (Pi session commands); an epoch bump
+  // after a turn refetches them.
+  const [providerCommandCatalogs, setProviderCommandCatalogs] = useState<Record<string, ProviderCommandCatalog>>({});
+  const [commandEpochs, setCommandEpochs] = useState<Record<string, number>>({});
+  const [commandCatalogRevision, setCommandCatalogRevision] = useState(0);
+  const refreshProviderCommands = useCallback(() => setCommandCatalogRevision(value => value + 1), []);
   const [controlStatusByConversation, setControlStatusByConversation] = useState<Record<string, 'pending' | 'unknown' | undefined>>({});
   const controlRequestsRef = useRef(new Map<string, string>());
   const controlDraftsRef = useRef(new Map<string, { conversationId: string; text: string }>());
@@ -1450,7 +1470,20 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       nextSettings.serverUrl = normalizeServerUrl(nextSettings.serverUrl);
       const storedProfiles = (storedBackendConnections as unknown[]).map(normalizeBackendConnectionProfile).filter((profile): profile is BackendConnectionProfile => Boolean(profile));
       const hydratedProfiles = storedProfiles.length ? await Promise.all(storedProfiles.map(async (profile) => ({ ...profile, deviceSecret: (await loadSecretOrReport(`${DEVICE_SECRET_STORAGE_KEY}.${profile.id}`)) || (profile.id === 'default-backend' ? nextSettings.deviceSecret : '') }))) : [];
-      const profiles = hydratedProfiles.length ? hydratedProfiles : [profileFromSettings(nextSettings)];
+      const unmanagedProfiles = hydratedProfiles.length ? hydratedProfiles : [profileFromSettings(nextSettings)];
+      // A self-hosted deployment pins the backend list; keys of the profiles
+      // it drops are forgotten.
+      const deployment = platform.deployment;
+      const profiles = deployment
+        ? deployment.profiles(hydratedProfiles, profileFromSettings(nextSettings))
+        : unmanagedProfiles;
+      if (deployment) {
+        const kept = new Set(profiles.map((profile) => profile.id));
+        for (const profile of storedProfiles) {
+          if (!kept.has(profile.id)) void removeSecret(`${DEVICE_SECRET_STORAGE_KEY}.${profile.id}`).catch(reportSecretStoreError);
+        }
+        nextSettings.serverUrl = profiles[0].serverUrl;
+      }
       const normalizedWorkspaces = withNoneWorkspace(storedWorkspaces, () => createNoneWorkspace(nextSettings)).map((workspace) => ({
         ...workspace,
         reasoningEffort: normalizeReasoningEffort(workspace.reasoningEffort),
@@ -2114,6 +2147,44 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   );
 
 
+  // A conversation's command catalog depends on its backend, workspace,
+  // provider, native session and runtime (Pi extensions add commands).
+  const providerCommandContext = useCallback((conversationId: string) => {
+    const conversation = conversations.find(item => item.id === conversationId);
+    if (!conversation?.provider) return;
+    const workspace = workspaces.find(item => item.id === conversation.workspaceId);
+    if (!workspace) return;
+    const runtime = conversationRuntimeById[conversationId]?.providerRuntime;
+    return { backend: `${activeBackendConnectionId}:${settings.serverUrl}`, workspace: workspace.path,
+      provider: conversation.provider, conversationId: conversation.v2ConversationId,
+      runtimeId: runtime?.runtimeId, runtimeStatus: runtime?.status, commandEpoch: commandEpochs[conversationId] };
+  }, [conversations, workspaces, conversationRuntimeById, activeBackendConnectionId, settings.serverUrl, commandEpochs]);
+  const getProviderCommandCatalog = useCallback((conversationId: string) => {
+    const context = providerCommandContext(conversationId);
+    const catalog = context && providerCommandCatalogs[commandContextKey(context)];
+    return catalog || undefined;
+  }, [providerCommandContext, providerCommandCatalogs]);
+  const activeCommandContext = activeConversation && providerCommandContext(activeConversation.id);
+  const activeCommandKey = activeCommandContext ? commandContextKey(activeCommandContext) : '';
+  useEffect(() => {
+    if (!hydrated || !activeCommandKey) return;
+    const [, workspace, provider, conversationId] = JSON.parse(activeCommandKey) as string[];
+    let cancelled = false;
+    setProviderCommandCatalogs(current => ({ ...current,
+      [activeCommandKey]: { contextKey: activeCommandKey, status: 'loading', commands: [] } }));
+    const api = backendApi(settings);
+    void api.listProviderCommands(provider as ProviderKind, workspace, conversationId || undefined).then(result => {
+      if (!cancelled) setProviderCommandCatalogs(current => ({ ...current,
+        [activeCommandKey]: { contextKey: activeCommandKey, status: 'ready', commands: result.commands, source: result.catalogSource } }));
+    }).catch((error: unknown) => {
+      if (!cancelled) setProviderCommandCatalogs(current => ({ ...current,
+        [activeCommandKey]: { contextKey: activeCommandKey, status: 'error', commands: [],
+          error: error instanceof Error ? error.message : t('sess.commandCatalogFailed') } }));
+    });
+    return () => { cancelled = true; };
+  }, [hydrated, activeCommandKey, commandCatalogRevision, settings.serverUrl, settings.deviceSecret, settings.encryptionProtocol, settings.encryptionPublicKey, settings.transportVerified]);
+
+
   const restoreSubmissionDraft = useCallback((conversationId: string, submission: SubmissionDraft) => {
     setConversationChatDraft(conversationId, (current) => current || submission.text);
     setConversationAttachments(conversationId, (current) => current.length ? current : submission.attachments);
@@ -2284,6 +2355,11 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         // A realtime frame is news even when it lands inside a history replay.
         const replayed = recovering && !live.has(event.sequence);
         completedAt = Math.max(completedAt, Date.parse(event.time) || Date.now());
+        // Extensions can change their catalog or native session during a turn;
+        // Claude's slash-command catalog likewise only arrives once a turn's
+        // initialize exchange has run.
+        if (conversation.provider === 'pi' || conversation.provider === 'claude-code') setCommandEpochs(current => (current[localId] ?? 0) >= event.sequence
+          ? current : { ...current, [localId]: event.sequence });
         const settledKey = turnId ? `${state.conversationId}:${turnId}` : '';
         const firstSettle = Boolean(settledKey) && !settledV2TurnsRef.current.has(settledKey);
         if (turnId) {
@@ -2477,9 +2553,11 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       setOpenStatusByConversation(withoutReleased);
       setEarlierHistory(withoutReleased);
     }
-    // Agent extension state is rebuilt on demand.
+    // Agent extension state and command catalogs are rebuilt on demand.
     extensionEffectsRef.current.reset();
     setPendingPluginDrafts({});
+    setProviderCommandCatalogs({});
+    setCommandEpochs({});
     setStoppingProviderRuntimes({});
     setRuntimeRevision((value) => value + 1);
   }, [backendConnections, closeSocket, hydrated, patchLinkStatus]);
@@ -2838,8 +2916,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       next[index] = {
         ...previous,
         ...entry,
+        // Keep the entry anchored at its first (oldest) sequence and
+        // timestamp so rows do not swap positions while streaming.
+        sequence: previous.sequence !== undefined && (entry.sequence === undefined || previous.sequence <= entry.sequence)
+          ? previous.sequence
+          : entry.sequence,
+        at: previous.at || entry.at,
         subtitle: appendSubtitle ? `${previous.subtitle === STREAMING_REPLY_PLACEHOLDER ? '' : previous.subtitle}${entry.subtitle}` : entry.subtitle,
-        at: Date.now(),
       };
       return next;
     });
@@ -4196,7 +4279,15 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       if (!response.ok) {
         throw new Error(`health endpoint returned ${response.status}`);
       }
-      patchLinkStatus(backendId, { health: { status: 'online', latencyMs, lastCheckedAt: Date.now(), error: '' } });
+      // Quantize latency so the sidebar badge color only changes when the
+      // connection quality actually shifts, not on every probe.
+      const latencyBucket = latencyMs <= 100 ? 100 : latencyMs <= 300 ? 300 : 600;
+      patchLinkStatus(backendId, (current) => {
+        const health = current.health;
+        const currentBucket = health.latencyMs === null ? null : health.latencyMs <= 100 ? 100 : health.latencyMs <= 300 ? 300 : 600;
+        if (health.status === 'online' && currentBucket === latencyBucket && !health.error && !health.code) return {};
+        return { health: { status: 'online', latencyMs, lastCheckedAt: Date.now(), error: '', code: '' } };
+      });
     } catch (error) {
       if (stale()) {
         return;
@@ -4271,6 +4362,22 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           lastCheckedAt: Date.now(),
           error: inspected.error.userMessage,
           code: inspected.error.code,
+        });
+        return;
+      }
+
+      const insecureReason = platform.backendUrlProblem(inspected.origin);
+      if (insecureReason) {
+        const error = ConnectionError.invalidServerUrl(insecureReason);
+        link.lastFailureRetryable = false;
+        patchLinkStatus(backendId, { state: 'error' });
+        reportLinkError(backendId, insecureReason);
+        setHealth({
+          status: 'offline',
+          latencyMs: null,
+          lastCheckedAt: Date.now(),
+          error: insecureReason,
+          code: error.code,
         });
         return;
       }
@@ -5138,7 +5245,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     ],
   );
 
-  const updateBackendConnection = useCallback((id: string, patch: Partial<BackendConnectionProfile>) => {
+  const updateBackendConnection = useCallback((id: string, requested: Partial<BackendConnectionProfile>) => {
+    // A self-hosted deployment fixes each backend's address.
+    const { serverUrl: _pinned, ...unpinned } = requested;
+    const patch: Partial<BackendConnectionProfile> = platform.deployment ? unpinned : requested;
     setBackendConnections((current) => current.map((profile) => {
       if (profile.id !== id) return profile;
       const originChanged = patch.serverUrl !== undefined
@@ -5183,6 +5293,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   }, [updateBackendConnection]);
 
   const addBackendConnection = useCallback((profile?: Partial<BackendConnectionProfile>) => {
+    // A self-hosted deployment fixes the backend list (its settings hide
+    // the add button); stay on the first backend instead.
+    if (platform.deployment) return backendConnectionsRef.current[0];
     const id = createRequestId('backend');
     // A new backend never inherits the current device key or transport pin.
     const next: BackendConnectionProfile = { ...profileFromSettings(connectionRoutingRef.current, t('session.newBackend'), id), ...UNPAIRED_TRANSPORT, ...profile, id, createdAt: Date.now(), updatedAt: Date.now() };
@@ -5194,7 +5307,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
    * and history keys are forgotten. The last backend cannot be removed. */
   const removeBackendConnection = useCallback((id: string) => {
     const profiles = backendConnectionsRef.current;
-    if (profiles.length <= 1 || !profiles.some((profile) => profile.id === id)) return;
+    if (platform.deployment || profiles.length <= 1 || !profiles.some((profile) => profile.id === id)) return;
     closeSocket(id, true);
     linksRef.current.get(id)?.commands.dispose();
     linksRef.current.delete(id);
@@ -8571,7 +8684,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       }
 
       const [command, ...rest] = trimmed.slice(1).trim().split(/\s+/);
-      const lower = command.toLowerCase();
+      let lower = command.toLowerCase();
       const context = getConversationContext(conversationId);
 
       if (!context) {
@@ -8580,6 +8693,18 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       }
 
       const { workspace, conversation } = context;
+      if (conversation.provider === 'pi' && isV2Conversation(conversation)) {
+        const route = routePiSlashCommand(input, getProviderCommandCatalog(conversation.id));
+        if (route.kind === 'blocked') { toast.warning(t('sess.piCommand'), { description: route.message }); return; }
+        if (route.kind === 'native') {
+          void sendV2Prompt(route.input, conversation.id).then(accepted => {
+            if (accepted) setConversationChatDraft(conversation.id, current => current.trim() === input.trim() ? '' : current);
+          });
+          return;
+        }
+        if (route.command === 'commands') { refreshProviderCommands(); return; }
+        lower = route.command;
+      }
       if (isV2Conversation(conversation)) {
         if (lower === 'memory' || lower === 'memories') {
           openSlashCommandActionPage(workspace, conversation, '/memory');
@@ -8634,6 +8759,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           return;
         }
       }
+
       const addCommandNotice = (title: string, detail: string) => {
         appendTimeline(makeSystemEntry(title, detail, workspace.id, conversation.id));
       };
@@ -9138,6 +9264,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       turnIds,
       updateConversation,
       updateWorkspace,
+      getProviderCommandCatalog,
+      refreshProviderCommands,
     ],
   );
 
@@ -9345,7 +9473,11 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     }
     const { workspace, conversation } = context;
     const isThinking = thinkingConversations[conversationId] === true;
-    if (text === '/compact') {
+    if (conversation.provider === 'pi' && text.startsWith('/')) {
+      const route = routePiSlashCommand(text, getProviderCommandCatalog(conversation.id));
+      if (route.kind !== 'native') { sendSlashCommand(text, conversationId); return; }
+    }
+    if (text === '/compact' && conversation.provider !== 'pi') {
       if (isThinking || pendingV2SubmissionsRef.current.has(conversationId)) {
         setLastError(t('sess.compactWait'));
         return;
@@ -9405,7 +9537,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       return;
     }
     sendSlashCommand(text, conversationId);
-  }, [appendTimeline, chatDrafts, composerAttachments, controlConversation, getConversationContext, queueWhileBusy, rememberMentionReferences, selectedSkills, sendLocalTurn, sendSlashCommand, sendV2Prompt, setConversationAttachments, setConversationChatDraft, setConversationComposerSelection, setConversationSelectedSkills, thinkingConversations]);
+  }, [appendTimeline, chatDrafts, composerAttachments, controlConversation, getConversationContext, queueWhileBusy, rememberMentionReferences, selectedSkills, sendLocalTurn, sendSlashCommand, sendV2Prompt, setConversationAttachments, setConversationChatDraft, setConversationComposerSelection, setConversationSelectedSkills, thinkingConversations, getProviderCommandCatalog]);
   const submitChatRef = useRef(submitChat);
   submitChatRef.current = submitChat;
 
@@ -9795,6 +9927,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     capabilityCatalogs,
     providerModels,
     providerCommands,
+    getProviderCommandCatalog,
+    refreshProviderCommands,
     contextUsageByConversation,
     compactionByConversation,
     subagentsByConversation,
