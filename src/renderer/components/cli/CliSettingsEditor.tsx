@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { RiAddLine, RiDeleteBin6Line, RiEyeLine, RiEyeOffLine } from '@remixicon/react';
 import type { CliSettingsDocument, CliSettingsProvider, V2ApiClient } from '@todex/protocol/v2';
 import { isConflictError } from '@todex/protocol/connectionError';
@@ -34,18 +34,28 @@ import { PiPluginsPanel, usePiPlugins } from './PiPluginsTab';
 import { SettingsField, SettingsFieldModels } from './SettingsFields';
 
 type TabId = 'form' | 'env' | 'plugins' | 'mcp' | 'raw' | 'agents';
-const TAB_IDS: TabId[] = ['form', 'env', 'plugins', 'mcp', 'raw', 'agents'];
+const TAB_IDS: string[] = ['form', 'env', 'plugins', 'mcp', 'raw', 'agents'];
+const isSettingsTab = (id: string): id is TabId => TAB_IDS.includes(id);
+
+/** A tab of the CLI's page beside its settings tabs, in the same tab row. */
+export type CliPageExtraTab = { id: string; label: string; render: () => ReactNode };
 type EnvRow = { key: number; name: string; value: string; revealed: boolean };
 
 const key = (value: string) => value as MessageKey;
 
 /** A CLI's user settings file on the backend host, shown on the CLI's own
- * page in CLI management (the page scrolls; the save bar stays in view). */
-export function CliSettingsEditor({ provider, api }: { provider: CliSettingsProvider; api: () => V2ApiClient }) {
-  return <CliSettingsForm key={provider} schema={CLI_SETTINGS[provider]} api={api} />;
+ * page in CLI management (the page scrolls; the save bar stays in view).
+ * The page's other tabs join the settings tabs in one tab row. */
+export function CliSettingsEditor({ provider, api, label, extraTabs = [] }: {
+  provider: CliSettingsProvider;
+  api: () => V2ApiClient;
+  label: string;
+  extraTabs?: CliPageExtraTab[];
+}) {
+  return <CliSettingsForm key={provider} schema={CLI_SETTINGS[provider]} api={api} label={label} extraTabs={extraTabs} />;
 }
 
-function CliSettingsForm({ schema, api }: { schema: CliSettingsSchema; api: () => V2ApiClient }) {
+function CliSettingsForm({ schema, api, label, extraTabs }: { schema: CliSettingsSchema; api: () => V2ApiClient; label: string; extraTabs: CliPageExtraTab[] }) {
   const { provider, envPath } = schema;
   const t = useT();
   const [doc, setDoc] = useState<CliSettingsDocument>();
@@ -55,7 +65,14 @@ function CliSettingsForm({ schema, api }: { schema: CliSettingsSchema; api: () =
   const [rawText, setRawText] = useState('');
   const [rawRevealed, setRawRevealed] = useState(false);
   const hasForm = schema.groups.length > 0;
-  const [tab, setTab] = useState<TabId>(hasForm ? 'form' : 'plugins');
+  const [tab, setTab] = useState<string>(hasForm ? 'form' : 'plugins');
+  // A visited extra tab stays mounted (hidden), so its state survives a look
+  // at another tab; unvisited ones load nothing.
+  const [visited, setVisited] = useState<ReadonlySet<string>>(() => new Set());
+  const select = (next: string) => {
+    setTab(next);
+    if (!isSettingsTab(next)) setVisited((current) => (current.has(next) ? current : new Set([...current, next])));
+  };
   const [saving, setSaving] = useState(false);
   const nextEnvKey = useRef(0);
   const instructions = useCliInstructions(provider, api);
@@ -71,7 +88,8 @@ function CliSettingsForm({ schema, api }: { schema: CliSettingsSchema; api: () =
     setDraft(settings);
     setEnv(toEnvRows(settings));
     setRawText(next.text);
-    if (!next.settings) setTab('raw');
+    // Only a settings tab the document cannot fill is moved off.
+    if (!next.settings) setTab((current) => (current === 'form' || current === 'env' ? 'raw' : current));
     else if (!hasForm) setTab((current) => (current === 'form' ? 'plugins' : current));
   }, []);
 
@@ -131,6 +149,7 @@ function CliSettingsForm({ schema, api }: { schema: CliSettingsSchema; api: () =
   const rawError = useMemo(() => (doc?.format === 'json' ? rawObjectError(rawText) : null), [doc?.format, rawText]);
   const fileName = doc?.path.split(/[\\/]/).pop() || doc?.path || '';
   const envInvalid = env.some((row) => row.name.trim() !== '' && !ENV_NAME.test(row.name.trim()));
+  const onSettingsTab = isSettingsTab(tab);
   const editingRaw = tab === 'raw';
   const editingAgents = tab === 'agents';
   const editingPlugins = tab === 'plugins';
@@ -190,60 +209,68 @@ function CliSettingsForm({ schema, api }: { schema: CliSettingsSchema; api: () =
     }
   };
 
-  if (loadError) {
-    return (
+  const loadState = loadError ? (
       <Alert
         status="danger"
         title={t('cliSettings.readFailed')}
         description={loadError}
         actions={<Button size="small" variant="secondary" onClick={() => void load()}>{t('cliSettings.retry')}</Button>}
       />
-    );
-  }
-  if (!doc) {
-    return <div className="flex min-h-48 items-center justify-center"><Spinner size="md" aria-label={t('cliSettings.reading')} /></div>;
-  }
+    ) : !doc ? <div className="flex min-h-48 items-center justify-center"><Spinner size="md" aria-label={t('cliSettings.reading')} /></div> : null;
+  // Settings tabs wait for the file; the page's other tabs do not.
+  const settingsPanel = (content: () => ReactNode) => loadState ?? content();
 
   return (
     <div className="flex flex-col gap-3">
-      {/* The AGENTS.md tab names its own file. */}
-      <p className={cx('truncate text-body-2-regular text-text-secondary', editingAgents && 'invisible')} dir="ltr" title={doc.path}>{doc.path}</p>
-      <Tabs selectedKey={tab} onSelectionChange={(next) => setTab(TAB_IDS.find((id) => id === next) ?? 'form')} className="gap-0">
-        <TabList aria-label={t('cliSettings.tabsLabel')}>
-          {hasForm ? <Tab id="form" isDisabled={!saved}>{t('cliSettings.tabForm')}</Tab> : null}
-          {envPath ? <Tab id="env" isDisabled={!saved} count={env.length || undefined}>{t('cliSettings.tabEnv')}</Tab> : null}
+      <Tabs selectedKey={tab} onSelectionChange={(next) => select(String(next))} className="gap-0">
+        <TabList aria-label={label}>
+          {hasForm ? <Tab id="form" isDisabled={Boolean(doc) && !saved}>{t('cliSettings.tabForm')}</Tab> : null}
+          {envPath ? <Tab id="env" isDisabled={Boolean(doc) && !saved} count={env.length || undefined}>{t('cliSettings.tabEnv')}</Tab> : null}
           {isPi ? <Tab id="plugins" count={piPlugins.list?.packages.length || undefined}>{t('cliSettings.tabPlugins')}</Tab> : null}
           {isDsh ? <Tab id="plugins" count={dshPlugins.list?.packages.length || undefined}>{t('cliSettings.tabPlugins')}</Tab> : null}
           {isPi ? <Tab id="mcp" count={Object.keys(mcp.doc?.config?.mcpServers ?? {}).length || undefined}>MCP</Tab> : null}
-          <Tab id="raw">{t('cliSettings.tabRaw')}</Tab>
+          {extraTabs.map((item) => <Tab key={item.id} id={item.id}>{item.label}</Tab>)}
           <Tab id="agents">AGENTS.md</Tab>
+          <Tab id="raw">{t('cliSettings.tabRaw')}</Tab>
         </TabList>
         <div className="pt-4 pb-4">
+          {/* The settings file's tabs name it; AGENTS.md names its own. */}
+          {doc && onSettingsTab && !editingAgents ? (
+            <p className="mb-3 truncate px-3 text-body-2-regular text-text-tertiary" dir="ltr" title={doc.path}>{doc.path}</p>
+          ) : null}
           {hasForm ? <TabPanel id="form" className="flex flex-col gap-5">
-            <p className="px-3 text-body-2-regular text-text-secondary">
-              {doc.exists ? t(schema.hints.scope) : t('cliSettings.missingHint')}
-            </p>
-            {schema.groups.map((group) => (
-              <SettingsGroup key={group.id} label={t(key(`${schema.keyPrefix}.group.${group.id}`))}>
-                <SettingsCard>
-                  {group.fields.map((field) => (
-                    <SettingsField
-                      key={fieldId(field.path)}
-                      field={field}
-                      keyPrefix={schema.keyPrefix}
-                      value={getAt(draft, field.path)}
-                      onChange={(value) => setDraft((current) => setAt(current, field.path, value))}
-                    />
-                  ))}
-                </SettingsCard>
-              </SettingsGroup>
+            {settingsPanel(() => (
+              <>
+                <p className="px-3 text-body-2-regular text-text-secondary">
+                  {doc?.exists ? t(schema.hints.scope) : t('cliSettings.missingHint')}
+                </p>
+                {schema.groups.map((group) => (
+                  <SettingsGroup key={group.id} label={t(key(`${schema.keyPrefix}.group.${group.id}`))}>
+                    <SettingsCard>
+                      {group.fields.map((field) => (
+                        <SettingsField
+                          key={fieldId(field.path)}
+                          field={field}
+                          keyPrefix={schema.keyPrefix}
+                          value={getAt(draft, field.path)}
+                          onChange={(value) => setDraft((current) => setAt(current, field.path, value))}
+                        />
+                      ))}
+                    </SettingsCard>
+                  </SettingsGroup>
+                ))}
+                <p className="px-3 text-body-2-regular text-text-secondary">{t(schema.hints.moreInRaw)}</p>
+              </>
             ))}
-            <p className="px-3 text-body-2-regular text-text-secondary">{t(schema.hints.moreInRaw)}</p>
           </TabPanel> : null}
           {envPath ? (
             <TabPanel id="env" className="flex flex-col gap-3">
-              {schema.hints.env ? <p className="px-3 text-body-2-regular text-text-secondary">{t(schema.hints.env)}</p> : null}
-              <EnvEditor rows={env} onChange={setEnv} nextKey={() => nextEnvKey.current++} isManaged={envManaged} />
+              {settingsPanel(() => (
+                <>
+                  {schema.hints.env ? <p className="px-3 text-body-2-regular text-text-secondary">{t(schema.hints.env)}</p> : null}
+                  <EnvEditor rows={env} onChange={setEnv} nextKey={() => nextEnvKey.current++} isManaged={envManaged} />
+                </>
+              ))}
             </TabPanel>
           ) : null}
           {isPi ? (
@@ -271,42 +298,54 @@ function CliSettingsForm({ schema, api }: { schema: CliSettingsSchema; api: () =
               <DshPluginsPanel state={dshPlugins} />
             </TabPanel>
           ) : null}
-          <TabPanel id="raw" className="flex flex-col gap-3">
-            {doc.parseError ? <Alert status="warning" title={t('cliSettings.parseError', { file: fileName })} description={doc.parseError} /> : null}
-            {rawRevealed || !doc.exists ? (
-              <Textarea
-                className="w-full"
-                aria-label={fileName}
-                value={rawText}
-                onChange={setRawText}
-                rows={22}
-                spellCheck="false"
-                isInvalid={Boolean(rawError)}
-                hint={rawError ?? t(doc.format === 'toml' ? 'cliSettings.rawHintToml' : doc.format === 'yaml' ? 'cliSettings.rawHintYaml' : 'cliSettings.rawHintJson')}
-                inputClassName="font-mono text-caption-1-regular"
-              />
-            ) : (
-              <Alert
-                status="neutral"
-                title={t('cliSettings.rawHiddenTitle')}
-                description={t(schema.hints.rawHidden)}
-                actions={<Button size="small" variant="secondary" leadingIcon={RiEyeLine} onClick={() => setRawRevealed(true)}>{t('cliSettings.reveal')}</Button>}
-              />
-            )}
-          </TabPanel>
+          {extraTabs.map((item) => (
+            <TabPanel key={item.id} id={item.id} shouldForceMount className="data-[inert=true]:hidden">
+              {visited.has(item.id) || item.id === tab ? item.render() : null}
+            </TabPanel>
+          ))}
           <TabPanel id="agents">
             <CliInstructionsPanel state={instructions} />
+          </TabPanel>
+          <TabPanel id="raw" className="flex flex-col gap-3">
+            {settingsPanel(() => doc ? (
+              <>
+                {doc.parseError ? <Alert status="warning" title={t('cliSettings.parseError', { file: fileName })} description={doc.parseError} /> : null}
+                {rawRevealed || !doc.exists ? (
+                  <Textarea
+                    className="w-full"
+                    aria-label={fileName}
+                    value={rawText}
+                    onChange={setRawText}
+                    rows={22}
+                    spellCheck="false"
+                    isInvalid={Boolean(rawError)}
+                    hint={rawError ?? t(doc.format === 'toml' ? 'cliSettings.rawHintToml' : doc.format === 'yaml' ? 'cliSettings.rawHintYaml' : 'cliSettings.rawHintJson')}
+                    inputClassName="font-mono text-caption-1-regular"
+                  />
+                ) : (
+                  <Alert
+                    status="neutral"
+                    title={t('cliSettings.rawHiddenTitle')}
+                    description={t(schema.hints.rawHidden)}
+                    actions={<Button size="small" variant="secondary" leadingIcon={RiEyeLine} onClick={() => setRawRevealed(true)}>{t('cliSettings.reveal')}</Button>}
+                  />
+                )}
+              </>
+            ) : null)}
           </TabPanel>
         </div>
       </Tabs>
       {/* The settings page scrolls with 2rem of bottom padding; sticking at
-          -2rem keeps the save bar on the page's bottom edge. */}
-      <div className="sticky -bottom-8 z-10 -mb-8 flex flex-wrap items-center justify-end gap-2.5 border-t border-separator-border bg-background-full pt-4 pb-6">
-        {unsavedElsewhere ? (
-          <span className="me-auto text-body-2-regular text-text-secondary">{t(unsavedElsewhere)}</span>
-        ) : null}
-        <Button onClick={() => void save()} disabled={!canSave} aria-busy={(editingAgents ? instructions.busy : editingPlugins ? plugins.saving : saving) || undefined}>{t('common.save')}</Button>
-      </div>
+          -2rem keeps the save bar on the page's bottom edge. The page's
+          other tabs save on their own. */}
+      {onSettingsTab ? (
+        <div className="sticky -bottom-8 z-10 -mb-8 flex flex-wrap items-center justify-end gap-2.5 border-t border-separator-border bg-background-full pt-4 pb-6">
+          {unsavedElsewhere ? (
+            <span className="me-auto text-body-2-regular text-text-secondary">{t(unsavedElsewhere)}</span>
+          ) : null}
+          <Button onClick={() => void save()} disabled={!canSave} aria-busy={(editingAgents ? instructions.busy : editingPlugins ? plugins.saving : saving) || undefined}>{t('common.save')}</Button>
+        </div>
+      ) : null}
     </div>
   );
 }

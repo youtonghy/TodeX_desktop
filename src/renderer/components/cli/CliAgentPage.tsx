@@ -11,7 +11,7 @@ import { AgentProvidersPanel } from '../../screens/AgentProvidersPanel';
 import { CapabilitiesPanel, type ProviderChoice } from '../../screens/CapabilitiesPanel';
 import { NativeHistoryTab } from '../cleanup/NativeHistoryTab';
 import { ProviderIcon } from '../ProviderIcon';
-import { CliSettingsEditor } from './CliSettingsEditor';
+import { CliSettingsEditor, type CliPageExtraTab } from './CliSettingsEditor';
 
 /** A CLI's own page in CLI management, or the shared skills and MCPs. */
 export type CliPage = ManagedCliProvider | 'shared';
@@ -52,37 +52,48 @@ export function CliAgentPage({ session, backend, api, id, name, onBack }: {
 }) {
   const t = useT();
   const tabs = cliPageTabs(backend, id);
-  const [picked, setPicked] = useState<CliPageTab>(tabs[0] ?? 'settings');
-  const tab = tabs.includes(picked) ? picked : tabs[0];
-  // A visited tab stays mounted (hidden), so unsaved settings edits survive
-  // a look at another tab; unvisited ones load nothing.
-  const [visited, setVisited] = useState<ReadonlySet<CliPageTab>>(() => new Set(tab ? [tab] : []));
-  const select = (next: CliPageTab) => {
-    setPicked(next);
-    setVisited((current) => (current.has(next) ? current : new Set([...current, next])));
-  };
   const provider = capabilityProvider(backend, id);
+  // Everything besides the settings file joins its tabs in one tab row.
+  const extraTabs: CliPageExtraTab[] = tabs.flatMap((item): CliPageExtraTab[] => {
+    const label = t(TAB_LABELS[item]);
+    if (item === 'capabilities' && provider) return [{ id: item, label, render: () => <BackendCapabilities session={session} backend={backend} provider={provider} /> }];
+    if (item === 'accounts') return [{ id: item, label, render: () => <AgentProvidersPanel key={backend.backendId} backend={backend} agent={id as ManagedProviderAgent} /> }];
+    if (item === 'cleanup') return [{ id: item, label, render: () => <NativeHistoryTab key={backend.backendId} backend={backend} provider={id as NativeHistoryProvider} label={name} /> }];
+    return [];
+  });
   return (
     <SettingsSubpage
       title={<span className="flex items-center gap-2"><ProviderIcon provider={id} className="size-5" />{name}</span>}
       onBack={onBack}
     >
-      <Tabs selectedKey={tab} onSelectionChange={(key) => select(key as CliPageTab)} className="gap-4">
-        <TabList aria-label={name}>
-          {tabs.map((item) => <Tab key={item} id={item}>{t(TAB_LABELS[item])}</Tab>)}
-        </TabList>
-        {tabs.map((item) => (
-          <TabPanel key={item} id={item} shouldForceMount className="data-[inert=true]:hidden">
-            {!visited.has(item) && item !== tab ? null
-              : item === 'settings' && hasCliSettings(id) ? <CliSettingsEditor provider={id} api={api} />
-                : item === 'capabilities' && provider ? <BackendCapabilities session={session} backend={backend} provider={provider} />
-                  : item === 'accounts' ? <AgentProvidersPanel key={backend.backendId} backend={backend} agent={id as ManagedProviderAgent} />
-                    : item === 'cleanup' ? <NativeHistoryTab key={backend.backendId} backend={backend} provider={id as NativeHistoryProvider} label={name} />
-                      : null}
-          </TabPanel>
-        ))}
-      </Tabs>
+      {hasCliSettings(id)
+        ? <CliSettingsEditor provider={id} api={api} label={name} extraTabs={extraTabs} />
+        : <CliPageTabs label={name} tabs={extraTabs} />}
     </SettingsSubpage>
+  );
+}
+
+/** The tab row of a CLI without a settings file. */
+function CliPageTabs({ label, tabs }: { label: string; tabs: CliPageExtraTab[] }) {
+  const [picked, setPicked] = useState(tabs[0]?.id);
+  const tab = tabs.some((item) => item.id === picked) ? picked : tabs[0]?.id;
+  // A visited tab stays mounted (hidden); unvisited ones load nothing.
+  const [visited, setVisited] = useState<ReadonlySet<string>>(() => new Set(tab ? [tab] : []));
+  const select = (next: string) => {
+    setPicked(next);
+    setVisited((current) => (current.has(next) ? current : new Set([...current, next])));
+  };
+  return (
+    <Tabs selectedKey={tab} onSelectionChange={(key) => select(String(key))} className="gap-4">
+      <TabList aria-label={label}>
+        {tabs.map((item) => <Tab key={item.id} id={item.id}>{item.label}</Tab>)}
+      </TabList>
+      {tabs.map((item) => (
+        <TabPanel key={item.id} id={item.id} shouldForceMount className="data-[inert=true]:hidden">
+          {visited.has(item.id) || item.id === tab ? item.render() : null}
+        </TabPanel>
+      ))}
+    </Tabs>
   );
 }
 
