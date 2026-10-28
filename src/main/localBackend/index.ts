@@ -7,7 +7,7 @@ import type WebSocket from 'ws';
 import { BackendBinaries, binaryVersion, matchingBackendVersion, platformLabel } from './binary';
 import { autostartEnabled, clientPort, daemonCommand, daemonRecord, daemonStatus, dockerInstances, dockerPairApprove, setAutostart, type DaemonStatus, type DockerInstance } from './cli';
 import { LOCAL_ADMIN_PREFIX, isLocalAdminPath } from './adminPath';
-import { socketFetch, socketJson, socketWebSocket } from './socketHttp';
+import { socketFetch, socketJson, socketWebSocket, truncateUtf8 } from './socketHttp';
 import { ipcInstanceId } from '../container/instance';
 
 export const IPC_SCHEME = 'todex-ipc';
@@ -16,6 +16,8 @@ export const LOCAL_INSTANCE = 'local';
 const NATIVE_DEFAULT_PORT = 7345;
 const PAIRING_CREATE_PATH = '/v2/device-pairing/create';
 const LOG_TAIL_BYTES = 64 * 1024;
+/** RFC 6455: a close frame's reason is at most 123 bytes of UTF-8. */
+const MAX_CLOSE_REASON_BYTES = 123;
 // The backend shows ten hex digits as XXXXX-XXXXX (src/device_pairing.rs).
 const VERIFICATION_CODE = /^[0-9a-f]{5}-?[0-9a-f]{5}$/i;
 
@@ -36,6 +38,18 @@ export type LocalBackendHost = {
   isRendererUrl(url: string): boolean;
   stopOnQuit(): boolean;
   log(level: 'info' | 'warn' | 'error', event: string, data?: Record<string, unknown>): void;
+};
+
+/** A renderer WebSocket relayed to a backend socket; `socket` is null until the upstream resolves. */
+type RelaySocket = {
+  socket: WebSocket | null;
+  owner: WebContents;
+  closeRequested: boolean;
+  closeCode?: number;
+  closeReason?: string;
+  /** Close reported to the renderer (once). */
+  closed: boolean;
+  finish?: (code: number, reason: string) => void;
 };
 
 type ContainerInstance = { id: string; name: string; socketPath: string };
@@ -131,7 +145,8 @@ export class LocalBackendManager {
   private dockerContainers: DockerInstance[] = [];
   /** Pairing requests this app created over IPC: only these may be approved without the user. */
   private readonly ownPairings = new Map<string, { instance: string; expiresAt: number }>();
-  private readonly sockets = new Map<number, { socket: WebSocket; owner: WebContents }>();
+  private readonly sockets = new Map<number, RelaySocket>();
+  private readonly watchedOwners = new WeakSet<WebContents>();
   private nextSocketId = 1;
   private busy: Promise<unknown> = Promise.resolve();
 
@@ -270,44 +285,99 @@ export class LocalBackendManager {
     if (isLocalAdminPath(url.pathname)) throw new Error('forbidden');
     const id = this.nextSocketId++;
     const owner = event.sender;
+    // Registered before the socket exists, so a close that arrives while the
+    // upstream is still being resolved is not lost.
+    const entry: RelaySocket = { socket: null, owner, closeRequested: false, closed: false };
+    this.sockets.set(id, entry);
+    this.watchOwner(owner);
     const emit = (payload: Record<string, unknown>) => {
       if (!owner.isDestroyed()) owner.send('localBackend:wsEvent', { id, ...payload });
     };
+    const finish = (code: number, reason: string) => {
+      if (entry.closed) return;
+      entry.closed = true;
+      this.sockets.delete(id);
+      emit({ type: 'close', code, reason });
+    };
+    entry.finish = finish;
     const start = async () => {
       await this.ensureResolved(url.hostname);
+      if (entry.closeRequested) {
+        finish(entry.closeCode ?? 1000, entry.closeReason ?? '');
+        return;
+      }
       const socket = socketWebSocket(this.socketFor(url.hostname), `${url.pathname}${url.search}`, { origin: this.host.appOrigin });
-      this.sockets.set(id, { socket, owner });
+      entry.socket = socket;
       socket.on('open', () => emit({ type: 'open' }));
       socket.on('message', (data, isBinary) => {
         const buffer = Array.isArray(data) ? Buffer.concat(data) : Buffer.from(data as ArrayBuffer);
         emit(isBinary ? { type: 'message', binary: new Uint8Array(buffer) } : { type: 'message', text: buffer.toString('utf8') });
       });
-      socket.on('error', (error) => emit({ type: 'error', message: error.message }));
-      socket.on('close', (code, reason) => {
-        this.sockets.delete(id);
-        emit({ type: 'close', code, reason: reason.toString('utf8') });
+      socket.on('error', (error) => {
+        if (!entry.closed) emit({ type: 'error', message: error.message });
       });
+      socket.on('close', (code, reason) => finish(code, reason.toString('utf8')));
     };
     start().catch((error) => {
+      if (entry.closed) return;
       emit({ type: 'error', message: errorMessage(error) });
-      emit({ type: 'close', code: 1006, reason: '' });
+      finish(1006, '');
     });
-    owner.once('destroyed', () => this.sockets.get(id)?.socket.terminate());
     return id;
+  }
+
+  /** One `destroyed` listener per renderer, ending every socket it still owns. */
+  private watchOwner(owner: WebContents): void {
+    if (this.watchedOwners.has(owner)) return;
+    this.watchedOwners.add(owner);
+    owner.once('destroyed', () => {
+      this.watchedOwners.delete(owner);
+      this.closeSocketsOf(owner);
+    });
+  }
+
+  /** Ends the relay sockets `owner` opened (it reloaded, crashed or closed). */
+  closeSocketsOf(owner: WebContents): void {
+    for (const entry of [...this.sockets.values()]) {
+      if (entry.owner !== owner) continue;
+      entry.closeRequested = true;
+      try {
+        entry.socket?.terminate();
+      } catch (error) {
+        this.host.log('warn', 'localBackend.ws.terminateFailed', { error: errorMessage(error) });
+      }
+      entry.finish?.(1001, '');
+    }
   }
 
   private wsSend(event: IpcMainEvent, id: unknown, data: unknown): void {
     const entry = typeof id === 'number' ? this.sockets.get(id) : undefined;
-    if (!entry || entry.owner !== event.sender) return;
-    if (typeof data === 'string') entry.socket.send(data);
-    else if (data instanceof Uint8Array) entry.socket.send(data, { binary: true });
+    if (!entry || entry.owner !== event.sender || !entry.socket || entry.closeRequested) return;
+    try {
+      if (typeof data === 'string') entry.socket.send(data);
+      else if (data instanceof Uint8Array) entry.socket.send(data, { binary: true });
+    } catch (error) {
+      // Not open yet, or already closing: the renderer sees the close event.
+      this.host.log('warn', 'localBackend.ws.sendFailed', { error: errorMessage(error) });
+    }
   }
 
   private wsClose(event: IpcMainEvent, id: unknown, code: unknown, reason: unknown): void {
     const entry = typeof id === 'number' ? this.sockets.get(id) : undefined;
-    if (!entry || entry.owner !== event.sender) return;
+    if (!entry || entry.owner !== event.sender || entry.closeRequested) return;
     const validCode = typeof code === 'number' && (code === 1000 || (code >= 3000 && code <= 4999)) ? code : 1000;
-    entry.socket.close(validCode, typeof reason === 'string' ? reason.slice(0, 120) : undefined);
+    const validReason = typeof reason === 'string' ? truncateUtf8(reason, MAX_CLOSE_REASON_BYTES) : '';
+    entry.closeRequested = true;
+    entry.closeCode = validCode;
+    entry.closeReason = validReason;
+    // Still resolving the socket: `start` sees the flag and reports the close.
+    if (!entry.socket) return;
+    try {
+      entry.socket.close(validCode, validReason);
+    } catch (error) {
+      this.host.log('warn', 'localBackend.ws.closeFailed', { error: errorMessage(error) });
+      entry.socket.terminate();
+    }
   }
 
   // ---- native instance ---------------------------------------------------

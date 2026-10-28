@@ -179,3 +179,13 @@ test('daemon.json stands in for daemon status on backends without --format json'
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('close reasons are cut by UTF-8 bytes without splitting characters', async () => {
+  const { truncateUtf8 } = await import('../src/main/localBackend/socketHttp.ts');
+  assert.equal(truncateUtf8('short', 123), 'short');
+  const wide = '界'.repeat(60); // 180 bytes
+  const cut = truncateUtf8(wide, 123);
+  assert.equal(cut, '界'.repeat(41));
+  assert.ok(Buffer.byteLength(cut) <= 123);
+  assert.equal(truncateUtf8('a😀b', 4), 'a');
+});

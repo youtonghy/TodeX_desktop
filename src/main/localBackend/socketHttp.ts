@@ -5,6 +5,8 @@ import WebSocket from 'ws';
 
 /** Host header sent over the local channel; backends check it is loopback. */
 const IPC_HOST = 'localhost';
+/** A local socket that accepts but never answers the upgrade must not hang the relay. */
+const WS_HANDSHAKE_TIMEOUT_MS = 15_000;
 
 export type SocketRequest = {
   method: string;
@@ -87,6 +89,21 @@ export function socketWebSocket(socketPath: string, path: string, headers: Recor
   return new WebSocket(`ws://${IPC_HOST}${path}`, {
     headers,
     perMessageDeflate: false,
+    handshakeTimeout: WS_HANDSHAKE_TIMEOUT_MS,
     createConnection: () => connect(socketPath),
   } as WebSocket.ClientOptions);
+}
+
+/** `text` cut to at most `maxBytes` of UTF-8 without splitting a character. */
+export function truncateUtf8(text: string, maxBytes: number): string {
+  if (Buffer.byteLength(text, 'utf8') <= maxBytes) return text;
+  let bytes = 0;
+  let end = 0;
+  for (const char of text) {
+    const size = Buffer.byteLength(char, 'utf8');
+    if (bytes + size > maxBytes) break;
+    bytes += size;
+    end += char.length;
+  }
+  return text.slice(0, end);
 }

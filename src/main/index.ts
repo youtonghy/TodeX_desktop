@@ -514,6 +514,13 @@ function windowState(window: BrowserWindow): { maximized: boolean; fullScreen: b
   return { maximized: window.isMaximized(), fullScreen: window.isFullScreen() };
 }
 
+/** Ends what a renderer document owned in the main process (see createWindow). */
+function releaseRendererResources(contents: Electron.WebContents, reason: string): void {
+  debugLog('debug', 'renderer.resources.release', { id: contents.id, reason });
+  previews?.closeAll();
+  localBackend?.closeSocketsOf(contents);
+}
+
 function createWindow(): BrowserWindow {
   const window = new BrowserWindow({
     width: 1280,
@@ -612,8 +619,14 @@ function createWindow(): BrowserWindow {
       rendererReloadTimer = null;
     }
   });
+  // A reload (or crash) drops the renderer's state: its preview tabs, relay
+  // sockets and setup jobs would otherwise outlive the page that owns them.
+  window.webContents.on('did-start-navigation', (details) => {
+    if (details.isMainFrame && !details.isSameDocument) releaseRendererResources(window.webContents, 'navigation');
+  });
   window.webContents.on('render-process-gone', (_event, details) => {
     debugLog('fatal', 'renderer.process-gone', { id: window.webContents.id, details });
+    releaseRendererResources(window.webContents, 'process-gone');
     if (!['crashed', 'oom', 'integrity-failure'].includes(details.reason)) return;
     rendererCrashCount += 1;
     if (rendererCrashCount > MAX_RENDERER_CRASH_RELOADS) {
