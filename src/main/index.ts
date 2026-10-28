@@ -7,7 +7,7 @@ import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { checkForUpdates, downloadUpdate, installUpdate, refreshUpdateMenu, setAutoDownload, startAutoUpdates, updateState } from './autoUpdates';
 import { syncDesktopEntry } from './desktopEntry';
-import { PREVIEW_PARTITION, PreviewViews, type InspectColors, type PreviewTarget } from './previewViews';
+import { PreviewViews, previewPartition, type InspectColors, type PreviewTarget } from './previewViews';
 import { PreviewProxy, type PreviewBackend } from './previewProxy';
 import { LocalBackendManager, registerIpcScheme } from './localBackend';
 import { CONTAINER_PREFS_KEY, ContainerManager, type ContainerPrefs } from './container';
@@ -952,14 +952,33 @@ app.whenReady().then(() => {
     previews?.closeAll();
   });
   const liveWindow = () => (mainWindow && !mainWindow.isDestroyed() ? mainWindow : null);
+  // One preview partition (and forwarder) per backend; new tabs open in the
+  // active backend's, existing tabs stay with the backend they were opened for.
+  const previewProxies = new Map<string, PreviewProxy>();
+  const previewProxyFor = (partition: string): PreviewProxy => {
+    let proxy = previewProxies.get(partition);
+    if (!proxy) {
+      proxy = new PreviewProxy(session.fromPartition(partition));
+      previewProxies.set(partition, proxy);
+    }
+    return proxy;
+  };
+  let activePreviewPartition = previewPartition(null);
+  previewProxyFor(activePreviewPartition);
   previews = new PreviewViews(
     liveWindow,
     state => liveWindow()?.webContents.send('preview:state', state),
     picked => liveWindow()?.webContents.send('preview:picked', picked),
+    () => activePreviewPartition,
   );
   handleIpc('preview:open', (_event, key: string, target: PreviewTarget) => previews?.open(String(key), target));
-  const previewProxy = new PreviewProxy(session.fromPartition(PREVIEW_PARTITION));
-  handleIpc('preview:setBackend', (_event, backend: unknown) => previewProxy.setBackend(previewBackend(backend)));
+  handleIpc('preview:setBackend', (_event, value: unknown) => {
+    const backend = previewBackend(value);
+    const partition = previewPartition(backend?.serverUrl ?? null);
+    // Same partition, same backend: refreshed credentials apply to its open tabs too.
+    previewProxyFor(partition).setBackend(backend);
+    activePreviewPartition = partition;
+  });
   handleIpc('preview:reload', (_event, key: string) => previews?.reload(String(key)));
   handleIpc('preview:goBack', (_event, key: string) => previews?.goBack(String(key)));
   handleIpc('preview:capture', (_event, key: string) => previews?.capture(String(key)) ?? null);

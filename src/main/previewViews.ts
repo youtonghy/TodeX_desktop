@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { WebContentsView, type BrowserWindow, type Rectangle } from 'electron';
 import { isLoopbackUrl } from '@todex/protocol/mobileParity';
 
@@ -7,8 +8,17 @@ const VIEWPORT = { width: 1280, height: 800 };
  * parked one keeps rendering. */
 const PARKED = { x: -VIEWPORT.width - 200, y: 0, ...VIEWPORT };
 
-/** Workbench preview pages share one partition, apart from the app's own storage. */
-export const PREVIEW_PARTITION = 'persist:todex-preview';
+/**
+ * Partition of the preview pages served through `serverUrl`'s backend (null:
+ * this machine), apart from the app's own storage. Every backend gets its own,
+ * so cookies and storage of one host's `127.0.0.1:3000` never reach another
+ * host's service on the same port.
+ */
+export function previewPartition(serverUrl: string | null): string {
+  if (!serverUrl) return 'persist:todex-preview-local';
+  const digest = createHash('sha256').update(serverUrl.trim().replace(/\/+$/, '')).digest('hex');
+  return `persist:todex-preview-${digest.slice(0, 16)}`;
+}
 const INSPECT_WORLD = 'todex-inspect';
 const INSPECT_BINDING = '__todexInspect';
 
@@ -98,6 +108,8 @@ export class PreviewViews {
     private readonly window: () => BrowserWindow | null,
     private readonly emitState: (state: PreviewState) => void,
     private readonly emitPicked: (picked: PickedElement) => void,
+    /** Partition for a new view: the backend active now. A view keeps its partition (and backend) for life. */
+    private readonly partition: () => string,
   ) {}
 
   async open(key: string, target: PreviewTarget): Promise<void> {
@@ -208,7 +220,7 @@ export class PreviewViews {
   private create(key: string): Preview {
     const window = this.window();
     if (!window) throw new Error('the TodeX window is not open');
-    const view = new WebContentsView({ webPreferences: { partition: PREVIEW_PARTITION, sandbox: true, contextIsolation: true, nodeIntegration: false } });
+    const view = new WebContentsView({ webPreferences: { partition: this.partition(), sandbox: true, contextIsolation: true, nodeIntegration: false } });
     const preview: Preview = { view, inspect: null, listening: false };
     const contents = view.webContents;
     const allowed = (url: string) => isLoopbackUrl(url) || url.startsWith('data:text/html') || url === 'about:blank';
