@@ -354,6 +354,8 @@ function PermissionResponseForm({ request, form, onSelect }: { request: PendingR
   }}>
     {form.mode === 'url' && form.url ? <div className="flex flex-col items-start gap-1">
       <LinkButton href={form.url} target="_blank" rel="noopener noreferrer" trailingIcon={RiExternalLinkLine}>{t('runStatus.openVerify')}</LinkButton>
+      {/* The agent picks this address: show where it leads before it opens. */}
+      <bdi dir="ltr" className="text-caption-1-regular text-text-tertiary">{new URL(form.url).host}</bdi>
       <p className="text-body-2-regular text-text-secondary">{t('runStatus.verifyHint')}</p>
     </div> : null}
     {form.fields.map(permissionFieldInput)}

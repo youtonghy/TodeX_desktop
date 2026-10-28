@@ -122,6 +122,7 @@ import { describeToolCall, type ToolCallKind } from '@todex/protocol/toolPresent
 import { agentCallingToolFromName, agentCallingToolSummary, type AgentCallingTool } from '@todex/protocol/agentCalling';
 import { isThinkingProgressEntry } from '@todex/protocol/mobileParity';
 import { getLocale, t, useT, type MessageKey } from '../i18n';
+import { ErrorBoundary } from '@/components/ui/error-boundary';
 
 type Props = {
   session: TodeXSession;
@@ -776,12 +777,12 @@ const ChatTimelineItem = memo(function ChatTimelineItem({
                 className="cursor-pointer rounded-md px-1 py-0.5 text-caption-1-regular text-text-error-primary outline-none focus-visible:ring-2 focus-visible:ring-border-focus-ring"
                 onClick={requestDetails}
               >
-                加载过程记录失败，点按重试
+                {t('chat.processLoadFailed')}
               </button>
             ) : (
               <p className="flex items-center gap-1.5 px-1 py-0.5 text-caption-1-regular text-text-tertiary">
                 <Spinner size="xs" />
-                正在加载过程记录…
+                {t('chat.processLoading')}
               </p>
             )
           ) : (
@@ -915,6 +916,24 @@ const ChatTimelineItem = memo(function ChatTimelineItem({
   && prev.markdownComponents === next.markdownComponents
   && prev.onHydrateGroup === next.onHydrateGroup
   && prev.onApprove === next.onApprove);
+
+/** One row that failed to render; the rest of the conversation stays usable. */
+function RowRenderError() {
+  const t = useT();
+  return <p className="px-1 py-0.5 text-caption-1-regular text-text-tertiary">{t('chat.rowRenderFailed')}</p>;
+}
+
+/** Inserts `text` at the viewport point, as typing would (one undo step,
+ * an input event for the editor). */
+function insertPlainTextAt(x: number, y: number, text: string): void {
+  const range = document.caretRangeFromPoint?.(x, y);
+  const selection = window.getSelection();
+  if (range && selection) {
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+  document.execCommand('insertText', false, text);
+}
 
 function isHttpUrl(href: string | undefined): boolean {
   try {
@@ -1881,8 +1900,8 @@ export function ChatPanel({ session }: Props) {
             </p>
           ) : null}
           {mountedItems.map((item) => (
+            <ErrorBoundary key={chatRenderItemKey(item)} label="chat row" fallback={() => <RowRenderError />}>
             <ChatTimelineItem
-              key={chatRenderItemKey(item)}
               item={item}
               conversationId={conversation.id}
               agentName={agentLabel}
@@ -1907,6 +1926,7 @@ export function ChatPanel({ session }: Props) {
               animateEntrance={animateEntrance}
               session={session}
             />
+            </ErrorBoundary>
           ))}
           {showTrailingStatus ? (
             backgroundTaskCount > 0 ? <BackgroundTasksStatus tasks={backgroundTasks} items={items} /> : (
@@ -2178,9 +2198,11 @@ export function ChatPanel({ session }: Props) {
                     return;
                   }
                   // Dropped text follows the paste rules; short text drops in
-                  // where the pointer is, as the browser does it.
+                  // where the pointer is, as plain text (never the rich HTML
+                  // the browser would insert).
+                  event.preventDefault();
                   const text = event.dataTransfer.getData('text/plain');
-                  if (text && addPastedText(text)) event.preventDefault();
+                  if (text && !addPastedText(text)) insertPlainTextAt(event.clientX, event.clientY, text);
                 }}
                 // Capture phase so long text pastes become capsules before the
                 // editor inserts them as plain text.

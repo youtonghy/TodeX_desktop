@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { codeToHtml } from 'shiki';
 import { RiCheckLine, RiFileCopyLine } from '@remixicon/react';
 import { Focusable } from 'react-aria-components';
@@ -56,20 +56,58 @@ export function CopyCodeButton({ code, label: labelProp, copiedLabel: copiedProp
   );
 }
 
+/** Larger code renders plain: Shiki runs on the main thread and builds a
+ * span per token, which freezes the UI on big or minified files. */
+const HIGHLIGHT_MAX_CHARS = 200_000;
+const HIGHLIGHT_MAX_LINES = 5_000;
+const HIGHLIGHT_MAX_LINE_CHARS = 10_000;
+/** A changing block (a streamed reply) is re-highlighted at most this often. */
+const HIGHLIGHT_DEBOUNCE_MS = 150;
+
+function highlightable(code: string): boolean {
+  if (code.length > HIGHLIGHT_MAX_CHARS) return false;
+  let lines = 1;
+  let lineStart = 0;
+  for (let index = code.indexOf('\n'); index !== -1; index = code.indexOf('\n', index + 1)) {
+    if (index - lineStart > HIGHLIGHT_MAX_LINE_CHARS || ++lines > HIGHLIGHT_MAX_LINES) return false;
+    lineStart = index + 1;
+  }
+  return code.length - lineStart <= HIGHLIGHT_MAX_LINE_CHARS;
+}
+
 export function HighlightedCode({ code, language = 'plaintext', className }: { code: string; language?: string; className?: string }) {
   const key = `${language}:${code}`;
-  const [html, setHtml] = useState<{ key: string; html: string } | null>(null);
+  const enabled = useMemo(() => highlightable(code), [code]);
+  const [html, setHtml] = useState<{ key: string; language: string; code: string; html: string } | null>(null);
+  const lastRunRef = useRef(0);
   useEffect(() => {
+    if (!code || !enabled) return;
     let cancelled = false;
-    if (!code) return;
-    codeToHtml(code, { lang: language, themes: { light: 'github-light', dark: 'github-dark' }, defaultColor: false })
-      .then((result) => { if (!cancelled) setHtml({ key, html: result }); })
-      .catch(() => { if (!cancelled) setHtml(null); });
-    return () => { cancelled = true; };
-  }, [code, language, key]);
+    const run = () => {
+      lastRunRef.current = Date.now();
+      codeToHtml(code, { lang: language, themes: { light: 'github-light', dark: 'github-dark' }, defaultColor: false })
+        .then((result) => { if (!cancelled) setHtml({ key, language, code, html: result }); })
+        .catch(() => { if (!cancelled) setHtml(null); });
+    };
+    const wait = HIGHLIGHT_DEBOUNCE_MS - (Date.now() - lastRunRef.current);
+    if (wait <= 0) {
+      run();
+      return () => { cancelled = true; };
+    }
+    const timer = window.setTimeout(run, wait);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [code, enabled, language, key]);
   const base = cx('code-block-code w-full overflow-x-auto font-mono text-[13px] leading-[1.7]', className);
-  if (html?.key === key) return <div className={base} dangerouslySetInnerHTML={{ __html: html.html }} />;
-  return <div className={base}><pre><code>{code}</code></pre></div>;
+  // While a growing block waits for its next pass, the last highlight stays
+  // up rather than flashing back to plain text.
+  const current = html && enabled && (html.key === key || (html.language === language && code.startsWith(html.code))) ? html : null;
+  // `data-code-synced`: the element's text is exactly `code` (selection
+  // offsets map onto it), which a stale highlight is not.
+  if (current) return <div className={base} data-code-synced={current.key === key} dangerouslySetInnerHTML={{ __html: current.html }} />;
+  return <div className={base} data-code-synced><pre><code>{code}</code></pre></div>;
 }
 
 export function CodeBlock({ code, language = 'plaintext', title, actions, showCopy = true, copyLabel, className, codeClassName }: {

@@ -1441,9 +1441,12 @@ export function conversationDisplayTitle(
   if (preview && preview !== '暂无预览' && preview !== '还没有消息') {
     return preview;
   }
-  const firstPrompt = [...timeline]
-    .filter((entry) => entry.conversationId === conversation.id && entry.kind === 'outgoing' && entry.subtitle.trim())
-    .sort((left, right) => left.at - right.at)[0];
+  // One pass, no copy: the sidebar asks this for every row on each render.
+  let firstPrompt: TimelineEntry | undefined;
+  for (const entry of timeline) {
+    if (entry.conversationId !== conversation.id || entry.kind !== 'outgoing' || (firstPrompt && entry.at >= firstPrompt.at)) continue;
+    if (entry.subtitle.trim()) firstPrompt = entry;
+  }
   return summarize(firstPrompt?.subtitle || '') || title || t('chat.untitledConversation');
 }
 

@@ -8,7 +8,7 @@ import { UnicodeGraphemesAddon } from '@xterm/addon-unicode-graphemes';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { WebglAddon } from '@xterm/addon-webgl';
 import { Terminal, type IDisposable, type IMarker, type ITheme } from '@xterm/xterm';
-import type { TerminalStream } from '@todex/protocol/terminalStream';
+import { TERMINAL_STREAM_LIMIT, type TerminalStream } from '@todex/protocol/terminalStream';
 import {
   findFileLinks,
   isTerminalImageType,
@@ -23,10 +23,15 @@ import { Input } from '@/components/base/input/input';
 import { ConfirmDialog } from '@/components/ui/modal';
 import { ContextMenu, Menu, MenuItem, MenuSeparator } from '@/components/ui/menu';
 import { IconAction } from '@/components/ui/icon-action';
+import { toast } from '@/components/ui/toast';
 import { cx } from '@/utils/cx';
-import { useT } from '../i18n';
+import { t as translate, useT } from '../i18n';
 import { platform } from '../platform';
 import { terminalFontFamily, useTerminalPreferences } from '../session/terminalPreferences';
+
+/** OSC 52 clipboard writes longer than this are ignored. */
+const OSC52_MAX_CHARS = 100_000;
+const HIDDEN_FLUSH_MS = 250;
 
 export type TerminalCommandFinished = { exitCode: number | null; durationMs: number };
 
@@ -316,9 +321,16 @@ export function XtermTerminal({ stream, isActive, isDisabled = false, ...handler
     const searchAddon = new SearchAddon();
     const progressAddon = new ProgressAddon();
     const clipboardProvider: IClipboardProvider = {
-      // Programs may set the clipboard (OSC 52) but never read it.
+      // Programs may set the clipboard (OSC 52) but never read it. Only the
+      // terminal on screen may, within a size limit, and the user is told:
+      // any output (a cat'ed file, a remote host) can send the sequence.
       readText: () => '',
-      writeText: (_selection: ClipboardSelectionType, text: string) => navigator.clipboard?.writeText(text).catch(() => undefined),
+      writeText: (_selection: ClipboardSelectionType, text: string) => {
+        if (!isActiveRef.current || !text || text.length > OSC52_MAX_CHARS) return;
+        return navigator.clipboard?.writeText(text)
+          .then(() => { toast.info(translate('terminal.clipboardWritten', { count: text.length })); })
+          .catch(() => undefined);
+      },
     };
     terminal.loadAddon(fitAddon);
     terminal.loadAddon(searchAddon);
@@ -479,17 +491,20 @@ export function XtermTerminal({ stream, isActive, isDisabled = false, ...handler
       else actionsRef.current.pasteText(text);
     };
     container.addEventListener('paste', onPaste, true);
+    // Dropped files never fall through to the page: a browser would open them
+    // in place of the app.
     const onDragOver = (event: DragEvent) => {
-      if (!handlersRef.current.onPasteImages || !event.dataTransfer?.types.includes('Files')) return;
+      if (!event.dataTransfer?.types.includes('Files')) return;
       event.preventDefault();
-      event.dataTransfer.dropEffect = 'copy';
+      event.dataTransfer.dropEffect = handlersRef.current.onPasteImages ? 'copy' : 'none';
     };
     const onDrop = (event: DragEvent) => {
-      const images = imagesOf(event.dataTransfer);
-      if (!handlersRef.current.onPasteImages || !images.length) return;
+      if (!event.dataTransfer?.types.includes('Files')) return;
       event.preventDefault();
       event.stopPropagation();
-      void actionsRef.current.pasteImages(images);
+      const images = imagesOf(event.dataTransfer);
+      if (handlersRef.current.onPasteImages && images.length) void actionsRef.current.pasteImages(images);
+      else toast.info(translate('terminal.dropImagesOnly'));
     };
     container.addEventListener('dragover', onDragOver);
     container.addEventListener('drop', onDrop);
@@ -523,12 +538,26 @@ export function XtermTerminal({ stream, isActive, isDisabled = false, ...handler
     // Output: what the stream kept, then live updates written once a frame.
     let pending = '';
     let writeFrame = 0;
+    let writeTimer = 0;
     let lastActivity = 0;
     const flush = () => {
       writeFrame = 0;
+      writeTimer = 0;
       if (!pending) return;
       terminal.write(pending);
       pending = '';
+    };
+    const cancelFlush = () => {
+      window.cancelAnimationFrame(writeFrame);
+      window.clearTimeout(writeTimer);
+      writeFrame = 0;
+      writeTimer = 0;
+    };
+    // Frames stop in a hidden window, so output is flushed on a timer there.
+    const scheduleFlush = () => {
+      if (writeFrame || writeTimer) return;
+      if (document.hidden) writeTimer = window.setTimeout(flush, HIDDEN_FLUSH_MS);
+      else writeFrame = window.requestAnimationFrame(flush);
     };
     // A truncated tail may start mid-sequence; a snapshot replaces it.
     if (!stream.truncated || !handlersRef.current.onRequestSnapshot?.()) {
@@ -536,8 +565,7 @@ export function XtermTerminal({ stream, isActive, isDisabled = false, ...handler
     }
     const unsubscribe = stream.subscribe((update) => {
       if (update.kind === 'reset') {
-        window.cancelAnimationFrame(writeFrame);
-        writeFrame = 0;
+        cancelFlush();
         pending = '';
         terminal.reset();
         promptMarkersRef.current = [];
@@ -545,7 +573,17 @@ export function XtermTerminal({ stream, isActive, isDisabled = false, ...handler
         return;
       }
       pending += update.data;
-      if (!writeFrame) writeFrame = window.requestAnimationFrame(flush);
+      if (pending.length > TERMINAL_STREAM_LIMIT) {
+        // More than the stream keeps arrived unwritten: redraw from what it
+        // kept instead of writing (and holding) all of it.
+        cancelFlush();
+        pending = '';
+        terminal.reset();
+        promptMarkersRef.current = [];
+        terminal.write(stream.snapshot());
+      } else {
+        scheduleFlush();
+      }
       const now = Date.now();
       if (now - lastActivity > ACTIVITY_THROTTLE_MS) {
         lastActivity = now;
@@ -555,7 +593,7 @@ export function XtermTerminal({ stream, isActive, isDisabled = false, ...handler
 
     return () => {
       unsubscribe();
-      window.cancelAnimationFrame(writeFrame);
+      cancelFlush();
       window.cancelAnimationFrame(fitFrame);
       window.clearTimeout(resizeTimer);
       container.removeEventListener('paste', onPaste, true);

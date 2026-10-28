@@ -427,8 +427,10 @@ export const ReferenceComposer = forwardRef<ReferenceComposerHandle, {
       }}
       onPaste={(event) => {
         const text = event.clipboardData?.getData('text/plain');
-        if (!text) return;
+        // Only plain text enters the editor: rich HTML (remote images,
+        // hidden elements) would ride along into the prompt.
         event.preventDefault();
+        if (!text) return;
         // A pasted capsule token should render as a capsule again.
         forceRebuildRef.current = composerTokenPattern().test(text);
         if (typeof document.execCommand === 'function' && document.execCommand('insertText', false, text)) {

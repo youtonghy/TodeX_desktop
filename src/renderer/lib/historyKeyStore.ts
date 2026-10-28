@@ -3,6 +3,7 @@
 // OS keychain through Electron safeStorage (main process `secureStore:*`).
 
 import { decodeBase64UrlBytes, encodeBase64Url } from '@todex/protocol/transportCrypto';
+import { t } from '../i18n';
 
 const seedKey = (profileId: string) => `todex.desktop.historySeed.v1.${profileId}`;
 
@@ -10,7 +11,7 @@ export async function loadHistorySeed(profileId: string): Promise<Uint8Array | n
   const stored = await window.todexDesktop.secureStore.get(seedKey(profileId));
   if (!stored) return null;
   const seed = decodeBase64UrlBytes(stored);
-  if (seed.length !== 32) throw new Error('历史记录密钥已损坏，请在设置中重新登记此设备');
+  if (seed.length !== 32) throw new Error(t('history.seedCorrupt'));
   return seed;
 }
 

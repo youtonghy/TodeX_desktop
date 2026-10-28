@@ -273,7 +273,9 @@ export function WorkspaceFilePreview({ file, onAddReference, onSaveFile, onReloa
       let range: TextLineRange | undefined;
       const codeElement = container.querySelector<HTMLElement>('.code-block-code');
       const source = file?.text;
-      if (source && codeElement && codeElement.textContent === source) {
+      // Comparing textContent would rebuild the whole file's text on every
+      // selection change; the code block marks when its text is the source.
+      if (source && codeElement?.dataset.codeSynced === 'true') {
         const start = selectionStartOffset(codeElement);
         if (start !== null) range = lineRangeForOffsets(source, start, start + info.text.length);
       }

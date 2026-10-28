@@ -1,4 +1,4 @@
-import { Component, lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { RiAddLine, RiFolderAddLine, RiExpandLeftLine, RiExpandRightLine, RiGithubLine, RiLayoutLeftLine, RiLayoutRightLine } from '@remixicon/react';
 import { motion, useReducedMotion } from 'motion/react';
 import { Dialog, Modal as AriaModal, ModalOverlay } from 'react-aria-components';
@@ -8,6 +8,7 @@ import { SegmentedControl, SegmentedControlItem } from '@/components/base/segmen
 import { Select, SelectItem } from '@/components/base/select/select';
 import { useDirection } from '@/components/foundations/direction/direction';
 import { Alert } from '@/components/ui/alert';
+import { ErrorBoundary } from '@/components/ui/error-boundary';
 import { IconAction } from '@/components/ui/icon-action';
 import { Modal } from '@/components/ui/modal';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -59,26 +60,25 @@ function PanelFallback() {
 }
 const panelFallback = <PanelFallback />;
 
-function PanelError({ error }: { error: unknown }) {
+function PanelError({ error, onRetry }: { error: unknown; onRetry: () => void }) {
   const t = useT();
   return (
-    <div className="p-4">
+    <div className="flex flex-col items-start gap-3 p-4">
       <Alert status="danger" title={t('app.panelFailed')} description={error instanceof Error ? error.message : String(error)} />
+      <Button size="small" variant="secondary" onClick={onRetry}>{t('app.panelRetry')}</Button>
     </div>
   );
 }
 
 /** A panel that fails to load or render shows its error in place instead of
- * unmounting the whole app (a blank window). */
-class PanelErrorBoundary extends Component<{ children: ReactNode }, { error: unknown }> {
-  state: { error: unknown } = { error: null };
-  static getDerivedStateFromError(error: unknown) { return { error }; }
-  componentDidCatch(error: unknown) { console.error('[panel] render failed', error); }
-  render() { return this.state.error ? <PanelError error={this.state.error} /> : this.props.children; }
-}
-
-function PanelBoundary({ children }: { children: ReactNode }) {
-  return <PanelErrorBoundary><Suspense fallback={panelFallback}>{children}</Suspense></PanelErrorBoundary>;
+ * unmounting the whole app (a blank window); `resetKey` (the conversation or
+ * panel shown) retries once it changes. */
+function PanelBoundary({ children, resetKey }: { children: ReactNode; resetKey?: unknown }) {
+  return (
+    <ErrorBoundary label="panel" resetKey={resetKey} fallback={(error, reset) => <PanelError error={error} onRetry={reset} />}>
+      <Suspense fallback={panelFallback}>{children}</Suspense>
+    </ErrorBoundary>
+  );
 }
 
 /** The compact-layout drawer motion from the BoardUI AI chat shell. */
@@ -466,7 +466,7 @@ export function App() {
 
   const asideContent = (
     !scopeKey || !layout.hydrated ? null : (
-      <PanelBoundary>
+      <PanelBoundary resetKey={`${scopeKey}:${overlayPanel ?? workbenchTab}`}>
         {overlayPanel ? (
           <AsidePanel
             session={session}
@@ -549,9 +549,9 @@ export function App() {
             onDismiss={session.historyEncryption.dismissRecoveryNotice}
           />
         </div>
-        <div className="min-h-0 flex-1"><ChatPanel session={session} /></div>
+        <div className="min-h-0 flex-1"><PanelBoundary resetKey={session.activeConversation?.id}><ChatPanel session={session} /></PanelBoundary></div>
       </div>
-    ) : <ChatPanel session={session} />
+    ) : <PanelBoundary resetKey={session.activeConversation?.id}><ChatPanel session={session} /></PanelBoundary>
   );
 
   // The conversation container of the BoardUI AI chat shell: header row, then
