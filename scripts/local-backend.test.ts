@@ -13,6 +13,7 @@ import {
   releaseAssetName,
   releaseIsSigned,
   releaseSignatureValid,
+  signatureRequired,
   RELEASE_SIGNING_KEYS,
 } from '../src/main/localBackend/releaseAssets.ts';
 import { socketFetch, socketJson, socketWebSocket } from '../src/main/localBackend/socketHttp.ts';
@@ -188,4 +189,13 @@ test('close reasons are cut by UTF-8 bytes without splitting characters', async 
   assert.equal(cut, '界'.repeat(41));
   assert.ok(Buffer.byteLength(cut) <= 123);
   assert.equal(truncateUtf8('a😀b', 4), 'a');
+});
+
+test('an unsigned old release is accepted only as the exact matching version', () => {
+  assert.equal(signatureRequired('2.3.6', '2.3.6'), false);
+  // Dev builds (no matching version) resolve "latest": never unsigned.
+  assert.equal(signatureRequired('2.3.6', null), true);
+  assert.equal(signatureRequired('2.3.5', '2.3.6'), true);
+  assert.equal(signatureRequired('2.3.7', '2.3.7'), true);
+  assert.equal(signatureRequired('3.0.0', null), true);
 });

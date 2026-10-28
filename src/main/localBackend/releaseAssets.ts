@@ -64,6 +64,20 @@ export function releaseIsSigned(version: string): boolean {
   return compareVersions(version, LAST_UNSIGNED_VERSION) > 0;
 }
 
+/**
+ * Whether a backend release must come with a valid `SHA256SUMS.sig`: every
+ * release after v2.3.6, and also an older one unless it is exactly the
+ * version this desktop build pairs with (`matchingVersion`). Otherwise a
+ * leaked publishing token could mark an old unsigned release "latest" and
+ * dev builds, which install "latest", would take it unsigned.
+ */
+export function signatureRequired(version: string, matchingVersion: string | null): boolean {
+  return releaseIsSigned(version) || version !== matchingVersion;
+}
+
+/** Signature domain of backend releases (TodeX_backend build-binaries.yml). */
+export const BACKEND_RELEASE_DOMAIN = 'todex-release-v1';
+
 /** Whether `signature` (`SHA256SUMS.sig`) is a release key's Ed25519 signature over
  * `"todex-release-v1\0" + tag + "\0" + manifest`, exactly as the release workflow signs. */
 export function releaseSignatureValid(
@@ -72,10 +86,22 @@ export function releaseSignatureValid(
   signature: Uint8Array,
   keys: readonly string[] = RELEASE_SIGNING_KEYS,
 ): boolean {
+  return manifestSignatureValid(BACKEND_RELEASE_DOMAIN, tag, manifest, signature, keys);
+}
+
+/** Whether `signature` is a key's Ed25519 signature over `domain + "\0" + tag + "\0" + manifest`. */
+export function manifestSignatureValid(
+  domain: string,
+  tag: string,
+  manifest: Uint8Array,
+  signature: Uint8Array,
+  keys: readonly string[] = RELEASE_SIGNING_KEYS,
+): boolean {
   if (signature.byteLength !== 64) return false;
   const encoder = new TextEncoder();
   const message = Buffer.concat([
-    encoder.encode('todex-release-v1\0'),
+    encoder.encode(domain),
+    new Uint8Array([0]),
     encoder.encode(tag),
     new Uint8Array([0]),
     manifest,

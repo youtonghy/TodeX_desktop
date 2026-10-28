@@ -513,7 +513,7 @@ export class LocalBackendManager {
     return this.exclusive(async () => {
       const version = await this.binaries.resolveVersion(this.host.buildVersion);
       if (this.binaries.installedVersions().includes(version)) return this.binaries.managedPath(version);
-      const path = await this.binaries.install(version, (received, total) => {
+      const path = await this.binaries.install(version, this.expectedVersion(), (received, total) => {
         if (!sender.isDestroyed()) sender.send('localBackend:progress', { version, received, total });
       });
       this.host.log('info', 'localBackend.installed', { version });
@@ -606,12 +606,15 @@ export class LocalBackendManager {
     }
   }
 
-  async stopForQuit(): Promise<void> {
-    if (!this.host.stopOnQuit()) return;
-    const binary = await this.currentBinary(null);
-    if (!binary) return;
-    const status = await daemonStatus(binary.path, this.dataDir).catch(() => null);
-    if (status?.running) await daemonCommand(binary.path, this.dataDir, 'stop');
+  /** Queued behind a running start/stop/install, like those are behind each other. */
+  stopForQuit(): Promise<void> {
+    if (!this.host.stopOnQuit()) return Promise.resolve();
+    return this.exclusive(async () => {
+      const binary = await this.currentBinary(null);
+      if (!binary) return;
+      const status = await daemonStatus(binary.path, this.dataDir).catch(() => null);
+      if (status?.running) await daemonCommand(binary.path, this.dataDir, 'stop');
+    });
   }
 
   // ---- local-admin API -------------------------------------------------

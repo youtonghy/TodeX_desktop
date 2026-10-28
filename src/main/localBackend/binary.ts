@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { constants, existsSync, readdirSync } from 'node:fs';
-import { access, chmod, mkdir, rename, rm, writeFile } from 'node:fs/promises';
+import { access, chmod, mkdir, open, rename, rm, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { promisify } from 'node:util';
@@ -13,8 +13,8 @@ import {
   parseVersionOutput,
   platformLabel,
   releaseAssetName,
-  releaseIsSigned,
   releaseSignatureValid,
+  signatureRequired,
 } from './releaseAssets';
 
 export { matchingBackendVersion, platformLabel } from './releaseAssets';
@@ -25,6 +25,10 @@ export const BACKEND_REPOSITORY = 'youtonghy/TodeX_backend';
 const RELEASES_URL = `https://github.com/${BACKEND_REPOSITORY}/releases/download`;
 const LATEST_RELEASE_API = `https://api.github.com/repos/${BACKEND_REPOSITORY}/releases/latest`;
 const MAX_BINARY_BYTES = 256 * 1024 * 1024;
+/** SHA256SUMS, its signature and the latest-release lookup are small. */
+const METADATA_TIMEOUT_MS = 30_000;
+/** A download that receives nothing for this long is given up (and frees the lifecycle lock). */
+const DOWNLOAD_IDLE_TIMEOUT_MS = 60_000;
 const BINARY_NAME = process.platform === 'win32' ? 'todex-agentd.exe' : 'todex-agentd';
 
 export class BackendBinaries {
@@ -57,7 +61,7 @@ export class BackendBinaries {
   async resolveVersion(buildVersion: string): Promise<string> {
     const matching = matchingBackendVersion(buildVersion);
     if (matching) return matching;
-    const response = await net.fetch(LATEST_RELEASE_API, { headers: { accept: 'application/vnd.github+json' } });
+    const response = await net.fetch(LATEST_RELEASE_API, { headers: { accept: 'application/vnd.github+json' }, signal: AbortSignal.timeout(METADATA_TIMEOUT_MS) });
     if (!response.ok) throw new Error(`GitHub releases: HTTP ${response.status}`);
     const tag = (await response.json() as { tag_name?: unknown }).tag_name;
     const version = typeof tag === 'string' ? tag.replace(/^v/, '') : '';
@@ -66,19 +70,23 @@ export class BackendBinaries {
   }
 
   /** Downloads `version`, checks it against the release's `SHA256SUMS` and
-   * its own `--version`, and only then publishes it at `managedPath`. */
-  async install(version: string, onProgress?: (received: number, total: number) => void): Promise<string> {
+   * its own `--version`, and only then publishes it at `managedPath`.
+   * `matchingVersion` is the release this desktop build pairs with: only that
+   * one may predate release signing (see `signatureRequired`). */
+  async install(version: string, matchingVersion: string | null, onProgress?: (received: number, total: number) => void): Promise<string> {
     const label = platformLabel();
     if (!label) throw Object.assign(new Error(`no published backend build for ${process.platform}-${process.arch}`), { code: 'unsupported_platform' });
     const asset = releaseAssetName(version, label);
-    const sumsResponse = await net.fetch(`${RELEASES_URL}/v${version}/SHA256SUMS`);
+    const sumsResponse = await net.fetch(`${RELEASES_URL}/v${version}/SHA256SUMS`, { signal: AbortSignal.timeout(METADATA_TIMEOUT_MS) });
     if (!sumsResponse.ok) throw new Error(`SHA256SUMS for v${version}: HTTP ${sumsResponse.status}`);
     const sums = new Uint8Array(await sumsResponse.arrayBuffer());
     // The checksums are trusted only once the release key signed them, so
     // a release published without the key (a leaked token) is refused.
-    // v2.3.6 and earlier predate signing and only have their checksums.
-    if (releaseIsSigned(version)) {
-      const signatureResponse = await net.fetch(`${RELEASES_URL}/v${version}/SHA256SUMS.sig`);
+    // v2.3.6 and earlier predate signing and only have their checksums; they
+    // are accepted only as the exact version this desktop build ships with,
+    // never as whatever GitHub currently calls "latest".
+    if (signatureRequired(version, matchingVersion)) {
+      const signatureResponse = await net.fetch(`${RELEASES_URL}/v${version}/SHA256SUMS.sig`, { signal: AbortSignal.timeout(METADATA_TIMEOUT_MS) });
       if (!signatureResponse.ok) {
         throw Object.assign(new Error(`SHA256SUMS.sig for v${version}: HTTP ${signatureResponse.status}`), { code: 'signature_invalid' });
       }
@@ -90,40 +98,60 @@ export class BackendBinaries {
     const expected = checksumFor(new TextDecoder().decode(sums), asset);
     if (!expected) throw new Error(`SHA256SUMS of v${version} has no entry for ${asset}`);
 
-    const response = await net.fetch(`${RELEASES_URL}/v${version}/${asset}`);
-    if (!response.ok || !response.body) throw new Error(`${asset}: HTTP ${response.status}`);
-    const total = Number(response.headers.get('content-length')) || 0;
-    if (total > MAX_BINARY_BYTES) throw new Error(`${asset} is larger than ${MAX_BINARY_BYTES} bytes`);
-    const chunks: Uint8Array[] = [];
-    const hash = createHash('sha256');
-    let received = 0;
-    const reader = response.body.getReader();
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      received += value.byteLength;
-      if (received > MAX_BINARY_BYTES) {
-        await reader.cancel();
-        throw new Error(`${asset} is larger than ${MAX_BINARY_BYTES} bytes`);
-      }
-      hash.update(value);
-      chunks.push(value);
-      onProgress?.(received, total);
-    }
-    const actual = hash.digest('hex');
-    if (actual !== expected) throw Object.assign(new Error(`${asset} does not match SHA256SUMS`), { code: 'checksum_mismatch' });
-
     const target = this.managedPath(version);
     const dir = join(this.root, version);
     await mkdir(dir, { recursive: true, mode: 0o700 });
     const staged = join(dir, `.${BINARY_NAME}.${process.pid}.partial`);
+    // Streamed to the staging file while hashing; a stalled connection is
+    // aborted after DOWNLOAD_IDLE_TIMEOUT_MS without data.
+    const idle = new AbortController();
+    let idleTimer: ReturnType<typeof setTimeout> | undefined;
+    const armIdle = () => {
+      clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => idle.abort(new Error(`${asset}: no data for ${DOWNLOAD_IDLE_TIMEOUT_MS / 1000} s`)), DOWNLOAD_IDLE_TIMEOUT_MS);
+    };
     try {
-      await writeFile(staged, Buffer.concat(chunks), { mode: 0o700 });
+      armIdle();
+      const response = await net.fetch(`${RELEASES_URL}/v${version}/${asset}`, { signal: idle.signal });
+      if (!response.ok || !response.body) throw new Error(`${asset}: HTTP ${response.status}`);
+      const total = Number(response.headers.get('content-length')) || 0;
+      if (total > MAX_BINARY_BYTES) throw new Error(`${asset} is larger than ${MAX_BINARY_BYTES} bytes`);
+      const hash = createHash('sha256');
+      let received = 0;
+      const file = await open(staged, 'w', 0o700);
+      try {
+        const reader = response.body.getReader();
+        try {
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            armIdle();
+            received += value.byteLength;
+            if (received > MAX_BINARY_BYTES) throw new Error(`${asset} is larger than ${MAX_BINARY_BYTES} bytes`);
+            hash.update(value);
+            await file.write(value);
+            onProgress?.(received, total);
+          }
+        } catch (error) {
+          await reader.cancel().catch(() => undefined);
+          throw error;
+        }
+        await file.sync();
+      } finally {
+        await file.close();
+      }
+      clearTimeout(idleTimer);
+      const actual = hash.digest('hex');
+      if (actual !== expected) throw Object.assign(new Error(`${asset} does not match SHA256SUMS`), { code: 'checksum_mismatch' });
       if (process.platform !== 'win32') await chmod(staged, 0o755);
       const reported = await binaryVersion(staged);
       if (reported !== version) throw new Error(`${asset} reports version ${reported ?? 'unknown'}, expected ${version}`);
       await rename(staged, target);
+    } catch (error) {
+      // A stalled transfer surfaces as an abort; report why.
+      throw idle.signal.aborted ? idle.signal.reason : error;
     } finally {
+      clearTimeout(idleTimer);
       await rm(staged, { force: true });
     }
     return target;
@@ -137,11 +165,26 @@ export class BackendBinaries {
   }
 }
 
+/** `--version` results by path, valid while the file's mtime and size stay the same. */
+const versionCache = new Map<string, { mtimeMs: number; size: number; version: string | null }>();
+
 export async function binaryVersion(binary: string): Promise<string | null> {
+  let info: { mtimeMs: number; size: number } | null = null;
+  try {
+    info = await stat(binary);
+  } catch {
+    versionCache.delete(binary);
+  }
+  const cached = info ? versionCache.get(binary) : undefined;
+  if (info && cached && cached.mtimeMs === info.mtimeMs && cached.size === info.size) return cached.version;
+  let version: string | null = null;
   try {
     const { stdout } = await execFileAsync(binary, ['--version'], { timeout: 10_000, windowsHide: true });
-    return parseVersionOutput(stdout);
+    version = parseVersionOutput(stdout);
   } catch {
-    return null;
+    version = null;
   }
+  // Failures are not cached: the binary may just have been busy or replaced.
+  if (info && version) versionCache.set(binary, { mtimeMs: info.mtimeMs, size: info.size, version });
+  return version;
 }
