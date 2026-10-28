@@ -26,6 +26,13 @@ const LAUNCHABLE_EXTENSIONS = new Set([
   'desktop', 'appimage', 'run', 'sh', 'bash', 'zsh', 'csh', 'ksh', 'fish', 'jar', 'jnlp',
 ]);
 
+/** Launched (or installed, or followed) by Windows only: elsewhere these are
+ * ordinary documents (`.py` opens in an editor), so they stay openable there. */
+const WINDOWS_LAUNCHABLE_EXTENSIONS = new Set([
+  'py', 'pyw', 'pyz', 'chm', 'wsc', 'sct', 'library-ms', 'search-ms', 'searchconnector-ms', 'appx', 'appxbundle',
+  'msix', 'msixbundle', 'appinstaller', 'diagcab', 'ps1xml', 'psd1', 'xll', 'theme', 'themepack', 'scf',
+]);
+
 function extensionOf(path: string, platform: NodeJS.Platform): string {
   const name = (platform === 'win32' ? win32 : posix).basename(path);
   // Windows ignores trailing dots and spaces ("run.exe. " opens run.exe).
@@ -44,7 +51,8 @@ export function shellPathRefusal(path: unknown, info: PathInfo | null, platform:
 export function openPathRefusal(path: unknown, info: PathInfo | null, platform: NodeJS.Platform): ShellPathRefusal | null {
   const refusal = shellPathRefusal(path, info, platform);
   if (refusal || typeof path !== 'string' || !info) return refusal;
-  if (LAUNCHABLE_EXTENSIONS.has(extensionOf(path, platform))) return 'launchable';
+  const extension = extensionOf(path, platform);
+  if (LAUNCHABLE_EXTENSIONS.has(extension) || (platform === 'win32' && WINDOWS_LAUNCHABLE_EXTENSIONS.has(extension))) return 'launchable';
   // macOS and Linux run an executable file (Terminal, or the file manager's
   // "run" action) rather than showing it.
   if (platform !== 'win32' && !info.isDirectory && (info.mode & 0o111) !== 0) return 'launchable';
