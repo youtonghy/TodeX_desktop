@@ -49,6 +49,7 @@ const zhCN = {
   'preview.targetUnreachable': '后端主机上的 {target} 无法连接，请确认开发服务器正在后端主机上运行。',
   'preview.backendOutdated': '当前后端不支持网页转发，请更新后端后重试。',
   'preview.forwardFailed': '无法通过后端加载 {target}：{reason}',
+  'main.updateUnverified': '下载的更新未通过签名校验，已丢弃：{reason}',
 };
 
 const messages: MainMessages = {
@@ -65,6 +66,7 @@ const messages: MainMessages = {
     'preview.targetUnreachable': 'Could not connect to {target} on the backend host. Make sure the dev server is running there.',
     'preview.backendOutdated': 'This backend does not support page forwarding. Update the backend and try again.',
     'preview.forwardFailed': 'Could not load {target} through the backend: {reason}',
+    'main.updateUnverified': 'The downloaded update failed signature verification and was discarded: {reason}',
   },
   ja: {
     'main.updateMenu': 'アップデート',
@@ -78,6 +80,7 @@ const messages: MainMessages = {
     'preview.targetUnreachable': 'バックエンドホスト上の {target} に接続できません。開発サーバーがそのホストで起動しているか確認してください。',
     'preview.backendOutdated': 'このバックエンドはページ転送に対応していません。バックエンドを更新してから再試行してください。',
     'preview.forwardFailed': 'バックエンド経由で {target} を読み込めませんでした：{reason}',
+    'main.updateUnverified': 'ダウンロードしたアップデートは署名の検証に失敗したため破棄しました：{reason}',
   },
   ko: {
     'main.updateMenu': '업데이트',
@@ -91,6 +94,7 @@ const messages: MainMessages = {
     'preview.targetUnreachable': '백엔드 호스트의 {target}에 연결할 수 없습니다. 개발 서버가 해당 호스트에서 실행 중인지 확인하세요.',
     'preview.backendOutdated': '이 백엔드는 페이지 전달을 지원하지 않습니다. 백엔드를 업데이트한 후 다시 시도하세요.',
     'preview.forwardFailed': '백엔드를 통해 {target}을(를) 불러오지 못했습니다: {reason}',
+    'main.updateUnverified': '다운로드한 업데이트가 서명 검증에 실패하여 폐기했습니다: {reason}',
   },
 };
 
