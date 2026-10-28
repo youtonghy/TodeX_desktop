@@ -164,6 +164,7 @@ export const zhCN = {
   'sidebar.unfoldGroup': '展开分组',
   'sidebar.foldGroup': '折叠分组',
   'sidebar.newGroupName': '新分组',
+  'sidebar.noWorkspace': '无工作区',
   'sidebar.groupMenu': '分组菜单',
   'sidebar.expandGroup': '展开分组 {name}',
   'sidebar.collapseGroup': '收起分组 {name}',

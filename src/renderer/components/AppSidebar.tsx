@@ -39,6 +39,7 @@ import { cx } from '@/utils/cx';
 import { useSidebarPins } from '../session/useSidebarPins';
 import { searchConversations } from '../session/conversationSearch';
 import { useSidebarGroupCollapse } from '../session/useSidebarGroupCollapse';
+import { isContainerProfile, useContainerProfileIds } from '../session/containerProfileIds';
 import { useKanbanTasks } from '../session/kanbanTasks';
 import { setFeaturesMoreOpen, useFeatureModes, useFeaturesMoreOpen, type FeatureId } from '../session/featureToggles';
 import { BACKEND_LABEL_COLORS, backendLabelColor } from '../session/backendColors';
@@ -330,6 +331,10 @@ function isNoneRowId(rowId: string): boolean {
   return noneWorkspaceRowBackendId(rowId) !== null;
 }
 
+/** Several None rows form this built-in group, which cannot be renamed,
+ * ungrouped, dragged or joined. */
+const NONE_GROUP_ID = NONE_WORKSPACE_ID;
+
 /** The workspace record behind a sidebar row (None rows share one). */
 function workspaceIdOfRow(rowId: string): string {
   return isNoneRowId(rowId) ? NONE_WORKSPACE_ID : rowId;
@@ -391,9 +396,16 @@ export function AppSidebar({
     )
   ), [activeRowId, rowIdOf, session.conversations]);
 
+  // Containers get no None row unless they already hold None conversations.
+  const containerProfileIds = useContainerProfileIds();
+  const noneBackendsInUse = useMemo(() => new Set(session.conversations
+    .filter((conversation) => isNoneWorkspaceId(conversation.workspaceId) && !conversation.archived && isListedConversation(conversation))
+    .map((conversation) => ownerBackendId(conversation, null, session.noWorkspaceBackendId))), [session.conversations, session.noWorkspaceBackendId]);
+
   // Workspaces of every configured backend are live and editable here; only
   // those left behind by a removed backend profile render read-only below.
-  // None becomes one row per backend, in the order they were added.
+  // None becomes one row per backend, in the order they were added; several
+  // of them form the built-in None group, each row named by its backend.
   const ownWorkspaces = useMemo(() => {
     // A disabled profile's backend is listed under the profile serving it.
     const enabled = session.backendConnections.filter((profile) => !profile.disabled);
@@ -405,16 +417,21 @@ export function AppSidebar({
     ) && !seen.has(workspace.id) && Boolean(seen.add(workspace.id)));
     const none = session.workspaces.find((workspace) => isNoneWorkspaceId(workspace.id));
     if (!none) return listed;
-    const profiles = [...enabled].sort((a, b) => a.createdAt - b.createdAt);
+    const profiles = enabled
+      .filter((profile) => !isContainerProfile(profile, containerProfileIds) || noneBackendsInUse.has(profile.id))
+      .sort((a, b) => a.createdAt - b.createdAt);
+    const grouped = profiles.length > 1;
     const rows = profiles.map((profile, index): WorkspaceRecord => ({
       ...none,
       id: noneWorkspaceRowId(profile.id),
-      name: profiles.length > 1 ? `${none.name} · ${profile.name}` : none.name,
+      name: grouped ? profile.name : t('sidebar.noWorkspace'),
+      groupId: grouped ? NONE_GROUP_ID : undefined,
+      groupName: grouped ? t('sidebar.noWorkspace') : undefined,
       backendConnectionId: profile.id,
       sortOrder: index,
     }));
     return [...rows, ...listed];
-  }, [session.workspaces, session.backendConnections]);
+  }, [session.workspaces, session.backendConnections, containerProfileIds, noneBackendsInUse, t]);
   const openWorkspaceRow = (rowId: string) => {
     const noneBackendId = noneWorkspaceRowBackendId(rowId);
     if (noneBackendId === null) session.selectWorkspace(rowId);
@@ -812,7 +829,7 @@ export function AppSidebar({
     ? workspaceEntries.find((entry): entry is WorkspaceGroupEntry => entry.kind === 'group' && entry.workspaces.some((workspace) => workspace.id === menu.id))?.id
     : undefined;
   const contextMoveTargets = menu?.kind === 'workspace'
-    ? workspaceEntries.filter((entry): entry is WorkspaceGroupEntry => entry.kind === 'group' && entry.id !== contextWorkspaceGroupId)
+    ? workspaceEntries.filter((entry): entry is WorkspaceGroupEntry => entry.kind === 'group' && entry.id !== contextWorkspaceGroupId && entry.id !== NONE_GROUP_ID)
     : [];
   const runGroupLayout = (next: WorkspaceSidebarEntry[]) => {
     applyWorkspaceLayout(next);
@@ -979,7 +996,7 @@ export function AppSidebar({
         textValue={name}
         aria-label={folded ? t('sidebar.expandGroup', { name }) : t('sidebar.collapseGroup', { name })}
         className={rowClassName({ rail, drop, dragging: draggingKey === `group:${entry.id}` })}
-        data-workspace-drag={`group:${entry.id}`}
+        data-workspace-drag={entry.id === NONE_GROUP_ID ? undefined : `group:${entry.id}`}
         onContextMenu={(event) => openContextMenu(event, 'group', entry.id)}
       >
         <RowContent rail={rail} title={rail ? name : undefined}>
@@ -1093,7 +1110,7 @@ export function AppSidebar({
           drop && DROP_CLASS[drop],
           draggingKey === `group:${entry.id}` && 'opacity-40',
         )}
-        data-workspace-drag={`group:${entry.id}`}
+        data-workspace-drag={entry.id === NONE_GROUP_ID ? undefined : `group:${entry.id}`}
         onContextMenu={(event) => openContextMenu(event, 'group', entry.id)}
         trailingContent={(
           <span className="flex items-center gap-1.5 pe-1">
@@ -1614,10 +1631,10 @@ export function AppSidebar({
       <PointMenu position={contextMenu} onClose={closeContextMenu}>
         {menu?.kind === 'group' ? (
           <Menu aria-label={t('sidebar.groupMenu')} autoFocus="first">
-            <MenuItem id="rename-group" icon={RiPencilLine} textValue={t('sidebar.renameGroup')} onAction={() => { if (contextGroup) setRenamingGroup({ id: contextGroup.id, name: contextGroup.name }); setContextMenu(null); }}>{t('sidebar.renameGroup')}</MenuItem>
+            {menu.id === NONE_GROUP_ID ? null : <MenuItem id="rename-group" icon={RiPencilLine} textValue={t('sidebar.renameGroup')} onAction={() => { if (contextGroup) setRenamingGroup({ id: contextGroup.id, name: contextGroup.name }); setContextMenu(null); }}>{t('sidebar.renameGroup')}</MenuItem>}
             <MenuItem id="toggle-group" icon={RiArrowDownSLine} textValue={collapsedGroups.includes(menu.id) ? t('sidebar.unfoldGroup') : t('sidebar.foldGroup')} onAction={() => { toggleGroupCollapsed(menu.id); setContextMenu(null); }}>{collapsedGroups.includes(menu.id) ? t('sidebar.unfoldGroup') : t('sidebar.foldGroup')}</MenuItem>
-            <MenuSeparator />
-            <MenuItem id="ungroup" icon={RiFoldersLine} tone="danger" textValue={t('sidebar.ungroup')} onAction={() => runGroupLayout(ungroupWorkspaceGroup(workspaceEntries, menu.id))}>{t('sidebar.ungroup')}</MenuItem>
+            {menu.id === NONE_GROUP_ID ? null : <MenuSeparator />}
+            {menu.id === NONE_GROUP_ID ? null : <MenuItem id="ungroup" icon={RiFoldersLine} tone="danger" textValue={t('sidebar.ungroup')} onAction={() => runGroupLayout(ungroupWorkspaceGroup(workspaceEntries, menu.id))}>{t('sidebar.ungroup')}</MenuItem>}
           </Menu>
         ) : menu ? (
           <Menu aria-label={menu.kind === 'workspace' ? t('sidebar.workspaceMenu') : t('sidebar.conversationMenu')} autoFocus="first">
@@ -1724,7 +1741,7 @@ export function AppSidebar({
                 </MenuPopover>
               </SubmenuTrigger>
             ) : null}
-            {contextWorkspaceGroupId ? <MenuItem id="remove-from-group" icon={RiFolderReduceLine} textValue={t('sidebar.removeFromGroup')} onAction={() => runGroupLayout(removeWorkspaceFromGroup(workspaceEntries, menu.id))}>{t('sidebar.removeFromGroup')}</MenuItem> : null}
+            {contextWorkspaceGroupId && !contextIsNone ? <MenuItem id="remove-from-group" icon={RiFolderReduceLine} textValue={t('sidebar.removeFromGroup')} onAction={() => runGroupLayout(removeWorkspaceFromGroup(workspaceEntries, menu.id))}>{t('sidebar.removeFromGroup')}</MenuItem> : null}
             {menu.kind === 'conversation' ? (
               <SubmenuTrigger>
                 <MenuItem id="label-color" icon={RiPriceTag3Line} textValue={t('sidebar.labelColor')} trailing={SUBMENU_CHEVRON}>{t('sidebar.labelColor')}</MenuItem>

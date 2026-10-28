@@ -164,6 +164,7 @@ export const ja: Messages = {
   'sidebar.unfoldGroup': 'グループを展開',
   'sidebar.foldGroup': 'グループを折りたたむ',
   'sidebar.newGroupName': '新しいグループ',
+  'sidebar.noWorkspace': 'ワークスペースなし',
   'sidebar.groupMenu': 'グループメニュー',
   'sidebar.expandGroup': 'グループ {name} を展開',
   'sidebar.collapseGroup': 'グループ {name} を折りたたむ',

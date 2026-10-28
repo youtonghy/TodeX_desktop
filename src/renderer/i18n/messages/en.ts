@@ -164,6 +164,7 @@ export const en: Messages = {
   'sidebar.unfoldGroup': 'Expand group',
   'sidebar.foldGroup': 'Collapse group',
   'sidebar.newGroupName': 'New group',
+  'sidebar.noWorkspace': 'No workspace',
   'sidebar.groupMenu': 'Group menu',
   'sidebar.expandGroup': 'Expand group {name}',
   'sidebar.collapseGroup': 'Collapse group {name}',

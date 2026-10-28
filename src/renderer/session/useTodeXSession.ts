@@ -1,5 +1,6 @@
 import { normalizeBackendLabelColor, type BackendConnectionProfile } from './backendColors';
 import { ipcDaemonConflicts, moveBackendRecords, ownerBackendId, resolveNoWorkspaceBackendId, tagLegacyBackendRecords } from './backendRouting';
+import { isContainerProfile, useContainerProfileIds } from './containerProfileIds';
 import { useWorkbenchSharing } from './useWorkbenchSharing';
 import {
   completionNotificationBody,
@@ -700,13 +701,19 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const [activeConversationId, setActiveConversationId] = useState('');
   const activeConversationRecord = conversations.find((item) => item.id === activeConversationId);
   // The None backend in view: the backend of the open None conversation,
-  // else the None row last picked, else the first backend added. New None
-  // conversations and untagged None drafts belong to it.
+  // else the None row last picked, else the first backend added that is not
+  // a container (containers get no None row). New None conversations and
+  // untagged None drafts belong to it.
   const enabledBackendConnections = useMemo(() => backendConnections.filter((profile) => !profile.disabled), [backendConnections]);
+  const containerProfileIds = useContainerProfileIds();
+  const firstHostBackendId = useMemo(() => resolveNoWorkspaceBackendId(
+    enabledBackendConnections.filter((profile) => !isContainerProfile(profile, containerProfileIds)),
+  ), [containerProfileIds, enabledBackendConnections]);
   const noWorkspaceBackendId = resolveNoWorkspaceBackendId(
     enabledBackendConnections,
     isNoneWorkspaceId(activeConversationRecord?.workspaceId) ? activeConversationRecord?.backendConnectionId : null,
     noneBackendSelection,
+    firstHostBackendId,
   );
   noWorkspaceBackendIdRef.current = noWorkspaceBackendId;
   // The focused backend serves the visible conversation (or workspace). It

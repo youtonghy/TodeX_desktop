@@ -4,6 +4,7 @@ import { useT } from '../../i18n';
 import { loadJson } from '../../lib/storage';
 import { enabledProfileIds, freezeContainer, isFrozenProfile, noteContainerState, wakeProfile } from '../../session/containerFreeze';
 import { followMovedPort } from '../../session/containerConnection';
+import { noteContainerProfiles } from '../../session/containerProfileIds';
 import { backendActive, idleExpired } from '../../session/containerIdle';
 import { CONTAINER_PREFS_KEY } from '../../session/containerPrefs';
 import type { TodeXSession } from '../../session/useTodeXSession';
@@ -12,11 +13,11 @@ import { toast } from '../ui/toast';
 const SAMPLE_MS = 30_000;
 
 /**
- * Samples the containers every 30 s: re-points the profiles of containers
- * moved to another host port, and runs Settings → TodeX Container →
- * Auto-freeze, which pauses a container once nothing ran on its backend (as
- * this app sees it) for the chosen time, and wakes it for a send, a terminal,
- * or opening one of its workspaces. Renders nothing.
+ * Samples the containers every 30 s: notes which profiles reach a container,
+ * re-points the profiles of containers moved to another host port, and runs
+ * Settings → TodeX Container → Auto-freeze, which pauses a container once
+ * nothing ran on its backend (as this app sees it) for the chosen time, and
+ * wakes it for a send, a terminal, or opening one of its workspaces. Renders nothing.
  */
 export function ContainerFreezer({ session }: { session: TodeXSession }) {
   const t = useT();
@@ -52,7 +53,10 @@ export function ContainerFreezer({ session }: { session: TodeXSession }) {
       const prefs = await loadJson<ContainerPrefs>(CONTAINER_PREFS_KEY, {});
       const minutes = Number(prefs?.freezeIdleMinutes) || 0;
       const now = Date.now();
-      for (const item of await api.list()) {
+      const items = await api.list();
+      if (cancelled) return;
+      noteContainerProfiles(sessionRef.current.backendConnections, items);
+      for (const item of items) {
         if (cancelled) return;
         const current = sessionRef.current;
         noteContainerState(current, item);
@@ -88,6 +92,21 @@ export function ContainerFreezer({ session }: { session: TodeXSession }) {
       window.clearInterval(timer);
     };
   }, []);
+
+  // A profile added or re-pointed between samples learns whether it reaches a container.
+  const profileUrls = session.backendConnections.map((profile) => `${profile.id}=${profile.serverUrl}`).join('\n');
+  useEffect(() => {
+    let cancelled = false;
+    const api = window.todexDesktop.container;
+    void api.environment()
+      .then(async (env) => {
+        if (env.problem) return;
+        const items = await api.list();
+        if (!cancelled) noteContainerProfiles(sessionRef.current.backendConnections, items);
+      })
+      .catch((error) => window.todexDesktop.debug.log('warn', 'container.profiles.failed', { error: error instanceof Error ? error.message : String(error) }));
+    return () => { cancelled = true; };
+  }, [profileUrls]);
 
   // Opening a workspace of a frozen backend wakes it, so its history loads.
   useEffect(() => {

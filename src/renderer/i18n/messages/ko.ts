@@ -164,6 +164,7 @@ export const ko: Messages = {
   'sidebar.unfoldGroup': '그룹 펼치기',
   'sidebar.foldGroup': '그룹 접기',
   'sidebar.newGroupName': '새 그룹',
+  'sidebar.noWorkspace': '워크스페이스 없음',
   'sidebar.groupMenu': '그룹 메뉴',
   'sidebar.expandGroup': '{name} 그룹 펼치기',
   'sidebar.collapseGroup': '{name} 그룹 접기',

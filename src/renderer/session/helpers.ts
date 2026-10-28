@@ -797,7 +797,7 @@ export function createNoneWorkspace(
 ): WorkspaceRecord {
   return {
     id: NONE_WORKSPACE_ID,
-    name: 'None',
+    name: t('sidebar.noWorkspace'),
     path: '',
     backendConnectionId: null,
     sessionId: createSessionId('none'),
@@ -818,11 +818,11 @@ export function createNoneWorkspace(
 }
 
 /** `workspaces` with exactly one None record, kept last so the default
- * selection stays on a real workspace. */
+ * selection stays on a real workspace. Its name follows the current locale. */
 export function withNoneWorkspace(workspaces: WorkspaceRecord[], fallback: () => WorkspaceRecord): WorkspaceRecord[] {
   const none = workspaces.find((workspace) => isNoneWorkspaceId(workspace.id));
   const rest = workspaces.filter((workspace) => !isNoneWorkspaceId(workspace.id));
-  return [...rest, none ? { ...none, backendConnectionId: null, pathMissing: undefined } : fallback()];
+  return [...rest, none ? { ...none, name: t('sidebar.noWorkspace'), backendConnectionId: null, pathMissing: undefined } : fallback()];
 }
 
 /** The workspace a conversation actually runs in: a None conversation that
