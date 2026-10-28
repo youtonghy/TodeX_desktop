@@ -1,4 +1,5 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { isAbsolute, join, posix } from 'node:path';
 import type { IpcMainInvokeEvent, WebContents } from 'electron';
@@ -7,7 +8,10 @@ import {
   detectEnvironment,
   imagesInUse,
   inspectTodexContainers,
+  createLineBatcher,
   runDocker,
+  setupExecArgs,
+  setupKillArgs,
   todexImages,
   type DockerEnvironment,
   type InspectedContainer,
@@ -82,7 +86,8 @@ export type ContainerProgress = { name: string; phase: 'pull' | 'start' | 'wait'
 export type MountResult = { target: string; backendPath: string; recreated: boolean };
 
 /** Output and outcome of a workspace setup script run in a container. */
-export type SetupOutput = { jobId: string; line: string };
+/** `lines` is one batch of output lines; `line` is the same text joined with newlines. */
+export type SetupOutput = { jobId: string; line: string; lines: string[] };
 export type SetupDone = { jobId: string; ok: boolean; exitCode: number | null; error: string | null; cancelled: boolean };
 
 /** Files whose presence suggests a setup template (see the renderer's containerSetup.ts). */
@@ -102,6 +107,8 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/** Lock key serializing name choice in `create` (not a valid instance name). */
+const CREATE_LOCK = ' create';
 const FORMER_PORTS_FILE = 'former-ports';
 const FORMER_PORTS_KEPT = 5;
 
@@ -109,7 +116,7 @@ export class ContainerManager {
   private readonly root = configRoot(process.env, homedir());
   private readonly locks = new Map<string, Promise<unknown>>();
   private environmentCache: DockerEnvironment | null = null;
-  private readonly setupJobs = new Map<string, AbortController>();
+  private readonly setupJobs = new Map<string, { controller: AbortController; sender: WebContents }>();
   private nextSetupJob = 1;
   private cleanupTimer: NodeJS.Timeout | null = null;
   private sender: WebContents | null = null;
@@ -381,21 +388,28 @@ export class ContainerManager {
   /** Creates an instance mounting `mounts` and starts it. Agents are installed later, over the API. */
   async create(options: { name?: unknown; mounts: unknown; sshAgent?: unknown; tag?: unknown }): Promise<ContainerInfo> {
     await this.requireDocker();
-    const name = options.name === undefined || options.name === '' ? this.freeName() : options.name;
-    if (!isInstanceName(name)) throw new TypeError('name');
-    if (readInstance(this.root, name, this.defaults())) throw new Error(`a container named ${name} already exists`);
     if (!Array.isArray(options.mounts) || !options.mounts.length) throw new TypeError('mounts');
     const tag = typeof options.tag === 'string' && /^[A-Za-z0-9_.-]{1,128}$/.test(options.tag) ? options.tag : 'latest';
+    // Picking a free name and claiming it (writing the instance directory)
+    // happen under one lock, so two creates cannot pick or reuse the same name.
+    const name = await this.exclusive(CREATE_LOCK, async () => {
+      const name = options.name === undefined || options.name === '' ? this.freeName() : options.name;
+      if (!isInstanceName(name)) throw new TypeError('name');
+      return this.exclusive(name, async () => {
+        if (readInstance(this.root, name, this.defaults())) throw new Error(`a container named ${name} already exists`);
+        const mounts: InstanceMount[] = [];
+        for (const raw of options.mounts as unknown[]) {
+          const host = await this.realDirectory(raw);
+          if (mountCovering(mounts, host, process.platform === 'win32')) continue;
+          mounts.push({ host, target: mountTargetFor(host, process.platform, mounts) });
+        }
+        const settings: InstanceSettings = { ...this.defaults(), ...await this.newPort(name), tag, extraAgents: '', sshAgent: options.sshAgent === true };
+        await this.write({ name, settings, mounts }, true);
+        this.host.log('info', 'container.create', { name, port: settings.publish ? settings.port : null, mounts: mounts.length });
+        return name;
+      });
+    });
     return this.exclusive(name, async () => {
-      const mounts: InstanceMount[] = [];
-      for (const raw of options.mounts as unknown[]) {
-        const host = await this.realDirectory(raw);
-        if (mountCovering(mounts, host, process.platform === 'win32')) continue;
-        mounts.push({ host, target: mountTargetFor(host, process.platform, mounts) });
-      }
-      const settings: InstanceSettings = { ...this.defaults(), ...await this.newPort(name), tag, extraAgents: '', sshAgent: options.sshAgent === true };
-      await this.write({ name, settings, mounts }, true);
-      this.host.log('info', 'container.create', { name, port: settings.publish ? settings.port : null, mounts: mounts.length });
       await this.up(name);
       return (await this.list()).find((item) => item.name === name)!;
     });
@@ -477,28 +491,54 @@ export class ContainerManager {
     return (async () => {
       const info = (await this.list()).find((item) => item.name === name);
       if (!info?.container || info.state !== 'running') throw new Error(`${name} is not running`);
+      const container = info.container;
       const jobId = `setup-${this.nextSetupJob++}`;
       const controller = new AbortController();
-      this.setupJobs.set(jobId, controller);
+      // Ends the local `docker exec` client once the script is gone (or could not be signalled).
+      const client = new AbortController();
+      const pgidFile = `/tmp/todex-setup-${randomUUID()}.pgid`;
+      this.setupJobs.set(jobId, { controller, sender });
       const send = (channel: string, payload: SetupOutput | SetupDone) => {
         if (!sender.isDestroyed()) sender.send(channel, payload);
       };
+      const output = createLineBatcher((lines) => send('container:setupOutput', { jobId, line: lines.join('\n'), lines }));
+      let stopping: Promise<void> | null = null;
+      let timedOut = false;
+      // The script runs in its own process group in the container; signal
+      // that group, since killing the local client would leave it running.
+      const terminate = () => {
+        stopping ??= runDocker(setupKillArgs(container, pgidFile), { timeoutMs: 15_000 })
+          .then(() => undefined, (error: unknown) => this.host.log('warn', 'container.setup.killFailed', { name, jobId, error: errorMessage(error) }))
+          .finally(() => client.abort());
+        return stopping;
+      };
+      controller.signal.addEventListener('abort', () => void terminate(), { once: true });
+      const timer = setTimeout(() => {
+        timedOut = true;
+        void terminate();
+      }, SETUP_TIMEOUT_MS);
+      timer.unref?.();
       this.host.log('info', 'container.setup.start', { name, jobId });
-      // Not a login shell: Debian's /etc/profile resets PATH, dropping node and ~/.local/bin.
-      void runDocker(['exec', '-u', 'todex', '-w', cwd, info.container, 'bash', '-c', script], {
-        timeoutMs: SETUP_TIMEOUT_MS,
-        signal: controller.signal,
-        onLine: (line) => send('container:setupOutput', { jobId, line }),
+      void runDocker(setupExecArgs(container, cwd, script, pgidFile), {
+        signal: client.signal,
+        onLine: (line) => output.push(line),
       }).then(
-        () => send('container:setupDone', { jobId, ok: true, exitCode: 0, error: null, cancelled: false }),
-        (error: unknown) => send('container:setupDone', {
-          jobId,
-          ok: false,
-          exitCode: error instanceof DockerError ? error.exitCode : null,
-          error: errorMessage(error),
-          cancelled: controller.signal.aborted,
-        }),
+        () => {
+          output.flush();
+          send('container:setupDone', { jobId, ok: true, exitCode: 0, error: null, cancelled: false });
+        },
+        (error: unknown) => {
+          output.flush();
+          send('container:setupDone', {
+            jobId,
+            ok: false,
+            exitCode: error instanceof DockerError ? error.exitCode : null,
+            error: timedOut ? `the setup script did not finish within ${SETUP_TIMEOUT_MS / 60_000} minutes` : errorMessage(error),
+            cancelled: controller.signal.aborted,
+          });
+        },
       ).finally(() => {
+        clearTimeout(timer);
         this.setupJobs.delete(jobId);
         this.host.log('info', 'container.setup.done', { name, jobId });
       });
@@ -506,8 +546,15 @@ export class ContainerManager {
     })();
   }
 
-  cancelSetup(jobId: unknown): void {
-    if (typeof jobId === 'string') this.setupJobs.get(jobId)?.abort();
+  cancelSetup(sender: WebContents, jobId: unknown): void {
+    if (typeof jobId !== 'string') return;
+    const job = this.setupJobs.get(jobId);
+    if (job && job.sender === sender) job.controller.abort();
+  }
+
+  /** Cancels the setup runs `sender` started (it reloaded, crashed or closed). */
+  abortSetupsOf(sender: WebContents): void {
+    for (const job of this.setupJobs.values()) if (job.sender === sender) job.controller.abort();
   }
 
   /**
@@ -719,6 +766,6 @@ export class ContainerManager {
     handle('container:unpause', (event, value) => from(event, () => this.setPaused(name(value), false)));
     handle('container:detectSetup', (_event, folder: unknown) => this.detectSetup(folder));
     handle('container:runSetup', (event, value, cwd: unknown, script: unknown) => this.runSetup(event.sender, name(value), cwd, script));
-    handle('container:cancelSetup', (_event, jobId: unknown) => this.cancelSetup(jobId));
+    handle('container:cancelSetup', (event, jobId: unknown) => this.cancelSetup(event.sender, jobId));
   }
 }

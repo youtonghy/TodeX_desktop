@@ -519,6 +519,7 @@ function releaseRendererResources(contents: Electron.WebContents, reason: string
   debugLog('debug', 'renderer.resources.release', { id: contents.id, reason });
   previews?.closeAll();
   localBackend?.closeSocketsOf(contents);
+  containers?.abortSetupsOf(contents);
 }
 
 function createWindow(): BrowserWindow {

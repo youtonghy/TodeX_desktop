@@ -32,6 +32,9 @@ export type RunOptions = {
   signal?: AbortSignal;
 };
 
+/** A partial line longer than this (no newline in sight) is passed on as it is. */
+const MAX_PENDING_LINE = 64 * 1024;
+
 /** Runs `docker <args>`; resolves stdout, rejects with the last stderr lines. */
 export function runDocker(args: string[], options: RunOptions = {}): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -45,6 +48,10 @@ export function runDocker(args: string[], options: RunOptions = {}): Promise<str
       const lines = pending.split(/\r?\n|\r/);
       pending = lines.pop() ?? '';
       for (const line of lines) if (line.trim()) options.onLine(line);
+      if (pending.length > MAX_PENDING_LINE) {
+        options.onLine(pending);
+        pending = '';
+      }
     };
     child.stdout.setEncoding('utf8').on('data', (chunk: string) => {
       if (stdout.length < 8 * 1024 * 1024) stdout += chunk;
@@ -62,6 +69,8 @@ export function runDocker(args: string[], options: RunOptions = {}): Promise<str
     });
     child.on('close', (code, signal) => {
       if (timer) clearTimeout(timer);
+      if (options.onLine && pending.trim()) options.onLine(pending);
+      pending = '';
       if (code === 0) {
         resolve(stdout);
         return;
@@ -71,6 +80,70 @@ export function runDocker(args: string[], options: RunOptions = {}): Promise<str
       reject(new DockerError(message, classifyDockerError(stderr), code));
     });
   });
+}
+
+/**
+ * Runs a setup script as the leader of its own process group and records the
+ * group id in `pgidFile`, so `setupKillArgs` can end the script and everything
+ * it started inside the container: killing the local `docker exec` client
+ * alone leaves them running. Arguments for `bash -c` after the command:
+ * `$0` = pgid file, `$1` = the script.
+ */
+export const SETUP_WRAPPER = 'echo $$ > "$0"; bash -c "$1"; status=$?; rm -f "$0"; exit $status';
+
+/** TERM to the script's process group, then KILL after five seconds; `$0` = pgid file. */
+export const SETUP_KILL = [
+  'f="$0"',
+  'for _ in $(seq 20); do [ -s "$f" ] && break; sleep 0.1; done',
+  '[ -s "$f" ] || exit 0',
+  'pg=$(cat "$f")',
+  'case "$pg" in ""|*[!0-9]*) exit 0;; esac',
+  'kill -TERM -- "-$pg" 2>/dev/null || { rm -f "$f"; exit 0; }',
+  'for _ in $(seq 50); do kill -0 -- "-$pg" 2>/dev/null || break; sleep 0.1; done',
+  'kill -KILL -- "-$pg" 2>/dev/null',
+  'rm -f "$f"',
+  'exit 0',
+].join('\n');
+
+/** `docker exec` running `script` in `cwd` as the todex user, killable through `pgidFile`. */
+export function setupExecArgs(container: string, cwd: string, script: string, pgidFile: string): string[] {
+  // Not a login shell: Debian's /etc/profile resets PATH, dropping node and ~/.local/bin.
+  return ['exec', '-u', 'todex', '-w', cwd, container, 'setsid', '-w', 'bash', '-c', SETUP_WRAPPER, pgidFile, script];
+}
+
+/** `docker exec` ending the setup run recorded in `pgidFile` (same user, so nothing else can be signalled). */
+export function setupKillArgs(container: string, pgidFile: string): string[] {
+  return ['exec', '-u', 'todex', container, 'bash', '-c', SETUP_KILL, pgidFile];
+}
+
+/**
+ * Collects output lines and hands them on in batches: every `intervalMs`, or
+ * at once when `maxBytes` of text is waiting. `flush()` sends what is left.
+ */
+export function createLineBatcher(send: (lines: string[]) => void, intervalMs = 50, maxBytes = 64 * 1024) {
+  let lines: string[] = [];
+  let bytes = 0;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const flush = () => {
+    if (timer) {
+      clearTimeout(timer);
+      timer = null;
+    }
+    if (!lines.length) return;
+    const batch = lines;
+    lines = [];
+    bytes = 0;
+    send(batch);
+  };
+  return {
+    push(line: string) {
+      lines.push(line);
+      bytes += line.length;
+      if (bytes >= maxBytes) flush();
+      else if (!timer) timer = setTimeout(flush, intervalMs);
+    },
+    flush,
+  };
 }
 
 export type DockerEnvironment = {

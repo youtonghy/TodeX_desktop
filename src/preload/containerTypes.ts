@@ -52,7 +52,8 @@ export type ContainerProgress = { name: string; phase: 'pull' | 'start' | 'wait'
 
 export type ContainerMountResult = { target: string; backendPath: string; recreated: boolean };
 
-export type ContainerSetupOutput = { jobId: string; line: string };
+/** One batch of setup output: `lines` in order; `line` is the batch joined with newlines (older listeners). */
+export type ContainerSetupOutput = { jobId: string; line: string; lines: string[] };
 export type ContainerSetupDone = { jobId: string; ok: boolean; exitCode: number | null; error: string | null; cancelled: boolean };
 
 /** Settings → TodeX Container → Automatic cleanup (store key `todex.desktop.container.v1`). */
