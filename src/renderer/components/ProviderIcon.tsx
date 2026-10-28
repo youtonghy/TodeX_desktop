@@ -7,6 +7,7 @@ import grokSvg from '@lobehub/icons-static-svg/icons/grok.svg?raw';
 import opencodeSvg from '@lobehub/icons-static-svg/icons/opencode.svg?raw';
 import piSvg from '@lobehub/icons-static-svg/icons/pi.svg?raw';
 import { RiRobot2Line } from '@remixicon/react';
+import ompSvg from '@/assets/providers/omp.svg?raw';
 import { cx } from '@/utils/cx';
 
 type Props = {
@@ -34,6 +35,7 @@ function brandSvg(provider?: string | null): string | null {
   if (id === 'opencode' || id === 'open-code' || id === 'open_code') return opencodeSvg;
   if (id === 'antigravity' || id === 'agy' || id === 'antigravity-cli') return antigravitySvg;
   if (id === 'deepseek-harness' || id === 'deepseek_harness' || id === 'dsh') return deepseekSvg;
+  if (id === 'omp' || id === 'oh-my-pi' || id === 'oh_my_pi') return ompSvg;
   return null;
 }
 

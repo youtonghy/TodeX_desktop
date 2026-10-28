@@ -1426,6 +1426,8 @@ export function conversationDisplayTitle(
     'devin',
     'opencode',
     'antigravity',
+    'omp',
+    'oh-my-pi',
     'deepseek harness',
     conversation.provider ? providerDisplayName(conversation.provider).toLowerCase() : '',
   ]);
