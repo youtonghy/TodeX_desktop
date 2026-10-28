@@ -3,7 +3,8 @@ import { SubmenuTrigger, type Selection } from 'react-aria-components';
 import { RiArrowRightSLine } from '@remixicon/react';
 import { Menu, MenuItem, MenuPopover, MenuSection, MenuSeparator } from '@/components/ui/menu';
 import { useT } from '@/i18n';
-import { conversationDisplayTitle, type ConversationRecord } from '@/session/helpers';
+import { conversationDisplayTitle, firstPromptText, type ConversationRecord } from '@/session/helpers';
+import { sameRecordValues, useTimelineSelector } from '@/session/conversationStore';
 import {
   cancelKanbanTaskSchedule,
   kanbanTaskCanStartConversation,
@@ -39,6 +40,9 @@ export type TaskBoardHandlers = {
 export function useTaskActions(task: KanbanTask, handlers: TaskBoardHandlers, options: { onRename: () => void }) {
   const t = useT();
   const { session, conversations, latestEntries, onOpenConversation, onStartConversation, onSchedule } = handlers;
+  // Title fallbacks of the task's conversations (their first prompts).
+  const firstPrompts = useTimelineSelector(session.stores, (timeline) => Object.fromEntries(
+    (task.conversationIds ?? []).map((id) => [id, firstPromptText(timeline, id)])), sameRecordValues);
   const linkedState = groupLinkedConversations(
     task, session, conversations, latestEntries, t('kanban.groupPlain'), t('kanban.linkStale'),
   );
@@ -124,9 +128,9 @@ export function useTaskActions(task: KanbanTask, handlers: TaskBoardHandlers, op
                 <MenuItem
                   key={conversation.id}
                   id={`draft:${conversation.id}`}
-                  textValue={conversationDisplayTitle(conversation, session.timeline)}
+                  textValue={conversationDisplayTitle(conversation, firstPrompts[conversation.id] ?? '')}
                 >
-                  {conversationDisplayTitle(conversation, session.timeline)}
+                  {conversationDisplayTitle(conversation, firstPrompts[conversation.id] ?? '')}
                 </MenuItem>
               ))}
             </Menu>

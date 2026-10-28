@@ -1044,9 +1044,21 @@ export function isDefaultConversationTitle(title: string): boolean {
   return matchesMessage('chat.newConversation', title) || matchesMessage('chat.defaultConversation', title);
 }
 
+/** The oldest non-empty prompt sent in a conversation (title fallback). */
+export function firstPromptText(timeline: readonly TimelineEntry[], conversationId: string): string {
+  let firstPrompt: TimelineEntry | undefined;
+  for (const entry of timeline) {
+    if (entry.conversationId !== conversationId || entry.kind !== 'outgoing' || (firstPrompt && entry.at >= firstPrompt.at)) continue;
+    if (entry.subtitle.trim()) firstPrompt = entry;
+  }
+  return firstPrompt?.subtitle ?? '';
+}
+
+/** `firstPrompt`: the conversation's rows, or its first prompt already taken
+ * from them (`firstPromptText`). */
 export function conversationDisplayTitle(
   conversation: Pick<ConversationRecord, 'id' | 'title' | 'preview' | 'provider'>,
-  timeline: TimelineEntry[],
+  firstPrompt: readonly TimelineEntry[] | string,
 ): string {
   const title = conversation.title.trim();
   const genericTitles = new Set([
@@ -1076,13 +1088,8 @@ export function conversationDisplayTitle(
   if (preview && preview !== '暂无预览' && preview !== '还没有消息') {
     return preview;
   }
-  // One pass, no copy: the sidebar asks this for every row on each render.
-  let firstPrompt: TimelineEntry | undefined;
-  for (const entry of timeline) {
-    if (entry.conversationId !== conversation.id || entry.kind !== 'outgoing' || (firstPrompt && entry.at >= firstPrompt.at)) continue;
-    if (entry.subtitle.trim()) firstPrompt = entry;
-  }
-  return summarize(firstPrompt?.subtitle || '') || title || t('chat.untitledConversation');
+  const prompt = typeof firstPrompt === 'string' ? firstPrompt : firstPromptText(firstPrompt, conversation.id);
+  return summarize(prompt) || title || t('chat.untitledConversation');
 }
 
 export type ConversationContextUsage = {

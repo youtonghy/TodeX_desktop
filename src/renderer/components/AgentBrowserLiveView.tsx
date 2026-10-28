@@ -7,6 +7,7 @@ import type { AgentBrowserFrame } from '@todex/protocol/agentDesktop';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { useT } from '../i18n';
 import { backendApi } from '../session/helpers';
+import { useConversationRuntime } from '../session/conversationStore';
 
 /** A frame decoded into a bitmap, or the latest screenshot as a data URL. */
 type Still = { shotId: string; dataUrl: string };
@@ -45,7 +46,7 @@ export function AgentBrowserLiveView({ session, conversationId, isActive }: {
     () => backendApi(session.settings),
     [session.settings.deviceSecret, session.settings.encryptionProtocol, session.settings.encryptionPublicKey, session.settings.transportVerified, session.settings.serverUrl],
   );
-  const state = session.conversationRuntimeById[conversationId]?.desktopBrowser;
+  const state = useConversationRuntime(session.stores, conversationId)?.desktopBrowser;
   // The backend knows the conversation by its v2 id, not the local one.
   const backendConversationId = session.conversations.find(item => item.id === conversationId)?.v2ConversationId ?? conversationId;
   // One backward pass per actions change, not three array copies per render.

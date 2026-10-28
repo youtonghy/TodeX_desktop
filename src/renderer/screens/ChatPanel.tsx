@@ -61,7 +61,7 @@ import { ProcessDisclosure, ProcessStep, ProcessSteps } from '../components/chat
 import { ToolCallCard, type ToolCallState } from '../components/chat/ToolCallCard';
 import { ToolElapsed } from '../components/chat/ToolRunStatus';
 import { TurnNavigator, type ChatTurn } from '../components/chat/TurnNavigator';
-import { activeChatProcessId, buildChatRenderItems, isChatTimelineEntry, isChatToolEntry, latestIncomingEntryIds, sameTimelineEntries, sortChatEntries } from '../components/conversationTimeline';
+import { activeChatProcessId, buildChatRenderItems, isChatTimelineEntry, isChatToolEntry, latestIncomingEntryIds, sortChatEntries } from '../components/conversationTimeline';
 import type { ChatRenderItem } from '../components/conversationTimeline';
 import { awaitedBackgroundTasks, type BackgroundTask } from '@todex/protocol/conversationRuntime';
 import { EFFORT_TEXT, ModelReasoningCard } from '../components/ModelReasoningCard';
@@ -123,6 +123,7 @@ import { describeToolCall, type ToolCallKind } from '@todex/protocol/toolPresent
 import { agentCallingToolFromName, agentCallingToolSummary, type AgentCallingTool } from '@todex/protocol/agentCalling';
 import { isThinkingProgressEntry } from '@todex/protocol/mobileParity';
 import { getLocale, t, useT, type MessageKey } from '../i18n';
+import { useConversationRuntime, useConversationTimeline } from '../session/conversationStore';
 import { ErrorBoundary } from '@/components/ui/error-boundary';
 
 type Props = {
@@ -1062,15 +1063,11 @@ export function ChatPanel({ session }: Props) {
     const itemRect = active.getBoundingClientRect();
     popover.scrollTop += itemRect.top + itemRect.height / 2 - (popRect.top + popRect.height / 2);
   }, [suggestionIndex, draft]);
-  // The session timeline merges every conversation and changes on each
-  // streamed frame; this conversation's rows keep their array (and so the
-  // render items below) until one of them changes.
-  const conversationTimelineRef = useRef<TimelineEntry[]>([]);
-  const conversationTimeline = useMemo(() => {
-    const next = conversation ? session.timeline.filter((entry) => entry.conversationId === conversation.id) : [];
-    if (!sameTimelineEntries(conversationTimelineRef.current, next)) conversationTimelineRef.current = next;
-    return conversationTimelineRef.current;
-  }, [conversation?.id, session.timeline]);
+  // This conversation's rows (and runtime), from the session stores: they
+  // keep their identity, and this panel does not re-render, while other
+  // conversations stream.
+  const conversationTimeline = useConversationTimeline(session.stores, conversation?.id);
+  const conversationRuntime = useConversationRuntime(session.stores, conversation?.id);
   const chatEntries = useMemo(() => sortChatEntries(conversationTimeline
     .filter((entry) => isChatTimelineEntry(entry) && !isChatReminderEntry(entry))), [conversationTimeline]);
   const items = useMemo(() => buildChatRenderItems(chatEntries), [chatEntries]);
@@ -1090,7 +1087,7 @@ export function ChatPanel({ session }: Props) {
   const sentHistoryBrowseRef = useRef<{ conversationId: string; index: number; recalled: string } | null>(null);
   // Background tasks the agent still waits on; the calls that launched them
   // read as running.
-  const runtimeBackgroundTasks = conversation ? session.conversationRuntimeById[conversation.id]?.backgroundTasks : undefined;
+  const runtimeBackgroundTasks = conversationRuntime?.backgroundTasks;
   const backgroundTasks = useMemo(() => awaitedBackgroundTasks(runtimeBackgroundTasks ?? []), [runtimeBackgroundTasks]);
   const backgroundToolIds = useMemo(() => {
     const ids = backgroundTasks.flatMap(task => task.toolUseId ? [task.toolUseId] : []);
@@ -1298,7 +1295,7 @@ export function ChatPanel({ session }: Props) {
           ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
       }
     }
-  }, [session.timeline, firstMountedKey, earlierHistoryStatus?.loading, conversation?.id]);
+  }, [conversationTimeline, firstMountedKey, earlierHistoryStatus?.loading, conversation?.id]);
   useEffect(() => {
     atBottomRef.current = true;
     lastScrollRef.current = { top: 0, height: 0 };
@@ -1309,7 +1306,7 @@ export function ChatPanel({ session }: Props) {
   }, [conversation?.id]);
   useEffect(() => {
     if (atBottomRef.current) scrollToLatest();
-  }, [session.timeline]);
+  }, [conversationTimeline]);
   useEffect(updateActiveTurn, [chatTurns, firstMountedKey]);
   // Rows on screen when a conversation opens stay still; rows that arrive
   // later in a live turn blur in (see RowEntrance).
@@ -1506,7 +1503,7 @@ export function ChatPanel({ session }: Props) {
   // encrypted) and retired local Codex history: viewable, exportable,
   // archivable and deletable, nothing else.
   const readOnly = isReadOnlyConversation(conversation);
-  const runtime = session.conversationRuntimeById[conversation.id];
+  const runtime = conversationRuntime;
   const sessionPermissionIds = new Set((runtime?.pendingPermissions ?? []).filter(item => item.scope === 'session').map(item => item.id));
   const pendingPermissionIds = new Set((runtime?.pendingPermissions ?? []).map(item => item.id));
   const permissionRequests = session.pendingRequests.filter(item => item.requestId && pendingPermissionIds.has(item.requestId));
@@ -1987,7 +1984,7 @@ export function ChatPanel({ session }: Props) {
       />
       <div className="shrink-0 px-4 pt-2 pb-4">
         <div className="relative mx-auto max-w-2xl">
-          <ComputerLiveView session={session} conversationId={conversation.v2ConversationId ?? conversation.id} state={session.conversationRuntimeById[conversation.id]?.desktopComputer} />
+          <ComputerLiveView session={session} conversationId={conversation.v2ConversationId ?? conversation.id} state={conversationRuntime?.desktopComputer} />
           {readOnly ? null : permissionRequests.map(request => <PermissionRequestCard
             key={request.requestId}
             request={request}

@@ -31,10 +31,11 @@ import { AppIcon } from './components/AppIcon';
 import { ChatPanel } from './screens/ChatPanel';
 import { HistoryRecoveryNotice } from './components/HistoryRecoveryNotice';
 import { Field } from './components/Field';
-import { connectionStateLabel, conversationDisplayTitle, createWorkspaceDirectory, fetchWorkspaceDirectorySnapshot, isUnmountedPathError } from './session/helpers';
+import { connectionStateLabel, conversationDisplayTitle, firstPromptText, createWorkspaceDirectory, fetchWorkspaceDirectorySnapshot, isUnmountedPathError } from './session/helpers';
 import { pickedHostPathToBackend } from './session/hostPaths';
 import { WorkspaceMountHint } from './components/WorkspaceMountHint';
 import { platform } from './platform';
+import { useTimelineSelector } from './session/conversationStore';
 import { slots } from './platform/slots';
 import { isLocalBackendUrl } from '@todex/protocol/mobileParity';
 import { mapHostPathToBackend } from '@todex/protocol/pathMapping';
@@ -340,44 +341,36 @@ export function App() {
   // log or Subagents tab, creating it on first use. Runs already in the runtime
   // when the conversation became the viewed one (history, replay) are only
   // recorded, and the SSH view (another Workbench scope) records without opening.
+  // Checked on every runtime change (in the session store, so the app does
+  // not re-render for each streamed delta), and when the view changes.
   const sshExecWatchRef = useRef(createRunWatch());
+  const subagentWatchRef = useRef(createRunWatch());
+  const agentCallWatchRef = useRef(createRunWatch());
+  const agentBrowserWatchRef = useRef(createAgentBrowserWatch());
   const viewedConversationId = session.activeConversation?.id ?? '';
-  const viewedRuntime = viewedConversationId ? session.conversationRuntimeById[viewedConversationId] : undefined;
   const viewedRecovering = viewedConversationId ? session.recoveringConversations[viewedConversationId] === true : false;
   useEffect(() => {
-    const fresh = takeNewSshExecs(sshExecWatchRef.current, viewedConversationId, viewedRuntime, viewedRecovering);
-    if (!fresh.length || sshActive || !scopeKey) return;
-    queueWorkbenchRequest(id => ({ id, kind: 'ssh-exec', conversationId: viewedConversationId }));
-    persistAsideOpen(true);
-  }, [persistAsideOpen, queueWorkbenchRequest, scopeKey, sshActive, viewedConversationId, viewedRecovering, viewedRuntime]);
-  const subagentWatchRef = useRef(createRunWatch());
-  useEffect(() => {
-    const fresh = takeNewSubagents(subagentWatchRef.current, viewedConversationId, viewedRuntime, viewedRecovering);
-    if (!fresh.length || sshActive || !scopeKey) return;
-    queueWorkbenchRequest(id => ({ id, kind: 'subagents', conversationId: viewedConversationId }));
-    persistAsideOpen(true);
-  }, [persistAsideOpen, queueWorkbenchRequest, scopeKey, sshActive, viewedConversationId, viewedRecovering, viewedRuntime]);
-  // A child conversation the viewed conversation's agent starts through the
-  // `todex_agents` MCP server opens the Agent calls tab, like subagents.
-  const agentCallWatchRef = useRef(createRunWatch());
-  useEffect(() => {
-    const fresh = takeNewAgentCalls(agentCallWatchRef.current, viewedConversationId, viewedRuntime, viewedRecovering);
-    if (!fresh.length || sshActive || !scopeKey) return;
-    queueWorkbenchRequest(id => ({ id, kind: 'agent-calls', conversationId: viewedConversationId }));
-    persistAsideOpen(true);
-  }, [persistAsideOpen, queueWorkbenchRequest, scopeKey, sshActive, viewedConversationId, viewedRecovering, viewedRuntime]);
-  // A new agent-browser tab lifetime in the viewed conversation (its first
-  // successful call, or one after the tab closed) opens the live view.
-  // Lifetimes already present when the conversation became the viewed one
-  // (history, replay), failed calls, and a panel the user closed during the
-  // same lifetime do not.
-  const agentBrowserWatchRef = useRef(createAgentBrowserWatch());
-  useEffect(() => {
-    const started = takeNewAgentBrowserTab(agentBrowserWatchRef.current, viewedConversationId, viewedRuntime, viewedRecovering);
-    if (!started || sshActive || !scopeKey) return;
-    queueWorkbenchRequest(id => ({ id, kind: 'agent-browser', conversationId: viewedConversationId }));
-    persistAsideOpen(true);
-  }, [persistAsideOpen, queueWorkbenchRequest, scopeKey, sshActive, viewedConversationId, viewedRecovering, viewedRuntime]);
+    const check = () => {
+      const viewedRuntime = viewedConversationId ? session.stores.runtime.get()[viewedConversationId] : undefined;
+      const open = (kind: 'ssh-exec' | 'subagents' | 'agent-calls' | 'agent-browser') => {
+        if (sshActive || !scopeKey) return;
+        queueWorkbenchRequest(id => ({ id, kind, conversationId: viewedConversationId }));
+        persistAsideOpen(true);
+      };
+      if (takeNewSshExecs(sshExecWatchRef.current, viewedConversationId, viewedRuntime, viewedRecovering).length) open('ssh-exec');
+      if (takeNewSubagents(subagentWatchRef.current, viewedConversationId, viewedRuntime, viewedRecovering).length) open('subagents');
+      // A child conversation the viewed conversation's agent starts through
+      // the `todex_agents` MCP server opens the Agent calls tab, like subagents.
+      if (takeNewAgentCalls(agentCallWatchRef.current, viewedConversationId, viewedRuntime, viewedRecovering).length) open('agent-calls');
+      // A new agent-browser tab lifetime (its first successful call, or one
+      // after the tab closed) opens the live view; lifetimes present when the
+      // conversation became the viewed one, failed calls, and a panel the user
+      // closed during the same lifetime do not.
+      if (takeNewAgentBrowserTab(agentBrowserWatchRef.current, viewedConversationId, viewedRuntime, viewedRecovering)) open('agent-browser');
+    };
+    check();
+    return session.stores.runtime.subscribe(check);
+  }, [persistAsideOpen, queueWorkbenchRequest, scopeKey, session.stores, sshActive, viewedConversationId, viewedRecovering]);
   const changeWorkbenchTab = useCallback((next: WorkbenchTab) => {
     setWorkbenchTab(next);
     setPanelTarget({});
@@ -445,7 +438,9 @@ export function App() {
   }, [themeSource]);
 
   // The same title the sidebar shows (not the raw provider-name default).
-  const windowConversationTitle = session.activeConversation ? conversationDisplayTitle(session.activeConversation, session.timeline) : '';
+  const activeFirstPrompt = useTimelineSelector(session.stores,
+    (timeline) => (session.activeConversation ? firstPromptText(timeline, session.activeConversation.id) : ''), Object.is);
+  const windowConversationTitle = session.activeConversation ? conversationDisplayTitle(session.activeConversation, activeFirstPrompt) : '';
   useEffect(() => {
     const status = connectionStateLabel(session.connectionState);
     document.title = windowConversationTitle ? `TodeX · ${windowConversationTitle} · ${status}` : `TodeX · ${status}`;

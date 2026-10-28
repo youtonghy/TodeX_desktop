@@ -10,6 +10,8 @@ import { Button } from '@/components/base/buttons/button';
 import { Checkbox } from '@/components/base/checkbox/checkbox';
 import { Input } from '@/components/base/input/input';
 import { Modal } from '@/components/ui/modal';
+import { sameRecordValues, useRuntimeSelector } from '../../session/conversationStore';
+import type { ConversationRuntime } from '@todex/protocol/conversationRuntime';
 
 /** How often expired requests are dropped from the queue. */
 const EXPIRY_CHECK_MS = 5_000;
@@ -46,15 +48,21 @@ export function SshLoginPrompter({ session }: { session: TodeXSession }) {
     return () => window.clearInterval(timer);
   }, []);
 
+  // Only the SSH runs matter here, not every streamed delta.
+  const sshExecsById = useRuntimeSelector(session.stores, (runtimes) => {
+    const map: Record<string, ConversationRuntime['sshExecs']> = {};
+    for (const [id, runtime] of Object.entries(runtimes)) if (runtime.sshExecs.length) map[id] = runtime.sshExecs;
+    return map;
+  }, sameRecordValues);
   const pending = useMemo(() => {
     const requests: { requestId: string; host: string; conversationId: string }[] = [];
-    for (const [conversationId, runtime] of Object.entries(session.conversationRuntimeById)) {
-      for (const run of runtime.sshExecs) {
+    for (const [conversationId, sshExecs] of Object.entries(sshExecsById)) {
+      for (const run of sshExecs) {
         if (run.host && run.login && isSshLoginPending(run.login, now)) requests.push({ requestId: run.login.requestId, host: run.host, conversationId });
       }
     }
     return requests;
-  }, [now, session.conversationRuntimeById]);
+  }, [now, sshExecsById]);
 
   // Answered elsewhere, timed out or cancelled: close its prompt.
   useEffect(() => {

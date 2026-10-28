@@ -9,7 +9,9 @@ import {
   useCompletionNotifications,
 } from './completionNotifications';
 import { addNotification } from './notificationFeed';
-import { bindSentAttachmentEvents, prepareSentAttachments, projectSentAttachments, pruneSentAttachmentRecords, type SentAttachmentRecord } from './sentAttachments';
+import { bindSentAttachmentEvents, prepareSentAttachments, pruneSentAttachmentRecords, type SentAttachmentRecord } from './sentAttachments';
+import { createConversationStores, sameRecordValues, visibleTimeline, type ConversationStores } from './conversationStore';
+import { useStoreSelector } from './store/createStore';
 import { uploadPromptFile } from './promptUploads';
 import { uploadedPromptContent } from '@todex/protocol/promptUploads';
 import { isIpcServerUrl } from '@todex/protocol/ipcServerUrl';
@@ -366,6 +368,9 @@ export type BackendWakeGate = {
   wake: (backendId: string) => Promise<void>;
 };
 
+/** How often a streaming conversation's record takes its new high-water mark. */
+const LAST_SEQUENCE_WRITE_MS = 2000;
+
 /** How long an opened socket may take to become ready (hello, or open over IPC). */
 const SOCKET_OPEN_TIMEOUT_MS = 20_000;
 
@@ -407,7 +412,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const workspacesRef = useRef<WorkspaceRecord[]>([]);
   const conversationsRef = useRef<ConversationRecord[]>([]);
   const v2ProvidersRef = useRef<ProviderDescriptor[]>([]);
-  const timelineRef = useRef<TimelineEntry[]>([]);
   const turnIdsRef = useRef<Record<string, string>>({});
   const thinkingConversationsRef = useRef<Record<string, boolean>>({});
   const terminalByIdRef = useRef<Record<string, TerminalClientState>>({});
@@ -617,8 +621,12 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     setLastError(t(conversation?.legacyCodex ? 'sess.legacyCodexReadOnly' : 'history.readOnlyError'));
     return true;
   };
-  const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
-  const [sentAttachmentRecords, setSentAttachmentRecords] = useState<SentAttachmentRecord[]>([]);
+  // High-frequency state lives outside React (see conversationStore.ts).
+  const storesRef = useRef<ConversationStores | null>(null);
+  if (!storesRef.current) storesRef.current = createConversationStores();
+  const stores = storesRef.current;
+  const setTimeline = stores.timeline.set;
+  const setSentAttachmentRecords = stores.sentAttachments.set;
   const sentAttachmentRecordsRef = useRef<SentAttachmentRecord[]>([]);
   const [mentionHistory, setMentionHistory] = useState<WorkspaceMentionHistory[]>([]);
   const [experimentalFeatures, setExperimentalFeatures] = useState<ExperimentalFeatureSettings>(EXPERIMENTAL_FEATURE_DEFAULTS);
@@ -723,7 +731,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const [agentCallsByConversation, setAgentCallsByConversation] = useState<Record<string, AgentCallSession[]>>({});
   const [memoryEntriesByConversation, setMemoryEntriesByConversation] = useState<Record<string, MemoryEntry[]>>({});
   const [usageRecords, setUsageRecords] = useState<UsageRecord[]>([]);
-  const [conversationRuntimeById, setConversationRuntimeById] = useState<Record<string, ConversationRuntime>>({});
+  const setConversationRuntimeById = stores.runtime.set;
   const [recoveringConversations, setRecoveringConversations] = useState<Record<string, boolean>>({});
   /** Lazy history opens in flight or failed, by local conversation id; set
    * before any runtime state exists, unlike recoveringConversations. */
@@ -891,9 +899,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     }
   }, [v2Conversations]);
 
-  useEffect(() => {
-    timelineRef.current = timeline;
-  }, [timeline]);
   const queueV2FollowUpRef = useRef<(conversationId: string, item: QueuedChatSubmission) => Promise<'queued' | 'started' | false>>(async () => false);
   const refreshFollowUpQueueRef = useRef<(conversationId: string) => Promise<void>>(async () => undefined);
   const editFollowUpQueueRef = useRef<(conversationId: string, operation: 'remove' | 'clear' | 'resume' | 'pause', itemId?: string) => Promise<boolean>>(async () => false);
@@ -1778,15 +1783,19 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     if (!hydrated) {
       return;
     }
-    const v2ConversationIds = new Set(conversationsRef.current.filter(isV2Conversation).map((item) => item.id));
-    const local = timeline
-      .filter((entry) => !entry.conversationId || !v2ConversationIds.has(entry.conversationId))
-      .slice(0, MAX_TIMELINE_ITEMS);
-    const previous = persistedTimelineRef.current;
-    if (local.length === previous.length && local.every((entry, index) => entry === previous[index])) return;
-    persistedTimelineRef.current = local;
-    scheduleJsonSave(TIMELINE_STORAGE_KEY, local);
-  }, [hydrated, scheduleJsonSave, timeline]);
+    const persist = () => {
+      const v2ConversationIds = new Set(conversationsRef.current.filter(isV2Conversation).map((item) => item.id));
+      const local = stores.timeline.get()
+        .filter((entry) => !entry.conversationId || !v2ConversationIds.has(entry.conversationId))
+        .slice(0, MAX_TIMELINE_ITEMS);
+      const previous = persistedTimelineRef.current;
+      if (local.length === previous.length && local.every((entry, index) => entry === previous[index])) return;
+      persistedTimelineRef.current = local;
+      scheduleJsonSave(TIMELINE_STORAGE_KEY, local);
+    };
+    persist();
+    return stores.timeline.subscribe(persist);
+  }, [hydrated, scheduleJsonSave, stores]);
 
   useEffect(() => {
     if (!hydrated) {
@@ -1973,16 +1982,21 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
 
   // A conversation's command catalog depends on its backend, workspace,
   // provider, native session and runtime (Pi extensions add commands).
+  const providerRuntimes = useStoreSelector(stores.runtime, (runtimes) => {
+    const next: Record<string, ConversationRuntime['providerRuntime']> = {};
+    for (const [localId, state] of Object.entries(runtimes)) if (state.providerRuntime) next[localId] = state.providerRuntime;
+    return next;
+  }, sameRecordValues);
   const providerCommandContext = useCallback((conversationId: string) => {
     const conversation = conversations.find(item => item.id === conversationId);
     if (!conversation?.provider) return;
     const workspace = workspaces.find(item => item.id === conversation.workspaceId);
     if (!workspace) return;
-    const runtime = conversationRuntimeById[conversationId]?.providerRuntime;
+    const runtime = providerRuntimes[conversationId];
     return { backend: `${activeBackendConnectionId}:${settings.serverUrl}`, workspace: workspace.path,
       provider: conversation.provider, conversationId: conversation.v2ConversationId,
       runtimeId: runtime?.runtimeId, runtimeStatus: runtime?.status, commandEpoch: commandEpochs[conversationId] };
-  }, [conversations, workspaces, conversationRuntimeById, activeBackendConnectionId, settings.serverUrl, commandEpochs]);
+  }, [conversations, workspaces, providerRuntimes, activeBackendConnectionId, settings.serverUrl, commandEpochs]);
   const getProviderCommandCatalog = useCallback((conversationId: string) => {
     const context = providerCommandContext(conversationId);
     const catalog = context && providerCommandCatalogs[commandContextKey(context)];
@@ -2070,6 +2084,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     for (const entry of backendContinuationsRef.current.values()) clearTimeout(entry.timer);
   }, []);
 
+  const lastSequenceTimersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   runtimeUpdateRef.current = (state, appliedEvents, recovering, live) => {
     const conversation = conversationsRef.current.find((item) => item.v2ConversationId === state.conversationId || item.id === state.conversationId);
     if (!conversation) return;
@@ -2213,17 +2228,35 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     setConversationTurnId(localId, state.activeTurnId);
     const pending = pendingV2SubmissionsRef.current.get(localId);
     setConversationThinking(localId, Boolean(state.activeTurnId) || pending?.phase === 'sending');
-    setConversations((current) => {
-      const index = current.findIndex((item) => item.id === localId);
-      if (index < 0) return current;
-      const lastSequence = Math.max(current[index].lastSequence ?? 0, state.appliedSequence);
-      const lastCompletedAt = Math.max(current[index].lastCompletedAt ?? 0, completedAt);
-      if (lastSequence === current[index].lastSequence && lastCompletedAt === current[index].lastCompletedAt) return current;
-      const next = [...current];
-      next[index] = { ...next[index], lastSequence, lastCompletedAt };
-      return next;
-    });
+    // The record's high-water mark follows the runtime: right away when a
+    // turn ends, otherwise at most every LAST_SEQUENCE_WRITE_MS, so a stream
+    // of deltas does not rewrite the conversation list (and re-render the
+    // app) for each one. Recovery reads the runtime's own sequence.
+    const writeLastSequence = () => {
+      lastSequenceTimersRef.current.delete(localId);
+      setConversations((current) => {
+        const index = current.findIndex((item) => item.id === localId);
+        if (index < 0) return current;
+        const applied = stores.runtime.get()[localId]?.appliedSequence ?? state.appliedSequence;
+        const lastSequence = Math.max(current[index].lastSequence ?? 0, applied);
+        const lastCompletedAt = Math.max(current[index].lastCompletedAt ?? 0, completedAt);
+        if (lastSequence === current[index].lastSequence && lastCompletedAt === current[index].lastCompletedAt) return current;
+        const next = [...current];
+        next[index] = { ...next[index], lastSequence, lastCompletedAt };
+        return next;
+      });
+    };
+    const pendingWrite = lastSequenceTimersRef.current.get(localId);
+    if (completedAt > 0) {
+      if (pendingWrite) clearTimeout(pendingWrite);
+      writeLastSequence();
+    } else if (!pendingWrite && state.appliedSequence > (conversation.lastSequence ?? 0)) {
+      lastSequenceTimersRef.current.set(localId, setTimeout(writeLastSequence, LAST_SEQUENCE_WRITE_MS));
+    }
   };
+  useEffect(() => () => {
+    for (const timer of lastSequenceTimersRef.current.values()) clearTimeout(timer);
+  }, []);
 
   /** Open a conversation lazily: only the newest history window is fetched
    * from the journal tail; earlier events page in on scroll. Falls back to a
@@ -2475,10 +2508,18 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
 
   // Open permission requests of every projected conversation (a resolved one
   // leaves its runtime's `pendingPermissions`).
+  // Re-renders the session only when a conversation's open permissions change.
+  const permissionRuntimes = useStoreSelector(stores.runtime, (runtimes) => {
+    const next: Record<string, { conversationId: string; pendingPermissions: ConversationRuntime['pendingPermissions']; caughtUp: boolean }> = {};
+    for (const [localId, state] of Object.entries(runtimes)) {
+      next[localId] = { conversationId: state.conversationId, pendingPermissions: state.pendingPermissions, caughtUp: state.appliedSequence >= state.highWaterSequence };
+    }
+    return next;
+  }, (left, right) => sameRecordValues(left, right, (a, b) => a.conversationId === b.conversationId && a.pendingPermissions === b.pendingPermissions && a.caughtUp === b.caughtUp));
   const pendingRequests = useMemo<PendingRequest[]>(() => {
     const open = new Map<string, PendingRequest>();
-    for (const [localId, state] of Object.entries(conversationRuntimeById)) {
-      if (recoveringConversations[localId] || state.appliedSequence < state.highWaterSequence) continue;
+    for (const [localId, state] of Object.entries(permissionRuntimes)) {
+      if (recoveringConversations[localId] || !state.caughtUp) continue;
       const conversation = conversations.find((item) => item.id === localId);
       for (const permission of state.pendingPermissions) {
         const request = classifyPendingRequest({ type: 'conversation.permission.request', payload: {
@@ -2489,7 +2530,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       }
     }
     return [...open.values()];
-  }, [conversationRuntimeById, recoveringConversations, conversations]);
+  }, [permissionRuntimes, recoveringConversations, conversations]);
 
   const updateWorkspace = useCallback((id: string, patch: Partial<WorkspaceRecord>) => {
     setWorkspaces((current) =>
@@ -2557,13 +2598,14 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   // the unread marker. Activity that lands while hidden stays unread. Only
   // new activity (a later row, completion or status) re-marks it, so
   // streaming into an existing row writes nothing.
-  const activeAttentionAt = useMemo(() => {
-    let latest = Math.max(activeConversationRecord?.updatedAt ?? 0, activeConversationRecord?.lastCompletedAt ?? 0);
-    for (const entry of timeline) {
+  const activeRowsAt = useStoreSelector(stores.timeline, (rows) => {
+    let latest = 0;
+    for (const entry of rows) {
       if (entry.conversationId === activeConversationId && entry.at > latest) latest = entry.at;
     }
     return latest;
-  }, [activeConversationId, activeConversationRecord?.lastCompletedAt, activeConversationRecord?.updatedAt, timeline]);
+  });
+  const activeAttentionAt = Math.max(activeRowsAt, activeConversationRecord?.updatedAt ?? 0, activeConversationRecord?.lastCompletedAt ?? 0);
   useEffect(() => {
     const markActiveRead = () => {
       if (!activeConversationId) return;
@@ -4533,7 +4575,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const notifiedPermissionIdsRef = useRef(new Set<string>());
   useEffect(() => {
     const ownerById = new Map<string, string>();
-    for (const [localId, state] of Object.entries(conversationRuntimeById)) {
+    for (const [localId, state] of Object.entries(permissionRuntimes)) {
       for (const permission of state.pendingPermissions) ownerById.set(permission.id, localId);
     }
     for (const request of pendingRequests) {
@@ -4570,7 +4612,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     }
   }, [
     pendingRequests,
-    conversationRuntimeById,
+    permissionRuntimes,
     completionNotificationsState.completionNotifications,
     completionNotificationsState.completionNotificationsSupported,
     selectConversation,
@@ -4893,7 +4935,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     && !pendingV2ConversationCreatesRef.current.has(conversation.id)
     && !pendingV2FirstPromptsRef.current.has(conversation.id)
     && canSwitchConversationAgent(conversation, {
-      timeline: timelineRef.current,
+      timeline: stores.timeline.get(),
       thinking: thinkingConversationsRef.current[conversation.id] === true,
     })
   ), []);
@@ -5125,7 +5167,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       return;
     }
     if (!canSwitchConversationAgent(conversation, {
-      timeline: timelineRef.current.filter((entry) => entry.conversationId === conversation.id),
+      timeline: stores.timeline.get().filter((entry) => entry.conversationId === conversation.id),
       thinking: thinkingConversationsRef.current[conversation.id] === true,
     })) {
       desktopAlert(t('alert.cannotSwitchAgent'), t('alert.cannotSwitchAgentBody'));
@@ -5479,12 +5521,12 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
    * the composer held the user's own text. */
   const handlePluginDraft = useCallback((conversationId: string, request: ExtensionEditorRequest, replace: boolean) => {
     const current = pendingPluginDrafts[conversationId];
-    const runtime = conversationRuntimeById[conversationId];
+    const runtime = stores.runtime.get()[conversationId];
     if (current?.eventId !== request.eventId || current.eventId !== runtime?.extensionUi.editorRequest?.eventId || current.runtimeId !== runtime?.extensionUi.runtimeId
       || runtime.providerRuntime?.status === 'stopped') return;
     if (replace) setConversationChatDraft(conversationId, current.text);
     setPendingPluginDrafts(items => ({ ...items, [conversationId]: undefined }));
-  }, [pendingPluginDrafts, conversationRuntimeById, setConversationChatDraft]);
+  }, [pendingPluginDrafts, setConversationChatDraft, stores]);
 
   const stopProviderRuntime = useCallback(async (conversationId: string) => {
     const conversation = conversationsRef.current.find(item => item.id === conversationId);
@@ -6300,7 +6342,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       desktopAlert(t('alert.noConversation'), t('alert.pickCodexConversation'));
       return false;
     }
-    const lastMessage = timelineRef.current.find(
+    const lastMessage = stores.timeline.get().find(
       (entry) => entry.conversationId === conversationId && entry.kind === 'incoming' && entry.subtitle.trim(),
     );
     if (!lastMessage) {
@@ -6324,7 +6366,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     const transcript = v2Id
       ? await fetchConversationTranscriptTail((id, before, limit) => decryptedHistoryReplay(id, v2ApiForConversation(id).replayEventsBefore(id, before, limit, 'full'), 'full'),
         v2Id, conversation.workspaceId, { title: conversation.title, maxBytes })
-      : { entries: transcriptEntries(timelineRef.current.filter((entry) => entry.conversationId === conversationId)), olderUnread: false };
+      : { entries: transcriptEntries(stores.timeline.get().filter((entry) => entry.conversationId === conversationId)), olderUnread: false };
     return conversationTranscriptMarkdown(transcript.entries, { title: conversation.title, maxBytes, olderUnread: transcript.olderUnread });
   }, [decryptedHistoryReplay, v2ApiForConversation]);
 
@@ -6704,21 +6746,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
 
 
 
-  // Only outgoing rows carry attachments; each is projected once per records
-  // version, so a streamed delta neither rescans every record nor hands the
-  // chat a new object for rows that did not change.
-  const projectedEntriesRef = useRef(new WeakMap<TimelineEntry, { records: typeof sentAttachmentRecords; projected: TimelineEntry }>());
-  const visibleTimeline = useMemo(() => {
-    const cache = projectedEntriesRef.current;
-    return timeline.map((entry) => {
-      if (entry.kind !== 'outgoing') return entry;
-      const hit = cache.get(entry);
-      if (hit?.records === sentAttachmentRecords) return hit.projected;
-      const projected = projectSentAttachments([entry], sentAttachmentRecords, entry.conversationId ?? '')[0];
-      cache.set(entry, { records: sentAttachmentRecords, projected });
-      return projected;
-    });
-  }, [timeline, sentAttachmentRecords]);
 
   // Backend/app release versions are expected to ship in lockstep; dev builds
   // (DEV0.0.0 / 0.0.0) on either side skip the check entirely.
@@ -6815,7 +6842,11 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     lastError,
     serverVersion,
     versionMismatch,
-    timeline: visibleTimeline,
+    /** High-frequency state; components subscribe through conversationStore.ts. */
+    stores,
+    /** The visible timeline right now (read it in a render through
+     * `useVisibleTimeline` or a narrower selector to stay current). */
+    get timeline() { return visibleTimeline(stores); },
     hydrateProcessGroup,
     historyEncryption,
     mentionHistory,
@@ -6850,7 +6881,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     compactionByConversation,
     subagentsByConversation,
     agentCallsByConversation,
-    conversationRuntimeById,
+    get conversationRuntimeById() { return stores.runtime.get(); },
     recoveringConversations,
     openStatusByConversation,
     earlierHistory,

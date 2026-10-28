@@ -20,6 +20,7 @@ import {
   useKanbanTasks,
   type KanbanTask,
 } from '../session/kanbanTasks';
+import { sameRecordValues, useTimelineSelector } from '../session/conversationStore';
 
 type Props = { session: TodeXSession; onOpenConversation: () => void };
 
@@ -64,16 +65,20 @@ export function KanbanPanel({ session, onOpenConversation }: Props) {
     [session.conversations],
   );
 
-  const latestEntries = useMemo(() => {
+  // Status inputs per conversation; a delta streamed into an existing row
+  // keeps them, so the board does not re-render for it.
+  const latestEntries = useTimelineSelector(session.stores, (timeline) => {
     const map: LatestEntries = {};
-    for (const entry of session.timeline) {
+    for (const entry of timeline) {
       if (!entry.conversationId) continue;
       const existing = map[entry.conversationId] ??= { latest: undefined, latestIncomingAt: 0 };
       if (!existing.latest || entry.at > existing.latest.at) existing.latest = entry;
       if (entry.kind === 'incoming' && entry.at > existing.latestIncomingAt) existing.latestIncomingAt = entry.at;
     }
     return map;
-  }, [session.timeline]);
+  }, (left, right) => sameRecordValues(left, right, (a, b) => a.latestIncomingAt === b.latestIncomingAt
+    && a.latest?.id === b.latest?.id && a.latest?.at === b.latest?.at && a.latest?.kind === b.latest?.kind
+    && a.latest?.marker === b.latest?.marker && a.latest?.title === b.latest?.title));
 
   const openConversation = (workspaceId: string, conversationId: string) => {
     if (conversationId) session.selectConversation(workspaceId, conversationId);

@@ -20,6 +20,7 @@ import { Tooltip, TooltipTrigger } from "@/components/base/tooltip/tooltip";
 import { Menu, MenuItem, MenuPopover, MenuSeparator, MenuTrigger } from "@/components/ui/menu";
 import { useT } from "@/i18n";
 import { conversationDisplayTitle, isV2Conversation, workspaceDisplayName } from "@/session/helpers";
+import { useVisibleTimeline } from '@/session/conversationStore';
 import {
   addKanbanTask,
   isKanbanTaskOverdue,
@@ -233,6 +234,7 @@ function TicketDetailBody({ task, workspaces, handlers, editTitle, onOpenTask, o
   const actions = useTaskActions(task, handlers, { onRename: startTitleEdit });
   const { groups, staleCount, linked, run, canStart, canSchedule, hasSubtasks } = actions;
   const { session, conversations, onOpenConversation, onStartConversation, onSchedule } = handlers;
+  const timeline = useVisibleTimeline(session.stores);
   // A subtask's description is the prompt its conversation starts with.
   const descriptionLabel = parent ? t("kanban.promptLabel") : t("kanban.descLabel");
 
@@ -426,7 +428,7 @@ function TicketDetailBody({ task, workspaces, handlers, editTitle, onOpenTask, o
                             <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-background-tertiary-default">
                               <ProviderIcon className="size-3.5" provider={isV2Conversation(conversation) ? conversation.provider : "codex"} />
                             </span>
-                            <span className="min-w-0 flex-1 truncate text-body-medium text-text-primary">{conversationDisplayTitle(conversation, session.timeline)}</span>
+                            <span className="min-w-0 flex-1 truncate text-body-medium text-text-primary">{conversationDisplayTitle(conversation, timeline)}</span>
                             <RiArrowRightSLine className="size-4 shrink-0 text-foreground-icon-tertiary rtl:rotate-180" aria-hidden />
                           </button>
                         ))}
@@ -435,7 +437,7 @@ function TicketDetailBody({ task, workspaces, handlers, editTitle, onOpenTask, o
                   </div>
                 </div>
 
-                <TaskActivity conversationIds={activityIds} timeline={session.timeline} usageRecords={session.usageRecords} />
+                <TaskActivity conversationIds={activityIds} timeline={timeline} usageRecords={session.usageRecords} />
               </div>
 
               <div className="mt-auto flex flex-wrap items-center justify-end gap-2.5 px-6 pt-6 pb-6 max-sm:px-4">

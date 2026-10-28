@@ -40,6 +40,8 @@ import { useSidebarPins } from '../session/useSidebarPins';
 import { searchConversations } from '../session/conversationSearch';
 import { useSidebarGroupCollapse } from '../session/useSidebarGroupCollapse';
 import { platform } from '../platform';
+import { sameRecordValues, useRuntimeSelector, useTimelineSelector } from '../session/conversationStore';
+import type { ConversationRuntime } from '@todex/protocol/conversationRuntime';
 import { useKanbanTasks } from '../session/kanbanTasks';
 import { setFeaturesMoreOpen, useFeatureModes, useFeaturesMoreOpen, type FeatureId } from '../session/featureToggles';
 import { BACKEND_LABEL_COLORS, backendLabelColor } from '../session/backendColors';
@@ -56,7 +58,7 @@ import { AppIcon } from './AppIcon';
 import { WORKSPACE_ICON_CHOICES, WORKSPACE_RING_STYLES, WorkspaceStatusRing, ringStyleKey, workspaceIconComponent } from './WorkspaceIcon';
 import type { TodeXSession } from '../session/useTodeXSession';
 import type { ProviderKind } from '@todex/protocol/v2';
-import { connectionStateLabel, conversationDisplayTitle, isReadOnlyConversation, formatResetInstant, getConversationStatus, healthLabelOf, isConversationHighlighted, isListedConversation, isNoneWorkspaceId, NONE_WORKSPACE_ID, noneWorkspaceRowBackendId, noneWorkspaceRowId, workspaceDisplayName } from '../session/helpers';
+import { connectionStateLabel, conversationDisplayTitle, isReadOnlyConversation, formatResetInstant, getConversationStatus, healthLabelOf, isConversationHighlighted, isListedConversation, isNoneWorkspaceId, NONE_WORKSPACE_ID, noneWorkspaceRowBackendId, noneWorkspaceRowId, workspaceDisplayName, type TimelineEntry } from '../session/helpers';
 import { ownerBackendId } from '../session/backendRouting';
 import { ShortcutHint, shortcutKeys, useAppShortcuts, type ShortcutId } from '../lib/shortcuts';
 import { useT } from '../i18n';
@@ -376,6 +378,16 @@ function workspaceIdOfRow(rowId: string): string {
   return isNoneRowId(rowId) ? NONE_WORKSPACE_ID : rowId;
 }
 
+type TimelineInfo = { latestAt: number; latestEntry?: TimelineEntry; latestIncomingAt: number; firstPrompt: string; firstPromptAt: number };
+const NO_ROWS: TimelineEntry[] = [];
+
+/** Equal when every conversation's status inputs and title fallback are. */
+function sameTimelineInfo(left: Record<string, TimelineInfo>, right: Record<string, TimelineInfo>): boolean {
+  return sameRecordValues(left, right, (a, b) => a.latestAt === b.latestAt && a.latestIncomingAt === b.latestIncomingAt
+    && a.firstPrompt === b.firstPrompt && a.latestEntry?.id === b.latestEntry?.id && a.latestEntry?.kind === b.latestEntry?.kind
+    && a.latestEntry?.marker === b.latestEntry?.marker && a.latestEntry?.title === b.latestEntry?.title);
+}
+
 export function AppSidebar({
   session,
   open,
@@ -634,14 +646,16 @@ export function AppSidebar({
   // sidebar, so its top strip is a drag region with room for them.
   const chromeStrip = insetChrome ? <div aria-hidden="true" className="window-drag -mx-3 -mt-3 h-7 shrink-0" /> : null;
 
-  // High-performance timeline lookup map: precomputed once in O(M) time instead of O(N*M) during sorting
-  const timelineInfoMap = useMemo(() => {
-    const map: Record<string, { latestAt: number; latestEntry?: TodeXSession['timeline'][number]; latestIncomingAt: number }> = {};
-    const timeline = session.timeline;
+  // Per conversation: its latest row and reply time, and its first prompt
+  // (title fallback). Taken from the session stores, and kept while what the
+  // rows show does not change, so a streamed delta into an existing row does
+  // not re-render the sidebar.
+  const timelineInfoMap = useTimelineSelector(session.stores, (timeline) => {
+    const map: Record<string, TimelineInfo> = {};
     for (let i = 0; i < timeline.length; i++) {
       const entry = timeline[i];
       if (!entry?.conversationId || !entry?.at) continue;
-      const existing = map[entry.conversationId] ??= { latestAt: 0, latestIncomingAt: 0 };
+      const existing = map[entry.conversationId] ??= { latestAt: 0, latestIncomingAt: 0, firstPrompt: '', firstPromptAt: Infinity };
       if (entry.at > existing.latestAt) {
         existing.latestAt = entry.at;
         existing.latestEntry = entry;
@@ -649,9 +663,21 @@ export function AppSidebar({
       if (entry.kind === 'incoming' && entry.at > existing.latestIncomingAt) {
         existing.latestIncomingAt = entry.at;
       }
+      if (entry.kind === 'outgoing' && entry.at < existing.firstPromptAt && entry.subtitle.trim()) {
+        existing.firstPrompt = entry.subtitle;
+        existing.firstPromptAt = entry.at;
+      }
     }
     return map;
-  }, [session.timeline]);
+  }, sameTimelineInfo);
+  // Message text only matters while searching.
+  const searchTimeline = useTimelineSelector(session.stores, (timeline) => (query ? timeline : NO_ROWS), Object.is);
+  // Rate-limit badges read each conversation's follow-up queue.
+  const followUpsById = useRuntimeSelector(session.stores, (runtimes) => {
+    const map: Record<string, ConversationRuntime['followUps']> = {};
+    for (const [id, runtime] of Object.entries(runtimes)) if (runtime.followUps) map[id] = runtime.followUps;
+    return map;
+  }, sameRecordValues);
 
   // A workspace surfaces its most urgent conversation status: a running turn
   // beats an unread error, which beats a plain unread marker — the same
@@ -795,7 +821,7 @@ export function AppSidebar({
     if (!query) return { matchedConversations: sortedConversations, searchSnippets: new Map<string, string>() };
     const hidden = new Set(session.workspaces.filter((workspace) => workspace.pathMissing).map((workspace) => workspace.id));
     const messagesById = new Map<string, string[]>();
-    for (const entry of session.timeline) {
+    for (const entry of searchTimeline) {
       if (!entry.conversationId || !entry.subtitle) continue;
       const message = entry.kind === 'outgoing'
         || (entry.kind === 'incoming' && (!entry.category || entry.category === 'assistant_final' || entry.category === 'assistant_progress'));
@@ -807,7 +833,7 @@ export function AppSidebar({
     const hits = searchConversations(
       session.conversations.filter((conversation) => workspaceById.has(conversation.workspaceId)).sort(compareConversations),
       query,
-      (conversation) => conversationDisplayTitle(conversation, session.timeline),
+      (conversation) => conversationDisplayTitle(conversation, timelineInfoMap[conversation.id]?.firstPrompt ?? ''),
       hidden,
       (conversation) => [conversation.preview ?? '', ...(messagesById.get(conversation.id) ?? [])],
     );
@@ -815,7 +841,7 @@ export function AppSidebar({
       matchedConversations: hits.map((hit) => hit.conversation),
       searchSnippets: new Map(hits.flatMap((hit) => (hit.snippet ? [[hit.conversation.id, hit.snippet] as const] : []))),
     };
-  }, [sortedConversations, query, session.conversations, session.workspaces, session.timeline, workspaceById, compareConversations]);
+  }, [sortedConversations, query, session.conversations, session.workspaces, searchTimeline, timelineInfoMap, workspaceById, compareConversations]);
 
   const displayedConversations = useMemo(() => {
     return query ? matchedConversations : matchedConversations.slice(0, conversationLimit);
@@ -960,7 +986,7 @@ export function AppSidebar({
     } else {
       const conversation = session.conversations.find((item) => item.id === menu.id);
       if (!conversation) return;
-      if (action === 'rename') setRenaming({ kind: 'conversation', id: conversation.id, name: conversationDisplayTitle(conversation, session.timeline) });
+      if (action === 'rename') setRenaming({ kind: 'conversation', id: conversation.id, name: conversationDisplayTitle(conversation, timelineInfoMap[conversation.id]?.firstPrompt ?? '') });
       else if (action === 'fork') session.forkConversation(conversation.id);
       else if (action === 'delete') setDeleting({ kind: 'conversation', id: conversation.id, local: !conversation.v2ConversationId });
     }
@@ -1722,12 +1748,12 @@ export function AppSidebar({
                     const taskMeta = conversationTaskMetaMap[conversation.id];
                     // A daemon-paused follow-up queue waiting out a provider rate
                     // limit gets a clock badge; it reports its own resumeAt.
-                    const followUps = session.conversationRuntimeById[conversation.id]?.followUps;
+                    const followUps = followUpsById[conversation.id];
                     const backendWait = followUps?.paused && followUps.pauseReason === 'rate_limited' && followUps.items.length > 0
                       ? Date.parse(followUps.resumeAt) : NaN;
                     const resetAt = Number.isFinite(backendWait) && backendWait > Date.now() ? backendWait : undefined;
                     const tasksDone = Boolean(taskMeta && taskMeta.pending === 0);
-                    const title = conversationDisplayTitle(conversation, session.timeline);
+                    const title = conversationDisplayTitle(conversation, timelineInfoMap[conversation.id]?.firstPrompt ?? '');
                     const running = isConversationHighlighted(conversation, session.activeConversationId, session.turnIds);
                     // Search results come from every workspace, so each names its own.
                     const resultWorkspace = query ? rowById.get(rowIdOf(conversation)) ?? workspaceById.get(conversation.workspaceId) : undefined;

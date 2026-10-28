@@ -57,6 +57,8 @@ import { uploadTerminalImages } from '../session/terminalImagePaste';
 import { t, useT, type MessageKey } from '../i18n';
 import { platform } from '../platform';
 import { slots } from '../platform/slots';
+import { sameRecordValues, useRuntimeSelector } from '../session/conversationStore';
+import type { ConversationRuntime } from '@todex/protocol/conversationRuntime';
 
 type Props = {
   scopeKey?: string;
@@ -186,6 +188,13 @@ function placeholderFiles(): Record<string, { title: string; language: string; b
 export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = session.activeConversation?.id || '', shown = true, onTargetConsumed, closeRequestRef, sshMode = false, sshBackendId: sshBackendProp, requests, onRequestsHandled, onItemsChange }: Props) {
   const t = useT();
   const { BrowserPane } = slots;
+  // What the tabs show of each conversation's runtime (SSH runs, browser
+  // actions); a streamed delta changes neither.
+  const tabRuntimes = useRuntimeSelector(session.stores, (runtimes) => {
+    const map: Record<string, { sshExecs: SshExecRun[]; browserActions: ConversationRuntime['desktopBrowser']['actions'] }> = {};
+    for (const [id, runtime] of Object.entries(runtimes)) map[id] = { sshExecs: runtime.sshExecs, browserActions: runtime.desktopBrowser?.actions };
+    return map;
+  }, (left, right) => sameRecordValues(left, right, (a, b) => a.sshExecs === b.sshExecs && a.browserActions === b.browserActions));
   const storageKey = `${SETTINGS_STORAGE_KEY}.workbenchTabs.v1:${scopeKey}`;
   const [items, setItems] = useState<WorkbenchItem[]>([]);
   const [activeId, setActiveId] = useState('');
@@ -444,7 +453,7 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
     const location = isSystemWorkbenchTab(item.type)
       ? ''
       : item.type === 'agent-browser'
-      ? [...(session.conversationRuntimeById[item.agentBrowser?.conversationId ?? '']?.desktopBrowser.actions ?? [])].reverse().find(action => action.url)?.url || ''
+      ? [...(tabRuntimes[item.agentBrowser?.conversationId ?? '']?.browserActions ?? [])].reverse().find(action => action.url)?.url || ''
       : item.ssh
       ? `ssh ${item.ssh.host}`
       : item.remote
@@ -478,7 +487,7 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
               onClick={() => selectTab(item)}
             >
               {item.sshExec ? (
-                <SshExecTabIcon conversationId={item.sshExec.conversationId} runs={session.conversationRuntimeById[item.sshExec.conversationId]?.sshExecs} className={tabIconClass} />
+                <SshExecTabIcon conversationId={item.sshExec.conversationId} runs={tabRuntimes[item.sshExec.conversationId]?.sshExecs} className={tabIconClass} />
               ) : item.subagents ? (
                 <SubagentsTabIcon runs={session.subagentsByConversation[item.subagents.conversationId]} className={tabIconClass} />
               ) : item.agentCalls ? (
@@ -587,7 +596,7 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
             {item.type === 'browser' && BrowserPane ? <BrowserPane itemId={item.id} isActive={item.id === active?.id} workspacePath={session.activeWorkspace?.path} session={session} target={item.type === tab && item.id === active?.id && (target?.filePath || target?.url) ? target : item.target} onTargetChange={next => updateTabTarget(item.id, next)} /> : null}
             {item.type === 'files' ? <FilesPane session={session} remote={item.remote} remoteBackendId={sshBackendId} onRemoteRebind={next => updateRemoteBinding(item.id, next)} target={item.type === tab && item.id === active?.id && (target?.filePath || target?.url) ? target : item.target} onTargetChange={next => updateTabTarget(item.id, next)} /> : null}
             {item.type === 'git-diff' ? <GitDiffPane session={session} /> : null}
-            {item.type === 'ssh-exec' && item.sshExec ? <SshExecPane conversationId={item.sshExec.conversationId} runs={session.conversationRuntimeById[item.sshExec.conversationId]?.sshExecs ?? NO_SSH_EXECS} isActive={item.id === active?.id} /> : null}
+            {item.type === 'ssh-exec' && item.sshExec ? <SshExecPane conversationId={item.sshExec.conversationId} runs={tabRuntimes[item.sshExec.conversationId]?.sshExecs ?? NO_SSH_EXECS} isActive={item.id === active?.id} /> : null}
             {item.type === 'subagents' && item.subagents ? <SubagentsPanel session={session} conversationId={item.subagents.conversationId} /> : null}
             {item.type === 'agent-calls' && item.agentCalls ? <AgentCallsPanel session={session} conversationId={item.agentCalls.conversationId} /> : null}
             {item.type === 'agent-browser' && item.agentBrowser ? <AgentBrowserLiveView session={session} isActive={shown && item.id === active?.id} conversationId={item.agentBrowser.conversationId} /> : null}
