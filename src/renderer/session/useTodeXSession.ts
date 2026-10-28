@@ -10,6 +10,7 @@ import {
 } from './completionNotifications';
 import { addNotification } from './notificationFeed';
 import { bindSentAttachmentEvents, prepareSentAttachments, pruneSentAttachmentRecords, type SentAttachmentRecord } from './sentAttachments';
+import { ManifestEpochs, flagWorkspaceMissing, mergeWorkspaceDirectory } from './workspaceDirectorySync';
 import { createConversationStores, sameRecordValues, visibleTimeline, type ConversationStores } from './conversationStore';
 import { useStoreSelector } from './store/createStore';
 import { uploadPromptFile } from './promptUploads';
@@ -80,14 +81,12 @@ import {
   normalizeServerUrl,
   normalizeWorkspacePath,
   normalizeWorkspaceTombstone,
-  mergeWorkspaceRecords,
-  nextWorkspaceSortOrder,
+    nextWorkspaceSortOrder,
   remapWorkspaceScopedRecords,
   prepareWorkspaceSyncPayload,
   parseWorkspaceSyncRejected,
   parseWorkspaceSyncResponse,
-  workspaceMatchesTombstone,
-} from '@todex/protocol/todex';
+  } from '@todex/protocol/todex';
 import { loadJson, loadSecret, removeSecret, saveJson, saveSecret } from '../lib/storage';
 import { ConnectionError } from '@todex/protocol/connectionError';
 import { desktopAlert } from '../lib/desktopAlert';
@@ -381,6 +380,11 @@ function withEntry<Value>(record: Record<string, Value>, key: string, value: Val
 }
 
 export function useTodeXSession(openPanel: OpenPanelFn) {
+  // Session state outside React: high-frequency conversation state and the
+  // records code reads synchronously (see conversationStore.ts).
+  const storesRef = useRef<ConversationStores | null>(null);
+  if (!storesRef.current) storesRef.current = createConversationStores();
+  const stores = storesRef.current;
   const workbenchSharingState = useWorkbenchSharing();
   const completionNotificationsState = useCompletionNotifications();
   /** Live agent browser views: conversation → frame listeners. The socket
@@ -409,8 +413,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   }, []);
   const activeWorkspaceRef = useRef('');
   const activeConversationRef = useRef('');
-  const workspacesRef = useRef<WorkspaceRecord[]>([]);
-  const conversationsRef = useRef<ConversationRecord[]>([]);
   const v2ProvidersRef = useRef<ProviderDescriptor[]>([]);
   const turnIdsRef = useRef<Record<string, string>>({});
   const thinkingConversationsRef = useRef<Record<string, boolean>>({});
@@ -468,7 +470,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   // Backends whose own sync just wrote the workspace list: their next save
   // would only echo it back.
   const workspaceBackendSkipNextSaveRef = useRef(new Set<string>());
-  const workspaceTombstonesRef = useRef<WorkspaceTombstone[]>([]);
   const workspaceMissingNotifiedRef = useRef(new Set<string>());
 
   const [hydrated, setHydrated] = useState(false);
@@ -508,8 +509,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   /** Backend profile owning a conversation (the no-workspace backend for an
    * untagged None-workspace draft). */
   function backendIdForConversation(conversationId: string): string {
-    const conversation = conversationsRef.current.find((item) => item.v2ConversationId === conversationId || item.id === conversationId);
-    const workspace = workspacesRef.current.find((item) => item.id === conversation?.workspaceId);
+    const conversation = stores.conversations.get().find((item) => item.v2ConversationId === conversationId || item.id === conversationId);
+    const workspace = stores.workspaces.get().find((item) => item.id === conversation?.workspaceId);
     return ownerBackendId(conversation, workspace, noWorkspaceBackendIdRef.current);
   }
   /** Backend a protocol frame is for, read from what it addresses: a
@@ -521,14 +522,14 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     if (conversationId) return backendIdForConversation(conversationId);
     const sessionId = text('codexSessionId') || text('sessionId');
     if (sessionId) {
-      const conversation = conversationsRef.current.find((item) => item.sessionId === sessionId);
+      const conversation = stores.conversations.get().find((item) => item.sessionId === sessionId);
       if (conversation) return backendIdForConversation(conversation.id);
-      const workspace = workspacesRef.current.find((item) => item.sessionId === sessionId);
+      const workspace = stores.workspaces.get().find((item) => item.sessionId === sessionId);
       if (workspace) return ownerBackendId(null, workspace, noWorkspaceBackendIdRef.current);
     }
     const terminal = terminalByIdRef.current[text('terminalId')];
     if (terminal?.backendConnectionId) return terminal.backendConnectionId;
-    const workspace = workspacesRef.current.find((item) => item.id === text('workspaceId'));
+    const workspace = stores.workspaces.get().find((item) => item.id === text('workspaceId'));
     if (workspace) return ownerBackendId(null, workspace, noWorkspaceBackendIdRef.current);
     return activeBackendConnectionIdRef.current;
   }
@@ -544,9 +545,14 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     const result = await page;
     return history ? history.decryptPage(backendIdForConversation(conversationId), conversationId, result, detail) : result;
   }, []);
-  const [workspaces, setWorkspaces] = useState<WorkspaceRecord[]>([]);
-  const [workspaceTombstones, setWorkspaceTombstones] = useState<WorkspaceTombstone[]>([]);
-  const [conversations, setConversations] = useState<ConversationRecord[]>([]);
+  // Records live in the session stores (read and written synchronously);
+  // the hook re-renders when they change.
+  const workspaces = useStoreSelector(stores.workspaces, (value) => value);
+  const setWorkspaces = stores.workspaces.set;
+  const workspaceTombstones = useStoreSelector(stores.workspaceTombstones, (value) => value);
+  const setWorkspaceTombstones = stores.workspaceTombstones.set;
+  const conversations = useStoreSelector(stores.conversations, (value) => value);
+  const setConversations = stores.conversations.set;
   const [directorySyncByBackend, setDirectorySyncByBackend] = useState<Record<string, 'loading' | 'ready' | 'error'>>({});
   const [activeWorkspaceId, setActiveWorkspaceId] = useState('');
   const [activeConversationId, setActiveConversationId] = useState('');
@@ -621,10 +627,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     setLastError(t(conversation?.legacyCodex ? 'sess.legacyCodexReadOnly' : 'history.readOnlyError'));
     return true;
   };
-  // High-frequency state lives outside React (see conversationStore.ts).
-  const storesRef = useRef<ConversationStores | null>(null);
-  if (!storesRef.current) storesRef.current = createConversationStores();
-  const stores = storesRef.current;
   const setTimeline = stores.timeline.set;
   const setSentAttachmentRecords = stores.sentAttachments.set;
   const sentAttachmentRecordsRef = useRef<SentAttachmentRecord[]>([]);
@@ -783,7 +785,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     (state, applied, recovering, live) => runtimeUpdateRef.current(state, applied, recovering, live), setLastError,
     (id, before, limit) => decryptedHistoryReplay(id, v2ApiForConversation(id).replayEventsBefore(id, before, limit, 'summary'), 'summary'),
     (id, status) => {
-      const localId = conversationsRef.current.find((item) => item.v2ConversationId === id || item.id === id)?.id;
+      const localId = stores.conversations.get().find((item) => item.v2ConversationId === id || item.id === id)?.id;
       if (!localId) return;
       setOpenStatusByConversation((current) => {
         if (current[localId] === status) return current;
@@ -794,7 +796,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       });
     },
     (id) => {
-      const localId = conversationsRef.current.find((item) => item.v2ConversationId === id || item.id === id)?.id;
+      const localId = stores.conversations.get().find((item) => item.v2ConversationId === id || item.id === id)?.id;
       return Boolean(localId && conversationHasPendingWork(localId));
     },
   );
@@ -838,9 +840,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   // A conversation list requested before a create, fork or delete on its
   // backend is stale: merging it would drop the new conversation (or bring
   // the deleted one back) until the next poll, so it is skipped.
-  const manifestEpochsRef = useRef(new Map<string, number>());
-  const manifestEpoch = (backendId: string) => manifestEpochsRef.current.get(backendId) ?? 0;
-  const bumpManifestEpoch = (backendId: string) => { manifestEpochsRef.current.set(backendId, manifestEpoch(backendId) + 1); };
+  const manifestEpochsRef = useRef(new ManifestEpochs());
+  const manifestEpoch = (backendId: string) => manifestEpochsRef.current.current(backendId);
+  const bumpManifestEpoch = (backendId: string) => manifestEpochsRef.current.bump(backendId);
 
   // Every backend's agents and conversation list, refreshed over HTTP.
   useEffect(() => {
@@ -859,7 +861,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           setBackendProviders(backendId, providers.providers);
           if (manifestEpoch(backendId) === firstEpoch) {
             setBackendManifests(backendId, conversations.conversations);
-            setConversations((current) => mergeManifestConversations(current, withDecryptedTitles(backendId, conversations.conversations), workspacesRef.current, backendId, manifestRunModes(backendId, providers.providers)));
+            setConversations((current) => mergeManifestConversations(current, withDecryptedTitles(backendId, conversations.conversations), stores.workspaces.get(), backendId, manifestRunModes(backendId, providers.providers)));
           }
           setDirectorySyncByBackend((current) => ({ ...current, [backendId]: 'ready' }));
         })
@@ -875,7 +877,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         void api.listConversations().then((response) => {
           if (!active || manifestEpoch(backendId) !== epoch) return;
           setBackendManifests(backendId, response.conversations);
-          setConversations((current) => mergeManifestConversations(current, withDecryptedTitles(backendId, response.conversations), workspacesRef.current, backendId, manifestRunModes(backendId)));
+          setConversations((current) => mergeManifestConversations(current, withDecryptedTitles(backendId, response.conversations), stores.workspaces.get(), backendId, manifestRunModes(backendId)));
         }).catch(() => undefined);
       }, 15000);
       stops.push(() => {
@@ -1388,7 +1390,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         if (restoredNoneBackendId === loserId) restoredNoneBackendId = winnerId;
         resolvedProfiles = resolvedProfiles.map((profile) => (profile.id === loserId ? { ...profile, disabled: true } : profile));
       }
-      workspaceTombstonesRef.current = records.tombstones;
       setPreferences(nextSettings);
       setBackendConnections(resolvedProfiles);
       setWorkspaces(records.workspaces);
@@ -1425,17 +1426,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     activeConversationRef.current = activeConversationId;
   }, [activeConversationId]);
 
-  useEffect(() => {
-    workspacesRef.current = workspaces;
-  }, [workspaces]);
 
-  useEffect(() => {
-    workspaceTombstonesRef.current = workspaceTombstones;
-  }, [workspaceTombstones]);
 
-  useEffect(() => {
-    conversationsRef.current = conversations;
-  }, [conversations]);
 
   useEffect(() => {
     v2ProvidersRef.current = v2Providers;
@@ -1486,17 +1478,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     }
   }, [hydrated, workspaceTombstones]);
 
-  // Rejections carry `code` per record; every rejected workspace is flagged
-  // `pathMissing` (greyed out in the sidebar) and toasted once per path until
-  // it syncs cleanly again.
-  const flagWorkspaceMissing = useCallback(
-    (workspace: WorkspaceRecord, missingKeys: Set<string>, backendId: string) => {
-      if (workspace.backendConnectionId !== backendId) return workspace;
-      const pathMissing = missingKeys.has(normalizeWorkspacePath(workspace.path)) || undefined;
-      return workspace.pathMissing === pathMissing ? workspace : { ...workspace, pathMissing };
-    },
-    [],
-  );
 
   // Paths already reported missing, per backend.
   const notifyRejectedWorkspaces = useCallback((backendId: string, rejections: WorkspaceSyncRejection[]) => {
@@ -1524,12 +1505,12 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         return flagged;
       });
     },
-    [flagWorkspaceMissing, notifyRejectedWorkspaces],
+    [notifyRejectedWorkspaces],
   );
 
   /** Push the workspaces of one backend to it. */
   const syncWorkspacesToBackend = useCallback(
-    async (backendId: string, snapshot: WorkspaceRecord[] = workspacesRef.current) => {
+    async (backendId: string, snapshot: WorkspaceRecord[] = stores.workspaces.get()) => {
       const profile = profileFor(backendId);
       if (!profile) return false;
       try {
@@ -1589,69 +1570,24 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       const remoteWorkspaces = parseWorkspaceSyncResponse(syncBody);
       const remoteRejections = parseWorkspaceSyncRejected(syncBody);
       notifyRejectedWorkspaces(backendId, remoteRejections);
-      const missingKeys = new Set(remoteRejections.map((item) => normalizeWorkspacePath(item.path)));
-      // The None workspace is local-only: keep it out of the merge.
-      const localScopedWorkspaces = workspacesRef.current.filter((workspace) =>
-        !isNoneWorkspaceId(workspace.id) && workspace.backendConnectionId === backendId);
-      const scopedTombstones = workspaceTombstonesRef.current.filter((item) => item.backendConnectionId === backendId);
-      const taggedRemoteWorkspaces = remoteWorkspaces.map((workspace) => ({
-        ...workspace,
-        backendConnectionId: backendId,
-      }));
-      // Tombstoned deletions must not be merged back. While the backend still
-      // stores such a record, re-issue the DELETE with the remote id so it is
-      // cleaned up even if the original delete never reached the server.
-      const keptRemoteWorkspaces = taggedRemoteWorkspaces.filter((workspace) =>
-        !scopedTombstones.some((item) => workspaceMatchesTombstone(workspace, item)),
-      );
-      for (const remote of taggedRemoteWorkspaces) {
-        if (keptRemoteWorkspaces.includes(remote)) {
-          continue;
-        }
-        void backendFetch(profile, {
-          method: 'DELETE',
-          path: `/v2/workspaces/${encodeURIComponent(remote.id)}`,
-        }).catch(() => {});
+      const merge = mergeWorkspaceDirectory({
+        backendId,
+        remote: remoteWorkspaces,
+        rejections: remoteRejections,
+        workspaces: stores.workspaces.get(),
+        tombstones: stores.workspaceTombstones.get(),
+      });
+      // Deleted here while the backend still lists them: delete them again,
+      // in case the first DELETE never reached it.
+      for (const id of merge.staleRemoteIds) {
+        void backendFetch(profile, { method: 'DELETE', path: `/v2/workspaces/${encodeURIComponent(id)}` }).catch(() => {});
       }
-      // Prune tombstones once the backend no longer stores a matching record.
-      if (workspaceTombstonesRef.current.length > 0) {
-        const surviving = workspaceTombstonesRef.current.filter((item) => {
-          if (item.backendConnectionId !== backendId) {
-            return true;
-          }
-          return remoteWorkspaces.some((remote) => workspaceMatchesTombstone(remote, item));
-        });
-        if (surviving.length !== workspaceTombstonesRef.current.length) {
-          workspaceTombstonesRef.current = surviving;
-          setWorkspaceTombstones(surviving);
-        }
-      }
-      const nextScopedWorkspaces = remoteWorkspaces.length > 0
-        ? mergeWorkspaceRecords(localScopedWorkspaces, keptRemoteWorkspaces).map((workspace) => ({
-            ...workspace,
-            backendConnectionId: backendId,
-            threadId: '',
-            localAdapterState:
-              localScopedWorkspaces.find((item) => item.id === workspace.id || item.path === workspace.path)?.localAdapterState ??
-              workspace.localAdapterState ??
-              'idle',
-          }))
-        : localScopedWorkspaces;
-      // Other backends' workspaces come from the latest list, so their
-      // concurrent syncs are kept.
-      const current = workspacesRef.current;
-      const nextWorkspaces = [
-        ...[
-          ...current.filter((workspace) => !isNoneWorkspaceId(workspace.id) && workspace.backendConnectionId !== backendId),
-          ...nextScopedWorkspaces.map((workspace) => flagWorkspaceMissing(workspace, missingKeys, backendId)),
-        ].sort((left, right) => right.updatedAt - left.updatedAt),
-        ...current.filter((workspace) => isNoneWorkspaceId(workspace.id)),
-      ];
+      if (merge.survivingTombstones) setWorkspaceTombstones(merge.survivingTombstones);
+      const { localScoped: localScopedWorkspaces, nextScoped: nextScopedWorkspaces, nextWorkspaces, keptRemote: keptRemoteWorkspaces } = merge;
 
       if (nextWorkspaces.length > 0) {
-        const remappedFrom = conversationsRef.current;
         const remappedConversations = remapWorkspaceScopedRecords(
-          remappedFrom,
+          stores.conversations.get(),
           localScopedWorkspaces,
           nextScopedWorkspaces,
         );
@@ -1664,30 +1600,15 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         // dropped as unused right after, so adding them re-rendered every sync.
         const viewedWorkspaceId = nextWorkspaces.some((workspace) => workspace.id === remappedActive) ? remappedActive : nextWorkspaces[0]?.id ?? '';
         const nextConversations = conversationsForWorkspaceSnapshot(nextWorkspaces, remappedConversations, new Set([viewedWorkspaceId]));
-        workspacesRef.current = nextWorkspaces;
-        conversationsRef.current = nextConversations;
-        // Splice this backend's scope into the latest list, so updates queued
-        // meanwhile (another backend's sync, rejection flags) are kept.
-        const scoped = nextWorkspaces.filter((workspace) => !isNoneWorkspaceId(workspace.id) && workspace.backendConnectionId === backendId);
-        setWorkspaces((latest) => {
-          const next = [
-            ...[
-              ...latest.filter((workspace) => !isNoneWorkspaceId(workspace.id) && workspace.backendConnectionId !== backendId),
-              ...scoped,
-            ].sort((left, right) => right.updatedAt - left.updatedAt),
-            ...latest.filter((workspace) => isNoneWorkspaceId(workspace.id)),
-          ];
-          // An unchanged directory keeps the list (and every consumer) as is;
-          // a changed one came from the backend, so it is not pushed back.
-          if (JSON.stringify(next) === JSON.stringify(latest)) return latest;
+        // The records are read and written synchronously (session stores),
+        // so nothing landed between the merge and these writes. An unchanged
+        // directory keeps the list (and every consumer) as is; a changed one
+        // came from the backend, so it is not pushed back.
+        if (JSON.stringify(nextWorkspaces) !== JSON.stringify(stores.workspaces.get())) {
           workspaceBackendSkipNextSaveRef.current.add(backendId);
-          return next;
-        });
-        // Computed from the latest list: updates queued since the refs were
-        // read (sequence marks, read marks, renames) must not be lost.
-        setConversations((latest) => (latest === remappedFrom
-          ? nextConversations
-          : conversationsForWorkspaceSnapshot(nextWorkspaces, remapWorkspaceScopedRecords(latest, localScopedWorkspaces, nextScopedWorkspaces), new Set([viewedWorkspaceId]))));
+          setWorkspaces(nextWorkspaces);
+        }
+        setConversations(nextConversations);
         setTimeline((current) => remapWorkspaceScopedRecords(current, localScopedWorkspaces, nextScopedWorkspaces));
         setMentionHistory((current) => remapWorkspaceScopedRecords(current, localScopedWorkspaces, nextScopedWorkspaces));
         if (remappedActive !== activeWorkspaceRef.current) {
@@ -1709,7 +1630,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           const conversationResponse = await backendApi(profile).listConversations();
           if (manifestEpoch(backendId) === epoch) {
             setBackendManifests(backendId, conversationResponse.conversations);
-            setConversations((current) => mergeManifestConversations(current, withDecryptedTitles(backendId, conversationResponse.conversations), workspacesRef.current, backendId, manifestRunModes(backendId)));
+            setConversations((current) => mergeManifestConversations(current, withDecryptedTitles(backendId, conversationResponse.conversations), stores.workspaces.get(), backendId, manifestRunModes(backendId)));
           }
         } catch (error) {
           setLastError(error instanceof Error ? error.message : t('sess.conversationDirSyncFailed'));
@@ -1724,13 +1645,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       setLastError(error instanceof Error ? error.message : t('sess.workspaceSyncFailed'));
       return false;
     }
-  }, [flagWorkspaceMissing, notifyRejectedWorkspaces, setBackendManifests, syncWorkspacesToBackend]);
+  }, [notifyRejectedWorkspaces, setBackendManifests, syncWorkspacesToBackend]);
 
   // Kanban tasks follow their workspace's backend; the focused backend's
   // zone is the one shown.
   useEffect(() => {
     configureKanbanRouting(activeBackendConnectionId, (workspaceId) => {
-      const workspace = workspacesRef.current.find((item) => item.id === workspaceId);
+      const workspace = stores.workspaces.get().find((item) => item.id === workspaceId);
       return workspace ? ownerBackendId(null, workspace, noWorkspaceBackendIdRef.current) || null : null;
     });
   }, [activeBackendConnectionId]);
@@ -1784,7 +1705,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       return;
     }
     const persist = () => {
-      const v2ConversationIds = new Set(conversationsRef.current.filter(isV2Conversation).map((item) => item.id));
+      const v2ConversationIds = new Set(stores.conversations.get().filter(isV2Conversation).map((item) => item.id));
       const local = stores.timeline.get()
         .filter((entry) => !entry.conversationId || !v2ConversationIds.has(entry.conversationId))
         .slice(0, MAX_TIMELINE_ITEMS);
@@ -1917,7 +1838,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         providerModelsByBackendRef.current = next;
         return next;
       });
-      const conversation = conversationsRef.current.find((item) => item.id === activeConversationRef.current);
+      const conversation = stores.conversations.get().find((item) => item.id === activeConversationRef.current);
       if (conversation?.provider === provider.id) {
         const selection = resolveRememberedProviderSelection(
           conversation.backendConnectionId ?? backendId,
@@ -2069,7 +1990,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     // snapshot once the daemon has had time to settle the turn.
     entry.timer = setTimeout(() => {
       void refreshFollowUpQueueRef.current(conversationId).finally(() => {
-        const v2Id = conversationsRef.current.find((item) => item.id === conversationId)?.v2ConversationId;
+        const v2Id = stores.conversations.get().find((item) => item.id === conversationId)?.v2ConversationId;
         entry.decide(v2Id ? conversationRecoveryRef.current?.get(v2Id)?.followUps : undefined);
       });
     }, BACKEND_CONTINUATION_SETTLE_MS);
@@ -2086,7 +2007,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
 
   const lastSequenceTimersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   runtimeUpdateRef.current = (state, appliedEvents, recovering, live) => {
-    const conversation = conversationsRef.current.find((item) => item.v2ConversationId === state.conversationId || item.id === state.conversationId);
+    const conversation = stores.conversations.get().find((item) => item.v2ConversationId === state.conversationId || item.id === state.conversationId);
     if (!conversation) return;
     const localId = conversation.id;
     setConversationRuntimeById((current) => ({ ...current, [localId]: state }));
@@ -2211,7 +2132,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         // A daemon that holds the queue handles rate limits itself — for every
         // client and with no window open — and reports them only through its
         // queue snapshot, so its error text is not parsed.
-        const backendQueued = hasBackendQueue(providersForConversation(conversationsRef.current.find((item) => item.id === localId)), conversationsRef.current.find((item) => item.id === localId));
+        const backendQueued = hasBackendQueue(providersForConversation(stores.conversations.get().find((item) => item.id === localId)), stores.conversations.get().find((item) => item.id === localId));
         if (submission && turnId && submission.turnId === turnId) {
           if (type === 'turn.failed' && backendQueued) {
             void awaitBackendContinuation(localId, turnId, submission,
@@ -2262,7 +2183,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
    * from the journal tail; earlier events page in on scroll. Falls back to a
    * full forward replay when the runtime is already initialized. */
   const openConversation = useCallback(async (conversationId: string) => {
-    const conversation = conversationsRef.current.find((item) => item.id === conversationId || item.v2ConversationId === conversationId);
+    const conversation = stores.conversations.get().find((item) => item.id === conversationId || item.v2ConversationId === conversationId);
     const v2Id = conversation?.v2ConversationId;
     if (!v2Id || !conversation) return;
     const status = conversation.nativeStatus ?? '';
@@ -2274,7 +2195,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   }, []);
 
   const recoverConversation = useCallback(async (conversationId: string) => {
-    const conversation = conversationsRef.current.find((item) => item.id === conversationId || item.v2ConversationId === conversationId);
+    const conversation = stores.conversations.get().find((item) => item.id === conversationId || item.v2ConversationId === conversationId);
     const v2Id = conversation?.v2ConversationId;
     if (!v2Id || !conversation) return;
     // Without a loaded runtime a forward replay would read the whole journal;
@@ -2292,7 +2213,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
    * explicit retry after a failure goes through here; automatic triggers
    * check `canAutoLoadEarlierHistory` first. */
   const loadEarlierHistory = useCallback(async (conversationId: string) => {
-    const conversation = conversationsRef.current.find((item) => item.id === conversationId);
+    const conversation = stores.conversations.get().find((item) => item.id === conversationId);
     const v2Id = conversation?.v2ConversationId;
     const recovery = conversationRecoveryRef.current;
     if (!conversation || !v2Id || !recovery || recovery.isLoadingEarlier(v2Id) || !recovery.hasEarlierHistory(v2Id)) {
@@ -2334,7 +2255,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     const settled = () => pendingV2SubmissionsRef.current.get(conversationId) !== submission
       || submission.phase !== 'unknown' || Boolean(submission.turnId);
     const unfinished = () => {
-      const v2Id = conversationsRef.current.find((item) => item.id === conversationId)?.v2ConversationId;
+      const v2Id = stores.conversations.get().find((item) => item.id === conversationId)?.v2ConversationId;
       return !v2Id || (conversationRecoveryRef.current?.isRecovering(v2Id) ?? true);
     };
     await recoverConversation(conversationId);
@@ -2391,7 +2312,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     for (const v2Id of recovery?.loadedConversationIds() ?? []) {
       if (!changedIds.has(backendIdForConversation(v2Id))) continue;
       recovery?.release(v2Id);
-      const localId = conversationsRef.current.find((item) => item.v2ConversationId === v2Id || item.id === v2Id)?.id;
+      const localId = stores.conversations.get().find((item) => item.v2ConversationId === v2Id || item.id === v2Id)?.id;
       if (localId) released.push(localId);
       for (const key of [...settledV2TurnsRef.current.keys()]) {
         if (key.startsWith(`${v2Id}:`)) settledV2TurnsRef.current.delete(key);
@@ -2446,14 +2367,14 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const releaseIdleConversationRuntimes = useCallback(() => {
     const recovery = conversationRecoveryRef.current;
     if (!recovery) return;
-    const localIdFor = (v2Id: string) => conversationsRef.current.find((item) => item.v2ConversationId === v2Id || item.id === v2Id)?.id;
+    const localIdFor = (v2Id: string) => stores.conversations.get().find((item) => item.v2ConversationId === v2Id || item.id === v2Id)?.id;
     const busy = (localId: string, state: ConversationRuntime | undefined) =>
       Boolean(state && isConversationRuntimeBusy(state)) || conversationHasPendingWork(localId);
     const recent = recentConversationIdsRef.current;
     const kept: string[] = [];
     const released: string[] = [];
     for (const [index, localId] of recent.entries()) {
-      const v2Id = conversationsRef.current.find((item) => item.id === localId)?.v2ConversationId;
+      const v2Id = stores.conversations.get().find((item) => item.id === localId)?.v2ConversationId;
       const state = v2Id ? recovery.get(v2Id) : undefined;
       if (index < RETAINED_CONVERSATION_RUNTIMES || busy(localId, state)) kept.push(localId);
       else if (!v2Id || !state) continue; // nothing loaded to release
@@ -2499,9 +2420,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
 
 
   const getConversationContext = useCallback((conversationId = activeConversationRef.current): ConversationContext | null => {
-    const conversation = conversationsRef.current.find((item) => item.id === conversationId) ?? null;
+    const conversation = stores.conversations.get().find((item) => item.id === conversationId) ?? null;
     const workspace = conversation
-      ? workspacesRef.current.find((item) => item.id === conversation.workspaceId) ?? null
+      ? stores.workspaces.get().find((item) => item.id === conversation.workspaceId) ?? null
       : null;
     return workspace && conversation ? { workspace: workspaceForConversation(workspace, conversation), conversation } : null;
   }, []);
@@ -2552,15 +2473,14 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
 
   const clearWorkspaceTombstone = useCallback((path: string, backendConnectionId: string | null) => {
     const key = normalizeWorkspacePath(path);
-    const next = workspaceTombstonesRef.current.filter((item) => {
+    const next = stores.workspaceTombstones.get().filter((item) => {
       if (normalizeWorkspacePath(item.path) !== key) {
         return true;
       }
       const scope = item.backendConnectionId ?? null;
       return scope !== null && scope !== backendConnectionId;
     });
-    if (next.length !== workspaceTombstonesRef.current.length) {
-      workspaceTombstonesRef.current = next;
+    if (next.length !== stores.workspaceTombstones.get().length) {
       setWorkspaceTombstones(next);
     }
   }, []);
@@ -2806,7 +2726,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     const cwd = typeof rawCwd === 'string' ? rawCwd : '';
     const rawShell = data.shell;
     const shell = typeof rawShell === 'string' ? rawShell : '';
-    const conversation = conversationsRef.current.find((item) => terminalIdForConversation(item.id) === terminalId);
+    const conversation = stores.conversations.get().find((item) => terminalIdForConversation(item.id) === terminalId);
     const conversationId = conversation?.id ?? activeConversationRef.current;
 
     // ssh exits with 255 when the saved password is rejected or the host key
@@ -2837,7 +2757,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         conversationId,
         tenantId: tenantId || settings.tenantId,
         cwd: cwd || (conversation
-          ? workspacesRef.current.find((workspace) => workspace.id === conversation.workspaceId)?.path ?? ''
+          ? stores.workspaces.get().find((workspace) => workspace.id === conversation.workspaceId)?.path ?? ''
           : ''),
         shell,
         rows: DEFAULT_TERMINAL_ROWS,
@@ -2974,7 +2894,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           // The capped backfill stopped short of the high-water mark. A loaded
           // conversation pages the rest over HTTP; an unopened one loads its
           // history lazily when it is opened.
-          const conversation = conversationsRef.current.find((item) => item.v2ConversationId === subscribedConversationId);
+          const conversation = stores.conversations.get().find((item) => item.v2ConversationId === subscribedConversationId);
           if (conversation && conversationRecoveryRef.current?.get(subscribedConversationId)) {
             void conversationRecoveryRef.current.recover(subscribedConversationId, conversation.workspaceId, conversation.lastSequence ?? 0);
           }
@@ -3035,7 +2955,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           if (!event) throw new Error(t('sess.invalidConversationEvent'));
           // Only this backend's conversations take its events, even if
           // another backend reuses an id.
-          const conversation = conversationsRef.current.find((item) => (
+          const conversation = stores.conversations.get().find((item) => (
             (item.v2ConversationId === event.conversationId || item.id === event.conversationId)
             && backendIdForConversation(item.id) === backendId
           ));
@@ -3181,7 +3101,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       subscribed.add(v2ConversationId);
       return true;
     }
-    const activeV2Id = conversationsRef.current.find(
+    const activeV2Id = stores.conversations.get().find(
       (item) => item.id === activeConversationRef.current,
     )?.v2ConversationId;
     while (subscribed.size >= V2_WS_SUBSCRIPTION_BUDGET) {
@@ -3263,7 +3183,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     onUnlocked: (conversationIds) => {
       const recovery = conversationRecoveryRef.current;
       if (!recovery) return;
-      const activeV2Id = conversationsRef.current.find((item) => item.id === activeConversationRef.current)?.v2ConversationId;
+      const activeV2Id = stores.conversations.get().find((item) => item.id === activeConversationRef.current)?.v2ConversationId;
       let reopenActive = false;
       for (const id of conversationIds ?? recovery.loadedConversationIds()) {
         if (!recovery.get(id)?.timeline.some((entry) => entry.detailLocked)) continue;
@@ -3292,13 +3212,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   useEffect(() => {
     if (!decryptedTitleRevision) return;
     setConversations((current) => Object.entries(v2ConversationsByBackend).reduce(
-      (merged, [backendId, manifests]) => mergeManifestConversations(merged, withDecryptedTitles(backendId, manifests), workspacesRef.current, backendId, manifestRunModes(backendId)),
+      (merged, [backendId, manifests]) => mergeManifestConversations(merged, withDecryptedTitles(backendId, manifests), stores.workspaces.get(), backendId, manifestRunModes(backendId)),
       current,
     ));
   }, [decryptedTitleRevision]);
 
   const controlConversation = useCallback(async (conversationId: string, control: LiveConversationControl): Promise<boolean> => {
-    const conversation = conversationsRef.current.find(item => item.id === conversationId);
+    const conversation = stores.conversations.get().find(item => item.id === conversationId);
     if (refuseReadOnlyWrite(conversation)) return false;
     const turnId = turnIdsRef.current[conversationId];
     if (!conversation?.v2ConversationId || !turnId || controlRequestsRef.current.has(conversationId)) {
@@ -3609,7 +3529,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         // conversations subscribe at their known high-water mark and
         // recover on demand (open, or a live event exposing a gap), so a
         // reconnect no longer replays every journal at once.
-        const foregroundConversation = conversationsRef.current.find(
+        const foregroundConversation = stores.conversations.get().find(
           (item) => item.id === activeConversationRef.current,
         );
         const ownsForeground = Boolean(foregroundConversation) && backendIdForConversation(foregroundConversation!.id) === backendId;
@@ -3627,7 +3547,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         void (async () => {
           await syncWorkspacesFromBackend(backendId);
           if (!isSocketCurrent()) return;
-          const candidates = conversationsRef.current.filter((conversation) => (
+          const candidates = stores.conversations.get().filter((conversation) => (
             Boolean(conversation.v2ConversationId) && conversation.archived !== true
             && backendIdForConversation(conversation.id) === backendId
           ));
@@ -4314,7 +4234,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         localAdapterState: 'idle',
         createdAt: Date.now(),
         updatedAt: Date.now(),
-        sortOrder: nextWorkspaceSortOrder(workspacesRef.current),
+        sortOrder: nextWorkspaceSortOrder(stores.workspaces.get()),
       };
       const nextConversation = createDefaultConversation(nextWorkspace);
 
@@ -4436,13 +4356,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     setV2ConversationsByBackend(({ [loserId]: _removed, ...rest }) => rest);
     setDirectorySyncByBackend(({ [loserId]: _removed, ...rest }) => rest);
     const moved = moveBackendRecords({
-      workspaces: workspacesRef.current,
-      conversations: conversationsRef.current,
-      tombstones: workspaceTombstonesRef.current,
+      workspaces: stores.workspaces.get(),
+      conversations: stores.conversations.get(),
+      tombstones: stores.workspaceTombstones.get(),
     }, loserId, winnerId);
-    workspacesRef.current = moved.workspaces;
-    conversationsRef.current = moved.conversations;
-    workspaceTombstonesRef.current = moved.tombstones;
     setWorkspaces(moved.workspaces);
     setConversations(moved.conversations);
     setWorkspaceTombstones(moved.tombstones);
@@ -4495,12 +4412,12 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
    * is fetched by id from its parent's backend and kept as a hidden record
    * in the parent's workspace. */
   const openAgentCallConversation = useCallback(async (parentConversationId: string, childConversationId: string, fallbackTitle?: string) => {
-    const existing = conversationsRef.current.find((item) => item.v2ConversationId === childConversationId || item.id === childConversationId);
+    const existing = stores.conversations.get().find((item) => item.v2ConversationId === childConversationId || item.id === childConversationId);
     if (existing) {
       selectConversation(existing.workspaceId, existing.id);
       return;
     }
-    const parent = conversationsRef.current.find((item) => item.id === parentConversationId || item.v2ConversationId === parentConversationId);
+    const parent = stores.conversations.get().find((item) => item.id === parentConversationId || item.v2ConversationId === parentConversationId);
     if (!parent) throw new Error(t('agentCalls.parentMissing'));
     const backendId = backendIdForConversation(parent.id);
     const profile = profileFor(backendId);
@@ -4508,7 +4425,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     // Children are not listed, so their sealed title is decrypted here; the
     // call's own title stands in when it cannot be read.
     const manifest = await withDecryptedManifest(backendId, await backendApi(profile).getConversation(childConversationId));
-    const workspace = workspacesRef.current.find((item) => item.id === parent.workspaceId);
+    const workspace = stores.workspaces.get().find((item) => item.id === parent.workspaceId);
     const base = conversationFromManifest(
       !manifest.title && fallbackTitle?.trim() ? { ...manifest, title: fallbackTitle.trim() } : manifest,
       parent.workspaceId,
@@ -4520,7 +4437,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       parentConversationId: manifest.parentConversationId || parent.v2ConversationId || parent.id,
     };
     setConversations((current) => current.some((item) => item.v2ConversationId === manifest.id) ? current : [record, ...current]);
-    const localId = conversationsRef.current.find((item) => item.v2ConversationId === manifest.id)?.id ?? record.id;
+    const localId = stores.conversations.get().find((item) => item.v2ConversationId === manifest.id)?.id ?? record.id;
     selectConversation(parent.workspaceId, localId);
   }, [selectConversation]);
 
@@ -4534,8 +4451,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
 
   /** A turn that finished out of sight goes to the notification history. */
   const recordCompletion = (localId: string, state: { timeline: TimelineEntry[] }) => {
-    const conversation = conversationsRef.current.find((item) => item.id === localId);
-    const workspace = workspacesRef.current.find((item) => item.id === conversation?.workspaceId);
+    const conversation = stores.conversations.get().find((item) => item.id === localId);
+    const workspace = stores.workspaces.get().find((item) => item.id === conversation?.workspaceId);
     addNotification({
       kind: 'conversation',
       status: 'success',
@@ -4558,8 +4475,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       if (!viewingConversation) recordCompletion(localId, state);
       return;
     }
-    const conversation = conversationsRef.current.find((item) => item.id === localId);
-    const workspace = workspacesRef.current.find((item) => item.id === conversation?.workspaceId);
+    const conversation = stores.conversations.get().find((item) => item.id === localId);
+    const workspace = stores.workspaces.get().find((item) => item.id === conversation?.workspaceId);
     recordCompletion(localId, state);
     postCompletionNotification({
       title: conversation?.title?.trim() || workspace?.name?.trim() || 'TodeX',
@@ -4586,8 +4503,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         && document.visibilityState === 'visible'
         && document.hasFocus();
       if (viewingConversation) continue;
-      const conversation = conversationsRef.current.find((item) => item.id === localId);
-      const workspace = workspacesRef.current.find((item) => item.id === conversation?.workspaceId);
+      const conversation = stores.conversations.get().find((item) => item.id === localId);
+      const workspace = stores.workspaces.get().find((item) => item.id === conversation?.workspaceId);
       const title = conversation?.title?.trim() || workspace?.name?.trim() || 'TodeX';
       const body = permissionNotificationBody(request);
       addNotification({
@@ -4635,10 +4552,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         };
         const nextTombstones = [
           tombstone,
-          ...workspaceTombstonesRef.current.filter((item) =>
+          ...stores.workspaceTombstones.get().filter((item) =>
             item.id !== tombstone.id && normalizeWorkspacePath(item.path) !== normalizeWorkspacePath(tombstone.path)),
         ].slice(0, MAX_WORKSPACE_TOMBSTONES);
-        workspaceTombstonesRef.current = nextTombstones;
         setWorkspaceTombstones(nextTombstones);
       }
       const ownerProfile = profileFor(removedWorkspace?.backendConnectionId ?? activeBackendConnectionId);
@@ -4774,7 +4690,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       setLastError(t('sess.permissionWait'));
       return false;
     }
-    conversationsRef.current = conversationsRef.current.map((item) => item.id === conversationId ? { ...item, permissionMode: mode } : item);
     updateConversation(conversationId, { permissionMode: mode });
     rememberProviderRunModes(
       context.conversation.backendConnectionId ?? context.workspace.backendConnectionId ?? activeBackendConnectionId,
@@ -4799,7 +4714,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       setLastError(t('sess.workModeWait'));
       return false;
     }
-    conversationsRef.current = conversationsRef.current.map((item) => item.id === conversationId ? { ...item, mode } : item);
     updateConversation(conversationId, { mode });
     rememberProviderRunModes(
       context.conversation.backendConnectionId ?? context.workspace.backendConnectionId ?? activeBackendConnectionId,
@@ -4946,7 +4860,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       .filter((item) => item.id !== activeConversationId && isUnusedConversation(item))
       .map((item) => item.id));
     if (unusedIds.size === 0) return;
-    conversationsRef.current = conversationsRef.current.filter((item) => !unusedIds.has(item.id));
     setConversations((current) => current.filter((item) => !unusedIds.has(item.id)));
     const withoutUnused = <T,>(current: Record<string, T>): Record<string, T> =>
       Object.fromEntries(Object.entries(current).filter(([id]) => !unusedIds.has(id)));
@@ -4962,7 +4875,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     // conversation it starts, so two starts must not share one.
     options?: { provider?: ProviderKind; providerProfile?: string; title?: string; backendConnectionId?: string; fresh?: boolean },
   ) => {
-    const workspace = workspacesRef.current.find((item) => item.id === workspaceId);
+    const workspace = stores.workspaces.get().find((item) => item.id === workspaceId);
     if (!workspace) {
       desktopAlert(t('alert.workspaceNotFound'), t('alert.workspaceNotFoundBody'));
       return null;
@@ -4979,7 +4892,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       requestedProvider: options?.provider,
       requestedProfile: options?.providerProfile,
       providers,
-      conversations: conversationsRef.current,
+      conversations: stores.conversations.get(),
       activeConversationId: activeConversationRef.current,
       workspaceId: workspace.id,
     });
@@ -4996,14 +4909,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       providerModelPreferencesRef.current[providerModelPreferenceKey(backendConnectionId, agent.provider)],
       providers.find((item) => item.id === agent.provider)?.capabilities.permissionConfig,
     );
-    const existing = options?.fresh ? undefined : conversationsRef.current.find((item) =>
+    const existing = options?.fresh ? undefined : stores.conversations.get().find((item) =>
       item.workspaceId === workspaceId
       && item.backendConnectionId === backendConnectionId
       && isUnusedConversation(item));
     if (existing && existing.provider && !options?.provider && !options?.title) {
       const record = { ...existing, permissionMode: runModes.permissionMode, mode: runModes.mode };
       if (record.permissionMode !== existing.permissionMode || record.mode !== existing.mode) {
-        conversationsRef.current = conversationsRef.current.map((item) => item.id === record.id ? record : item);
         setConversations((current) => current.map((item) => item.id === record.id ? record : item));
       }
       setActiveWorkspaceId(workspace.id);
@@ -5024,7 +4936,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       createdAt: now,
       updatedAt: now,
     };
-    conversationsRef.current = [placeholder, ...conversationsRef.current.filter((item) => item.id !== placeholder.id)];
     setConversations((current) => [placeholder, ...current.filter((item) => item.id !== placeholder.id)]);
     setActiveWorkspaceId(workspace.id);
     setActiveConversationId(placeholder.id);
@@ -5038,21 +4949,21 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
    * to send with, or null (with an alert unless `quiet`) when no agent is
    * available or the record is retired local Codex history. */
   const ensureConversationAgent = useCallback((conversationId: string, { quiet = false }: { quiet?: boolean } = {}): ConversationRecord | null => {
-    const conversation = conversationsRef.current.find((item) => item.id === conversationId);
+    const conversation = stores.conversations.get().find((item) => item.id === conversationId);
     if (!conversation) return null;
     if (isV2Conversation(conversation)) return conversation;
     if (conversation.legacyCodex) {
       if (!quiet) setLastError(t('sess.legacyCodexReadOnly'));
       return null;
     }
-    const workspace = workspacesRef.current.find((item) => item.id === conversation.workspaceId);
+    const workspace = stores.workspaces.get().find((item) => item.id === conversation.workspaceId);
     const backendConnectionId = conversation.backendConnectionId
       ?? workspace?.backendConnectionId
       ?? (isNoneWorkspaceId(conversation.workspaceId) ? noWorkspaceBackendIdRef.current || null : null);
     const providers = (backendConnectionId ? v2ProvidersByBackendRef.current[backendConnectionId] : undefined) ?? v2ProvidersRef.current;
     const agent = resolveCreateConversationAgent({
       providers,
-      conversations: conversationsRef.current,
+      conversations: stores.conversations.get(),
       activeConversationId: activeConversationRef.current,
       workspaceId: conversation.workspaceId,
     });
@@ -5075,7 +4986,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       model: rememberedSelection.model || undefined,
       reasoningEffort: rememberedSelection.reasoningEffort,
     };
-    conversationsRef.current = conversationsRef.current.map((item) => (item.id === conversationId ? record : item));
     setConversations((current) => current.map((item) => (item.id === conversationId ? record : item)));
     return record;
   }, [resolveRememberedProviderSelection]);
@@ -5092,8 +5002,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const openGitWorktree = useCallback((path: string, sourceConversationId: string): {
     workspace: WorkspaceRecord; conversation: ConversationRecord;
   } | null => {
-    const source = conversationsRef.current.find(item => item.id === sourceConversationId);
-    const sourceWorkspace = source && workspacesRef.current.find(item => item.id === source.workspaceId);
+    const source = stores.conversations.get().find(item => item.id === sourceConversationId);
+    const sourceWorkspace = source && stores.workspaces.get().find(item => item.id === source.workspaceId);
     const targetPath = path.trim();
     if (!source || !sourceWorkspace || !targetPath || targetPath.includes('\0')
       || !(/^(?:\/|[A-Za-z]:[\\/]|\\\\)/.test(targetPath))) {
@@ -5109,10 +5019,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       return null;
     }
     const pathKey = (value: string) => value.replace(/[\\/]+$/, '') || '/';
-    let workspace = workspacesRef.current.find(item =>
+    let workspace = stores.workspaces.get().find(item =>
       (item.backendConnectionId ?? activeBackendConnectionIdRef.current) === backendId
       && pathKey(item.path) === pathKey(targetPath));
-    let conversation = workspace && conversationsRef.current.find(item =>
+    let conversation = workspace && stores.conversations.get().find(item =>
       item.workspaceId === workspace!.id
       && (item.backendConnectionId ?? workspace!.backendConnectionId ?? backendId) === backendId);
     if (!workspace) {
@@ -5125,18 +5035,16 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         approvalPolicy: sourceWorkspace.approvalPolicy, approvalsReviewer: sourceWorkspace.approvalsReviewer,
         sandboxMode: sourceWorkspace.sandboxMode, permissionProfile: sourceWorkspace.permissionProfile,
         serviceTier: sourceWorkspace.serviceTier, personality: sourceWorkspace.personality };
-      workspacesRef.current = [workspace, ...workspacesRef.current.filter(item => item.id !== workspace!.id)];
       const record = workspace;
       setWorkspaces(current => [record, ...current.filter(item => item.id !== record.id)]);
       conversation = created.conversation;
     }
-    if (!conversation || !conversationsRef.current.some(item => item.id === conversation!.id)) {
+    if (!conversation || !stores.conversations.get().some(item => item.id === conversation!.id)) {
       conversation = { ...(conversation ?? createDefaultConversation(workspace)),
         backendConnectionId: backendId, provider: source.provider, providerProfile: source.providerProfile,
         model: source.model, reasoningEffort: source.reasoningEffort, mode: source.mode,
         permissionMode: source.permissionMode };
       const record = conversation;
-      conversationsRef.current = [record, ...conversationsRef.current.filter(item => item.id !== record.id)];
       setConversations(current => [record, ...current.filter(item => item.id !== record.id)]);
     }
     // Use current refs so rapid clicks reuse the same records. The backend
@@ -5199,9 +5107,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       localAdapterState: 'idle',
       updatedAt,
     };
-    conversationsRef.current = conversationsRef.current.map((item) => (
-      item.id === conversation.id ? { ...item, ...patch } : item
-    ));
     setConversations((current) => current.map((item) => (
       item.id === conversation.id ? { ...item, ...patch } : item
     )));
@@ -5284,7 +5189,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           const record = { ...conversationFromManifest(created, workspace.id), backendConnectionId: conversation.backendConnectionId,
             model: conversation.model, reasoningEffort: conversation.reasoningEffort,
             permissionMode: conversation.permissionMode, mode: conversation.mode };
-          conversationsRef.current = [record, ...conversationsRef.current.filter((item) => item.id !== record.id)];
           setConversations((current) => [record, ...current.filter((item) => item.id !== record.id)]);
           setActiveWorkspaceId(workspace.id);
           setActiveConversationId(record.id);
@@ -5308,7 +5212,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       return;
     }
     const { workspace, conversation } = context;
-    const nextActive = conversationsRef.current.find(
+    const nextActive = stores.conversations.get().find(
       (item) => item.workspaceId === workspace.id && item.id !== conversationId && item.archived !== true,
     );
     updateConversation(conversationId, { archived: true, nativeStatus: 'archived' });
@@ -5461,7 +5365,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
             : provider.profiles[0],
         });
         if (backendConnectionId) bumpManifestEpoch(backendConnectionId);
-        const latestConversation = conversationsRef.current.find((item) => item.id === conversationId)
+        const latestConversation = stores.conversations.get().find((item) => item.id === conversationId)
           ?? conversation;
         // The backend seals the title; keep the one asked for (or the local
         // one) instead of the provider name until this device reads it.
@@ -5486,7 +5390,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
             && item.v2ConversationId !== created.id
           )),
         ];
-        conversationsRef.current = replaceConversation(conversationsRef.current);
         setConversations(replaceConversation);
         if (backendConnectionId) {
           setV2ConversationsByBackend((current) => ({
@@ -5529,7 +5432,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   }, [pendingPluginDrafts, setConversationChatDraft, stores]);
 
   const stopProviderRuntime = useCallback(async (conversationId: string) => {
-    const conversation = conversationsRef.current.find(item => item.id === conversationId);
+    const conversation = stores.conversations.get().find(item => item.id === conversationId);
     if (!conversation?.v2ConversationId) return;
     setStoppingProviderRuntimes(current => ({ ...current, [conversationId]: true }));
     try {
@@ -5699,7 +5602,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       } catch (error) {
         if (error instanceof ProtocolCommandError && error.state === 'unknown') {
           if (submission.phase === 'running') {
-            const v2Id = conversationsRef.current.find((item) => item.id === conversation.id)?.v2ConversationId;
+            const v2Id = stores.conversations.get().find((item) => item.id === conversation.id)?.v2ConversationId;
             const terminal = submission.turnId ? settledV2TurnsRef.current.get(`${v2Id}:${submission.turnId}`) : undefined;
             return terminal !== 'turn.failed';
           }
@@ -5709,7 +5612,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           setConversationThinking(conversation.id, false);
           await reconcilePendingSubmission(conversation.id);
           const latest = pendingV2SubmissionsRef.current.get(conversation.id);
-          const v2Id = conversationsRef.current.find((item) => item.id === conversation.id)?.v2ConversationId;
+          const v2Id = stores.conversations.get().find((item) => item.id === conversation.id)?.v2ConversationId;
           const terminal = v2Id && submission.turnId ? settledV2TurnsRef.current.get(`${v2Id}:${submission.turnId}`) : undefined;
           if (terminal) {
             if (terminal === 'turn.failed' && backendQueued) {
@@ -5884,7 +5787,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   /** Reads the backend queue into the runtime: the loaded window may not
    * hold its latest `followups.updated`. */
   const refreshFollowUpQueue = useCallback(async (conversationId: string) => {
-    const conversation = conversationsRef.current.find((item) => item.id === conversationId);
+    const conversation = stores.conversations.get().find((item) => item.id === conversationId);
     const v2Id = conversation?.v2ConversationId;
     if (!conversation || !v2Id || !hasBackendQueue(providersForConversation(conversation), conversation)) return;
     try {
@@ -5897,7 +5800,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
 
   /** Removes one item, clears, resumes, or (`backendQueueControl`) pauses the backend queue. */
   const editFollowUpQueue = useCallback(async (conversationId: string, operation: 'remove' | 'clear' | 'resume' | 'pause', itemId?: string) => {
-    const v2Id = conversationsRef.current.find((item) => item.id === conversationId)?.v2ConversationId;
+    const v2Id = stores.conversations.get().find((item) => item.id === conversationId)?.v2ConversationId;
     if (!v2Id) return false;
     try {
       const result = await sendProtocolCommand({ id: createRequestId(`queue-${operation}`),
@@ -5913,7 +5816,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   /** Holds the conversation's backend queue until `at` (ISO instant), or
    * cancels its schedule with null. */
   const scheduleConversation = useCallback(async (conversationId: string, at: string | null) => {
-    const conversation = conversationsRef.current.find((item) => item.id === conversationId);
+    const conversation = stores.conversations.get().find((item) => item.id === conversationId);
     const v2Id = conversation?.v2ConversationId;
     if (!conversation || !v2Id) return false;
     try {
@@ -5921,7 +5824,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       if (result.queue !== undefined) conversationRecoveryRef.current?.adoptFollowUpQueue(v2Id, parseFollowUpQueue(result.queue));
       const schedule = parseConversationSchedule(result.schedule);
       const apply = (items: ConversationRecord[]) => items.map((item) => item.id === conversationId ? { ...item, schedule } : item);
-      conversationsRef.current = apply(conversationsRef.current);
       setConversations(apply);
       return true;
     } catch (error) {
@@ -5935,7 +5837,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const sendScheduledNow = useCallback(async (conversationId: string) => {
     if (!await editFollowUpQueue(conversationId, 'resume')) return false;
     const apply = (items: ConversationRecord[]) => items.map((item) => item.id === conversationId ? { ...item, schedule: undefined } : item);
-    conversationsRef.current = apply(conversationsRef.current);
     setConversations(apply);
     return true;
   }, [editFollowUpQueue]);
@@ -5961,21 +5862,21 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     const record = await materializeV2Conversation(created.id, options?.title ?? '');
     if (!record?.v2ConversationId) return null;
     if (!await scheduleConversation(record.id, at)) return null;
-    return conversationsRef.current.find((item) => item.id === record.id) ?? record;
+    return stores.conversations.get().find((item) => item.id === record.id) ?? record;
   }, [createConversation, materializeV2Conversation, scheduleConversation, setLastError]);
 
   /** Agents a scheduled conversation in the workspace can run on (available
    * and able to hold its queue until a set time), and the one a new
    * conversation there would start with when it is among them. */
   const scheduledConversationAgents = useCallback((workspaceId: string): { providers: ProviderDescriptor[]; defaultProvider?: ProviderKind } => {
-    const workspace = workspacesRef.current.find((item) => item.id === workspaceId);
+    const workspace = stores.workspaces.get().find((item) => item.id === workspaceId);
     const backendConnectionId = workspace?.backendConnectionId
       ?? (workspace && isNoneWorkspaceId(workspace.id) ? noWorkspaceBackendIdRef.current || null : null);
     const providers = (backendConnectionId ? v2ProvidersByBackendRef.current[backendConnectionId] : undefined) ?? v2ProvidersRef.current;
     const eligible = providers.filter((item) => item.available && providerSupportsScheduledConversations(providers, item.id));
     const agent = resolveCreateConversationAgent({
       providers,
-      conversations: conversationsRef.current,
+      conversations: stores.conversations.get(),
       activeConversationId: activeConversationRef.current,
       workspaceId,
     });
@@ -6010,7 +5911,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     };
     void migrateLegacyFollowUps(legacy, {
       resolve: (conversationId): LegacyQueueTarget => {
-        const conversation = conversationsRef.current.find((item) => item.id === conversationId);
+        const conversation = stores.conversations.get().find((item) => item.id === conversationId);
         if (!conversation || isReadOnlyConversation(conversation)) return { kind: 'gone' };
         // Each backend's queue is migrated once that backend is connected.
         if (!conversation.v2ConversationId || linkStatusRef.current[backendIdForConversation(conversation.id)]?.state !== 'open'
@@ -6025,7 +5926,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       settle: (conversationId, discarded) => {
         forget(conversationId);
         if (discarded.length === 0) return;
-        const conversation = conversationsRef.current.find((item) => item.id === conversationId);
+        const conversation = stores.conversations.get().find((item) => item.id === conversationId);
         const listing = discarded.map((item) => (item.text.trim() || attachmentPrompt(item.attachments)
           || selectedSkillSummary(item.skills)).slice(0, 200)).join('\n');
         const body = t('sess.queueDiscardedHint', { count: discarded.length, text: listing });
@@ -6127,13 +6028,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     const deleted = new Set(v2ConversationIds);
     if (deleted.size === 0) return;
     for (const id of deleted) unsubscribeV2Conversation(id);
-    const removed = conversationsRef.current.filter((item) => (
+    const removed = stores.conversations.get().filter((item) => (
       item.v2ConversationId && deleted.has(item.v2ConversationId) && backendIdForConversation(item.id) === backendId
     ));
     const removedIds = new Set(removed.map((item) => item.id));
     if (removedIds.has(activeConversationRef.current)) {
       const active = removed.find((item) => item.id === activeConversationRef.current);
-      const nextActive = conversationsRef.current.find(
+      const nextActive = stores.conversations.get().find(
         (item) => item.workspaceId === active?.workspaceId && !removedIds.has(item.id) && item.archived !== true,
       );
       setActiveConversationId(nextActive?.id ?? '');
@@ -6157,11 +6058,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const deleteConversation = useCallback(async (conversationId: string): Promise<
     { status: 'deleted' | 'archived' } | { status: 'skipped'; code: string; message: string }
   > => {
-    const conversation = conversationsRef.current.find((item) => item.id === conversationId);
+    const conversation = stores.conversations.get().find((item) => item.id === conversationId);
     const v2ConversationId = conversation?.v2ConversationId;
     if (conversation?.legacyCodex) {
       removeConversation(conversationId);
-      conversationsRef.current = conversationsRef.current.filter((item) => item.id !== conversationId);
       setConversations((current) => current.filter((item) => item.id !== conversationId));
       setTimeline((current) => current.filter((entry) => entry.conversationId !== conversationId));
       pruneConversationState([conversationId], { drafts: true });
@@ -6178,7 +6078,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     if (!result.deleted.includes(v2ConversationId)) {
       return { status: 'skipped', code: skip?.code ?? '', message: skip?.message ?? '' };
     }
-    const children = conversationsRef.current
+    const children = stores.conversations.get()
       .filter((item) => item.parentConversationId === v2ConversationId && item.v2ConversationId)
       .map((item) => item.v2ConversationId as string);
     forgetDeletedConversations(children, backendId);
@@ -6195,7 +6095,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   }), [mutateCapabilityCatalog]);
 
   const refreshMcpServer = useCallback((conversationId: string, resourceId: string) => {
-    const conversation = conversationsRef.current.find((item) => item.id === conversationId) ?? null;
+    const conversation = stores.conversations.get().find((item) => item.id === conversationId) ?? null;
     const v2Id = conversation?.v2ConversationId;
     if (!conversation || !isV2Conversation(conversation) || !v2Id) {
       desktopAlert(t('alert.needCreatedConversation'), t('alert.needMessageRefreshMcp'));
@@ -6209,9 +6109,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   }, [sendRawProtocolFrame]);
 
   const callMcpTool = useCallback((conversationId: string, resourceId: string, toolName: string, args: Record<string, unknown> = {}) => {
-    const conversation = conversationsRef.current.find((item) => item.id === conversationId) ?? null;
+    const conversation = stores.conversations.get().find((item) => item.id === conversationId) ?? null;
     const workspace = conversation
-      ? workspacesRef.current.find((item) => item.id === conversation.workspaceId) ?? null
+      ? stores.workspaces.get().find((item) => item.id === conversation.workspaceId) ?? null
       : null;
     const v2Id = conversation?.v2ConversationId;
     if (!conversation || !workspace || !isV2Conversation(conversation) || !v2Id) {
@@ -6236,7 +6136,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       const data = eventPayloadData(request.event);
       if (request.requestType === 'conversation.permission.request') {
         const conversationId = typeof data.conversationId === 'string' ? data.conversationId : '';
-        const conversation = conversationsRef.current.find((item) => item.id === conversationId || item.v2ConversationId === conversationId) ?? null;
+        const conversation = stores.conversations.get().find((item) => item.id === conversationId || item.v2ConversationId === conversationId) ?? null;
         if (refuseReadOnlyWrite(conversation)) return false;
         const v2Id = conversation?.v2ConversationId || conversation?.id || conversationId;
         const permissionId = typeof data.permissionId === 'string' ? data.permissionId : request.requestId;
@@ -6360,7 +6260,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
    * opened here — in full detail, since summary pages leave the steps empty,
    * and stops once the newest entries fill `maxBytes`. */
   const exportConversationMarkdown = useCallback(async (conversationId: string, maxBytes?: number) => {
-    const conversation = conversationsRef.current.find((item) => item.id === conversationId);
+    const conversation = stores.conversations.get().find((item) => item.id === conversationId);
     if (!conversation) throw new Error(t('alert.noConversation'));
     const v2Id = conversation.v2ConversationId;
     const transcript = v2Id
@@ -6618,9 +6518,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   }, [activeConversationId, activeWorkspaceId, conversations, hydrated, workspaces]);
 
   const stopThinking = useCallback((conversationId: string) => {
-    const conversation = conversationsRef.current.find((item) => item.id === conversationId) ?? null;
+    const conversation = stores.conversations.get().find((item) => item.id === conversationId) ?? null;
     const workspace = conversation
-      ? workspacesRef.current.find((item) => item.id === conversation.workspaceId) ?? null
+      ? stores.workspaces.get().find((item) => item.id === conversation.workspaceId) ?? null
       : null;
     if (!workspace || !conversation) {
       desktopAlert(t('alert.noWorkspace'), t('alert.pickWorkspace'));
@@ -6762,7 +6662,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
    * journal range [firstSequence, sequence] it was built from, and merge them
    * into the projection. */
   const hydrateProcessGroup = useCallback(async (conversationId: string, ranges: ReadonlyArray<readonly [number, number]>) => {
-    const conversation = conversationsRef.current.find((item) => item.id === conversationId);
+    const conversation = stores.conversations.get().find((item) => item.id === conversationId);
     const v2Id = conversation?.v2ConversationId ?? conversationId;
     const api = v2ApiForConversation(v2Id);
     const merged = mergeSequenceRanges(ranges);

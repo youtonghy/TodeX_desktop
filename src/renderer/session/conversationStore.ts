@@ -6,7 +6,8 @@
 // re-render only when it changes.
 import type { ConversationRuntime } from '@todex/protocol/conversationRuntime';
 import { createStore, useStoreSelector, type Store } from './store/createStore';
-import type { TimelineEntry } from './helpers';
+import type { ConversationRecord, TimelineEntry } from './helpers';
+import type { WorkspaceRecord, WorkspaceTombstone } from '@todex/protocol/todex';
 import { projectSentAttachments, type SentAttachmentRecord } from './sentAttachments';
 
 export type ConversationStores = {
@@ -15,6 +16,12 @@ export type ConversationStores = {
   /** Runtime per local conversation id. */
   runtime: Store<Record<string, ConversationRuntime>>;
   sentAttachments: Store<SentAttachmentRecord[]>;
+  /** The conversation, workspace and deleted-workspace records: the hook
+   * re-renders on every change of these, but code reads and writes them
+   * synchronously here instead of through refs that mirror React state. */
+  conversations: Store<ConversationRecord[]>;
+  workspaces: Store<WorkspaceRecord[]>;
+  workspaceTombstones: Store<WorkspaceTombstone[]>;
 };
 
 type Projection = { records: SentAttachmentRecord[]; projected: TimelineEntry };
@@ -25,6 +32,9 @@ export function createConversationStores(): ConversationStores {
     timeline: createStore<TimelineEntry[]>([]),
     runtime: createStore<Record<string, ConversationRuntime>>({}),
     sentAttachments: createStore<SentAttachmentRecord[]>([]),
+    conversations: createStore<ConversationRecord[]>([]),
+    workspaces: createStore<WorkspaceRecord[]>([]),
+    workspaceTombstones: createStore<WorkspaceTombstone[]>([]),
   };
 }
 
