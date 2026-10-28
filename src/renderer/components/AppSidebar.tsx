@@ -44,12 +44,13 @@ import { useKanbanTasks } from '../session/kanbanTasks';
 import { setFeaturesMoreOpen, useFeatureModes, useFeaturesMoreOpen, type FeatureId } from '../session/featureToggles';
 import { BACKEND_LABEL_COLORS, backendLabelColor } from '../session/backendColors';
 import type { BackendConnectionProfile } from '../session/backendColors';
-import { WORKSPACE_GROUP_FIELD_MAX, groupWorkspaceEntries, moveWorkspaceEntry, moveWorkspaceToGroup, newWorkspaceGroupId, removeWorkspaceFromGroup, renameWorkspaceGroup, ungroupWorkspaceGroup, workspaceLayoutPatches } from '@todex/protocol/todex';
-import type { WorkspaceDragSource, WorkspaceDropTarget, WorkspaceRecord, WorkspaceSidebarEntry } from '@todex/protocol/todex';
+import { WORKSPACE_GROUP_FIELD_MAX, collectWorkspaceTags, groupWorkspaceEntries, groupWorkspaceEntriesByTag, moveWorkspaceEntry, moveWorkspaceToGroup, newWorkspaceGroupId, normalizeWorkspaceTags, removeWorkspaceFromGroup, renameWorkspaceGroup, setWorkspaceGroupTags, ungroupWorkspaceGroup, workspaceLayoutPatches } from '@todex/protocol/todex';
+import type { WorkspaceDragSource, WorkspaceDropTarget, WorkspaceRecord, WorkspaceSidebarEntry, WorkspaceTagSection } from '@todex/protocol/todex';
 import { ProviderIcon } from './ProviderIcon';
 import { ConversationScheduleIcon } from './ConversationSchedule';
 import { ScheduleConversationDialog } from './ScheduleConversationDialog';
 import { RenameDialog } from './RenameDialog';
+import { WorkspaceTagsDialog } from './WorkspaceTagsDialog';
 import { WorkspaceHoverTooltip } from './WorkspaceHoverTooltip';
 import { AppIcon } from './AppIcon';
 import { WORKSPACE_ICON_CHOICES, WORKSPACE_RING_STYLES, WorkspaceStatusRing, ringStyleKey, workspaceIconComponent } from './WorkspaceIcon';
@@ -157,7 +158,7 @@ function sameDropTarget(left: WorkspaceDropTarget | null, right: WorkspaceDropTa
 }
 
 /** Section header: a collapse toggle (chevron, label, count) beside its add action. */
-function SectionHeader({ label, count, collapsed, expandLabel, collapseLabel, onToggle, addLabel, addDisabled, onAdd, hint }: {
+function SectionHeader({ label, count, collapsed, expandLabel, collapseLabel, onToggle, addLabel, addDisabled, onAdd, hint, actions }: {
   label: string;
   count: number;
   collapsed: boolean;
@@ -168,6 +169,8 @@ function SectionHeader({ label, count, collapsed, expandLabel, collapseLabel, on
   addDisabled?: boolean;
   onAdd: () => void;
   hint: ShortcutId;
+  /** Extra header actions before the add button. */
+  actions?: ReactNode;
 }) {
   return (
     <div className="flex items-center justify-between gap-1">
@@ -189,6 +192,7 @@ function SectionHeader({ label, count, collapsed, expandLabel, collapseLabel, on
         <span className="truncate text-body-medium text-text-secondary">{label}</span>
         <span className="text-caption-1-regular text-text-tertiary">({count})</span>
       </button>
+      {actions}
       <span className="relative inline-flex shrink-0">
         <IconAction size="xs" icon={RiAddLine} aria-label={addLabel} disabled={addDisabled} onClick={onAdd} />
         <ShortcutHint id={hint} className="absolute -top-1.5 -end-1.5 z-10" />
@@ -334,6 +338,38 @@ function isNoneRowId(rowId: string): boolean {
 /** Several None rows form this built-in group, which cannot be renamed,
  * ungrouped, dragged or joined. */
 const NONE_GROUP_ID = NONE_WORKSPACE_ID;
+
+/** Tag-view row keys: a workspace or group can sit under several tags, so its
+ * key is prefixed by the tag section's key. */
+const SCOPE_SEPARATOR = '\u0001';
+function scopedKey(scope: string | undefined, key: string): string {
+  return scope ? `${scope}${SCOPE_SEPARATOR}${key}` : key;
+}
+/** The workspace id or `group:<id>` behind a (possibly scoped) row key. */
+function unscopedKey(key: string): string {
+  return key.slice(key.lastIndexOf(SCOPE_SEPARATOR) + 1);
+}
+/** Fold-state id and tree key of a tag section header. */
+function tagSectionKey(section: WorkspaceTagSection): string {
+  return `tag:${section.key}`;
+}
+function isTagSectionKey(key: string): boolean {
+  return key.startsWith('tag:') && !key.includes(SCOPE_SEPARATOR);
+}
+const WORKSPACE_VIEW_KEY = 'todex.sidebar.workspaceView';
+
+/** The None rows (alone or as their built-in group) stay out of tag sections. */
+function isNoneEntry(entry: WorkspaceSidebarEntry): boolean {
+  return entry.kind === 'group' ? entry.id === NONE_GROUP_ID : isNoneRowId(entry.workspace.id);
+}
+
+/** A tag section's distinct workspaces in order, groups flattened (the rail). */
+function tagSectionWorkspaces(section: WorkspaceTagSection): WorkspaceRecord[] {
+  const seen = new Set<string>();
+  return section.entries
+    .flatMap((entry) => (entry.kind === 'group' ? entry.workspaces : [entry.workspace]))
+    .filter((workspace) => !seen.has(workspace.id) && Boolean(seen.add(workspace.id)));
+}
 
 /** The workspace record behind a sidebar row (None rows share one). */
 function workspaceIdOfRow(rowId: string): string {
@@ -486,6 +522,7 @@ export function AppSidebar({
   const [draggingKey, setDraggingKey] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<WorkspaceDropTarget | null>(null);
   const [renamingGroup, setRenamingGroup] = useState<{ id: string; name: string } | null>(null);
+  const [editingTags, setEditingTags] = useState<{ kind: 'workspace' | 'group'; id: string; tags: string[] } | null>(null);
   const [renaming, setRenaming] = useState<{ kind: 'workspace' | 'conversation'; id: string; name: string } | null>(null);
   // Delete asks first; `local` marks a legacy record that is only archived.
   const [deleting, setDeleting] = useState<{ kind: 'workspace' | 'conversation'; id: string; local?: boolean } | null>(null);
@@ -662,20 +699,54 @@ export function AppSidebar({
   const newGroupFallbackName = t('sidebar.newGroupName');
   // A search keeps the rows whose name matches; a group whose own name matches
   // keeps all of its workspaces, otherwise just the matching ones.
-  const matchedEntries = useMemo(() => {
-    if (!query) return workspaceEntries;
+  const matchEntries = useCallback((entries: WorkspaceSidebarEntry[]) => {
+    if (!query) return entries;
     const hit = (text: string) => text.toLocaleLowerCase().includes(query);
-    return workspaceEntries.flatMap((entry): WorkspaceSidebarEntry[] => {
+    return entries.flatMap((entry): WorkspaceSidebarEntry[] => {
       if (entry.kind === 'workspace') return hit(workspaceDisplayName(entry.workspace)) ? [entry] : [];
       if (hit(entry.name || newGroupFallbackName)) return [entry];
       const workspaces = entry.workspaces.filter((workspace) => hit(workspaceDisplayName(workspace)));
       return workspaces.length > 0 ? [{ ...entry, workspaces }] : [];
     });
-  }, [workspaceEntries, query, newGroupFallbackName]);
-  const matchedWorkspaceCount = useMemo(() => matchedEntries.reduce(
-    (count, entry) => count + (entry.kind === 'group' ? entry.workspaces.length : 1),
-    0,
-  ), [matchedEntries]);
+  }, [query, newGroupFallbackName]);
+  const matchedEntries = useMemo(() => matchEntries(workspaceEntries), [matchEntries, workspaceEntries]);
+
+  // Grouping by tag (a per-device choice): the None rows stay on top, the
+  // rest regroup into one section per tag. A search keeps a section whose tag
+  // matches whole, otherwise its matching rows.
+  const [tagView, setTagView] = useState(() => {
+    try { return window.localStorage.getItem(WORKSPACE_VIEW_KEY) === 'tags'; } catch { return false; }
+  });
+  const toggleTagView = () => {
+    setTagView((current) => {
+      try { window.localStorage.setItem(WORKSPACE_VIEW_KEY, current ? 'groups' : 'tags'); } catch { /* the view resets next launch */ }
+      return !current;
+    });
+  };
+  const tagNoneEntries = useMemo(() => matchedEntries.filter(isNoneEntry), [matchedEntries]);
+  const tagSections = useMemo(() => {
+    if (!tagView) return [];
+    const untaggedLabel = t('sidebar.untagged').toLocaleLowerCase();
+    return groupWorkspaceEntriesByTag(workspaceEntries.filter((entry) => !isNoneEntry(entry))).flatMap((section): WorkspaceTagSection[] => {
+      if (!query || (section.tag ?? untaggedLabel).toLocaleLowerCase().includes(query)) return [section];
+      const entries = matchEntries(section.entries);
+      return entries.length > 0 ? [{ ...section, entries }] : [];
+    });
+  }, [tagView, workspaceEntries, matchEntries, query, t]);
+  const knownTags = useMemo(() => collectWorkspaceTags(ownWorkspaces), [ownWorkspaces]);
+
+  const matchedWorkspaceCount = useMemo(() => {
+    if (!tagView) {
+      return matchedEntries.reduce((count, entry) => count + (entry.kind === 'group' ? entry.workspaces.length : 1), 0);
+    }
+    // Distinct workspaces: a tagged one may be listed under several tags.
+    const ids = new Set<string>();
+    for (const entry of [...tagNoneEntries, ...tagSections.flatMap((section) => section.entries)]) {
+      if (entry.kind === 'group') entry.workspaces.forEach((workspace) => ids.add(workspace.id));
+      else ids.add(entry.workspace.id);
+    }
+    return ids.size;
+  }, [tagView, matchedEntries, tagNoneEntries, tagSections]);
   // Search results are shown whole; paging applies to the full list.
   const displayedEntries = useMemo(
     () => (query ? matchedEntries : matchedEntries.slice(0, workspaceLimit)),
@@ -690,9 +761,16 @@ export function AppSidebar({
   );
   // Children of a folded group stay mounted (they fold away with the
   // grid-rows transition) but leave keyboard navigation.
-  const foldedWorkspaceKeys = useMemo(() => displayedEntries.flatMap((entry) => (
-    entry.kind === 'group' && isGroupFolded(entry.id) ? entry.workspaces.map((workspace) => workspace.id) : []
-  )), [displayedEntries, isGroupFolded]);
+  const foldedWorkspaceKeys = useMemo(() => {
+    const folded = (tagView ? tagNoneEntries : displayedEntries).flatMap((entry) => (
+      entry.kind === 'group' && isGroupFolded(entry.id) ? entry.workspaces.map((workspace) => workspace.id) : []
+    ));
+    if (!tagView) return folded;
+    // The rail lists a tag section's workspaces flat under its header.
+    return [...folded, ...tagSections.flatMap((section) => (isGroupFolded(tagSectionKey(section))
+      ? tagSectionWorkspaces(section).map((workspace) => scopedKey(tagSectionKey(section), workspace.id))
+      : []))];
+  }, [tagView, tagNoneEntries, tagSections, displayedEntries, isGroupFolded]);
 
   const matchedForeignGroups = useMemo(() => {
     if (!query) return foreignWorkspaceGroups;
@@ -743,69 +821,86 @@ export function AppSidebar({
     return query ? matchedConversations : matchedConversations.slice(0, conversationLimit);
   }, [matchedConversations, query, conversationLimit]);
 
-  // Drag-and-drop uses native listeners on the rendered rows; each draggable
-  // row carries data-workspace-drag="<kind>:<id>".
+  // Drag-and-drop uses native listeners delegated from the workspace section;
+  // each draggable row carries data-workspace-drag="<kind>:<id>". The tree
+  // renders its rows after this effect runs, so an observer keeps `draggable`
+  // in step with the attribute instead of marking rows once.
+  const [workspaceSection, setWorkspaceSection] = useState<HTMLElement | null>(null);
   useEffect(() => {
+    if (!workspaceSection) return;
     const finish = () => {
       dragSourceRef.current = null;
       setDraggingKey(null);
       setDropTarget(null);
     };
-    const rows = Array.from(document.querySelectorAll<HTMLElement>('[data-workspace-drag]'));
-    const cleanups = rows.map((row) => {
-      const key = row.dataset.workspaceDrag || '';
+    const markDraggable = () => {
+      workspaceSection.querySelectorAll<HTMLElement>('[role="row"]').forEach((row) => {
+        const draggable = row.hasAttribute('data-workspace-drag');
+        if (row.draggable !== draggable) row.draggable = draggable;
+      });
+    };
+    markDraggable();
+    const observer = new MutationObserver(markDraggable);
+    observer.observe(workspaceSection, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-workspace-drag'] });
+    const rowOf = (event: globalThis.DragEvent) => {
+      const row = event.target instanceof Element ? event.target.closest<HTMLElement>('[data-workspace-drag]') : null;
+      const key = row?.dataset.workspaceDrag || '';
       const separator = key.indexOf(':');
       const kind = key.slice(0, separator);
       const id = key.slice(separator + 1);
-      if ((kind !== 'workspace' && kind !== 'group') || !id) return () => {};
-      const inGroup = row.dataset.workspaceInGroup === 'true';
-      const targetAt = (event: globalThis.DragEvent) => {
-        const source = dragSourceRef.current;
-        if (!source) return null;
-        const rect = row.getBoundingClientRect();
-        return workspaceDropTargetAt(source, kind, id, inGroup, (event.clientY - rect.top) / Math.max(rect.height, 1));
-      };
-      row.draggable = true;
-      const start = (event: globalThis.DragEvent) => {
-        dragSourceRef.current = { kind, id };
-        setDraggingKey(key);
-        event.dataTransfer?.setData('text/plain', id);
-        if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
-      };
-      const over = (event: globalThis.DragEvent) => {
-        if (!dragSourceRef.current) return;
-        event.preventDefault();
-        if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
-        const target = targetAt(event);
-        setDropTarget((current) => (sameDropTarget(current, target) ? current : target));
-      };
-      const drop = (event: globalThis.DragEvent) => {
-        event.preventDefault();
-        const source = dragSourceRef.current;
-        const target = targetAt(event);
-        finish();
-        if (!source || !target) return;
-        const current = workspaceEntriesRef.current;
-        const groupId = newWorkspaceGroupId();
-        const next = moveWorkspaceEntry(current, source, target, { id: groupId, fallbackName: newGroupFallbackName });
-        if (next === current) return;
-        applyWorkspaceLayout(next);
-        const created = next.find((entry): entry is WorkspaceGroupEntry => entry.kind === 'group' && entry.id === groupId);
-        if (created) setRenamingGroup({ id: created.id, name: created.name });
-      };
-      row.addEventListener('dragstart', start);
-      row.addEventListener('dragover', over);
-      row.addEventListener('drop', drop);
-      row.addEventListener('dragend', finish);
-      return () => {
-        row.removeEventListener('dragstart', start);
-        row.removeEventListener('dragover', over);
-        row.removeEventListener('drop', drop);
-        row.removeEventListener('dragend', finish);
-      };
-    });
-    return () => cleanups.forEach((cleanup) => cleanup());
-  }, [displayedEntries, isGroupFolded, applyWorkspaceLayout, newGroupFallbackName]);
+      if (!row || (kind !== 'workspace' && kind !== 'group') || !id) return null;
+      return { row, key, kind: kind as WorkspaceDragSource['kind'], id };
+    };
+    const targetAt = (event: globalThis.DragEvent) => {
+      const source = dragSourceRef.current;
+      const hit = rowOf(event);
+      if (!source || !hit) return null;
+      const rect = hit.row.getBoundingClientRect();
+      const inGroup = hit.row.dataset.workspaceInGroup === 'true';
+      return workspaceDropTargetAt(source, hit.kind, hit.id, inGroup, (event.clientY - rect.top) / Math.max(rect.height, 1));
+    };
+    const start = (event: globalThis.DragEvent) => {
+      const hit = rowOf(event);
+      if (!hit) return;
+      dragSourceRef.current = { kind: hit.kind, id: hit.id };
+      setDraggingKey(hit.key);
+      event.dataTransfer?.setData('text/plain', hit.id);
+      if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
+    };
+    const over = (event: globalThis.DragEvent) => {
+      if (!dragSourceRef.current || !rowOf(event)) return;
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+      const target = targetAt(event);
+      setDropTarget((current) => (sameDropTarget(current, target) ? current : target));
+    };
+    const drop = (event: globalThis.DragEvent) => {
+      if (!dragSourceRef.current) return;
+      event.preventDefault();
+      const source = dragSourceRef.current;
+      const target = targetAt(event);
+      finish();
+      if (!source || !target) return;
+      const current = workspaceEntriesRef.current;
+      const groupId = newWorkspaceGroupId();
+      const next = moveWorkspaceEntry(current, source, target, { id: groupId, fallbackName: newGroupFallbackName });
+      if (next === current) return;
+      applyWorkspaceLayout(next);
+      const created = next.find((entry): entry is WorkspaceGroupEntry => entry.kind === 'group' && entry.id === groupId);
+      if (created) setRenamingGroup({ id: created.id, name: created.name });
+    };
+    workspaceSection.addEventListener('dragstart', start);
+    workspaceSection.addEventListener('dragover', over);
+    workspaceSection.addEventListener('drop', drop);
+    workspaceSection.addEventListener('dragend', finish);
+    return () => {
+      observer.disconnect();
+      workspaceSection.removeEventListener('dragstart', start);
+      workspaceSection.removeEventListener('dragover', over);
+      workspaceSection.removeEventListener('drop', drop);
+      workspaceSection.removeEventListener('dragend', finish);
+    };
+  }, [workspaceSection, applyWorkspaceLayout, newGroupFallbackName]);
 
   // Losing window focus closes the menu; outside presses close it through
   // the popover itself.
@@ -841,7 +936,7 @@ export function AppSidebar({
   // Legacy plaintext history is read-only: no rename or fork.
   const contextReadOnly = menu?.kind === 'conversation'
     && session.conversations.find((item) => item.id === menu.id)?.legacyPlaintext === true;
-  const runContextAction = (action: 'rename' | 'edit' | 'fork' | 'pin' | 'delete' | 'schedule') => {
+  const runContextAction = (action: 'rename' | 'edit' | 'tags' | 'fork' | 'pin' | 'delete' | 'schedule') => {
     if (!menu || menu.kind === 'group') return;
     if (action === 'schedule') {
       // A None row schedules on its own backend: it opens first.
@@ -860,6 +955,7 @@ export function AppSidebar({
       if (!workspace) return;
       if (action === 'rename') setRenaming({ kind: 'workspace', id: workspace.id, name: workspace.name });
       else if (action === 'edit') onEditWorkspace(workspace.id);
+      else if (action === 'tags') setEditingTags({ kind: 'workspace', id: workspace.id, tags: workspace.tags ?? [] });
       else if (action === 'delete') setDeleting({ kind: 'workspace', id: workspace.id });
     } else {
       const conversation = session.conversations.find((item) => item.id === menu.id);
@@ -892,7 +988,8 @@ export function AppSidebar({
     }
   };
 
-  const renderWorkspaceItem = (workspace: WorkspaceRecord, group: { entry: WorkspaceGroupEntry; last: boolean; folded: boolean } | null) => {
+  // `scope` places a tag-view row under its tag section (no dragging there).
+  const renderWorkspaceItem = (workspace: WorkspaceRecord, group: { entry: WorkspaceGroupEntry; last: boolean; folded: boolean } | null, scope?: { key: string; folded: boolean }) => {
     const isSelected = workspace.id === activeRowId;
     // A group-after drop on an expanded group marks the group's last row.
     const drop = dropTarget?.kind === 'workspace' && dropTarget.id === workspace.id
@@ -913,20 +1010,20 @@ export function AppSidebar({
     const WorkspaceGlyph = workspaceIconComponent(workspace.icon);
     return (
       <GridListItem
-        key={workspace.id}
-        id={workspace.id}
+        key={scopedKey(scope?.key, workspace.id)}
+        id={scopedKey(scope?.key, workspace.id)}
         textValue={workspaceDisplayName(workspace)}
         className={rowClassName({
           selected: isSelected,
           rail,
-          hidden: group?.folded,
+          hidden: group?.folded || scope?.folded,
           drop,
           dragging: draggingKey === `workspace:${workspace.id}`,
           extra: isMissing ? 'cursor-not-allowed opacity-50' : undefined,
         })}
-        inert={group?.folded || undefined}
+        inert={group?.folded || scope?.folded || undefined}
         data-workspace-id={workspace.id}
-        data-workspace-drag={isNoneRowId(workspace.id) ? undefined : `workspace:${workspace.id}`}
+        data-workspace-drag={isNoneRowId(workspace.id) || scope ? undefined : `workspace:${workspace.id}`}
         data-workspace-in-group={group ? 'true' : undefined}
         onContextMenu={(event) => openContextMenu(event, 'workspace', workspace.id)}
       >
@@ -962,6 +1059,9 @@ export function AppSidebar({
     if (!workspace) return null;
     const backend = session.backendConnections.find((profile) => profile.id === (workspace.backendConnectionId || session.activeBackendConnectionId));
     const lastActivity = workspaceLastActivity.get(workspace.id) ?? workspace.updatedAt;
+    // Own tags first, then those it takes from its group.
+    const groupTags = workspaceEntries.find((entry): entry is WorkspaceGroupEntry => entry.kind === 'group' && entry.workspaces.some((item) => item.id === workspace.id))?.tags ?? [];
+    const tags = normalizeWorkspaceTags([...(workspace.tags ?? []), ...groupTags]) ?? [];
     return (
       <span className="flex flex-col gap-1">
         <bdi className="text-caption-1-semibold">{workspaceDisplayName(workspace)}</bdi>
@@ -972,6 +1072,12 @@ export function AppSidebar({
           <dd className="break-all"><span dir="ltr">{(isNoneRowId(workspace.id) ? session.backendLinkStatus[workspace.backendConnectionId ?? '']?.serverVersion?.scratch_workspace_root : workspace.path) || '—'}</span></dd>
           <dt className="text-text-tertiary">{t('sidebar.workspaceTipActivity')}</dt>
           <dd>{lastActivity ? relativeTime(lastActivity) : '—'}</dd>
+          {tags.length > 0 ? (
+            <>
+              <dt className="text-text-tertiary">{t('sidebar.workspaceTipTags')}</dt>
+              <dd className="break-words">{tags.map((tag, index) => <span key={tag}>{index > 0 ? ', ' : null}<bdi>{tag}</bdi></span>)}</dd>
+            </>
+          ) : null}
         </dl>
         {workspace.pathMissing ? <span className="text-status-yellow-text">{t('sidebar.workspaceMissingPath')}</span> : null}
       </span>
@@ -1022,10 +1128,35 @@ export function AppSidebar({
     return [header, ...entry.workspaces.map((workspace, index) => renderWorkspaceItem(workspace, { entry, last: index === entry.workspaces.length - 1, folded }))];
   };
 
+  // Rail tag view: a tag header followed by the section's workspaces.
+  const renderTagItems = (section: WorkspaceTagSection) => {
+    const key = tagSectionKey(section);
+    const folded = isGroupFolded(key);
+    const name = section.tag ?? t('sidebar.untagged');
+    const workspaces = tagSectionWorkspaces(section);
+    const containsSelected = workspaces.some((workspace) => workspace.id === activeRowId);
+    const header = (
+      <GridListItem
+        key={key}
+        id={key}
+        textValue={name}
+        aria-label={folded ? t('sidebar.expandGroup', { name }) : t('sidebar.collapseGroup', { name })}
+        className={rowClassName({ rail })}
+      >
+        <RowContent rail={rail} title={name}>
+          <span className="relative flex size-5 shrink-0 items-center justify-center">
+            <RiPriceTag3Line aria-hidden className={cx('size-4', containsSelected ? 'text-foreground-icon-primary' : 'text-foreground-icon-secondary')} />
+          </span>
+        </RowContent>
+      </GridListItem>
+    );
+    return [header, ...workspaces.map((workspace) => renderWorkspaceItem(workspace, null, { key, folded }))];
+  };
+
   // Expanded sidebar: the workspace list is a BoardUI tree. Groups are
   // branches (folder, chevron, guides) holding their workspaces; lone
   // workspaces are root leaves. The icon rail keeps the flat grid list.
-  const workspaceTreeItem = (workspace: WorkspaceRecord, group: { entry: WorkspaceGroupEntry; last: boolean } | null): ReactNode => {
+  const workspaceTreeItem = (workspace: WorkspaceRecord, group: { entry: WorkspaceGroupEntry; last: boolean } | null, scope?: string): ReactNode => {
     const isSelected = workspace.id === activeRowId;
     const drop = dropTarget?.kind === 'workspace' && dropTarget.id === workspace.id
       ? dropTarget.position
@@ -1040,8 +1171,8 @@ export function AppSidebar({
     const WorkspaceGlyph = workspaceIconComponent(workspace.icon);
     return (
       <TreeViewItem
-        key={workspace.id}
-        id={workspace.id}
+        key={scopedKey(scope, workspace.id)}
+        id={scopedKey(scope, workspace.id)}
         label={workspaceDisplayName(workspace)}
         className={({ isHovered, isPressed }) => cx(
           // The sidebar's row fills: the tree's menu fill matches this surface.
@@ -1052,7 +1183,7 @@ export function AppSidebar({
           draggingKey === `workspace:${workspace.id}` && 'opacity-40',
         )}
         data-workspace-id={workspace.id}
-        data-workspace-drag={isNoneRowId(workspace.id) ? undefined : `workspace:${workspace.id}`}
+        data-workspace-drag={isNoneRowId(workspace.id) || scope ? undefined : `workspace:${workspace.id}`}
         data-workspace-in-group={group ? 'true' : undefined}
         onContextMenu={(event) => openContextMenu(event, 'workspace', workspace.id)}
         leading={(
@@ -1085,7 +1216,7 @@ export function AppSidebar({
     );
   };
 
-  const groupTreeItem = (entry: WorkspaceGroupEntry): ReactNode => {
+  const groupTreeItem = (entry: WorkspaceGroupEntry, scope?: string): ReactNode => {
     const folded = isGroupFolded(entry.id);
     const name = entry.name || t('sidebar.newGroupName');
     const containsSelected = entry.workspaces.some((workspace) => workspace.id === activeRowId);
@@ -1098,8 +1229,8 @@ export function AppSidebar({
       : null;
     return (
       <TreeViewItem
-        key={`group:${entry.id}`}
-        id={`group:${entry.id}`}
+        key={scopedKey(scope, `group:${entry.id}`)}
+        id={scopedKey(scope, `group:${entry.id}`)}
         label={name}
         icon={RiFolder3Line}
         expandedIcon={RiFolderOpenLine}
@@ -1110,7 +1241,7 @@ export function AppSidebar({
           drop && DROP_CLASS[drop],
           draggingKey === `group:${entry.id}` && 'opacity-40',
         )}
-        data-workspace-drag={entry.id === NONE_GROUP_ID ? undefined : `group:${entry.id}`}
+        data-workspace-drag={entry.id === NONE_GROUP_ID || scope ? undefined : `group:${entry.id}`}
         onContextMenu={(event) => openContextMenu(event, 'group', entry.id)}
         trailingContent={(
           <span className="flex items-center gap-1.5 pe-1">
@@ -1123,14 +1254,87 @@ export function AppSidebar({
           </span>
         )}
       >
-        {entry.workspaces.map((workspace, index) => workspaceTreeItem(workspace, { entry, last: index === entry.workspaces.length - 1 }))}
+        {entry.workspaces.map((workspace, index) => workspaceTreeItem(workspace, { entry, last: index === entry.workspaces.length - 1 }, scope))}
       </TreeViewItem>
     );
   };
 
-  const expandedGroupKeys = new Set<Key>(displayedEntries
-    .filter((entry): entry is WorkspaceGroupEntry => entry.kind === 'group' && !isGroupFolded(entry.id))
-    .map((entry) => `group:${entry.id}`));
+  const entryTreeItem = (entry: WorkspaceSidebarEntry, scope?: string): ReactNode => (entry.kind === 'group'
+    ? groupTreeItem(entry, scope)
+    : workspaceTreeItem(entry.workspace, null, scope));
+
+  const tagTreeItem = (section: WorkspaceTagSection): ReactNode => {
+    const key = tagSectionKey(section);
+    const folded = isGroupFolded(key);
+    const name = section.tag ?? t('sidebar.untagged');
+    const workspaces = tagSectionWorkspaces(section);
+    const containsSelected = workspaces.some((workspace) => workspace.id === activeRowId);
+    const statuses = workspaces
+      .map((workspace) => workspaceStatusMap[workspace.id])
+      .filter((status): status is NonNullable<typeof status> => Boolean(status))
+      .slice(0, 3);
+    return (
+      <TreeViewItem
+        key={key}
+        id={key}
+        label={name}
+        icon={RiPriceTag3Line}
+        className={({ isHovered, isPressed }) => cx(
+          isPressed ? 'bg-background-tertiary-default' : isHovered ? 'bg-background-secondary-hover' : 'bg-transparent',
+          'text-body-semibold',
+          folded && containsSelected ? 'text-text-primary' : section.tag === null ? 'text-text-tertiary' : 'text-text-secondary',
+        )}
+        trailingContent={(
+          <span className="flex items-center gap-1.5 pe-1">
+            {folded && statuses.length > 0 ? (
+              <span className="flex items-center gap-1" aria-hidden="true">
+                {statuses.map((status, index) => <span key={index} className={cx('size-1.5 rounded-full', STATUS_DOT_CLASS[status])} />)}
+              </span>
+            ) : null}
+            <span className="tabular-nums">{workspaces.length}</span>
+          </span>
+        )}
+      >
+        {section.entries.map((entry) => entryTreeItem(entry, key))}
+      </TreeViewItem>
+    );
+  };
+
+  // Branches of the current view: their tree keys and fold-state ids. A
+  // group listed under several tags shares one fold state.
+  const treeBranches = tagView
+    ? [
+      ...tagNoneEntries.flatMap((entry) => (entry.kind === 'group' ? [{ key: `group:${entry.id}`, foldId: entry.id }] : [])),
+      ...tagSections.flatMap((section) => [
+        { key: tagSectionKey(section), foldId: tagSectionKey(section) },
+        ...section.entries.flatMap((entry) => (entry.kind === 'group'
+          ? [{ key: scopedKey(tagSectionKey(section), `group:${entry.id}`), foldId: entry.id }]
+          : [])),
+      ]),
+    ]
+    : displayedEntries.flatMap((entry) => (entry.kind === 'group' ? [{ key: `group:${entry.id}`, foldId: entry.id }] : []));
+  const expandedGroupKeys = new Set<Key>(treeBranches.filter((branch) => !isGroupFolded(branch.foldId)).map((branch) => branch.key));
+  // Every row key of the active workspace (several in the tag view).
+  const selectedWorkspaceKeys = !activeRowId ? [] : !tagView ? [activeRowId] : [
+    ...(tagNoneEntries.some((entry) => (entry.kind === 'group' ? entry.workspaces.some((workspace) => workspace.id === activeRowId) : entry.workspace.id === activeRowId)) ? [activeRowId] : []),
+    ...tagSections.flatMap((section) => section.entries
+      .filter((entry) => (entry.kind === 'group' ? entry.workspaces.some((workspace) => workspace.id === activeRowId) : entry.workspace.id === activeRowId))
+      .map(() => scopedKey(tagSectionKey(section), activeRowId))),
+  ];
+  // A row key picked in the list: tag and group headers fold, workspaces open.
+  const activateWorkspaceKey = (rawKey: string) => {
+    if (isTagSectionKey(rawKey)) {
+      toggleGroupCollapsed(rawKey);
+      return;
+    }
+    const key = unscopedKey(rawKey);
+    if (key.startsWith('group:')) {
+      toggleGroupCollapsed(key.slice('group:'.length));
+      return;
+    }
+    if (session.workspaces.find((item) => item.id === key)?.pathMissing) return;
+    openWorkspaceRow(key);
+  };
 
   // Cached data renders immediately; the directory sync only blocks an
   // entirely empty sidebar (first run or cleared storage).
@@ -1338,7 +1542,7 @@ export function AppSidebar({
 
         {/* Workspace section */}
         {query && matchedWorkspaceCount === 0 && matchedForeignGroups.length === 0 ? null : (
-        <section className="flex flex-col gap-1">
+        <section ref={setWorkspaceSection} className="flex flex-col gap-1">
           {rail ? null : (
             <SectionHeader
               label={t('sidebar.workspaces')}
@@ -1350,6 +1554,16 @@ export function AppSidebar({
               addLabel={t('sidebar.newWorkspace')}
               onAdd={() => onCreateWorkspace()}
               hint="newWorkspace"
+              actions={(
+                <IconAction
+                  size="xs"
+                  icon={RiPriceTag3Line}
+                  aria-label={t('sidebar.groupByTags')}
+                  tooltip
+                  active={tagView}
+                  onClick={toggleTagView}
+                />
+              )}
             />
           )}
 
@@ -1357,7 +1571,7 @@ export function AppSidebar({
             <>
               {ownWorkspaces.length === 0 ? (
                 rail || query ? null : <p className="px-2 py-1 text-caption-1-regular text-text-tertiary">{t('sidebar.noWorkspaces')}</p>
-              ) : displayedEntries.length === 0 ? null : (
+              ) : (tagView ? tagNoneEntries.length + tagSections.length : displayedEntries.length) === 0 ? null : (
                 <>
                   <WorkspaceHoverTooltip disabled={Boolean(draggingKey) || Boolean(contextMenu)} renderContent={workspaceTooltipContent}>
                   {rail ? (
@@ -1367,21 +1581,14 @@ export function AppSidebar({
                       className="flex flex-col outline-none"
                       disabledKeys={foldedWorkspaceKeys}
                       disabledBehavior="all"
-                      onAction={(key) => {
-                        if (String(key).startsWith('group:')) {
-                          toggleGroupCollapsed(String(key).slice('group:'.length));
-                          return;
-                        }
-                        const target = session.workspaces.find((item) => item.id === String(key));
-                        if (target?.pathMissing) {
-                          return;
-                        }
-                        openWorkspaceRow(String(key));
-                      }}
+                      onAction={(key) => activateWorkspaceKey(String(key))}
                     >
-                      {displayedEntries.flatMap((entry) => (entry.kind === 'group'
-                        ? renderGroupItems(entry)
-                        : [renderWorkspaceItem(entry.workspace, null)]))}
+                      {[
+                        ...(tagView ? tagNoneEntries : displayedEntries).flatMap((entry) => (entry.kind === 'group'
+                          ? renderGroupItems(entry)
+                          : [renderWorkspaceItem(entry.workspace, null)])),
+                        ...tagSections.flatMap(renderTagItems),
+                      ]}
                     </GridList>
                   ) : (
                     <TreeView
@@ -1390,35 +1597,31 @@ export function AppSidebar({
                       className="rounded-none border-0 bg-transparent p-0"
                       selectionMode="single"
                       selectionBehavior="replace"
-                      selectedKeys={activeRowId ? [activeRowId] : []}
+                      selectedKeys={selectedWorkspaceKeys}
                       expandedKeys={expandedGroupKeys}
                       onExpandedChange={(keys) => {
-                        for (const entry of displayedEntries) {
-                          if (entry.kind !== 'group') continue;
-                          const key = `group:${entry.id}`;
-                          if (keys.has(key) !== expandedGroupKeys.has(key)) toggleGroupCollapsed(entry.id);
+                        const toggled = new Set<string>();
+                        for (const branch of treeBranches) {
+                          if (keys.has(branch.key) === expandedGroupKeys.has(branch.key) || toggled.has(branch.foldId)) continue;
+                          toggled.add(branch.foldId);
+                          toggleGroupCollapsed(branch.foldId);
                         }
                       }}
                       onSelectionChange={(keys) => {
+                        // Tag and group rows fold or unfold; they are never selected.
                         const key = keys === 'all' ? '' : String([...keys][0] ?? '');
-                        if (!key) return;
-                        // A group row folds or unfolds; it is never selected.
-                        if (key.startsWith('group:')) {
-                          toggleGroupCollapsed(key.slice('group:'.length));
-                          return;
-                        }
-                        if (session.workspaces.find((item) => item.id === key)?.pathMissing) return;
-                        openWorkspaceRow(key);
+                        if (key) activateWorkspaceKey(key);
                       }}
                     >
-                      {displayedEntries.map((entry) => (entry.kind === 'group'
-                        ? groupTreeItem(entry)
-                        : workspaceTreeItem(entry.workspace, null)))}
+                      {[
+                        ...(tagView ? tagNoneEntries : displayedEntries).map((entry) => entryTreeItem(entry)),
+                        ...tagSections.map(tagTreeItem),
+                      ]}
                     </TreeView>
                   )}
                   </WorkspaceHoverTooltip>
 
-                  {!query && workspaceEntries.length > 5 && !rail && (
+                  {!query && !tagView && workspaceEntries.length > 5 && !rail && (
                     <ListPaging
                       hasMore={workspaceEntries.length > workspaceLimit}
                       canCollapse={workspaceLimit > 5}
@@ -1632,6 +1835,7 @@ export function AppSidebar({
         {menu?.kind === 'group' ? (
           <Menu aria-label={t('sidebar.groupMenu')} autoFocus="first">
             {menu.id === NONE_GROUP_ID ? null : <MenuItem id="rename-group" icon={RiPencilLine} textValue={t('sidebar.renameGroup')} onAction={() => { if (contextGroup) setRenamingGroup({ id: contextGroup.id, name: contextGroup.name }); setContextMenu(null); }}>{t('sidebar.renameGroup')}</MenuItem>}
+            {menu.id === NONE_GROUP_ID ? null : <MenuItem id="group-tags" icon={RiPriceTag3Line} textValue={t('sidebar.editGroupTags')} onAction={() => { if (contextGroup) setEditingTags({ kind: 'group', id: contextGroup.id, tags: contextGroup.tags }); setContextMenu(null); }}>{t('sidebar.editGroupTags')}</MenuItem>}
             <MenuItem id="toggle-group" icon={RiArrowDownSLine} textValue={collapsedGroups.includes(menu.id) ? t('sidebar.unfoldGroup') : t('sidebar.foldGroup')} onAction={() => { toggleGroupCollapsed(menu.id); setContextMenu(null); }}>{collapsedGroups.includes(menu.id) ? t('sidebar.unfoldGroup') : t('sidebar.foldGroup')}</MenuItem>
             {menu.id === NONE_GROUP_ID ? null : <MenuSeparator />}
             {menu.id === NONE_GROUP_ID ? null : <MenuItem id="ungroup" icon={RiFoldersLine} tone="danger" textValue={t('sidebar.ungroup')} onAction={() => runGroupLayout(ungroupWorkspaceGroup(workspaceEntries, menu.id))}>{t('sidebar.ungroup')}</MenuItem>}
@@ -1642,6 +1846,7 @@ export function AppSidebar({
             {contextReadOnly || contextIsNone ? null : <MenuItem id="rename" icon={RiPencilLine} textValue={t('sidebar.rename')} onAction={() => runContextAction('rename')}>{t('sidebar.rename')}</MenuItem>}
             {menu.kind === 'workspace' && canSchedule ? <MenuItem id="schedule" icon={RiTimerLine} textValue={t('schedule.create')} onAction={() => runContextAction('schedule')}>{t('schedule.create')}</MenuItem> : null}
             {menu.kind === 'workspace' && !contextIsNone ? <MenuItem id="edit" icon={RiEdit2Line} textValue={t('sidebar.edit')} onAction={() => runContextAction('edit')}>{t('sidebar.edit')}</MenuItem> : null}
+            {menu.kind === 'workspace' && !contextIsNone ? <MenuItem id="tags" icon={RiPriceTag3Line} textValue={t('sidebar.editTags')} onAction={() => runContextAction('tags')}>{t('sidebar.editTags')}</MenuItem> : null}
             <MenuItem id="pin" icon={RiPushpin2Fill} textValue={pins[menu.kind].includes(menu.id) ? t('sidebar.unpin') : t('sidebar.pin')} onAction={() => runContextAction('pin')}>{pins[menu.kind].includes(menu.id) ? t('sidebar.unpin') : t('sidebar.pin')}</MenuItem>
             {menu.kind === 'workspace' ? (
               <SubmenuTrigger>
@@ -1787,6 +1992,19 @@ export function AppSidebar({
           initialName={renamingGroup.name}
           onSubmit={(name) => applyWorkspaceLayout(renameWorkspaceGroup(workspaceEntriesRef.current, renamingGroup.id, name))}
           onClose={() => setRenamingGroup(null)}
+        />
+      ) : null}
+      {editingTags ? (
+        <WorkspaceTagsDialog
+          key={`${editingTags.kind}:${editingTags.id}`}
+          title={editingTags.kind === 'group' ? t('sidebar.editGroupTags') : t('sidebar.editTags')}
+          initialTags={editingTags.tags}
+          knownTags={knownTags}
+          onSubmit={(tags) => {
+            if (editingTags.kind === 'group') applyWorkspaceLayout(setWorkspaceGroupTags(workspaceEntriesRef.current, editingTags.id, tags));
+            else session.updateWorkspace(editingTags.id, { tags: normalizeWorkspaceTags(tags) });
+          }}
+          onClose={() => setEditingTags(null)}
         />
       ) : null}
       <ConfirmDialog
