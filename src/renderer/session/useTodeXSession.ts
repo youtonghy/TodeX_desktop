@@ -518,6 +518,13 @@ export type BackendWakeGate = {
   wake: (backendId: string) => Promise<void>;
 };
 
+/** Slash commands a v2 conversation runs in the client (pickers, drafts,
+ * views) rather than through the legacy local Codex session. */
+const V2_CLIENT_SLASH_COMMANDS = new Set([
+  'permissions', 'fast', 'model', 'approve', 'approval', 'clear', 'new', 'mention', 'copy', 'plan', 'diff',
+  'experimental', 'hooks', 'hook', 'plugins', 'plugin', 'personality', 'feedback',
+]);
+
 export function useTodeXSession(openPanel: OpenPanelFn) {
   const workbenchSharingState = useWorkbenchSharing();
   const completionNotificationsState = useCompletionNotifications();
@@ -8758,6 +8765,33 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           });
           return;
         }
+        // The agent's own prompt commands go to it as prompts; a few TodeX
+        // commands map to v2 actions. The legacy Codex commands below would
+        // start a local Codex session beside this conversation instead.
+        const promptCommand = conversation.provider
+          ? providerCommands[conversation.provider as ProviderKind]?.find(
+            (item) => item.name.toLowerCase() === lower && item.invocation === 'prompt')
+          : undefined;
+        if (promptCommand) {
+          void sendV2Prompt(trimmed, conversation.id);
+          return;
+        }
+        if (lower === 'fork') {
+          forkConversation(conversation.id);
+          return;
+        }
+        if (lower === 'rename') {
+          renameConversation(conversation.id, rest.join(' '));
+          return;
+        }
+        if (lower === 'archive') {
+          removeConversation(conversation.id);
+          return;
+        }
+        if (!V2_CLIENT_SLASH_COMMANDS.has(lower)) {
+          setLastError(t('sess.operationUnsupported'));
+          return;
+        }
       }
 
       const addCommandNotice = (title: string, detail: string) => {
@@ -9266,6 +9300,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       updateWorkspace,
       getProviderCommandCatalog,
       refreshProviderCommands,
+      forkConversation,
+      renameConversation,
+      removeConversation,
     ],
   );
 
