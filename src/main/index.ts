@@ -1,5 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, safeStorage, session, shell } from 'electron';
-import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -214,16 +214,72 @@ let storeDirty = false;
 let storeWriteTimer: ReturnType<typeof setTimeout> | null = null;
 const STORE_WRITE_DEBOUNCE_MS = 300;
 
+/** Keys only the main process writes: the renderer's `store:set` must not
+ * redirect the debug log, flip update downloads behind the settings switch,
+ * or overwrite sealed `secureStore` values. */
+const MAIN_OWNED_STORE_KEYS = new Set([DEBUG_LOG_PATH_KEY, UPDATES_AUTO_DOWNLOAD_KEY]);
+const RESERVED_STORE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
+function assertRendererStoreKey(key: unknown): asserts key is string {
+  if (typeof key !== 'string' || !key) throw new TypeError('store key must be a non-empty string');
+  if (RESERVED_STORE_KEYS.has(key)) throw new TypeError(`store key ${key} is reserved`);
+  if (MAIN_OWNED_STORE_KEYS.has(key) || key.startsWith('secure:')) throw new Error(`store key ${key} is managed by the main process`);
+}
+
+function emptyStore(): StoreShape {
+  return Object.create(null) as StoreShape;
+}
+
 function readStore(): StoreShape {
   if (storeCache) {
     return storeCache;
   }
+  const target = storePath();
+  let raw: string;
   try {
-    storeCache = JSON.parse(readFileSync(storePath(), 'utf8')) as StoreShape;
-  } catch {
-    storeCache = {};
+    raw = readFileSync(target, 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') debugLog('error', 'store.read.error', { error });
+    storeCache = emptyStore();
+    return storeCache;
+  }
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('the store is not a JSON object');
+    storeCache = Object.assign(emptyStore(), parsed);
+  } catch (error) {
+    // Keep the unreadable file for recovery instead of overwriting it with
+    // the next write, and start from an empty store.
+    const corrupt = `${target}.corrupt-${Date.now()}`;
+    try {
+      renameSync(target, corrupt);
+      console.error(`[${APP_IDENTITY}] settings store was unreadable; moved it to ${corrupt}`);
+    } catch (renameError) {
+      debugLog('error', 'store.quarantine.error', { error: renameError });
+    }
+    debugLog('error', 'store.parse.error', { error, corrupt });
+    storeCache = emptyStore();
   }
   return storeCache;
+}
+
+/** Replaces the store file atomically: a crash mid-write leaves the old file. */
+function writeStoreFile(target: string, contents: string): void {
+  mkdirSync(dirname(target), { recursive: true });
+  const temporary = `${target}.${process.pid}.tmp`;
+  const fd = openSync(temporary, 'w', 0o600);
+  try {
+    writeSync(fd, contents, null, 'utf8');
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+  try {
+    renameSync(temporary, target);
+  } catch (error) {
+    rmSync(temporary, { force: true });
+    throw error;
+  }
 }
 
 function flushStore(): void {
@@ -236,9 +292,7 @@ function flushStore(): void {
   }
   storeDirty = false;
   try {
-    const target = storePath();
-    mkdirSync(dirname(target), { recursive: true });
-    writeFileSync(target, JSON.stringify(storeCache), 'utf8');
+    writeStoreFile(storePath(), JSON.stringify(storeCache));
   } catch (error) {
     debugLog('error', 'store.flush.error', { error });
   }
@@ -606,83 +660,6 @@ function createWindow(): BrowserWindow {
   return window;
 }
 
-async function gitText(cwd: string, args: string[]): Promise<string> {
-  const result = await execFileAsync('git', ['-C', cwd, ...args], { maxBuffer: 4 * 1024 * 1024 });
-  return result.stdout.trim();
-}
-
-async function gitSummary(repoPath: string) {
-  const root = await gitText(repoPath, ['rev-parse', '--show-toplevel']);
-  const branch = await gitText(root, ['branch', '--show-current']).catch(() => 'HEAD');
-  const status = await gitText(root, ['status', '--short', '--untracked-files=all']);
-  const stat = await gitText(root, ['diff', '--numstat', 'HEAD']).catch(() => '');
-  let additions = 0;
-  let deletions = 0;
-  for (const line of stat.split('\n')) {
-    const [added, removed] = line.split('\t');
-    if (/^\d+$/.test(added)) additions += Number(added);
-    if (/^\d+$/.test(removed)) deletions += Number(removed);
-  }
-  const untracked = await gitText(root, ['ls-files', '--others', '--exclude-standard']).catch(() => '');
-  for (const relative of untracked.split('\n').filter(Boolean)) {
-    try {
-      const text = readFileSync(join(root, relative), 'utf8');
-      additions += text ? text.split(/\r?\n/).length - (text.endsWith('\n') ? 1 : 0) : 0;
-    } catch { /* binary or unreadable files have no line count */ }
-  }
-  const initialEligible = !(await gitText(root, ['rev-parse', '--verify', 'HEAD']).catch(() => ''));
-  let ahead = 0;
-  if (!initialEligible) {
-    try {
-      const aheadText = await gitText(root, ['rev-list', '--count', '@{u}..HEAD']);
-      if (/^\d+$/.test(aheadText)) ahead = Number(aheadText);
-    } catch {
-      try {
-        const aheadText = await gitText(root, ['rev-list', '--count', 'HEAD', '--not', '--remotes']);
-        if (/^\d+$/.test(aheadText)) ahead = Number(aheadText);
-      } catch {
-        try {
-          const aheadText = await gitText(root, ['rev-list', '--count', 'HEAD']);
-          if (/^\d+$/.test(aheadText)) ahead = Number(aheadText);
-        } catch {
-          ahead = 0;
-        }
-      }
-    }
-  }
-  return {
-    path: root,
-    name: root.split(/[\\/]/).pop() || root,
-    branch: branch || 'HEAD',
-    files: status ? status.split('\n').map((line) => ({ status: line.slice(0, 2), path: line.slice(3) })) : [],
-    additions,
-    deletions,
-    ahead,
-    initialEligible,
-  };
-}
-
-async function findGitRepositories(workspacePath: string): Promise<string[]> {
-  const candidates = [workspacePath];
-  const scan = (dir: string, depth: number) => {
-    if (depth > 2) return;
-    try {
-      for (const entry of readdirSync(dir, { withFileTypes: true })) {
-        if (!entry.isDirectory() || entry.name === 'node_modules' || entry.name === '.git') continue;
-        const child = join(dir, entry.name);
-        candidates.push(child);
-        scan(child, depth + 1);
-      }
-    } catch { /* inaccessible directories are skipped */ }
-  };
-  scan(workspacePath, 0);
-  const roots = new Set<string>();
-  for (const candidate of candidates) {
-    try { roots.add((await gitText(candidate, ['rev-parse', '--show-toplevel']))); } catch { /* not a repository */ }
-  }
-  return [...roots];
-}
-
 // Escape hatch for renderer V8 issues (e.g. upstream JIT crashes):
 // TODEX_JS_FLAGS="--jitless" pnpm dev
 const jsFlags = process.env.TODEX_JS_FLAGS?.trim();
@@ -690,7 +667,23 @@ if (jsFlags) {
   app.commandLine.appendSwitch('js-flags', jsFlags);
 }
 
-initializeDebugLogging();
+// One app per user data directory: a second launch would race this one on
+// the settings store and the backend/container lifecycle. It hands over to
+// the running window instead. (Installing an update releases the lock before
+// the updated app starts; see installUpdate.)
+const singleInstance = app.requestSingleInstanceLock();
+if (!singleInstance) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    const window = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
+    if (!window) return;
+    if (window.isMinimized()) window.restore();
+    window.show();
+    window.focus();
+  });
+  initializeDebugLogging();
+}
 
 // Chromium picks the Linux keychain from XDG_CURRENT_DESKTOP and falls back
 // to `basic_text` (refused by secureStore) on desktops it does not know, such
@@ -715,6 +708,7 @@ let containers: ContainerManager | null = null;
 let localBackendStopped = false;
 
 app.whenReady().then(() => {
+  if (!singleInstance) return;
   setMainLocale(app.getLocale());
   debugLog('info', 'app.ready', { readyAt: new Date().toISOString() });
   applySystemAppIcon();
@@ -761,11 +755,14 @@ app.whenReady().then(() => {
     logPath: '',
     chromiumLogPath: '',
   });
-  handleIpc('store:get', (_event, key: string) => {
-    return readStore()[key] ?? null;
+  handleIpc('store:get', (_event, key: unknown) => {
+    if (typeof key !== 'string') return null;
+    const store = readStore();
+    return Object.hasOwn(store, key) ? store[key] ?? null : null;
   });
 
-  handleIpc('store:set', (_event, key: string, value: unknown) => {
+  handleIpc('store:set', (_event, key: unknown, value: unknown) => {
+    assertRendererStoreKey(key);
     const next = readStore();
     if (value === undefined) {
       delete next[key];
@@ -868,46 +865,6 @@ app.whenReady().then(() => {
     }
   });
 
-  handleIpc('git:scan', async (_event, workspacePath: string) => {
-    const repos = await findGitRepositories(workspacePath);
-    const summaries = await Promise.all(repos.map(async (repoPath) => {
-      try { return await gitSummary(repoPath); }
-      catch (error) { return { path: repoPath, name: repoPath.split(/[\\/]/).pop() || repoPath, branch: mainT('main.unknown'), files: [], additions: 0, deletions: 0, initialEligible: false, error: error instanceof Error ? error.message : mainT('main.gitReadFailed') }; }
-    }));
-    if (!summaries.some((repo) => repo.path === workspacePath)) {
-      summaries.unshift({
-        path: workspacePath,
-        name: workspacePath.split(/[\\/]/).pop() || workspacePath,
-        branch: mainT('main.notInitialized'),
-        files: [] as { status: string; path: string }[],
-        additions: 0,
-        deletions: 0,
-        ahead: 0,
-        initialEligible: true,
-      });
-    }
-    return summaries;
-  });
-
-  handleIpc('git:run', async (_event, workspacePath: string, action: 'commit' | 'commit-push' | 'push' | 'initial', message?: string, includeUnstaged = true) => {
-    const outputs: string[] = [];
-    const repositoryRoot = await gitText(workspacePath, ['rev-parse', '--show-toplevel']).catch(() => '');
-    const targets = [repositoryRoot || workspacePath];
-    for (const repo of targets) {
-      if (action === 'initial') {
-        await gitText(repo, ['init']);
-        if (includeUnstaged) await gitText(repo, ['add', '-A']);
-        await gitText(repo, ['commit', '-m', message?.trim() || 'Initial commit']);
-      } else if (action !== 'push') {
-        if (includeUnstaged) await gitText(repo, ['add', '-A']);
-        const summary = await gitSummary(repo);
-        await gitText(repo, ['commit', '-m', message?.trim() || `Update ${summary.files.length} file${summary.files.length === 1 ? '' : 's'} in ${summary.name}`]);
-      }
-      if (action === 'push' || action === 'commit-push') outputs.push(await gitText(repo, ['push']));
-    }
-    return { output: outputs.filter(Boolean).join('\n') || mainT('main.operationDone') };
-  });
-
   ipcMain.on('locale:set', (_event, value: unknown) => {
     if (!isMainLocale(value)) return;
     setMainLocale(value);
@@ -1000,7 +957,7 @@ app.whenReady().then(() => {
     legacyAgentPartitionDirs().length > 0 || LEGACY_AGENT_BROWSER_KEYS.some(key => readStore()[key] !== undefined));
   handleIpc('legacyAgentBrowser:clear', async () => {
     for (const dir of legacyAgentPartitionDirs()) await rm(dir, { recursive: true, force: true });
-    const next = { ...readStore() };
+    const next = readStore();
     for (const key of LEGACY_AGENT_BROWSER_KEYS) delete next[key];
     writeStore(next);
   });
@@ -1018,7 +975,11 @@ app.whenReady().then(() => {
   startAutoUpdates(BUILD_VERSION, {
     onAppImageMoved: syncLinuxDesktopEntry,
     readAutoDownload: () => readStore()[UPDATES_AUTO_DOWNLOAD_KEY] !== false,
-    writeAutoDownload: (enabled) => writeStore({ ...readStore(), [UPDATES_AUTO_DOWNLOAD_KEY]: enabled }),
+    writeAutoDownload: (enabled) => {
+      const store = readStore();
+      store[UPDATES_AUTO_DOWNLOAD_KEY] = enabled;
+      writeStore(store);
+    },
     onShowUpdates: () => {
       const window = liveWindow();
       if (!window) return;
@@ -1040,6 +1001,8 @@ app.whenReady().then(() => {
 });
 
 app.on('before-quit', (event) => {
+  // A second instance never read or owned anything; its cache must not overwrite the store.
+  if (!singleInstance) return;
   debugLog('info', 'app.before-quit');
   flushStore();
   // "Stop when TodeX quits": hold the quit until `daemon stop` and the container stops return.

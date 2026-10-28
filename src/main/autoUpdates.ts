@@ -77,6 +77,9 @@ export function setAutoDownload(enabled: boolean): UpdateState {
 
 export function installUpdate(): void {
   if (controller?.getState().status !== 'downloaded') return;
+  // The relaunched app must not find this (still quitting) one holding the
+  // single-instance lock, or it would hand over to it and exit.
+  app.releaseSingleInstanceLock();
   // Silent on Windows, then relaunch the updated app.
   electronUpdater.autoUpdater.quitAndInstall(true, true);
 }

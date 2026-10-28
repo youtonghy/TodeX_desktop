@@ -18,17 +18,6 @@ export type * from './containerTypes';
 
 type WindowState = { maximized: boolean; fullScreen: boolean };
 
-export type GitRepositorySummary = {
-  path: string;
-  name: string;
-  branch: string;
-  files: Array<{ path: string; status: string }>;
-  additions: number;
-  deletions: number;
-  ahead?: number;
-  initialEligible?: boolean;
-  error?: string;
-};
 /** Window-relative CSS pixels of a native view. */
 export type ViewBounds = { x: number; y: number; width: number; height: number };
 export type PreviewBackend = { serverUrl: string; deviceSecret: string; encryptionProtocol: 'none' | 'x25519' | 'ml-kem-768'; encryptionPublicKey: string; transportVerified?: boolean };
@@ -74,10 +63,6 @@ const api = {
     openPath: (path: string) => ipcRenderer.invoke('shell:openPath', path) as Promise<void>,
     showItemInFolder: (path: string) => ipcRenderer.invoke('shell:showItemInFolder', path) as Promise<void>,
     openWith: (path: string) => ipcRenderer.invoke('shell:openWith', path) as Promise<void>,
-  },
-  git: {
-    scan: (workspacePath: string) => ipcRenderer.invoke('git:scan', workspacePath),
-    run: (workspacePath: string, action: 'commit' | 'commit-push' | 'push' | 'initial', message?: string, includeUnstaged = true) => ipcRenderer.invoke('git:run', workspacePath, action, message, includeUnstaged),
   },
   app: {
     focus: () => {
@@ -295,4 +280,9 @@ const api = {
 
 contextBridge.exposeInMainWorld('todexDesktop', api);
 
-export type TodeXDesktopApi = typeof api;
+export type TodeXDesktopApi = typeof api & {
+  /** @deprecated The desktop bridge has no `git` API any more; this optional
+   * slot only keeps the browser bridge's leftover stub type-checking until it
+   * is removed there. */
+  git?: unknown;
+};

@@ -25,10 +25,6 @@ export type TodeXDesktopApi = {
     showItemInFolder: (path: string) => Promise<void>;
     openWith: (path: string) => Promise<void>;
   };
-  git: {
-    scan: (workspacePath: string) => Promise<GitRepositorySummary[]>;
-    run: (workspacePath: string, action: 'commit' | 'commit-push' | 'push' | 'initial', message?: string, includeUnstaged?: boolean) => Promise<{ output: string }>;
-  };
   app: {
     focus: () => void;
     paste: () => void;
@@ -191,18 +187,6 @@ export type DesktopDebugLogInfo = {
   configPath: string;
   logPath: string;
   chromiumLogPath: string;
-};
-
-export type GitRepositorySummary = {
-  path: string;
-  name: string;
-  branch: string;
-  files: Array<{ path: string; status: string }>;
-  additions: number;
-  deletions: number;
-  ahead?: number;
-  initialEligible?: boolean;
-  error?: string;
 };
 
 declare global {
