@@ -170,7 +170,15 @@ The desktop window will launch at 1280×800.
 | `pnpm run preview` | Previews the production build locally. |
 | `pnpm run typecheck` | Validates TypeScript types across main and renderer targets. |
 | `pnpm run check:electron` | Verifies that the native Electron binary is intact. |
-| `pnpm run test:updates` | Unit tests for the update policy and Linux desktop entry. |
+| `pnpm run test:updates` | Unit tests for the main-process policies, plus the static IPC contract between preload and main (`scripts/ipc-contract.test.ts`). |
+| `pnpm run test:visual` | Screenshot regression of the main screens in the `?demo` preview (headless Chromium, light and dark). |
+| `pnpm run test:electron` | Builds main + preload and smoke-tests the real Electron shell against an isolated, offline profile. |
+
+### Tests
+
+`test:visual` compares full-window screenshots under `tests/visual/__screenshots__` against the demo preview with a fixed clock and reduced motion. Baselines are rendered only in CI's `mcr.microsoft.com/playwright` image, since fonts rasterize differently elsewhere, so local runs show diffs but must not overwrite baselines. A new screenshot gets its baseline from the next CI run: download the `visual-baselines` artifact of the *Desktop checks* run and commit it. After an intended UI change, run *Desktop checks* manually (`gh workflow run checks.yml --ref <branch> -f update-screenshots=true`) and commit the re-rendered artifact. Open `playwright-report/` or the `visual-report` artifact to inspect diffs.
+
+`test:electron` gives the app its own `HOME` and `XDG_CONFIG_HOME` and a backend URL nobody serves, so it never touches the real profile or a daemon; native dialogs are replaced in main via `electronApp.evaluate`. On a Wayland desktop pass `TODEX_E2E_ELECTRON_ARGS=--ozone-platform=wayland`; CI runs it under `xvfb-run`. The window is shown while the tests run.
 
 ## Desktop Releases
 

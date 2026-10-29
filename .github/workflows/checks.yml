@@ -5,6 +5,12 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
+    inputs:
+      update-screenshots:
+        description: Re-render every visual baseline (after an intended UI change) and upload them as an artifact
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -70,3 +76,129 @@ jobs:
       - name: Build
         working-directory: TodeX_desktop
         run: pnpm run build
+
+  visual:
+    name: Visual regression
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    # Baselines are only ever rendered in this image: fonts rasterize
+    # differently on other distros. Keep its tag in step with @playwright/test.
+    container: mcr.microsoft.com/playwright:v1.62.1-noble
+    steps:
+      - name: Checkout desktop
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          path: TodeX_desktop
+
+      - name: Checkout shared protocol
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          repository: youtonghy/TodeX_protocol
+          ref: main
+          path: TodeX_protocol
+          token: ${{ secrets.PROTOCOL_REPO_TOKEN || github.token }}
+
+      - name: Setup Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install pnpm
+        run: npm install --global pnpm@${{ env.PNPM_VERSION }}
+
+      - name: Install dependencies
+        working-directory: TodeX_desktop
+        # The image ships the browsers; Electron's binary is not needed here.
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Compare screenshots
+        working-directory: TodeX_desktop
+        shell: bash
+        env:
+          # "missing" renders baselines for new screenshots instead of failing;
+          # the step below hands them over for committing.
+          UPDATE_MODE: ${{ inputs.update-screenshots && 'all' || 'missing' }}
+        run: pnpm exec playwright test --project=visual --update-snapshots="${UPDATE_MODE}"
+
+      - name: Detect new baselines
+        id: baselines
+        if: ${{ !cancelled() }}
+        working-directory: TodeX_desktop
+        shell: bash
+        run: |
+          git config --global --add safe.directory "$PWD"
+          changed="$(git status --porcelain -- tests/visual/__screenshots__)"
+          if [ -n "${changed}" ]; then
+            echo "::warning::Visual baselines were rendered for this run; download the visual-baselines artifact and commit it under tests/visual/__screenshots__."
+            echo "changed=true" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Upload new baselines
+        if: ${{ !cancelled() && steps.baselines.outputs.changed == 'true' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: visual-baselines
+          path: TodeX_desktop/tests/visual/__screenshots__
+
+      - name: Upload diffs
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: visual-report
+          path: |
+            TodeX_desktop/playwright-report
+            TodeX_desktop/test-results
+
+  electron:
+    name: Electron smoke
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout desktop
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          path: TodeX_desktop
+
+      - name: Checkout shared protocol
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          repository: youtonghy/TodeX_protocol
+          ref: main
+          path: TodeX_protocol
+          token: ${{ secrets.PROTOCOL_REPO_TOKEN || github.token }}
+
+      - name: Setup Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install pnpm
+        run: npm install --global pnpm@${{ env.PNPM_VERSION }}
+
+      - name: Install dependencies
+        working-directory: TodeX_desktop
+        shell: bash
+        run: |
+          pnpm install --frozen-lockfile --ignore-scripts
+          pnpm rebuild
+
+      - name: Prepare a display
+        # Ubuntu 24.04 blocks the unprivileged user namespaces Chromium's
+        # sandbox needs unless AppArmor's restriction is lifted.
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends xvfb
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
+      - name: Run smoke tests
+        working-directory: TodeX_desktop
+        run: xvfb-run --auto-servernum pnpm run test:electron
+
+      - name: Upload report
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: electron-report
+          path: |
+            TodeX_desktop/playwright-report
+            TodeX_desktop/test-results

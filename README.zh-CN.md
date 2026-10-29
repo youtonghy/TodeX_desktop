@@ -171,7 +171,15 @@ pnpm run dev
 | `pnpm run preview` | 本地预览生产构建产物。 |
 | `pnpm run typecheck` | 执行全工程 TypeScript 类型静态检查。 |
 | `pnpm run check:electron` | 校验本地 Electron 二进制文件完整性。 |
-| `pnpm run test:updates` | 更新策略与 Linux 桌面入口的单元测试。 |
+| `pnpm run test:updates` | 主进程策略的单元测试，以及 preload 与主进程之间的静态 IPC 契约（`scripts/ipc-contract.test.ts`）。 |
+| `pnpm run test:visual` | 在 `?demo` 演示预览中对主要界面做截图回归（无头 Chromium，浅色与深色）。 |
+| `pnpm run test:electron` | 构建主进程与 preload，并在隔离、离线的配置下对真实 Electron 外壳做冒烟测试。 |
+
+### 测试
+
+`test:visual` 在固定时钟、减少动效的演示预览中截取整窗截图，与 `tests/visual/__screenshots__` 下的基准图对比。基准图只在 CI 的 `mcr.microsoft.com/playwright` 镜像中渲染（其他系统的字体光栅化不同），本地运行只用于查看差异，不要覆盖基准图。新增截图的基准图由下一次 CI 生成：下载 *Desktop checks* 运行的 `visual-baselines` 产物并提交。有意修改 UI 后，手动运行 *Desktop checks*（`gh workflow run checks.yml --ref <分支> -f update-screenshots=true`），提交重新渲染的产物。差异可在 `playwright-report/` 或 `visual-report` 产物中查看。
+
+`test:electron` 为应用提供独立的 `HOME`、`XDG_CONFIG_HOME` 和一个无人监听的后端地址，不会触碰真实配置或 daemon；原生对话框通过 `electronApp.evaluate` 在主进程中替换。在 Wayland 桌面上需传入 `TODEX_E2E_ELECTRON_ARGS=--ozone-platform=wayland`；CI 在 `xvfb-run` 下运行。测试期间窗口会显示出来。
 
 ## 桌面端发布
 
