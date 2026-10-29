@@ -114,7 +114,7 @@ function provider(id: ProviderKind, displayName: string, available: boolean, una
 
 export const demoProviders: ProviderDescriptor[] = [
   provider('claude-code', 'Claude Code', true, undefined, { controlActions: ['cancel', 'interrupt', 'fork'] }),
-  provider('codex', 'Codex CLI', true),
+  provider('codex', 'Codex CLI', true, undefined, { controlActions: ['cancel', 'interrupt', 'retry', 'fork', 'forkAt', 'compact', 'goal'] }),
   provider('pi', 'Pi', true),
   provider('opencode', 'OpenCode', false, 'opencode is not installed'),
   provider('antigravity', 'Antigravity', false, "executable 'agy' was not found"),
@@ -133,6 +133,12 @@ class JournalBuilder {
 
   constructor(private readonly conversationId: string, private readonly provider: ProviderKind, startedAt: number) {
     this.time = startedAt;
+  }
+
+  /** Any other event, e.g. `goal.updated`. */
+  event(type: string, payload: Record<string, unknown>) {
+    this.push(type, payload);
+    return this;
   }
 
   private push(type: string, payload: Record<string, unknown>, gapMs = 6_000) {
@@ -300,6 +306,9 @@ export const demoJournals: Journal[] = [
     j.user('把设计系统导出的 CSS 变量同步到 tokens 包里。')
       .tool('shell', { command: ['pnpm', 'build:tokens'] }, 'Built 96 tokens → dist/tokens.css')
       .answer('已同步 96 个 token，色相统一为 253.83，并生成了浅色与暗色两套变量。', { model: 'gpt-5.5', input: 12_000, output: 1_100, cacheRead: 40_000, cacheWrite: 0 });
+    j.user('再检查一遍暗色模式的对比度。')
+      .answer('暗色模式下 4 处文本对比度不足，已调整为 4.5:1 以上。', { model: 'gpt-5.5', input: 9_000, output: 800, cacheRead: 30_000, cacheWrite: 0 });
+    j.event('goal.updated', { provider: 'codex', goal: { objective: '让所有组件通过 WCAG AA 对比度检查', status: 'active', tokensUsed: 184_000, timeUsedSeconds: 1_260, tokenBudget: null } });
   }),
 ];
 

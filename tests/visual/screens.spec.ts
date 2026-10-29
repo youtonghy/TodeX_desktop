@@ -66,6 +66,15 @@ for (const theme of ['light', 'dark'] as Theme[]) {
       await expect(page).toHaveScreenshot(`profile-${theme}.png`, { mask: volatile(page) });
     });
 
+    test('agent goal above the composer', async ({ page, openDemo }) => {
+      await openDemo(theme);
+      await page.getByText('design-tokens', { exact: true }).click();
+      await page.getByText('同步 HeroUI 主题变量').first().click();
+      await expect(page.getByText(/^目标 · /)).toBeVisible();
+      await settle(page);
+      await expect(page).toHaveScreenshot(`goal-${theme}.png`, { mask: volatile(page) });
+    });
+
     test('settings: general', async ({ page, openDemo }) => {
       await openDemo(theme);
       await page.getByRole('button', { name: '设置', exact: true }).click();
@@ -87,6 +96,16 @@ for (const [tab, slug] of Object.entries(SETTINGS_TABS)) {
     await expect(page).toHaveScreenshot(`settings-${slug}-light.png`, { mask: volatile(page) });
   });
 }
+
+test('fork from an earlier reply', async ({ page, openDemo }) => {
+  await openDemo('light');
+  await page.getByText('design-tokens', { exact: true }).click();
+  await page.getByText('同步 HeroUI 主题变量').first().click();
+  await page.getByRole('button', { name: '从这条回复分叉' }).first().click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await settle(page);
+  await expect(page).toHaveScreenshot('fork-from-reply-light.png', { mask: volatile(page) });
+});
 
 test.describe('compact window', () => {
   test.use({ viewport: { width: 1024, height: 768 } });
