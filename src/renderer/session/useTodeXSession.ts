@@ -6278,6 +6278,27 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     return uploadPromptFile(backendApi(profile), name, blob);
   }, []);
 
+  /** Sets, pauses, resumes or clears the goal an agent pursues on its own
+   * (`conversation.goal`); resolves to whether the backend accepted it. */
+  const sendConversationGoal = useCallback(async (conversationId: string, action: 'set' | 'pause' | 'resume' | 'clear', objective?: string) => {
+    const conversation = getConversationContext(conversationId)?.conversation;
+    if (!conversation?.v2ConversationId || refuseReadOnlyWrite(conversation)) return false;
+    const provider = providersForConversation(conversation).find((item) => item.id === conversation.provider);
+    if (!provider?.capabilities.controlActions?.includes('goal')) {
+      setLastError(t('sess.goalUnsupported'));
+      return false;
+    }
+    try {
+      await sendProtocolCommand({ id: createRequestId('goal'), type: 'conversation.goal', payload: {
+        conversationId: conversation.v2ConversationId, action, ...(action === 'set' ? { objective } : {}),
+      } }, 45_000);
+      return true;
+    } catch (error) {
+      setLastError(error instanceof Error ? error.message : t('sess.operationFailed'));
+      return false;
+    }
+  }, [getConversationContext, sendProtocolCommand]);
+
   const sendSlashCommand = useCallback(
     (input: string, conversationId = activeConversationRef.current) => {
       const trimmed = input.trim();
@@ -6288,6 +6309,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
 
       const [command, ...rest] = trimmed.slice(1).trim().split(/\s+/);
       let lower = command.toLowerCase();
+      // The command's argument text as typed, for commands that take free text.
+      let argumentText = trimmed.slice(1).trim().slice(command.length).trim();
       const context = getConversationContext(conversationId);
 
       if (!context) {
@@ -6310,6 +6333,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         }
         if (route.command === 'commands') { refreshProviderCommands(); return; }
         lower = route.command;
+        argumentText = route.args;
       }
       if (lower === 'memory' || lower === 'memories') {
         openSlashCommandActionPage(workspace, conversation, '/memory');
@@ -6329,6 +6353,11 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         }
         if (!nativeAction) {
           void sendV2Prompt(trimmed, conversation.id);
+          return;
+        }
+        const instructions = lower === 'compact' ? argumentText : '';
+        if (instructions && provider?.capabilities.compactInstructions !== true) {
+          setLastError(t('sess.compactNoInstructions'));
           return;
         }
         // An e2e backend cannot read the original request back (§7): retry
@@ -6355,11 +6384,29 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           return sendProtocolCommand({ id: createRequestId(lower), type: `conversation.${lower}`, payload: {
             conversationId: v2Id,
             ...fields,
+            ...(instructions ? { instructions } : {}),
           } }).then(() => recoverConversation(conversation.id));
         }).catch((error: unknown) => {
           setLastError(error instanceof Error ? error.message : t('sess.operationFailed'));
           void recoverConversation(conversation.id);
         });
+        return;
+      }
+      if (lower === 'goal' && providersForConversation(conversation).find((item) => item.id === conversation.provider)
+        ?.capabilities.controlActions?.includes('goal')) {
+        // `/goal` alone opens the editor; pause, resume and clear act on the
+        // goal; anything else (optionally after `set`) is the new objective.
+        const subcommand = rest[0]?.toLowerCase() ?? '';
+        const objective = subcommand === 'set' ? argumentText.slice(rest[0].length).trim() : argumentText;
+        if (!objective) {
+          openSlashCommandActionPage(workspace, conversation, '/goal');
+        } else if (rest.length === 1 && (subcommand === 'pause' || subcommand === 'resume' || subcommand === 'clear')) {
+          void sendConversationGoal(conversation.id, subcommand);
+        } else {
+          void sendConversationGoal(conversation.id, 'set', objective).then((accepted) => {
+            if (accepted) setConversationChatDraft(conversation.id, current => current.trim() === trimmed ? '' : current);
+          });
+        }
         return;
       }
       // The agent's own prompt commands go to it as prompts; a few TodeX
@@ -6455,6 +6502,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       forkConversation,
       getConversationContext,
       getProviderCommandCatalog,
+      sendConversationGoal,
       openExperimentalFeatures,
       openGitDiff,
       openPermissionsMenu,
@@ -6810,6 +6858,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     cancelAgentCall,
     renameConversation,
     forkConversation,
+    sendConversationGoal,
     removeConversation,
     purgeConversations,
     deleteConversation,

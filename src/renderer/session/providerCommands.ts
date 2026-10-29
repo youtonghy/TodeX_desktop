@@ -54,14 +54,15 @@ export const piTodexCommands = todexCommands.map(name => ({ command: `/todex ${n
   category: 'context' as const }));
 
 export function routePiSlashCommand(input: string, catalog?: ProviderCommandCatalog):
-  | { kind: 'native'; input: string } | { kind: 'todex'; command: string }
+  | { kind: 'native'; input: string } | { kind: 'todex'; command: string; args: string }
   | { kind: 'blocked'; message: string } {
   const [name, ...args] = input.trim().slice(1).split(/\s+/);
   // The reserved explicit namespace stays usable while discovery is unavailable.
   if (name === 'todex') {
     const command = args[0];
-    return todexCommands.some(item => item === command) && args.length === 1
-      ? { kind: 'todex', command }
+    // Only compact takes arguments: instructions for the summary.
+    return todexCommands.some(item => item === command) && (args.length === 1 || command === 'compact')
+      ? { kind: 'todex', command, args: input.trim().replace(/^\/todex\s+\S+\s*/, '') }
       : { kind: 'blocked', message: t('piExt.todexUsage') };
   }
   if (!catalog || catalog.status !== 'ready') return { kind: 'blocked', message: catalog?.status === 'error'

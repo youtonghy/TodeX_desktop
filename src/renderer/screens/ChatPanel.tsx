@@ -2,6 +2,7 @@ import { ConversationControls } from '../components/ConversationControls';
 import { PiExtensionPanel } from '../components/PiExtensionPanel';
 import { piCommandCompatibility, piTodexCommands } from '../session/providerCommands';
 import { ComputerLiveView } from '../components/ComputerLiveView';
+import { ConversationGoalBar } from '../components/ConversationGoal';
 import { ConversationScheduleBar } from '../components/ConversationSchedule';
 import { NoticeToast } from '../components/NoticeToast';
 import {
@@ -2028,6 +2029,13 @@ export function ChatPanel({ session }: Props) {
                 </Button>
               ))}
             </div>
+          ) : null}
+          {runtime?.goal && !readOnly ? (
+            <ConversationGoalBar
+              className="mb-2"
+              goal={runtime.goal}
+              onChange={(action) => session.sendConversationGoal(conversation.id, action)}
+            />
           ) : null}
           {conversation.schedule ? (
             <ConversationScheduleBar
