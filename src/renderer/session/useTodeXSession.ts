@@ -5154,7 +5154,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     // A draft without an agent only has its local title.
   }, [getConversationContext, updateConversation, v2ApiForConversation]);
 
-  const forkConversation = useCallback((conversationId: string) => {
+  /** Forks the conversation; with `throughTurnId`, only its history through
+   * that finished turn (the provider's `forkAt`). */
+  const forkConversation = useCallback((conversationId: string, throughTurnId?: string) => {
     const context = getConversationContext(conversationId);
     if (!context) {
       desktopAlert(t('alert.noConversation'), t('alert.pickThread'));
@@ -5176,7 +5178,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         try {
           const forkTitle = t('sess.forkTitle', { title: conversation.title || t('sess.conversation') });
           const result = await sendProtocolCommand({ id: createRequestId('fork'), type: 'conversation.fork', payload: {
-            conversationId: conversation.v2ConversationId, title: forkTitle,
+            conversationId: conversation.v2ConversationId, title: forkTitle, ...(throughTurnId ? { throughTurnId } : {}),
           } }, 45_000);
           if (typeof result.conversationId !== 'string') throw new Error(t('sess.forkNoId'));
           // The fork lives on the source conversation's backend; its sealed

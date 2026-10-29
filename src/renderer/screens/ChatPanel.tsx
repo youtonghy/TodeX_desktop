@@ -41,6 +41,7 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { Markdown, type MarkdownComponents } from '@/components/ui/markdown';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Spinner } from '@/components/ui/spinner';
+import { ConfirmDialog } from '@/components/ui/modal';
 import { toast } from '@/components/ui/toast';
 import { cx } from '@/utils/cx';
 import { baseMarkdownComponents } from '../components/markdownComponents';
@@ -146,6 +147,7 @@ const PROVIDER_TURN_NOTICES = {
   background_task: 'chat.providerTurn.backgroundTask',
   wakeup: 'chat.providerTurn.wakeup',
   cron: 'chat.providerTurn.cron',
+  goal: 'chat.providerTurn.goal',
   unknown: 'chat.providerTurn.backgroundTask',
 } as const satisfies Record<NonNullable<TimelineEntry['providerTrigger']>, string>;
 
@@ -555,16 +557,23 @@ const COPY_CONFIRM_MS = 1600;
 function AgentMessageActions({
   conversationId,
   entry,
+  latest,
   session,
 }: {
   conversationId: string;
   entry: { id: string; subtitle: string; at: number; turnId?: string };
+  /** The conversation's latest reply: a fork keeps all of the history. */
+  latest: boolean;
   session: TodeXSession;
 }) {
   const t = useT();
   const conversation = session.conversations.find(item => item.id === conversationId);
   const provider = session.v2Providers.find(item => item.id === conversation?.provider);
-  const canFork = provider?.capabilities.controlActions?.includes('fork') === true;
+  // Under an earlier reply the fork keeps the history through that reply,
+  // which needs the agent to fork its own session at the same point.
+  const canFork = provider?.capabilities.controlActions?.includes(latest ? 'fork' : 'forkAt') === true
+    && (latest || Boolean(entry.turnId));
+  const [confirmFork, setConfirmFork] = useState(false);
   // Legacy plaintext history is read-only and can never be forked.
   const readOnly = isReadOnlyConversation(conversation);
   const records = entry.turnId ? session.usageRecords.filter(record =>
@@ -606,12 +615,24 @@ function AgentMessageActions({
       {readOnly ? null : (
         <FeedbackButton
           icon={RiGitBranchLine}
-          label={t('chat.forkConversation')}
-          tooltip={canFork ? undefined : t('chat.forkUnsupported')}
+          label={latest ? t('chat.forkConversation') : t('chat.forkThrough')}
+          tooltip={canFork ? undefined : latest ? t('chat.forkUnsupported') : t('chat.forkThroughUnsupported')}
           disabled={!canFork}
-          onPress={() => session.forkConversation(conversationId)}
+          onPress={() => (latest ? session.forkConversation(conversationId) : setConfirmFork(true))}
         />
       )}
+      <ConfirmDialog
+        isOpen={confirmFork}
+        onOpenChange={setConfirmFork}
+        title={t('chat.forkConfirmTitle')}
+        description={t('chat.forkConfirmBody')}
+        confirmLabel={t('chat.forkConfirm')}
+        cancelLabel={t('common.cancel')}
+        onConfirm={() => {
+          setConfirmFork(false);
+          session.forkConversation(conversationId, entry.turnId);
+        }}
+      />
       <FeedbackButton icon={RiBarChartBoxLine} label={t('chat.replyStats')} tooltip={<TurnUsageSummary records={records} />} />
     </div>
   );
@@ -648,6 +669,8 @@ type ChatTimelineItemProps = {
   groupPendingCount: number;
   request: TodeXSession['pendingRequests'][number] | undefined;
   isActionable: boolean;
+  /** The row is the conversation's latest reply. */
+  isLatestReply: boolean;
   isPendingReply: boolean;
   markdownComponents: MarkdownComponents;
   onHydrateGroup: TodeXSession['hydrateProcessGroup'];
@@ -694,6 +717,7 @@ const ChatTimelineItem = memo(function ChatTimelineItem({
   groupPendingCount,
   request,
   isActionable,
+  isLatestReply,
   isPendingReply,
   markdownComponents,
   onHydrateGroup,
@@ -890,7 +914,7 @@ const ChatTimelineItem = memo(function ChatTimelineItem({
         </Markdown>
       )}
       {entry.kind === 'incoming' && isActionable && !isPendingReply
-        ? <AgentMessageActions conversationId={conversationId} entry={entry} session={session} />
+        ? <AgentMessageActions conversationId={conversationId} entry={entry} latest={isLatestReply} session={session} />
         : null}
       {request ? (
         <div className="flex flex-wrap items-center gap-2">
@@ -911,6 +935,7 @@ const ChatTimelineItem = memo(function ChatTimelineItem({
   && prev.groupPendingCount === next.groupPendingCount
   && prev.request === next.request
   && prev.isActionable === next.isActionable
+  && prev.isLatestReply === next.isLatestReply
   && prev.isPendingReply === next.isPendingReply
   && prev.markdownComponents === next.markdownComponents
   && prev.onHydrateGroup === next.onHydrateGroup
@@ -1072,6 +1097,12 @@ export function ChatPanel({ session }: Props) {
     item.type === 'entry' && item.entry.kind === 'outgoing' ? [{ id: item.entry.id, preview: item.entry.subtitle.trim() }] : []
   )), [items]);
   const actionableIncoming = useMemo(() => latestIncomingEntryIds(chatEntries), [chatEntries]);
+  const latestReplyId = useMemo(() => {
+    for (let index = chatEntries.length - 1; index >= 0; index--) {
+      if (actionableIncoming.has(chatEntries[index].id)) return chatEntries[index].id;
+    }
+    return undefined;
+  }, [actionableIncoming, chatEntries]);
   const sentHistory = useMemo(() => {
     const texts: string[] = [];
     for (const entry of chatEntries) {
@@ -1854,6 +1885,7 @@ export function ChatPanel({ session }: Props) {
                 ? session.pendingRequests.find((pendingItem) => pendingItem.requestId && (item.entry.requestId === pendingItem.requestId || item.entry.raw.includes(pendingItem.requestId)))
                 : undefined}
               isActionable={item.type === 'entry' && actionableIncoming.has(item.entry.id)}
+              isLatestReply={item.type === 'entry' && item.entry.id === latestReplyId}
               isPendingReply={item.type === 'entry' && item.entry.id === pendingReplyId}
               markdownComponents={markdownComponents}
               onHydrateGroup={session.hydrateProcessGroup}
