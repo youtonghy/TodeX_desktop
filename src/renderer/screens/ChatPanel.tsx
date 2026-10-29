@@ -661,16 +661,12 @@ type ChatTimelineItemProps = {
   session: TodeXSession;
 };
 
-// Timeline entries keep object identity while unchanged, so an element-wise
-// comparison of a group's entries is enough to detect real updates.
-/** Rows mounted at the bottom of the chat, and revealed per upward scroll. */
-const CHAT_ROW_WINDOW = 60;
-const SHOW_ALL_CHAT_ROWS = '\u0000all';
-
 function chatRenderItemKey(item: ChatRenderItem): string {
   return item.type === 'executionGroup' ? item.id : item.entry.id;
 }
 
+// Timeline entries keep object identity while unchanged, so an element-wise
+// comparison of a group's entries is enough to detect real updates.
 function chatRowItemEqual(prev: ChatRenderItem, next: ChatRenderItem): boolean {
   if (prev.type !== next.type) return false;
   if (prev.type === 'executionGroup' && next.type === 'executionGroup') {
@@ -1093,18 +1089,9 @@ export function ChatPanel({ session }: Props) {
     const ids = backgroundTasks.flatMap(task => task.toolUseId ? [task.toolUseId] : []);
     return ids.length ? new Set(ids) : NO_BACKGROUND_TOOLS;
   }, [backgroundTasks]);
-  // Only the newest rows are mounted. Scrolling up reveals loaded rows a
-  // window at a time before any older history is fetched; returning to the
-  // bottom unmounts them again. `null` slides with the newest rows, a row key
-  // pins the window start, and SHOW_ALL_CHAT_ROWS mounts everything.
-  const [chatWindowStart, setChatWindowStart] = useState<string | null>(null);
-  const chatWindowStartIndex = chatWindowStart === SHOW_ALL_CHAT_ROWS ? 0
-    : chatWindowStart ? items.findIndex((item) => chatRenderItemKey(item) === chatWindowStart) : -1;
-  const hiddenItemCount = chatWindowStartIndex >= 0 ? chatWindowStartIndex : Math.max(0, items.length - CHAT_ROW_WINDOW);
-  const mountedItems = hiddenItemCount > 0 ? items.slice(hiddenItemCount) : items;
-  const firstMountedKey = mountedItems[0] ? chatRenderItemKey(mountedItems[0]) : '';
-  /** A message to scroll to once the unmounted history rows it sits in mount. */
-  const pendingMessageJumpRef = useRef<{ id: string; align: 'center' | 'top' } | null>(null);
+  // Every loaded row stays mounted; only history that is not loaded yet pages
+  // in, when the reader scrolls near the top.
+  const oldestItemKey = items[0] ? chatRenderItemKey(items[0]) : '';
   const messagesRef = useRef<HTMLDivElement>(null);
   const [quote, setQuote] = useState<{ text: string; left: number; top: number; messageId?: string } | null>(null);
   useEffect(() => {
@@ -1178,19 +1165,10 @@ export function ChatPanel({ session }: Props) {
       conversationId: conversation.id,
       scrollHeight: element.scrollHeight,
       scrollTop: element.scrollTop,
-      oldestEntryId: firstMountedKey,
+      oldestEntryId: oldestItemKey,
     };
-    if (hiddenItemCount > 0) {
-      // Loaded rows are still unmounted: reveal the next window first.
-      historyAnchorRef.current = anchor;
-      const start = items[Math.max(0, hiddenItemCount - CHAT_ROW_WINDOW)];
-      setChatWindowStart(start ? chatRenderItemKey(start) : SHOW_ALL_CHAT_ROWS);
-      return;
-    }
     if (retry ? !earlierHistoryStatus?.failed || earlierHistoryStatus.loading : !canAutoLoadEarlierHistory(earlierHistoryStatus)) return;
     historyAnchorRef.current = anchor;
-    // Fetched rows land above the window start; keep them all mounted.
-    setChatWindowStart(SHOW_ALL_CHAT_ROWS);
     void session.loadEarlierHistory(conversation.id);
   };
   // The turn being read: the last user message whose top has passed a line
@@ -1206,19 +1184,12 @@ export function ChatPanel({ session }: Props) {
     }
     const turnIds = new Set(chatTurns.map((turn) => turn.id));
     const line = viewport.getBoundingClientRect().top + 96;
-    let current: string | null = null;
-    let firstMounted: string | null = null;
+    let current = chatTurns[0].id;
     for (const row of list.querySelectorAll<HTMLElement>('[data-message-id]')) {
       const id = row.dataset.messageId ?? '';
       if (!turnIds.has(id)) continue;
-      firstMounted ??= id;
       if (row.getBoundingClientRect().top > line) break;
       current = id;
-    }
-    if (!current && firstMounted) {
-      // Above the first mounted turn: the reader is still in the turn before it.
-      const index = chatTurns.findIndex((turn) => turn.id === firstMounted);
-      current = chatTurns[Math.max(0, index - 1)].id;
     }
     setActiveTurnId(current);
   };
@@ -1231,12 +1202,6 @@ export function ChatPanel({ session }: Props) {
     viewport.scrollTo({ top: viewport.scrollTop + offset - 16, behavior: 'smooth' });
     setActiveTurnId(id);
     return true;
-  };
-  const jumpToTurn = (id: string) => {
-    if (scrollMessageToTop(id)) return;
-    // The turn is in the unmounted part of the history.
-    pendingMessageJumpRef.current = { id, align: 'top' };
-    setChatWindowStart(SHOW_ALL_CHAT_ROWS);
   };
   const updateScrollPosition = () => {
     const element = scrollRef.current;
@@ -1251,16 +1216,6 @@ export function ChatPanel({ session }: Props) {
     const atBottom = !scrolledUp && element.scrollHeight - element.scrollTop - element.clientHeight < 120;
     atBottomRef.current = atBottom;
     setIsAtBottom(atBottom);
-    if (atBottom) {
-      // Back at the newest rows: let the window slide again, unmounting the
-      // rows revealed while reading older history.
-      if (chatWindowStart !== null && !historyAnchorRef.current) setChatWindowStart(null);
-    } else if (chatWindowStart === null && hiddenItemCount > 0) {
-      // Reading away from the bottom: pin the window so streamed rows do not
-      // slide the content under the reader. Functional, so a second scroll
-      // event before the re-render cannot undo a reveal already queued.
-      setChatWindowStart((current) => current ?? firstMountedKey);
-    }
     if (element.scrollTop < 240) requestEarlierHistory();
     updateActiveTurn();
   };
@@ -1269,7 +1224,7 @@ export function ChatPanel({ session }: Props) {
     const element = scrollRef.current;
     if (!element) return;
     if (anchor && anchor.conversationId === conversation?.id) {
-      if (firstMountedKey !== anchor.oldestEntryId) {
+      if (oldestItemKey !== anchor.oldestEntryId) {
         // Older rows mounted above the viewport: compensate by the height they
         // added so the visible content does not move.
         historyAnchorRef.current = null;
@@ -1280,34 +1235,23 @@ export function ChatPanel({ session }: Props) {
       }
     }
     // Content shorter than the viewport, or a reader already parked at the
-    // top, cannot produce another scroll event: reveal or fetch from here.
-    if ((hiddenItemCount > 0 || canAutoLoadEarlierHistory(earlierHistoryStatus))
+    // top, cannot produce another scroll event: fetch from here.
+    if (canAutoLoadEarlierHistory(earlierHistoryStatus)
       && (element.scrollHeight <= element.clientHeight || (!atBottomRef.current && element.scrollTop < 240))) {
       requestEarlierHistory();
     }
-    const jumpTarget = pendingMessageJumpRef.current;
-    if (jumpTarget) {
-      pendingMessageJumpRef.current = null;
-      if (jumpTarget.align === 'top') scrollMessageToTop(jumpTarget.id);
-      else {
-        messagesRef.current
-          ?.querySelector(`[data-message-id="${CSS.escape(jumpTarget.id)}"]`)
-          ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      }
-    }
-  }, [conversationTimeline, firstMountedKey, earlierHistoryStatus?.loading, conversation?.id]);
+  }, [conversationTimeline, oldestItemKey, earlierHistoryStatus?.loading, conversation?.id]);
   useEffect(() => {
     atBottomRef.current = true;
     lastScrollRef.current = { top: 0, height: 0 };
     setIsAtBottom(true);
-    setChatWindowStart(null);
     historyAnchorRef.current = null;
     scrollToLatest();
   }, [conversation?.id]);
   useEffect(() => {
     if (atBottomRef.current) scrollToLatest();
   }, [conversationTimeline]);
-  useEffect(updateActiveTurn, [chatTurns, firstMountedKey]);
+  useEffect(updateActiveTurn, [chatTurns]);
   // Rows on screen when a conversation opens stay still; rows that arrive
   // later in a live turn blur in (see RowEntrance).
   const [entranceArmedFor, setEntranceArmedFor] = useState<string | null>(null);
@@ -1576,14 +1520,9 @@ export function ChatPanel({ session }: Props) {
       return;
     }
     if (item.messageId) {
-      const target = messagesRef.current?.querySelector(`[data-message-id="${CSS.escape(item.messageId)}"]`);
-      if (target || hiddenItemCount === 0) {
-        target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        return;
-      }
-      // The quoted message is in the unmounted part of the history.
-      pendingMessageJumpRef.current = { id: item.messageId, align: 'center' };
-      setChatWindowStart(SHOW_ALL_CHAT_ROWS);
+      messagesRef.current
+        ?.querySelector(`[data-message-id="${CSS.escape(item.messageId)}"]`)
+        ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
   };
 
@@ -1865,16 +1804,16 @@ export function ChatPanel({ session }: Props) {
               <Spinner size="xs" />
               {t('chat.loadingEarlier')}
             </p>
-          ) : earlierHistoryStatus?.failed && hiddenItemCount === 0 ? (
+          ) : earlierHistoryStatus?.failed ? (
             <div className="flex items-center justify-center gap-2 py-1" role="alert">
               <p className="text-caption-1-regular text-text-error-primary">{t('chat.loadEarlierFailed')}</p>
               <Button size="xs" variant="secondary" onClick={() => requestEarlierHistory(true)}>
                 {t('chat.retry')}
               </Button>
             </div>
-          ) : earlierHistoryStatus?.capped && hiddenItemCount === 0 ? (
+          ) : earlierHistoryStatus?.capped ? (
             <p className="py-2 text-center text-caption-1-regular text-text-tertiary" role="status">{t('chat.earlierHistoryCapped')}</p>
-          ) : earlierHistoryStatus?.hasMore || hiddenItemCount > 0 ? (
+          ) : earlierHistoryStatus?.hasMore ? (
             <div className="flex justify-center py-1">
               <Button size="xs" variant="secondary" onClick={() => requestEarlierHistory()}>
                 {t('chat.loadEarlier')}
@@ -1896,7 +1835,7 @@ export function ChatPanel({ session }: Props) {
                     : t('chat.emptyHint')}
             </p>
           ) : null}
-          {mountedItems.map((item) => (
+          {items.map((item) => (
             <ErrorBoundary key={chatRenderItemKey(item)} label="chat row" fallback={() => <RowRenderError />}>
             <ChatTimelineItem
               item={item}
@@ -1938,7 +1877,7 @@ export function ChatPanel({ session }: Props) {
         <TurnNavigator
           turns={chatTurns}
           activeId={activeTurnId}
-          onSelect={jumpToTurn}
+          onSelect={scrollMessageToTop}
           className="absolute inset-y-0 start-0 z-20 ps-3"
         />
         {isAtBottom ? null : (
