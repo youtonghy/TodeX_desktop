@@ -36,6 +36,32 @@ export async function settle(page: Page): Promise<void> {
     await document.fonts.ready;
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
   });
+  await scrollSettled(page);
+  // The chat pins itself to the bottom while code highlighting and fonts
+  // change its height, and how close it lands depends on timing: put every
+  // scrolled container at its end, then let it settle again.
+  await page.evaluate(() => {
+    for (const element of document.querySelectorAll('*')) {
+      if (element.scrollTop > 0) element.scrollTop = element.scrollHeight;
+    }
+  });
+  await scrollSettled(page);
+}
+
+/** Waits until no scroll container moves or grows for a few polls. */
+async function scrollSettled(page: Page): Promise<void> {
+  const signature = () => page.evaluate(() => Array.from(document.querySelectorAll('*'))
+    .filter((element) => element.scrollHeight > element.clientHeight + 1)
+    .map((element) => `${element.scrollTop}/${element.scrollHeight}`)
+    .join(','));
+  let previous = await signature();
+  for (let stable = 0, polls = 0; stable < 4; polls++) {
+    if (polls > 50) throw new Error('scroll positions kept changing');
+    await page.waitForTimeout(100);
+    const current = await signature();
+    stable = current === previous ? stable + 1 : 0;
+    previous = current;
+  }
 }
 
 /** Live values that legitimately differ between runs. The sidebar identity
