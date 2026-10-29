@@ -266,8 +266,12 @@ const V2_WS_SUBSCRIPTION_BUDGET = 120;
 const V2_SUBSCRIBE_BACKFILL_LIMIT = 500;
 
 // Conversations whose projected history stays in memory after the user moves
-// on; older ones are released and reopen lazily from the journal tail.
+// on. The next ones keep only their newest rows, so switching back shows
+// them at once; older ones are released and reopen lazily from the journal
+// tail (or the desktop history cache).
 const RETAINED_CONVERSATION_RUNTIMES = 8;
+const RETAINED_CONVERSATION_TAILS = 40;
+const RETAINED_TAIL_ROWS = 100;
 // How long a failed prompt waits for the daemon's queue snapshot before the
 // client asks for it (`conversation.queue.list`).
 const BACKEND_CONTINUATION_SETTLE_MS = 1_000;
@@ -2359,7 +2363,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   }, [activeConversation?.id, activeConversation?.v2ConversationId, hydrated, openConversation, runtimeRevision, settings.serverUrl, settings.deviceSecret, settings.encryptionProtocol, settings.encryptionPublicKey, settings.transportVerified]);
 
   // Only recently viewed conversations keep their projected history in
-  // memory. Older ones, and runtimes live frames created for conversations
+  // memory, the less recent ones trimmed to their newest rows. Older ones,
+  // and runtimes live frames created for conversations
   // never opened here, are released and reopen lazily from the journal tail;
   // busy conversations (running, awaiting approval, queued or unconfirmed
   // prompts, loading) are always kept.
@@ -2378,6 +2383,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       const state = v2Id ? recovery.get(v2Id) : undefined;
       if (index < RETAINED_CONVERSATION_RUNTIMES || busy(localId, state)) kept.push(localId);
       else if (!v2Id || !state) continue; // nothing loaded to release
+      else if (index < RETAINED_CONVERSATION_TAILS && recovery.trim(v2Id, RETAINED_TAIL_ROWS)) kept.push(localId);
       else if (recovery.release(v2Id)) released.push(localId);
       else kept.push(localId); // a page is in flight; retry on the next sweep
     }

@@ -159,6 +159,23 @@ export class ConversationRecovery {
     return true;
   }
 
+  /** Shrink a loaded runtime to its newest `rows` timeline rows; the rest
+   * becomes unloaded history below a raised floor that pages back in on
+   * scroll. Refused (false) while a replay or history page is in flight, or
+   * without reverse paging, since nothing could page the rows back. */
+  trim(conversationId: string, rows: number): boolean {
+    if (!this.replayBefore || this.recovering.has(conversationId) || this.historyLoading.has(conversationId) || this.turnScans.has(conversationId)) return false;
+    const state = this.states.get(conversationId);
+    if (!state) return false;
+    const floor = this.historyFloors.get(conversationId) ?? 0;
+    const capped = capConversationRuntimeTimeline(state, rows, floor);
+    if (capped.state === state) return true;
+    this.states.set(conversationId, capped.state);
+    if (capped.floor > floor) this.historyFloors.set(conversationId, capped.floor);
+    this.update(capped.state, [], false, NO_LIVE);
+    return true;
+  }
+
   private clearGapRetry(conversationId: string): void {
     const retry = this.gapRetries.get(conversationId);
     if (retry?.timer) clearTimeout(retry.timer);
