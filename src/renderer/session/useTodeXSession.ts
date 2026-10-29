@@ -94,6 +94,7 @@ import { gitDiffUnsupported, readGitWorkingTreeDiff } from '../lib/gitWorkspace'
 import { loadSshPassword } from '../lib/sshPasswordStore';
 import { createConcurrencyLimit } from '../lib/concurrencyLimit';
 import { type OpenPanelOptions } from '../lib/panels';
+import { historyTailCache } from './historyCache';
 import type { CapabilityManager, CatalogState } from '../screens/CapabilitiesPanel';
 import {
   DEFAULT_COMPOSER_SELECTION,
@@ -544,9 +545,15 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     historyEncryptionRef.current?.withDecryptedTitles(backendId, manifests) ?? manifests;
   const withDecryptedManifest = async (backendId: string, manifest: ConversationManifest): Promise<ConversationManifest> =>
     (await historyEncryptionRef.current?.withDecryptedTitle(backendId, manifest)) ?? manifest;
-  const decryptedHistoryReplay = useCallback(async <P extends ConversationReplay>(conversationId: string, page: Promise<P>, detail: 'summary' | 'full'): Promise<P> => {
+  /** `capture` hands a summary page's ciphertext to the history cache:
+   * `start` begins a conversation's cached tail (a lazy window), `extend`
+   * only grows one already captured. */
+  const decryptedHistoryReplay = useCallback(async <P extends ConversationReplay>(conversationId: string, page: Promise<P>, detail: 'summary' | 'full', capture?: 'start' | 'extend'): Promise<P> => {
     const history = historyEncryptionRef.current;
     const result = await page;
+    if (capture && detail === 'summary') {
+      historyTailCache?.capture(backendIdForConversation(conversationId), conversationId, result.events, result.frames, { start: capture === 'start' });
+    }
     return history ? history.decryptPage(backendIdForConversation(conversationId), conversationId, result, detail) : result;
   }, []);
   // Records live in the session stores (read and written synchronously);
@@ -682,6 +689,11 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const setBackendManifests = useCallback((backendId: string, manifests: ConversationManifest[]) => {
     setV2ConversationsByBackend((current) => (current[backendId] === manifests ? current : { ...current, [backendId]: manifests }));
   }, []);
+  /** A complete conversation list of a backend: cached history of the
+   * conversations it no longer has goes. */
+  const retainCachedHistory = (backendId: string, manifests: readonly ConversationManifest[]) => {
+    void historyTailCache?.retainConversations(backendId, new Set(manifests.map((manifest) => manifest.id)));
+  };
   const [capabilityCatalogs, setCapabilityCatalogs] = useState<Partial<Record<ProviderKind, CatalogState>>>({});
   const [providerModelsByBackend, setProviderModelsByBackend] = useState<Record<string, ProviderModelCatalog>>({});
   const [providerModelPreferences, setProviderModelPreferences] = useState<ProviderModelPreferences>({});
@@ -784,10 +796,11 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const conversationRecoveryRef = useRef<ConversationRecovery | null>(null);
   // History replays fetch summary events only; folded process groups fetch
   // their full sequence range back when the user expands them.
+  const tailCache = historyTailCache;
   if (!conversationRecoveryRef.current) conversationRecoveryRef.current = new ConversationRecovery(
-    (id, after, limit) => decryptedHistoryReplay(id, v2ApiForConversation(id).replayEvents(id, after, limit, 'summary'), 'summary'),
+    (id, after, limit) => decryptedHistoryReplay(id, v2ApiForConversation(id).replayEvents(id, after, limit, 'summary'), 'summary', 'extend'),
     (state, applied, recovering, live) => runtimeUpdateRef.current(state, applied, recovering, live), setLastError,
-    (id, before, limit) => decryptedHistoryReplay(id, v2ApiForConversation(id).replayEventsBefore(id, before, limit, 'summary'), 'summary'),
+    (id, before, limit) => decryptedHistoryReplay(id, v2ApiForConversation(id).replayEventsBefore(id, before, limit, 'summary'), 'summary', 'start'),
     (id, status) => {
       const localId = stores.conversations.get().find((item) => item.v2ConversationId === id || item.id === id)?.id;
       if (!localId) return;
@@ -803,6 +816,19 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       const localId = stores.conversations.get().find((item) => item.v2ConversationId === id || item.id === id)?.id;
       return Boolean(localId && conversationHasPendingWork(localId));
     },
+    tailCache ? {
+      read: async (id) => {
+        const tail = await tailCache.read(backendIdForConversation(id), id);
+        if (!tail) return null;
+        const events = tail.events as ConversationEvent[];
+        const page = await decryptedHistoryReplay(id, Promise.resolve({
+          conversationId: id, fromSequence: events[0].sequence, nextSequence: events[events.length - 1].sequence + 1,
+          hasMore: false, events, frames: tail.frames,
+        }), 'summary');
+        return page.events;
+      },
+      discard: (id) => { void tailCache.discard(backendIdForConversation(id), id); },
+    } : undefined,
   );
   // Realtime events project once per animation frame: a streaming burst
   // costs one runtime batch and one timeline render instead of one per delta.
@@ -865,6 +891,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           setBackendProviders(backendId, providers.providers);
           if (manifestEpoch(backendId) === firstEpoch) {
             setBackendManifests(backendId, conversations.conversations);
+            retainCachedHistory(backendId, conversations.conversations);
             setConversations((current) => mergeManifestConversations(current, withDecryptedTitles(backendId, conversations.conversations), stores.workspaces.get(), backendId, manifestRunModes(backendId, providers.providers)));
           }
           setDirectorySyncByBackend((current) => ({ ...current, [backendId]: 'ready' }));
@@ -881,6 +908,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         void api.listConversations().then((response) => {
           if (!active || manifestEpoch(backendId) !== epoch) return;
           setBackendManifests(backendId, response.conversations);
+          retainCachedHistory(backendId, response.conversations);
           setConversations((current) => mergeManifestConversations(current, withDecryptedTitles(backendId, response.conversations), stores.workspaces.get(), backendId, manifestRunModes(backendId)));
         }).catch(() => undefined);
       }, 15000);
@@ -1634,6 +1662,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           const conversationResponse = await backendApi(profile).listConversations();
           if (manifestEpoch(backendId) === epoch) {
             setBackendManifests(backendId, conversationResponse.conversations);
+            retainCachedHistory(backendId, conversationResponse.conversations);
             setConversations((current) => mergeManifestConversations(current, withDecryptedTitles(backendId, conversationResponse.conversations), stores.workspaces.get(), backendId, manifestRunModes(backendId)));
           }
         } catch (error) {
@@ -2417,6 +2446,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     if (!activeConversationId) return;
     recentConversationIdsRef.current = [activeConversationId, ...recentConversationIdsRef.current.filter((id) => id !== activeConversationId)];
     releaseIdleConversationRuntimes();
+    void historyTailCache?.flushAll();
   }, [activeConversationId, releaseIdleConversationRuntimes]);
   // Background conversations settle without a switch; each manifest refresh
   // releases the ones that went idle.
@@ -2971,6 +3001,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           }
         };
         const history = historyEncryptionRef.current;
+        if (rawConversationId) historyTailCache?.capture(backendId, rawConversationId, [raw], parsed.frames);
         if (!history || !rawConversationId) deliver(raw);
         else history.receiveSocketEvent(backendId, rawConversationId, raw, parsed.frames, parsed.delivery === 'replay' ? 'summary' : 'full', deliver, setLastError);
         return;
@@ -3199,6 +3230,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     },
   });
   historyEncryptionRef.current = historyEncryption;
+  useEffect(() => {
+    historyTailCache?.setRecipientResolver(async (backendId) => historyEncryptionRef.current?.localRecipientId(backendId));
+    // Tails changed while reading are written before the window goes away.
+    const flush = () => { if (document.visibilityState === 'hidden') void historyTailCache?.flushAll(); };
+    document.addEventListener('visibilitychange', flush);
+    return () => document.removeEventListener('visibilitychange', flush);
+  }, []);
 
   // A revoked device says so once instead of only showing locked rows.
   const historyRevoked = historyEncryption.revoked;
@@ -4336,6 +4374,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     void removeSecret(`${DEVICE_SECRET_STORAGE_KEY}.${id}`).catch((error) => {
       setLastError(error instanceof Error ? error.message : t('sess.credentialClearFailed'));
     });
+    void historyTailCache?.forgetBackend(id);
     void historyEncryptionRef.current?.forgetBackend(id).catch((error: unknown) => {
       setLastError(error instanceof Error ? error.message : t('history.keyFailed'));
     });
@@ -6035,7 +6074,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const forgetDeletedConversations = useCallback((v2ConversationIds: string[], backendId = activeBackendConnectionIdRef.current) => {
     const deleted = new Set(v2ConversationIds);
     if (deleted.size === 0) return;
-    for (const id of deleted) unsubscribeV2Conversation(id);
+    for (const id of deleted) {
+      unsubscribeV2Conversation(id);
+      void historyTailCache?.forgetConversation(backendId, id);
+    }
     const removed = stores.conversations.get().filter((item) => (
       item.v2ConversationId && deleted.has(item.v2ConversationId) && backendIdForConversation(item.id) === backendId
     ));

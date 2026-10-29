@@ -31,6 +31,7 @@ import { decodeBase64UrlBytes, encodeBase64Url } from '@todex/protocol/transport
 import type { ConversationManifest } from '@todex/protocol/v2';
 import { t } from '../i18n';
 import { deleteHistorySeed, loadHistorySeed, saveHistorySeed } from '../lib/historyKeyStore';
+import { historyTailCache } from './historyCache';
 
 // End-to-end encrypted conversation history (TodeX_backend
 // docs/history-encryption.md) for every connected backend. History is always
@@ -144,12 +145,13 @@ export function useHistoryEncryption({ backends, focusBackendId, sendCommand, on
     });
   }, []);
 
-  /** A revoked device keeps no unwrapped keys and fetches no wraps: its
-   * encrypted rows project locked. */
+  /** A revoked device keeps no unwrapped keys, fetches no wraps and keeps no
+   * cached history: its encrypted rows project locked. */
   const markRevoked = useCallback((backendId: string, revoked: boolean) => {
     if (!revoked) { revokedBackends.current.delete(backendId); return; }
     if (revokedBackends.current.has(backendId)) return;
     revokedBackends.current.add(backendId);
+    void historyTailCache?.forgetBackend(backendId);
     decryptors.current.get(backendId)?.decryptor.clear();
     decryptors.current.delete(backendId);
     titles.current.clear();
@@ -201,7 +203,9 @@ export function useHistoryEncryption({ backends, focusBackendId, sendCommand, on
   const decryptorFor = useCallback((backendId: string) => {
     let entry = decryptors.current.get(backendId);
     if (!entry) {
-      const fetchWraps = historyWrapsFetcher((frame) => send(backendId, frame));
+      const fetchFromBackend = historyWrapsFetcher((frame) => send(backendId, frame));
+      // Wraps are addressed to this device's key, so the cache may keep them.
+      const fetchWraps = historyTailCache?.wrapsFetcher(backendId, fetchFromBackend) ?? fetchFromBackend;
       const decryptor = new HistoryDecryptor({
         fetchWraps: async (request) => {
           if (revokedBackends.current.has(backendId)) return {};
@@ -361,7 +365,12 @@ export function useHistoryEncryption({ backends, focusBackendId, sendCommand, on
         localRid = ridOf(publicKey);
         const { decryptor, ready } = decryptorFor(backendId);
         await ready;
-        if (decryptor.recipientIds[0] !== localRid) decryptor.setSeeds([seed]);
+        const previousRid = decryptor.recipientIds[0];
+        if (previousRid !== localRid) {
+          decryptor.setSeeds([seed]);
+          // History cached for another key of this device is not kept.
+          if (previousRid) void historyTailCache?.forgetBackend(backendId);
+        }
         decryptor.forgetMissing();
         seed.fill(0);
         if (register && !revoked && state.myRid !== localRid) {
@@ -376,6 +385,7 @@ export function useHistoryEncryption({ backends, focusBackendId, sendCommand, on
             await saveHistorySeed(backendId, fresh.secretKey);
             decryptor.setSeeds([fresh.secretKey]);
             fresh.secretKey.fill(0);
+            void historyTailCache?.forgetBackend(backendId);
             localRid = ridOf(fresh.publicKey);
             await send(backendId, historyCommands.register(fresh.publicKey));
           }
@@ -651,7 +661,15 @@ export function useHistoryEncryption({ backends, focusBackendId, sendCommand, on
       && !view.state.recipients.some((item) => item.kind === 'recovery' && !item.revokedAt));
   };
   const focusView = viewOf(focusBackendId);
+  /** This device's history recipient id on a backend once its key loaded;
+   * the history cache is keyed by it. */
+  const localRecipientId = useCallback(async (backendId: string) => {
+    const { decryptor, ready } = decryptorFor(backendId);
+    await ready;
+    return decryptor.recipientIds[0];
+  }, [decryptorFor]);
   return {
+    localRecipientId,
     /** State of the focused backend (the visible conversation's). */
     view: focusView,
     /** The non-blocking "no recovery key" notice should show for the

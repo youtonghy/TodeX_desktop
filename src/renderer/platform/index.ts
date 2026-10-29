@@ -2,6 +2,7 @@
 // the preload bridge. Members read `window.todexDesktop` when used: the dev
 // demo installs its browser stand-in after the modules load.
 import { isContainerProfile, useContainerProfileIds } from '../session/containerProfileIds';
+import { createIndexedDbHistoryCacheStore } from '../lib/historyCacheIdb';
 import type { Platform } from './types';
 
 export type * from './types';
@@ -47,6 +48,7 @@ export const platform: Platform = {
     reveal: (path) => bridge().shell.showItemInFolder(path),
   },
   get preview() { return bridge().preview; },
+  historyCache: createIndexedDbHistoryCacheStore(),
   get legacyAgentBrowser() { return bridge().legacyAgentBrowser; },
   containers: {
     useProfileIds: useContainerProfileIds,

@@ -61,6 +61,14 @@ export type EarlierHistoryResult = { hasMore: boolean; failed?: boolean; capped?
 export type ConversationOpenStatus = 'opening' | 'failed';
 type OpenStatusListener = (conversationId: string, status: ConversationOpenStatus | undefined) => void;
 
+/** Decrypted tails of conversations cached on this device (desktop history
+ * cache): ascending, contiguous events ending where the cache stopped. */
+export type CachedTailSource = {
+  read: (conversationId: string) => Promise<ConversationEvent[] | null>;
+  /** The tail disagreed with the journal; it must not be offered again. */
+  discard: (conversationId: string) => void;
+};
+
 export type ConversationOpenOptions = {
   /** Journal high-water mark from the conversation manifest. */
   highWater: number;
@@ -106,6 +114,7 @@ export class ConversationRecovery {
     /** The consumer still owes the conversation work that needs every event
      * after the cursor (a prompt awaiting its turn, queued follow-ups). */
     private readonly hasPendingWork?: (conversationId: string) => boolean,
+    private readonly cachedTails?: CachedTailSource,
   ) {}
 
   get(conversationId: string): ConversationRuntime | undefined { return this.states.get(conversationId); }
@@ -417,6 +426,7 @@ export class ConversationRecovery {
         await this.replayForward(conversationId, workspaceId, epoch);
         return;
       }
+      if (await this.openFromCachedTail(conversationId, workspaceId, options.highWater, epoch) || epoch !== this.epoch) return;
       const page = await this.replayBefore(conversationId, options.highWater, options.pageLimit ?? HISTORY_PAGE_LIMIT);
       if (epoch !== this.epoch) return;
       const last = page.events[page.events.length - 1];
@@ -468,6 +478,47 @@ export class ConversationRecovery {
     const state = this.states.get(conversationId);
     if (state) this.update(state, [], true, NO_LIVE);
     return work;
+  }
+
+  /** Lazy open from the device's cached tail: the tail renders before any
+   * request, then one forward page from its last event checks it against the
+   * journal and catches up. A tail whose last event the journal no longer
+   * holds (a truncated tail, a rewritten sequence) is dropped and the open
+   * falls back to the journal tail. False when no usable tail exists. A
+   * failed catch-up (offline) throws with the tail still shown. */
+  private async openFromCachedTail(conversationId: string, workspaceId: string, highWater: number, epoch: number): Promise<boolean> {
+    if (!this.cachedTails) return false;
+    let tail: ConversationEvent[] | null = null;
+    try {
+      tail = await this.cachedTails.read(conversationId);
+    } catch {
+      tail = null;
+    }
+    const newest = tail?.[tail.length - 1];
+    if (epoch !== this.epoch || !tail?.length || !newest || highWater - newest.sequence > REOPEN_GAP_EVENTS) return false;
+    if ((this.states.get(conversationId)?.appliedSequence ?? 0) > 0) return false;
+    this.seed(conversationId, workspaceId, tail[0].sequence <= 1 ? 0 : tail[0].sequence - 1);
+    this.ingest(conversationId, workspaceId, tail, false);
+    this.setOpenStatus(conversationId, undefined);
+    this.flushConversation(conversationId);
+    const shown = this.states.get(conversationId);
+    if (shown) this.update(shown, [], true, NO_LIVE);
+    const page = await this.replay(conversationId, newest.sequence - 1, 500);
+    if (epoch !== this.epoch) return true;
+    const check = page.events[0];
+    if (check?.sequence !== newest.sequence || check.eventId !== newest.eventId) {
+      this.cachedTails.discard(conversationId);
+      this.states.delete(conversationId);
+      this.historyFloors.delete(conversationId);
+      this.turnResolved.delete(conversationId);
+      this.liveSequences.delete(conversationId);
+      return false;
+    }
+    this.ingest(conversationId, workspaceId, page.events, false);
+    const state = this.states.get(conversationId);
+    if (page.hasMore || (state && state.appliedSequence < state.highWaterSequence)) await this.replayForward(conversationId, workspaceId, epoch);
+    this.incomplete.delete(conversationId);
+    return true;
   }
 
   /** A lazy open that failed before seeding leaves its realtime frames

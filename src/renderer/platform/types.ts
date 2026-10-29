@@ -5,6 +5,7 @@
 import type { ComponentType, ReactNode } from 'react';
 import type { BackendConnectionProfile } from '@todex/protocol/todex';
 import type { TodeXSession } from '../session/useTodeXSession';
+import type { HistoryCacheStore } from '../session/historyCache';
 
 export type ThemeSource = 'system' | 'light' | 'dark';
 /** `hidden-inset`: macOS traffic lights over the page; `custom`: the app
@@ -85,6 +86,9 @@ export type Platform = {
   preview?: PlatformPreview;
   /** Removes every key and secret this client stored (web "clear local data"). */
   clearLocalData?: () => Promise<void>;
+  /** Persistence of the on-device history cache (session/historyCache.ts);
+   * absent where the client keeps none (web). */
+  historyCache?: HistoryCacheStore;
   /** Data of the removed built-in agent browser (desktop). */
   legacyAgentBrowser?: { hasData: () => Promise<boolean>; clear: () => Promise<void> };
   /** Backend profiles that reach a TodeX container on this machine. */
