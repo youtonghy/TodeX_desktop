@@ -3234,8 +3234,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     historyTailCache?.setRecipientResolver(async (backendId) => historyEncryptionRef.current?.localRecipientId(backendId));
     // Tails changed while reading are written before the window goes away.
     const flush = () => { if (document.visibilityState === 'hidden') void historyTailCache?.flushAll(); };
+    const flushOnExit = () => { void historyTailCache?.flushAll(); };
     document.addEventListener('visibilitychange', flush);
-    return () => document.removeEventListener('visibilitychange', flush);
+    window.addEventListener('pagehide', flushOnExit);
+    return () => {
+      document.removeEventListener('visibilitychange', flush);
+      window.removeEventListener('pagehide', flushOnExit);
+    };
   }, []);
 
   // A revoked device says so once instead of only showing locked rows.

@@ -149,7 +149,8 @@ export class HistoryTailCache {
 
   /** Records wire events of a conversation. Without `start`, only a
    * conversation already being captured (opened, or read from the cache) is
-   * extended, so a tail always begins with a full history window. */
+   * extended, so a tail always begins with a full history window, unless the
+   * events start the journal (a conversation created here). */
   capture(backendId: string, conversationId: string, events: readonly HistoryWireEvent[], frames: unknown, options: { start?: boolean } = {}): void {
     if (!this.enabled || !backendId || !conversationId || !events.length) return;
     const key = bufferKey(backendId, conversationId);
@@ -163,7 +164,7 @@ export class HistoryTailCache {
     }
     let buffer = this.buffers.get(key);
     if (!buffer) {
-      if (!options.start) return;
+      if (!options.start && !events.some((event) => sequenceOf(event) === 1)) return;
       buffer = this.createBuffer(key, backendId, conversationId);
     }
     for (const event of events) {
