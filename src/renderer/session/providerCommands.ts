@@ -14,6 +14,16 @@ export const commandContextKey = (context: CommandContext) => JSON.stringify([
   context.runtimeId ?? '', context.runtimeStatus ?? '', context.nativeSessionId ?? '', context.commandEpoch ?? 0,
 ]);
 
+/** Whether the agent runs this catalog command itself, sent as the prompt
+ * text `/name args`: Claude and Pi report `prompt`, ACP agents
+ * (Grok, Devin, OpenCode, ...) `provider-prompt`. */
+export const runsAsPrompt = (command: ProviderCommandDescriptor) =>
+  command.invocation === 'prompt' || command.invocation === 'provider-prompt';
+
+/** The catalog command `/name` names when the agent runs it as a prompt. */
+export const findPromptCommand = (commands: ProviderCommandDescriptor[] | undefined, name: string) =>
+  commands?.find(item => item.name.toLowerCase() === name.toLowerCase() && runsAsPrompt(item));
+
 /** This is a versioned evidence registry, not an inference from command names. */
 export function piCommandCompatibility(command: ProviderCommandDescriptor, args = ''): { label: string; blocked?: string } {
   const identity = `${command.packageName ?? ''}@${command.packageVersion ?? ''}/${command.name}`;
@@ -56,7 +66,7 @@ export function routePiSlashCommand(input: string, catalog?: ProviderCommandCata
   }
   if (!catalog || catalog.status !== 'ready') return { kind: 'blocked', message: catalog?.status === 'error'
     ? t('piExt.catalogError') : t('piExt.catalogLoading') };
-  const command = catalog.commands.find(item => item.name === name && item.invocation === 'prompt');
+  const command = catalog.commands.find(item => item.name === name && runsAsPrompt(item));
   if (!command) return { kind: 'blocked', message: t('piExt.noCommand', { name }) };
   const compatibility = piCommandCompatibility(command, args.join(' '));
   return compatibility.blocked ? { kind: 'blocked', message: compatibility.blocked } : { kind: 'native', input };

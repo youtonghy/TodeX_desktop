@@ -21,7 +21,7 @@ import { t } from '../i18n';
 import { toast } from '../components/ui/toast';
 import { piExtensionPlainText } from '../components/piExtensionPresentation';
 import { PiExtensionEffects, canApplyPluginDraft } from './piExtensionEffects';
-import { commandContextKey, routePiSlashCommand, type ProviderCommandCatalog } from './providerCommands';
+import { commandContextKey, findPromptCommand, routePiSlashCommand, type ProviderCommandCatalog } from './providerCommands';
 import { platform } from '../platform';
 import { migrateLegacyFollowUps, restoreQueuedFollowUps, type LegacyAddResult, type LegacyFollowUps, type LegacyQueueTarget } from './queuedFollowUps';
 import { backendRateLimitState } from './sessionRateLimit';
@@ -6321,8 +6321,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         // Some providers expose these as catalog commands instead of control
         // actions (e.g. Claude /compact runs as a literal prompt).
         const promptCommand = conversation.provider
-          ? providerCommands[conversation.provider as ProviderKind]?.find(
-              (item) => item.name.toLowerCase() === lower && item.invocation === 'prompt')
+          ? findPromptCommand(providerCommands[conversation.provider as ProviderKind], lower)
           : undefined;
         if (!conversation.v2ConversationId || (!nativeAction && !promptCommand)) {
           setLastError(lower === 'resume' ? t('sess.resumeNeedsMessage') : t('sess.operationUnsupported'));
@@ -6366,8 +6365,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       // The agent's own prompt commands go to it as prompts; a few TodeX
       // commands map to v2 actions, and the rest run in the client.
       const promptCommand = conversation.provider
-        ? providerCommands[conversation.provider as ProviderKind]?.find(
-          (item) => item.name.toLowerCase() === lower && item.invocation === 'prompt')
+        ? findPromptCommand(providerCommands[conversation.provider as ProviderKind], lower)
         : undefined;
       if (promptCommand) {
         void sendV2Prompt(trimmed, conversation.id);
