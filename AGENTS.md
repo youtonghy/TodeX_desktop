@@ -23,6 +23,20 @@
 - The BoardUI CLI targets Next.js: replace any `next/image` / `next/link` imports in added files with plain elements, and keep the global CSS entry at `src/renderer/styles/global.css` (it imports `styles/globals.css`, which brings Tailwind, the theme tokens and the type scale).
 - If `pnpm install` fails with `ERR_PNPM_IGNORED_BUILDS`, run `pnpm approve-builds` and approve the build scripts, then continue.
 
+## UI tests and visual regression CI
+
+- Every UI change updates its tests in the same task. A new or changed screen, panel, dialog or visible state gets a screenshot in `tests/visual/screens.spec.ts`, plus `src/renderer/demo/` fixtures or mocks if the `?demo` preview needs data to show it. A change to desktop shell behavior (window, preload bridge, native dialogs, store) gets coverage in `tests/electron/`, and a new or renamed IPC channel must keep `scripts/ipc-contract.test.ts` passing. See README "Tests".
+- Baselines under `tests/visual/__screenshots__` are rendered only in CI's Playwright image, never locally. After an intended visual change:
+  1. Push.
+  2. Run `gh workflow run checks.yml --ref <branch> -f update-screenshots=true`.
+  3. Download that run's `visual-baselines` artifact into a fresh temp directory.
+  4. Look at the images.
+  5. Copy them into `tests/visual/__screenshots__/screens.spec.ts/`, commit and push.
+- Do not loosen the screenshot thresholds, add masks, or delete screenshots to make a diff pass. Mask only values that genuinely differ between runs.
+- Before ending any task that changes UI, watch the *Desktop checks* run for the final pushed commit until it completes (`gh run watch <id> --exit-status`). A run cancelled by a later push does not count; watch the latest one.
+  - If *Visual regression* or *Electron smoke* fails, inspect its `visual-report` or `electron-report` artifact. Fix the cause: a UI regression gets fixed, an intended change gets new baselines. Then push and watch again.
+  - Do not finish while the run is still running or failing. Report the run and its result in the final response.
+
 ## Sibling repositories (cross-repo access)
 
 TodeX lives in sibling checkouts under the same parent directory:
