@@ -64,8 +64,28 @@ export function claudeUnmanagedKeys(settingsConfig: unknown): string[] {
 
 /** Agents whose providers live side by side, one of them the default. */
 export function isAdditiveAgent(agent: ManagedProviderAgent): boolean {
-  return agent === 'pi' || agent === 'opencode' || agent === 'deepseek-harness';
+  return agent === 'pi' || agent === 'opencode' || agent === 'deepseek-harness' || agent === 'omp';
 }
+
+/// omp derives a model's thinking levels itself; its models.yml entries
+/// only say whether the model reasons.
+export function editsModelEfforts(agent: ManagedProviderAgent): boolean {
+  return agent !== 'omp';
+}
+
+/// omp's chat transports (`api` in models.yml); the judgment-only APIs are
+/// left to JSON mode.
+export const OMP_API_KINDS = [
+  'openai-completions',
+  'openai-responses',
+  'openai-codex-responses',
+  'azure-openai-responses',
+  'anthropic-messages',
+  'bedrock-converse-stream',
+  'google-generative-ai',
+  'google-gemini-cli',
+  'google-vertex',
+] as const;
 
 /// Per-model editor row shared by the additive agents: the form edits this
 /// normalized shape; buildSettingsConfig maps it back to each native schema.
@@ -504,7 +524,8 @@ export function extractFormValues(
         ),
       };
     }
-    case 'pi': {
+    case 'pi':
+    case 'omp': {
       const models = Array.isArray(settings.models) ? settings.models : [];
       return {
         ...base,
@@ -596,6 +617,21 @@ function piModelEntry(model: ModelFormEntry, existing: Record<string, unknown>):
     }
     entry.thinkingLevelMap = map;
   }
+  return entry;
+}
+
+/// omp `models[]` entry: Pi's fields without a thinking-level map, which
+/// omp does not read (it derives a reasoning model's levels).
+function ompModelEntry(model: ModelFormEntry, existing: Record<string, unknown>): Record<string, unknown> {
+  const entry: Record<string, unknown> = { ...existing, id: model.id };
+  applyName(entry, model);
+  const contextWindow = parsePositiveInt(model.contextWindow);
+  if (contextWindow) entry.contextWindow = contextWindow;
+  else delete entry.contextWindow;
+  const maxTokens = parsePositiveInt(model.maxTokens);
+  if (maxTokens) entry.maxTokens = maxTokens;
+  else delete entry.maxTokens;
+  applyReasoningFlag(entry, model, existing);
   return entry;
 }
 
@@ -754,7 +790,8 @@ export function buildSettingsConfig(
       );
       return { ...previous, options, models };
     }
-    case 'pi': {
+    case 'pi':
+    case 'omp': {
       const existingById = new Map<string, Record<string, unknown>>();
       if (Array.isArray(previous.models)) {
         for (const model of previous.models) {
@@ -763,9 +800,8 @@ export function buildSettingsConfig(
           if (id) existingById.set(id, record);
         }
       }
-      const models = form.models.map((model) =>
-        piModelEntry(model, existingById.get(model.id) ?? {}),
-      );
+      const entry = agent === 'omp' ? ompModelEntry : piModelEntry;
+      const models = form.models.map((model) => entry(model, existingById.get(model.id) ?? {}));
       const next: Record<string, unknown> = { ...previous, models };
       if (form.baseUrl.trim()) next.baseUrl = form.baseUrl.trim();
       if (form.apiKey.trim()) next.apiKey = form.apiKey.trim();
@@ -798,6 +834,7 @@ export function providerModelIds(agent: ManagedProviderAgent, settings: Record<s
     case 'opencode':
       return Object.keys(asRecord(settings.models));
     case 'pi':
+    case 'omp':
     case 'deepseek-harness':
       return (Array.isArray(settings.models) ? settings.models : [])
         .map((model) => asString(asRecord(model).id))
@@ -828,6 +865,7 @@ export function providerBaseUrl(agent: ManagedProviderAgent, settings: Record<st
       return asString(options.baseURL ?? options.baseUrl);
     }
     case 'pi':
+    case 'omp':
       return asString(settings.baseUrl);
     case 'deepseek-harness':
       return asString(settings.baseURL);

@@ -45,6 +45,8 @@ import {
   claudeUnmanagedKeys,
   CODEX_REASONING_EFFORTS,
   defaultEfforts,
+  editsModelEfforts,
+  OMP_API_KINDS,
   DSH_API_KINDS,
   DSH_DEEPSEEK_ROUTE,
   emptyModelEntry,
@@ -495,10 +497,11 @@ function ProviderEditor({
   const dshDeepseek = isDsh && id.trim() === DSH_DEEPSEEK_ROUTE;
   const isAdditive = isAdditiveAgent(agent) && !dshDeepseek;
 
+  const knownApiKinds: readonly string[] = agent === 'omp' ? OMP_API_KINDS : PI_API_KINDS;
   const apiKindOptions =
-    form.apiKind && !PI_API_KINDS.includes(form.apiKind)
-      ? [...PI_API_KINDS, form.apiKind]
-      : PI_API_KINDS;
+    form.apiKind && !knownApiKinds.includes(form.apiKind)
+      ? [...knownApiKinds, form.apiKind]
+      : knownApiKinds;
 
   // The backend resolves masked secrets against the stored profile or the
   // live additive node of the same id, so this works pre-save in all modes.
@@ -669,7 +672,7 @@ function ProviderEditor({
               />
             </>
           ) : null}
-          {agent === 'pi' || (isDsh && !dshDeepseek) ? (
+          {agent === 'pi' || agent === 'omp' || (isDsh && !dshDeepseek) ? (
             <Select
               label={t('ap.apiKind')}
               className="w-full"
@@ -1165,7 +1168,7 @@ function ModelConfigList({
                     {t('ap.reasoning')}
                   </Switch>
                 </div>
-                {model.reasoning ? (
+                {model.reasoning && editsModelEfforts(agent) ? (
                   <div className="sm:col-span-2">
                     <p className="mb-1.5 text-caption-1-regular text-text-secondary">{t('ap.efforts')}</p>
                     <ButtonGroup size="small" aria-label={t('ap.efforts')} className="max-w-full">

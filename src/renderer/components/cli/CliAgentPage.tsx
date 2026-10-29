@@ -10,22 +10,24 @@ import type { TodeXSession } from '@/session/useTodeXSession';
 import { AgentProvidersPanel } from '../../screens/AgentProvidersPanel';
 import { CapabilitiesPanel, type ProviderChoice } from '../../screens/CapabilitiesPanel';
 import { NativeHistoryTab } from '../cleanup/NativeHistoryTab';
+import { OmpPluginsTab } from './OmpPluginsTab';
 import { ProviderIcon } from '../ProviderIcon';
 import { CliSettingsEditor, type CliPageExtraTab } from './CliSettingsEditor';
 
 /** A CLI's own page in CLI management, or the shared skills and MCPs. */
 export type CliPage = ManagedCliProvider | 'shared';
 
-type CliPageTab = 'settings' | 'capabilities' | 'accounts' | 'cleanup';
+type CliPageTab = 'settings' | 'capabilities' | 'accounts' | 'plugins' | 'cleanup';
 
 const TAB_LABELS: Record<CliPageTab, MessageKey> = {
   settings: 'cliPage.tabSettings',
   capabilities: 'cliPage.tabCapabilities',
   accounts: 'cliPage.tabAccounts',
+  plugins: 'cliPage.tabPlugins',
   cleanup: 'cliPage.tabCleanup',
 };
 
-const NATIVE_HISTORY: readonly NativeHistoryProvider[] = ['claude-code', 'pi', 'codex', 'grok-build', 'devin'];
+const NATIVE_HISTORY: readonly NativeHistoryProvider[] = ['claude-code', 'pi', 'codex', 'grok-build', 'devin', 'omp'];
 
 /** Skills and MCPs come from the picked backend's agents. */
 function capabilityProvider(backend: PanelBackend, id: string): ProviderKind | undefined {
@@ -38,6 +40,8 @@ export function cliPageTabs(backend: PanelBackend, id: ManagedCliProvider): CliP
   if (hasCliSettings(id)) tabs.push('settings');
   if (capabilityProvider(backend, id)) tabs.push('capabilities');
   if ((MANAGED_PROVIDER_AGENTS as string[]).includes(id)) tabs.push('accounts');
+  // Pi's plugins live in its settings editor; omp has no settings file here.
+  if (id === 'omp') tabs.push('plugins');
   if ((NATIVE_HISTORY as string[]).includes(id)) tabs.push('cleanup');
   return tabs;
 }
@@ -58,6 +62,7 @@ export function CliAgentPage({ session, backend, api, id, name, onBack }: {
     const label = t(TAB_LABELS[item]);
     if (item === 'capabilities' && provider) return [{ id: item, label, render: () => <BackendCapabilities session={session} backend={backend} provider={provider} /> }];
     if (item === 'accounts') return [{ id: item, label, render: () => <AgentProvidersPanel key={backend.backendId} backend={backend} agent={id as ManagedProviderAgent} /> }];
+    if (item === 'plugins') return [{ id: item, label, render: () => <OmpPluginsTab key={backend.backendId} api={api} /> }];
     if (item === 'cleanup') return [{ id: item, label, render: () => <NativeHistoryTab key={backend.backendId} backend={backend} provider={id as NativeHistoryProvider} label={name} /> }];
     return [];
   });
