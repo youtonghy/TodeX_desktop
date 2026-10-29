@@ -28,9 +28,12 @@ test.beforeAll(async () => {
   app = await electron.launch({
     cwd: root,
     // e.g. `--ozone-platform=wayland` on a Wayland desktop; CI runs under xvfb.
-    args: [...(process.env.TODEX_E2E_ELECTRON_ARGS?.split(' ').filter(Boolean) ?? []), '.'],
+    // The labels below are Chinese; pin the UI language whatever the host's is.
+    args: [...(process.env.TODEX_E2E_ELECTRON_ARGS?.split(' ').filter(Boolean) ?? []), '--lang=zh-CN', '.'],
     env: {
       ...process.env,
+      LANG: 'zh_CN.UTF-8',
+      LANGUAGE: 'zh_CN',
       HOME: join(sandbox, 'home'),
       XDG_CONFIG_HOME: configHome,
       ELECTRON_RENDERER_URL: rendererUrl,

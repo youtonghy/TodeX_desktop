@@ -115,8 +115,8 @@ jobs:
         working-directory: TodeX_desktop
         shell: bash
         env:
-          # "missing" renders baselines for new screenshots instead of failing;
-          # the step below hands them over for committing.
+          # "missing" renders baselines for new screenshots (their tests still
+          # fail until committed); the steps below hand them over.
           UPDATE_MODE: ${{ inputs.update-screenshots && 'all' || 'missing' }}
         run: pnpm exec playwright test --project=visual --update-snapshots="${UPDATE_MODE}"
 
