@@ -27,12 +27,27 @@ optional and canonical aliases are recomputed when old journals are replayed.
 - Memory configuration is separate from memory content; the panel explicitly
   reports when the provider has no readable content source.
 - Only the eight most recently viewed conversations keep their projection in
-  memory. Any other loaded runtime, including one live frames created for a
+  memory; the next 32 keep their newest 100 rows, so switching back to them
+  needs no history fetch (the trimmed rows page back in on scroll). Any other
+  loaded runtime, including one live frames created for a
   conversation never opened, is released once idle (checked on every switch
   and manifest refresh) and reopens lazily from the journal tail. An idle,
   lazily opened conversation more than 2000 events behind the journal also
   reopens from the tail instead of replaying the gap; running turns, approvals
   and unconfirmed or queued prompts always replay forward.
+- Desktop caches the newest 300 events of recently opened conversations in
+  IndexedDB (`session/historyCache.ts`), exactly as the backend sent them:
+  end-to-end ciphertext (summary stream only) plus the wraps addressed to this
+  device's history key, keyed by backend and recipient id. Plaintext events are
+  never cached. A conversation opens from its cached tail before any request;
+  one forward page from the tail's last event then checks it against the
+  journal (a different event id drops the tail and the open falls back to the
+  journal tail) and catches up. Offline, the tail stays readable. The cache
+  holds at most 100 conversations / 200 MB (least recently used first) and is
+  cleared for a backend when this device is revoked or re-keyed or the backend
+  is removed, and per conversation when it is deleted or leaves the backend's
+  list. Settings → General → Storage switches it off or clears it. Web keeps
+  no cache.
 - The conversation list is fetched once per 15-second manifest refresh. The
   periodic workspace sync leaves it to that refresh; only the sync that runs
   when a connection opens lists conversations itself.
