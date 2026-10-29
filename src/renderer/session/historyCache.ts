@@ -98,7 +98,7 @@ export class HistoryTailCache {
   /** Conversations that delivered plaintext (legacy history): never cached. */
   private readonly plaintext = new Set<string>();
   private enabled = true;
-  private readonly loaded: Promise<void>;
+  private loading: Promise<void> | null = null;
   private recipientFor: (backendId: string) => Promise<string | undefined> = async () => undefined;
   private readonly listeners = new Set<() => void>();
 
@@ -107,18 +107,27 @@ export class HistoryTailCache {
     private readonly settings: SettingsStore,
     private readonly settingsKey: string,
     private readonly now: () => number = Date.now,
-  ) {
-    this.loaded = settings.get(settingsKey).then((value) => {
+  ) {}
+
+  /** The switch loads on first use: the desktop store is not reachable yet
+   * while modules load (the demo installs its bridge afterwards). */
+  private get loaded(): Promise<void> {
+    this.loading ??= this.settings.get(this.settingsKey).then((value) => {
       const stored = value as { enabled?: unknown } | null | undefined;
       if (stored && stored.enabled === false) this.enabled = false;
+      this.changed();
     }, (error: unknown) => warn('load settings', error));
+    return this.loading;
   }
 
   /** The device's history recipient id per backend; tails are keyed by it,
    * so a re-keyed device never reads entries it cannot decrypt. */
   setRecipientResolver(resolve: (backendId: string) => Promise<string | undefined>): void { this.recipientFor = resolve; }
 
-  isEnabled(): boolean { return this.enabled; }
+  isEnabled(): boolean {
+    void this.loaded;
+    return this.enabled;
+  }
 
   /** Settings UI: notified when the switch or the stored data change. */
   subscribe(listener: () => void): () => void {

@@ -21,6 +21,8 @@ import { ScrollArea } from '../components/ui/scroll-area';
 import { toast } from '../components/ui/toast';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { platform } from '../platform';
+import { historyTailCache } from '../session/historyCache';
+import { HistoryCacheSettings } from '../components/settings/HistoryCacheSettings';
 import { slots } from '../platform/slots';
 import { LOCALE_LABELS, SUPPORTED_LOCALES, getLocalePreference, isLocale, setLocalePreference, useT, type LocalePreference } from '../i18n';
 
@@ -200,6 +202,11 @@ export function SettingsPanel({ session, historyRecoverySetup = false, repairPai
             <SettingsCard className="overflow-hidden ps-0">
               <SettingsEntry icon={RiHistoryLine} title={t('cleanup.todexTitle')} description={t('settings.todexHistoryEntry')} onPress={() => setHistoryPage(true)} />
             </SettingsCard>
+            {historyTailCache ? (
+              <SettingsCard>
+                <HistoryCacheSettings cache={historyTailCache} />
+              </SettingsCard>
+            ) : null}
           </SettingsGroup>
           </>}
         </SettingsPage>

@@ -25,6 +25,11 @@ test.beforeAll(async () => {
     join(configHome, 'todex-desktop', 'todex-desktop-store.json'),
     JSON.stringify({ 'todex.desktop.settings.v1': { serverUrl: OFFLINE_BACKEND } }),
   );
+  await launch();
+});
+
+async function launch() {
+  const configHome = join(sandbox, 'config');
   app = await electron.launch({
     cwd: root,
     // e.g. `--ozone-platform=wayland` on a Wayland desktop; CI runs under xvfb.
@@ -40,7 +45,7 @@ test.beforeAll(async () => {
     },
   });
   page = await app.firstWindow();
-});
+}
 
 test.afterAll(async () => {
   await app?.close();
@@ -92,4 +97,34 @@ test('picks a local folder for a new workspace through the native dialog', async
   await dialog.getByRole('button', { name: '本机选择' }).click();
   await expect(dialog.getByRole('textbox', { name: '目录' })).toHaveValue(picked);
   await page.keyboard.press('Escape');
+});
+
+test('keeps the on-device history cache across a restart', async () => {
+  // The renderer's IndexedDB (session/historyCache.ts) lives in the profile.
+  const write = () => new Promise<void>((resolve, reject) => {
+    const open = indexedDB.open('todex-history-cache', 1);
+    open.onupgradeneeded = () => {
+      for (const name of ['tails', 'tailMeta', 'wraps']) open.result.createObjectStore(name, { keyPath: 'key' });
+    };
+    open.onerror = () => reject(open.error);
+    open.onsuccess = () => {
+      const tx = open.result.transaction('wraps', 'readwrite');
+      tx.objectStore('wraps').put({ key: 'e2e\u0000probe', wrap: { rid: 'r', kemCt: 'k', wrapped: 'w' } });
+      tx.oncomplete = () => { open.result.close(); resolve(); };
+      tx.onerror = () => reject(tx.error);
+    };
+  });
+  await page.evaluate(write);
+  await app.close();
+  await launch();
+  const stored = await page.evaluate(() => new Promise<unknown>((resolve, reject) => {
+    const open = indexedDB.open('todex-history-cache', 1);
+    open.onerror = () => reject(open.error);
+    open.onsuccess = () => {
+      const get = open.result.transaction('wraps').objectStore('wraps').get('e2e\u0000probe');
+      get.onsuccess = () => resolve(get.result);
+      get.onerror = () => reject(get.error);
+    };
+  }));
+  expect(stored).toEqual({ key: 'e2e\u0000probe', wrap: { rid: 'r', kemCt: 'k', wrapped: 'w' } });
 });
