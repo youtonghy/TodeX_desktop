@@ -83,6 +83,9 @@ export interface DashboardNavItem {
   /** Disclosure rows report whether the rows they reveal are open (`aria-expanded`). */
   expanded?: boolean;
   disabled?: boolean;
+  /** Why a disabled row is unavailable: the row stays focusable and hoverable
+   *  (`aria-disabled`) and explains itself in a tooltip. */
+  disabledReason?: string;
   /** Trailing counter: strings and numbers render as a `Badge`, nodes as they are. */
   badge?: ReactNode;
   /** Trailing hint after the badge, e.g. a shortcut keycap. */
@@ -101,7 +104,9 @@ function NavItem({
   isSelected: boolean;
   collapsed: boolean;
 }) {
-  const { icon: Icon, label, href, onClick, toggle, expanded, disabled = false, badge, hint } = item;
+  const { icon: Icon, label, href, onClick, toggle, expanded, disabled = false, disabledReason, badge, hint } = item;
+  // A disabled row with a reason stays reachable so its tooltip can explain.
+  const explained = disabled && Boolean(disabledReason);
   const className = cx(
     "flex items-center justify-between overflow-hidden rounded-2lg p-2 text-start",
     "outline-none focus-visible:ring-2 focus-visible:ring-border-focus-ring",
@@ -166,8 +171,9 @@ function NavItem({
   ) : (
     <button
       type="button"
-      disabled={disabled}
-      onClick={onClick}
+      disabled={disabled && !explained}
+      aria-disabled={explained || undefined}
+      onClick={explained ? undefined : onClick}
       aria-current={!toggle && isSelected ? "page" : undefined}
       aria-pressed={toggle ? isSelected : undefined}
       aria-expanded={expanded}
@@ -179,9 +185,9 @@ function NavItem({
   );
   // The rail shows icons only, so its rows name themselves in a tooltip.
   return (
-    <TooltipTrigger delay={200} isDisabled={!collapsed || disabled}>
-      <Focusable isDisabled={disabled}>{row}</Focusable>
-      <Tooltip placement="right">{label}</Tooltip>
+    <TooltipTrigger delay={200} isDisabled={explained ? false : !collapsed || disabled}>
+      <Focusable isDisabled={disabled && !explained}>{row}</Focusable>
+      <Tooltip placement="right">{explained ? (collapsed ? `${label} · ${disabledReason}` : disabledReason) : label}</Tooltip>
     </TooltipTrigger>
   );
 }

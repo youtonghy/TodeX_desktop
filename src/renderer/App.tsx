@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { RiAddLine, RiFolderAddLine, RiExpandLeftLine, RiExpandRightLine, RiGithubLine, RiLayoutLeftLine, RiLayoutRightLine } from '@remixicon/react';
 import { motion, useReducedMotion } from 'motion/react';
 import { Dialog, Modal as AriaModal, ModalOverlay } from 'react-aria-components';
@@ -31,7 +31,8 @@ import { AppIcon } from './components/AppIcon';
 import { ChatPanel } from './screens/ChatPanel';
 import { HistoryRecoveryNotice } from './components/HistoryRecoveryNotice';
 import { Field } from './components/Field';
-import { connectionStateLabel, conversationDisplayTitle, firstPromptText, createWorkspaceDirectory, fetchWorkspaceDirectorySnapshot, isUnmountedPathError } from './session/helpers';
+import { connectionStateLabel, conversationDisplayTitle, firstPromptText, createWorkspaceDirectory, fetchWorkspaceDirectorySnapshot, isNoneWorkspaceId, isPrivateConversation, isUnmountedPathError } from './session/helpers';
+import { PrivateConversationDialog } from './components/PrivateConversationDialog';
 import { pickedHostPathToBackend } from './session/hostPaths';
 import { WorkspaceMountHint } from './components/WorkspaceMountHint';
 import { platform } from './platform';
@@ -193,6 +194,18 @@ export function App() {
   const openPanelHandlerRef = useRef<(name: string, params?: OpenPanelOptions) => void>(() => {});
   const forwardOpenPanel = useCallback((name: string, params?: OpenPanelOptions) => openPanelHandlerRef.current(name, params), []);
   const session = useTodeXSession(forwardOpenPanel);
+  // Workspace a private conversation is being started in (its dialog is open).
+  const [privateWorkspaceId, setPrivateWorkspaceId] = useState<string | null>(null);
+  const privateAgents = useMemo(
+    () => (privateWorkspaceId ? session.privateConversationAgents(privateWorkspaceId) : undefined),
+    // Re-read when the agent catalogs change while the dialog is open.
+    [privateWorkspaceId, session.privateConversationAgents, session.v2Providers],
+  );
+  const openPrivateConversation = () => {
+    // Private conversations need a real workspace.
+    if (!session.activeWorkspaceId || isNoneWorkspaceId(session.activeWorkspaceId)) return;
+    setPrivateWorkspaceId(session.activeWorkspaceId);
+  };
   const { AppOverlays } = slots;
   slots.useSessionEffects(session);
   // The SSH view swaps the main content but keeps sidebar and Workbench; its
@@ -228,7 +241,9 @@ export function App() {
         session.activeWorkspace?.backendConnectionId || session.activeBackendConnectionId || session.settings.serverUrl,
         session.activeWorkspace?.id || '', session.activeConversation?.id || '',
       );
-  const layout = useWorkbenchLayout(scopeKey);
+  // A private conversation's own workbench (tabs, layout) stays in memory.
+  const workbenchEphemeral = !sshActive && session.workbenchSharing === 'conversation' && isPrivateConversation(session.activeConversation);
+  const layout = useWorkbenchLayout(scopeKey, workbenchEphemeral);
   const { isOpen: asideOpen, setOpen: setAsideOpenRaw, tab: workbenchTab, setTab: setWorkbenchTab,
     target: panelTarget, setTarget: setPanelTarget } = layout;
   // The aside is actually on screen; live views stop streaming otherwise.
@@ -426,6 +441,7 @@ export function App() {
       setEditingWorkspaceId(null);
       setCreateOpen(true);
     },
+    newPrivateConversation: openPrivateConversation,
   });
 
   useEffect(() => platform.theme.onUpdated(applyTheme), []);
@@ -470,7 +486,7 @@ export function App() {
             onBack={() => setPanel(workbenchTab)}
           />
         ) : (
-          <WorkbenchPanel key={scopeKey} scopeKey={scopeKey} shown={asideShown} session={session} tab={workbenchTab} target={panelTarget} onTabChange={changeWorkbenchTab} onTargetConsumed={consumePanelTarget} closeRequestRef={workbenchCloseRef}
+          <WorkbenchPanel key={scopeKey} scopeKey={scopeKey} ephemeral={workbenchEphemeral} shown={asideShown} session={session} tab={workbenchTab} target={panelTarget} onTabChange={changeWorkbenchTab} onTargetConsumed={consumePanelTarget} closeRequestRef={workbenchCloseRef}
             sshMode={sshActive} sshBackendId={sshActive ? sshBackendId : undefined} requests={workbenchRequests} onRequestsHandled={workbenchRequestsHandled} onItemsChange={sshActive ? setWorkbenchItems : undefined} />
         )}
       </PanelBoundary>
@@ -595,6 +611,7 @@ export function App() {
         session.createConversation(session.activeWorkspaceId);
         setPanel(null);
       }}
+      onCreatePrivateConversation={openPrivateConversation}
       onCreateScheduledConversation={async (workspaceId, at, options) => {
         const record = await session.createScheduledConversation(workspaceId, at, options);
         if (record) setPanel(null);
@@ -698,6 +715,17 @@ export function App() {
         <PanelBoundary><SettingsPanel session={session} historyRecoverySetup={historyRecoverySetup} repairPairing={repairPairing} sectionRequest={settingsSectionRequest} /></PanelBoundary>
       </Modal>
       <GitActionsModal key={session.activeConversation?.id} session={session} isOpen={gitOpen} onOpenChange={setGitOpen} />
+      <PrivateConversationDialog
+        isOpen={privateWorkspaceId !== null}
+        agents={privateAgents}
+        onConfirm={async (options) => {
+          if (!privateWorkspaceId) return false;
+          const record = await session.createPrivateConversation(privateWorkspaceId, options);
+          if (record) setPanel(null);
+          return Boolean(record);
+        }}
+        onClose={() => setPrivateWorkspaceId(null)}
+      />
       {createOpen ? <CreateWorkspaceModal
         key={editingWorkspaceId ?? 'create'}
         session={session}

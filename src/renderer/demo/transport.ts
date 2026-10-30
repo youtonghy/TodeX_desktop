@@ -21,7 +21,7 @@ type Journal = { manifest: ConversationManifest; events: ConversationEvent[] };
 
 // Mutable copies so prompts, renames and kanban edits persist for the tab.
 const journals = new Map<string, Journal>(
-  fixtures.demoJournals.map((journal) => [journal.manifest.id, { manifest: { ...journal.manifest }, events: [...journal.events] }]),
+  [...fixtures.demoJournals, fixtures.demoPrivateJournal].map((journal) => [journal.manifest.id, { manifest: { ...journal.manifest }, events: [...journal.events] }]),
 );
 let workspaces = [...fixtures.demoWorkspaces];
 let kanbanTasks = [...fixtures.demoKanbanTasks];
@@ -886,7 +886,9 @@ function route(request: SecureRequest): SecureResponse {
       case '/v2/kanban/tasks':
         return json({ tasks: kanbanTasks });
       case '/v2/history/storage': {
-        const conversations = [...journals.values()].map((journal) => ({ ...journal.manifest, bytes: demoConversationBytes(journal) }));
+        // Private conversations are not stored history.
+        const conversations = [...journals.values()].filter((journal) => !journal.manifest.ephemeral)
+          .map((journal) => ({ ...journal.manifest, bytes: demoConversationBytes(journal) }));
         return json({ totalBytes: conversations.reduce((sum, entry) => sum + entry.bytes, 0), count: conversations.length, measuredAt: now, conversations });
       }
       case '/v2/history/cleanup-policy':
@@ -1024,6 +1026,8 @@ function route(request: SecureRequest): SecureResponse {
         : typeof body.workspace === 'string' ? body.workspace : fixtures.demoWorkspaces[0].path,
       ...(body.scratchWorkspace === true ? { scratchWorkspace: true } : {}),
       ...(typeof body.workspaceId === 'string' ? { workspaceId: body.workspaceId } : {}),
+      // Private conversations: the daemon echoes the flag it honoured.
+      ...(body.ephemeral === true ? { ephemeral: true } : {}),
       title: typeof body.title === 'string' ? body.title : '新对话',
       status: 'idle',
       lastSequence: 0,

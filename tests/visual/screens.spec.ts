@@ -75,6 +75,16 @@ for (const theme of ['light', 'dark'] as Theme[]) {
       await expect(page).toHaveScreenshot(`goal-${theme}.png`, { mask: volatile(page) });
     });
 
+    test('private conversation', async ({ page, openDemo }) => {
+      await openDemo(theme);
+      await page.getByText('infra-scripts', { exact: true }).click();
+      await page.getByText('轮换部署密钥').first().click();
+      await expect(page.getByText(/^隐私对话：内容只保存在守护进程内存中/)).toBeVisible();
+      await expect(page.getByRole('img', { name: '隐私对话' })).toBeVisible();
+      await settle(page);
+      await expect(page).toHaveScreenshot(`private-conversation-${theme}.png`, { mask: volatile(page) });
+    });
+
     test('settings: general', async ({ page, openDemo }) => {
       await openDemo(theme);
       await page.getByRole('button', { name: '设置', exact: true }).click();
@@ -105,6 +115,15 @@ test('fork from an earlier reply', async ({ page, openDemo }) => {
   await expect(page.getByRole('dialog')).toBeVisible();
   await settle(page);
   await expect(page).toHaveScreenshot('fork-from-reply-light.png', { mask: volatile(page) });
+});
+
+test('new private conversation', async ({ page, openDemo }) => {
+  await openDemo('light');
+  await page.getByRole('button', { name: '新建隐私对话' }).click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await expect(page.getByRole('radio', { name: /Claude Code/ })).toBeChecked();
+  await settle(page);
+  await expect(page).toHaveScreenshot('new-private-conversation-light.png', { mask: volatile(page) });
 });
 
 test.describe('compact window', () => {

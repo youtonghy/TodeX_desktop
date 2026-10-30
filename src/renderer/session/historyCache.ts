@@ -95,7 +95,8 @@ const warn = (action: string, error: unknown) => console.warn(`[history-cache] $
 
 export class HistoryTailCache {
   private readonly buffers = new Map<string, Buffer>();
-  /** Conversations that delivered plaintext (legacy history): never cached. */
+  /** Conversations that delivered plaintext (legacy history) or are
+   * private (RAM-only): never cached. */
   private readonly plaintext = new Set<string>();
   private enabled = true;
   private loading: Promise<void> | null = null;
@@ -294,6 +295,17 @@ export class HistoryTailCache {
       warn('read', error);
       return null;
     }
+  }
+
+  /** A private conversation: nothing of it is ever stored, and anything
+   * captured before it was known to be private goes. */
+  exclude(backendId: string, conversationId: string): void {
+    if (!backendId || !conversationId) return;
+    const key = bufferKey(backendId, conversationId);
+    if (this.plaintext.has(key)) return;
+    this.plaintext.add(key);
+    this.dropBuffer(key);
+    void this.forgetConversation(backendId, conversationId);
   }
 
   /** Drops a conversation's tail after it disagreed with the journal. */

@@ -200,6 +200,9 @@ export type ConversationRecord = {
   /** Scheduled conversation (manifest `schedule`): the backend holds what is
    * sent to it until `at`. */
   schedule?: ConversationSchedule;
+  /** Private conversation (manifest `ephemeral`): it lives only in its
+   * daemon's memory, so this client never persists anything of it. */
+  ephemeral?: boolean;
   sessionId: string;
   threadId: string;
   localAdapterState?: LocalAdapterState;
@@ -1951,6 +1954,7 @@ export function conversationFromManifest(
     archived: Boolean(manifest.archivedAt),
     ...(manifest.legacyPlaintext ? { legacyPlaintext: true } : {}),
     ...(parseConversationSchedule(manifest.schedule) ? { schedule: parseConversationSchedule(manifest.schedule) } : {}),
+    ...(manifest.ephemeral === true ? { ephemeral: true } : {}),
     sessionId: `v2_${manifest.id}`,
     threadId: '',
     localAdapterState: 'idle',
@@ -1965,6 +1969,11 @@ export function conversationFromManifest(
     createdAt,
     updatedAt,
   };
+}
+
+/** A private (RAM-only) conversation: only what its manifest echoed counts. */
+export function isPrivateConversation(conversation: Pick<ConversationRecord, 'ephemeral'> | null | undefined): boolean {
+  return conversation?.ephemeral === true;
 }
 
 /** Conversations the sidebar and pickers list: everything but Agent Calling children. */
@@ -2041,7 +2050,9 @@ export function mergeManifestConversations(
       const archived = Boolean(manifest.archivedAt);
       const legacyPlaintext = manifest.legacyPlaintext === true;
       const schedule = parseConversationSchedule(manifest.schedule);
+      const ephemeral = manifest.ephemeral === true;
       const same = existing.title === title
+        && isPrivateConversation(existing) === ephemeral
         && sameConversationSchedule(existing.schedule, schedule)
         && existing.archived === archived
         && Boolean(existing.legacyPlaintext) === legacyPlaintext
@@ -2060,6 +2071,7 @@ export function mergeManifestConversations(
           title,
           archived,
           legacyPlaintext: legacyPlaintext || undefined,
+          ephemeral: ephemeral || undefined,
           schedule,
           nativeStatus: manifest.status,
           provider: manifest.provider,

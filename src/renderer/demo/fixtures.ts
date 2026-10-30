@@ -113,8 +113,8 @@ function provider(id: ProviderKind, displayName: string, available: boolean, una
 }
 
 export const demoProviders: ProviderDescriptor[] = [
-  provider('claude-code', 'Claude Code', true, undefined, { controlActions: ['cancel', 'interrupt', 'fork'] }),
-  provider('codex', 'Codex CLI', true, undefined, { controlActions: ['cancel', 'interrupt', 'retry', 'fork', 'forkAt', 'compact', 'goal'] }),
+  provider('claude-code', 'Claude Code', true, undefined, { controlActions: ['cancel', 'interrupt', 'fork'], privateConversations: 'native' }),
+  provider('codex', 'Codex CLI', true, undefined, { controlActions: ['cancel', 'interrupt', 'retry', 'fork', 'forkAt', 'compact', 'goal'], privateConversations: 'scrubbed' }),
   provider('pi', 'Pi', true),
   provider('opencode', 'OpenCode', false, 'opencode is not installed'),
   provider('antigravity', 'Antigravity', false, "executable 'agy' was not found"),
@@ -311,6 +311,18 @@ export const demoJournals: Journal[] = [
     j.event('goal.updated', { provider: 'codex', goal: { objective: '让所有组件通过 WCAG AA 对比度检查', status: 'active', tokensUsed: 184_000, timeUsedSeconds: 1_260, tokenBudget: null } });
   }),
 ];
+
+function privateJournal(source: Journal): Journal {
+  return { ...source, manifest: { ...source.manifest, ephemeral: true } };
+}
+
+// A private (RAM-only) conversation: its manifest echoes `ephemeral`. Only
+// the in-memory backend lists it; it is never seeded into local storage.
+export const demoPrivateJournal: Journal = privateJournal(journal('c4d5e6f7-a8b9-4c0d-9e1f-2a3b4c5d6e7f', infra, 'claude-code', '轮换部署密钥', NOW - 40 * MINUTE, (j) => {
+  j.user('帮我检查 rotate-keys.sh 在轮换部署密钥时有没有把旧密钥留在日志里。')
+    .tool('Read', { file_path: 'scripts/rotate-keys.sh' }, '#!/usr/bin/env bash\nset -euo pipefail\n# 生成新密钥并更新 secret store……')
+    .answer('脚本在 `set -x` 打开时会把旧密钥打印到 CI 日志。已改为只在调试块里临时开启 `set -x`，并在轮换前后用 `***` 遮盖密钥变量。', { model: 'sonnet', input: 14_000, output: 1_200, cacheRead: 0, cacheWrite: 0 });
+}));
 
 export const demoActiveConversationId = demoJournals[0].manifest.id;
 

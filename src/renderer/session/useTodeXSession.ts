@@ -8,7 +8,7 @@ import {
   shouldNotifyCompletion,
   useCompletionNotifications,
 } from './completionNotifications';
-import { addNotification } from './notificationFeed';
+import { addNotification, forgetConversationNotifications } from './notificationFeed';
 import { bindSentAttachmentEvents, prepareSentAttachments, pruneSentAttachmentRecords, type SentAttachmentRecord } from './sentAttachments';
 import { ManifestEpochs, flagWorkspaceMissing, mergeWorkspaceDirectory } from './workspaceDirectorySync';
 import { createConversationStores, sameRecordValues, visibleTimeline, type ConversationStores } from './conversationStore';
@@ -201,6 +201,7 @@ import {
   conversationFromManifest,
   mergeManifestConversations,
   isReadOnlyConversation,
+  isPrivateConversation,
   isV2Conversation,
   activeConversationSchedule,
   hasBackendQueue,
@@ -233,6 +234,7 @@ import {
   scheduleMessageTask,
   cancelMessageTask,
 } from './helpers';
+import { persistableConversations, privateConversationIds, providerPrivateMode, vanishedPrivateConversations, withoutPrivateEntries } from './privateConversations';
 
 const SENT_ATTACHMENTS_STORAGE_KEY = `${TIMELINE_STORAGE_KEY}.attachments`;
 
@@ -511,6 +513,11 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     if (!profile) throw new Error(t('sidebar.backendRemoved'));
     return backendApi(profile, { historyEncryption: true });
   }, []);
+  /** Whether a backend conversation id belongs to a private conversation,
+   * which the on-device history cache never stores. */
+  function isPrivateBackendConversation(v2ConversationId: string): boolean {
+    return stores.conversations.get().some((item) => item.v2ConversationId === v2ConversationId && isPrivateConversation(item));
+  }
   /** Backend profile owning a conversation (the no-workspace backend for an
    * untagged None-workspace draft). */
   function backendIdForConversation(conversationId: string): string {
@@ -551,7 +558,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const decryptedHistoryReplay = useCallback(async <P extends ConversationReplay>(conversationId: string, page: Promise<P>, detail: 'summary' | 'full', capture?: 'start' | 'extend'): Promise<P> => {
     const history = historyEncryptionRef.current;
     const result = await page;
-    if (capture && detail === 'summary') {
+    if (capture && detail === 'summary' && !isPrivateBackendConversation(conversationId)) {
       historyTailCache?.capture(backendIdForConversation(conversationId), conversationId, result.events, result.frames, { start: capture === 'start' });
     }
     return history ? history.decryptPage(backendIdForConversation(conversationId), conversationId, result, detail) : result;
@@ -693,7 +700,11 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
    * conversations it no longer has goes. */
   const retainCachedHistory = (backendId: string, manifests: readonly ConversationManifest[]) => {
     void historyTailCache?.retainConversations(backendId, new Set(manifests.map((manifest) => manifest.id)));
+    // The same complete list tells which private conversations died with a
+    // daemon restart (set once forgetDeletedConversations exists below).
+    forgetVanishedPrivateRef.current(backendId, manifests);
   };
+  const forgetVanishedPrivateRef = useRef<(backendId: string, manifests: readonly ConversationManifest[]) => void>(() => undefined);
   const [capabilityCatalogs, setCapabilityCatalogs] = useState<Partial<Record<ProviderKind, CatalogState>>>({});
   const [providerModelsByBackend, setProviderModelsByBackend] = useState<Record<string, ProviderModelCatalog>>({});
   const [providerModelPreferences, setProviderModelPreferences] = useState<ProviderModelPreferences>({});
@@ -873,6 +884,16 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const manifestEpochsRef = useRef(new ManifestEpochs());
   const manifestEpoch = (backendId: string) => manifestEpochsRef.current.current(backendId);
   const bumpManifestEpoch = (backendId: string) => manifestEpochsRef.current.bump(backendId);
+
+  // Private conversations listed by a backend (created here or elsewhere)
+  // are excluded from the on-device history cache before anything of them
+  // could be flushed.
+  useEffect(() => {
+    if (!historyTailCache) return;
+    for (const item of conversations) {
+      if (isPrivateConversation(item) && item.v2ConversationId) historyTailCache.exclude(backendIdForConversation(item.id), item.v2ConversationId);
+    }
+  }, [conversations]);
 
   // Every backend's agents and conversation list, refreshed over HTTP.
   useEffect(() => {
@@ -1227,7 +1248,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     const pruned = pruneSentAttachmentRecords(next);
     sentAttachmentRecordsRef.current = pruned;
     setSentAttachmentRecords(pruned);
-    scheduleJsonSave(SENT_ATTACHMENTS_STORAGE_KEY, pruned);
+    // Receipts of private conversations hold prompt text and previews: memory only.
+    scheduleJsonSave(SENT_ATTACHMENTS_STORAGE_KEY, withoutPrivateEntries(pruned, privateConversationIds(stores.conversations.get())));
   }, [scheduleJsonSave]);
 
   useEffect(() => {
@@ -1727,7 +1749,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     if (!hydrated) {
       return;
     }
-    scheduleJsonSave(CONVERSATIONS_STORAGE_KEY, conversations);
+    // Private conversations (and their drafts) live in memory only.
+    scheduleJsonSave(CONVERSATIONS_STORAGE_KEY, persistableConversations(conversations));
   }, [conversations, hydrated, scheduleJsonSave]);
 
   // v2 history lives in the backend journal and pages in lazily, so only
@@ -1738,7 +1761,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       return;
     }
     const persist = () => {
-      const v2ConversationIds = new Set(stores.conversations.get().filter(isV2Conversation).map((item) => item.id));
+      const v2ConversationIds = new Set(stores.conversations.get().filter((item) => isV2Conversation(item) || isPrivateConversation(item)).map((item) => item.id));
       const local = stores.timeline.get()
         .filter((entry) => !entry.conversationId || !v2ConversationIds.has(entry.conversationId))
         .slice(0, MAX_TIMELINE_ITEMS);
@@ -1755,8 +1778,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     if (!hydrated) {
       return;
     }
-    scheduleJsonSave(USAGE_RECORDS_STORAGE_KEY, usageRecords.slice(0, MAX_USAGE_RECORDS));
-  }, [hydrated, scheduleJsonSave, usageRecords]);
+    scheduleJsonSave(USAGE_RECORDS_STORAGE_KEY, withoutPrivateEntries(usageRecords, privateConversationIds(stores.conversations.get())).slice(0, MAX_USAGE_RECORDS));
+  }, [conversations, hydrated, scheduleJsonSave, usageRecords]);
 
   useEffect(() => {
     if (!hydrated) {
@@ -1776,12 +1799,14 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     if (!hydrated) {
       return;
     }
+    // A private conversation is never named on disk; its workspace is.
+    const active = stores.conversations.get().find((item) => item.id === activeConversationId);
     void saveJson(ACTIVE_SELECTION_STORAGE_KEY, {
       workspaceId: activeWorkspaceId,
-      conversationId: activeConversationId,
+      conversationId: isPrivateConversation(active) ? '' : activeConversationId,
       noneBackendId: noWorkspaceBackendId,
     });
-  }, [activeConversationId, activeWorkspaceId, hydrated, noWorkspaceBackendId]);
+  }, [activeConversationId, activeWorkspaceId, hydrated, noWorkspaceBackendId, stores]);
 
   const activeWorkspace = useMemo(() => {
     const workspace = workspaces.find((item) => item.id === activeWorkspaceId) ?? null;
@@ -3001,7 +3026,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           }
         };
         const history = historyEncryptionRef.current;
-        if (rawConversationId) historyTailCache?.capture(backendId, rawConversationId, [raw], parsed.frames);
+        if (rawConversationId && !isPrivateBackendConversation(rawConversationId)) historyTailCache?.capture(backendId, rawConversationId, [raw], parsed.frames);
         if (!history || !rawConversationId) deliver(raw);
         else history.receiveSocketEvent(backendId, rawConversationId, raw, parsed.frames, parsed.delivery === 'replay' ? 'summary' : 'full', deliver, setLastError);
         return;
@@ -4503,13 +4528,17 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const recordCompletion = (localId: string, state: { timeline: TimelineEntry[] }) => {
     const conversation = stores.conversations.get().find((item) => item.id === localId);
     const workspace = stores.workspaces.get().find((item) => item.id === conversation?.workspaceId);
+    // A private conversation is announced without its title or reply, and
+    // the entry is never stored.
+    const hidden = isPrivateConversation(conversation);
     addNotification({
       kind: 'conversation',
       status: 'success',
-      title: conversation?.title?.trim() || workspace?.name?.trim() || 'TodeX',
-      description: completionNotificationBody(state.timeline),
+      title: hidden ? t('private.notifyReply') : conversation?.title?.trim() || workspace?.name?.trim() || 'TodeX',
+      description: hidden ? '' : completionNotificationBody(state.timeline),
       workspaceId: conversation?.workspaceId,
       conversationId: localId,
+      ...(hidden ? { ephemeral: true } : {}),
     });
   };
 
@@ -4528,9 +4557,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     const conversation = stores.conversations.get().find((item) => item.id === localId);
     const workspace = stores.workspaces.get().find((item) => item.id === conversation?.workspaceId);
     recordCompletion(localId, state);
+    const hidden = isPrivateConversation(conversation);
     postCompletionNotification({
-      title: conversation?.title?.trim() || workspace?.name?.trim() || 'TodeX',
-      body: completionNotificationBody(state.timeline),
+      title: hidden ? t('private.notifyReply') : conversation?.title?.trim() || workspace?.name?.trim() || 'TodeX',
+      body: hidden ? '' : completionNotificationBody(state.timeline),
       tag: `turn-completed-${state.conversationId}-${turnId}`,
       onActivate: () => { if (conversation) selectConversation(conversation.workspaceId, localId); },
     });
@@ -4555,8 +4585,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       if (viewingConversation) continue;
       const conversation = stores.conversations.get().find((item) => item.id === localId);
       const workspace = stores.workspaces.get().find((item) => item.id === conversation?.workspaceId);
-      const title = conversation?.title?.trim() || workspace?.name?.trim() || 'TodeX';
-      const body = permissionNotificationBody(request);
+      // A private conversation's request is announced without what it asks.
+      const hidden = isPrivateConversation(conversation);
+      const title = hidden ? t('private.notifyPermission') : conversation?.title?.trim() || workspace?.name?.trim() || 'TodeX';
+      const body = hidden ? '' : permissionNotificationBody(request);
       addNotification({
         kind: 'conversation',
         status: 'information',
@@ -4564,6 +4596,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         description: body,
         workspaceId: conversation?.workspaceId,
         conversationId: localId,
+        ...(hidden ? { ephemeral: true } : {}),
       });
       if (!shouldNotifyCompletion({
         enabled: completionNotificationsState.completionNotifications,
@@ -4893,6 +4926,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   // represent history that has not been loaded yet.
   const isUnusedConversation = useCallback((conversation: ConversationRecord) => (
     !conversation.archived
+    && !isPrivateConversation(conversation)
     && !conversation.v2ConversationId
     && !conversation.preview?.trim()
     && !turnIdsRef.current[conversation.id]
@@ -4922,8 +4956,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const createConversation = useCallback((
     workspaceId: string,
     // `fresh` never recycles an unused draft: a kanban task owns each
-    // conversation it starts, so two starts must not share one.
-    options?: { provider?: ProviderKind; providerProfile?: string; title?: string; backendConnectionId?: string; fresh?: boolean },
+    // conversation it starts, so two starts must not share one. `ephemeral`
+    // marks the placeholder of a private conversation (always fresh, never
+    // persisted, never reused by a normal "new conversation").
+    options?: { provider?: ProviderKind; providerProfile?: string; title?: string; backendConnectionId?: string; fresh?: boolean; ephemeral?: boolean },
   ) => {
     const workspace = stores.workspaces.get().find((item) => item.id === workspaceId);
     if (!workspace) {
@@ -4959,7 +4995,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       providerModelPreferencesRef.current[providerModelPreferenceKey(backendConnectionId, agent.provider)],
       providers.find((item) => item.id === agent.provider)?.capabilities.permissionConfig,
     );
-    const existing = options?.fresh ? undefined : stores.conversations.get().find((item) =>
+    const existing = options?.fresh || options?.ephemeral ? undefined : stores.conversations.get().find((item) =>
       item.workspaceId === workspaceId
       && item.backendConnectionId === backendConnectionId
       && isUnusedConversation(item));
@@ -4983,6 +5019,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       backendConnectionId,
       model: rememberedSelection.model || undefined,
       reasoningEffort: rememberedSelection.reasoningEffort,
+      ...(options?.ephemeral ? { ephemeral: true } : {}),
       createdAt: now,
       updatedAt: now,
     };
@@ -5214,6 +5251,11 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     }
     const { workspace, conversation } = context;
     if (refuseReadOnlyWrite(conversation)) return null;
+    // The backend refuses to fork private conversations.
+    if (isPrivateConversation(conversation)) {
+      setLastError(t('private.forkRefused'));
+      return null;
+    }
     if (conversation.v2ConversationId) {
       const provider = providersForConversation(conversation).find((item) => item.id === conversation.provider);
       if (!provider?.capabilities.controlActions?.includes('fork')) {
@@ -5403,6 +5445,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       const title = conversation.title.trim();
       const isDefaultTitle = isDefaultConversationTitle(title);
       const firstMessageTitle = firstMessageText.trim().slice(0, 18);
+      // A private conversation needs a real workspace and an agent that can
+      // hold one.
+      const ephemeral = isPrivateConversation(conversation);
+      if (ephemeral && (isNoneWorkspaceId(workspace.id) || !providerPrivateMode(provider))) {
+        desktopAlert(t('alert.createConversationFailed'), t(isNoneWorkspaceId(workspace.id) ? 'private.needsWorkspace' : 'private.agentUnsupported'));
+        return null;
+      }
 
       try {
         const api = backendApi(backendProfile ?? settings);
@@ -5415,8 +5464,18 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           providerProfile: conversation.providerProfile && provider.profiles.includes(conversation.providerProfile)
             ? conversation.providerProfile
             : provider.profiles[0],
+          ...(ephemeral ? { ephemeral: true } : {}),
         });
         if (backendConnectionId) bumpManifestEpoch(backendConnectionId);
+        if (ephemeral && created.ephemeral !== true) {
+          // An older daemon ignored `ephemeral` and journaled the conversation
+          // on disk: delete it right away so nothing of it survives.
+          await api.deleteConversation(created.id).catch((error: unknown) => {
+            console.error('Failed to delete the non-private conversation', error);
+          });
+          throw new Error(t('private.backendUnsupported'));
+        }
+        if (ephemeral && backendConnectionId) historyTailCache?.exclude(backendConnectionId, created.id);
         const latestConversation = stores.conversations.get().find((item) => item.id === conversationId)
           ?? conversation;
         // The backend seals the title; keep the one asked for (or the local
@@ -5871,6 +5930,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     const conversation = stores.conversations.get().find((item) => item.id === conversationId);
     const v2Id = conversation?.v2ConversationId;
     if (!conversation || !v2Id) return false;
+    if (isPrivateConversation(conversation)) {
+      setLastError(t('private.scheduleRefused'));
+      return false;
+    }
     try {
       const result = await sendProtocolCommand({ id: createRequestId('schedule'), ...conversationScheduleFrame(v2Id, at) });
       if (result.queue !== undefined) conversationRecoveryRef.current?.adoptFollowUpQueue(v2Id, parseFollowUpQueue(result.queue));
@@ -5916,6 +5979,54 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     if (!await scheduleConversation(record.id, at)) return null;
     return stores.conversations.get().find((item) => item.id === record.id) ?? record;
   }, [createConversation, materializeV2Conversation, scheduleConversation, setLastError]);
+
+  /** Creates a private (RAM-only) conversation on the workspace's backend
+   * right away, so its id exists before attachments upload into its private
+   * folder. The placeholder never persists and is dropped when the backend
+   * refuses or cannot keep the conversation private. */
+  const createPrivateConversation = useCallback(async (
+    workspaceId: string,
+    options?: { provider?: ProviderKind },
+  ): Promise<ConversationRecord | null> => {
+    if (isNoneWorkspaceId(workspaceId)) {
+      setLastError(t('private.needsWorkspace'));
+      return null;
+    }
+    const created = createConversation(workspaceId, {
+      fresh: true,
+      ephemeral: true,
+      ...(options?.provider ? { provider: options.provider } : {}),
+    });
+    if (!created) return null;
+    const record = await materializeV2Conversation(created.id, '');
+    if (record?.v2ConversationId && isPrivateConversation(record)) return record;
+    setConversations((current) => current.filter((item) => item.id !== created.id));
+    if (activeConversationRef.current === created.id) {
+      const fallback = stores.conversations.get().find((item) => item.workspaceId === workspaceId && item.archived !== true && item.id !== created.id);
+      setActiveConversationId(fallback?.id ?? '');
+    }
+    pruneConversationState([created.id], { drafts: true });
+    return null;
+  }, [createConversation, materializeV2Conversation, pruneConversationState, setLastError]);
+
+  /** Agents of the workspace's backend for a private conversation: every
+   * available one, those that cannot hold one marked unsupported, and the
+   * default pick among the supported. */
+  const privateConversationAgents = useCallback((workspaceId: string): { providers: Array<ProviderDescriptor & { privateMode: 'native' | 'scrubbed' | null }>; defaultProvider?: ProviderKind } => {
+    const workspace = stores.workspaces.get().find((item) => item.id === workspaceId);
+    const backendConnectionId = workspace?.backendConnectionId ?? null;
+    const providers = (backendConnectionId ? v2ProvidersByBackendRef.current[backendConnectionId] : undefined) ?? v2ProvidersRef.current;
+    const listed = providers.filter((item) => item.available).map((item) => ({ ...item, privateMode: providerPrivateMode(item) }));
+    const agent = resolveCreateConversationAgent({
+      providers,
+      conversations: stores.conversations.get(),
+      activeConversationId: activeConversationRef.current,
+      workspaceId,
+    });
+    const eligible = listed.filter((item) => item.privateMode);
+    const defaultProvider = eligible.some((item) => item.id === agent?.provider) ? agent?.provider : eligible[0]?.id;
+    return { providers: listed, defaultProvider };
+  }, []);
 
   /** Agents a scheduled conversation in the workspace can run on (available
    * and able to hold its queue until a set time), and the one a new
@@ -6097,6 +6208,40 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     setConversations((current) => current.filter((item) => !removedIds.has(item.id)));
     pruneConversationState([...removedIds], { drafts: true });
   }, [pruneConversationState, unsubscribeV2Conversation]);
+
+  // A private conversation its backend no longer lists died with a daemon
+  // restart: everything this client held of it goes (record, subscription,
+  // runtime, receipts, usage, notifications), and the user is told once.
+  forgetVanishedPrivateRef.current = (backendId, manifests) => {
+    const gone = vanishedPrivateConversations(stores.conversations.get(), manifests, stores.workspaces.get(), backendId)
+      .filter((item) => backendIdForConversation(item.id) === backendId);
+    if (!gone.length) return;
+    const ids = privateConversationIds(gone);
+    const localIds = gone.map((item) => item.id);
+    conversationEventBatcherRef.current?.flush();
+    for (const item of gone) conversationRecoveryRef.current?.release(item.v2ConversationId!);
+    forgetDeletedConversations(gone.map((item) => item.v2ConversationId!), backendId);
+    const without = <T,>(current: Record<string, T>) => {
+      if (!localIds.some((id) => id in current)) return current;
+      const next = { ...current };
+      for (const id of localIds) delete next[id];
+      return next;
+    };
+    for (const id of localIds) projectedRuntimeListsRef.current.delete(id);
+    setConversationRuntimeById(without);
+    setRecoveringConversations(without);
+    setOpenStatusByConversation(without);
+    setEarlierHistory(without);
+    setTurnIds(without);
+    setThinkingConversations(without);
+    setTimeline((current) => current.some((entry) => entry.conversationId && ids.has(entry.conversationId))
+      ? current.filter((entry) => !entry.conversationId || !ids.has(entry.conversationId)) : current);
+    updateSentAttachmentRecords(withoutPrivateEntries(sentAttachmentRecordsRef.current, ids));
+    setUsageRecords((current) => withoutPrivateEntries(current, ids));
+    recentConversationIdsRef.current = recentConversationIdsRef.current.filter((id) => !ids.has(id));
+    forgetConversationNotifications(ids);
+    toast.info(t('private.cleared'));
+  };
 
   /** Deletes backend conversations for good (unlike removeConversation,
    * which archives) and drops their local records right away. */
@@ -6317,6 +6462,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const exportConversationMarkdown = useCallback(async (conversationId: string, maxBytes?: number) => {
     const conversation = stores.conversations.get().find((item) => item.id === conversationId);
     if (!conversation) throw new Error(t('alert.noConversation'));
+    // A private conversation's content never leaves it.
+    if (isPrivateConversation(conversation)) throw new Error(t('private.exportRefused'));
     const v2Id = conversation.v2ConversationId;
     const transcript = v2Id
       ? await fetchConversationTranscriptTail((id, before, limit) => decryptedHistoryReplay(id, v2ApiForConversation(id).replayEventsBefore(id, before, limit, 'full'), 'full'),
@@ -6330,7 +6477,11 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const uploadComposerFile = useCallback(async (conversationId: string, name: string, blob: Blob) => {
     const profile = profileFor(backendIdForConversation(conversationId));
     if (!profile) throw new Error(t('sidebar.backendRemoved'));
-    return uploadPromptFile(backendApi(profile), name, blob);
+    // A private conversation's files go to its private folder, deleted with
+    // it; it was created on the backend when it was opened.
+    const conversation = stores.conversations.get().find((item) => item.id === conversationId);
+    if (isPrivateConversation(conversation) && !conversation?.v2ConversationId) throw new Error(t('private.notReady'));
+    return uploadPromptFile(backendApi(profile), name, blob, isPrivateConversation(conversation) ? conversation?.v2ConversationId : undefined);
   }, []);
 
   /** Sets, pauses, resumes or clears the goal an agent pursues on its own
@@ -6392,6 +6543,11 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       }
       if (lower === 'memory' || lower === 'memories') {
         openSlashCommandActionPage(workspace, conversation, '/memory');
+        return;
+      }
+      // The backend refuses compaction of private conversations.
+      if (lower === 'compact' && conversation.provider !== 'pi' && isPrivateConversation(conversation)) {
+        setLastError(t('private.compactRefused'));
         return;
       }
       if (lower === 'compact' || lower === 'retry' || lower === 'resume') {
@@ -6700,7 +6856,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     }
     const mentionReferences = parseMentionReferences(text);
     if (mentionReferences.length > 0) {
-      rememberMentionReferences(workspace.id, mentionReferences);
+      // Files named in a private conversation are not remembered.
+      if (!isPrivateConversation(conversation)) rememberMentionReferences(workspace.id, mentionReferences);
       const mentionSummary = summarizeMentionReferences(mentionReferences);
       if (mentionSummary) {
         appendTimeline(makeSystemEntry(t('sess.filesReferenced'), mentionSummary, workspace.id, conversationId));
@@ -6859,6 +7016,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     sendScheduledNow,
     createScheduledConversation,
     scheduledConversationAgents,
+    createPrivateConversation,
+    privateConversationAgents,
     controlConversation,
     controlStatusByConversation,
     composerAttachments,

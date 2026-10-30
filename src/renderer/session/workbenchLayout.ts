@@ -16,7 +16,7 @@ export function sshWorkbenchScopeKey(backendId: string): string {
 export type WorkbenchLayout = { hydrated: boolean; isOpen: boolean; tab: WorkbenchTab; target: OpenPanelOptions };
 type SavedLayout = Omit<WorkbenchLayout, 'hydrated'>;
 type Storage = { load: (key: string) => Promise<unknown>; save: (key: string, value: SavedLayout) => Promise<void> };
-type Entry = { state: WorkbenchLayout; dirty: Set<keyof SavedLayout>; hydration?: Promise<void>; writes: Promise<void> };
+type Entry = { state: WorkbenchLayout; dirty: Set<keyof SavedLayout>; hydration?: Promise<void>; writes: Promise<void>; ephemeral?: boolean };
 const defaults = (): WorkbenchLayout => ({ hydrated: false, isOpen: false, tab: 'terminal', target: {} });
 export const workbenchLayoutStorageKey = (scopeKey: string) => `${SETTINGS_STORAGE_KEY}.workbenchLayout.v1:${scopeKey}`;
 
@@ -63,8 +63,16 @@ export class WorkbenchLayoutStore {
     return entry;
   }
   snapshot = (scope: string): WorkbenchLayout => this.entry(scope).state;
+  /** A private conversation's scope: its layout is never loaded or saved. */
+  markEphemeral(scope: string): void {
+    const entry = this.entry(scope);
+    if (!scope || entry.ephemeral) return;
+    entry.ephemeral = true;
+    entry.dirty.clear();
+    if (!entry.state.hydrated) entry.state = { ...entry.state, hydrated: true };
+  }
   private save(scope: string, entry: Entry) {
-    if (!scope) return;
+    if (!scope || entry.ephemeral) return;
     const value = normalizeWorkbenchLayout(entry.state);
     entry.writes = entry.writes.then(() => this.storage.save(workbenchLayoutStorageKey(scope), value)).catch(() => {
       // Keep the current layout usable if storage is temporarily unavailable.

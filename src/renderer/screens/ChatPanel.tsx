@@ -23,6 +23,7 @@ import {
   RiShieldCheckLine,
   RiShieldLine,
   RiSpeedUpLine,
+  RiSpyLine,
   RiStopFill,
   RiTimerLine,
 } from '@remixicon/react';
@@ -78,6 +79,7 @@ import {
   isImageMimeType,
   isStepProgressEntry,
   isReadOnlyConversation,
+  isPrivateConversation,
   isV2Conversation,
   liveComposerAttachments,
   MAX_COMPOSER_ATTACHMENTS,
@@ -612,7 +614,8 @@ function AgentMessageActions({
       >
         <CopyGlyph copied={copied} />
       </FeedbackButton>
-      {readOnly ? null : (
+      {/* Private conversations cannot be forked (the backend refuses). */}
+      {readOnly || isPrivateConversation(conversation) ? null : (
         <FeedbackButton
           icon={RiGitBranchLine}
           label={latest ? t('chat.forkConversation') : t('chat.forkThrough')}
@@ -1330,12 +1333,15 @@ export function ChatPanel({ session }: Props) {
       category: 'context' as const,
     }))
     : currentProvider === 'pi' ? [] : SLASH_COMMANDS;
-  const canCompact = session.v2Providers.find(item => item.id === currentProvider)?.capabilities.controlActions?.includes('compact') === true;
+  // The backend refuses to compact a private conversation.
+  const canCompact = session.v2Providers.find(item => item.id === currentProvider)?.capabilities.controlActions?.includes('compact') === true
+    && !isPrivateConversation(conversation);
   const slashCatalog = currentProvider === 'pi' ? [...providerSlashCatalog, ...piTodexCommands] : [
     ...(canCompact ? [{ command: '/compact', title: t('chat.compactTitle'), description: t('chat.compactDescription'), category: 'thread' as const }] : []),
     // The synthetic /compact item already covers the catalog entry when the
     // provider offers a native control action; otherwise keep the catalog's.
-    ...providerSlashCatalog.filter(item => !canCompact || canonicalSlashCommand(item.command) !== '/compact'),
+    // A private conversation offers no /compact at all.
+    ...providerSlashCatalog.filter(item => !(canCompact || isPrivateConversation(conversation)) || canonicalSlashCommand(item.command) !== '/compact'),
   ];
   const chooseSlashCommand = (command: string) => {
     if (command === '/compact' && currentProvider !== 'pi') {
@@ -1370,7 +1376,7 @@ export function ChatPanel({ session }: Props) {
     : referenceState.stage === 'type'
       ? [...buildReferenceTypeSuggestions(referenceState.prefix, (type) => t(REFERENCE_TYPE_KEYS[type])), ...entryRows]
       : referenceType === 'chat'
-        ? buildChatReferenceSuggestions(referenceQuery, session.conversations.filter(isListedConversation), conversation.workspaceId, conversation.id, t('chat.newConversation'))
+        ? buildChatReferenceSuggestions(referenceQuery, session.conversations.filter((item) => isListedConversation(item) && !isPrivateConversation(item)), conversation.workspaceId, conversation.id, t('chat.newConversation'))
         : referenceType === 'skill' || referenceType === 'mcp'
           ? buildCapabilityReferenceSuggestions(
             buildCapabilitySuggestions(session.capabilityCatalogs, capabilityProviderOrder, referenceQuery, { limit: 100, isSkillAttached }),
@@ -2068,6 +2074,9 @@ export function ChatPanel({ session }: Props) {
               goal={runtime.goal}
               onChange={(action) => session.sendConversationGoal(conversation.id, action)}
             />
+          ) : null}
+          {isPrivateConversation(conversation) ? (
+            <Alert className="mb-2" status="neutral" icon={RiSpyLine} description={t('private.notice')} />
           ) : null}
           {conversation.schedule ? (
             <ConversationScheduleBar

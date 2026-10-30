@@ -14,6 +14,7 @@ import {
 } from './CleanupParts';
 import { useT } from '../../i18n';
 import { backendApi } from '../../session/helpers';
+import { privateConversationIds } from '../../session/privateConversations';
 import { usePanelBackend, type PanelBackend } from '../../session/panelBackend';
 import type { TodeXSession } from '../../session/useTodeXSession';
 
@@ -44,7 +45,7 @@ function TodexHistoryTab({ session, backend }: { session: TodeXSession; backend:
   const [loading, setLoading] = useState(true);
   const [policy, setPolicy] = useState<HistoryCleanupPolicyResponse>();
   const generation = useRef(0);
-  const { getHistoryStorage, purgeConversations, forgetDeletedConversations } = session;
+  const { getHistoryStorage, purgeConversations, forgetDeletedConversations, stores } = session;
   const { backendId, settings } = backend;
   const api = useCallback(() => backendApi(settings), [settings.deviceSecret, settings.encryptionProtocol, settings.encryptionPublicKey, settings.transportVerified, settings.serverUrl]);
 
@@ -54,7 +55,9 @@ function TodexHistoryTab({ session, backend }: { session: TodeXSession; backend:
     try {
       const [storage, nextPolicy] = await Promise.all([getHistoryStorage(backendId), api().getHistoryCleanupPolicy()]);
       if (current !== generation.current) return;
-      setEntries(storage.conversations);
+      // Private conversations are not history: they are never listed here.
+      const privateIds = privateConversationIds(stores.conversations.get());
+      setEntries(storage.conversations.filter((entry) => entry.ephemeral !== true && !privateIds.has(entry.id)));
       setTotalBytes(storage.totalBytes);
       setMeasuredAt(storage.measuredAt);
       setPolicy(nextPolicy);
@@ -63,7 +66,7 @@ function TodexHistoryTab({ session, backend }: { session: TodeXSession; backend:
     } finally {
       if (current === generation.current) setLoading(false);
     }
-  }, [api, backendId, getHistoryStorage]);
+  }, [api, backendId, getHistoryStorage, stores]);
 
   useEffect(() => {
     setEntries([]);

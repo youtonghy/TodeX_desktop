@@ -1,4 +1,4 @@
-import { RiPushpin2Fill, RiLockLine, RiAddLine, RiArrowRightSLine, RiCheckLine, RiFolderReduceLine, RiFoldersLine, RiFolderTransferLine, RiPencilLine, RiEdit2Line, RiErrorWarningLine, RiFolder3Line, RiFolderOpenLine, RiGitBranchLine, RiDeleteBinLine, RiArrowDownSLine, RiBookOpenLine, RiKanbanView2, RiMoreLine, RiPaletteLine, RiPriceTag3Line, RiSettings3Line, RiTerminalLine, RiTimeLine, RiTimerLine } from '@remixicon/react';
+import { RiPushpin2Fill, RiLockLine, RiSpyLine, RiAddLine, RiArrowRightSLine, RiCheckLine, RiFolderReduceLine, RiFoldersLine, RiFolderTransferLine, RiPencilLine, RiEdit2Line, RiErrorWarningLine, RiFolder3Line, RiFolderOpenLine, RiGitBranchLine, RiDeleteBinLine, RiArrowDownSLine, RiBookOpenLine, RiKanbanView2, RiMoreLine, RiPaletteLine, RiPriceTag3Line, RiSettings3Line, RiTerminalLine, RiTimeLine, RiTimerLine } from '@remixicon/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { MouseEvent, ReactNode } from 'react';
 import {
@@ -58,7 +58,7 @@ import { AppIcon } from './AppIcon';
 import { WORKSPACE_ICON_CHOICES, WORKSPACE_RING_STYLES, WorkspaceStatusRing, ringStyleKey, workspaceIconComponent } from './WorkspaceIcon';
 import type { TodeXSession } from '../session/useTodeXSession';
 import type { ProviderKind } from '@todex/protocol/v2';
-import { connectionStateLabel, conversationDisplayTitle, isReadOnlyConversation, formatResetInstant, getConversationStatus, healthLabelOf, isConversationHighlighted, isListedConversation, isNoneWorkspaceId, NONE_WORKSPACE_ID, noneWorkspaceRowBackendId, noneWorkspaceRowId, workspaceDisplayName, type TimelineEntry } from '../session/helpers';
+import { connectionStateLabel, conversationDisplayTitle, isReadOnlyConversation, isPrivateConversation, formatResetInstant, getConversationStatus, healthLabelOf, isConversationHighlighted, isListedConversation, isNoneWorkspaceId, NONE_WORKSPACE_ID, noneWorkspaceRowBackendId, noneWorkspaceRowId, workspaceDisplayName, type TimelineEntry } from '../session/helpers';
 import { ownerBackendId } from '../session/backendRouting';
 import { ShortcutHint, shortcutKeys, useAppShortcuts, type ShortcutId } from '../lib/shortcuts';
 import { useT } from '../i18n';
@@ -80,6 +80,8 @@ type Props = {
   /** Creates a conversation in the workspace that sends at `at` (ISO), on
    * the picked agent (the default one when absent). */
   onCreateScheduledConversation: (workspaceId: string, at: string, options: { provider?: ProviderKind }) => Promise<boolean>;
+  /** Opens the private (RAM-only) conversation dialog for the active workspace. */
+  onCreatePrivateConversation: () => void;
   onOpenSettings: () => void;
   onOpenProfile: () => void;
   onOpenKanban: () => void;
@@ -399,6 +401,7 @@ export function AppSidebar({
   onEditWorkspace,
   onCreateConversation,
   onCreateScheduledConversation,
+  onCreatePrivateConversation,
   onOpenSettings,
   onOpenProfile,
   onOpenKanban,
@@ -567,6 +570,12 @@ export function AppSidebar({
     // Re-read when the agent catalogs change while the dialog is open.
     [schedulingWorkspaceId, session.scheduledConversationAgents, session.v2Providers],
   );
+  // Private conversations need a real workspace and an agent able to keep
+  // one; a backend without any is too old for them.
+  const privateUnavailable = !session.activeWorkspaceId ? t('private.pickWorkspace')
+    : isNoneWorkspaceId(session.activeWorkspaceId) ? t('private.needsWorkspace')
+      : !session.v2Providers.some((provider) => provider.available && provider.capabilities.privateConversations) ? t('private.backendUnsupportedHint')
+        : '';
   const canSchedule = features.scheduledConversations !== 'off' && session.v2Providers.some((provider) => provider.available && provider.capabilities.scheduledConversations === true);
   // The menu keeps rendering its last target while it animates out.
   const lastContextMenuRef = useRef<ContextMenu>(contextMenu);
@@ -962,6 +971,9 @@ export function AppSidebar({
   // Read-only history (legacy plaintext, retired local Codex): no rename or fork.
   const contextReadOnly = menu?.kind === 'conversation'
     && isReadOnlyConversation(session.conversations.find((item) => item.id === menu.id));
+  // Private conversations cannot be forked, and are never pinned (pins are stored).
+  const contextPrivate = menu?.kind === 'conversation'
+    && isPrivateConversation(session.conversations.find((item) => item.id === menu.id));
   const runContextAction = (action: 'rename' | 'edit' | 'tags' | 'fork' | 'pin' | 'delete' | 'schedule') => {
     if (!menu || menu.kind === 'group') return;
     if (action === 'schedule') {
@@ -1375,6 +1387,18 @@ export function AppSidebar({
       onClick: onCreateConversation,
       hint: <ShortcutHint id="newConversation" />,
     },
+    {
+      key: 'new-private-conversation',
+      label: t('private.create'),
+      icon: RiSpyLine,
+      disabled: Boolean(privateUnavailable),
+      disabledReason: privateUnavailable || undefined,
+      onClick: () => {
+        if (mobile) onCloseMobile?.();
+        onCreatePrivateConversation();
+      },
+      hint: <ShortcutHint id="newPrivateConversation" />,
+    },
   ];
   // Optional features: shown in the nav, folded under "More", or off.
   const featureItems: Array<DashboardNavItem & { feature: FeatureId }> = [
@@ -1781,6 +1805,16 @@ export function AppSidebar({
                           <span className={cx('flex min-w-0 flex-1 flex-col', rail && 'hidden')}>
                             <span className={cx('flex min-w-0 items-center gap-1 text-body-medium', isSelected ? 'text-text-primary' : tasksDone ? 'text-text-tertiary' : 'text-text-secondary')}>
                               {isReadOnlyConversation(conversation) ? <span className="inline-flex shrink-0 text-foreground-icon-tertiary" role="img" title={t('history.readOnlyBadge')} aria-label={t('history.readOnlyBadge')}><RiLockLine className="size-3" aria-hidden="true" /></span> : null}
+                              {isPrivateConversation(conversation) ? (
+                                <TooltipTrigger delay={300}>
+                                  <Focusable>
+                                    <span role="img" tabIndex={-1} aria-label={t('private.badge')} className={cx('inline-flex shrink-0 rounded-sm text-foreground-icon-tertiary', FOCUS_RING)}>
+                                      <RiSpyLine className="size-3.5" aria-hidden="true" />
+                                    </span>
+                                  </Focusable>
+                                  <Tooltip placement="top">{t('private.badge')}</Tooltip>
+                                </TooltipTrigger>
+                              ) : null}
                               <span className="truncate">{title}</span>
                               {pins.conversation.includes(conversation.id) ? <RiPushpin2Fill className="size-3 shrink-0 text-foreground-icon-tertiary" aria-label={t('sidebar.pinned')} /> : null}
                               {taskMeta ? (
@@ -1868,12 +1902,12 @@ export function AppSidebar({
           </Menu>
         ) : menu ? (
           <Menu aria-label={menu.kind === 'workspace' ? t('sidebar.workspaceMenu') : t('sidebar.conversationMenu')} autoFocus="first">
-            {menu.kind === 'conversation' && !contextReadOnly ? <MenuItem id="fork" icon={RiGitBranchLine} textValue="Fork" onAction={() => runContextAction('fork')}>Fork</MenuItem> : null}
+            {menu.kind === 'conversation' && !contextReadOnly && !contextPrivate ? <MenuItem id="fork" icon={RiGitBranchLine} textValue="Fork" onAction={() => runContextAction('fork')}>Fork</MenuItem> : null}
             {contextReadOnly || contextIsNone ? null : <MenuItem id="rename" icon={RiPencilLine} textValue={t('sidebar.rename')} onAction={() => runContextAction('rename')}>{t('sidebar.rename')}</MenuItem>}
             {menu.kind === 'workspace' && canSchedule ? <MenuItem id="schedule" icon={RiTimerLine} textValue={t('schedule.create')} onAction={() => runContextAction('schedule')}>{t('schedule.create')}</MenuItem> : null}
             {menu.kind === 'workspace' && !contextIsNone ? <MenuItem id="edit" icon={RiEdit2Line} textValue={t('sidebar.edit')} onAction={() => runContextAction('edit')}>{t('sidebar.edit')}</MenuItem> : null}
             {menu.kind === 'workspace' && !contextIsNone ? <MenuItem id="tags" icon={RiPriceTag3Line} textValue={t('sidebar.editTags')} onAction={() => runContextAction('tags')}>{t('sidebar.editTags')}</MenuItem> : null}
-            <MenuItem id="pin" icon={RiPushpin2Fill} textValue={pins[menu.kind].includes(menu.id) ? t('sidebar.unpin') : t('sidebar.pin')} onAction={() => runContextAction('pin')}>{pins[menu.kind].includes(menu.id) ? t('sidebar.unpin') : t('sidebar.pin')}</MenuItem>
+            {contextPrivate ? null : <MenuItem id="pin" icon={RiPushpin2Fill} textValue={pins[menu.kind].includes(menu.id) ? t('sidebar.unpin') : t('sidebar.pin')} onAction={() => runContextAction('pin')}>{pins[menu.kind].includes(menu.id) ? t('sidebar.unpin') : t('sidebar.pin')}</MenuItem>}
             {menu.kind === 'workspace' ? (
               <SubmenuTrigger>
                 <MenuItem id="workspace-icon" icon={RiPaletteLine} textValue={t('sidebar.workspaceIcon')} trailing={SUBMENU_CHEVRON}>{t('sidebar.workspaceIcon')}</MenuItem>

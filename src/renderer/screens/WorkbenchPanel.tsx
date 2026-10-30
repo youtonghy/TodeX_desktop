@@ -62,6 +62,8 @@ import type { ConversationRuntime } from '@todex/protocol/conversationRuntime';
 
 type Props = {
   scopeKey?: string;
+  /** A private conversation's scope: its tabs are never loaded or saved. */
+  ephemeral?: boolean;
   /** The panel is on screen (the aside is open); live views pause while it is not. */
   shown?: boolean;
   onTargetConsumed?: () => void;
@@ -185,7 +187,7 @@ function placeholderFiles(): Record<string, { title: string; language: string; b
   };
 }
 
-export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = session.activeConversation?.id || '', shown = true, onTargetConsumed, closeRequestRef, sshMode = false, sshBackendId: sshBackendProp, requests, onRequestsHandled, onItemsChange }: Props) {
+export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = session.activeConversation?.id || '', ephemeral = false, shown = true, onTargetConsumed, closeRequestRef, sshMode = false, sshBackendId: sshBackendProp, requests, onRequestsHandled, onItemsChange }: Props) {
   const t = useT();
   const { BrowserPane } = slots;
   // What the tabs show of each conversation's runtime (SSH runs, browser
@@ -208,6 +210,10 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
 
   useEffect(() => {
     let cancelled = false;
+    if (ephemeral) {
+      setRestored(true);
+      return () => { cancelled = true; };
+    }
     void platform.store.get(storageKey)
       .then((value) => {
         if (cancelled) return;
@@ -224,17 +230,18 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
         if (!cancelled) setRestored(true);
       });
     return () => { cancelled = true; };
-  }, [onTabChange, storageKey]);
+  }, [ephemeral, onTabChange, storageKey]);
 
   useEffect(() => {
     if (!restored) return;
     rememberSessionSshExecTabs(storageKey, items);
+    if (ephemeral) return;
     const persisted = items.filter(item => WORKBENCH_TYPES.has(item.type)).map(normalizeWorkbenchItem);
     void platform.store.set(storageKey, { items: persisted, activeId } satisfies StoredWorkbenchState)
       .catch((reason) => {
         console.error('Failed to persist workbench tabs', reason);
       });
-  }, [activeId, items, restored, storageKey]);
+  }, [activeId, ephemeral, items, restored, storageKey]);
 
   useEffect(() => {
     if (!restored) return;

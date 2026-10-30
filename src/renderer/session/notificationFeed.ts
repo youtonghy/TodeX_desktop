@@ -2,7 +2,8 @@ import { useSyncExternalStore } from 'react';
 
 // In-app notification history for the sidebar's notification center: app
 // notices (every toast) and conversations that finished while the user was
-// elsewhere. Kept in localStorage so it survives a restart.
+// elsewhere. Kept in localStorage so it survives a restart, except entries
+// about private conversations, which stay in memory.
 
 export type FeedStatus = 'neutral' | 'information' | 'success' | 'error';
 
@@ -17,6 +18,8 @@ export type FeedItem = {
   read: boolean;
   workspaceId?: string;
   conversationId?: string;
+  /** About a private conversation: shown this session, never stored. */
+  ephemeral?: boolean;
 };
 
 const STORAGE_KEY = 'todex.notificationFeed.v1';
@@ -30,7 +33,7 @@ function load(): FeedItem[] {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     const value = raw ? JSON.parse(raw) as unknown : [];
-    return Array.isArray(value) ? value.filter((item): item is FeedItem => typeof item?.id === 'string').slice(0, LIMIT) : [];
+    return Array.isArray(value) ? value.filter((item): item is FeedItem => typeof item?.id === 'string' && !item.ephemeral).slice(0, LIMIT) : [];
   } catch {
     return [];
   }
@@ -39,7 +42,7 @@ function load(): FeedItem[] {
 function commit(next: FeedItem[]) {
   items = next.slice(0, LIMIT);
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(items.filter((item) => !item.ephemeral)));
   } catch {
     // The feed still works for this session.
   }
@@ -64,6 +67,13 @@ export function markNotificationRead(id: string): void {
 export function markAllNotificationsRead(): void {
   if (!items.some((item) => !item.read)) return;
   commit(items.map((item) => item.read ? item : { ...item, read: true }));
+}
+
+/** Drops the entries of conversations that are gone (a private
+ * conversation cleared with its daemon). */
+export function forgetConversationNotifications(conversationIds: ReadonlySet<string>): void {
+  if (!items.some((item) => item.conversationId && conversationIds.has(item.conversationId))) return;
+  commit(items.filter((item) => !item.conversationId || !conversationIds.has(item.conversationId)));
 }
 
 function subscribe(listener: () => void) {
