@@ -1754,16 +1754,19 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   }, [conversations, hydrated, scheduleJsonSave]);
 
   // v2 history lives in the backend journal and pages in lazily, so only
-  // local-only entries are persisted; unchanged snapshots skip the write.
+  // entries of existing local-only conversations are persisted: a deleted
+  // (or private) conversation's rows must never reach disk, even while they
+  // linger in memory after the record is gone. Unchanged snapshots skip the
+  // write.
   const persistedTimelineRef = useRef<TimelineEntry[]>([]);
   useEffect(() => {
     if (!hydrated) {
       return;
     }
     const persist = () => {
-      const v2ConversationIds = new Set(stores.conversations.get().filter((item) => isV2Conversation(item) || isPrivateConversation(item)).map((item) => item.id));
+      const localConversationIds = new Set(stores.conversations.get().filter((item) => !isV2Conversation(item) && !isPrivateConversation(item)).map((item) => item.id));
       const local = stores.timeline.get()
-        .filter((entry) => !entry.conversationId || !v2ConversationIds.has(entry.conversationId))
+        .filter((entry) => !entry.conversationId || localConversationIds.has(entry.conversationId))
         .slice(0, MAX_TIMELINE_ITEMS);
       const previous = persistedTimelineRef.current;
       if (local.length === previous.length && local.every((entry, index) => entry === previous[index])) return;
@@ -1771,7 +1774,12 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       scheduleJsonSave(TIMELINE_STORAGE_KEY, local);
     };
     persist();
-    return stores.timeline.subscribe(persist);
+    const unsubscribeTimeline = stores.timeline.subscribe(persist);
+    const unsubscribeConversations = stores.conversations.subscribe(persist);
+    return () => {
+      unsubscribeTimeline();
+      unsubscribeConversations();
+    };
   }, [hydrated, scheduleJsonSave, stores]);
 
   useEffect(() => {
