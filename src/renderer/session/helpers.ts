@@ -106,6 +106,10 @@ export type ServerVersion = {
   scratch_workspace_root: string;
   /** `1` when the backend serves end-to-end encrypted history. */
   historyEncryption?: number;
+  /** Where private conversations' temp folders live: `memory` (tmpfs) or
+   * `disk` (no RAM-backed folder; files are deleted with the conversation).
+   * Missing on backends without private conversations. */
+  privateConversationStorage?: 'memory' | 'disk';
   /** `1` when terminal output carries `seq` and `terminal.attach` exists. */
   terminalReplay?: number;
   /** `1` when an attach that cannot continue sends a screen snapshot. */

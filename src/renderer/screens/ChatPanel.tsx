@@ -158,6 +158,7 @@ const PROVIDER_NOTICES = {
   auto_mode_unavailable: 'chat.providerNotice.autoModeUnavailable',
   background_tasks_ended: 'chat.providerNotice.backgroundTasksEnded',
   bypass_mode_disabled: 'chat.providerNotice.bypassModeDisabledNoLayer',
+  context_lost: 'chat.providerNotice.contextLost',
 } as const satisfies Record<NonNullable<TimelineEntry['providerNotice']>, MessageKey>;
 
 /** Why background work was lost (`background_tasks_ended`'s `reason`, the
@@ -195,6 +196,8 @@ function providerNoticeText(notice: NonNullable<TimelineEntry['providerNotice']>
         : t('chat.providerNotice.autoModeDisabledBySettingsNoLayer', { agent, ask: t('chat.permissionAsk') });
     case 'bypass_mode_disabled':
       return layer ? t('chat.providerNotice.bypassModeDisabled', { agent, layer }) : t(PROVIDER_NOTICES[notice], { agent });
+    case 'context_lost':
+      return t(PROVIDER_NOTICES[notice], { agent });
   }
 }
 
@@ -2076,7 +2079,14 @@ export function ChatPanel({ session }: Props) {
             />
           ) : null}
           {isPrivateConversation(conversation) ? (
-            <Alert className="mb-2" status="neutral" icon={RiSpyLine} description={t('private.notice')} />
+            <Alert
+              className="mb-2"
+              status="neutral"
+              icon={RiSpyLine}
+              description={session.backendLinkStatus[session.activeBackendConnectionId]?.serverVersion?.privateConversationStorage === 'disk'
+                ? `${t('private.notice')} ${t('private.noticeDisk')}`
+                : t('private.notice')}
+            />
           ) : null}
           {conversation.schedule ? (
             <ConversationScheduleBar
