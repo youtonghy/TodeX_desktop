@@ -2,6 +2,7 @@ import { RiPushpin2Fill, RiLockLine, RiSpyLine, RiAddLine, RiArrowRightSLine, Ri
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { MouseEvent, ReactNode } from 'react';
 import {
+  Button as AriaButton,
   Dialog,
   Focusable,
   GridList,
@@ -39,6 +40,7 @@ import { cx } from '@/utils/cx';
 import { useSidebarPins } from '../session/useSidebarPins';
 import { searchConversations } from '../session/conversationSearch';
 import { useSidebarGroupCollapse } from '../session/useSidebarGroupCollapse';
+import { useSidebarLayout, useSidebarWorkspaceExpansion } from '../session/sidebarLayout';
 import { platform } from '../platform';
 import { sameRecordValues, useRuntimeSelector, useTimelineSelector } from '../session/conversationStore';
 import type { ConversationRuntime } from '@todex/protocol/conversationRuntime';
@@ -76,7 +78,9 @@ type Props = {
   className?: string;
   onCreateWorkspace: () => void;
   onEditWorkspace: (workspaceId: string) => void;
-  onCreateConversation: () => void;
+  /** Creates a conversation in the active workspace, or in `workspaceId`
+   * (on `backendConnectionId`, for a None row) when given. */
+  onCreateConversation: (workspaceId?: string, options?: { backendConnectionId?: string }) => void;
   /** Creates a conversation in the workspace that sends at `at` (ISO), on
    * the picked agent (the default one when absent). */
   onCreateScheduledConversation: (workspaceId: string, at: string, options: { provider?: ProviderKind }) => Promise<boolean>;
@@ -628,6 +632,19 @@ export function AppSidebar({
   // (or the rail's search button) switches modes.
   const rail = !isOpen;
 
+  // Unified layout: the workspace tree unfolds each workspace into its own
+  // conversations, paged like the split list. The icon rail and search
+  // results keep the split sections.
+  const unifiedLayout = useSidebarLayout() === 'unified';
+  const nested = unifiedLayout && !rail && !query;
+  const { expandedWorkspaces, toggleWorkspaceExpanded, expandWorkspace } = useSidebarWorkspaceExpansion();
+  const [rowConversationLimits, setRowConversationLimits] = useState<Record<string, number>>({});
+  // The workspace in use opens: on entering the layout, and when a
+  // conversation elsewhere is picked. Folding it afterwards is left alone.
+  useEffect(() => {
+    if (unifiedLayout && activeRowId) expandWorkspace(activeRowId);
+  }, [unifiedLayout, activeRowId, expandWorkspace]);
+
   // The rail has no room for the field: collapsing drops the search.
   useEffect(() => {
     if (!rail) return;
@@ -727,6 +744,20 @@ export function AppSidebar({
     () => [...workspaceConversations].sort(compareConversations),
     [workspaceConversations, compareConversations],
   );
+  // Unified layout: every workspace row's listed conversations, in list order.
+  const conversationsByRow = useMemo(() => {
+    const byRow = new Map<string, TodeXSession['conversations']>();
+    if (!unifiedLayout) return byRow;
+    for (const conversation of session.conversations) {
+      if (conversation.archived || !isListedConversation(conversation)) continue;
+      const rowId = rowIdOf(conversation);
+      const list = byRow.get(rowId);
+      if (list) list.push(conversation);
+      else byRow.set(rowId, [conversation]);
+    }
+    for (const list of byRow.values()) list.sort(compareConversations);
+    return byRow;
+  }, [unifiedLayout, session.conversations, rowIdOf, compareConversations]);
 
   // Top-level rows: lone workspaces and groups. "Show more" pages by these,
   // so a group counts as one row.
@@ -1026,6 +1057,101 @@ export function AppSidebar({
     }
   };
 
+  // One conversation row's pieces, shared by the split list (grid rows) and
+  // the unified workspace tree (tree leaves).
+  const conversationRow = (conversation: TodeXSession['conversations'][number]) => {
+    const isSelected = conversation.id === session.activeConversationId;
+    const status = getConversationStatus(session, conversation, timelineInfoMap[conversation.id]?.latestEntry, timelineInfoMap[conversation.id]?.latestIncomingAt);
+    const taskMeta = conversationTaskMetaMap[conversation.id];
+    // A daemon-paused follow-up queue waiting out a provider rate
+    // limit gets a clock badge; it reports its own resumeAt.
+    const followUps = followUpsById[conversation.id];
+    const backendWait = followUps?.paused && followUps.pauseReason === 'rate_limited' && followUps.items.length > 0
+      ? Date.parse(followUps.resumeAt) : NaN;
+    const resetAt = Number.isFinite(backendWait) && backendWait > Date.now() ? backendWait : undefined;
+    const tasksDone = Boolean(taskMeta && taskMeta.pending === 0);
+    const title = conversationDisplayTitle(conversation, timelineInfoMap[conversation.id]?.firstPrompt ?? '');
+    const running = isConversationHighlighted(conversation, session.activeConversationId, session.turnIds);
+    // Search results come from every workspace, so each names its own.
+    const resultWorkspace = query ? rowById.get(rowIdOf(conversation)) ?? workspaceById.get(conversation.workspaceId) : undefined;
+    const resultSnippet = query ? searchSnippets.get(conversation.id) : undefined;
+    const glyph = (
+      <span className="relative flex size-5 shrink-0 items-center justify-center">
+        <ProviderIcon className={cx('size-4', isSelected ? 'text-foreground-icon-primary' : 'text-foreground-icon-secondary')} provider={conversation.provider} />
+        <span
+          className={cx(
+            'absolute -end-0.5 -bottom-0.5 size-2 rounded-full ring-2',
+            isSelected ? 'ring-background-secondary-hover' : mobile ? 'ring-background-full' : 'ring-background-secondary-default',
+            status ? STATUS_DOT_CLASS[status.kind] : 'hidden',
+          )}
+          aria-label={status?.label}
+        />
+      </span>
+    );
+    const label = (
+      <span className={cx('flex min-w-0 flex-1 flex-col', rail && 'hidden')}>
+        <span className={cx('flex min-w-0 items-center gap-1 text-body-medium', isSelected ? 'text-text-primary' : tasksDone ? 'text-text-tertiary' : 'text-text-secondary')}>
+          {isReadOnlyConversation(conversation) ? <span className="inline-flex shrink-0 text-foreground-icon-tertiary" role="img" title={t('history.readOnlyBadge')} aria-label={t('history.readOnlyBadge')}><RiLockLine className="size-3" aria-hidden="true" /></span> : null}
+          {isPrivateConversation(conversation) ? (
+            <TooltipTrigger delay={300}>
+              <Focusable>
+                <span role="img" tabIndex={-1} aria-label={t('private.badge')} className={cx('inline-flex shrink-0 rounded-sm text-foreground-icon-tertiary', FOCUS_RING)}>
+                  <RiSpyLine className="size-3.5" aria-hidden="true" />
+                </span>
+              </Focusable>
+              <Tooltip placement="top">{t('private.badge')}</Tooltip>
+            </TooltipTrigger>
+          ) : null}
+          <span className="truncate">{title}</span>
+          {pins.conversation.includes(conversation.id) ? <RiPushpin2Fill className="size-3 shrink-0 text-foreground-icon-tertiary" aria-label={t('sidebar.pinned')} /> : null}
+          {taskMeta ? (
+            <span
+              aria-label={t('sidebar.taskCount', { count: taskMeta.count })}
+              className={cx(CHIP, !tasksDone && 'bg-badge-new-background text-badge-new-text')}
+            >
+              {tasksDone ? t('sidebar.tasksDone') : t('sidebar.tasksPlanning')}
+            </span>
+          ) : null}
+        </span>
+        {resultSnippet ? <SearchSnippet snippet={resultSnippet} query={query} /> : null}
+        {resultWorkspace ? (
+          <span className="truncate text-caption-1-regular text-text-tertiary">{workspaceDisplayName(resultWorkspace)}</span>
+        ) : null}
+      </span>
+    );
+    const badges = (
+      <span className="flex shrink-0 items-center gap-1">
+        {resetAt ? (
+          <TooltipTrigger delay={300}>
+            <Focusable>
+              <span
+                role="img"
+                tabIndex={-1}
+                aria-label={t('controls.waitingReset', { time: formatResetInstant(resetAt) })}
+                className={cx('inline-flex rounded-sm', FOCUS_RING)}
+              >
+                <RiTimeLine className="size-3.5 text-status-yellow-text" aria-hidden="true" />
+              </span>
+            </Focusable>
+            <Tooltip placement="top" className="max-w-xs">
+              {t('controls.waitingReset', { time: formatResetInstant(resetAt) })}
+            </Tooltip>
+          </TooltipTrigger>
+        ) : null}
+        {conversation.schedule ? <ConversationScheduleIcon schedule={conversation.schedule} /> : null}
+        {conversation.labelColor ? (
+          <span
+            aria-label={t('sidebar.labelColor')}
+            className="inline-block size-2 rounded-full"
+            style={{ backgroundColor: conversation.labelColor }}
+          />
+        ) : null}
+        {running ? <span className={CHIP}>{t('sidebar.running')}</span> : null}
+      </span>
+    );
+    return { isSelected, title, tasksDone, running, glyph, label, badges };
+  };
+
   // `scope` places a tag-view row under its tag section (no dragging there).
   const renderWorkspaceItem = (workspace: WorkspaceRecord, group: { entry: WorkspaceGroupEntry; last: boolean; folded: boolean } | null, scope?: { key: string; folded: boolean }) => {
     const isSelected = workspace.id === activeRowId;
@@ -1191,6 +1317,77 @@ export function AppSidebar({
     return [header, ...workspaces.map((workspace) => renderWorkspaceItem(workspace, null, { key, folded }))];
   };
 
+  // A new conversation in the workspace behind a row (None rows open first,
+  // so the draft lands on their own backend).
+  const createConversationIn = (rowId: string) => {
+    const noneBackendId = noneWorkspaceRowBackendId(rowId);
+    if (noneBackendId !== null) openWorkspaceRow(rowId);
+    onCreateConversation(workspaceIdOfRow(rowId), noneBackendId ? { backendConnectionId: noneBackendId } : undefined);
+    if (mobile) onCloseMobile?.();
+  };
+
+  // Unified layout: a workspace branch's leaves — its conversations, paged
+  // like the split list, then the paging row. A folded branch keeps a single
+  // placeholder leaf (never shown) so it still carries its chevron without
+  // building every conversation row.
+  const workspaceConversationItems = (rowId: string, conversations: TodeXSession['conversations'], unfolded: boolean, scope?: string): ReactNode[] => {
+    if (!unfolded || conversations.length === 0) {
+      return [(
+        <TreeViewItem
+          key={scopedKey(scope, `empty:${rowId}`)}
+          id={scopedKey(scope, `empty:${rowId}`)}
+          label={t('sidebar.noConversations')}
+          icon={null}
+          className="cursor-default bg-transparent text-caption-1-regular text-text-tertiary"
+        />
+      )];
+    }
+    const limit = rowConversationLimits[rowId] ?? 5;
+    const items: ReactNode[] = conversations.slice(0, limit).map((conversation) => {
+      const row = conversationRow(conversation);
+      return (
+        <TreeViewItem
+          key={scopedKey(scope, `conversation:${conversation.id}`)}
+          id={scopedKey(scope, `conversation:${conversation.id}`)}
+          label={row.title}
+          leading={row.glyph}
+          labelContent={(
+            <>
+              {row.label}
+              {row.running ? <span className="sr-only">{t('sidebar.running')}</span> : null}
+            </>
+          )}
+          trailingContent={row.badges}
+          className={({ isHovered, isPressed }) => cx(
+            row.isSelected ? 'bg-background-secondary-hover' : isPressed ? 'bg-background-tertiary-default' : isHovered ? 'bg-background-secondary-hover' : 'bg-transparent',
+            row.tasksDone && 'opacity-60',
+          )}
+          onContextMenu={(event) => openContextMenu(event, 'conversation', conversation.id)}
+        />
+      );
+    });
+    if (conversations.length > 5) {
+      const setLimit = (next: number) => setRowConversationLimits((current) => ({ ...current, [rowId]: next }));
+      const hasMore = conversations.length > limit;
+      items.push(
+        <TreeViewItem
+          key={scopedKey(scope, `more:${rowId}`)}
+          id={scopedKey(scope, `more:${rowId}`)}
+          label={hasMore ? t('sidebar.showMore') : t('sidebar.collapse')}
+          icon={null}
+          className="cursor-default bg-transparent"
+          labelContent={(
+            <span className="flex min-w-0 flex-1 items-center justify-between">
+              {hasMore ? <AriaButton className={QUIET_BUTTON} onPress={() => setLimit(limit + 5)}>{t('sidebar.showMore')}</AriaButton> : <span />}
+              {limit > 5 ? <AriaButton className={QUIET_BUTTON} onPress={() => setLimit(5)}>{t('sidebar.collapse')}</AriaButton> : null}
+            </span>
+          )}
+        />,
+      );
+    }
+    return items;
+  };
+
   // Expanded sidebar: the workspace list is a BoardUI tree. Groups are
   // branches (folder, chevron, guides) holding their workspaces; lone
   // workspaces are root leaves. The icon rail keeps the flat grid list.
@@ -1207,14 +1404,18 @@ export function AppSidebar({
     const showBackend = duplicateWorkspaceNames.has(workspaceDisplayName(workspace)) || (splitNone && isNoneRowId(workspace.id));
     const workspaceStatus = workspaceStatusMap[workspace.id];
     const WorkspaceGlyph = workspaceIconComponent(workspace.icon);
+    const conversations = nested ? conversationsByRow.get(workspace.id) ?? [] : [];
+    const unfolded = nested && expandedWorkspaces.includes(workspace.id);
     return (
       <TreeViewItem
         key={scopedKey(scope, workspace.id)}
         id={scopedKey(scope, workspace.id)}
         label={workspaceDisplayName(workspace)}
         className={({ isHovered, isPressed }) => cx(
+          'group/workspace-row',
           // The sidebar's row fills: the tree's menu fill matches this surface.
-          isSelected ? 'bg-background-secondary-hover' : isPressed ? 'bg-background-tertiary-default' : isHovered ? 'bg-background-secondary-hover' : 'bg-transparent',
+          // An unfolded workspace leaves the fill to its selected conversation.
+          isSelected && !unfolded ? 'bg-background-secondary-hover' : isPressed ? 'bg-background-tertiary-default' : isHovered ? 'bg-background-secondary-hover' : 'bg-transparent',
           isSelected ? 'text-text-primary' : isMissing ? 'cursor-not-allowed text-text-tertiary opacity-50' : 'text-text-secondary',
           'text-body-medium',
           drop && DROP_CLASS[drop],
@@ -1248,9 +1449,31 @@ export function AppSidebar({
                 <span aria-hidden="true" className="size-2.5 rounded-full ring-1 ring-separator-border" style={{ backgroundColor: backendLabelColor(backend) }} />
               </span>
             ) : null}
+            {nested ? (
+              <>
+                {isMissing ? null : (
+                  <AriaButton
+                    aria-label={t('sidebar.newConversationIn', { name: workspaceDisplayName(workspace) })}
+                    onPress={() => createConversationIn(workspace.id)}
+                    className={cx(
+                      'flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-foreground-icon-secondary',
+                      'transition-[color,background-color,opacity] duration-150 ease hover:bg-background-tertiary-default hover:text-foreground-icon-primary',
+                      // Shown while the row is hovered or focused.
+                      'opacity-0 group-data-[hovered]/workspace-row:opacity-100 group-data-[focus-visible]/workspace-row:opacity-100 data-[focus-visible]:opacity-100',
+                      FOCUS_RING,
+                    )}
+                  >
+                    <RiAddLine aria-hidden className="size-3.5" />
+                  </AriaButton>
+                )}
+                <span className="min-w-4 text-center tabular-nums">{conversations.length}</span>
+              </>
+            ) : null}
           </span>
         )}
-      />
+      >
+        {nested ? workspaceConversationItems(workspace.id, conversations, unfolded, scope) : null}
+      </TreeViewItem>
     );
   };
 
@@ -1338,20 +1561,30 @@ export function AppSidebar({
     );
   };
 
-  // Branches of the current view: their tree keys and fold-state ids. A
-  // group listed under several tags shares one fold state.
+  // Branches of the current view: their tree keys, fold-state ids, whether
+  // they are open and how they toggle. A group listed under several tags
+  // shares one fold state, and so does a workspace (unified layout).
+  type TreeBranch = { key: string; foldId: string; open: boolean; toggle: () => void };
+  const groupBranch = (key: string, foldId: string): TreeBranch => ({ key, foldId, open: !isGroupFolded(foldId), toggle: () => toggleGroupCollapsed(foldId) });
+  const entryBranches = (entry: WorkspaceSidebarEntry, scope?: string): TreeBranch[] => [
+    ...(entry.kind === 'group' ? [groupBranch(scopedKey(scope, `group:${entry.id}`), entry.id)] : []),
+    ...(nested ? (entry.kind === 'group' ? entry.workspaces : [entry.workspace]).map((workspace): TreeBranch => ({
+      key: scopedKey(scope, workspace.id),
+      foldId: `workspace:${workspace.id}`,
+      open: expandedWorkspaces.includes(workspace.id),
+      toggle: () => toggleWorkspaceExpanded(workspace.id),
+    })) : []),
+  ];
   const treeBranches = tagView
     ? [
-      ...tagNoneEntries.flatMap((entry) => (entry.kind === 'group' ? [{ key: `group:${entry.id}`, foldId: entry.id }] : [])),
+      ...tagNoneEntries.flatMap((entry) => entryBranches(entry)),
       ...tagSections.flatMap((section) => [
-        { key: tagSectionKey(section), foldId: tagSectionKey(section) },
-        ...section.entries.flatMap((entry) => (entry.kind === 'group'
-          ? [{ key: scopedKey(tagSectionKey(section), `group:${entry.id}`), foldId: entry.id }]
-          : [])),
+        groupBranch(tagSectionKey(section), tagSectionKey(section)),
+        ...section.entries.flatMap((entry) => entryBranches(entry, tagSectionKey(section))),
       ]),
     ]
-    : displayedEntries.flatMap((entry) => (entry.kind === 'group' ? [{ key: `group:${entry.id}`, foldId: entry.id }] : []));
-  const expandedGroupKeys = new Set<Key>(treeBranches.filter((branch) => !isGroupFolded(branch.foldId)).map((branch) => branch.key));
+    : displayedEntries.flatMap((entry) => entryBranches(entry));
+  const expandedGroupKeys = new Set<Key>(treeBranches.filter((branch) => branch.open).map((branch) => branch.key));
   // Every row key of the active workspace (several in the tag view).
   const selectedWorkspaceKeys = !activeRowId ? [] : !tagView ? [activeRowId] : [
     ...(tagNoneEntries.some((entry) => (entry.kind === 'group' ? entry.workspaces.some((workspace) => workspace.id === activeRowId) : entry.workspace.id === activeRowId)) ? [activeRowId] : []),
@@ -1359,6 +1592,11 @@ export function AppSidebar({
       .filter((entry) => (entry.kind === 'group' ? entry.workspaces.some((workspace) => workspace.id === activeRowId) : entry.workspace.id === activeRowId))
       .map(() => scopedKey(tagSectionKey(section), activeRowId))),
   ];
+  // Unified layout: the tree selects the active conversation under each of
+  // those rows; the workspace row only fills while folded.
+  const selectedTreeKeys = !nested ? selectedWorkspaceKeys : !session.activeConversationId ? [] : selectedWorkspaceKeys.map((key) => (
+    `${key.slice(0, key.length - activeRowId.length)}conversation:${session.activeConversationId}`
+  ));
   // A row key picked in the list: tag and group headers fold, workspaces open.
   const activateWorkspaceKey = (rawKey: string) => {
     if (isTagSectionKey(rawKey)) {
@@ -1368,6 +1606,30 @@ export function AppSidebar({
     const key = unscopedKey(rawKey);
     if (key.startsWith('group:')) {
       toggleGroupCollapsed(key.slice('group:'.length));
+      return;
+    }
+    if (nested) {
+      if (key.startsWith('conversation:')) {
+        const conversation = session.conversations.find((item) => item.id === key.slice('conversation:'.length));
+        if (!conversation) return;
+        session.selectConversation(conversation.workspaceId, conversation.id);
+        onSelectConversation?.();
+        return;
+      }
+      // The paging row's own buttons page; picking the row pages forward
+      // (or back once everything shows).
+      if (key.startsWith('more:')) {
+        const rowId = key.slice('more:'.length);
+        const limit = rowConversationLimits[rowId] ?? 5;
+        const next = (conversationsByRow.get(rowId)?.length ?? 0) > limit ? limit + 5 : 5;
+        setRowConversationLimits((current) => ({ ...current, [rowId]: next }));
+        return;
+      }
+      if (key.startsWith('empty:')) return;
+      // A workspace row folds or unfolds its conversations; it does not
+      // switch away from the conversation in view.
+      if (session.workspaces.find((item) => item.id === workspaceIdOfRow(key))?.pathMissing) return;
+      toggleWorkspaceExpanded(key);
       return;
     }
     if (session.workspaces.find((item) => item.id === key)?.pathMissing) return;
@@ -1384,7 +1646,7 @@ export function AppSidebar({
       label: t('sidebar.newConversation'),
       icon: RiAddLine,
       disabled: !session.activeWorkspaceId,
-      onClick: onCreateConversation,
+      onClick: () => onCreateConversation(),
       hint: <ShortcutHint id="newConversation" />,
     },
     {
@@ -1647,18 +1909,19 @@ export function AppSidebar({
                       className="rounded-none border-0 bg-transparent p-0"
                       selectionMode="single"
                       selectionBehavior="replace"
-                      selectedKeys={selectedWorkspaceKeys}
+                      selectedKeys={selectedTreeKeys}
                       expandedKeys={expandedGroupKeys}
                       onExpandedChange={(keys) => {
                         const toggled = new Set<string>();
                         for (const branch of treeBranches) {
                           if (keys.has(branch.key) === expandedGroupKeys.has(branch.key) || toggled.has(branch.foldId)) continue;
                           toggled.add(branch.foldId);
-                          toggleGroupCollapsed(branch.foldId);
+                          branch.toggle();
                         }
                       }}
                       onSelectionChange={(keys) => {
-                        // Tag and group rows fold or unfold; they are never selected.
+                        // Tag and group rows (and, unified, workspace rows)
+                        // fold or unfold; they are never selected.
                         const key = keys === 'all' ? '' : String([...keys][0] ?? '');
                         if (key) activateWorkspaceKey(key);
                       }}
@@ -1727,8 +1990,8 @@ export function AppSidebar({
         </section>
         )}
 
-        {/* Conversation section */}
-        {query && matchedConversations.length === 0 ? null : (
+        {/* Conversation section (the unified layout nests it in the tree) */}
+        {nested || (query && matchedConversations.length === 0) ? null : (
         <section className="flex flex-col gap-1">
           {rail ? null : (
             <SectionHeader
@@ -1767,101 +2030,20 @@ export function AppSidebar({
                   }}
                 >
                   {displayedConversations.map((conversation) => {
-                    const isSelected = conversation.id === session.activeConversationId;
-                    const status = getConversationStatus(session, conversation, timelineInfoMap[conversation.id]?.latestEntry, timelineInfoMap[conversation.id]?.latestIncomingAt);
-                    const taskMeta = conversationTaskMetaMap[conversation.id];
-                    // A daemon-paused follow-up queue waiting out a provider rate
-                    // limit gets a clock badge; it reports its own resumeAt.
-                    const followUps = followUpsById[conversation.id];
-                    const backendWait = followUps?.paused && followUps.pauseReason === 'rate_limited' && followUps.items.length > 0
-                      ? Date.parse(followUps.resumeAt) : NaN;
-                    const resetAt = Number.isFinite(backendWait) && backendWait > Date.now() ? backendWait : undefined;
-                    const tasksDone = Boolean(taskMeta && taskMeta.pending === 0);
-                    const title = conversationDisplayTitle(conversation, timelineInfoMap[conversation.id]?.firstPrompt ?? '');
-                    const running = isConversationHighlighted(conversation, session.activeConversationId, session.turnIds);
-                    // Search results come from every workspace, so each names its own.
-                    const resultWorkspace = query ? rowById.get(rowIdOf(conversation)) ?? workspaceById.get(conversation.workspaceId) : undefined;
-                    const resultSnippet = query ? searchSnippets.get(conversation.id) : undefined;
+                    const row = conversationRow(conversation);
                     return (
                       <GridListItem
                         key={conversation.id}
                         id={conversation.id}
-                        textValue={title}
-                        className={rowClassName({ selected: isSelected, rail, dim: tasksDone })}
+                        textValue={row.title}
+                        className={rowClassName({ selected: row.isSelected, rail, dim: row.tasksDone })}
                         onContextMenu={(event) => openContextMenu(event, 'conversation', conversation.id)}
                       >
-                        <RowContent rail={rail} title={rail ? title : undefined}>
-                          <span className="relative flex size-5 shrink-0 items-center justify-center">
-                            <ProviderIcon className={cx('size-4', isSelected ? 'text-foreground-icon-primary' : 'text-foreground-icon-secondary')} provider={conversation.provider} />
-                            <span
-                              className={cx(
-                                'absolute -end-0.5 -bottom-0.5 size-2 rounded-full ring-2',
-                                isSelected ? 'ring-background-secondary-hover' : mobile ? 'ring-background-full' : 'ring-background-secondary-default',
-                                status ? STATUS_DOT_CLASS[status.kind] : 'hidden',
-                              )}
-                              aria-label={status?.label}
-                            />
-                          </span>
-                          <span className={cx('flex min-w-0 flex-1 flex-col', rail && 'hidden')}>
-                            <span className={cx('flex min-w-0 items-center gap-1 text-body-medium', isSelected ? 'text-text-primary' : tasksDone ? 'text-text-tertiary' : 'text-text-secondary')}>
-                              {isReadOnlyConversation(conversation) ? <span className="inline-flex shrink-0 text-foreground-icon-tertiary" role="img" title={t('history.readOnlyBadge')} aria-label={t('history.readOnlyBadge')}><RiLockLine className="size-3" aria-hidden="true" /></span> : null}
-                              {isPrivateConversation(conversation) ? (
-                                <TooltipTrigger delay={300}>
-                                  <Focusable>
-                                    <span role="img" tabIndex={-1} aria-label={t('private.badge')} className={cx('inline-flex shrink-0 rounded-sm text-foreground-icon-tertiary', FOCUS_RING)}>
-                                      <RiSpyLine className="size-3.5" aria-hidden="true" />
-                                    </span>
-                                  </Focusable>
-                                  <Tooltip placement="top">{t('private.badge')}</Tooltip>
-                                </TooltipTrigger>
-                              ) : null}
-                              <span className="truncate">{title}</span>
-                              {pins.conversation.includes(conversation.id) ? <RiPushpin2Fill className="size-3 shrink-0 text-foreground-icon-tertiary" aria-label={t('sidebar.pinned')} /> : null}
-                              {taskMeta ? (
-                                <span
-                                  aria-label={t('sidebar.taskCount', { count: taskMeta.count })}
-                                  className={cx(CHIP, !tasksDone && 'bg-badge-new-background text-badge-new-text')}
-                                >
-                                  {tasksDone ? t('sidebar.tasksDone') : t('sidebar.tasksPlanning')}
-                                </span>
-                              ) : null}
-                            </span>
-                            {resultSnippet ? <SearchSnippet snippet={resultSnippet} query={query} /> : null}
-                            {resultWorkspace ? (
-                              <span className="truncate text-caption-1-regular text-text-tertiary">{workspaceDisplayName(resultWorkspace)}</span>
-                            ) : null}
-                          </span>
-                          {rail ? null : (
-                            <span className="flex shrink-0 items-center gap-1">
-                              {resetAt ? (
-                                <TooltipTrigger delay={300}>
-                                  <Focusable>
-                                    <span
-                                      role="img"
-                                      tabIndex={-1}
-                                      aria-label={t('controls.waitingReset', { time: formatResetInstant(resetAt) })}
-                                      className={cx('inline-flex rounded-sm', FOCUS_RING)}
-                                    >
-                                      <RiTimeLine className="size-3.5 text-status-yellow-text" aria-hidden="true" />
-                                    </span>
-                                  </Focusable>
-                                  <Tooltip placement="top" className="max-w-xs">
-                                    {t('controls.waitingReset', { time: formatResetInstant(resetAt) })}
-                                  </Tooltip>
-                                </TooltipTrigger>
-                              ) : null}
-                              {conversation.schedule ? <ConversationScheduleIcon schedule={conversation.schedule} /> : null}
-                              {conversation.labelColor ? (
-                                <span
-                                  aria-label={t('sidebar.labelColor')}
-                                  className="inline-block size-2 rounded-full"
-                                  style={{ backgroundColor: conversation.labelColor }}
-                                />
-                              ) : null}
-                              {running ? <span className={CHIP}>{t('sidebar.running')}</span> : null}
-                            </span>
-                          )}
-                          {running ? <span className="sr-only">{t('sidebar.running')}</span> : null}
+                        <RowContent rail={rail} title={rail ? row.title : undefined}>
+                          {row.glyph}
+                          {row.label}
+                          {rail ? null : row.badges}
+                          {row.running ? <span className="sr-only">{t('sidebar.running')}</span> : null}
                         </RowContent>
                       </GridListItem>
                     );

@@ -85,6 +85,21 @@ for (const theme of ['light', 'dark'] as Theme[]) {
       await expect(page).toHaveScreenshot(`private-conversation-${theme}.png`, { mask: volatile(page) });
     });
 
+    test('unified sidebar', async ({ page, openDemo }) => {
+      await openDemo(theme);
+      await page.getByRole('button', { name: '设置', exact: true }).click();
+      await page.getByRole('tab', { name: '外观', exact: true }).click();
+      await page.getByRole('radio', { name: '统一' }).click();
+      await page.getByRole('button', { name: '关闭', exact: true }).click();
+      // The active workspace opens by itself; a second one opens on click.
+      await page.getByRole('row', { name: 'lumen-api' }).click();
+      await expect(page.getByRole('row', { name: '支付回调幂等处理' })).toBeVisible();
+      await expect(page.getByRole('grid', { name: '对话' })).toHaveCount(0);
+      await page.mouse.move(900, 300);
+      await settle(page);
+      await expect(page).toHaveScreenshot(`unified-sidebar-${theme}.png`, { mask: volatile(page) });
+    });
+
     test('settings: general', async ({ page, openDemo }) => {
       await openDemo(theme);
       await page.getByRole('button', { name: '设置', exact: true }).click();

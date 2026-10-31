@@ -123,6 +123,9 @@ export interface TreeViewItemProps<T extends object = object>
   leading?: ReactNode;
   /** Optional metadata or a badge at the end of the row. */
   trailingContent?: ReactNode;
+  /** Rich label (inline badges, a second line); replaces the plain `label`
+   *  text, which still names the row and drives typeahead. */
+  labelContent?: ReactNode;
   /** Nested TreeViewItem elements or a TreeViewCollection. */
   children?: ReactNode;
   ref?: Ref<HTMLDivElement>;
@@ -136,6 +139,7 @@ export function TreeViewItem<T extends object = object>({
   iconClassName,
   leading,
   trailingContent,
+  labelContent,
   children,
   className,
   style,
@@ -201,7 +205,7 @@ export function TreeViewItem<T extends object = object>({
                   iconClassName,
                 )} />)}
               </span>
-              <span className="min-w-0 flex-1 truncate text-start"><bdi>{label}</bdi></span>
+              {labelContent ?? <span className="min-w-0 flex-1 truncate text-start"><bdi>{label}</bdi></span>}
               {trailingContent != null && (
                 <span className="ms-auto shrink-0 text-caption-1-regular text-text-tertiary">{trailingContent}</span>
               )}

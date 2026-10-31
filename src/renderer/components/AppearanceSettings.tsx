@@ -16,6 +16,7 @@ import {
   useAppearance,
   type ThemeSource,
 } from '../lib/appearance';
+import { setSidebarLayout, useSidebarLayout, type SidebarLayout } from '../session/sidebarLayout';
 import { useT } from '../i18n';
 
 const DEFAULT_FONT_KEY = '__default__';
@@ -23,6 +24,7 @@ const DEFAULT_FONT_KEY = '__default__';
 export function AppearanceSettings() {
   const t = useT();
   const appearance = useAppearance();
+  const sidebarLayout = useSidebarLayout();
   // undefined: not requested yet; null: the platform cannot list fonts.
   const [fonts, setFonts] = useState<string[] | null | undefined>(undefined);
   const defaultLabel = t('settings.fontDefault');
@@ -62,6 +64,19 @@ export function AppearanceSettings() {
             <SegmentedControlItem id="system">{t('settings.themeSystem')}</SegmentedControlItem>
             <SegmentedControlItem id="light">{t('settings.themeLight')}</SegmentedControlItem>
             <SegmentedControlItem id="dark">{t('settings.themeDark')}</SegmentedControlItem>
+          </SegmentedControl>
+        </SettingsRow>
+        <SettingsRow label={t('settings.sidebarLayout')} description={t('settings.sidebarLayoutHint')}>
+          <SegmentedControl
+            aria-label={t('settings.sidebarLayout')}
+            selectedKeys={[sidebarLayout]}
+            onSelectionChange={(keys) => {
+              const [next] = [...keys] as SidebarLayout[];
+              if (next) setSidebarLayout(next);
+            }}
+          >
+            <SegmentedControlItem id="split">{t('settings.sidebarLayoutSplit')}</SegmentedControlItem>
+            <SegmentedControlItem id="unified">{t('settings.sidebarLayoutUnified')}</SegmentedControlItem>
           </SegmentedControl>
         </SettingsRow>
       </SettingsCard>

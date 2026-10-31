@@ -604,11 +604,11 @@ export function App() {
       onCloseMobile={() => setMobileNavOpen(false)}
       onCreateWorkspace={() => { setEditingWorkspaceId(null); setCreateOpen(true); }}
       onEditWorkspace={(workspaceId) => { setEditingWorkspaceId(workspaceId); setCreateOpen(true); }}
-      onCreateConversation={() => {
-        if (!session.activeWorkspaceId) {
+      onCreateConversation={(workspaceId = session.activeWorkspaceId, options) => {
+        if (!workspaceId) {
           return;
         }
-        session.createConversation(session.activeWorkspaceId);
+        session.createConversation(workspaceId, options);
         setPanel(null);
       }}
       onCreatePrivateConversation={openPrivateConversation}
