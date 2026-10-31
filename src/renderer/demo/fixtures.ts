@@ -170,14 +170,20 @@ class JournalBuilder {
     return this;
   }
 
+  /** Id of the latest `tool()` call. */
+  lastToolCallId = '';
+
   tool(toolName: string, args: Record<string, unknown>, result?: string) {
     const toolCallId = `${this.turnId}-call${this.events.length}`;
+    this.lastToolCallId = toolCallId;
     this.push('tool.started', { toolCallId, toolName, arguments: args }, 2_500);
     if (result !== undefined) this.push('tool.completed', { toolCallId, toolName, arguments: args, result, isError: false }, 4_000);
     return this;
   }
 
-  answer(text: string, usage: { model: string; input: number; output: number; cacheRead: number; cacheWrite: number }) {
+  /** Ends the turn on `text`; `waitingOn` lists background tasks the agent
+   * still waits on afterwards (`background_tasks_pending`). */
+  answer(text: string, usage: { model: string; input: number; output: number; cacheRead: number; cacheWrite: number }, waitingOn?: Record<string, unknown>[]) {
     this.push('message.completed', {
       role: 'assistant',
       message: { role: 'assistant', content: [{ type: 'text', text }] },
@@ -188,6 +194,12 @@ class JournalBuilder {
       contextWindow: 200_000,
       usage: { last: { ...usage, total: usage.input + usage.output } },
     }, 200);
+    if (waitingOn) {
+      this.push('provider.event', {
+        providerMethod: 'background_tasks_pending',
+        metadata: { taskIds: waitingOn.map(task => task.taskId), tasks: waitingOn },
+      }, 100);
+    }
     this.push('turn.completed', { status: 'completed' }, 300);
     return this;
   }
@@ -302,7 +314,11 @@ export const demoJournals: Journal[] = [
     j.user('支付网关会重复推送回调，订单偶尔被记两次账。请加上幂等处理。')
       .tool('Read', { file_path: 'internal/payment/webhook.go' }, 'func HandleWebhook(w http.ResponseWriter, r *http.Request) { … }')
       .tool('Edit', { file_path: 'internal/payment/webhook.go' }, 'The file internal/payment/webhook.go has been updated.')
-      .answer('回调现在以 `event_id` 作为幂等键写入 `payment_events` 表（唯一索引），重复推送会直接返回 200 而不再记账。补充了并发重放测试。', { model: 'sonnet', input: 32_000, output: 3_400, cacheRead: 64_000, cacheWrite: 6_000 });
+      .tool('Bash', { command: 'go test -race -count=20 ./internal/payment/...', run_in_background: true }, 'Command running in background with ID: b4k9q2xt');
+    // The turn ended while the race test still runs: Claude reports back in a
+    // turn of its own, so the conversation shows it is still working.
+    j.answer('回调现在以 `event_id` 作为幂等键写入 `payment_events` 表（唯一索引），重复推送会直接返回 200 而不再记账。并发重放测试已在后台运行，结果出来后我会继续汇报。', { model: 'sonnet', input: 32_000, output: 3_400, cacheRead: 64_000, cacheWrite: 6_000 },
+      [{ taskId: 'b4k9q2xt', description: '并发重放测试（-race，20 轮）', taskType: 'local_bash', toolUseId: j.lastToolCallId }]);
   }),
   journal('2d3e4f5a-6b7c-4d8e-9f0a-1b2c3d4e5f6a', designTokens, 'codex', '同步 HeroUI 主题变量', NOW - 4 * DAY, (j) => {
     j.user('把设计系统导出的 CSS 变量同步到 tokens 包里。')

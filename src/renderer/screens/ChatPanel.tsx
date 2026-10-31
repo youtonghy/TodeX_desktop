@@ -2160,7 +2160,9 @@ export function ChatPanel({ session }: Props) {
             onSubmit={submitComposer}
             onStop={() => session.stopThinking(conversation.id)}
           >
-            <ComposerLoader active={thinking && !readOnly} radius={24}>
+            {/* Lit while the agent still works, including after its turn ended
+                while it only waits on background tasks to report back. */}
+            <ComposerLoader active={(thinking || backgroundTaskCount > 0) && !readOnly} radius={24}>
               <div
                 data-dragging={isDraggingAttachment || undefined}
                 onDragStart={() => { internalDragRef.current = true; }}

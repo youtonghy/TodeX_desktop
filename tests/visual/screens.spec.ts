@@ -76,6 +76,18 @@ for (const theme of ['light', 'dark'] as Theme[]) {
       await expect(page).toHaveScreenshot(`goal-${theme}.png`, { mask: volatile(page) });
     });
 
+    test('waiting on background tasks after the turn', async ({ page, openDemo }) => {
+      await openDemo(theme);
+      await page.getByText('lumen-api', { exact: true }).click();
+      await page.getByText('支付回调幂等处理').first().click();
+      await expect(page.getByText('等待后台任务（1 个）')).toBeVisible();
+      // The composer stays lit while the agent waits; its light fades in.
+      await expect.poll(() => page.locator('.bui-composer-loader-rect').first()
+        .evaluate(rect => getComputedStyle(rect.closest('svg')!.parentElement!).opacity)).toBe('1');
+      await settle(page);
+      await expect(page).toHaveScreenshot(`background-tasks-${theme}.png`, { mask: volatile(page) });
+    });
+
     test('private conversation', async ({ page, openDemo }) => {
       await openDemo(theme);
       await page.getByText('infra-scripts', { exact: true }).click();
