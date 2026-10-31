@@ -20,6 +20,8 @@ import type { AgentDesktopSettings } from '@todex/protocol/agentDesktop';
 import type { GitScanResult, GitStatusSummary, GitWorkspaceSnapshot } from '../lib/gitWorkspace';
 
 export const DEMO_SERVER_URL = 'http://127.0.0.1:7399';
+/** The second backend of `?demo&backends=2` (the config sync preview). */
+export const DEMO_SECOND_SERVER_URL = 'http://127.0.0.1:7398';
 export const DEMO_ROOT = '/home/demo/projects';
 
 const NOW = Date.now();

@@ -1585,15 +1585,16 @@ export type BackendTransportProfile = Pick<ConnectionSettings, 'serverUrl' | 'de
  * unpaired loopback host is plaintext.
  */
 export function backendTransport(settings: BackendTransportProfile): SecureTransport {
-  if (transportOverride) return transportOverride;
+  if (transportOverride) return typeof transportOverride === 'function' ? transportOverride(settings.serverUrl) : transportOverride;
   return withLocalizedRequestLimits(cachedSecureTransport(settings, cachedDeviceIdentity(settings.deviceSecret)));
 }
 
-let transportOverride: SecureTransport | null = null;
+let transportOverride: SecureTransport | ((serverUrl: string) => SecureTransport) | null = null;
 
-/** Routes every backend call through `transport` instead of the network; the
- * dev-only demo preview (`?demo`) uses it to serve fixtures. */
-export function overrideBackendTransport(transport: SecureTransport | null): void {
+/** Routes every backend call through `transport` (or the one it picks per
+ * server URL) instead of the network; the dev-only demo preview (`?demo`)
+ * uses it to serve fixtures. */
+export function overrideBackendTransport(transport: SecureTransport | ((serverUrl: string) => SecureTransport) | null): void {
   transportOverride = transport;
 }
 

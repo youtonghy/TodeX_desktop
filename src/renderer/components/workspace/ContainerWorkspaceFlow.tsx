@@ -18,7 +18,6 @@ import { backendApi, fetchWorkspaceDirectorySnapshot } from '../../session/helpe
 import { backendBusy, connectContainer, containerProfiles, waitForLink } from '../../session/containerConnection';
 import { useConfigSync } from '../../session/useConfigSync';
 import { SETUP_TEMPLATES, detectTemplates, setupScript, templateText, type SetupTemplateId } from '../../session/containerSetup';
-import { CONFIG_SYNC_CATEGORIES } from '@todex/protocol/configSync';
 import type { TodeXSession } from '../../session/useTodeXSession';
 import { AGENT_CONFIG_CATEGORIES, agentConfigSource } from '../settings/BackendConnectionSettings';
 import { SettingsCard, SettingsNote, SettingsRow, SettingsValueField } from '../settings/SettingsRows';
@@ -557,33 +556,31 @@ function useAgentInstallStep({ session, profileId, onFinish }: { session: TodeXS
 /** Copies agent config (accounts, settings, MCP, skills) from another backend with the existing sync engine. */
 function useSyncStep({ session, profileId, active, onFinish }: { session: TodeXSession; profileId: string; active: boolean; onFinish: () => void }): { body: ReactNode; footer: ReactNode } {
   const t = useT();
-  const sync = useConfigSync(session);
+  const sync = useConfigSync(session, { sourceId: '', targetId: profileId, categories: AGENT_CONFIG_CATEGORIES }, { active });
   const [requested, setRequested] = useState(false);
-  // Entering the step points the engine at this container with the agent categories.
+  // Entering the step points the engine at this container.
   useEffect(() => {
     if (!active || !profileId) return;
     const source = agentConfigSource(session, profileId);
-    if (source) sync.setSourceId(source.id);
-    for (const id of sync.targetIds) if (id !== profileId) sync.toggleTarget(id, false);
-    sync.toggleTarget(profileId, true);
-    for (const category of CONFIG_SYNC_CATEGORIES) sync.toggleCategory(category, AGENT_CONFIG_CATEGORIES.includes(category));
+    sync.select(source?.id ?? '', profileId);
   }, [active, profileId]);
-  // Check, then write every entry the plan selects by default.
+  // Once both sides are read, write every entry the plan selects by default.
+  const failure = sync.source.failure || sync.target.failure;
   useEffect(() => {
     if (!requested) return;
-    if (sync.phase === 'ready') {
+    if (sync.ready) {
       setRequested(false);
       void sync.apply();
-    } else if (sync.phase === 'idle' && sync.failure) {
+    } else if (failure) {
       setRequested(false);
     }
-  }, [requested, sync.phase, sync.failure]);
+  }, [requested, sync.ready, failure]);
 
   const sources = session.backendConnections.filter((item) => item.id !== profileId && item.deviceSecret && session.backendLinkStatus[item.id]?.state === 'open');
-  const results = sync.plans.flatMap((plan) => [...plan.results.values()]);
+  const results = [...sync.results.values()];
   const failed = results.filter((result) => !result.ok);
-  const busy = sync.phase === 'checking' || sync.phase === 'applying' || requested;
-  const done = sync.phase === 'done';
+  const busy = sync.applying || requested;
+  const done = sync.applied;
   return {
     body: (
       <div className="flex flex-col gap-3">
@@ -593,14 +590,14 @@ function useSyncStep({ session, profileId, active, onFinish }: { session: TodeXS
           className="w-full"
           popoverClassName="w-(--trigger-width)"
           isDisabled={busy || done}
-          selectedKey={sources.some((item) => item.id === sync.sourceId) ? sync.sourceId : null}
+          selectedKey={sources.some((item) => item.id === sync.source.backendId) ? sync.source.backendId : null}
           onSelectionChange={(key) => typeof key === 'string' && sync.setSourceId(key)}
         >
           {sources.map((item) => <SelectItem key={item.id} id={item.id} textValue={item.name}>{item.name} · {item.serverUrl}</SelectItem>)}
         </Select>
         {sync.progress ? <SettingsNote>{t('container.sync.progress', { done: sync.progress.done, total: sync.progress.total })}</SettingsNote> : null}
-        {sync.failure ? <SettingsNote tone="danger" role="alert">{sync.failure}</SettingsNote> : null}
-        {sync.sourceErrors.length ? <SettingsNote tone="warning">{sync.sourceErrors.map((item) => item.message).join('\n')}</SettingsNote> : null}
+        {failure ? <SettingsNote tone="danger" role="alert">{failure}</SettingsNote> : null}
+        {sync.source.snapshot?.errors.length ? <SettingsNote tone="warning">{sync.source.snapshot.errors.map((item) => item.message).join('\n')}</SettingsNote> : null}
         {done ? (
           <SettingsNote tone={failed.length ? 'warning' : 'muted'}>
             {failed.length
@@ -614,7 +611,7 @@ function useSyncStep({ session, profileId, active, onFinish }: { session: TodeXS
       <>
         <Button variant="secondary" disabled={busy} onClick={onFinish}>{done ? t('container.flow.finish') : t('container.flow.skip')}</Button>
         {!done ? (
-          <Button disabled={busy || !sources.some((item) => item.id === sync.sourceId)} onClick={() => { setRequested(true); void sync.check(); }}>
+          <Button disabled={busy || !sources.some((item) => item.id === sync.source.backendId)} onClick={() => setRequested(true)}>
             {busy ? t('container.sync.running') : t('container.sync.start')}
           </Button>
         ) : null}

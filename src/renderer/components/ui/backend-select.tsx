@@ -14,6 +14,7 @@ export interface BackendSelectProps {
   onChange: (backendId: string) => void;
   /** Adds an "every backend" entry first, selected as `ALL_BACKENDS`. */
   allLabel?: string;
+  isDisabled?: boolean;
   className?: string;
 }
 
@@ -26,7 +27,7 @@ function BackendDot({ profile }: { profile?: BackendConnectionProfile }) {
  * color, name and URL, flagged when it is not connected. Renders nothing
  * with a single backend (and no `allLabel`), where there is nothing to pick.
  */
-export function BackendSelect({ profiles: allProfiles, linkStates, selectedId, onChange, allLabel, className }: BackendSelectProps) {
+export function BackendSelect({ profiles: allProfiles, linkStates, selectedId, onChange, allLabel, isDisabled, className }: BackendSelectProps) {
   const t = useT();
   // A disabled profile's backend is picked through the profile serving it.
   const profiles = allProfiles.filter((profile) => !profile.disabled);
@@ -35,6 +36,7 @@ export function BackendSelect({ profiles: allProfiles, linkStates, selectedId, o
     <Select
       aria-label={t('backendSelect.label')}
       size="sm"
+      isDisabled={isDisabled}
       className={cx('w-56 max-w-full shrink-0', className)}
       popoverClassName="w-72"
       selectedKey={selectedId}

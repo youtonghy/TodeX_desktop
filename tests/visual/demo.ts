@@ -6,20 +6,20 @@ export const FIXED_NOW = new Date('2026-10-20T10:00:00+08:00');
 export type Theme = 'light' | 'dark';
 
 type DemoFixtures = {
-  /** Opens the `?demo` preview in `theme` and waits until it has settled. */
-  openDemo: (theme?: Theme) => Promise<void>;
+  /** Opens the `?demo` preview in `theme` (plus extra `query` parameters) and waits until it has settled. */
+  openDemo: (theme?: Theme, query?: string) => Promise<void>;
 };
 
 export const test = base.extend<DemoFixtures>({
   openDemo: async ({ page }, use) => {
     const errors: string[] = [];
     page.on('pageerror', (error) => errors.push(String(error)));
-    await use(async (theme = 'light') => {
+    await use(async (theme = 'light', query = '') => {
       // The clock flows from FIXED_NOW, so dates, "today" and relative times
       // render the same on every run while timers still fire.
       await page.clock.install({ time: FIXED_NOW });
       await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' });
-      await page.goto(`/?demo&theme=${theme}`);
+      await page.goto(`/?demo&theme=${theme}${query ? `&${query}` : ''}`);
       await expect(page.getByRole('textbox', { name: '消息输入' })).toBeVisible();
       await settle(page);
     });

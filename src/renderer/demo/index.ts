@@ -5,7 +5,9 @@ import type { TodeXDesktopApi } from '../../preload/index';
 import { installBrowserDesktopBridge } from '../lib/browserDesktop';
 import {
   ACTIVE_SELECTION_STORAGE_KEY,
+  BACKEND_CONNECTIONS_STORAGE_KEY,
   CONVERSATIONS_STORAGE_KEY,
+  DEVICE_SECRET_STORAGE_KEY,
   SETTINGS_STORAGE_KEY,
   USAGE_RECORDS_STORAGE_KEY,
   WORKSPACES_STORAGE_KEY,
@@ -16,13 +18,14 @@ import {
 import { setLocale } from '../i18n';
 import {
   DEMO_ROOT,
+  DEMO_SECOND_SERVER_URL,
   DEMO_SERVER_URL,
   demoActiveConversationId,
   demoJournals,
   demoUsageRecords,
   demoWorkspaces,
 } from './fixtures';
-import { demoTransport, installDemoFetch } from './transport';
+import { demoSecondTransport, demoTransport, installDemoFetch } from './transport';
 
 export function installDemoMode(): boolean {
   if (window.todexDesktop) {
@@ -48,13 +51,30 @@ export function installDemoMode(): boolean {
       store.set(key, structuredClone(value));
     },
   };
+  // `backends=2`: a second backend, both paired, for screens that need two
+  // (config sync). Off by default so every other screen keeps one backend.
+  if (params.get('backends') === '2') {
+    const profile = (id: string, name: string, serverUrl: string, labelColor: string) => ({
+      id, name, serverUrl, labelColor, tenantId: 'default', encryptionProtocol: 'none', encryptionPublicKey: '', transportVerified: false, createdAt: 0, updatedAt: 0,
+    });
+    store.set(BACKEND_CONNECTIONS_STORAGE_KEY, [
+      profile('default-backend', 'MBP', DEMO_SERVER_URL, '#3b82f6'),
+      profile('demo-g14', 'G14', DEMO_SECOND_SERVER_URL, '#22c55e'),
+    ]);
+    // Never a real key: the fixtures transport neither signs nor checks.
+    bridge.secureStore = {
+      get: async (key) => (key.startsWith(`${DEVICE_SECRET_STORAGE_KEY}.`) ? 'demo-device-secret' : null),
+      set: async () => undefined,
+      available: async () => true,
+    };
+  }
   const theme = params.get('theme');
   if (theme === 'dark' || theme === 'light') {
     bridge.theme = { ...bridge.theme, shouldUseDark: async () => theme === 'dark', onUpdated: () => () => undefined };
   }
   if (!params.has('lang')) setLocale('zh-CN');
 
-  overrideBackendTransport(demoTransport);
+  overrideBackendTransport((serverUrl) => (serverUrl === DEMO_SECOND_SERVER_URL ? demoSecondTransport : demoTransport));
   installDemoFetch();
   document.title = 'TodeX · 演示预览';
   return true;

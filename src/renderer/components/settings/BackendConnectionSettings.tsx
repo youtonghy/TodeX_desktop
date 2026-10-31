@@ -182,7 +182,7 @@ function AgentConfigSyncSuggestion({ session, profile, onSync }: {
         icon={RiArrowLeftRightLine}
         title={t('configSync.suggestTitle', { name: source.name })}
         description={t('configSync.suggestHint')}
-        onPress={() => onSync({ sourceId: source.id, targetIds: [profile.id], categories: AGENT_CONFIG_CATEGORIES })}
+        onPress={() => onSync({ sourceId: source.id, targetId: profile.id, categories: AGENT_CONFIG_CATEGORIES })}
       />
     </SettingsCard>
   );

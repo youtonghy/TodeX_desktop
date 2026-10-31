@@ -834,6 +834,8 @@ function route(request: SecureRequest): SecureResponse {
   const now = new Date().toISOString();
 
   if (path.startsWith('/v2/catalog/')) return catalogRoute(method, path, provider, readBody(request));
+  const exportAgent = path.match(/^\/v2\/agent-providers\/([^/]+)\/export$/)?.[1];
+  if (exportAgent && method === 'GET') return demoProviderExport(decodeURIComponent(exportAgent));
   const settingsFile = demoCliSettings[path.match(/^\/v2\/providers\/([^/]+)\/settings$/)?.[1] ?? ''];
   if (settingsFile && method === 'GET') return json(demoCliSettingsDocument(settingsFile));
   const instructionsResponse = demoInstructionsRoute(method, path, readBody(request));
@@ -1281,15 +1283,73 @@ function playAgentCallTurn(journal: Journal, turnId: string, text: string): void
   ]);
 }
 
-export const demoTransport: SecureTransport = {
-  mode: 'plaintext',
-  fetch: async (request) => route(request),
-  fetchStream: async (request): Promise<SecureStreamResponse> => {
-    const response = route(request);
-    return { status: response.status, headers: response.headers, body: (async function* () { yield response.body; })() };
-  },
-  openSocket: (options = {}) => new DemoSocket(options),
-};
+/** What "export providers" hands out: the fixtures with their secrets in place. */
+function demoProviderExport(agent: string, drop: readonly string[] = []): SecureResponse {
+  const bucket = fixtures.demoAgentProviders.agents[agent as keyof typeof fixtures.demoAgentProviders.agents];
+  if (!bucket) return notFound('GET', `/v2/agent-providers/${agent}/export`);
+  const reveal = (value: unknown): unknown => (value === '__TODEX_MASKED__' ? 'sk-demo-0123456789abcdef' : value);
+  return json({
+    format: 'todex.agent-providers',
+    version: 1,
+    agent,
+    exportedAt: Date.now(),
+    providers: bucket.providers
+      .filter((item) => !drop.includes(item.id))
+      .map(({ createdAt: _createdAt, updatedAt: _updatedAt, ...item }) => ({
+        ...item,
+        settingsConfig: Object.fromEntries(Object.entries(item.settingsConfig).map(([key, value]) => [key, reveal(value)])),
+      })),
+  });
+}
+
+// The second backend (`?demo&backends=2`) answers like the first, except for
+// the config it holds, so the config sync preview has differences to show.
+const SECOND_ONLY_MCP = 'g14:mcp:sentry';
+
+function secondRoute(request: SecureRequest): SecureResponse {
+  const method = request.method.toUpperCase();
+  const url = new URL(request.path, fixtures.DEMO_SECOND_SERVER_URL);
+  const path = url.pathname;
+  const provider = (readQuery(request, url).get('provider') ?? 'claude-code') as ProviderKind;
+  if (method === 'GET') {
+    if (path === '/v2/agent-providers/claude-code/export') return demoProviderExport('claude-code', ['team-gateway']);
+    if (path === '/v2/history/cleanup-policy') {
+      const current = demoCleanupPolicy();
+      return json({ ...current, policy: { ...current.policy, enabled: !current.policy.enabled } });
+    }
+    if (path === '/v2/instruction-presets') {
+      const response = route(request);
+      const { presets } = JSON.parse(decoder.decode(response.body)) as { presets: unknown[] };
+      return json({ presets: presets.slice(0, -1) });
+    }
+    if (path === '/v2/catalog/mcp' && provider === 'claude-code') {
+      const catalog = JSON.parse(decoder.decode(route(request).body)) as McpCatalog;
+      const servers = catalog.servers.filter((server) => server.scope !== 'user').concat(catalog.servers.filter((server) => server.scope === 'user').slice(1));
+      const extra: McpServerCatalogDescriptor = { resourceId: SECOND_ONLY_MCP, name: 'sentry', provider, scope: 'user', source: 'claude-user', transport: 'http', enabled: true, active: true };
+      return json({ ...catalog, servers: [...servers, extra] });
+    }
+    if (path === `/v2/catalog/mcp/${encodeURIComponent(SECOND_ONLY_MCP)}`) {
+      return json({ descriptor: { resourceId: SECOND_ONLY_MCP, name: 'sentry' }, path: '~/.claude.json', format: 'json', config: { type: 'http', url: 'https://mcp.sentry.dev/mcp', headers: { Authorization: 'Bearer sntrys_demo' } } });
+    }
+  }
+  return route(request);
+}
+
+function transportFor(answer: (request: SecureRequest) => SecureResponse): SecureTransport {
+  return {
+    mode: 'plaintext',
+    fetch: async (request) => answer(request),
+    fetchStream: async (request): Promise<SecureStreamResponse> => {
+      const response = answer(request);
+      return { status: response.status, headers: response.headers, body: (async function* () { yield response.body; })() };
+    },
+    openSocket: (options = {}) => new DemoSocket(options),
+  };
+}
+
+export const demoSecondTransport = transportFor(secondRoute);
+
+export const demoTransport = transportFor(route);
 
 /** Answers the two calls that use `window.fetch` directly (health polling and
  * the transport policy probe) from the same routes. */
@@ -1297,8 +1357,10 @@ export function installDemoFetch(): void {
   const realFetch = window.fetch.bind(window);
   window.fetch = async (input, init) => {
     const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url, window.location.href);
-    if (url.origin !== new URL(fixtures.DEMO_SERVER_URL).origin) return realFetch(input, init);
-    const response = route({ method: init?.method ?? 'GET', path: url.pathname, query: url.search });
+    const answer = url.origin === new URL(fixtures.DEMO_SERVER_URL).origin ? route
+      : url.origin === new URL(fixtures.DEMO_SECOND_SERVER_URL).origin ? secondRoute : null;
+    if (!answer) return realFetch(input, init);
+    const response = answer({ method: init?.method ?? 'GET', path: url.pathname, query: url.search });
     return new Response(decoder.decode(response.body), { status: response.status, headers: response.headers });
   };
 }

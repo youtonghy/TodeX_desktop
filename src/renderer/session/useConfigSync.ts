@@ -9,47 +9,54 @@ import {
   type ConfigSyncBackend,
   type ConfigSyncBaseline,
   type ConfigSyncCategory,
-  type ConfigSyncEntry,
-  type ConfigSyncError,
   type ConfigSyncResult,
+  type ConfigSyncSnapshot,
 } from '@todex/protocol/configSync';
 import { loadJson, saveJson } from '../lib/storage';
+import { configSyncRows, type ConfigSyncRow } from './configSyncView';
 import { CONFIG_SYNC_STORAGE_KEY, backendApi } from './helpers';
 import type { TodeXSession } from './useTodeXSession';
-
-export type ConfigSyncPhase = 'idle' | 'checking' | 'ready' | 'applying' | 'done';
 
 /** Why a backend cannot take part in a sync; null when it can. */
 export type ConfigSyncIneligible = 'unpaired' | 'disconnected' | null;
 
-export type ConfigSyncTargetPlan = {
+/** What one side of the view has read from its backend. */
+export type ConfigSyncSide = {
   backendId: string;
-  entries: ConfigSyncEntry[];
-  selected: Set<string>;
-  results: Map<string, ConfigSyncResult>;
-  /** Read failures on this target (the source's are in `sourceErrors`). */
-  errors: ConfigSyncError[];
+  snapshot: ConfigSyncSnapshot | null;
+  loading: boolean;
+  failure: string;
 };
 
 /** Where the sync page starts (e.g. "sync agent config to this backend"). */
 export type ConfigSyncPreset = {
   sourceId: string;
-  targetIds: string[];
+  targetId: string;
+  /** Categories preselected for writing; the others stay visible but unticked. */
   categories: ConfigSyncCategory[];
 };
 
 /** Baselines per `source → target` pair. */
 type StoredBaselines = Record<string, ConfigSyncBaseline>;
+type Side = 'source' | 'target';
 
 const pairKey = (sourceId: string, targetId: string) => `${sourceId}->${targetId}`;
 
+const emptySide = (backendId: string): ConfigSyncSide => ({ backendId, snapshot: null, loading: false, failure: '' });
+
+const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
+
 /**
- * One-way config sync from one backend to others: pick the backends and
- * categories, check the differences, untick what should stay, then write.
- * Values read from the backends (secrets included) live in memory only; the
- * stored baseline holds content hashes.
+ * One-way config sync between two backends shown side by side: each side is
+ * read as soon as it is picked, every item is lined up with its counterpart,
+ * and the ticked ones are written to the target. Values read from the
+ * backends (secrets included) live in memory only; the stored baseline holds
+ * content hashes.
  */
-export function useConfigSync(session: TodeXSession, preset?: ConfigSyncPreset) {
+export function useConfigSync(session: TodeXSession, preset?: ConfigSyncPreset, { active = true }: {
+  /** Off: nothing is read yet (a wizard step that is not showing). */
+  active?: boolean;
+} = {}) {
   const { backendConnections, backendLinkStatus, settingsForBackend } = session;
 
   const ineligibility = useCallback((backendId: string): ConfigSyncIneligible => {
@@ -60,170 +67,212 @@ export function useConfigSync(session: TodeXSession, preset?: ConfigSyncPreset) 
     return null;
   }, [backendConnections, backendLinkStatus]);
 
-  const [sourceId, setSourceIdState] = useState<string>(() => preset?.sourceId ?? backendConnections[0]?.id ?? '');
-  const [targetIds, setTargetIds] = useState<string[]>(() => preset?.targetIds.filter(id => id !== preset.sourceId) ?? []);
-  const [categories, setCategories] = useState<ConfigSyncCategory[]>(
+  const firstOther = useCallback(
+    (excluded: string | undefined) => backendConnections.find(item => item.id !== excluded)?.id ?? '',
+    [backendConnections],
+  );
+  const [source, setSource] = useState<ConfigSyncSide>(() => emptySide(preset?.sourceId || firstOther(preset?.targetId)));
+  const [target, setTarget] = useState<ConfigSyncSide>(() => emptySide(preset?.targetId || firstOther(preset?.sourceId || firstOther(undefined))));
+  const [categories] = useState<ConfigSyncCategory[]>(
     () => (preset ? CONFIG_SYNC_CATEGORIES.filter(category => preset.categories.includes(category)) : [...CONFIG_SYNC_CATEGORIES]),
   );
-  const [phase, setPhase] = useState<ConfigSyncPhase>('idle');
-  const [plans, setPlans] = useState<ConfigSyncTargetPlan[]>([]);
-  const [sourceErrors, setSourceErrors] = useState<ConfigSyncError[]>([]);
-  const [failure, setFailure] = useState('');
+  const [baselines, setBaselines] = useState<StoredBaselines>({});
+  // The user's ticks, valid only for the rows they were made on.
+  const [picks, setPicks] = useState<{ rows: ConfigSyncRow[]; keys: Set<string> } | null>(null);
+  const [results, setResults] = useState<Map<string, ConfigSyncResult>>(() => new Map());
+  const [applying, setApplying] = useState(false);
+  // Set once a write finishes; picking, swapping or refreshing clears it.
+  const [applied, setApplied] = useState(false);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
-  const baselines = useRef<StoredBaselines>({});
-  // Each check or apply bumps this; a run that is no longer current drops its results.
-  const run = useRef(0);
+  // Each read or write bumps its side's counter; one that is no longer current drops its result.
+  const runs = useRef<Record<Side, number>>({ source: 0, target: 0 });
 
   useEffect(() => {
     let cancelled = false;
     void loadJson<StoredBaselines>(CONFIG_SYNC_STORAGE_KEY, {}).then((value) => {
-      if (!cancelled) baselines.current = value && typeof value === 'object' ? value : {};
+      if (!cancelled) setBaselines(value && typeof value === 'object' ? value : {});
     });
     return () => { cancelled = true; };
   }, []);
 
-  // A removed backend leaves the selection.
+  // A removed backend leaves the view.
   useEffect(() => {
     const ids = new Set(backendConnections.map(item => item.id));
-    if (!ids.has(sourceId)) setSourceIdState(backendConnections[0]?.id ?? '');
-    setTargetIds(current => (current.every(id => ids.has(id)) ? current : current.filter(id => ids.has(id))));
-  }, [backendConnections, sourceId]);
+    if (!ids.has(source.backendId)) setSource(emptySide(firstOther(target.backendId)));
+    else if (!ids.has(target.backendId)) setTarget(emptySide(firstOther(source.backendId)));
+  }, [backendConnections, firstOther, source.backendId, target.backendId]);
 
-  const reset = useCallback(() => {
-    run.current += 1;
-    setPhase('idle');
-    setPlans([]);
-    setSourceErrors([]);
-    setFailure('');
-    setProgress(null);
-  }, []);
-
-  const setSourceId = useCallback((id: string) => {
-    setSourceIdState(id);
-    setTargetIds(current => current.filter(target => target !== id));
-    reset();
-  }, [reset]);
-
-  const toggleTarget = useCallback((id: string, on: boolean) => {
-    setTargetIds(current => (on ? [...new Set([...current, id])] : current.filter(target => target !== id)));
-    reset();
-  }, [reset]);
-
-  const toggleCategory = useCallback((category: ConfigSyncCategory, on: boolean) => {
-    setCategories(current => CONFIG_SYNC_CATEGORIES.filter(item => (item === category ? on : current.includes(item))));
-    reset();
-  }, [reset]);
-
-  const backendFor = useCallback((backendId: string): ConfigSyncBackend => ({
+  // Through a ref: the session hands out new settings objects on every render,
+  // and a new function each time would re-run the read effects.
+  const backendFor = useRef<(backendId: string) => ConfigSyncBackend>(() => { throw new Error('config sync: no backend'); });
+  backendFor.current = (backendId: string) => ({
     // Writes carrying whole skill bundles or provider exports can be slow.
     api: backendApi(settingsForBackend(backendId), { timeout: 60_000 }),
     workspace: backendLinkStatus[backendId]?.serverVersion?.scratch_workspace_root ?? '',
-  }), [backendLinkStatus, settingsForBackend]);
+  });
 
-  const check = useCallback(async () => {
-    const current = ++run.current;
-    setPhase('checking');
-    setFailure('');
-    setPlans([]);
-    setProgress(null);
+  const read = useCallback(async (side: Side, backendId: string) => {
+    const setSide = side === 'source' ? setSource : setTarget;
+    const current = ++runs.current[side];
+    setSide(prev => (prev.backendId === backendId ? { ...prev, loading: true, failure: '' } : prev));
     try {
-      const [source, ...targets] = await Promise.all([
-        collectConfigSync(backendFor(sourceId), categories),
-        ...targetIds.map(id => collectConfigSync(backendFor(id), categories)),
-      ]);
-      if (run.current !== current) return;
-      setSourceErrors(source.errors);
-      setPlans(targetIds.map((backendId, index) => {
-        const entries = planConfigSync(source, targets[index], baselines.current[pairKey(sourceId, backendId)]);
-        return {
-          backendId,
-          entries,
-          selected: new Set(entries.filter(entry => entry.selected).map(entry => entry.key)),
-          results: new Map(),
-          errors: targets[index].errors,
-        };
-      }));
-      setPhase('ready');
+      const snapshot = await collectConfigSync(backendFor.current(backendId), CONFIG_SYNC_CATEGORIES);
+      if (runs.current[side] !== current) return;
+      setSide(prev => (prev.backendId === backendId ? { backendId, snapshot, loading: false, failure: '' } : prev));
     } catch (error) {
-      if (run.current !== current) return;
-      setFailure(error instanceof Error ? error.message : String(error));
-      setPhase('idle');
+      if (runs.current[side] !== current) return;
+      setSide(prev => (prev.backendId === backendId ? { ...prev, loading: false, failure: errorText(error) } : prev));
     }
-  }, [backendFor, categories, sourceId, targetIds]);
-
-  const toggleEntry = useCallback((backendId: string, keys: string[], on: boolean) => {
-    setPlans(current => current.map((plan) => {
-      if (plan.backendId !== backendId) return plan;
-      const selected = new Set(plan.selected);
-      for (const key of keys) {
-        const entry = plan.entries.find(item => item.key === key);
-        if (!entry || !isConfigSyncSelectable(entry.status)) continue;
-        if (on) selected.add(key); else selected.delete(key);
-      }
-      return { ...plan, selected };
-    }));
   }, []);
 
-  const selectedCount = useMemo(() => plans.reduce((sum, plan) => sum + plan.selected.size, 0), [plans]);
+  const sourceBlocked = ineligibility(source.backendId);
+  const targetBlocked = ineligibility(target.backendId);
+  const sourceReadable = active && Boolean(source.backendId) && !sourceBlocked;
+  const targetReadable = active && Boolean(target.backendId) && !targetBlocked;
+  const sourcePending = sourceReadable && !source.snapshot && !source.failure;
+  const targetPending = targetReadable && !target.snapshot && !target.failure;
+
+  // A side reads itself once it is picked and reachable, and again when refreshed.
+  useEffect(() => {
+    if (sourcePending) void read('source', source.backendId);
+  }, [read, source.backendId, sourcePending]);
+  useEffect(() => {
+    if (targetPending) void read('target', target.backendId);
+  }, [read, target.backendId, targetPending]);
+
+  const baseline = baselines[pairKey(source.backendId, target.backendId)];
+  const rows = useMemo<ConfigSyncRow[]>(() => {
+    if (!source.snapshot || !target.snapshot || source.backendId === target.backendId) return [];
+    return configSyncRows(planConfigSync(source.snapshot, target.snapshot, baseline), target.snapshot);
+  }, [baseline, source.backendId, source.snapshot, target.backendId, target.snapshot]);
+
+  // Fresh rows start from the plan's own picks, within the preselected
+  // categories. Derived, not set in an effect, so an apply in the same commit
+  // that lined the rows up already sees them.
+  const defaults = useMemo(
+    () => new Set(rows.filter(row => row.entry?.selected && categories.includes(row.category)).map(row => row.key)),
+    [categories, rows],
+  );
+  const selected = picks?.rows === rows ? picks.keys : defaults;
+
+  const swap = useCallback(() => {
+    runs.current.source += 1;
+    runs.current.target += 1;
+    setResults(new Map());
+    setApplied(false);
+    // Snapshots belong to backends, not to sides: swapping needs no new read.
+    setSource({ ...target, loading: false, snapshot: target.loading ? null : target.snapshot });
+    setTarget({ ...source, loading: false, snapshot: source.loading ? null : source.snapshot });
+  }, [source, target]);
+
+  const pick = useCallback((side: Side, backendId: string) => {
+    if (backendId === (side === 'source' ? source : target).backendId) return;
+    // Picking the other side's backend swaps the two.
+    if (backendId === (side === 'source' ? target : source).backendId) {
+      swap();
+      return;
+    }
+    runs.current[side] += 1;
+    setResults(new Map());
+    setApplied(false);
+    (side === 'source' ? setSource : setTarget)(emptySide(backendId));
+  }, [source, swap, target]);
+
+  /** Points both sides at once (a wizard aiming at a fixed pair). */
+  const select = useCallback((sourceId: string, targetId: string) => {
+    if (sourceId === source.backendId && targetId === target.backendId) return;
+    setResults(new Map());
+    setApplied(false);
+    // A side that keeps its backend keeps its read, finished or in flight.
+    if (sourceId !== source.backendId) {
+      runs.current.source += 1;
+      setSource(emptySide(sourceId));
+    }
+    if (targetId !== target.backendId) {
+      runs.current.target += 1;
+      setTarget(emptySide(targetId));
+    }
+  }, [source.backendId, target.backendId]);
+
+  const setSourceId = useCallback((id: string) => pick('source', id), [pick]);
+  const setTargetId = useCallback((id: string) => pick('target', id), [pick]);
+
+  const refresh = useCallback(() => {
+    setResults(new Map());
+    setApplied(false);
+    // A side without a snapshot or failure reads again.
+    setSource(prev => emptySide(prev.backendId));
+    setTarget(prev => emptySide(prev.backendId));
+  }, []);
+
+  const toggleEntries = useCallback((keys: string[], on: boolean) => {
+    setPicks((current) => {
+      const next = new Set(current?.rows === rows ? current.keys : defaults);
+      for (const key of keys) {
+        const row = rows.find(item => item.key === key);
+        if (!row?.entry || !isConfigSyncSelectable(row.entry.status)) continue;
+        if (on) next.add(key); else next.delete(key);
+      }
+      return { rows, keys: next };
+    });
+  }, [defaults, rows]);
 
   const apply = useCallback(async () => {
-    const current = ++run.current;
-    const work = plans.map(plan => ({ plan, chosen: plan.entries.filter(entry => plan.selected.has(entry.key)) }));
-    const total = work.reduce((sum, item) => sum + item.chosen.length, 0);
-    let done = 0;
-    setPhase('applying');
-    setProgress({ done: 0, total });
-    const finished: ConfigSyncTargetPlan[] = [];
-    for (const { plan, chosen } of work) {
-      const target = backendFor(plan.backendId);
-      let results: ConfigSyncResult[] = [];
-      try {
-        if (chosen.length) {
-          const base = done;
-          results = await applyConfigSync(target, chosen, (count) => {
-            if (run.current === current) setProgress({ done: base + count, total });
-          });
-        }
-        done += chosen.length;
-        // Re-read the target so the baseline holds what it actually stored.
-        const after = await collectConfigSync(target, [...new Set(plan.entries.map(entry => entry.category))]);
-        const key = pairKey(sourceId, plan.backendId);
-        baselines.current = {
-          ...baselines.current,
-          [key]: nextConfigSyncBaseline(baselines.current[key] ?? {}, plan.entries, results, after),
-        };
-        await saveJson(CONFIG_SYNC_STORAGE_KEY, baselines.current);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        const reported = new Set(results.map(result => result.key));
-        results = [...results, ...chosen.filter(entry => !reported.has(entry.key)).map(entry => ({ key: entry.key, ok: false, error: message }))];
+    const entries = rows.flatMap(row => (row.entry ? [row.entry] : []));
+    const chosen = entries.filter(entry => selected.has(entry.key));
+    const sourceId = source.backendId;
+    const targetId = target.backendId;
+    const backend = backendFor.current(targetId);
+    const current = ++runs.current.target;
+    setApplying(true);
+    setProgress({ done: 0, total: chosen.length });
+    let written: ConfigSyncResult[] = [];
+    try {
+      if (chosen.length) {
+        written = await applyConfigSync(backend, chosen, (done) => {
+          if (runs.current.target === current) setProgress({ done, total: chosen.length });
+        });
       }
-      finished.push({ ...plan, results: new Map(results.map(result => [result.key, result])), selected: new Set() });
+      // Re-read the target: the baseline holds what it actually stored, and the view shows it.
+      const after = await collectConfigSync(backend, CONFIG_SYNC_CATEGORIES);
+      const key = pairKey(sourceId, targetId);
+      const stored = await loadJson<StoredBaselines>(CONFIG_SYNC_STORAGE_KEY, {});
+      const next = { ...stored, [key]: nextConfigSyncBaseline(stored?.[key] ?? {}, entries, written, after) };
+      await saveJson(CONFIG_SYNC_STORAGE_KEY, next);
+      setBaselines(next);
+      if (runs.current.target === current) setTarget(prev => (prev.backendId === targetId ? { ...prev, snapshot: after } : prev));
+    } catch (error) {
+      const message = errorText(error);
+      const reported = new Set(written.map(result => result.key));
+      written = [...written, ...chosen.filter(entry => !reported.has(entry.key)).map(entry => ({ key: entry.key, ok: false, error: message }))];
     }
-    if (run.current !== current) return;
-    setPlans(finished);
+    setResults(new Map(written.map(result => [result.key, result])));
     setProgress(null);
-    setPhase('done');
-  }, [backendFor, plans, sourceId]);
+    setApplying(false);
+    setApplied(true);
+  }, [rows, selected, source.backendId, target.backendId]);
 
   return {
-    sourceId,
+    source,
+    target,
+    sourceBlocked,
+    targetBlocked,
     setSourceId,
-    targetIds,
-    toggleTarget,
+    setTargetId,
+    select,
+    swap,
+    refresh,
     categories,
-    toggleCategory,
-    ineligibility,
-    phase,
-    plans,
-    sourceErrors,
-    failure,
+    rows,
+    selected,
+    results,
+    /** Both sides are read and lined up. */
+    ready: Boolean(source.snapshot && target.snapshot) && !source.loading && !target.loading && source.backendId !== target.backendId,
+    applying,
+    applied,
     progress,
-    selectedCount,
-    check,
-    toggleEntry,
+    toggleEntries,
     apply,
-    reset,
   };
 }
 

@@ -1,3 +1,4 @@
+import type { Page } from '@playwright/test';
 import { expect, settle, test, volatile, type Theme } from './demo';
 
 // Full-window screenshots of the main screens in the `?demo` preview. A diff
@@ -121,6 +122,32 @@ for (const [tab, slug] of Object.entries(SETTINGS_TABS)) {
     await expect(page).toHaveScreenshot(`settings-${slug}-light.png`, { mask: volatile(page) });
   });
 }
+
+// Two paired backends (`backends=2`), the second holding slightly different config.
+async function openConfigSync(page: Page, openDemo: (theme?: Theme, query?: string) => Promise<void>, theme: Theme) {
+  await openDemo(theme, 'backends=2');
+  await page.getByRole('button', { name: '设置', exact: true }).click();
+  await page.getByRole('tab', { name: '后端连接', exact: true }).click();
+  await page.getByRole('button', { name: /^配置同步/ }).click();
+  await expect(page.getByText(/^\d+ 项可同步/)).toBeVisible();
+}
+
+for (const theme of ['light', 'dark'] as const) {
+  test(`config sync: two backends side by side (${theme})`, async ({ page, openDemo }) => {
+    await openConfigSync(page, openDemo, theme);
+    await settle(page);
+    await expect(page).toHaveScreenshot(`config-sync-${theme}.png`, { mask: volatile(page) });
+  });
+}
+
+test('config sync: both values of an item, secrets hidden', async ({ page, openDemo }) => {
+  await openConfigSync(page, openDemo, 'light');
+  const mcp = page.getByRole('region', { name: 'MCP' });
+  await mcp.getByRole('button', { name: '查看内容' }).last().click();
+  await expect(mcp.getByText('"••••"')).toBeVisible();
+  await settle(page);
+  await expect(page).toHaveScreenshot('config-sync-values-light.png', { mask: volatile(page) });
+});
 
 test('fork from an earlier reply', async ({ page, openDemo }) => {
   await openDemo('light');
