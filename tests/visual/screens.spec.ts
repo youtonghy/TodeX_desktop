@@ -81,6 +81,8 @@ for (const theme of ['light', 'dark'] as Theme[]) {
       await page.getByText('lumen-api', { exact: true }).click();
       await page.getByText('支付回调幂等处理').first().click();
       await expect(page.getByText('等待后台任务（1 个）')).toBeVisible();
+      // The sidebar keeps the conversation marked as working as well.
+      await expect(page.getByRole('row', { name: /支付回调幂等处理/ }).getByLabel('正在工作')).toBeVisible();
       // The composer stays lit while the agent waits; its light fades in.
       await expect.poll(() => page.locator('.bui-composer-loader-rect').first()
         .evaluate(rect => getComputedStyle(rect.closest('svg')!.parentElement!).opacity)).toBe('1');

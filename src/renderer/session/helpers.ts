@@ -553,13 +553,15 @@ export type ConversationStatus = {
   label: string;
 };
 
+/** `backgroundWaits` marks conversations whose turn ended while the agent
+ * still waits on background tasks to report back: they read as working too. */
 export function getConversationStatus(
-  session: { activeConversationId: string; turnIds: Record<string, string> },
+  session: { activeConversationId: string; turnIds: Record<string, string>; backgroundWaits?: Record<string, boolean> },
   conversation: ConversationRecord,
   latestEntry?: TimelineEntry,
   latestIncomingAt?: number,
 ): ConversationStatus | null {
-  if (isConversationHighlighted(conversation, session.activeConversationId, session.turnIds)) {
+  if (isConversationHighlighted(conversation, session.activeConversationId, session.turnIds) || session.backgroundWaits?.[conversation.id]) {
     return { kind: 'working', color: 'bg-chart-7', border: 'border-chart-7', label: t('sidebar.statusWorking') };
   }
   // The dot is an attention marker: it clears once the conversation has been

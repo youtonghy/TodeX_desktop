@@ -43,7 +43,7 @@ import { useSidebarGroupCollapse } from '../session/useSidebarGroupCollapse';
 import { useSidebarLayout, useSidebarWorkspaceExpansion } from '../session/sidebarLayout';
 import { platform } from '../platform';
 import { sameRecordValues, useRuntimeSelector, useTimelineSelector } from '../session/conversationStore';
-import type { ConversationRuntime } from '@todex/protocol/conversationRuntime';
+import { awaitedBackgroundTasks, type ConversationRuntime } from '@todex/protocol/conversationRuntime';
 import { useKanbanTasks } from '../session/kanbanTasks';
 import { setFeaturesMoreOpen, useFeatureModes, useFeaturesMoreOpen, type FeatureId } from '../session/featureToggles';
 import { BACKEND_LABEL_COLORS, backendLabelColor } from '../session/backendColors';
@@ -704,6 +704,17 @@ export function AppSidebar({
     for (const [id, runtime] of Object.entries(runtimes)) if (runtime.followUps) map[id] = runtime.followUps;
     return map;
   }, sameRecordValues);
+  // Conversations whose turn ended while the agent still waits on background
+  // tasks: they keep reading as working until it reports back.
+  const backgroundWaits = useRuntimeSelector(session.stores, (runtimes) => {
+    const map: Record<string, boolean> = {};
+    for (const [id, runtime] of Object.entries(runtimes)) if (awaitedBackgroundTasks(runtime.backgroundTasks).length > 0) map[id] = true;
+    return map;
+  }, sameRecordValues);
+  const statusSession = useMemo(
+    () => ({ activeConversationId: session.activeConversationId, turnIds: session.turnIds, backgroundWaits }),
+    [session.activeConversationId, session.turnIds, backgroundWaits],
+  );
 
   // A workspace surfaces its most urgent conversation status: a running turn
   // beats an unread error, which beats a plain unread marker — the same
@@ -713,7 +724,7 @@ export function AppSidebar({
     const map: Record<string, keyof typeof rank> = {};
     for (const conversation of session.conversations) {
       if (!conversation.workspaceId || conversation.archived || !isListedConversation(conversation)) continue;
-      const status = getConversationStatus(session, conversation, timelineInfoMap[conversation.id]?.latestEntry, timelineInfoMap[conversation.id]?.latestIncomingAt);
+      const status = getConversationStatus(statusSession, conversation, timelineInfoMap[conversation.id]?.latestEntry, timelineInfoMap[conversation.id]?.latestIncomingAt);
       if (!status) continue;
       const rowId = rowIdOf(conversation);
       const current = map[rowId];
@@ -722,7 +733,7 @@ export function AppSidebar({
       }
     }
     return map;
-  }, [session, timelineInfoMap, rowIdOf]);
+  }, [session, statusSession, timelineInfoMap, rowIdOf]);
 
   // Workspaces use an explicit manual order and never move when a conversation updates.
   // The built-in None workspace always leads the list.
@@ -1061,7 +1072,7 @@ export function AppSidebar({
   // the unified workspace tree (tree leaves).
   const conversationRow = (conversation: TodeXSession['conversations'][number]) => {
     const isSelected = conversation.id === session.activeConversationId;
-    const status = getConversationStatus(session, conversation, timelineInfoMap[conversation.id]?.latestEntry, timelineInfoMap[conversation.id]?.latestIncomingAt);
+    const status = getConversationStatus(statusSession, conversation, timelineInfoMap[conversation.id]?.latestEntry, timelineInfoMap[conversation.id]?.latestIncomingAt);
     const taskMeta = conversationTaskMetaMap[conversation.id];
     // A daemon-paused follow-up queue waiting out a provider rate
     // limit gets a clock badge; it reports its own resumeAt.
@@ -1071,7 +1082,7 @@ export function AppSidebar({
     const resetAt = Number.isFinite(backendWait) && backendWait > Date.now() ? backendWait : undefined;
     const tasksDone = Boolean(taskMeta && taskMeta.pending === 0);
     const title = conversationDisplayTitle(conversation, timelineInfoMap[conversation.id]?.firstPrompt ?? '');
-    const running = isConversationHighlighted(conversation, session.activeConversationId, session.turnIds);
+    const running = isConversationHighlighted(conversation, session.activeConversationId, session.turnIds) || Boolean(backgroundWaits[conversation.id]);
     // Search results come from every workspace, so each names its own.
     const resultWorkspace = query ? rowById.get(rowIdOf(conversation)) ?? workspaceById.get(conversation.workspaceId) : undefined;
     const resultSnippet = query ? searchSnippets.get(conversation.id) : undefined;
