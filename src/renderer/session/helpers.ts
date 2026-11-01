@@ -897,7 +897,9 @@ export function referenceNamesInText(text: string): string[] {
   return composerTokensInText(text).filter((item) => item.kind === 'reference').map((item) => item.name);
 }
 
-/** Keep every capsule name distinct so its token maps to exactly one attachment. */
+/** Keep every capsule name distinct so its token maps to exactly one attachment.
+ * The counter goes before the extension (`image 2.png`): the name is also the
+ * uploaded file's name, and the backend picks an image's type by extension. */
 export function uniqueAttachmentName(
   base: string,
   attachments: readonly ComposerAttachmentDraft[],
@@ -907,10 +909,12 @@ export function uniqueAttachmentName(
     ...attachments.map((item) => item.name),
     ...composerTokenNamesInText(draftText),
   ]);
+  const dot = base.lastIndexOf('.');
+  const [stem, extension] = dot > 0 ? [base.slice(0, dot), base.slice(dot)] : [base, ''];
   let name = base;
   let index = 2;
   while (taken.has(name)) {
-    name = `${base} ${index}`;
+    name = `${stem} ${index}${extension}`;
     index += 1;
   }
   return name;
