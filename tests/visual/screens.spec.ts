@@ -137,6 +137,21 @@ for (const [tab, slug] of Object.entries(SETTINGS_TABS)) {
   });
 }
 
+// Computer Use's page with the optional agent-desktop engine picked.
+test('settings: computer use engine', async ({ page, openDemo }) => {
+  await openDemo('light');
+  await page.getByRole('button', { name: '设置', exact: true }).click();
+  await page.getByRole('tab', { name: 'Agent 桌面工具', exact: true }).click();
+  await page.getByRole('button', { name: /^Computer Use/ }).click();
+  // The switch's input is visually hidden behind its track.
+  await page.getByRole('switch', { name: '允许 Agent 控制 lumen-devbox' }).check({ force: true });
+  await page.getByRole('button', { name: '内置 引擎' }).click();
+  await page.getByRole('option', { name: 'agent-desktop（实验）' }).click();
+  await expect(page.getByText('已就绪')).toBeVisible();
+  await settle(page);
+  await expect(page).toHaveScreenshot('settings-computer-use-engine-light.png', { mask: volatile(page) });
+});
+
 // Two paired backends (`backends=2`), the second holding slightly different config.
 async function openConfigSync(page: Page, openDemo: (theme?: Theme, query?: string) => Promise<void>, theme: Theme) {
   await openDemo(theme, 'backends=2');

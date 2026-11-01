@@ -560,6 +560,10 @@ export const demoAgentDesktop: AgentDesktopSettings = {
     platform: 'linux',
     permissions: { screen: true, accessibility: true },
   },
+  computerEngine: 'native',
+  computerEngines: {
+    agentDesktop: { version: '1.0.2', installed: false, downloading: false, overridden: false, available: false, reason: 'agent-desktop is not installed yet.' },
+  },
 };
 
 /** A small project tree for the Files pane, keyed by directory path relative

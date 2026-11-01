@@ -153,6 +153,7 @@ function BackendDesktopSettings({ session, backend, page, onPageChange }: {
           saving={saving}
           onEnable={selected => { void save(() => api.setAgentComputerEnabled(selected)); }}
           onRequestPermission={permission => { void save(() => api.requestComputerPermissions(permission)); }}
+          onEngineChange={engine => { void save(() => api.setAgentComputerEngine(engine)); }}
         />
       </SettingsSubpage>
     );

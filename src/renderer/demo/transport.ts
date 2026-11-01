@@ -1064,6 +1064,15 @@ function route(request: SecureRequest): SecureResponse {
   if (path.startsWith('/v2/agent-desktop') && (method === 'PUT' || method === 'POST' || method === 'PATCH')) {
     if (typeof body.enabled === 'boolean') agentDesktop = { ...agentDesktop, enabled: body.enabled };
     if (typeof body.computerEnabled === 'boolean') agentDesktop = { ...agentDesktop, computerEnabled: body.computerEnabled };
+    // The demo backend "installs" agent-desktop at once.
+    if (body.computerEngine === 'native' || body.computerEngine === 'agentDesktop') {
+      const installed = body.computerEngine === 'agentDesktop' || agentDesktop.computerEngines?.agentDesktop.installed === true;
+      agentDesktop = {
+        ...agentDesktop,
+        computerEngine: body.computerEngine,
+        computerEngines: { agentDesktop: { version: '1.0.2', installed, downloading: false, overridden: false, available: installed, ...(installed ? {} : { reason: 'agent-desktop is not installed yet.' }) } },
+      };
+    }
     return json(agentDesktop);
   }
   const cli = path.match(/^\/v2\/providers\/([^/]+)\/(upgrade|install)$/);
