@@ -2470,6 +2470,8 @@ export const en: Messages = {
   'ssh.hosts.sourceManagedHint': 'Managed by TodeX; can be edited and deleted',
   'ssh.hosts.sourceConfigHint': 'From {path} (read-only); TodeX never modifies this file',
   'ssh.hosts.via': 'via jump host {jump}',
+  'ssh.hosts.listHint': 'Double-click to connect, right-click for more actions',
+  'ssh.hosts.editHost': 'Edit {alias}',
   'ssh.hosts.more': 'More actions for {alias}',
   'ssh.hosts.connect': 'Connect',
   'ssh.hosts.localChip': "This machine",

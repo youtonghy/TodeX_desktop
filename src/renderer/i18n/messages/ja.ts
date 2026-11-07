@@ -2470,6 +2470,8 @@ export const ja: Messages = {
   'ssh.hosts.sourceManagedHint': 'TodeX で管理しています。編集・削除できます',
   'ssh.hosts.sourceConfigHint': '{path} から読み込み（読み取り専用）。TodeX はこのファイルを変更しません',
   'ssh.hosts.via': '踏み台 {jump} 経由',
+  'ssh.hosts.listHint': 'ダブルクリックで接続、右クリックでその他の操作',
+  'ssh.hosts.editHost': '{alias} を編集',
   'ssh.hosts.more': '{alias} のその他の操作',
   'ssh.hosts.connect': '接続',
   'ssh.hosts.localChip': "このマシン",

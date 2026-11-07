@@ -2470,6 +2470,8 @@ export const ko: Messages = {
   'ssh.hosts.sourceManagedHint': 'TodeX에서 관리하며 편집 및 삭제할 수 있습니다',
   'ssh.hosts.sourceConfigHint': '{path}에서 가져옴(읽기 전용). TodeX는 이 파일을 수정하지 않습니다',
   'ssh.hosts.via': '점프 호스트 {jump} 경유',
+  'ssh.hosts.listHint': '더블클릭하여 연결, 오른쪽 클릭으로 추가 작업',
+  'ssh.hosts.editHost': '{alias} 편집',
   'ssh.hosts.more': '{alias} 추가 작업',
   'ssh.hosts.connect': '연결',
   'ssh.hosts.localChip': "이 머신",

@@ -2470,6 +2470,8 @@ export const zhCN = {
   'ssh.hosts.sourceManagedHint': '由 TodeX 管理，可编辑和删除',
   'ssh.hosts.sourceConfigHint': '来自 {path}，只读；TodeX 不会修改该文件',
   'ssh.hosts.via': '经由跳板机 {jump}',
+  'ssh.hosts.listHint': '双击连接，右键查看更多操作',
+  'ssh.hosts.editHost': '编辑 {alias}',
   'ssh.hosts.more': '{alias} 的更多操作',
   'ssh.hosts.connect': '连接',
   'ssh.hosts.localChip': "本机",

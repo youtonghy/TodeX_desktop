@@ -17,6 +17,7 @@ import type {
 import type { KanbanTask, WorkspaceRecord } from '@todex/protocol/todex';
 import type { UsageRecord } from '@todex/protocol/mobileParity';
 import type { AgentDesktopSettings } from '@todex/protocol/agentDesktop';
+import type { SshHostsResponse, SshKeysResponse } from '@todex/protocol/ssh';
 import type { GitScanResult, GitStatusSummary, GitWorkspaceSnapshot } from '../lib/gitWorkspace';
 
 export const DEMO_SERVER_URL = 'http://127.0.0.1:7399';
@@ -599,3 +600,36 @@ export function demoWorkspaceFile(path: string) {
   const name = path.split('/').pop() ?? path;
   return { name, path, mimeType: 'text/plain', sizeBytes: 120, text: `// ${name}\n// 演示文件内容\n` };
 }
+
+/** SSH hosts and FTP sites for the Terminal screen (`/v2/ssh/hosts`). */
+export const demoSshHosts: SshHostsResponse = {
+  localTerminal: true,
+  hosts: [
+    {
+      alias: 'gs-dev',
+      source: 'managed',
+      agentAccess: true,
+      resolved: { hostName: '157.230.18.42', user: 'dev', identityFiles: ['~/.ssh/id_ed25519'] },
+      managed: { alias: 'gs-dev', hostName: '157.230.18.42', user: 'dev', identityFile: '~/.ssh/id_ed25519' },
+    },
+    {
+      alias: 'pp-lax',
+      source: 'managed',
+      agentAccess: false,
+      resolved: { hostName: '149.28.71.6', user: 'root', port: 2222, identityFiles: [] },
+      managed: { alias: 'pp-lax', hostName: '149.28.71.6', user: 'root', port: 2222, authMethod: 'password' },
+    },
+    {
+      alias: 'build-box',
+      source: 'sshConfig',
+      sourcePath: '/home/demo/.ssh/config',
+      agentAccess: false,
+      resolved: { hostName: '10.0.4.12', user: 'ci', proxyJump: 'gs-dev', identityFiles: ['~/.ssh/id_ed25519'] },
+    },
+  ],
+  ftpSites: [
+    { id: 'assets', name: '素材服务器', protocol: 'ftps', host: 'files.example.com', port: 21, user: 'deploy', initialDirectory: '/srv/assets' },
+  ],
+};
+
+export const demoSshKeys: SshKeysResponse = { sshDirectory: '/home/demo/.ssh', agentAvailable: true, keys: [] };

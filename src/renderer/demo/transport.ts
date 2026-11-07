@@ -908,6 +908,10 @@ function route(request: SecureRequest): SecureResponse {
         return json({ cleanupPeriodDays: demoClaudeRetention, settingsPath: '/home/demo/.claude/settings.json' });
       case '/v2/agent-desktop':
         return json(agentDesktop);
+      case '/v2/ssh/hosts':
+        return json(fixtures.demoSshHosts);
+      case '/v2/ssh/keys':
+        return json(fixtures.demoSshKeys);
       case '/v2/agent-browser/profiles':
         return json({ profiles: [{ id: 'default', name: '默认资料', createdAt: Date.now() }], workspaces: {} });
       case '/v2/git/workspace':

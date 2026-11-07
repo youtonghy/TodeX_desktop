@@ -152,6 +152,33 @@ test('settings: computer use engine', async ({ page, openDemo }) => {
   await expect(page).toHaveScreenshot('settings-computer-use-engine-light.png', { mask: volatile(page) });
 });
 
+// Terminal screen: the compact host list, then a host's right-click menu.
+async function openTerminalHosts(page: Page, openDemo: (theme?: Theme, query?: string) => Promise<void>, theme: Theme) {
+  await openDemo(theme);
+  await page.getByRole('button', { name: '终端', exact: true }).click();
+  await expect(page.getByRole('listitem', { name: 'gs-dev' })).toBeVisible();
+}
+
+for (const theme of ['light', 'dark'] as const) {
+  test(`terminal host list (${theme})`, async ({ page, openDemo }) => {
+    await openTerminalHosts(page, openDemo, theme);
+    // Hovering a row reveals its edit and more buttons.
+    await page.getByRole('listitem', { name: 'pp-lax' }).hover();
+    await expect(page.getByRole('button', { name: '编辑 pp-lax' })).toBeVisible();
+    await settle(page);
+    await expect(page).toHaveScreenshot(`terminal-hosts-${theme}.png`, { mask: volatile(page) });
+  });
+}
+
+test('terminal host context menu', async ({ page, openDemo }) => {
+  await openTerminalHosts(page, openDemo, 'light');
+  await page.getByRole('listitem', { name: 'gs-dev' }).getByText('dev@157.230.18.42').click({ button: 'right' });
+  const menu = page.getByRole('menu', { name: 'gs-dev 的更多操作' });
+  await expect(menu.getByRole('menuitemcheckbox', { name: 'Agent 访问' })).toHaveAttribute('aria-checked', 'true');
+  await settle(page);
+  await expect(page).toHaveScreenshot('terminal-host-menu-light.png', { mask: volatile(page) });
+});
+
 // Two paired backends (`backends=2`), the second holding slightly different config.
 async function openConfigSync(page: Page, openDemo: (theme?: Theme, query?: string) => Promise<void>, theme: Theme) {
   await openDemo(theme, 'backends=2');
