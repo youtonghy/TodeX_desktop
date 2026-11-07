@@ -76,6 +76,14 @@ for (const theme of ['light', 'dark'] as Theme[]) {
       await expect(page).toHaveScreenshot(`profile-${theme}.png`, { mask: volatile(page) });
     });
 
+    test('profile charts', async ({ page, openDemo }) => {
+      await openDemo(theme);
+      await page.getByRole('button', { name: '个人主页' }).click();
+      await page.getByText('Agent → 模型流向').scrollIntoViewIfNeeded();
+      await settle(page);
+      await expect(page).toHaveScreenshot(`profile-charts-${theme}.png`, { mask: volatile(page) });
+    });
+
     test('agent goal above the composer', async ({ page, openDemo }) => {
       await openDemo(theme);
       await page.getByText('design-tokens', { exact: true }).click();
