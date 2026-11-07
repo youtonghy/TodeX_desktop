@@ -1,4 +1,4 @@
-import { RiKanbanView2, RiTerminalLine, RiTimerLine } from '@remixicon/react';
+import { RiCalendarTodoLine, RiTerminalLine, RiTimerLine } from '@remixicon/react';
 import { SegmentedControl, SegmentedControlItem } from '@/components/base/segmented-control/segmented-control';
 import { SettingsCard, SettingsGroup, SettingsRow } from './settings/SettingsRows';
 import { setFeatureMode, useFeatureModes, type FeatureId, type FeatureMode } from '../session/featureToggles';
@@ -7,7 +7,7 @@ import { useT, type MessageKey } from '../i18n';
 const FEATURES: Array<{ id: FeatureId; label: MessageKey; hint: MessageKey; icon: typeof RiTimerLine }> = [
   { id: 'scheduledConversations', label: 'schedule.create', hint: 'settings.featureScheduleHint', icon: RiTimerLine },
   { id: 'terminal', label: 'sidebar.terminal', hint: 'settings.featureTerminalHint', icon: RiTerminalLine },
-  { id: 'kanban', label: 'sidebar.kanban', hint: 'settings.featureKanbanHint', icon: RiKanbanView2 },
+  { id: 'kanban', label: 'sidebar.kanban', hint: 'settings.featureKanbanHint', icon: RiCalendarTodoLine },
 ];
 
 /** Shows each optional sidebar feature, folds it under "More", or turns it off. */

@@ -24,7 +24,7 @@ import { sameRecordValues, useTimelineSelector } from '../session/conversationSt
 
 type Props = { session: TodeXSession; onOpenConversation: () => void };
 
-/** The task board: the BoardUI project-board template (status columns, task
+/** The plan: the BoardUI project-board template (status columns, task
  * sheet, create dialog) over the kanban store, plus the scheduled-conversation dialog. */
 export function KanbanPanel({ session, onOpenConversation }: Props) {
   const t = useT();

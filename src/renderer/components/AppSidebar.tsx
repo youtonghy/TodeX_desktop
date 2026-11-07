@@ -1,4 +1,4 @@
-import { RiPushpin2Fill, RiLockLine, RiSpyLine, RiAddLine, RiArrowRightSLine, RiCheckLine, RiFolderReduceLine, RiFoldersLine, RiFolderTransferLine, RiPencilLine, RiEdit2Line, RiErrorWarningLine, RiFolder3Line, RiFolderOpenLine, RiGitBranchLine, RiDeleteBinLine, RiArrowDownSLine, RiBookOpenLine, RiKanbanView2, RiMoreLine, RiPaletteLine, RiPriceTag3Line, RiSettings3Line, RiTerminalLine, RiTimeLine, RiTimerLine } from '@remixicon/react';
+import { RiPushpin2Fill, RiLockLine, RiSpyLine, RiAddLine, RiArrowRightSLine, RiCheckLine, RiFolderReduceLine, RiFoldersLine, RiFolderTransferLine, RiPencilLine, RiEdit2Line, RiErrorWarningLine, RiFolder3Line, RiFolderOpenLine, RiGitBranchLine, RiDeleteBinLine, RiArrowDownSLine, RiBookOpenLine, RiCalendarTodoLine, RiMoreLine, RiPaletteLine, RiPriceTag3Line, RiSettings3Line, RiTerminalLine, RiTimeLine, RiTimerLine } from '@remixicon/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { MouseEvent, ReactNode } from 'react';
 import {
@@ -1700,7 +1700,7 @@ export function AppSidebar({
       feature: 'kanban',
       key: 'kanban',
       label: t('sidebar.kanban'),
-      icon: RiKanbanView2,
+      icon: RiCalendarTodoLine,
       isSelected: kanbanActive,
       toggle: true,
       onClick: () => {

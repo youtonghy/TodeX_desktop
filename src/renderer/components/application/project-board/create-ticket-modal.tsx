@@ -56,10 +56,12 @@ function TaskSelect({ label, value, onChange, renderValue, children }: {
 }
 
 /** Figma default 4491:12600 and filled 4492:12735: a new task, rising in from the bottom. */
-export function CreateTicketModal({ isOpen, onClose, initialStatus, initialWorkspaceId, workspaces, onCreate }: {
+export function CreateTicketModal({ isOpen, onClose, initialStatus, initialDueDate, initialWorkspaceId, workspaces, onCreate }: {
   isOpen: boolean;
   onClose: () => void;
   initialStatus?: KanbanTaskStatus;
+  /** `YYYY-MM-DD`, from a calendar day. */
+  initialDueDate?: string;
   initialWorkspaceId?: string;
   workspaces: readonly WorkspaceRecord[];
   /** Returns false when the task could not be created (kept open). */
@@ -71,7 +73,7 @@ export function CreateTicketModal({ isOpen, onClose, initialStatus, initialWorks
   const [description, setDescription] = useState("");
   const [status, setStatus] = useState<KanbanTaskStatus>(initialStatus ?? "planned");
   const [workspaceId, setWorkspaceId] = useState(initialWorkspaceId ?? workspaces[0]?.id ?? "");
-  const [dueDate, setDueDate] = useState("");
+  const [dueDate, setDueDate] = useState(initialDueDate ?? "");
   const [priority, setPriority] = useState<KanbanTaskPriority | null>(null);
   const [dateOpen, setDateOpen] = useState(false);
   const [keepCreating, setKeepCreating] = useState(false);
@@ -101,7 +103,7 @@ export function CreateTicketModal({ isOpen, onClose, initialStatus, initialWorks
               if (keepCreating) {
                 setTitle("");
                 setDescription("");
-                setDueDate("");
+                setDueDate(initialDueDate ?? "");
                 titleRef.current?.focus();
               } else onClose();
             }}

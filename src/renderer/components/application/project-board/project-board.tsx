@@ -41,6 +41,7 @@ import { ProviderIcon } from "@/components/ProviderIcon";
 import { Chip } from "@/components/base/badges/chip";
 import { Tooltip, TooltipTrigger } from "@/components/base/tooltip/tooltip";
 import { Button } from "@/components/base/buttons/button";
+import { SegmentedControl, SegmentedControlItem } from "@/components/base/segmented-control/segmented-control";
 import { ContextMenu, Menu } from "@/components/ui/menu";
 import { getLocale, useT } from "@/i18n";
 import { isV2Conversation, workspaceDisplayName, type ConversationRecord } from "@/session/helpers";
@@ -64,11 +65,18 @@ import { ProjectBoardControls } from "./project-board-controls";
 import { CONVERSATION_GROUP_DOT, buildBoardColumns, findTaskConversation, type BoardColumn, type BoardSort, type LinkedConversation, type WorkspaceTasks } from "./project-board-data";
 import { useTaskActions, type TaskBoardHandlers } from "./task-actions";
 import { scheduleTone, useScheduleText } from "./task-schedule";
+import { TaskCalendar } from "./task-calendar";
 
 const subscribeToDocument = () => () => {};
 const NO_SUBTASKS: KanbanTask[] = [];
 const getPortalRoot = () => document.body;
 const getServerPortalRoot = () => null;
+// The board or calendar view, a per-device choice.
+const VIEW_STORAGE_KEY = "todex.kanban.view";
+type PlanView = "board" | "calendar";
+function readView(): PlanView {
+  try { return window.localStorage.getItem(VIEW_STORAGE_KEY) === "calendar" ? "calendar" : "board"; } catch { return "board"; }
+}
 const SORT_TRANSITION = { duration: 260, easing: "cubic-bezier(0.22, 1, 0.36, 1)" };
 const DROP_TRANSITION = { duration: 320, easing: "cubic-bezier(0.22, 1, 0.36, 1)" };
 const DROP_SIDE_EFFECTS = defaultDropAnimationSideEffects({
@@ -411,9 +419,10 @@ function StatusColumn({ column, context, onAdd }: {
 }
 
 /**
- * The TodeX task board on the BoardUI project-board template: status columns
- * with sortable cards and cross-column drag and drop, a detail sheet per
- * task, and the create-task dialog. Data comes from the kanban store.
+ * The TodeX plan on the BoardUI project-board template: status columns
+ * with sortable cards and cross-column drag and drop, or the BoardUI calendar
+ * month view of the same tasks, plus a detail sheet per task and the
+ * create-task dialog. Data comes from the kanban store.
  */
 export function ProjectBoard({ groups, workspaces, total, handlers, defaultWorkspaceId, toolbar, onBack }: {
   /** Workspaces in sidebar order with their (sorted) tasks. */
@@ -435,6 +444,11 @@ export function ProjectBoard({ groups, workspaces, total, handlers, defaultWorks
   const [workspaceFilter, setWorkspaceFilter] = useState("all");
   const [showDone, setShowDone] = useState(true);
   const [fillColumns, setFillColumns] = useState(true);
+  const [view, setViewState] = useState<PlanView>(readView);
+  const setView = (next: PlanView) => {
+    setViewState(next);
+    try { window.localStorage.setItem(VIEW_STORAGE_KEY, next); } catch { /* the view resets next launch */ }
+  };
   const [activeTask, setActiveTask] = useState<KanbanTask | null>(null);
   const [dragScale, setDragScale] = useState(1);
   const [dragWidth, setDragWidth] = useState(261);
@@ -472,7 +486,7 @@ export function ProjectBoard({ groups, workspaces, total, handlers, defaultWorks
     return map;
   }, [storeTasks]);
 
-  const [createModal, setCreateModal] = useState({ open: false, session: 0, status: undefined as KanbanTaskStatus | undefined });
+  const [createModal, setCreateModal] = useState({ open: false, session: 0, status: undefined as KanbanTaskStatus | undefined, dueDate: undefined as string | undefined });
   const [detail, setDetail] = useState({ id: null as string | null, open: false, session: 0, editTitle: false });
   // The sheet also shows subtasks, which are not on the board itself.
   const detailTask = storeTasks.find((task) => task.id === detail.id && !task.deletedAt);
@@ -481,6 +495,11 @@ export function ProjectBoard({ groups, workspaces, total, handlers, defaultWorks
     if (dragColumnsRef.current || performance.now() - lastDragEnd.current < 350) return;
     setDetail((current) => ({ id, open: true, session: current.session + 1, editTitle: Boolean(options?.editTitle) }));
   };
+  // The calendar also places subtasks, which often carry the schedules.
+  const calendarTasks = useMemo(() => view !== "calendar" ? NO_SUBTASKS : visibleColumns.flatMap((column) => column.tasks).flatMap((task) => [
+    task,
+    ...(subtasksByParent.get(task.id) ?? NO_SUBTASKS).filter((subtask) => showDone || subtask.status !== "done"),
+  ]), [view, visibleColumns, subtasksByParent, showDone]);
   const context: CardContext = {
     handlers,
     workspaceName: (task) => workspaceNames.get(task.workspaceId) ?? "",
@@ -488,8 +507,8 @@ export function ProjectBoard({ groups, workspaces, total, handlers, defaultWorks
     onOpen: openDetail,
   };
 
-  const openCreateModal = (status?: KanbanTaskStatus) => {
-    setCreateModal((current) => ({ open: true, session: current.session + 1, status }));
+  const openCreateModal = (status?: KanbanTaskStatus, dueDate?: string) => {
+    setCreateModal((current) => ({ open: true, session: current.session + 1, status, dueDate }));
   };
   const closeCreateModal = () => setCreateModal((current) => ({ ...current, open: false }));
 
@@ -605,8 +624,20 @@ export function ProjectBoard({ groups, workspaces, total, handlers, defaultWorks
           <p className="truncate text-body-regular text-text-secondary">{t("kanban.subtitle")}</p>
         </div>
         <div className="flex flex-wrap items-center justify-start gap-2.5 sm:justify-end">
+          <SegmentedControl
+            aria-label={t("kanban.view")}
+            selectedKeys={[view]}
+            onSelectionChange={(keys) => {
+              const [next] = [...keys] as PlanView[];
+              if (next) setView(next);
+            }}
+          >
+            <SegmentedControlItem id="board">{t("kanban.viewBoard")}</SegmentedControlItem>
+            <SegmentedControlItem id="calendar">{t("kanban.viewCalendar")}</SegmentedControlItem>
+          </SegmentedControl>
           {toolbar}
           <ProjectBoardControls
+            calendar={view === "calendar"}
             sort={sort} onSort={setSort}
             workspaceId={filter} onWorkspace={setWorkspaceFilter} workspaces={workspaces}
             showDone={showDone} onShowDone={setShowDone}
@@ -621,6 +652,13 @@ export function ProjectBoard({ groups, workspaces, total, handlers, defaultWorks
         </div>
       </header>
 
+      {view === "calendar" ? (
+        <TaskCalendar
+          tasks={calendarTasks}
+          onOpen={openDetail}
+          onAdd={(dueDate) => openCreateModal(undefined, dueDate)}
+        />
+      ) : (
       <DndContext
         id={dndId}
         sensors={sensors}
@@ -656,6 +694,7 @@ export function ProjectBoard({ groups, workspaces, total, handlers, defaultWorks
             )
           : null}
       </DndContext>
+      )}
       {detailTask ? (
         <TicketDetailModal
           key={detail.session}
@@ -673,6 +712,7 @@ export function ProjectBoard({ groups, workspaces, total, handlers, defaultWorks
         isOpen={createModal.open}
         onClose={closeCreateModal}
         initialStatus={createModal.status}
+        initialDueDate={createModal.dueDate}
         initialWorkspaceId={filter !== "all" ? filter : defaultWorkspaceId && workspaces.some((workspace) => workspace.id === defaultWorkspaceId) ? defaultWorkspaceId : workspaces[0]?.id}
         workspaces={workspaces}
         onCreate={createTask}

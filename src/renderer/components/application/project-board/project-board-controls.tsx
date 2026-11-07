@@ -16,7 +16,9 @@ const ROW = "rounded-2lg px-2 py-1.5 text-body-medium";
 const DOT = "absolute -top-0.5 -end-0.5 size-2 rounded-full bg-accent-500 ring-2 ring-background-full";
 
 /** Board toolbar: sort, workspace filter and display options. */
-export function ProjectBoardControls({ sort, onSort, workspaceId, onWorkspace, workspaces, showDone, onShowDone, fillColumns, onFillColumns }: {
+export function ProjectBoardControls({ calendar = false, sort, onSort, workspaceId, onWorkspace, workspaces, showDone, onShowDone, fillColumns, onFillColumns }: {
+  /** The calendar view: sorting and column layout do not apply. */
+  calendar?: boolean;
   sort: BoardSort;
   onSort: (sort: BoardSort) => void;
   /** "all" or a workspace id. */
@@ -39,7 +41,7 @@ export function ProjectBoardControls({ sort, onSort, workspaceId, onWorkspace, w
   ];
   return (
     <div className="flex items-center gap-2" role="group">
-      <Dropdown isOpen={sortOpen} onOpenChange={setSortOpen}>
+      {!calendar && <Dropdown isOpen={sortOpen} onOpenChange={setSortOpen}>
         <TooltipTrigger delay={200}>
           <DropdownTrigger aria-label={t("kanban.sort")} className={TRIGGER}>
             <RiSortDesc className="size-5" aria-hidden />
@@ -53,7 +55,7 @@ export function ProjectBoardControls({ sort, onSort, workspaceId, onWorkspace, w
               <span className="flex-1">{option.label}</span>{sort === option.id && <RiCheckLine className="size-4" aria-hidden />}
             </DropdownItem>)}
         </DropdownPopover>
-      </Dropdown>
+      </Dropdown>}
       <Dropdown>
         <TooltipTrigger delay={200}>
           <DropdownTrigger aria-label={t("kanban.filter")} className={TRIGGER}>
@@ -78,7 +80,7 @@ export function ProjectBoardControls({ sort, onSort, workspaceId, onWorkspace, w
         </TooltipTrigger>
         <DropdownPopover aria-label={t("kanban.display")} placement="bottom end" className={MENU}>
           <Checkbox isSelected={showDone} onChange={onShowDone} className={ROW}>{t("kanban.showDone")}</Checkbox>
-          <Checkbox isSelected={fillColumns} onChange={onFillColumns} className={ROW}>{t("kanban.fillColumns")}</Checkbox>
+          {!calendar && <Checkbox isSelected={fillColumns} onChange={onFillColumns} className={ROW}>{t("kanban.fillColumns")}</Checkbox>}
         </DropdownPopover>
       </Dropdown>
     </div>

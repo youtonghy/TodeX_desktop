@@ -55,9 +55,18 @@ for (const theme of ['light', 'dark'] as Theme[]) {
 
     test('task board', async ({ page, openDemo }) => {
       await openDemo(theme);
-      await page.getByRole('button', { name: '任务看板' }).click();
+      await page.getByRole('button', { name: '计划', exact: true }).click();
       await settle(page);
       await expect(page).toHaveScreenshot(`task-board-${theme}.png`, { mask: volatile(page) });
+    });
+
+    test('plan calendar', async ({ page, openDemo }) => {
+      await openDemo(theme);
+      await page.getByRole('button', { name: '计划', exact: true }).click();
+      await page.getByRole('radio', { name: '日历' }).click();
+      await expect(page.getByText('还有 2 项')).toBeVisible();
+      await settle(page);
+      await expect(page).toHaveScreenshot(`plan-calendar-${theme}.png`, { mask: volatile(page) });
     });
 
     test('profile page', async ({ page, openDemo }) => {
