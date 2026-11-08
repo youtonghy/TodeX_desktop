@@ -4,9 +4,9 @@ import { usageTotalTokens } from '@todex/protocol/conversationRuntime';
 import { AgentsChartCard } from '@/components/application/ai-profile/agents-chart-card';
 import { AiProfileCard } from '@/components/application/ai-profile/ai-profile-card';
 import { AreaChartCard, type AreaPoint, type AreaRange } from '@/components/application/charts/area-chart-card';
+import { BarListCard, type BarListTab } from '@/components/application/charts/bar-list-card';
 import { CHART_TONES } from '@/components/application/charts/chart-card';
-import { SankeyChartCard, type SankeyLinkDatum, type SankeyNodeDatum } from '@/components/application/charts/sankey-chart-card';
-import { ScatterChartCard, type ScatterSeries } from '@/components/application/charts/scatter-chart-card';
+import { HeatmapChartCard, type HeatmapRange } from '@/components/application/charts/heatmap-chart-card';
 import type { ContributionCell } from '@/components/application/dashboard/contributions-card';
 import { ActivityRingsCard } from '@/components/application/medical/activity-rings-card';
 import { Badge } from '@/components/base/badges/badge';
@@ -17,7 +17,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { AppIcon } from '../components/AppIcon';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { getLocale, t, useT } from '../i18n';
-import type { ConversationRecord, UsageRecord } from '../session/helpers';
+import type { UsageRecord } from '../session/helpers';
 
 type Props = {
   session: TodeXSession;
@@ -42,14 +42,10 @@ const EMPTY_TOTALS: UsageTotals = {
 /** The activity heatmap: 38 week columns × 7 weekday rows, ending this week. */
 const HEATMAP_WEEKS = 38;
 const DAY_MS = 86_400_000;
-/** Periods of the token composition chart, in days. */
-const COMPOSITION_PERIODS = [7, 30, 90] as const;
-/** Models drawn as their own flow sinks; the rest merge into one. */
-const FLOW_MODELS = 7;
-/** Longest model name a flow label shows before it is cut. */
-const FLOW_LABEL_CHARS = 20;
-/** Most recent conversations plotted on the scatter chart. */
-const SCATTER_CONVERSATIONS = 200;
+/** Selectable periods of the composition and hour charts, in days. */
+const PERIODS = [7, 30, 90] as const;
+/** Two-hour columns of the activity-by-hour heatmap, by starting hour. */
+const HOUR_BUCKETS = Array.from({ length: 12 }, (_, index) => index * 2);
 
 function addUsage(current: UsageTotals, record: UsageRecord): UsageTotals {
   return {
@@ -74,10 +70,6 @@ function formatTokens(value: number): string {
 
 function modelName(value: string): string {
   return value === 'unknown' ? t('usage.unknown') : value;
-}
-
-function clip(value: string, max: number): string {
-  return value.length > max ? `${value.slice(0, max - 1)}…` : value;
 }
 
 function titleCase(value: string): string {
@@ -132,100 +124,6 @@ function daysBack(today: Date, days: number, endOffset = 0): Date[] {
   return Array.from({ length: days }, (_, index) => new Date(today.getFullYear(), today.getMonth(), today.getDate() - endOffset - days + 1 + index));
 }
 
-/** Token composition chart periods: daily rows, delta against the period before. */
-function compositionRanges(composition: Map<string, Composition>, today: Date): AreaRange[] {
-  const totalOf = (dates: Date[]) => dates.reduce((total, date) => {
-    const day = composition.get(dayKey(date)) ?? EMPTY_COMPOSITION;
-    return total + day.input + day.output + day.cacheRead + day.cacheWrite;
-  }, 0);
-  return COMPOSITION_PERIODS.map((days) => {
-    const dates = daysBack(today, days);
-    const previous = totalOf(daysBack(today, days, days));
-    const data: AreaPoint[] = dates.map((date) => ({ label: shortDate(date), ...(composition.get(dayKey(date)) ?? EMPTY_COMPOSITION) }));
-    return {
-      id: `${days}d`,
-      label: t(`usage.last${days}Days`),
-      data,
-      delta: previous > 0 ? (totalOf(dates) - previous) / previous : undefined,
-    };
-  });
-}
-
-/** Token flow from agents (or the one selected agent) to their models. */
-function tokenFlow(records: UsageRecord[], toneOf: (provider: string) => (typeof CHART_TONES)[number]) {
-  const byPair = new Map<string, Map<string, number>>();
-  const byModel = new Map<string, number>();
-  for (const record of records) {
-    const value = usageTotalTokens(record);
-    if (value <= 0) continue;
-    const models = byPair.get(record.provider) ?? new Map<string, number>();
-    models.set(record.model, (models.get(record.model) ?? 0) + value);
-    byPair.set(record.provider, models);
-    byModel.set(record.model, (byModel.get(record.model) ?? 0) + value);
-  }
-  const providers = [...byPair.keys()].sort((a, b) => sumOf(byPair.get(b)!) - sumOf(byPair.get(a)!));
-  const ranked = [...byModel].sort((a, b) => b[1] - a[1]).map(([model]) => model);
-  const shown = ranked.length > FLOW_MODELS + 1 ? ranked.slice(0, FLOW_MODELS) : ranked;
-  const sinkOf = (model: string) => {
-    const index = shown.indexOf(model);
-    return providers.length + (index < 0 ? shown.length : index);
-  };
-  const nodes: SankeyNodeDatum[] = [
-    ...providers.map((provider) => ({ name: titleCase(provider), ...toneOf(provider) })),
-    ...shown.map((model) => ({ name: clip(modelName(model), FLOW_LABEL_CHARS), color: 'neutral' })),
-    ...(shown.length < ranked.length ? [{ name: t('usage.otherModels'), color: 'neutral' }] : []),
-  ];
-  // Links reference nodes by index: an agent and a model may share a name.
-  const merged = new Map<string, SankeyLinkDatum>();
-  providers.forEach((provider, source) => {
-    for (const [model, value] of byPair.get(provider)!) {
-      const target = sinkOf(model);
-      const link = merged.get(`${source}:${target}`);
-      if (link) link.value += value;
-      else merged.set(`${source}:${target}`, { source, target, value });
-    }
-  });
-  return { nodes, links: [...merged.values()] };
-}
-
-function sumOf(values: Map<string, number>): number {
-  let total = 0;
-  for (const value of values.values()) total += value;
-  return total;
-}
-
-/** One point per conversation (input × output, sized by turns), grouped by agent. */
-function conversationScatter(
-  records: UsageRecord[],
-  conversations: ConversationRecord[],
-  toneOf: (provider: string) => (typeof CHART_TONES)[number],
-): ScatterSeries[] {
-  const titles = new Map<string, string>();
-  for (const item of conversations) {
-    titles.set(item.id, item.title);
-    if (item.v2ConversationId) titles.set(item.v2ConversationId, item.title);
-  }
-  type Point = { conversationId: string; provider: string; input: number; output: number; turns: number; updatedAt: number };
-  const byConversation = new Map<string, Point>();
-  for (const record of records) {
-    const key = JSON.stringify([record.provider, record.conversationId]);
-    const point = byConversation.get(key) ?? { conversationId: record.conversationId, provider: record.provider, input: 0, output: 0, turns: 0, updatedAt: 0 };
-    point.input += record.inputTokens;
-    point.output += record.outputTokens;
-    point.turns += 1;
-    point.updatedAt = Math.max(point.updatedAt, record.updatedAt);
-    byConversation.set(key, point);
-  }
-  const recent = [...byConversation.values()].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, SCATTER_CONVERSATIONS);
-  const series = new Map<string, ScatterSeries>();
-  for (const point of recent) {
-    const entry = series.get(point.provider) ?? { label: titleCase(point.provider), points: [], ...toneOf(point.provider) };
-    entry.points.push({ x: point.input, y: point.output, z: point.turns, label: titles.get(point.conversationId)?.trim() || t('cleanup.untitled') });
-    series.set(point.provider, entry);
-  }
-  return [...series.values()].sort((a, b) => b.points.length - a.points.length);
-}
-
 /** Heatmap cells: weekday rows × week columns, tiers by quintile of the busy days. */
 function heatmapCells(tokens: Map<string, number>, today: Date): ContributionCell[][] {
   const end = startOfDay(today);
@@ -247,11 +145,87 @@ function heatmapCells(tokens: Map<string, number>, today: Date): ContributionCel
   }));
 }
 
+/** Token composition chart periods: daily rows, delta against the period before. */
+function compositionRanges(composition: Map<string, Composition>, today: Date): AreaRange[] {
+  const totalOf = (dates: Date[]) => dates.reduce((total, date) => {
+    const day = composition.get(dayKey(date)) ?? EMPTY_COMPOSITION;
+    return total + day.input + day.output + day.cacheRead + day.cacheWrite;
+  }, 0);
+  return PERIODS.map((days) => {
+    const dates = daysBack(today, days);
+    const previous = totalOf(daysBack(today, days, days));
+    const data: AreaPoint[] = dates.map((date) => ({ label: shortDate(date), ...(composition.get(dayKey(date)) ?? EMPTY_COMPOSITION) }));
+    return {
+      id: `${days}d`,
+      label: t(`usage.last${days}Days`),
+      data,
+      delta: previous > 0 ? (totalOf(dates) - previous) / previous : undefined,
+    };
+  });
+}
+
+/** Tokens by weekday (Monday first) × two-hour block for each period,
+ * with the change against the period before. */
+function hourRanges(records: UsageRecord[], today: Date): HeatmapRange[] {
+  const weekdays = Array.from({ length: 7 }, (_, index) => new Date(2024, 0, 1 + index).toLocaleDateString(getLocale(), { weekday: 'short' }));
+  const columns = HOUR_BUCKETS.map((hour) => t('usage.hourLabel', { hour }));
+  const end = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1).getTime();
+  return PERIODS.map((days) => {
+    const start = daysBack(today, days)[0].getTime();
+    const previousStart = daysBack(today, days, days)[0].getTime();
+    const values = weekdays.map(() => HOUR_BUCKETS.map(() => 0));
+    let total = 0;
+    let previous = 0;
+    for (const record of records) {
+      const value = usageTotalTokens(record);
+      if (record.updatedAt >= previousStart && record.updatedAt < start) previous += value;
+      if (record.updatedAt < start || record.updatedAt >= end) continue;
+      const date = new Date(record.updatedAt);
+      values[(date.getDay() + 6) % 7][Math.floor(date.getHours() / 2)] += value;
+      total += value;
+    }
+    return {
+      id: `${days}d`,
+      label: t(`usage.last${days}Days`),
+      rows: weekdays.map((label, index) => ({ label, values: values[index] })),
+      columns,
+      delta: previous > 0 ? (total - previous) / previous : undefined,
+    };
+  });
+}
+
+/** Token share by agent and by model; a model takes the colour of the agent
+ * that used it most. */
+function usageRanking(records: UsageRecord[], toneOf: (provider: string) => (typeof CHART_TONES)[number]): BarListTab[] {
+  const agents = new Map<string, number>();
+  const models = new Map<string, Map<string, number>>();
+  for (const record of records) {
+    const value = usageTotalTokens(record);
+    if (value <= 0) continue;
+    agents.set(record.provider, (agents.get(record.provider) ?? 0) + value);
+    const byAgent = models.get(record.model) ?? new Map<string, number>();
+    byAgent.set(record.provider, (byAgent.get(record.provider) ?? 0) + value);
+    models.set(record.model, byAgent);
+  }
+  const modelItems = [...models].map(([model, byAgent]) => {
+    const ranked = [...byAgent].sort((a, b) => b[1] - a[1]);
+    return { label: modelName(model), value: ranked.reduce((total, [, value]) => total + value, 0), color: toneOf(ranked[0][0]).color };
+  });
+  return [
+    { id: 'models', label: t('usage.modelLabel'), items: modelItems.sort((a, b) => b.value - a.value) },
+    {
+      id: 'agents',
+      label: 'Agent',
+      items: [...agents].map(([provider, value]) => ({ label: titleCase(provider), value, color: toneOf(provider).color })).sort((a, b) => b.value - a.value),
+    },
+  ];
+}
+
 /** The user's profile page, in place of the conversation: usage on the
  * BoardUI AI profile template and chart cards. The profile card carries the
  * totals and the activity heatmap; below it, 30-day goal rings beside the
- * active conversations per day, the daily token composition, each
- * conversation's input against its output, and the agent → model flow. */
+ * active conversations per day, the daily token composition, usage by
+ * weekday and hour, and the token share ranking of agents and models. */
 export function ProfilePanel({ session }: Props) {
   const t = useT();
   const [provider, setProvider] = useState('all');
@@ -291,8 +265,8 @@ export function ProfilePanel({ session }: Props) {
   const daily = useMemo(() => dailyUsage(filtered), [filtered]);
   const cells = useMemo(() => heatmapCells(daily.tokens, today), [daily, today]);
   const composition = useMemo(() => compositionRanges(daily.composition, today), [daily, today]);
-  const flow = useMemo(() => tokenFlow(filtered, toneOf), [filtered, toneOf]);
-  const scatter = useMemo(() => conversationScatter(filtered, session.conversations, toneOf), [filtered, session.conversations, toneOf]);
+  const hours = useMemo(() => hourRanges(filtered, today), [filtered, today]);
+  const ranking = useMemo(() => usageRanking(filtered, toneOf), [filtered, toneOf]);
 
   // Active conversations per day for the selected month.
   const month = new Date(today.getFullYear(), today.getMonth() + monthOffset, 1);
@@ -400,24 +374,25 @@ export function ProfilePanel({ session }: Props) {
           className="h-[360px]"
         />
 
-        {flow.links.length ? (
+        {ranking[0].items.length ? (
           <div className="grid w-full gap-4 lg:grid-cols-2">
-            <ScatterChartCard
-              title={t('usage.conversationOutput')}
-              series={scatter}
-              axisLabels={[t('usage.inputLabel'), t('usage.outputLabel')]}
+            <HeatmapChartCard
+              title={t('usage.activeHours')}
+              ranges={hours}
+              defaultRange="30d"
               format={formatTokens}
-              formatX={formatTokens}
-              formatTick={formatTokens}
-              className="h-[420px]"
+              color="var(--color-chart-5)"
+              activeColor="var(--color-chart-5-active)"
+              scale="sqrt"
+              legendLabels={[t('usage.less'), t('usage.more')]}
+              className="h-full min-h-[329px]"
             />
-            <SankeyChartCard
-              title={provider === 'all' ? t('usage.agentFlow') : t('usage.modelFlow')}
-              nodes={flow.nodes}
-              links={flow.links}
+            <BarListCard
+              tabs={ranking}
+              vivid
+              metricLabel={t('usage.tokenShare')}
               format={formatTokens}
-              axisLabels={[provider === 'all' ? 'Agent' : titleCase(provider), t('usage.modelShare')]}
-              className="h-[420px]"
+              limit={6}
             />
           </div>
         ) : (

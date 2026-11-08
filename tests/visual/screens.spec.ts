@@ -84,7 +84,7 @@ for (const theme of ['light', 'dark'] as Theme[]) {
     test('profile charts', async ({ page, openDemo }) => {
       await openDemo(theme);
       await page.getByRole('button', { name: '个人主页' }).click();
-      await page.getByText('Agent → 模型流向').scrollIntoViewIfNeeded();
+      await page.getByText('活跃时段').scrollIntoViewIfNeeded();
       await settle(page);
       await expect(page).toHaveScreenshot(`profile-charts-${theme}.png`, { mask: volatile(page) });
     });
