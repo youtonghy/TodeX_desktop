@@ -1,10 +1,9 @@
-import { useEffect, useRef, useState, type ComponentType, type ReactNode, type Ref } from 'react';
-import { Tab, TabList, TabPanel, Tabs } from 'react-aria-components';
+import { useEffect, useRef, useState, type ReactNode, type Ref } from 'react';
 import { RiApps2Line, RiCodeBoxLine, RiComputerLine, RiHistoryLine, RiInformationLine, RiNotification3Line, RiPaletteLine, RiServerLine, RiSettings3Line, RiTeamLine, RiTerminalBoxLine } from '@remixicon/react';
 import { Button } from '@/components/base/buttons/button';
 import { Select, SelectItem } from '@/components/base/select/select';
 import { Switch } from '@/components/base/switch/switch';
-import { cx } from '@/utils/cx';
+import { SettingsContent, SettingsNav, type SettingsNavGroup } from '@/components/application/settings/settings-modal';
 import { AgentCallingSettings } from '../components/AgentCallingSettings';
 import { AgentDesktopSettings, type AgentDesktopPage } from '../components/AgentDesktopSettings';
 import { BackendConnectionSettings } from '../components/settings/BackendConnectionSettings';
@@ -105,52 +104,38 @@ export function SettingsPanel({ session, historyRecoverySetup = false, repairPai
     generalPanel.current?.scrollTo({ top: 0 });
   }, [historyPage]);
 
-  const sections: Array<{ id: SettingsSection; label: string; icon: ComponentType<{ className?: string; 'aria-hidden'?: boolean | 'true' | 'false' }> }> = [
-    { id: 'general', label: t('settings.general'), icon: RiSettings3Line },
-    { id: 'features', label: t('settings.features'), icon: RiApps2Line },
-    { id: 'appearance', label: t('settings.appearance'), icon: RiPaletteLine },
-    { id: 'connection', label: t('settings.backendConnections'), icon: RiServerLine },
-    ...slots.settingsSections.map((item) => ({ id: item.id, label: t(item.labelKey), icon: item.icon })),
-    { id: 'cli', label: t('app.cliManager'), icon: RiCodeBoxLine },
-    { id: 'ssh', label: t('settings.ssh'), icon: RiTerminalBoxLine },
-    { id: 'notifications', label: t('settings.notifications'), icon: RiNotification3Line },
-    { id: 'agent', label: t('agentDesktop.title'), icon: RiComputerLine },
-    { id: 'agent-calling', label: t('agentCalling.title'), icon: RiTeamLine },
-    { id: 'about', label: t('app.about'), icon: RiInformationLine },
+  const groups: SettingsNavGroup<SettingsSection>[] = [
+    { id: 'app', label: t('settings.groupApp'), items: [
+      { id: 'general', label: t('settings.general'), icon: RiSettings3Line },
+      { id: 'features', label: t('settings.features'), icon: RiApps2Line },
+      { id: 'appearance', label: t('settings.appearance'), icon: RiPaletteLine },
+      { id: 'notifications', label: t('settings.notifications'), icon: RiNotification3Line },
+    ] },
+    { id: 'connections', label: t('settings.groupConnections'), items: [
+      { id: 'connection', label: t('settings.backendConnections'), icon: RiServerLine },
+      ...slots.settingsSections.map((item) => ({ id: item.id, label: t(item.labelKey), icon: item.icon })),
+      { id: 'ssh', label: t('settings.ssh'), icon: RiTerminalBoxLine },
+    ] },
+    { id: 'agents', label: t('settings.groupAgents'), items: [
+      { id: 'cli', label: t('app.cliManager'), icon: RiCodeBoxLine },
+      { id: 'agent', label: t('agentDesktop.title'), icon: RiComputerLine },
+      { id: 'agent-calling', label: t('agentCalling.title'), icon: RiTeamLine },
+    ] },
+    { id: 'todex', label: t('settings.groupTodex'), items: [
+      { id: 'about', label: t('app.about'), icon: RiInformationLine },
+    ] },
   ];
-  const titleOf = (id: SettingsSection) => sections.find((item) => item.id === id)?.label ?? '';
+  const titleOf = (id: SettingsSection) => groups.flatMap((group) => group.items).find((item) => item.id === id)?.label ?? '';
+  const page = (id: SettingsSection) => ({ title: titleOf(id), isActive: id === section });
 
-  // Categories on the left, each one's page on the right. Inactive pages stay
-  // mounted (hidden), so an in-progress pairing or recovery-key setup
-  // survives a visit to another category.
+  // Grouped categories on the left, each one's page on the right. Inactive
+  // pages stay mounted (hidden), so an in-progress pairing or recovery-key
+  // setup survives a visit to another category.
   return (
-    <Tabs
-      orientation="vertical"
-      className="flex h-full min-h-0 flex-1"
-      selectedKey={section}
-      onSelectionChange={(key) => setSection(key as SettingsSection)}
-    >
-      <div className="flex w-14 shrink-0 flex-col overflow-y-auto border-e border-t border-separator-border bg-background-secondary-default p-2.5 sm:w-48 lg:w-60">
-        <TabList aria-label={t('app.settings')} className="flex w-full flex-col gap-1 pt-1">
-          {sections.map(({ id, label, icon: Icon }) => (
-            <Tab
-              key={id}
-              id={id}
-              aria-label={label}
-              className={({ isSelected, isFocusVisible }) => cx(
-                'flex w-full cursor-pointer items-center gap-2 rounded-2lg p-2 text-start outline-none transition-colors duration-150 ease',
-                isSelected ? 'bg-background-secondary-hover text-text-primary' : 'text-text-secondary hover:bg-background-secondary-hover/60',
-                isFocusVisible && 'ring-2 ring-border-focus-ring',
-              )}
-            >
-              <Icon aria-hidden className="size-5 shrink-0 text-foreground-icon-secondary" />
-              <span className="hidden truncate text-body-medium sm:block">{label}</span>
-            </Tab>
-          ))}
-        </TabList>
-      </div>
-      <div className="flex min-w-0 flex-1 flex-col">
-        <SettingsPage id="general" title={titleOf('general')} viewportRef={generalPanel}>
+    <div className="flex min-h-0 flex-1">
+      <SettingsNav aria-label={t('app.settings')} groups={groups} selected={section} onSelect={setSection} />
+      <SettingsContent title={titleOf(section)}>
+        <SettingsPage {...page('general')} viewportRef={generalPanel}>
           {historyPage ? (
             <SettingsSubpage title={t('cleanup.todexTitle')} onBack={() => setHistoryPage(false)}>
               <TodexHistoryCleanup session={session} />
@@ -211,16 +196,16 @@ export function SettingsPanel({ session, historyRecoverySetup = false, repairPai
           </>}
         </SettingsPage>
 
-        <SettingsPage id="features" title={titleOf('features')}>
+        <SettingsPage {...page('features')}>
           <FeatureSettings />
         </SettingsPage>
 
-        <SettingsPage id="appearance" title={titleOf('appearance')}>
+        <SettingsPage {...page('appearance')}>
           <AppearanceSettings />
           <TerminalSettings />
         </SettingsPage>
 
-        <SettingsPage id="connection" title={titleOf('connection')} viewportRef={backendPanel}>
+        <SettingsPage {...page('connection')} viewportRef={backendPanel}>
           <BackendConnectionSettings
             session={session}
             page={backendPage}
@@ -234,20 +219,20 @@ export function SettingsPanel({ session, historyRecoverySetup = false, repairPai
         </SettingsPage>
 
         {slots.settingsSections.map(({ id, Component }) => (hostVisited.has(id) ? (
-          <SettingsPage key={id} id={id} title={titleOf(id)}>
+          <SettingsPage key={id} {...page(id)}>
             <Component session={session} deviceName={platform.productName} />
           </SettingsPage>
         ) : null))}
 
-        <SettingsPage id="cli" title={titleOf('cli')} viewportRef={cliPanel}>
+        <SettingsPage {...page('cli')} viewportRef={cliPanel}>
           {cliVisited ? <CliManagerPanel session={session} page={cliPage} onPageChange={setCliPage} /> : null}
         </SettingsPage>
 
-        <SettingsPage id="ssh" title={titleOf('ssh')}>
+        <SettingsPage {...page('ssh')}>
           <SshConnectionSettings session={session} />
         </SettingsPage>
 
-        <SettingsPage id="notifications" title={titleOf('notifications')}>
+        <SettingsPage {...page('notifications')}>
           <SettingsCard>
             <SettingsRow
               label={t('settings.notifyTaskDone')}
@@ -269,31 +254,30 @@ export function SettingsPanel({ session, historyRecoverySetup = false, repairPai
           </SettingsCard>
         </SettingsPage>
 
-        <SettingsPage id="agent" title={titleOf('agent')} viewportRef={agentPanel}>
+        <SettingsPage {...page('agent')} viewportRef={agentPanel}>
           <AgentDesktopSettings session={session} page={agentPage} onPageChange={setAgentPage} />
         </SettingsPage>
 
-        <SettingsPage id="agent-calling" title={titleOf('agent-calling')}>
+        <SettingsPage {...page('agent-calling')}>
           <AgentCallingSettings session={session} />
         </SettingsPage>
 
-        <SettingsPage id="about" title={titleOf('about')}>
+        <SettingsPage {...page('about')}>
           <AboutPanel session={session} />
         </SettingsPage>
-      </div>
-    </Tabs>
+      </SettingsContent>
+    </div>
   );
 }
 
-/** One category's page: a fixed title over its own scroll region. */
-function SettingsPage({ id, title, viewportRef, children }: { id: SettingsSection; title: string; viewportRef?: Ref<HTMLDivElement>; children: ReactNode }) {
+/** One category's page, scrolling under the shared title row; hidden while another is shown. */
+function SettingsPage({ title, isActive, viewportRef, children }: { title: string; isActive: boolean; viewportRef?: Ref<HTMLDivElement>; children: ReactNode }) {
   return (
-    <TabPanel id={id} shouldForceMount className="flex min-h-0 flex-1 flex-col outline-none data-[inert=true]:hidden">
-      <h2 className="shrink-0 px-8 pt-6 pb-3 text-title-3-medium text-text-primary">{title}</h2>
+    <section aria-label={title} hidden={!isActive} className="flex min-h-0 flex-1 flex-col">
       <ScrollArea className="flex-1" contentClassName="px-8 pb-8" surface="full" viewportRef={viewportRef}>
         <div className="flex flex-col gap-6 pt-1">{children}</div>
       </ScrollArea>
-    </TabPanel>
+    </section>
   );
 }
 

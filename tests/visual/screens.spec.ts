@@ -5,6 +5,11 @@ import { expect, settle, test, volatile, type Theme } from './demo';
 // here means a shared style, token or layout changed somewhere visible; update
 // the baselines (README "Tests") only when the change is intended.
 
+/** A category in the settings modal's grouped rail. */
+function settingsSection(page: Page, name: string) {
+  return page.getByRole('navigation', { name: '设置' }).getByRole('button', { name, exact: true });
+}
+
 const SETTINGS_TABS = {
   功能: 'features',
   外观: 'appearance',
@@ -120,7 +125,7 @@ for (const theme of ['light', 'dark'] as Theme[]) {
     test('unified sidebar', async ({ page, openDemo }) => {
       await openDemo(theme);
       await page.getByRole('button', { name: '设置', exact: true }).click();
-      await page.getByRole('tab', { name: '外观', exact: true }).click();
+      await settingsSection(page, '外观').click();
       await page.getByRole('radio', { name: '统一' }).click();
       await page.getByRole('button', { name: '关闭', exact: true }).click();
       // The active workspace opens by itself; a second one opens on click.
@@ -135,7 +140,7 @@ for (const theme of ['light', 'dark'] as Theme[]) {
     test('settings: general', async ({ page, openDemo }) => {
       await openDemo(theme);
       await page.getByRole('button', { name: '设置', exact: true }).click();
-      await expect(page.getByRole('tab', { name: '通用' })).toBeVisible();
+      await expect(settingsSection(page, '通用')).toBeVisible();
       await settle(page);
       await expect(page).toHaveScreenshot(`settings-general-${theme}.png`, { mask: volatile(page) });
     });
@@ -148,7 +153,7 @@ for (const [tab, slug] of Object.entries(SETTINGS_TABS)) {
   test(`settings: ${tab}`, async ({ page, openDemo }) => {
     await openDemo('light');
     await page.getByRole('button', { name: '设置', exact: true }).click();
-    await page.getByRole('tab', { name: tab, exact: true }).click();
+    await settingsSection(page, tab).click();
     await settle(page);
     await expect(page).toHaveScreenshot(`settings-${slug}-light.png`, { mask: volatile(page) });
   });
@@ -158,7 +163,7 @@ for (const [tab, slug] of Object.entries(SETTINGS_TABS)) {
 test('settings: computer use engine', async ({ page, openDemo }) => {
   await openDemo('light');
   await page.getByRole('button', { name: '设置', exact: true }).click();
-  await page.getByRole('tab', { name: 'Agent 桌面工具', exact: true }).click();
+  await settingsSection(page, 'Agent 桌面工具').click();
   await page.getByRole('button', { name: /^Computer Use/ }).click();
   // The switch's input is visually hidden behind its track.
   await page.getByRole('switch', { name: '允许 Agent 控制 lumen-devbox' }).check({ force: true });
@@ -200,7 +205,7 @@ test('terminal host context menu', async ({ page, openDemo }) => {
 async function openConfigSync(page: Page, openDemo: (theme?: Theme, query?: string) => Promise<void>, theme: Theme) {
   await openDemo(theme, 'backends=2');
   await page.getByRole('button', { name: '设置', exact: true }).click();
-  await page.getByRole('tab', { name: '后端连接', exact: true }).click();
+  await settingsSection(page, '后端连接').click();
   await page.getByRole('button', { name: /^配置同步/ }).click();
   await expect(page.getByText(/^\d+ 项可同步/)).toBeVisible();
 }

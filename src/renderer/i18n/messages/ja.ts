@@ -242,6 +242,10 @@ export const ja: Messages = {
   // settings
   'settings.connection': '接続',
   'settings.general': '一般',
+  'settings.groupApp': 'アプリ',
+  'settings.groupConnections': '接続',
+  'settings.groupAgents': 'エージェント',
+  'settings.groupTodex': 'TodeX',
   'settings.features': '機能',
   'settings.featuresNote': '各機能をサイドバーのどこに表示するかを選びます。折りたたんだ機能は「その他」にまとめられ、オフにした機能はショートカットとメニュー項目も非表示になります。この端末にのみ保存されます。',
   'settings.featureShown': '表示',

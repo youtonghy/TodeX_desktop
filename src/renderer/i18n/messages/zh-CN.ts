@@ -242,6 +242,10 @@ export const zhCN = {
   // settings
   'settings.connection': '连接',
   'settings.general': '通用',
+  'settings.groupApp': '应用',
+  'settings.groupConnections': '连接',
+  'settings.groupAgents': 'Agent',
+  'settings.groupTodex': 'TodeX',
   'settings.features': '功能',
   'settings.featuresNote': '选择每个功能在侧边栏中的位置。折叠的功能收在“更多”里；关闭的功能会同时隐藏快捷键和菜单入口。仅保存在本设备。',
   'settings.featureShown': '显示',

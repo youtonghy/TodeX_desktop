@@ -11,6 +11,7 @@ import { Alert } from '@/components/ui/alert';
 import { ErrorBoundary } from '@/components/ui/error-boundary';
 import { IconAction } from '@/components/ui/icon-action';
 import { Modal } from '@/components/ui/modal';
+import { SettingsModal } from '@/components/application/settings/settings-modal';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { ToastViewport, toast } from '@/components/ui/toast';
 import { cx } from '@/utils/cx';
@@ -710,10 +711,12 @@ export function App() {
         </div>
       )}
       {/* A fixed height keeps the dialog still when switching sections; each
-          category page scrolls on its own beside the category list. */}
-      <Modal isOpen={settingsOpen} onOpenChange={closePanel('settings')} title={t('app.settings')} size="4xl" className="h-[min(90vh,48rem)]" bodyClassName="flex min-h-0 flex-col overflow-hidden px-0 pb-0">
-        <PanelBoundary><SettingsPanel session={session} historyRecoverySetup={historyRecoverySetup} repairPairing={repairPairing} sectionRequest={settingsSectionRequest} /></PanelBoundary>
-      </Modal>
+          category page scrolls on its own beside the grouped category rail. */}
+      <SettingsModal isOpen={settingsOpen} onOpenChange={closePanel('settings')} aria-label={t('app.settings')} className="h-[min(90vh,48rem)] sm:max-w-4xl">
+        <PanelBoundary>
+          <SettingsPanel session={session} historyRecoverySetup={historyRecoverySetup} repairPairing={repairPairing} sectionRequest={settingsSectionRequest} />
+        </PanelBoundary>
+      </SettingsModal>
       <GitActionsModal key={session.activeConversation?.id} session={session} isOpen={gitOpen} onOpenChange={setGitOpen} />
       <PrivateConversationDialog
         isOpen={privateWorkspaceId !== null}

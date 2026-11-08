@@ -242,6 +242,10 @@ export const en: Messages = {
   // settings
   'settings.connection': 'Connection',
   'settings.general': 'General',
+  'settings.groupApp': 'App',
+  'settings.groupConnections': 'Connections',
+  'settings.groupAgents': 'Agents',
+  'settings.groupTodex': 'TodeX',
   'settings.features': 'Features',
   'settings.featuresNote': 'Choose where each feature appears in the sidebar. Folded features sit under “More”; turned-off features also lose their shortcuts and menu entries. Saved on this device.',
   'settings.featureShown': 'Show',

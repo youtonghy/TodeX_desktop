@@ -242,6 +242,10 @@ export const ko: Messages = {
   // settings
   'settings.connection': '연결',
   'settings.general': '일반',
+  'settings.groupApp': '앱',
+  'settings.groupConnections': '연결',
+  'settings.groupAgents': '에이전트',
+  'settings.groupTodex': 'TodeX',
   'settings.features': '기능',
   'settings.featuresNote': '각 기능을 사이드바 어디에 표시할지 선택합니다. 접은 기능은 “더 보기”에 모이고, 끈 기능은 단축키와 메뉴 항목도 숨겨집니다. 이 기기에만 저장됩니다.',
   'settings.featureShown': '표시',

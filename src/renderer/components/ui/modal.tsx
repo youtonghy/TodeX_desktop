@@ -50,14 +50,15 @@ export interface ModalProps {
   children?: ReactNode;
 }
 
-const OVERLAY = [
+/** Backdrop and panel recipes, shared with the settings modal's own shell. */
+export const MODAL_OVERLAY = [
   // No-drag so title-bar drag strips underneath don't swallow clicks (Electron).
   'window-no-drag fixed inset-0 z-100 flex items-center justify-center bg-black/70 p-4',
   'transition-opacity duration-300 ease-out',
   'data-[entering]:opacity-0 data-[exiting]:opacity-0',
 ].join(' ');
 
-const PANEL = [
+export const MODAL_PANEL = [
   'relative flex max-h-[calc(100dvh-32px)] w-full flex-col overflow-clip outline-none',
   'rounded-3xl bg-background-full text-text-primary shadow-xs',
   'transform-gpu transition-[opacity,transform,filter] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] will-change-[opacity,transform,filter]',
@@ -111,9 +112,9 @@ export function Modal({
       onOpenChange={onOpenChange}
       isDismissable={isDismissable}
       isKeyboardDismissDisabled={isKeyboardDismissDisabled}
-      className={OVERLAY}
+      className={MODAL_OVERLAY}
     >
-      <AriaModal className={cx(PANEL, SIZES[size], className)}>
+      <AriaModal className={cx(MODAL_PANEL, SIZES[size], className)}>
         <Dialog aria-label={ariaLabel} className="flex min-h-0 flex-1 flex-col outline-none">
           {title || !hideCloseButton ? (
             <div className="flex shrink-0 items-start justify-between gap-3 px-6 pt-6 pb-3">
