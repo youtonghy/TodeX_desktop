@@ -174,7 +174,7 @@ test('settings: computer use engine', async ({ page, openDemo }) => {
   await expect(page).toHaveScreenshot('settings-computer-use-engine-light.png', { mask: volatile(page) });
 });
 
-// Terminal screen: the compact host list, then a host's right-click menu.
+// Terminal screen: host cards (name and user, no addresses), then a host's right-click menu.
 async function openTerminalHosts(page: Page, openDemo: (theme?: Theme, query?: string) => Promise<void>, theme: Theme) {
   await openDemo(theme);
   await page.getByRole('button', { name: '终端', exact: true }).click();
@@ -194,7 +194,7 @@ for (const theme of ['light', 'dark'] as const) {
 
 test('terminal host context menu', async ({ page, openDemo }) => {
   await openTerminalHosts(page, openDemo, 'light');
-  await page.getByRole('listitem', { name: 'gs-dev' }).getByText('dev@157.230.18.42').click({ button: 'right' });
+  await page.getByRole('listitem', { name: 'gs-dev' }).getByRole('heading', { name: 'gs-dev' }).click({ button: 'right' });
   const menu = page.getByRole('menu', { name: 'gs-dev 的更多操作' });
   await expect(menu.getByRole('menuitemcheckbox', { name: 'Agent 访问' })).toHaveAttribute('aria-checked', 'true');
   await settle(page);

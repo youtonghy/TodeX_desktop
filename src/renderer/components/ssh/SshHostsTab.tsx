@@ -2,19 +2,17 @@ import { useRef, useState, type ComponentType, type MouseEvent, type ReactElemen
 import { Focusable, Pressable, type Key } from 'react-aria-components';
 import {
   RiAddLine, RiArrowLeftRightLine, RiComputerLine, RiDeleteBinLine, RiEdit2Line, RiFileCopyLine, RiFolder3Line, RiLinkUnlink, RiMore2Line,
-  RiPlugLine, RiPulseLine, RiRobot2Line, RiRouterLine, RiServerLine, RiTerminalBoxLine,
+  RiErrorWarningLine, RiFileTextLine, RiInformationLine, RiLockPasswordLine, RiPlugLine, RiPulseLine, RiRobot2Line, RiRouteLine, RiRouterLine, RiServerLine, RiTerminalBoxLine,
 } from '@remixicon/react';
-import { LOCAL_TERMINAL_HOST, isLocalTerminalHost, sshHostEndpoint, type FtpSite, type SshHost, type SshKey, type SshTestResult } from '@todex/protocol/ssh';
+import { LOCAL_TERMINAL_HOST, isLocalTerminalHost, type FtpSite, type SshHost, type SshKey, type SshTestResult } from '@todex/protocol/ssh';
 import { useT } from '../../i18n';
 import { FtpSiteFormDialog, SshHostFormDialog, SshImportDialog } from './SshHostDialogs';
 import type { EnteredPassword, RemoteConnectTarget } from './useRemoteConnector';
 import { loadSshPassword, saveSshPassword } from '../../lib/sshPasswordStore';
 import { SSH_FAILURE_HINT_KEYS, SSH_FAILURE_LABEL_KEYS, errorMessage, type SshApi } from './sshShared';
-import { Chip } from '@/components/base/badges/chip';
 import { Button } from '@/components/base/buttons/button';
 import { Tooltip, TooltipTrigger } from '@/components/base/tooltip/tooltip';
 import { Alert } from '@/components/ui/alert';
-import { Card } from '@/components/ui/card';
 import { EmptyState } from '@/components/ui/empty-state';
 import { IconAction } from '@/components/ui/icon-action';
 import { ContextMenu, Menu, MenuItem, MenuPopover, MenuSection, MenuSeparator, MenuTrigger } from '@/components/ui/menu';
@@ -24,7 +22,7 @@ import { toast } from '@/components/ui/toast';
 import { cx } from '@/utils/cx';
 
 /** Rounded tile holding a card's leading glyph. */
-const ICON_TILE = 'flex size-9 shrink-0 items-center justify-center rounded-xl bg-background-secondary-default text-foreground-icon-secondary';
+const ICON_TILE = 'flex size-12 shrink-0 items-center justify-center rounded-xl bg-background-secondary-default text-foreground-icon-secondary';
 
 type Props = {
   api: SshApi;
@@ -134,17 +132,15 @@ export function SshHostsTab({ api, backendId, askPassword, rememberPassword, hos
           </div>
         </div>
         {localTerminal || hosts.length > 0 ? (
-          <RowList>
+          <HostGrid>
             {localTerminal ? (
               <HostRow
                 name={LOCAL_TERMINAL_HOST}
                 icon={RiComputerLine}
                 moreLabel={t('ssh.hosts.more', { alias: LOCAL_TERMINAL_HOST })}
                 onActivate={() => onConnect(LOCAL_TERMINAL_HOST)}
-                chips={(
-                  <HintChip color="purple" hint={t('ssh.hosts.localHint')}>{t('ssh.hosts.localChip')}</HintChip>
-                )}
-                details={<p className="truncate font-mono text-caption-1-regular text-text-secondary">localhost</p>}
+                subtitle={hostSubtitle('ssh', t('ssh.hosts.localChip'))}
+                badges={<HintIcon icon={RiInformationLine} hint={t('ssh.hosts.localHint')} />}
                 menu={(
                   <Menu aria-label={t('ssh.hosts.more', { alias: LOCAL_TERMINAL_HOST })} onAction={() => onConnect(LOCAL_TERMINAL_HOST)}>
                     <MenuItem id="connect" icon={RiTerminalBoxLine} textValue={t('ssh.hosts.connect')}>{t('ssh.hosts.connect')}</MenuItem>
@@ -179,20 +175,15 @@ export function SshHostsTab({ api, backendId, askPassword, rememberPassword, hos
                   editLabel={managed ? t('ssh.hosts.editHost', { alias: host.alias }) : undefined}
                   onEdit={managed ? () => setHostDialog({ host }) : undefined}
                   onActivate={() => onConnect(host.alias)}
-                  chips={(
+                  // Name and login user only: addresses stay out of the list.
+                  subtitle={hostSubtitle('ssh', host.resolved?.user ?? host.managed?.user)}
+                  badges={(
                     <>
-                      <HintChip color={managed ? 'blue' : 'neutral'} hint={managed ? t('ssh.hosts.sourceManagedHint') : t('ssh.hosts.sourceConfigHint', { path: host.sourcePath || '~/.ssh/config' })}>
-                        {managed ? t('ssh.hosts.sourceManaged') : '~/.ssh/config'}
-                      </HintChip>
-                      {passwordAuth ? <Chip variant="caption" color="neutral">{t('ssh.hosts.passwordAuth')}</Chip> : null}
-                      {host.agentAccess ? <HintChip color="lime" hint={t('ssh.hosts.agentAccessHint')}>{t('ssh.hosts.agentAccess')}</HintChip> : null}
-                    </>
-                  )}
-                  details={(
-                    <>
-                      <p className="truncate font-mono text-caption-1-regular text-text-secondary" title={sshHostEndpoint(host)}>{sshHostEndpoint(host)}</p>
-                      {host.resolved?.proxyJump ? <p className="truncate text-caption-1-regular text-text-tertiary">{t('ssh.hosts.via', { jump: host.resolved.proxyJump })}</p> : null}
-                      {host.resolveError ? <p className="break-words text-caption-1-regular text-text-error-primary">{host.resolveError}</p> : null}
+                      {managed ? null : <HintIcon icon={RiFileTextLine} hint={t('ssh.hosts.sourceConfigHint', { path: host.sourcePath || '~/.ssh/config' })} />}
+                      {passwordAuth ? <HintIcon icon={RiLockPasswordLine} hint={t('ssh.hosts.passwordAuth')} /> : null}
+                      {host.resolved?.proxyJump ? <HintIcon icon={RiRouteLine} hint={t('ssh.hosts.via', { jump: host.resolved.proxyJump })} /> : null}
+                      {host.agentAccess ? <HintIcon icon={RiRobot2Line} tone="accent" label={t('ssh.hosts.agentAccess')} hint={t('ssh.hosts.agentAccessHint')} /> : null}
+                      {host.resolveError ? <HintIcon icon={RiErrorWarningLine} tone="error" hint={host.resolveError} /> : null}
                     </>
                   )}
                   menu={(
@@ -251,7 +242,7 @@ export function SshHostsTab({ api, backendId, askPassword, rememberPassword, hos
                 </HostRow>
               );
             })}
-          </RowList>
+          </HostGrid>
         ) : null}
         {hosts.length === 0 ? (
           <EmptyState size="sm" icon={RiServerLine} title={t('ssh.hosts.emptyTitle')} description={t('ssh.hosts.emptyHint')} />
@@ -266,7 +257,7 @@ export function SshHostsTab({ api, backendId, askPassword, rememberPassword, hos
         {ftpSites.length === 0 ? (
           <p className="text-caption-1-regular text-text-tertiary">{t('ssh.ftp.empty')}</p>
         ) : (
-          <RowList>
+          <HostGrid>
             {ftpSites.map((site) => {
               const openFiles = () => onOpenFiles({ kind: 'ftp', siteId: site.id, label: site.name, askPassword: Boolean(site.user) });
               return (
@@ -278,13 +269,8 @@ export function SshHostsTab({ api, backendId, askPassword, rememberPassword, hos
                   editLabel={t('ssh.hosts.editHost', { alias: site.name })}
                   onEdit={() => setFtpDialog({ site })}
                   onActivate={openFiles}
-                  chips={<Chip variant="caption" color={site.protocol === 'ftp' ? 'yellow' : 'lime'}>{site.protocol.toUpperCase()}</Chip>}
-                  details={(
-                    <>
-                      <p className="truncate font-mono text-caption-1-regular text-text-secondary">{site.user ? `${site.user}@` : ''}{site.host}:{site.port}{site.initialDirectory ? ` ${site.initialDirectory}` : ''}</p>
-                      {site.protocol === 'ftp' ? <p className="text-caption-1-regular text-status-yellow-text">{t('ssh.ftp.cleartextWarning')}</p> : null}
-                    </>
-                  )}
+                  subtitle={hostSubtitle(site.protocol, site.user)}
+                  badges={site.protocol === 'ftp' ? <HintIcon icon={RiErrorWarningLine} tone="warning" hint={t('ssh.ftp.cleartextWarning')} /> : null}
                   menu={(
                     <Menu aria-label={t('ssh.hosts.more', { alias: site.name })} onAction={(key) => {
                       if (key === 'files') openFiles();
@@ -300,7 +286,7 @@ export function SshHostsTab({ api, backendId, askPassword, rememberPassword, hos
                 />
               );
             })}
-          </RowList>
+          </HostGrid>
         )}
       </section>
 
@@ -325,36 +311,53 @@ export function SshHostsTab({ api, backendId, askPassword, rememberPassword, hos
   );
 }
 
-type ChipProps = Parameters<typeof Chip>[0];
+/** `ssh, root` style second line: protocol and login user, never the address. */
+function hostSubtitle(protocol: string, user?: string): string {
+  return user ? `${protocol}, ${user}` : protocol;
+}
 
-/** Caption chip that explains itself in a tooltip on hover or focus. */
-function HintChip({ color, hint, children }: { color: ChipProps['color']; hint: string; children: ReactNode }) {
+const HINT_TONES = {
+  default: 'text-foreground-icon-tertiary',
+  accent: 'text-accent-600',
+  warning: 'text-status-yellow-text',
+  error: 'text-foreground-icon-error',
+} as const;
+
+/** Small status glyph after a host name that explains itself in a tooltip. */
+function HintIcon({ icon: Icon, label, hint, tone = 'default' }: { icon: ComponentType<{ className?: string }>; label?: string; hint: string; tone?: keyof typeof HINT_TONES }) {
   return (
     <TooltipTrigger delay={200}>
       <Focusable>
-        <span role="button" tabIndex={0} className="cursor-default rounded-md outline-none focus-visible:ring-2 focus-visible:ring-border-focus-ring">
-          <Chip variant="caption" color={color}>{children}</Chip>
+        <span role="img" aria-label={label ? `${label}. ${hint}` : hint} tabIndex={0} className="inline-flex shrink-0 cursor-default rounded-md outline-none focus-visible:ring-2 focus-visible:ring-border-focus-ring">
+          <Icon aria-hidden className={cx('size-4', HINT_TONES[tone])} />
         </span>
       </Focusable>
-      <Tooltip className="max-w-sm break-words">{hint}</Tooltip>
+      <Tooltip className="max-w-sm break-words">
+        {label ? <span className="block text-caption-1-semibold">{label}</span> : null}
+        {hint}
+      </Tooltip>
     </TooltipTrigger>
   );
 }
 
-/** Bordered panel holding a column of `HostRow`s. */
-function RowList({ children }: { children: ReactNode }) {
+/** Two-column grid of host cards once the panel is wide enough. */
+function HostGrid({ children }: { children: ReactNode }) {
   return (
-    <Card role="list" className="gap-0.5 p-1.5">
-      {children}
-    </Card>
+    <div className="@container">
+      <div role="list" className="grid gap-3 @xl:grid-cols-2">
+        {children}
+      </div>
+    </div>
   );
 }
 
 type HostRowProps = {
   name: string;
   icon: ComponentType<{ className?: string }>;
-  chips?: ReactNode;
-  details?: ReactNode;
+  /** Muted second line, e.g. `ssh, root`. */
+  subtitle: string;
+  /** Status icons after the name. */
+  badges?: ReactNode;
   /** Double-click or Enter: the row's primary action (connect, open files). */
   onActivate: () => void;
   /** Hover action next to the menu button; omitted for read-only rows. */
@@ -371,11 +374,11 @@ type HostRowProps = {
 };
 
 /**
- * One compact list row: double-click (or Enter) runs the primary action,
+ * One host card: double-click (or Enter) runs the primary action,
  * hovering or focusing reveals the edit and more buttons, right-click (or
  * Shift+F10) opens the same menu at the pointer.
  */
-function HostRow({ name, icon: Icon, chips, details, onActivate, onEdit, editLabel, moreLabel, menu, busy, busyLabel, children }: HostRowProps) {
+function HostRow({ name, icon: Icon, subtitle, badges, onActivate, onEdit, editLabel, moreLabel, menu, busy, busyLabel, children }: HostRowProps) {
   const rowRef = useRef<HTMLDivElement>(null);
   const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
   const [moreOpen, setMoreOpen] = useState(false);
@@ -404,10 +407,10 @@ function HostRow({ name, icon: Icon, chips, details, onActivate, onEdit, editLab
       tabIndex={0}
       aria-label={name}
       className={cx(
-        'group flex cursor-default flex-col gap-2 rounded-2xl px-3 py-2.5 outline-none',
-        'transition-colors duration-150 ease hover:bg-background-secondary-default',
+        'group flex min-w-0 cursor-default flex-col gap-3 rounded-2xl border border-border-button-default bg-background-primary-default p-3 shadow-card outline-none',
+        'transition-colors duration-150 ease hover:border-border-button-hover',
         'focus-visible:ring-2 focus-visible:ring-border-focus-ring',
-        menuOpen && 'bg-background-secondary-default',
+        menuOpen && 'border-border-button-hover',
       )}
       // A double-click should connect, not select the word under the pointer.
       onMouseDown={(event) => { if (event.detail > 1 && !ignored(event)) event.preventDefault(); }}
@@ -421,14 +424,14 @@ function HostRow({ name, icon: Icon, chips, details, onActivate, onEdit, editLab
     >
       <div className="flex items-center gap-3">
         <div className={ICON_TILE}>
-          <Icon className="size-5" />
+          <Icon className="size-6" />
         </div>
-        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-            <h4 className="truncate text-body-semibold text-text-primary">{name}</h4>
-            {chips}
+        <div className="flex min-w-0 flex-1 flex-col">
+          <div className="flex min-w-0 items-center gap-1.5">
+            <h4 className="truncate text-body-medium text-text-primary">{name}</h4>
+            {badges}
           </div>
-          {details}
+          <p className="truncate text-caption-1-regular text-text-secondary">{subtitle}</p>
         </div>
         <div data-row-actions className="flex shrink-0 items-center gap-0.5">
           {busy ? <span role="status" aria-label={busyLabel} className="flex size-7 items-center justify-center"><SpinnerIcon aria-hidden className="size-4 text-foreground-icon-secondary" /></span> : null}
