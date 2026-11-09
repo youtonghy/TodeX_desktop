@@ -40,6 +40,7 @@ import { conversationTranscriptMarkdown, fetchConversationTranscriptTail, transc
 import { canonicalConversationEventType, type ConversationEvent } from '@todex/protocol/v2';
 import { ConversationEventBatcher } from '@todex/protocol/frameBatch';
 import { TerminalStreamStore } from '@todex/protocol/terminalStream';
+import { isLocalTerminalHost } from '@todex/protocol/ssh';
 import { getTerminalPreferences } from './terminalPreferences';
 import { ProtocolCommands, ProtocolCommandError, type ProtocolCommand } from './protocolCommands';
 import {
@@ -3982,6 +3983,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       ssh: { host: target.host, ...(password ? { password } : {}) },
       rows,
       cols,
+      // `Local` is a shell on the backend's machine; ssh hosts ignore it.
+      ...(isLocalTerminalHost(target.host) ? { shellIntegration: getTerminalPreferences().shellIntegration } : {}),
     } : {
       terminalId,
       tenantId: target.workspace.tenantId || settings.tenantId,

@@ -33,7 +33,7 @@ type Props = {
   hosts: SshHost[];
   ftpSites: FtpSite[];
   keys: SshKey[];
-  /** The backend offers the `Local` terminal (`ssh localhost`, Linux/macOS only). */
+  /** The backend offers the `Local` terminal (its own login shell). */
   localTerminal: boolean;
   onReload: () => void;
   onConnect: (host: string) => void;

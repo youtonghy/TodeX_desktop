@@ -42,7 +42,7 @@ import { ShortcutHint, useAppShortcuts, workbenchTabShortcut, type ShortcutId } 
 import { normalizeWorkbenchLayout } from '../session/workbenchLayout';
 import { SETTINGS_STORAGE_KEY, attachmentId, backendApi, referenceToken, uniqueReferenceName } from '../session/helpers';
 import { isConflictError } from '@todex/protocol/connectionError';
-import { isNotFoundError, type SshExecRun } from '@todex/protocol/ssh';
+import { isLocalTerminalHost, isNotFoundError, type SshExecRun } from '@todex/protocol/ssh';
 import type { SubagentRun } from '@todex/protocol/v2';
 import { SubagentsPanel } from './SubagentsPanel';
 import { AgentCallsPanel } from './AgentCallsPanel';
@@ -943,7 +943,8 @@ function TerminalPane({ session, terminalId, isActive, shown, workspaceTarget, s
       const api = backendApi(session.settingsForBackend(backendId));
       const pending = toast.info(t('xterm.imageUploading', { count: String(files.length) }), { timeout: 0 });
       try {
-        return await uploadTerminalImages(files, isSsh && sshHost
+        // The `Local` host is a shell on the backend's machine: its own uploads.
+        return await uploadTerminalImages(files, isSsh && sshHost && !isLocalTerminalHost(sshHost)
           ? { kind: 'ssh', api, backendId, host: sshHost }
           : { kind: 'backend', api });
       } catch (error) {
