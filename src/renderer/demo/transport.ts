@@ -595,6 +595,8 @@ function demoDelete(ids: string[]) {
   return { deleted, skipped: [], freedBytes };
 }
 let agentDesktop = { ...fixtures.demoAgentDesktop };
+/** `/v2/ssh/agent-approval`: on and per host, the daemon's default. */
+let agentSshApproval: { enabled: boolean; scope: 'host' | 'command' } = { enabled: true, scope: 'host' };
 
 // Agent Calling: settings as the daemon reports them; listener changes only
 // take effect "after a restart", so they leave `listening`/`baseUrl` alone.
@@ -912,6 +914,8 @@ function route(request: SecureRequest): SecureResponse {
         return json(fixtures.demoSshHosts);
       case '/v2/ssh/keys':
         return json(fixtures.demoSshKeys);
+      case '/v2/ssh/agent-approval':
+        return json(agentSshApproval);
       case '/v2/agent-browser/profiles':
         return json({ profiles: [{ id: 'default', name: '默认资料', createdAt: Date.now() }], workspaces: {} });
       case '/v2/git/workspace':
@@ -1065,6 +1069,13 @@ function route(request: SecureRequest): SecureResponse {
     if (!target) return notFound(method, path);
     return json({ conversationId: target.manifest.id, cancelled: cancelDemoTurn(target, typeof body.turnId === 'string' ? body.turnId : undefined), turnId: body.turnId ?? null });
   }
+  if (path === '/v2/ssh/agent-approval' && method === 'PUT') {
+    if (typeof body.enabled !== 'boolean' || (body.scope !== 'host' && body.scope !== 'command')) {
+      return json({ error: { code: 'INVALID_REQUEST', message: 'invalid agent SSH approval' } }, 400);
+    }
+    agentSshApproval = { enabled: body.enabled, scope: body.scope };
+    return json(agentSshApproval);
+  }
   if (path.startsWith('/v2/agent-desktop') && (method === 'PUT' || method === 'POST' || method === 'PATCH')) {
     if (typeof body.enabled === 'boolean') agentDesktop = { ...agentDesktop, enabled: body.enabled };
     if (typeof body.computerEnabled === 'boolean') agentDesktop = { ...agentDesktop, computerEnabled: body.computerEnabled };
@@ -1120,6 +1131,11 @@ class DemoSocket implements SecureSocket {
     } else if (message.type === 'conversation.prompt') {
       const journal = journals.get(String(payload.conversationId));
       if (journal) result = { conversationId: journal.manifest.id, turnId: playCannedTurn(journal, String(payload.text ?? '')) };
+    } else if (message.type === 'conversation.permission.respond') {
+      const answer = demoPermissions.get(String(payload.permissionId ?? ''));
+      const decision = (payload.decision ?? {}) as { outcome?: unknown };
+      if (answer) answer(typeof decision.outcome === 'string' ? decision.outcome : 'reject_once');
+      result = { conversationId: String(payload.conversationId ?? ''), permissionId: String(payload.permissionId ?? ''), resolved: Boolean(answer) };
     } else if (message.type === 'conversation.warm') {
       // The demo has no agent processes to start.
       result = { conversationId: String(payload.conversationId ?? ''), warmed: false, reason: 'demo' };
@@ -1217,6 +1233,10 @@ function playCannedTurn(journal: Journal, text: string): string {
     playAgentCallTurn(journal, turnId, text);
     return turnId;
   }
+  if (/ssh|服务器/i.test(text) && !journal.manifest.parentConversationId) {
+    playSshTurn(journal, turnId, text);
+    return turnId;
+  }
   const toolCallId = `${turnId}-call`;
   scheduleDemoTurn(journal, turnId, [
     [0, 'message.created', { role: 'user', content: text }],
@@ -1294,6 +1314,57 @@ function playAgentCallTurn(journal: Journal, turnId: string, text: string): void
     })],
     [7000, 'turn.completed', { status: 'completed' }],
   ]);
+}
+
+/** Pending demo permission prompts: permission id → answer with an outcome. */
+const demoPermissions = new Map<string, (outcome: string) => void>();
+
+/** A prompt mentioning SSH or a server plays a turn whose `ssh_exec` first
+ * asks to connect to the demo host (the per-host approval, on by default),
+ * and runs or stops on the answer. */
+function playSshTurn(journal: Journal, turnId: string, text: string): void {
+  const host = fixtures.demoSshHosts.hosts[0]?.alias ?? 'gs-dev';
+  const permissionId = `${turnId}-ssh-host`;
+  const toolCallId = `${turnId}-ssh`;
+  const toolName = 'mcp__todex_ssh__ssh_exec';
+  const args = { host, command: 'df -h /' };
+  scheduleDemoTurn(journal, turnId, [
+    [0, 'message.created', { role: 'user', content: text }],
+    [150, 'turn.started', { status: 'running' }],
+    [500, 'tool.started', { toolCallId, toolName, arguments: args }],
+    [700, 'permission.requested', () => {
+      demoPermissions.set(permissionId, (outcome) => {
+        demoPermissions.delete(permissionId);
+        const allowed = outcome.startsWith('allow');
+        appendDemoEvent(journal, turnId, 'permission.resolved', { permissionId, outcome });
+        scheduleDemoTurn(journal, turnId, [
+          [300, 'tool.completed', {
+            toolCallId, toolName, arguments: args, isError: !allowed,
+            result: allowed
+              ? JSON.stringify({ stdout: 'Filesystem  Size  Used Avail Use% Mounted on\n/dev/vda1    80G   31G   46G  41% /\n', stderr: '', exitCode: 0 })
+              : `DECLINED: the user declined connecting to ${host}`,
+          }],
+          [900, 'message.completed', {
+            role: 'assistant',
+            message: { role: 'assistant', content: [{ type: 'text', text: allowed ? `${host} 的根分区已用 41%，还有 46G 可用。` : `你拒绝了连接 ${host}，我没有在服务器上执行任何命令。` }] },
+            block: { category: 'assistant_final', id: `${turnId}-answer`, turnId, phase: 'completed' },
+          }],
+          [1000, 'turn.completed', { status: 'completed' }],
+        ]);
+      });
+      return {
+        permissionId,
+        providerRequestId: `agent_mcp_${permissionId}`,
+        kind: 'ssh_host',
+        title: `Allow the agent to connect to ${host}?`,
+        details: { host, local: false },
+        options: [
+          { optionId: 'allow', kind: 'allow_always', name: 'Allow for this conversation' },
+          { optionId: 'reject', kind: 'reject_once', name: 'Deny' },
+        ],
+      };
+    }],
+  ], () => demoPermissions.delete(permissionId));
 }
 
 /** What "export providers" hands out: the fixtures with their secrets in place. */

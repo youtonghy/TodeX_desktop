@@ -6,6 +6,7 @@ import { usageTotalTokens, type ConversationRuntime } from '@todex/protocol/conv
 import type { ContextCompactionState } from '@todex/protocol/v2';
 import { permissionActions, permissionDeviceGate, permissionRequestSummary, type PendingRequest, type PermissionOption } from '@todex/protocol/todex';
 import { DESKTOP_BROWSER_ACTION_KIND, DESKTOP_BROWSER_GRANT_KIND } from '@todex/protocol/agentDesktop';
+import { AGENT_SSH_HOST_GRANT_KIND } from '@todex/protocol/ssh';
 import { deviceIdentityFromSecret } from '@todex/protocol/deviceAuth';
 import type { UsageRecord } from '@todex/protocol/mobileParity';
 import { ShimmerText } from '@/components/application/agent-log/agent-log';
@@ -669,11 +670,15 @@ function permissionOptionLabel(option: boolean | PermissionOption, t: ReturnType
   }
 }
 
-/// The backend titles its desktop browser approvals in English; build them
-/// from the structured details instead.
-function desktopBrowserTitle(request: PendingRequest, t: ReturnType<typeof useT>): string | undefined {
+/// The backend titles its agent tool approvals (desktop browser, SSH host
+/// connection) in English; build them from the structured details instead.
+function agentToolTitle(request: PendingRequest, t: ReturnType<typeof useT>): string | undefined {
   const kind = permissionString(request.data.kind);
   const details = permissionObject(request.data.details);
+  if (kind === AGENT_SSH_HOST_GRANT_KIND) {
+    if (details.local === true) return t('agentSsh.localGrantTitle');
+    if (permissionString(details.host)) return t('agentSsh.hostGrantTitle', { host: permissionString(details.host) });
+  }
   if (kind === DESKTOP_BROWSER_GRANT_KIND && permissionString(details.host)) return t('agentBrowser.grantTitle', { host: permissionString(details.host) });
   if (kind === DESKTOP_BROWSER_ACTION_KIND && permissionString(details.action)) return t('agentBrowser.actionTitle', { action: permissionString(details.action) });
   return undefined;
@@ -691,7 +696,7 @@ export function PermissionRequestCard({ request, fallbackTitle, deviceSecret, on
   const summary = useMemo(() => permissionRequestSummary(request), [request]);
   const heading = summary.command ? t('runStatus.runCommand')
     : summary.tool ? t('runStatus.useTool', { tool: summary.tool })
-      : desktopBrowserTitle(request, t) ?? fallbackTitle;
+      : agentToolTitle(request, t) ?? fallbackTitle;
   return <div className="mb-3 flex flex-col gap-2 rounded-2xl border border-border-button-default bg-background-primary-default p-3 shadow-xs">
     <div className="flex items-start gap-2">
       {summary.command ? <RiTerminalBoxLine className="mt-0.5 size-4 shrink-0 text-foreground-icon-secondary" aria-hidden /> : null}
@@ -709,8 +714,13 @@ export function PermissionRequestCard({ request, fallbackTitle, deviceSecret, on
         {summary.safetyCheck ? <span className="text-text-secondary"> {t('runStatus.safetyCheckHint')}</span> : null}
       </p>
     </div> : null}
+    {summary.host ? <p className="font-mono text-caption-2-regular wrap-anywhere text-text-secondary">{t('runStatus.host')}: <bdi>{summary.host}</bdi></p> : null}
     {summary.command ? <pre className="max-h-60 overflow-auto rounded-lg bg-background-secondary-default px-3 py-2 font-mono text-caption-1-regular whitespace-pre-wrap wrap-anywhere text-text-primary select-text">{summary.command}</pre> : null}
     {summary.cwd ? <p className="font-mono text-caption-2-regular wrap-anywhere text-text-secondary">{t('runStatus.cwd')}: {summary.cwd}</p> : null}
+    {summary.stdin ? <>
+      <p className="text-caption-2-regular text-text-secondary">{t('runStatus.stdin')}</p>
+      <pre className="max-h-40 overflow-auto rounded-lg bg-background-secondary-default px-3 py-2 font-mono text-caption-1-regular whitespace-pre-wrap wrap-anywhere text-text-primary select-text">{summary.stdin}</pre>
+    </> : null}
     <ConversationPermissionActions request={request} deviceSecret={deviceSecret} onSelect={onSelect} />
   </div>;
 }

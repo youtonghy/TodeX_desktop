@@ -14,6 +14,7 @@ import { backendApi } from '../../session/helpers';
 import { usePanelBackend, type PanelBackend } from '../../session/panelBackend';
 import { AgentLocalTerminalSettings } from './AgentLocalTerminalSettings';
 import { AgentOutputFilterSettings } from './AgentOutputFilterSettings';
+import { AgentSshApprovalSettings } from './AgentSshApprovalSettings';
 import { BackendScopeRow } from './BackendScopeRow';
 import { toast } from '../ui/toast';
 import { SettingsCard, SettingsNote, SettingsRow } from './SettingsRows';
@@ -38,6 +39,7 @@ export function SshConnectionSettings({ session }: { session: TodeXSession }) {
     <div className="flex flex-col gap-6">
       <BackendScopeRow session={session} backend={backend} />
       <BackendSshSettings key={backend.backendId} backend={backend} />
+      <AgentSshApprovalSettings key={`approval:${backend.backendId}`} backend={backend} />
       <AgentLocalTerminalSettings key={`local:${backend.backendId}`} backend={backend} />
       <AgentOutputFilterSettings key={`filter:${backend.backendId}`} backend={backend} />
     </div>

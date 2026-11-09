@@ -174,6 +174,35 @@ test('settings: computer use engine', async ({ page, openDemo }) => {
   await expect(page).toHaveScreenshot('settings-computer-use-engine-light.png', { mask: volatile(page) });
 });
 
+// SSH settings with the connection approval switched to per command.
+test('settings: SSH approval per command', async ({ page, openDemo }) => {
+  await openDemo('light');
+  await page.getByRole('button', { name: '设置', exact: true }).click();
+  await settingsSection(page, 'SSH 连接').click();
+  await page.getByRole('radio', { name: '逐条' }).click();
+  await expect(page.getByRole('radio', { name: '逐条' })).toBeChecked();
+  await settle(page);
+  await expect(page).toHaveScreenshot('settings-ssh-approval-command-light.png', { mask: volatile(page) });
+});
+
+// An agent's first connection to a host asks in the conversation, like the
+// browser grant; allowing it lets the command run.
+for (const theme of ['light', 'dark'] as Theme[]) {
+  test(`SSH host approval card (${theme})`, async ({ page, openDemo }) => {
+    await openDemo(theme);
+    await page.getByRole('textbox', { name: '消息输入' }).fill('看看 gs-dev 服务器的磁盘');
+    await page.keyboard.press('Enter');
+    const title = page.getByText('允许 Agent 连接到 gs-dev？', { exact: true });
+    await expect(title).toBeVisible();
+    const card = title.locator('xpath=ancestor::div[contains(@class, "rounded-2xl")][1]');
+    await settle(page);
+    await expect(card).toHaveScreenshot(`ssh-host-approval-${theme}.png`);
+    await card.getByRole('button', { name: '本对话内允许' }).click();
+    await expect(page.getByText('gs-dev 的根分区已用 41%，还有 46G 可用。')).toBeVisible();
+    await expect(title).toHaveCount(0);
+  });
+}
+
 // Terminal screen: host cards (name and user, no addresses), then a host's right-click menu.
 async function openTerminalHosts(page: Page, openDemo: (theme?: Theme, query?: string) => Promise<void>, theme: Theme) {
   await openDemo(theme);
