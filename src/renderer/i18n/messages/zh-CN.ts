@@ -371,8 +371,8 @@ export const zhCN = {
   'settings.ssh': 'SSH 连接',
   'settings.notifyDenied': '系统拒绝了通知权限，请在系统设置中允许后再开启。',
   'settings.notifyUnsupported': '当前环境不支持系统通知（需要 HTTPS 或本机访问）。',
-  'settings.notifyTaskDone': '任务完成提醒',
-  'settings.notifyTaskDoneHint': '对话任务完成并收到回复、或等待权限审批时发送系统通知。开启时会请求系统通知权限。',
+  'settings.notifyTaskDone': '任务与请求提醒',
+  'settings.notifyTaskDoneHint': '对话任务完成并收到回复、等待授权审批或向你提问时发送系统通知。开启时会请求系统通知权限。',
   'settings.localData': '本地浏览器数据',
   'settings.localDataHint': '删除连接、凭据、偏好和本地缓存。',
   'settings.localDataConfirm': '确定清除这个浏览器中的所有 TodeX Web 数据吗？',
@@ -2132,6 +2132,9 @@ export const zhCN = {
 
   // notify
   'notify.completedFallback': '任务已完成，点击查看回复。',
+  'notify.approvalTitle': '{name} 正在等待授权',
+  'notify.questionTitle': '{name} 有问题需要你回答',
+  'notify.questionFallback': '正在等待你的回答，点击前往回复。',
   'notify.center': '通知',
   'notify.tabAll': '全部',
   'notify.tabConversations': '对话',
@@ -4037,6 +4040,7 @@ export const zhCN = {
   'private.pickWorkspace': "请先选择一个工作区",
   'private.notifyReply': "隐私对话有新回复",
   'private.notifyPermission': "隐私对话正在等待授权",
+  'private.notifyQuestion': "隐私对话有问题需要你回答",
   'private.forkRefused': "隐私对话不能 Fork",
   'private.scheduleRefused': "隐私对话不能定时发送",
   'private.compactRefused': "隐私对话不能压缩上下文",

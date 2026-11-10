@@ -371,8 +371,8 @@ export const en: Messages = {
   'settings.ssh': 'SSH connections',
   'settings.notifyDenied': 'The system denied notification permission. Allow it in system settings, then enable again.',
   'settings.notifyUnsupported': 'This environment does not support system notifications (requires HTTPS or local access).',
-  'settings.notifyTaskDone': 'Task completion alerts',
-  'settings.notifyTaskDoneHint': 'Send a system notification when a conversation task completes with a reply or is waiting for permission approval. Enabling requests notification permission.',
+  'settings.notifyTaskDone': 'Task and request alerts',
+  'settings.notifyTaskDoneHint': 'Send a system notification when a conversation task completes with a reply, needs your approval, or asks you a question. Enabling requests notification permission.',
   'settings.localData': 'Local browser data',
   'settings.localDataHint': 'Delete connections, credentials, preferences, and local cache.',
   'settings.localDataConfirm': 'Clear all TodeX Web data in this browser?',
@@ -2132,6 +2132,9 @@ export const en: Messages = {
 
   // notify
   'notify.completedFallback': 'Task finished. Tap to view the reply.',
+  'notify.approvalTitle': '{name} needs your approval',
+  'notify.questionTitle': '{name} has a question for you',
+  'notify.questionFallback': 'Waiting for your answer. Click to reply.',
   'notify.center': 'Notifications',
   'notify.tabAll': 'All',
   'notify.tabConversations': 'Conversations',
@@ -4037,6 +4040,7 @@ export const en: Messages = {
   'private.pickWorkspace': "Pick a workspace first",
   'private.notifyReply': "A private conversation has a new reply",
   'private.notifyPermission': "A private conversation is waiting for approval",
+  'private.notifyQuestion': "A private conversation has a question for you",
   'private.forkRefused': "Private conversations cannot be forked",
   'private.scheduleRefused': "Private conversations cannot be scheduled",
   'private.compactRefused': "Private conversations cannot be compacted",

@@ -371,8 +371,8 @@ export const ja: Messages = {
   'settings.ssh': 'SSH 接続',
   'settings.notifyDenied': 'システムが通知を拒否しました。システム設定で許可してから有効にしてください。',
   'settings.notifyUnsupported': 'この環境ではシステム通知をサポートしていません（HTTPS またはローカルアクセスが必要です）。',
-  'settings.notifyTaskDone': 'タスク完了の通知',
-  'settings.notifyTaskDoneHint': '会話タスクが完了して返信を受け取ったとき、または権限の承認を待っているときにシステム通知を送ります。有効にすると通知権限を要求します。',
+  'settings.notifyTaskDone': 'タスクとリクエストの通知',
+  'settings.notifyTaskDoneHint': '会話タスクが完了して返信を受け取ったとき、承認を待っているとき、または質問があるときにシステム通知を送ります。有効にすると通知権限を要求します。',
   'settings.localData': 'ローカルブラウザデータ',
   'settings.localDataHint': '接続・認証情報・設定・ローカルキャッシュを削除します。',
   'settings.localDataConfirm': 'このブラウザ内のすべての TodeX Web データを削除しますか？',
@@ -2132,6 +2132,9 @@ export const ja: Messages = {
 
   // notify
   'notify.completedFallback': 'タスクが完了しました。返信を確認してください。',
+  'notify.approvalTitle': '{name} が承認を待っています',
+  'notify.questionTitle': '{name} から質問があります',
+  'notify.questionFallback': '回答を待っています。クリックして返信します。',
   'notify.center': '通知',
   'notify.tabAll': 'すべて',
   'notify.tabConversations': '会話',
@@ -4037,6 +4040,7 @@ export const ja: Messages = {
   'private.pickWorkspace': "先にワークスペースを選択してください",
   'private.notifyReply': "プライベート会話に新しい返信があります",
   'private.notifyPermission': "プライベート会話が承認を待っています",
+  'private.notifyQuestion': "プライベート会話から質問があります",
   'private.forkRefused': "プライベート会話はフォークできません",
   'private.scheduleRefused': "プライベート会話はスケジュールできません",
   'private.compactRefused': "プライベート会話はコンパクトにできません",

@@ -5,8 +5,6 @@ import { AnimatePresence, motion, useReducedMotion, type Variants } from 'motion
 import { usageTotalTokens, type ConversationRuntime } from '@todex/protocol/conversationRuntime';
 import type { ContextCompactionState } from '@todex/protocol/v2';
 import { permissionActions, permissionDeviceGate, permissionRequestSummary, type PendingRequest, type PermissionOption } from '@todex/protocol/todex';
-import { DESKTOP_BROWSER_ACTION_KIND, DESKTOP_BROWSER_GRANT_KIND } from '@todex/protocol/agentDesktop';
-import { AGENT_SSH_HOST_GRANT_KIND } from '@todex/protocol/ssh';
 import { deviceIdentityFromSecret } from '@todex/protocol/deviceAuth';
 import type { UsageRecord } from '@todex/protocol/mobileParity';
 import { ShimmerText } from '@/components/application/agent-log/agent-log';
@@ -25,6 +23,7 @@ import { cx } from '@/utils/cx';
 import { useNoticeToast } from './NoticeToast';
 import { getLocale, t, useLocale, useT } from '../i18n';
 import { isMacLike } from '../lib/shortcuts';
+import { agentToolRequestTitle } from '../session/completionNotifications';
 
 type SubmissionStatus = 'sending' | 'running' | 'unknown' | undefined;
 type Props = {
@@ -670,20 +669,6 @@ function permissionOptionLabel(option: boolean | PermissionOption, t: ReturnType
   }
 }
 
-/// The backend titles its agent tool approvals (desktop browser, SSH host
-/// connection) in English; build them from the structured details instead.
-function agentToolTitle(request: PendingRequest, t: ReturnType<typeof useT>): string | undefined {
-  const kind = permissionString(request.data.kind);
-  const details = permissionObject(request.data.details);
-  if (kind === AGENT_SSH_HOST_GRANT_KIND) {
-    if (details.local === true) return t('agentSsh.localGrantTitle');
-    if (permissionString(details.host)) return t('agentSsh.hostGrantTitle', { host: permissionString(details.host) });
-  }
-  if (kind === DESKTOP_BROWSER_GRANT_KIND && permissionString(details.host)) return t('agentBrowser.grantTitle', { host: permissionString(details.host) });
-  if (kind === DESKTOP_BROWSER_ACTION_KIND && permissionString(details.action)) return t('agentBrowser.actionTitle', { action: permissionString(details.action) });
-  return undefined;
-}
-
 /// Composer-side approval card: says what will run (the full command, never
 /// clipped) and why the provider asked before offering the actions.
 export function PermissionRequestCard({ request, fallbackTitle, deviceSecret, onSelect }: {
@@ -696,7 +681,7 @@ export function PermissionRequestCard({ request, fallbackTitle, deviceSecret, on
   const summary = useMemo(() => permissionRequestSummary(request), [request]);
   const heading = summary.command ? t('runStatus.runCommand')
     : summary.tool ? t('runStatus.useTool', { tool: summary.tool })
-      : agentToolTitle(request, t) ?? fallbackTitle;
+      : agentToolRequestTitle(request, t) ?? fallbackTitle;
   return <div className="mb-3 flex flex-col gap-2 rounded-2xl border border-border-button-default bg-background-primary-default p-3 shadow-xs">
     <div className="flex items-start gap-2">
       {summary.command ? <RiTerminalBoxLine className="mt-0.5 size-4 shrink-0 text-foreground-icon-secondary" aria-hidden /> : null}

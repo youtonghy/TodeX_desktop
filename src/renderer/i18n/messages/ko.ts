@@ -371,8 +371,8 @@ export const ko: Messages = {
   'settings.ssh': 'SSH 연결',
   'settings.notifyDenied': '시스템에서 알림 권한을 거부했습니다. 시스템 설정에서 허용한 후 다시 켜주세요.',
   'settings.notifyUnsupported': '현재 환경에서는 시스템 알림을 지원하지 않습니다(HTTPS 또는 로컬 접속 필요).',
-  'settings.notifyTaskDone': '작업 완료 알림',
-  'settings.notifyTaskDoneHint': '대화 작업이 완료되어 답장을 받거나 권한 승인을 기다릴 때 시스템 알림을 보냅니다. 켜면 알림 권한을 요청합니다.',
+  'settings.notifyTaskDone': '작업 및 요청 알림',
+  'settings.notifyTaskDoneHint': '대화 작업이 완료되어 답장을 받거나, 승인을 기다리거나, 질문이 있을 때 시스템 알림을 보냅니다. 켜면 알림 권한을 요청합니다.',
   'settings.localData': '로컬 브라우저 데이터',
   'settings.localDataHint': '연결, 자격 증명, 환경 설정, 로컬 캐시를 삭제합니다.',
   'settings.localDataConfirm': '이 브라우저의 모든 TodeX Web 데이터를 삭제하시겠습니까?',
@@ -2132,6 +2132,9 @@ export const ko: Messages = {
 
   // notify
   'notify.completedFallback': '작업이 완료되었습니다. 눌러서 답변을 확인하세요.',
+  'notify.approvalTitle': '{name}에서 승인을 기다리고 있습니다',
+  'notify.questionTitle': '{name}에서 답변할 질문이 있습니다',
+  'notify.questionFallback': '답변을 기다리고 있습니다. 클릭하여 답장하세요.',
   'notify.center': '알림',
   'notify.tabAll': '전체',
   'notify.tabConversations': '대화',
@@ -4037,6 +4040,7 @@ export const ko: Messages = {
   'private.pickWorkspace': "먼저 워크스페이스를 선택하세요",
   'private.notifyReply': "비공개 대화에 새 답장이 있습니다",
   'private.notifyPermission': "비공개 대화가 승인을 기다리고 있습니다",
+  'private.notifyQuestion': "비공개 대화에 답변할 질문이 있습니다",
   'private.forkRefused': "비공개 대화는 포크할 수 없습니다",
   'private.scheduleRefused': "비공개 대화는 예약할 수 없습니다",
   'private.compactRefused': "비공개 대화는 압축할 수 없습니다",

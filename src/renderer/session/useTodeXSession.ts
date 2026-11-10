@@ -3,7 +3,9 @@ import { ipcDaemonConflicts, moveBackendRecords, ownerBackendId, resolveNoWorksp
 import { useWorkbenchSharing } from './useWorkbenchSharing';
 import {
   completionNotificationBody,
-  permissionNotificationBody,
+  requestNotificationBody,
+  requestNotificationKind,
+  requestNotificationTitle,
   postCompletionNotification,
   shouldNotifyCompletion,
   useCompletionNotifications,
@@ -4577,14 +4579,22 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     });
   };
 
-  /** Each permission request alerts once, like a finished turn: to the
-   * notification history when out of sight, and as a system notification
-   * when completion alerts are on. */
+  /** Each approval or question request alerts once, like a finished turn:
+   * to the notification history when out of sight, and as a system
+   * notification when alerts are on. The system notification stays until
+   * the user acts and is withdrawn once the request is answered. */
   const notifiedPermissionIdsRef = useRef(new Set<string>());
+  const requestSystemNotificationsRef = useRef(new Map<string, Notification>());
   useEffect(() => {
     const ownerById = new Map<string, string>();
     for (const [localId, state] of Object.entries(permissionRuntimes)) {
       for (const permission of state.pendingPermissions) ownerById.set(permission.id, localId);
+    }
+    // A request that left every runtime was answered (here or elsewhere).
+    for (const [requestId, notification] of requestSystemNotificationsRef.current) {
+      if (ownerById.has(requestId)) continue;
+      notification.close();
+      requestSystemNotificationsRef.current.delete(requestId);
     }
     for (const request of pendingRequests) {
       const localId = ownerById.get(request.requestId);
@@ -4598,8 +4608,12 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       const workspace = stores.workspaces.get().find((item) => item.id === conversation?.workspaceId);
       // A private conversation's request is announced without what it asks.
       const hidden = isPrivateConversation(conversation);
-      const title = hidden ? t('private.notifyPermission') : conversation?.title?.trim() || workspace?.name?.trim() || 'TodeX';
-      const body = hidden ? '' : permissionNotificationBody(request);
+      const name = conversation?.title?.trim() || workspace?.name?.trim() || 'TodeX';
+      const question = requestNotificationKind(request) === 'question';
+      const title = hidden
+        ? t(question ? 'private.notifyQuestion' : 'private.notifyPermission')
+        : requestNotificationTitle(request, name);
+      const body = hidden ? '' : requestNotificationBody(request);
       addNotification({
         kind: 'conversation',
         status: 'information',
@@ -4614,12 +4628,21 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         supported: completionNotificationsState.completionNotificationsSupported,
         viewingConversation,
       })) continue;
-      postCompletionNotification({
+      const notification = postCompletionNotification({
         title,
         body,
         tag: `permission-request-${request.requestId}`,
+        requireInteraction: true,
         onActivate: () => { if (conversation) selectConversation(conversation.workspaceId, localId); },
       });
+      if (notification) {
+        requestSystemNotificationsRef.current.set(request.requestId, notification);
+        notification.addEventListener('close', () => {
+          if (requestSystemNotificationsRef.current.get(request.requestId) === notification) {
+            requestSystemNotificationsRef.current.delete(request.requestId);
+          }
+        });
+      }
     }
   }, [
     pendingRequests,
@@ -4628,6 +4651,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     completionNotificationsState.completionNotificationsSupported,
     selectConversation,
   ]);
+  useEffect(() => () => {
+    for (const notification of requestSystemNotificationsRef.current.values()) notification.close();
+    requestSystemNotificationsRef.current.clear();
+  }, []);
 
   const removeWorkspace = useCallback(
     (workspaceId: string) => {
