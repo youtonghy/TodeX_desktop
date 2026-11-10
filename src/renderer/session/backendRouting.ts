@@ -99,6 +99,23 @@ export function ipcDaemonConflicts<P extends DaemonProfileLike>(
 }
 
 /**
+ * The paired TCP profile of the native daemon to re-point at its IPC socket
+ * instead of pairing a new device: connecting it keeps the device key, and
+ * with it the history access and the records filed under the profile.
+ * Enabled profiles come first, then the most recently updated.
+ */
+export function reusableNativeProfile<P extends DaemonProfileLike & { updatedAt: number }>(
+  profiles: readonly P[],
+  isIpc: (serverUrl: string) => boolean,
+  reachesNativeDaemon: (serverUrl: string) => boolean,
+  isPaired: (profile: P) => boolean,
+): P | undefined {
+  return profiles
+    .filter((profile) => !isIpc(profile.serverUrl) && reachesNativeDaemon(profile.serverUrl) && isPaired(profile))
+    .sort((a, b) => Number(Boolean(a.disabled)) - Number(Boolean(b.disabled)) || b.updatedAt - a.updatedAt)[0];
+}
+
+/**
  * Files the records of backend `fromId` under `toId`, a profile of the same
  * daemon. A workspace or conversation `toId` already lists (the daemon gave
  * both profiles the same ids) keeps the `toId` record; `conversationIds`

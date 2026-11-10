@@ -3,7 +3,7 @@ import { ipcServerInstance, ipcServerUrl, isIpcServerUrl } from '@todex/protocol
 import { isLoopbackHostname } from '@todex/protocol/loopback';
 import type { BackendConnectionProfile } from '@todex/protocol/todex';
 import type { LocalNativeEndpoint } from '../../preload/localBackendTypes';
-import { ipcDaemonConflicts } from './backendRouting';
+import { ipcDaemonConflicts, reusableNativeProfile } from './backendRouting';
 import { NATIVE_INSTANCE, daemonPeer } from './daemonPeers';
 
 export { daemonPeer };
@@ -109,19 +109,37 @@ export function managedProfile(profiles: BackendConnectionProfile[], instance: s
 /**
  * Makes sure this app is connected to the IPC backend `instance`: creates its
  * profile when missing, pairs it (approving the request over the socket) when
- * unpaired or when `repair` is set, then connects.
+ * unpaired or when `repair` is set, then connects. Without an IPC profile for
+ * the native daemon, a paired loopback profile of it (`nativePort`) is
+ * re-pointed at the socket instead, so this device keeps its key.
  */
 export async function ensureManagedConnection(session: ManagedSession, options: {
   instance: string;
   name: string;
   deviceName: string;
   repair?: boolean;
+  /** The native daemon's TCP port, when it listens on one. */
+  nativePort?: number | null;
   signal?: AbortSignal;
 }): Promise<string> {
   const localBackend = window.todexDesktop.localBackend;
   const serverUrl = ipcServerUrl(options.instance);
-  const profile = managedProfile(session.backendConnections, options.instance)
-    ?? session.addBackendConnection({ name: options.name, serverUrl });
+  const existing = managedProfile(session.backendConnections, options.instance);
+  const nativePort = options.nativePort;
+  const reusable = !existing && options.instance === NATIVE_INSTANCE && typeof nativePort === 'number'
+    ? reusableNativeProfile(
+      session.backendConnections,
+      isIpcServerUrl,
+      (url) => reachesNativePort(url, nativePort),
+      (item) => item.transportVerified && Boolean(deviceIdentityFromSecret(item.deviceSecret)),
+    )
+    : undefined;
+  if (reusable) {
+    if (reusable.disabled) session.updateBackendConnection(reusable.id, { disabled: false });
+    await switchToNativeIpc(session, reusable.id, options.deviceName);
+    return reusable.id;
+  }
+  const profile = existing ?? session.addBackendConnection({ name: options.name, serverUrl });
   const paired = profile.transportVerified && Boolean(deviceIdentityFromSecret(profile.deviceSecret));
   // A disabled IPC profile takes its daemon back from the profile serving it.
   const peer = profile.disabled ? daemonPeer(session.backendConnections, profile) : undefined;

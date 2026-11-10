@@ -5,6 +5,7 @@ import {
   moveBackendRecords,
   ownerBackendId,
   resolveNoWorkspaceBackendId,
+  reusableNativeProfile,
   tagLegacyBackendRecords,
 } from '../src/renderer/session/backendRouting.ts';
 
@@ -116,4 +117,25 @@ test('moved records keep one copy of each id the daemon issued', () => {
   ]);
   assert.deepEqual([...moved.conversationIds], [['c1', 'c3']]);
   assert.deepEqual(moved.tombstones, [{ backendConnectionId: 'ipc' }]);
+});
+
+test('connecting the native daemon reuses its paired loopback profile', () => {
+  const profile = (id: string, serverUrl: string, extra: Record<string, unknown> = {}) => ({
+    id, serverUrl, createdAt: 1, updatedAt: 1, encryptionPublicKey: 'k', transportVerified: true, paired: true, ...extra,
+  });
+  const isIpc = (url: string) => url.startsWith('todex-ipc://');
+  const reachesNative = (url: string) => url === 'http://127.0.0.1:7345';
+  const isPaired = (item: { paired: boolean }) => item.paired;
+  const pick = (items: ReturnType<typeof profile>[]) => reusableNativeProfile(items, isIpc, reachesNative, isPaired)?.id;
+
+  assert.equal(pick([profile('remote', 'http://10.0.0.2:7345'), profile('ipc', 'todex-ipc://local')]), undefined);
+  assert.equal(pick([profile('unpaired', 'http://127.0.0.1:7345', { paired: false })]), undefined);
+  assert.equal(pick([profile('loop', 'http://127.0.0.1:7345')]), 'loop');
+  // Enabled before disabled, then the most recently updated.
+  assert.equal(pick([
+    profile('old', 'http://127.0.0.1:7345', { updatedAt: 5 }),
+    profile('off', 'http://127.0.0.1:7345', { updatedAt: 9, disabled: true }),
+    profile('new', 'http://127.0.0.1:7345', { updatedAt: 7 }),
+  ]), 'new');
+  assert.equal(pick([profile('off', 'http://127.0.0.1:7345', { disabled: true })]), 'off');
 });

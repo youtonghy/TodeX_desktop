@@ -97,12 +97,16 @@ export function LocalBackendSettings({ session, deviceName }: { session: TodeXSe
     }
   };
 
-  const connectInstance = (instance: string, name: string, repair = false) => ensureManagedConnection(sessionRef.current, {
-    instance, name, deviceName, repair,
-  });
-
   const native = discovery?.native;
   const daemonRunning = native?.daemon?.running === true;
+  // The daemon's TCP port, which loopback profiles of it use. With the
+  // network off the recorded port only serves agent tools.
+  const nativePort = native?.daemon?.networkEnabled === false ? null : native?.daemon?.port ?? null;
+
+  const connectInstance = (instance: string, name: string, repair = false) => ensureManagedConnection(sessionRef.current, {
+    instance, name, deviceName, repair, nativePort,
+  });
+
   const versionMismatch = Boolean(native?.expectedVersion && native.binary?.version && native.binary.version !== native.expectedVersion);
   const profile = managedProfile(session.backendConnections, NATIVE_INSTANCE);
   const link = profile ? session.backendLinkStatus[profile.id] : undefined;
