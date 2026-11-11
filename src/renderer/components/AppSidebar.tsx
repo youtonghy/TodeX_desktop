@@ -209,12 +209,13 @@ function SectionHeader({ label, count, collapsed, expandLabel, collapseLabel, on
   );
 }
 
-/** "Show more" / "Collapse" paging under a list. */
-function ListPaging({ hasMore, canCollapse, onMore, onCollapse }: { hasMore: boolean; canCollapse: boolean; onMore: () => void; onCollapse: () => void }) {
+/** "Show more" / "Collapse" paging under a list. `moreLabel` renames the
+ * "Show more" button (e.g. the last step that reveals hidden rows). */
+function ListPaging({ hasMore, canCollapse, onMore, onCollapse, moreLabel }: { hasMore: boolean; canCollapse: boolean; onMore: () => void; onCollapse: () => void; moreLabel?: string }) {
   const t = useT();
   return (
     <div className="flex items-center justify-between px-1 pt-1">
-      {hasMore ? <button type="button" className={QUIET_BUTTON} onClick={onMore}>{t('sidebar.showMore')}</button> : <span />}
+      {hasMore ? <button type="button" className={QUIET_BUTTON} onClick={onMore}>{moreLabel ?? t('sidebar.showMore')}</button> : <span />}
       {canCollapse ? <button type="button" className={QUIET_BUTTON} onClick={onCollapse}>{t('sidebar.collapse')}</button> : null}
     </div>
   );
@@ -620,6 +621,9 @@ export function AppSidebar({
 
   // Progressive disclosure limits (default 5, clicking '显示更多' shows 5 more)
   const [workspaceLimit, setWorkspaceLimit] = useState(5);
+  // Workspaces of disconnected backends stay out of the list until the rest
+  // has been paged through and the user asks for them.
+  const [showOfflineWorkspaces, setShowOfflineWorkspaces] = useState(false);
   const [conversationLimit, setConversationLimit] = useState(5);
 
   // Reset conversation limit when switching workspaces
@@ -773,6 +777,22 @@ export function AppSidebar({
   // Top-level rows: lone workspaces and groups. "Show more" pages by these,
   // so a group counts as one row.
   const workspaceEntries = useMemo(() => groupWorkspaceEntries(sortedWorkspaces), [sortedWorkspaces]);
+  // Rows on a backend that is not connected right now (the open row stays).
+  // They are hidden from the list, not from layout edits: drag and group
+  // changes still work on `workspaceEntries`, so they keep their place.
+  const offlineWorkspaceIds = useMemo(() => new Set(ownWorkspaces
+    .filter((workspace) => workspace.id !== activeRowId
+      && session.backendLinkStatus[workspace.backendConnectionId || session.activeBackendConnectionId]?.state !== 'open')
+    .map((workspace) => workspace.id)), [ownWorkspaces, activeRowId, session.backendLinkStatus, session.activeBackendConnectionId]);
+  // A search and the revealed state list everything in its original order.
+  const hideOfflineWorkspaces = !query && !showOfflineWorkspaces && offlineWorkspaceIds.size > 0;
+  const listedEntries = useMemo(() => (hideOfflineWorkspaces
+    ? workspaceEntries.flatMap((entry): WorkspaceSidebarEntry[] => {
+      if (entry.kind === 'workspace') return offlineWorkspaceIds.has(entry.workspace.id) ? [] : [entry];
+      const workspaces = entry.workspaces.filter((workspace) => !offlineWorkspaceIds.has(workspace.id));
+      return workspaces.length > 0 ? [{ ...entry, workspaces }] : [];
+    })
+    : workspaceEntries), [hideOfflineWorkspaces, workspaceEntries, offlineWorkspaceIds]);
   const newGroupFallbackName = t('sidebar.newGroupName');
   // A search keeps the rows whose name matches; a group whose own name matches
   // keeps all of its workspaces, otherwise just the matching ones.
@@ -786,7 +806,7 @@ export function AppSidebar({
       return workspaces.length > 0 ? [{ ...entry, workspaces }] : [];
     });
   }, [query, newGroupFallbackName]);
-  const matchedEntries = useMemo(() => matchEntries(workspaceEntries), [matchEntries, workspaceEntries]);
+  const matchedEntries = useMemo(() => matchEntries(listedEntries), [matchEntries, listedEntries]);
 
   // Grouping by tag (a per-device choice): the None rows stay on top, the
   // rest regroup into one section per tag. A search keeps a section whose tag
@@ -804,12 +824,12 @@ export function AppSidebar({
   const tagSections = useMemo(() => {
     if (!tagView) return [];
     const untaggedLabel = t('sidebar.untagged').toLocaleLowerCase();
-    return groupWorkspaceEntriesByTag(workspaceEntries.filter((entry) => !isNoneEntry(entry))).flatMap((section): WorkspaceTagSection[] => {
+    return groupWorkspaceEntriesByTag(listedEntries.filter((entry) => !isNoneEntry(entry))).flatMap((section): WorkspaceTagSection[] => {
       if (!query || (section.tag ?? untaggedLabel).toLocaleLowerCase().includes(query)) return [section];
       const entries = matchEntries(section.entries);
       return entries.length > 0 ? [{ ...section, entries }] : [];
     });
-  }, [tagView, workspaceEntries, matchEntries, query, t]);
+  }, [tagView, listedEntries, matchEntries, query, t]);
   const knownTags = useMemo(() => collectWorkspaceTags(ownWorkspaces), [ownWorkspaces]);
 
   const matchedWorkspaceCount = useMemo(() => {
@@ -824,11 +844,16 @@ export function AppSidebar({
     }
     return ids.size;
   }, [tagView, matchedEntries, tagNoneEntries, tagSections]);
-  // Search results are shown whole; paging applies to the full list.
+  // Search results are shown whole; paging applies to the full list. Once
+  // the offline rows are revealed (the list was already paged to its end)
+  // everything is shown.
   const displayedEntries = useMemo(
-    () => (query ? matchedEntries : matchedEntries.slice(0, workspaceLimit)),
-    [matchedEntries, query, workspaceLimit],
+    () => (query || showOfflineWorkspaces ? matchedEntries : matchedEntries.slice(0, workspaceLimit)),
+    [matchedEntries, query, showOfflineWorkspaces, workspaceLimit],
   );
+  const workspacesHaveMore = !tagView && !showOfflineWorkspaces && matchedEntries.length > workspaceLimit;
+  // The last "Show more" step, in the same place: the hidden offline rows.
+  const canRevealOffline = hideOfflineWorkspaces && !workspacesHaveMore;
   const workspaceEntriesRef = useRef(workspaceEntries);
   workspaceEntriesRef.current = workspaceEntries;
   // Search results open folded groups.
@@ -1899,7 +1924,7 @@ export function AppSidebar({
                   <WorkspaceHoverTooltip disabled={Boolean(draggingKey) || Boolean(contextMenu)} renderContent={workspaceTooltipContent}>
                   {rail ? (
                     <GridList
-                      key={`workspaces_${workspaceLimit}`}
+                      key={`workspaces_${workspaceLimit}_${showOfflineWorkspaces}`}
                       aria-label={t('sidebar.workspaces')}
                       className="flex flex-col outline-none"
                       disabledKeys={foldedWorkspaceKeys}
@@ -1915,7 +1940,7 @@ export function AppSidebar({
                     </GridList>
                   ) : (
                     <TreeView
-                      key={`workspaces_${workspaceLimit}`}
+                      key={`workspaces_${workspaceLimit}_${showOfflineWorkspaces}`}
                       aria-label={t('sidebar.workspaces')}
                       className="rounded-none border-0 bg-transparent p-0"
                       selectionMode="single"
@@ -1944,16 +1969,19 @@ export function AppSidebar({
                     </TreeView>
                   )}
                   </WorkspaceHoverTooltip>
-
-                  {!query && !tagView && workspaceEntries.length > 5 && !rail && (
-                    <ListPaging
-                      hasMore={workspaceEntries.length > workspaceLimit}
-                      canCollapse={workspaceLimit > 5}
-                      onMore={() => setWorkspaceLimit((prev) => prev + 5)}
-                      onCollapse={() => setWorkspaceLimit(5)}
-                    />
-                  )}
                 </>
+              )}
+              {!query && !rail && (workspacesHaveMore || canRevealOffline || showOfflineWorkspaces || (!tagView && workspaceLimit > 5)) && (
+                <ListPaging
+                  hasMore={workspacesHaveMore || canRevealOffline}
+                  canCollapse={showOfflineWorkspaces || (!tagView && workspaceLimit > 5)}
+                  moreLabel={workspacesHaveMore ? undefined : t('sidebar.showOfflineWorkspaces', { n: offlineWorkspaceIds.size })}
+                  onMore={() => (workspacesHaveMore ? setWorkspaceLimit((prev) => prev + 5) : setShowOfflineWorkspaces(true))}
+                  onCollapse={() => {
+                    setWorkspaceLimit(5);
+                    setShowOfflineWorkspaces(false);
+                  }}
+                />
               )}
               {matchedForeignGroups.map((group) => {
                 const backendLabel = group.profile

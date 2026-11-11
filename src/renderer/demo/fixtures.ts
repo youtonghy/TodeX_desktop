@@ -23,6 +23,9 @@ import type { GitScanResult, GitStatusSummary, GitWorkspaceSnapshot } from '../l
 export const DEMO_SERVER_URL = 'http://127.0.0.1:7399';
 /** The second backend of `?demo&backends=2` (the config sync preview). */
 export const DEMO_SECOND_SERVER_URL = 'http://127.0.0.1:7398';
+/** The unreachable backend of `?demo&backends=offline`. */
+export const DEMO_OFFLINE_SERVER_URL = 'http://127.0.0.1:7396';
+export const DEMO_OFFLINE_BACKEND_ID = 'demo-offline';
 export const DEMO_ROOT = '/home/demo/projects';
 
 const NOW = Date.now();
@@ -55,6 +58,12 @@ export const demoWorkspaces: WorkspaceRecord[] = [
   workspace('ws-lumen-api', 'lumen-api', { groupId: 'grp-lumen', groupName: 'Lumen', sortOrder: 1 }),
   workspace('ws-design-tokens', 'design-tokens', { sortOrder: 2, icon: 'palette', iconColor: '#7C5CFC' }),
   workspace('ws-infra', 'infra-scripts', { sortOrder: 3, model: 'gpt-5.5' }),
+];
+
+/** Cached workspaces of the offline backend (`?demo&backends=offline`). */
+export const demoOfflineWorkspaces: WorkspaceRecord[] = [
+  workspace('ws-g14-firmware', 'g14-firmware', { backendConnectionId: DEMO_OFFLINE_BACKEND_ID, sortOrder: 2 }),
+  workspace('ws-g14-dotfiles', 'dotfiles', { backendConnectionId: DEMO_OFFLINE_BACKEND_ID, sortOrder: 4 }),
 ];
 
 const capabilities: ProviderCapabilities = {

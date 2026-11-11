@@ -17,15 +17,18 @@ import {
 } from '../session/helpers';
 import { setLocale } from '../i18n';
 import {
+  DEMO_OFFLINE_BACKEND_ID,
+  DEMO_OFFLINE_SERVER_URL,
   DEMO_ROOT,
   DEMO_SECOND_SERVER_URL,
   DEMO_SERVER_URL,
   demoActiveConversationId,
   demoJournals,
+  demoOfflineWorkspaces,
   demoUsageRecords,
   demoWorkspaces,
 } from './fixtures';
-import { demoSecondTransport, demoTransport, installDemoFetch } from './transport';
+import { demoOfflineTransport, demoSecondTransport, demoTransport, installDemoFetch } from './transport';
 
 export function installDemoMode(): boolean {
   if (window.todexDesktop) {
@@ -53,14 +56,20 @@ export function installDemoMode(): boolean {
   };
   // `backends=2`: a second backend, both paired, for screens that need two
   // (config sync). Off by default so every other screen keeps one backend.
-  if (params.get('backends') === '2') {
+  // `backends=offline`: a second backend that never connects, with cached
+  // workspaces, for the sidebar's hidden offline workspaces.
+  const backends = params.get('backends');
+  if (backends === '2' || backends === 'offline') {
     const profile = (id: string, name: string, serverUrl: string, labelColor: string) => ({
       id, name, serverUrl, labelColor, tenantId: 'default', encryptionProtocol: 'none', encryptionPublicKey: '', transportVerified: false, createdAt: 0, updatedAt: 0,
     });
     store.set(BACKEND_CONNECTIONS_STORAGE_KEY, [
       profile('default-backend', 'MBP', DEMO_SERVER_URL, '#3b82f6'),
-      profile('demo-g14', 'G14', DEMO_SECOND_SERVER_URL, '#22c55e'),
+      backends === 'offline'
+        ? profile(DEMO_OFFLINE_BACKEND_ID, 'G14', DEMO_OFFLINE_SERVER_URL, '#22c55e')
+        : profile('demo-g14', 'G14', DEMO_SECOND_SERVER_URL, '#22c55e'),
     ]);
+    if (backends === 'offline') store.set(WORKSPACES_STORAGE_KEY, [...demoWorkspaces, ...demoOfflineWorkspaces]);
     // Never a real key: the fixtures transport neither signs nor checks.
     bridge.secureStore = {
       get: async (key) => (key.startsWith(`${DEVICE_SECRET_STORAGE_KEY}.`) ? 'demo-device-secret' : null),
@@ -74,7 +83,8 @@ export function installDemoMode(): boolean {
   }
   if (!params.has('lang')) setLocale('zh-CN');
 
-  overrideBackendTransport((serverUrl) => (serverUrl === DEMO_SECOND_SERVER_URL ? demoSecondTransport : demoTransport));
+  overrideBackendTransport((serverUrl) => (serverUrl === DEMO_SECOND_SERVER_URL ? demoSecondTransport
+    : serverUrl === DEMO_OFFLINE_SERVER_URL ? demoOfflineTransport : demoTransport));
   installDemoFetch();
   document.title = 'TodeX · 演示预览';
   return true;

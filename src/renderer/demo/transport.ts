@@ -1435,6 +1435,23 @@ export const demoSecondTransport = transportFor(secondRoute);
 
 export const demoTransport = transportFor(route);
 
+/** A backend that never answers (`?demo&backends=offline`): every request
+ * fails and the socket closes right after it is opened. */
+export const demoOfflineTransport: SecureTransport = {
+  mode: 'plaintext',
+  fetch: async () => { throw new TypeError('Failed to fetch'); },
+  fetchStream: async () => { throw new TypeError('Failed to fetch'); },
+  openSocket: (options = {}) => {
+    const socket = { encrypted: false, ready: false, closed: false, send: () => undefined, close: () => { socket.closed = true; } };
+    setTimeout(() => {
+      if (socket.closed) return;
+      socket.closed = true;
+      options.onClose?.({ code: 1006, reason: '' });
+    }, 50);
+    return socket;
+  },
+};
+
 /** Answers the two calls that use `window.fetch` directly (health polling and
  * the transport policy probe) from the same routes. */
 export function installDemoFetch(): void {
@@ -1443,6 +1460,7 @@ export function installDemoFetch(): void {
     const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url, window.location.href);
     const answer = url.origin === new URL(fixtures.DEMO_SERVER_URL).origin ? route
       : url.origin === new URL(fixtures.DEMO_SECOND_SERVER_URL).origin ? secondRoute : null;
+    if (url.origin === new URL(fixtures.DEMO_OFFLINE_SERVER_URL).origin) throw new TypeError('Failed to fetch');
     if (!answer) return realFetch(input, init);
     const response = answer({ method: init?.method ?? 'GET', path: url.pathname, query: url.search });
     return new Response(decoder.decode(response.body), { status: response.status, headers: response.headers });

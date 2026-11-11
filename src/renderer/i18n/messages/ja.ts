@@ -168,6 +168,7 @@ export const ja: Messages = {
   'sidebar.backendRemoved': 'Backend 設定が削除されました',
   'sidebar.backendsOffline': '他の Backend {n} 件が未接続',
   'sidebar.showMore': 'さらに表示 (+5)',
+  'sidebar.showOfflineWorkspaces': '未接続の Backend のワークスペースを表示 ({n})',
   'sidebar.collapse': '折りたたむ',
   'sidebar.unfoldGroup': 'グループを展開',
   'sidebar.foldGroup': 'グループを折りたたむ',

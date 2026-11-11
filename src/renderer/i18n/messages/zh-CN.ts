@@ -168,6 +168,7 @@ export const zhCN = {
   'sidebar.backendRemoved': '后端配置已移除',
   'sidebar.backendsOffline': '{n} 个其他后端未连接',
   'sidebar.showMore': '显示更多 (+5)',
+  'sidebar.showOfflineWorkspaces': '显示未连接后端的工作区 ({n})',
   'sidebar.collapse': '收起',
   'sidebar.unfoldGroup': '展开分组',
   'sidebar.foldGroup': '折叠分组',

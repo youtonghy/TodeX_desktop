@@ -168,6 +168,7 @@ export const en: Messages = {
   'sidebar.backendRemoved': 'Backend configuration removed',
   'sidebar.backendsOffline': '{n, plural, one {# other backend offline} other {# other backends offline}}',
   'sidebar.showMore': 'Show more (+5)',
+  'sidebar.showOfflineWorkspaces': '{n, plural, one {Show # workspace on offline backends} other {Show # workspaces on offline backends}}',
   'sidebar.collapse': 'Show less',
   'sidebar.unfoldGroup': 'Expand group',
   'sidebar.foldGroup': 'Collapse group',

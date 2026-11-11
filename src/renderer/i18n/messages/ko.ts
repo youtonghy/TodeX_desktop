@@ -168,6 +168,7 @@ export const ko: Messages = {
   'sidebar.backendRemoved': 'Backend 설정이 삭제됨',
   'sidebar.backendsOffline': '다른 Backend {n}개 연결 안 됨',
   'sidebar.showMore': '더 보기 (+5)',
+  'sidebar.showOfflineWorkspaces': '연결 안 된 Backend의 워크스페이스 표시 ({n})',
   'sidebar.collapse': '접기',
   'sidebar.unfoldGroup': '그룹 펼치기',
   'sidebar.foldGroup': '그룹 접기',

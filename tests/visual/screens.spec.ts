@@ -290,3 +290,24 @@ test.describe('compact window', () => {
     await expect(page).toHaveScreenshot('compact-settings-light.png', { mask: volatile(page) });
   });
 });
+
+// A second backend that never connects (`backends=offline`): its cached
+// workspaces leave the list until the paging row's last step reveals them.
+test('sidebar: offline backend workspaces hidden, then revealed', async ({ page, openDemo }) => {
+  await openDemo('light', 'backends=offline');
+  const sidebar = page.getByRole('complementary');
+  const reveal = sidebar.getByRole('button', { name: '显示未连接后端的工作区 (3)' });
+  await expect(reveal).toBeVisible();
+  await expect(sidebar.getByText('g14-firmware')).toHaveCount(0);
+  await settle(page);
+  await expect(page).toHaveScreenshot('sidebar-offline-hidden-light.png', { mask: volatile(page) });
+
+  await reveal.click();
+  await expect(sidebar.getByText('g14-firmware')).toBeVisible();
+  await expect(sidebar.getByRole('button', { name: '收起', exact: true })).toBeAttached();
+  // The click leaves the pointer over a row that just moved in; keep its
+  // tooltip out of the shot.
+  await page.mouse.move(720, 880);
+  await settle(page);
+  await expect(page).toHaveScreenshot('sidebar-offline-revealed-light.png', { mask: volatile(page) });
+});
