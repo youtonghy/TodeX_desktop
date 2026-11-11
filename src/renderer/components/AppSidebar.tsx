@@ -738,6 +738,18 @@ export function AppSidebar({
     }
     return map;
   }, [session, statusSession, timelineInfoMap, rowIdOf]);
+  // A group's folder carries its most urgent workspace status (same
+  // precedence), drawn in that workspace's ring style.
+  const groupStatusOf = (entry: WorkspaceGroupEntry) => {
+    const rank = { working: 3, issue: 2, unread: 1 } as const;
+    let best: { kind: keyof typeof rank; style?: string } | null = null;
+    for (const workspace of entry.workspaces) {
+      const kind = workspaceStatusMap[workspace.id];
+      if (kind && (!best || rank[kind] > rank[best.kind])) best = { kind, style: workspace.ringStyle };
+    }
+    return best;
+  };
+  const statusLabel = (kind: 'working' | 'issue' | 'unread') => (kind === 'working' ? t('sidebar.statusWorking') : kind === 'issue' ? t('sidebar.statusIssue') : t('sidebar.statusUnread'));
 
   // Workspaces use an explicit manual order and never move when a conversation updates.
   // The built-in None workspace always leads the list.
@@ -1292,6 +1304,7 @@ export function AppSidebar({
       .map((workspace) => workspaceStatusMap[workspace.id])
       .filter((status): status is NonNullable<typeof status> => Boolean(status))
       .slice(0, 3);
+    const groupStatus = groupStatusOf(entry);
     const drop = dropTarget?.kind === 'group' && dropTarget.id === entry.id
       ? dropTarget.position === 'after' && !folded ? null : dropTarget.position
       : null;
@@ -1308,7 +1321,10 @@ export function AppSidebar({
         <RowContent rail={rail} title={rail ? name : undefined}>
           <span className="relative flex size-5 shrink-0 items-center justify-center">
             {rail ? (
-              <RiFoldersLine aria-hidden className={cx('size-4', containsSelected ? 'text-foreground-icon-primary' : 'text-foreground-icon-secondary')} />
+              <>
+                {groupStatus ? <WorkspaceStatusRing kind={groupStatus.kind} style={groupStatus.style} label={statusLabel(groupStatus.kind)} /> : null}
+                <RiFoldersLine aria-hidden className={cx('size-4', containsSelected ? 'text-foreground-icon-primary' : 'text-foreground-icon-secondary')} />
+              </>
             ) : (
               <RiArrowDownSLine aria-hidden className={cx('size-4 text-foreground-icon-tertiary transition-transform duration-200 ease', folded && '-rotate-90 rtl:rotate-90')} />
             )}
@@ -1521,9 +1537,11 @@ export function AppSidebar({
       .map((workspace) => workspaceStatusMap[workspace.id])
       .filter((status): status is NonNullable<typeof status> => Boolean(status))
       .slice(0, 3);
+    const groupStatus = groupStatusOf(entry);
     const drop = dropTarget?.kind === 'group' && dropTarget.id === entry.id
       ? dropTarget.position === 'after' && !folded ? null : dropTarget.position
       : null;
+    const FolderGlyph = folded ? RiFolder3Line : RiFolderOpenLine;
     return (
       <TreeViewItem
         key={scopedKey(scope, `group:${entry.id}`)}
@@ -1531,6 +1549,13 @@ export function AppSidebar({
         label={name}
         icon={RiFolder3Line}
         expandedIcon={RiFolderOpenLine}
+        // The ring overhangs the 16px folder so the row keeps its layout.
+        leading={groupStatus ? (
+          <span className="relative flex size-4 shrink-0 items-center justify-center">
+            <span className="absolute -inset-0.5"><WorkspaceStatusRing kind={groupStatus.kind} style={groupStatus.style} label={statusLabel(groupStatus.kind)} /></span>
+            <FolderGlyph aria-hidden className="size-4 shrink-0 text-foreground-icon-primary opacity-50" />
+          </span>
+        ) : undefined}
         className={({ isHovered, isPressed }) => cx(
           isPressed ? 'bg-background-tertiary-default' : isHovered ? 'bg-background-secondary-hover' : 'bg-transparent',
           'text-body-semibold',
