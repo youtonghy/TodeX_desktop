@@ -103,6 +103,8 @@ for (const theme of ['light', 'dark'] as Theme[]) {
       await page.getByText('lumen-api', { exact: true }).click();
       await page.getByText('支付回调幂等处理').first().click();
       await expect(page.getByText('等待后台任务（1 个）')).toBeVisible();
+      // Only the background tasks keep it working, so they can be stopped.
+      await expect(page.getByRole('button', { name: '停止后台任务' })).toBeVisible();
       // The sidebar keeps the conversation marked as working as well.
       await expect(page.getByRole('row', { name: /支付回调幂等处理/ }).getByLabel('正在工作')).toBeVisible();
       // So does the Lumen group folder holding that workspace.

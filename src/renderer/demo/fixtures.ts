@@ -125,7 +125,7 @@ function provider(id: ProviderKind, displayName: string, available: boolean, una
 }
 
 export const demoProviders: ProviderDescriptor[] = [
-  provider('claude-code', 'Claude Code', true, undefined, { controlActions: ['cancel', 'interrupt', 'fork'], privateConversations: 'native' }),
+  provider('claude-code', 'Claude Code', true, undefined, { controlActions: ['cancel', 'interrupt', 'fork'], privateConversations: 'native', backgroundTaskStop: true }),
   provider('codex', 'Codex CLI', true, undefined, { controlActions: ['cancel', 'interrupt', 'retry', 'fork', 'forkAt', 'compact', 'goal'], privateConversations: 'scrubbed' }),
   provider('pi', 'Pi', true),
   provider('opencode', 'OpenCode', false, 'opencode is not installed'),

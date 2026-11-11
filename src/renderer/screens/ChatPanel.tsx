@@ -169,6 +169,7 @@ const BACKGROUND_ENDED_REASONS: Record<string, MessageKey> = {
   stopped: 'chat.backgroundEnded.stopped',
   evicted: 'chat.backgroundEnded.evicted',
   expired: 'chat.backgroundEnded.expired',
+  user_stopped: 'chat.backgroundEnded.userStopped',
 };
 
 /** Claude Code settings layers a permission notice can name
@@ -1526,6 +1527,9 @@ export function ChatPanel({ session }: Props) {
     : 'Agent';
   const availableProviders = session.v2Providers.filter((item) => item.available);
   const providerDescriptor = session.v2Providers.find((item) => item.id === currentProvider);
+  // Once the turn ended, only background tasks keep the agent working.
+  const canStopBackgroundTasks = !thinking && !readOnly && backgroundTaskCount > 0
+    && providerDescriptor?.capabilities.backgroundTaskStop === true;
   const liveProviderModels = session.providerModels[currentProvider as ProviderKind];
   const providerModels = liveProviderModels?.length ? liveProviderModels : providerDescriptor?.models ?? [];
   const currentModel = conversation.model || providerModels.find((item) => item.isDefault)?.id || (currentProvider === 'codex' ? workspace.model || session.settings.defaultModel : '');
@@ -2391,6 +2395,17 @@ export function ChatPanel({ session }: Props) {
                           </ComposerRoundButton>
                         </Focusable>
                         <Tooltip placement="top">{t('chat.stop')}</Tooltip>
+                      </TooltipTrigger>
+                    ) : canStopBackgroundTasks ? (
+                      <TooltipTrigger delay={200}>
+                        <Focusable>
+                          <ComposerRoundButton aria-label={t('chat.stopBackground')}
+                            disabled={session.stoppingBackgroundTasks[conversation.id] === true}
+                            onClick={() => { void session.stopBackgroundTasks(conversation.id); }}>
+                            <RiStopFill aria-hidden className="size-4" />
+                          </ComposerRoundButton>
+                        </Focusable>
+                        <Tooltip placement="top">{t('chat.stopBackground')}</Tooltip>
                       </TooltipTrigger>
                     ) : null}
                     <ComposerSendButton aria-label={t('workbench.send')} disabled={!canSend} onClick={submitComposer}>

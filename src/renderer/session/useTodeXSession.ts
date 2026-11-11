@@ -55,7 +55,7 @@ import {
 } from 'react';
 import type { ConversationReplay, ProviderDescriptor, ProviderKind, PermissionMode, ConversationManifest, PromptContentRef, PromptSkillRef, SkillCatalogDescriptor, ProviderModelDescriptor, ProviderCommandDescriptor, ContextCompactionState, SubagentRun, MemoryEntry } from '@todex/protocol/v2';
 import { contextCompactionStatus, parseConversationSchedule } from '@todex/protocol/v2';
-import { HISTORY_ENCRYPTION_CAPABILITY, normalizeConversationEvent } from '@todex/protocol/v2';
+import { CONVERSATION_BACKGROUND_TASKS_STOP, HISTORY_ENCRYPTION_CAPABILITY, normalizeConversationEvent } from '@todex/protocol/v2';
 import { verifyTransportPolicy, type SecureSocket } from '@todex/protocol/secureTransport';
 import { TRANSPORT_V2_WS_CLOSE_CODE, TransportCryptoError } from '@todex/protocol/secureChannel';
 import { startSocketVerification, type SocketVerification } from '@todex/protocol/socketVerification';
@@ -665,6 +665,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const extensionEffectsRef = useRef(new PiExtensionEffects());
   const [pendingPluginDrafts, setPendingPluginDrafts] = useState<Record<string, ExtensionEditorRequest | undefined>>({});
   const [stoppingProviderRuntimes, setStoppingProviderRuntimes] = useState<Record<string, boolean>>({});
+  const [stoppingBackgroundTasks, setStoppingBackgroundTasks] = useState<Record<string, boolean>>({});
   // Per-conversation command catalogs (Pi session commands); an epoch bump
   // after a turn refetches them.
   const [providerCommandCatalogs, setProviderCommandCatalogs] = useState<Record<string, ProviderCommandCatalog>>({});
@@ -5593,6 +5594,22 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     } finally { setStoppingProviderRuntimes(current => ({ ...current, [conversationId]: false })); }
   }, [sendProtocolCommand, recoverConversation, setLastError]);
 
+  /** Stops the background tasks a conversation still waits on after its turn
+   * ended. The backend journals them as ended, which clears the waiting state. */
+  const stopBackgroundTasks = useCallback(async (conversationId: string) => {
+    const conversation = stores.conversations.get().find(item => item.id === conversationId);
+    if (!conversation?.v2ConversationId) return;
+    setStoppingBackgroundTasks(current => ({ ...current, [conversationId]: true }));
+    try {
+      const result = await sendProtocolCommand({ id: createRequestId('background-stop'), type: CONVERSATION_BACKGROUND_TASKS_STOP,
+        payload: { conversationId: conversation.v2ConversationId } });
+      // Nothing was running any more: resync a view still waiting on it.
+      if (!Array.isArray(result.stoppedTaskIds) || result.stoppedTaskIds.length === 0) await recoverConversation(conversationId);
+    } catch (error) {
+      toast.danger(t('sess.backgroundStopFailed'), { description: error instanceof Error ? error.message : undefined });
+    } finally { setStoppingBackgroundTasks(current => ({ ...current, [conversationId]: false })); }
+  }, [sendProtocolCommand, recoverConversation, stores]);
+
   const sendV2Prompt = useCallback(
     async (
       text: string,
@@ -7125,6 +7142,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     handlePluginDraft,
     stoppingProviderRuntimes,
     stopProviderRuntime,
+    stoppingBackgroundTasks,
+    stopBackgroundTasks,
     setConversationAttachments,
     setConversationSelectedSkills,
     setConversationComposerSelection,

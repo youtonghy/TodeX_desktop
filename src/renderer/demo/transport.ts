@@ -1136,6 +1136,20 @@ class DemoSocket implements SecureSocket {
       const decision = (payload.decision ?? {}) as { outcome?: unknown };
       if (answer) answer(typeof decision.outcome === 'string' ? decision.outcome : 'reject_once');
       result = { conversationId: String(payload.conversationId ?? ''), permissionId: String(payload.permissionId ?? ''), resolved: Boolean(answer) };
+    } else if (message.type === 'conversation.backgroundTasks.stop') {
+      // Stops what the newest `background_tasks_pending` notice still awaits.
+      const journal = journals.get(String(payload.conversationId));
+      type Notice = { turnId?: string; providerMethod?: string; metadata?: { taskIds?: string[] } };
+      const notice = [...(journal?.events ?? [])].reverse()
+        .map(event => (event.type === 'provider.event' ? event.payload as Notice : null))
+        .find(item => item?.providerMethod === 'background_tasks_pending' || item?.providerMethod === 'background_tasks_ended');
+      const taskIds = notice?.providerMethod === 'background_tasks_pending' ? notice.metadata?.taskIds ?? [] : [];
+      if (journal && taskIds.length > 0) {
+        appendDemoEvent(journal, String(notice?.turnId ?? ''), 'provider.event', {
+          providerMethod: 'background_tasks_ended', metadata: { taskIds, reason: 'user_stopped' },
+        });
+      }
+      result = { conversationId: String(payload.conversationId ?? ''), stoppedTaskIds: taskIds };
     } else if (message.type === 'conversation.warm') {
       // The demo has no agent processes to start.
       result = { conversationId: String(payload.conversationId ?? ''), warmed: false, reason: 'demo' };
