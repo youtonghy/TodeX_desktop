@@ -204,7 +204,7 @@ test('settings: computer use permissions', async ({ page, openDemo }) => {
   await settingsSection(page, 'Agent 桌面工具').click();
   await page.getByRole('button', { name: /^Computer Use/ }).click();
   await page.getByRole('button', { name: '请求授权' }).first().click();
-  await expect(page.getByText('等待授权')).toBeVisible();
+  await expect(page.getByText('等待授权', { exact: true })).toBeVisible();
   await settle(page);
   await expect(page).toHaveScreenshot('settings-computer-use-permissions-light.png', { mask: volatile(page) });
 });
