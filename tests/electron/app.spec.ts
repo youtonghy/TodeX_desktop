@@ -54,7 +54,8 @@ test.afterAll(async () => {
 
 test('opens the window with the renderer and an isolated profile', async () => {
   await expect(page).toHaveTitle(/TodeX/);
-  await expect(page.getByRole('textbox', { name: '消息输入' })).toBeVisible({ timeout: 30_000 });
+  // The app starts on its home page.
+  await expect(page.getByRole('button', { name: '自定义布局' })).toBeVisible({ timeout: 30_000 });
   const userData = await app.evaluate(({ app }) => app.getPath('userData'));
   expect(userData.startsWith(sandbox)).toBe(true);
 });

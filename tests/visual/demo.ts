@@ -6,21 +6,30 @@ export const FIXED_NOW = new Date('2026-10-20T10:00:00+08:00');
 export type Theme = 'light' | 'dark';
 
 type DemoFixtures = {
-  /** Opens the `?demo` preview in `theme` (plus extra `query` parameters) and waits until it has settled. */
-  openDemo: (theme?: Theme, query?: string) => Promise<void>;
+  /** Opens the `?demo` preview in `theme` (plus extra `query` parameters) and
+   * waits until it has settled. The app starts on its home page; unless
+   * `start` is `'home'`, the demo's active conversation is opened from the
+   * sidebar first, so screens start from the conversation. */
+  openDemo: (theme?: Theme, query?: string, start?: 'conversation' | 'home') => Promise<void>;
 };
 
 export const test = base.extend<DemoFixtures>({
   openDemo: async ({ page }, use) => {
     const errors: string[] = [];
     page.on('pageerror', (error) => errors.push(String(error)));
-    await use(async (theme = 'light', query = '') => {
+    await use(async (theme = 'light', query = '', start = 'conversation') => {
       // The clock flows from FIXED_NOW, so dates, "today" and relative times
       // render the same on every run while timers still fire.
       await page.clock.install({ time: FIXED_NOW });
       await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' });
       await page.goto(`/?demo&theme=${theme}${query ? `&${query}` : ''}`);
-      await expect(page.getByRole('textbox', { name: '消息输入' })).toBeVisible();
+      await expect(page.getByRole('button', { name: '自定义布局' })).toBeVisible();
+      if (start === 'conversation') {
+        await page.getByRole('grid', { name: '对话' }).getByRole('row', { name: '重构结账页表单校验' }).click();
+        await expect(page.getByRole('textbox', { name: '消息输入' })).toBeVisible();
+        // Park the pointer so the clicked row is not left hovered.
+        await page.mouse.move(0, 0);
+      }
       await settle(page);
     });
     expect(errors, 'uncaught errors in the renderer').toEqual([]);

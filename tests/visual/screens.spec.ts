@@ -29,6 +29,25 @@ for (const theme of ['light', 'dark'] as Theme[]) {
       await expect(page).toHaveScreenshot(`workbench-${theme}.png`, { mask: volatile(page) });
     });
 
+    // `board=busy`: a conversation waits on a permission prompt, so both live lists have rows.
+    test('home page', async ({ page, openDemo }) => {
+      await openDemo(theme, 'board=busy', 'home');
+      await expect(page.getByRole('region', { name: '等待回复' }).getByText('等待授权')).toBeVisible();
+      await expect(page.getByText('5 小时窗口')).toBeVisible();
+      await expect(page).toHaveScreenshot(`home-${theme}.png`, { mask: volatile(page) });
+    });
+
+    test('home page: customizing the layout', async ({ page, openDemo }) => {
+      await openDemo(theme, 'board=busy', 'home');
+      await expect(page.getByText('5 小时窗口')).toBeVisible();
+      await page.getByRole('button', { name: '自定义布局' }).click();
+      await page.getByRole('button', { name: '移除「今日用量」' }).click();
+      await page.getByRole('button', { name: '添加卡片' }).click();
+      await expect(page.getByRole('option', { name: '今日用量' })).toBeVisible();
+      await settle(page);
+      await expect(page).toHaveScreenshot(`home-customize-${theme}.png`, { mask: volatile(page) });
+    });
+
     test('right panel', async ({ page, openDemo }) => {
       await openDemo(theme);
       await page.getByRole('button', { name: '打开右侧面板' }).click();
@@ -235,7 +254,7 @@ test('terminal host context menu', async ({ page, openDemo }) => {
 });
 
 // Two paired backends (`backends=2`), the second holding slightly different config.
-async function openConfigSync(page: Page, openDemo: (theme?: Theme, query?: string) => Promise<void>, theme: Theme) {
+async function openConfigSync(page: Page, openDemo: (theme?: Theme, query?: string, start?: 'conversation' | 'home') => Promise<void>, theme: Theme) {
   await openDemo(theme, 'backends=2');
   await page.getByRole('button', { name: '设置', exact: true }).click();
   await settingsSection(page, '后端连接').click();
