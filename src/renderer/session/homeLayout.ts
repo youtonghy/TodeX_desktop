@@ -15,6 +15,8 @@ export type HomeWidgetLayout = {
   span: number;
   /** Fixed height in pixels; null follows the content. */
   height: number | null;
+  /** Removed from the page; it can be added back while customizing. */
+  hidden?: boolean;
 };
 
 const STORAGE_KEY = 'todex.homeLayout.v1';
@@ -38,6 +40,7 @@ function normalize(saved: unknown): HomeWidgetLayout[] {
       id: record.id,
       span: typeof record.span === 'number' ? Math.min(HOME_COLUMNS, Math.max(1, Math.round(record.span))) : DEFAULT_SPANS[record.id],
       height: typeof record.height === 'number' && Number.isFinite(record.height) ? Math.max(HOME_MIN_HEIGHT, Math.round(record.height)) : null,
+      ...(record.hidden === true ? { hidden: true } : {}),
     });
   }
   return [...layout, ...DEFAULTS.filter((item) => !seen.has(item.id))];
@@ -83,7 +86,7 @@ export function resetHomeLayout() {
   listeners.forEach((listener) => listener());
 }
 
-/** Per-device order and size of the home cards; never synced to the backend. */
+/** Per-device order, size and visibility of the home cards; never synced to the backend. */
 export function useHomeLayout(): HomeWidgetLayout[] {
   return useSyncExternalStore(subscribe, () => layout);
 }

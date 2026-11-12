@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ComponentType, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { DndContext, KeyboardSensor, MouseSensor, TouchSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
 import { SortableContext, arrayMove, rectSortingStrategy, sortableKeyboardCoordinates, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { RiArrowGoBackLine, RiChat3Line, RiCheckDoubleLine, RiDraggable, RiExpandDiagonal2Line, RiLayoutGridLine, RiPulseLine } from '@remixicon/react';
+import { RiAddLine, RiArrowGoBackLine, RiChat3Line, RiCheckDoubleLine, RiCloseLine, RiCoinsLine, RiDraggable, RiExpandDiagonal2Line, RiLayoutGridLine, RiPlayCircleLine, RiPulseLine, RiQuestionAnswerLine } from '@remixicon/react';
 import { awaitedBackgroundTasks, usageTotalTokens } from '@todex/protocol/conversationRuntime';
 import { providerDisplayName, type ProviderQuotaSnapshot } from '@todex/protocol/v2';
 import { AgentLimitsCard } from '@/components/application/agent-limits/agent-limits-card';
@@ -39,12 +39,18 @@ function clock(at: number): string {
   return new Date(at).toLocaleTimeString(getLocale(), { hour: '2-digit', minute: '2-digit' });
 }
 
-function StatTile({ label, value, dot }: { label: string; value: ReactNode; dot?: string }) {
+type TileIcon = ComponentType<{ className?: string; 'aria-hidden'?: boolean | 'true' | 'false' }>;
+
+/** A headline number under its label; `tone` tints the icon chip (a live
+ * count that is not zero), otherwise it stays neutral. */
+function StatTile({ label, value, icon: Icon, tone }: { label: string; value: ReactNode; icon: TileIcon; tone?: string }) {
   return (
     <div className={cx(SECTION, 'h-full gap-2')}>
       <span className="flex items-center gap-2 text-body-medium text-text-secondary">
-        {dot ? <span aria-hidden className={cx('size-2 rounded-full', dot)} /> : null}
-        {label}
+        <span aria-hidden className={cx('flex size-7 shrink-0 items-center justify-center rounded-lg', tone ?? 'bg-background-tertiary-default text-foreground-icon-secondary')}>
+          <Icon className="size-4" aria-hidden />
+        </span>
+        <span className="min-w-0 truncate">{label}</span>
       </span>
       <span className="text-title-1-medium text-text-primary tabular-nums">{value}</span>
     </div>
@@ -75,16 +81,17 @@ function ListSection({ title, count, fixed, children }: { title: string; count?:
 const HANDLE = 'absolute z-10 flex size-7 items-center justify-center rounded-lg border border-border-button-default bg-background-primary-default text-foreground-icon-secondary shadow-xs outline-none focus-visible:ring-2 focus-visible:ring-border-focus-ring';
 
 /** One card of the home grid. While the layout is edited it shows a move
- * handle (drag to reorder) and a resize handle (drag for width in columns
+ * handle (drag to reorder), a remove button and a resize handle (drag for width in columns
  * and height in pixels; double-click for the content's own height), and its
  * content is inert. */
-function HomeWidget({ item, name, editing, columns, columnWidth, onResize, children }: {
+function HomeWidget({ item, name, editing, columns, columnWidth, onResize, onRemove, children }: {
   item: HomeWidgetLayout;
   name: string;
   editing: boolean;
   columns: number;
   columnWidth: number;
   onResize: (patch: Partial<Pick<HomeWidgetLayout, 'span' | 'height'>>) => void;
+  onRemove: () => void;
   children: ReactNode;
 }) {
   const t = useT();
@@ -145,6 +152,9 @@ function HomeWidget({ item, name, editing, columns, columnWidth, onResize, child
           >
             <RiDraggable aria-hidden className="size-4" />
           </button>
+          <button type="button" aria-label={t('home.remove', { name })} className={cx(HANDLE, 'end-11 top-2 cursor-pointer')} onClick={onRemove}>
+            <RiCloseLine aria-hidden className="size-4" />
+          </button>
           <button
             type="button"
             aria-label={t('home.resize', { name })}
@@ -167,7 +177,7 @@ function HomeWidget({ item, name, editing, columns, columnWidth, onResize, child
 /** The home page, in place of the conversation: what is running and what
  * waits on the user right now, today's conversations and token usage, and
  * each agent's plan limits (5-hour and weekly windows). Its cards can be
- * reordered and resized; the layout is kept per device. */
+ * reordered, resized, removed and added back; the layout is kept per device. */
 export function HomePanel({ session, onOpenConversation }: Props) {
   const t = useT();
   // Re-reads "today" each minute so the board rolls over at midnight.
@@ -332,8 +342,15 @@ export function HomePanel({ session, onOpenConversation }: Props) {
     const to = layout.findIndex((item) => item.id === over.id);
     if (from >= 0 && to >= 0) setHomeLayout(arrayMove(layout, from, to));
   };
-  const resize = (id: HomeWidgetId, patch: Partial<Pick<HomeWidgetLayout, 'span' | 'height'>>) => {
+  const patchWidget = (id: HomeWidgetId, patch: Partial<Omit<HomeWidgetLayout, 'id'>>) => {
     setHomeLayout(layout.map((item) => (item.id === id ? { ...item, ...patch } : item)));
+  };
+  const shown = layout.filter((item) => !item.hidden);
+  const removed = layout.filter((item) => item.hidden);
+  /** A removed card comes back at the end of the page. */
+  const addWidget = (id: HomeWidgetId) => {
+    const item = layout.find((entry) => entry.id === id);
+    if (item) setHomeLayout([...layout.filter((entry) => entry.id !== id), { ...item, hidden: false }]);
   };
 
   /** A card's name (for its handles) and content; `fixed` cards have a set
@@ -341,14 +358,14 @@ export function HomePanel({ session, onOpenConversation }: Props) {
   const widgets: Record<HomeWidgetId, { name: string; render: (fixed: boolean) => ReactNode }> = {
     'running-count': {
       name: t('home.countCard', { name: t('home.running') }),
-      render: () => <StatTile label={t('home.running')} value={running.length} dot={running.length ? 'bg-chart-7 animate-pulse motion-reduce:animate-none' : 'bg-chart-track'} />,
+      render: () => <StatTile label={t('home.running')} value={running.length} icon={RiPlayCircleLine} tone={running.length ? 'bg-chart-7/15 text-chart-7' : undefined} />,
     },
     'waiting-count': {
       name: t('home.countCard', { name: t('home.waiting') }),
-      render: () => <StatTile label={t('home.waiting')} value={waiting.length} dot={waiting.length ? 'bg-chart-8' : 'bg-chart-track'} />,
+      render: () => <StatTile label={t('home.waiting')} value={waiting.length} icon={RiQuestionAnswerLine} tone={waiting.length ? 'bg-chart-8/15 text-chart-8' : undefined} />,
     },
-    'today-count': { name: t('home.todayConversations'), render: () => <StatTile label={t('home.todayConversations')} value={todayRows.length} /> },
-    'today-tokens': { name: t('home.todayTokens'), render: () => <StatTile label={t('home.todayTokens')} value={formatTokens(todayTokens)} /> },
+    'today-count': { name: t('home.todayConversations'), render: () => <StatTile label={t('home.todayConversations')} value={todayRows.length} icon={RiChat3Line} /> },
+    'today-tokens': { name: t('home.todayTokens'), render: () => <StatTile label={t('home.todayTokens')} value={formatTokens(todayTokens)} icon={RiCoinsLine} /> },
     running: {
       name: t('home.running'),
       render: (fixed) => (
@@ -457,10 +474,20 @@ export function HomePanel({ session, onOpenConversation }: Props) {
             <Button variant="ghost" size="small" leadingIcon={RiLayoutGridLine} onClick={() => setEditing(true)}>{t('home.customize')}</Button>
           )}
         </div>
+        {editing && removed.length ? (
+          <section className="flex flex-col gap-2 rounded-[20px] border border-dashed border-border-button-hover p-4" aria-label={t('home.addCards')}>
+            <h2 className="text-body-medium text-text-secondary">{t('home.addCards')}</h2>
+            <div className="flex flex-wrap gap-2">
+              {removed.map((item) => (
+                <Button key={item.id} variant="secondary" size="small" leadingIcon={RiAddLine} onClick={() => addWidget(item.id)}>{widgets[item.id].name}</Button>
+              ))}
+            </div>
+          </section>
+        ) : null}
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
-          <SortableContext items={layout.map((item) => item.id)} strategy={rectSortingStrategy}>
+          <SortableContext items={shown.map((item) => item.id)} strategy={rectSortingStrategy}>
             <div ref={gridRef} className="grid w-full gap-4" style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}>
-              {layout.map((item) => (
+              {shown.map((item) => (
                 <HomeWidget
                   key={item.id}
                   item={item}
@@ -468,7 +495,8 @@ export function HomePanel({ session, onOpenConversation }: Props) {
                   editing={editing}
                   columns={columns}
                   columnWidth={columnWidth}
-                  onResize={(patch) => resize(item.id, patch)}
+                  onResize={(patch) => patchWidget(item.id, patch)}
+                  onRemove={() => patchWidget(item.id, { hidden: true })}
                 >
                   {widgets[item.id].render(item.height !== null)}
                 </HomeWidget>
@@ -476,6 +504,9 @@ export function HomePanel({ session, onOpenConversation }: Props) {
             </div>
           </SortableContext>
         </DndContext>
+        {!shown.length && !editing ? (
+          <EmptyState className="min-h-60" icon={RiLayoutGridLine} title={t('home.emptyTitle')} description={t('home.emptyHint')} />
+        ) : null}
       </div>
     </ScrollArea>
   );
