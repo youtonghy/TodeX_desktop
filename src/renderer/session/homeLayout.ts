@@ -26,7 +26,7 @@ const DEFAULT_SPANS: Record<HomeWidgetId, number> = {
 };
 const DEFAULTS: HomeWidgetLayout[] = HOME_WIDGET_IDS.map((id) => ({ id, span: DEFAULT_SPANS[id], height: null }));
 
-const isWidgetId = (value: unknown): value is HomeWidgetId => HOME_WIDGET_IDS.includes(value as HomeWidgetId);
+export const isHomeWidgetId = (value: unknown): value is HomeWidgetId => HOME_WIDGET_IDS.includes(value as HomeWidgetId);
 
 /** Saved cards in their saved order, then any card the saved layout lacks. */
 function normalize(saved: unknown): HomeWidgetLayout[] {
@@ -34,7 +34,7 @@ function normalize(saved: unknown): HomeWidgetLayout[] {
   const layout: HomeWidgetLayout[] = [];
   for (const item of Array.isArray(saved) ? saved : []) {
     const record = item && typeof item === 'object' ? item as Record<string, unknown> : {};
-    if (!isWidgetId(record.id) || seen.has(record.id)) continue;
+    if (!isHomeWidgetId(record.id) || seen.has(record.id)) continue;
     seen.add(record.id);
     layout.push({
       id: record.id,

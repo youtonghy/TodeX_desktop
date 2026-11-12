@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ComponentType, type Keyboard
 import { DndContext, KeyboardSensor, MouseSensor, TouchSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
 import { SortableContext, arrayMove, rectSortingStrategy, sortableKeyboardCoordinates, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { RiAddLine, RiArrowGoBackLine, RiChat3Line, RiCheckDoubleLine, RiCloseLine, RiCoinsLine, RiDraggable, RiExpandDiagonal2Line, RiLayoutGridLine, RiPlayCircleLine, RiPulseLine, RiQuestionAnswerLine } from '@remixicon/react';
+import { RiArrowGoBackLine, RiChat3Line, RiCheckDoubleLine, RiCloseLine, RiCoinsLine, RiDraggable, RiExpandDiagonal2Line, RiLayoutGridLine, RiPlayCircleLine, RiPulseLine, RiQuestionAnswerLine } from '@remixicon/react';
 import { awaitedBackgroundTasks, usageTotalTokens } from '@todex/protocol/conversationRuntime';
 import { providerDisplayName, type ProviderQuotaSnapshot } from '@todex/protocol/v2';
 import { AgentLimitsCard } from '@/components/application/agent-limits/agent-limits-card';
@@ -11,13 +11,14 @@ import { BarListCard, type BarListTab } from '@/components/application/charts/ba
 import { CHART_TONES } from '@/components/application/charts/chart-card';
 import { Badge } from '@/components/base/badges/badge';
 import { Button } from '@/components/base/buttons/button';
+import { Select, SelectItem } from '@/components/base/select/select';
 import { EmptyState } from '@/components/ui/empty-state';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cx } from '@/utils/cx';
 import { ProviderIcon } from '../components/ProviderIcon';
 import { sameRecordValues, useRuntimeSelector, useTimelineSelector } from '../session/conversationStore';
 import { backendApi, getConversationStatus, isListedConversation, isPrivateConversation, workspaceDisplayName, type ConversationRecord, type TimelineEntry, type UsageRecord } from '../session/helpers';
-import { HOME_COLUMNS, HOME_MIN_HEIGHT, resetHomeLayout, setHomeLayout, useHomeLayout, type HomeWidgetId, type HomeWidgetLayout } from '../session/homeLayout';
+import { HOME_COLUMNS, HOME_MIN_HEIGHT, isHomeWidgetId, resetHomeLayout, setHomeLayout, useHomeLayout, type HomeWidgetId, type HomeWidgetLayout } from '../session/homeLayout';
 import { quotaLimits } from '../session/quota';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { getLocale, useT } from '../i18n';
@@ -467,6 +468,20 @@ export function HomePanel({ session, onOpenConversation }: Props) {
           {editing ? (
             <>
               <p className="min-w-0 flex-1 truncate text-body-2-regular text-text-tertiary">{t('home.editHint')}</p>
+              {/* Removed cards; picking one puts it back at the end of the page. */}
+              <Select
+                aria-label={t('home.addCards')}
+                placeholder={t('home.addCards')}
+                size="sm"
+                className="w-40 shrink-0"
+                triggerClassName="w-full"
+                popoverClassName="w-56"
+                selectedKey={null}
+                isDisabled={!removed.length}
+                onSelectionChange={(key) => { if (isHomeWidgetId(key)) addWidget(key); }}
+              >
+                {removed.map((item) => <SelectItem key={item.id} id={item.id} textValue={widgets[item.id].name}>{widgets[item.id].name}</SelectItem>)}
+              </Select>
               <Button variant="secondary" size="small" leadingIcon={RiArrowGoBackLine} onClick={resetHomeLayout}>{t('home.reset')}</Button>
               <Button variant="primary" size="small" onClick={() => setEditing(false)}>{t('ssh.done')}</Button>
             </>
@@ -474,16 +489,6 @@ export function HomePanel({ session, onOpenConversation }: Props) {
             <Button variant="ghost" size="small" leadingIcon={RiLayoutGridLine} onClick={() => setEditing(true)}>{t('home.customize')}</Button>
           )}
         </div>
-        {editing && removed.length ? (
-          <section className="flex flex-col gap-2 rounded-[20px] border border-dashed border-border-button-hover p-4" aria-label={t('home.addCards')}>
-            <h2 className="text-body-medium text-text-secondary">{t('home.addCards')}</h2>
-            <div className="flex flex-wrap gap-2">
-              {removed.map((item) => (
-                <Button key={item.id} variant="secondary" size="small" leadingIcon={RiAddLine} onClick={() => addWidget(item.id)}>{widgets[item.id].name}</Button>
-              ))}
-            </div>
-          </section>
-        ) : null}
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
           <SortableContext items={shown.map((item) => item.id)} strategy={rectSortingStrategy}>
             <div ref={gridRef} className="grid w-full gap-4" style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}>
