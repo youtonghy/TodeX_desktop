@@ -61,7 +61,7 @@ function sum(records: UsageRecord[]): UsageTotals {
   return records.reduce(addUsage, EMPTY_TOTALS);
 }
 
-function formatTokens(value: number): string {
+export function formatTokens(value: number): string {
   return new Intl.NumberFormat(getLocale(), {
     notation: value >= 10_000 ? 'compact' : 'standard',
     maximumFractionDigits: 1,
@@ -77,7 +77,7 @@ function titleCase(value: string): string {
 }
 
 /** Local calendar day key, YYYY-MM-DD. */
-function dayKey(date: Date): string {
+export function dayKey(date: Date): string {
   const pad = (value: number) => String(value).padStart(2, '0');
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }

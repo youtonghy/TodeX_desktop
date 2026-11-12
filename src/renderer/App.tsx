@@ -54,6 +54,7 @@ const SettingsPanel = lazy(() => import('./screens/SettingsPanel').then((module)
 const AsidePanel = lazy(() => import('./screens/AsidePanel').then((module) => ({ default: module.AsidePanel })));
 const WorkbenchPanel = lazy(() => import('./screens/WorkbenchPanel').then((module) => ({ default: module.WorkbenchPanel })));
 const ProfilePanel = lazy(() => import('./screens/ProfilePanel').then((module) => ({ default: module.ProfilePanel })));
+const HomePanel = lazy(() => import('./screens/HomePanel').then((module) => ({ default: module.HomePanel })));
 const KanbanPanel = lazy(() => import('./screens/KanbanPanel').then((module) => ({ default: module.KanbanPanel })));
 const SshPanel = lazy(() => import('./screens/SshPanel').then((module) => ({ default: module.SshPanel })));
 
@@ -227,7 +228,9 @@ export function App() {
   const profileActive = panel === 'profile';
   // A full page in the conversation's place: it sits on the full surface and
   // the Workbench stays hidden.
-  const pageActive = kanbanActive || profileActive;
+  // And the home board.
+  const homeActive = panel === 'home';
+  const pageActive = kanbanActive || profileActive || homeActive;
   const features = useFeatureModes();
   const terminalEnabled = features.terminal !== 'off';
   const kanbanEnabled = features.kanban !== 'off';
@@ -312,7 +315,7 @@ export function App() {
   openPanelHandlerRef.current = openPanel;
 
   useEffect(() => {
-    setPanel(current => current && ['settings', 'profile', 'kanban', 'ssh'].includes(current) ? current : null);
+    setPanel(current => current && ['settings', 'profile', 'kanban', 'home', 'ssh'].includes(current) ? current : null);
     setSlashCommand(undefined);
   }, [scopeKey]);
 
@@ -508,7 +511,7 @@ export function App() {
         </span>
       )}
       {sshActive || pageActive ? (
-        <span className="min-w-0 flex-1 truncate text-body-semibold text-text-primary">{t(kanbanActive ? 'sidebar.kanban' : profileActive ? 'app.profile' : 'ssh.title')}</span>
+        <span className="min-w-0 flex-1 truncate text-body-semibold text-text-primary">{t(homeActive ? 'sidebar.home' : kanbanActive ? 'sidebar.kanban' : profileActive ? 'app.profile' : 'ssh.title')}</span>
       ) : (
         <ConversationHeaderDetails session={session} title={session.activeConversation?.title ?? t('app.conversation')} gitOpen={gitOpen} onOpenGit={() => setGitOpen(true)} />
       )}
@@ -533,6 +536,10 @@ export function App() {
     profileActive ? (
       <PanelBoundary>
         <ProfilePanel session={session} />
+      </PanelBoundary>
+    ) : homeActive ? (
+      <PanelBoundary>
+        <HomePanel session={session} onOpenConversation={() => setPanel(null)} />
       </PanelBoundary>
     ) : kanbanActive ? (
       <PanelBoundary>
@@ -621,11 +628,13 @@ export function App() {
       onOpenSettings={() => setPanel('settings')}
       onOpenProfile={() => { setPanel('profile'); persistAsideOpen(false); }}
       onOpenKanban={() => { setPanel('kanban'); persistAsideOpen(false); }}
+      onOpenHome={() => { setPanel('home'); persistAsideOpen(false); }}
+      homeActive={homeActive}
       onOpenTerminal={toggleSshView}
       terminalActive={sshActive}
       kanbanActive={kanbanActive}
       profileActive={profileActive}
-      onSelectConversation={() => setPanel(current => current === 'ssh' || current === 'kanban' || current === 'profile' ? null : current)}
+      onSelectConversation={() => setPanel(current => current === 'ssh' || current === 'kanban' || current === 'profile' || current === 'home' ? null : current)}
     />
   );
   const drawerOpen = isMobile && mobileNavOpen;

@@ -1,4 +1,4 @@
-import { RiPushpin2Fill, RiLockLine, RiSpyLine, RiAddLine, RiArrowRightSLine, RiCheckLine, RiFolderReduceLine, RiFoldersLine, RiFolderTransferLine, RiPencilLine, RiEdit2Line, RiErrorWarningLine, RiFolder3Line, RiFolderOpenLine, RiGitBranchLine, RiDeleteBinLine, RiArrowDownSLine, RiBookOpenLine, RiCalendarTodoLine, RiMoreLine, RiPaletteLine, RiPriceTag3Line, RiSettings3Line, RiTerminalLine, RiTimeLine, RiTimerLine } from '@remixicon/react';
+import { RiPushpin2Fill, RiLockLine, RiSpyLine, RiAddLine, RiArrowRightSLine, RiCheckLine, RiFolderReduceLine, RiFoldersLine, RiFolderTransferLine, RiPencilLine, RiEdit2Line, RiErrorWarningLine, RiFolder3Line, RiFolderOpenLine, RiGitBranchLine, RiDeleteBinLine, RiArrowDownSLine, RiBookOpenLine, RiCalendarTodoLine, RiDashboardLine, RiMoreLine, RiPaletteLine, RiPriceTag3Line, RiSettings3Line, RiTerminalLine, RiTimeLine, RiTimerLine } from '@remixicon/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { MouseEvent, ReactNode } from 'react';
 import {
@@ -89,6 +89,8 @@ type Props = {
   onOpenSettings: () => void;
   onOpenProfile: () => void;
   onOpenKanban: () => void;
+  onOpenHome: () => void;
+  homeActive?: boolean;
   /** Toggles the SSH view (hosts, keys, SSH terminals, remote files). */
   onOpenTerminal: () => void;
   terminalActive?: boolean;
@@ -410,6 +412,8 @@ export function AppSidebar({
   onOpenSettings,
   onOpenProfile,
   onOpenKanban,
+  onOpenHome,
+  homeActive,
   onOpenTerminal,
   terminalActive = false,
   kanbanActive = false,
@@ -1763,6 +1767,16 @@ export function AppSidebar({
   const foldedItems = featureItems.filter((item) => features[item.feature] === 'folded');
   const moreStandsIn = !featuresMoreOpen && foldedItems.some((item) => item.isSelected);
   const primaryItems: DashboardNavItem[] = [
+    {
+      key: 'home',
+      label: t('sidebar.home'),
+      icon: RiDashboardLine,
+      isSelected: Boolean(homeActive),
+      onClick: () => {
+        if (mobile) onCloseMobile?.();
+        onOpenHome();
+      },
+    },
     ...newConversationItems,
     ...featureItems.filter((item) => features[item.feature] === 'shown'),
     ...(foldedItems.length > 0 ? [

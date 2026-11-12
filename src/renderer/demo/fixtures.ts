@@ -340,6 +340,12 @@ export const demoJournals: Journal[] = [
   }),
 ];
 
+// `?demo&board=busy`: one conversation waits on a permission prompt, so the
+// home board shows its waiting list.
+if (typeof location !== 'undefined' && new URLSearchParams(location.search).get('board') === 'busy') {
+  demoJournals[3].manifest.status = 'waiting_permission';
+}
+
 function privateJournal(source: Journal): Journal {
   return { ...source, manifest: { ...source.manifest, ephemeral: true } };
 }
