@@ -739,6 +739,8 @@ export const en: Messages = {
   'computerSettings.enableHint': 'The computer this backend runs on. Each conversation is allowed by someone at that computer first; each new app and every password field ask again. TodeX, system settings, credential stores and password managers are never controlled.',
   'computerSettings.grant': 'Request permissions',
   'computerSettings.grantHint': 'The system prompts appear on {host}; grant them to todex-agentd there. If no prompt appears, the matching System Settings page opens on that computer: switch todex-agentd on there.',
+  'computerSettings.grantHintMac': 'Request a permission and System Settings opens on {host} with a floating panel below its window: drag the todex-agentd icon from the panel into the list to grant it.',
+  'computerSettings.waiting': 'Waiting for grant',
   'computerSettings.legacyBackend': 'This backend still runs Computer Use on desktops. Update it to use Computer Use.',
   'computerSettings.permissions': 'System permissions',
   'computerSettings.permissionsHint': 'Granted to todex-agentd on {host}.',

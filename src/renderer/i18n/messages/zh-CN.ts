@@ -739,6 +739,8 @@ export const zhCN = {
   'computerSettings.enableHint': '即当前后端所在的电脑。每个会话需先由那台电脑前的人确认；每个新应用和每次密码框输入都会再次询问。TodeX、系统设置、凭据存储和密码管理器永远不会被操作。',
   'computerSettings.grant': '请求授权',
   'computerSettings.grantHint': '系统授权提示会出现在 {host} 上，请在那里为 todex-agentd 授权。若没有弹出提示，会直接打开该电脑的系统设置对应页面，请在那里勾选 todex-agentd。',
+  'computerSettings.grantHintMac': '点击“请求授权”后，{host} 会打开系统设置，并在窗口下方出现一个浮窗：把其中的 todex-agentd 图标拖进列表即可授权。',
+  'computerSettings.waiting': '等待授权',
   'computerSettings.legacyBackend': '此后端仍在桌面端执行 Computer Use，请升级后端后再使用。',
   'computerSettings.permissions': '系统权限',
   'computerSettings.permissionsHint': '在 {host} 上授予 todex-agentd。',

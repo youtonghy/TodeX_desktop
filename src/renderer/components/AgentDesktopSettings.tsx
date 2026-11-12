@@ -89,6 +89,14 @@ function BackendDesktopSettings({ session, backend, page, onPageChange }: {
     return () => clearInterval(timer);
   }, [refresh]);
 
+  // The person at the host is granting a permission: follow it closely.
+  const granting = settings?.computer?.permissionRequest !== undefined;
+  useEffect(() => {
+    if (!granting) return;
+    const timer = setInterval(() => { void refresh(); }, 1500);
+    return () => clearInterval(timer);
+  }, [granting, refresh]);
+
   // A page only exists while the tools are on; turning them off (here or
   // from another client) or losing the backend's support returns to the overview.
   const enabled = settings?.enabled === true;

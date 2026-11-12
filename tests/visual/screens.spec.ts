@@ -197,6 +197,18 @@ test('settings: computer use engine', async ({ page, openDemo }) => {
   await expect(page).toHaveScreenshot('settings-computer-use-engine-light.png', { mask: volatile(page) });
 });
 
+// Computer Use on a Mac without its OS permissions, one of them asked for.
+test('settings: computer use permissions', async ({ page, openDemo }) => {
+  await openDemo('light', 'computer=ungranted');
+  await page.getByRole('button', { name: '设置', exact: true }).click();
+  await settingsSection(page, 'Agent 桌面工具').click();
+  await page.getByRole('button', { name: /^Computer Use/ }).click();
+  await page.getByRole('button', { name: '请求授权' }).first().click();
+  await expect(page.getByText('等待授权')).toBeVisible();
+  await settle(page);
+  await expect(page).toHaveScreenshot('settings-computer-use-permissions-light.png', { mask: volatile(page) });
+});
+
 // SSH settings with the connection approval switched to per command.
 test('settings: SSH approval per command', async ({ page, openDemo }) => {
   await openDemo('light');

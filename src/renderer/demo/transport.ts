@@ -1079,6 +1079,12 @@ function route(request: SecureRequest): SecureResponse {
   if (path.startsWith('/v2/agent-desktop') && (method === 'PUT' || method === 'POST' || method === 'PATCH')) {
     if (typeof body.enabled === 'boolean') agentDesktop = { ...agentDesktop, enabled: body.enabled };
     if (typeof body.computerEnabled === 'boolean') agentDesktop = { ...agentDesktop, computerEnabled: body.computerEnabled };
+    // The demo host shows its permission guide and nobody answers it.
+    if (path === '/v2/agent-desktop/computer/permissions' && agentDesktop.computer) {
+      const { screen, accessibility } = agentDesktop.computer.permissions;
+      const asked = body.permission === 'accessibility' && !accessibility ? 'accessibility' : !screen ? 'screen' : !accessibility ? 'accessibility' : undefined;
+      agentDesktop = { ...agentDesktop, computer: { ...agentDesktop.computer, permissionRequest: asked } };
+    }
     // The demo backend "installs" agent-desktop at once.
     if (body.computerEngine === 'native' || body.computerEngine === 'agentDesktop') {
       const installed = body.computerEngine === 'agentDesktop' || agentDesktop.computerEngines?.agentDesktop.installed === true;

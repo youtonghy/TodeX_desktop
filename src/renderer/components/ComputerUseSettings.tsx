@@ -78,7 +78,9 @@ export function ComputerUseSettings({ settings, saving, onEnable, onRequestPermi
       {status.supported ? (
         <SettingsGroup
           label={t('computerSettings.permissions')}
-          description={missing ? t('computerSettings.grantHint', { host: status.host }) : t('computerSettings.permissionsHint', { host: status.host })}
+          description={missing
+            ? t(status.platform === 'macos' ? 'computerSettings.grantHintMac' : 'computerSettings.grantHint', { host: status.host })
+            : t('computerSettings.permissionsHint', { host: status.host })}
         >
           <SettingsCard>
             {permissions.map((permission) => (
@@ -87,7 +89,9 @@ export function ComputerUseSettings({ settings, saving, onEnable, onRequestPermi
                   <Chip variant="caption" color="lime">{t('computerSettings.granted')}</Chip>
                 ) : (
                   <>
-                    <Chip variant="caption" color="yellow">{t('computerSettings.notGranted')}</Chip>
+                    {status.permissionRequest === permission.key
+                      ? <Chip variant="caption" color="neutral">{t('computerSettings.waiting')}</Chip>
+                      : <Chip variant="caption" color="yellow">{t('computerSettings.notGranted')}</Chip>}
                     <Button size="small" variant="secondary" disabled={saving} onClick={() => onRequestPermission(permission.key)}>
                       {t('computerSettings.grant')}
                     </Button>

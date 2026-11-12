@@ -584,6 +584,11 @@ export const demoAgentDesktop: AgentDesktopSettings = {
   },
 };
 
+// `?computer=ungranted`: a Mac whose backend has no OS permissions yet.
+if (typeof location !== 'undefined' && new URLSearchParams(location.search).get('computer') === 'ungranted' && demoAgentDesktop.computer) {
+  demoAgentDesktop.computer = { ...demoAgentDesktop.computer, available: false, platform: 'macos', permissions: { screen: false, accessibility: false } };
+}
+
 /** A small project tree for the Files pane, keyed by directory path relative
  * to the workspace root; `/` marks a directory. */
 const DEMO_TREE: Record<string, string[]> = {
