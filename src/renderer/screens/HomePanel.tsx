@@ -1,5 +1,8 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { RiChat3Line, RiCheckDoubleLine, RiPulseLine } from '@remixicon/react';
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
+import { DndContext, KeyboardSensor, MouseSensor, TouchSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
+import { SortableContext, arrayMove, rectSortingStrategy, sortableKeyboardCoordinates, useSortable } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+import { RiArrowGoBackLine, RiChat3Line, RiCheckDoubleLine, RiDraggable, RiExpandDiagonal2Line, RiLayoutGridLine, RiPulseLine } from '@remixicon/react';
 import { awaitedBackgroundTasks, usageTotalTokens } from '@todex/protocol/conversationRuntime';
 import { providerDisplayName, type ProviderQuotaSnapshot } from '@todex/protocol/v2';
 import { AgentLimitsCard } from '@/components/application/agent-limits/agent-limits-card';
@@ -7,12 +10,14 @@ import { AgentsChartCard } from '@/components/application/ai-profile/agents-char
 import { BarListCard, type BarListTab } from '@/components/application/charts/bar-list-card';
 import { CHART_TONES } from '@/components/application/charts/chart-card';
 import { Badge } from '@/components/base/badges/badge';
+import { Button } from '@/components/base/buttons/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cx } from '@/utils/cx';
 import { ProviderIcon } from '../components/ProviderIcon';
 import { sameRecordValues, useRuntimeSelector, useTimelineSelector } from '../session/conversationStore';
 import { backendApi, getConversationStatus, isListedConversation, isPrivateConversation, workspaceDisplayName, type ConversationRecord, type TimelineEntry, type UsageRecord } from '../session/helpers';
+import { HOME_COLUMNS, HOME_MIN_HEIGHT, resetHomeLayout, setHomeLayout, useHomeLayout, type HomeWidgetId, type HomeWidgetLayout } from '../session/homeLayout';
 import { quotaLimits } from '../session/quota';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { getLocale, useT } from '../i18n';
@@ -24,7 +29,9 @@ type Props = { session: TodeXSession; onOpenConversation: () => void };
 const QUOTA_REFRESH_MS = 60_000;
 
 const SECTION = 'flex min-w-0 flex-col rounded-[20px] bg-background-secondary-default p-4';
-const ROW = '-mx-2 flex min-w-0 cursor-pointer items-center gap-3 rounded-xl px-2 py-2 text-start outline-none transition-colors duration-150 hover:bg-background-secondary-hover focus-visible:ring-2 focus-visible:ring-border-focus-ring';
+/** Gap between the cards of the grid, in pixels (`gap-4`). */
+const GRID_GAP = 16;
+const ROW = 'flex min-w-0 cursor-pointer items-center gap-3 rounded-xl px-2 py-2 text-start outline-none transition-colors duration-150 hover:bg-background-secondary-hover focus-visible:ring-2 focus-visible:ring-border-focus-ring';
 
 type LatestInfo = { latest?: TimelineEntry; latestIncomingAt: number };
 
@@ -34,7 +41,7 @@ function clock(at: number): string {
 
 function StatTile({ label, value, dot }: { label: string; value: ReactNode; dot?: string }) {
   return (
-    <div className={cx(SECTION, 'gap-2')}>
+    <div className={cx(SECTION, 'h-full gap-2')}>
       <span className="flex items-center gap-2 text-body-medium text-text-secondary">
         {dot ? <span aria-hidden className={cx('size-2 rounded-full', dot)} /> : null}
         {label}
@@ -53,9 +60,114 @@ function SectionTitle({ children, count }: { children: ReactNode; count?: number
   );
 }
 
-/** The home board, in place of the conversation: what is running and what
+/** A titled list card; with a fixed height its rows scroll under the title. */
+function ListSection({ title, count, fixed, children }: { title: string; count?: number; fixed: boolean; children: ReactNode }) {
+  return (
+    <section className={cx(SECTION, 'h-full')} aria-label={title}>
+      <SectionTitle count={count}>{title}</SectionTitle>
+      {fixed
+        ? <ScrollArea className="-mx-2 min-h-0 flex-1" contentClassName="flex flex-col" surface="secondary">{children}</ScrollArea>
+        : <div className="-mx-2 flex flex-col">{children}</div>}
+    </section>
+  );
+}
+
+const HANDLE = 'absolute z-10 flex size-7 items-center justify-center rounded-lg border border-border-button-default bg-background-primary-default text-foreground-icon-secondary shadow-xs outline-none focus-visible:ring-2 focus-visible:ring-border-focus-ring';
+
+/** One card of the home grid. While the layout is edited it shows a move
+ * handle (drag to reorder) and a resize handle (drag for width in columns
+ * and height in pixels; double-click for the content's own height), and its
+ * content is inert. */
+function HomeWidget({ item, name, editing, columns, columnWidth, onResize, children }: {
+  item: HomeWidgetLayout;
+  name: string;
+  editing: boolean;
+  columns: number;
+  columnWidth: number;
+  onResize: (patch: Partial<Pick<HomeWidgetLayout, 'span' | 'height'>>) => void;
+  children: ReactNode;
+}) {
+  const t = useT();
+  const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({ id: item.id, disabled: !editing });
+  const elementRef = useRef<HTMLDivElement | null>(null);
+  const dragStart = useRef<{ x: number; y: number; width: number; height: number; span: number; rtl: boolean } | null>(null);
+  const span = Math.min(item.span, columns);
+
+  const onPointerDown = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    const element = elementRef.current;
+    if (!element) return;
+    event.currentTarget.focus();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const rect = element.getBoundingClientRect();
+    dragStart.current = { x: event.clientX, y: event.clientY, width: rect.width, height: rect.height, span, rtl: getComputedStyle(element).direction === 'rtl' };
+  };
+  const onPointerMove = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    const start = dragStart.current;
+    if (!start) return;
+    const dx = (event.clientX - start.x) * (start.rtl ? -1 : 1);
+    const dy = event.clientY - start.y;
+    const nextSpan = Math.min(columns, Math.max(1, Math.round((start.width + dx + GRID_GAP) / (columnWidth + GRID_GAP))));
+    const patch: Partial<Pick<HomeWidgetLayout, 'span' | 'height'>> = {};
+    // The span only changes once the pointer crosses into another column, so
+    // a narrow window's clamped span never overwrites the saved one.
+    if (nextSpan !== span) patch.span = nextSpan;
+    if (Math.abs(dy) > 6) patch.height = Math.max(HOME_MIN_HEIGHT, Math.round((start.height + dy) / 8) * 8);
+    if (patch.span !== undefined || (patch.height !== undefined && patch.height !== item.height)) onResize(patch);
+  };
+  const onPointerUp = () => { dragStart.current = null; };
+  const onKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>) => {
+    const height = item.height ?? Math.round(elementRef.current?.getBoundingClientRect().height ?? HOME_MIN_HEIGHT);
+    if (event.key === 'ArrowRight') onResize({ span: Math.min(columns, span + 1) });
+    else if (event.key === 'ArrowLeft') onResize({ span: Math.max(1, span - 1) });
+    else if (event.key === 'ArrowDown') onResize({ height: height + 24 });
+    else if (event.key === 'ArrowUp') onResize({ height: Math.max(HOME_MIN_HEIGHT, height - 24) });
+    else if (event.key === 'Backspace' || event.key === 'Delete') onResize({ height: null });
+    else return;
+    event.preventDefault();
+  };
+
+  return (
+    <div
+      ref={(node) => { elementRef.current = node; setNodeRef(node); }}
+      className={cx('relative flex min-w-0 flex-col rounded-[20px]', editing && 'outline-1 outline-offset-2 outline-border-button-hover outline-dashed', isDragging && 'z-20 opacity-80')}
+      style={{ gridColumn: `span ${span}`, height: item.height ?? undefined, transform: CSS.Translate.toString(transform), transition }}
+    >
+      <div inert={editing} className="flex min-h-0 min-w-0 flex-1 flex-col *:min-h-0 *:flex-1">{children}</div>
+      {editing ? (
+        <>
+          <button
+            ref={setActivatorNodeRef}
+            type="button"
+            aria-label={t('home.move', { name })}
+            className={cx(HANDLE, 'end-2 top-2 cursor-grab touch-none active:cursor-grabbing')}
+            {...attributes}
+            {...listeners}
+          >
+            <RiDraggable aria-hidden className="size-4" />
+          </button>
+          <button
+            type="button"
+            aria-label={t('home.resize', { name })}
+            className={cx(HANDLE, 'end-2 bottom-2 cursor-nwse-resize touch-none select-none rtl:cursor-nesw-resize')}
+            onPointerDown={onPointerDown}
+            onPointerMove={onPointerMove}
+            onPointerUp={onPointerUp}
+            onPointerCancel={onPointerUp}
+            onDoubleClick={() => onResize({ height: null })}
+            onKeyDown={onKeyDown}
+          >
+            <RiExpandDiagonal2Line aria-hidden className="size-4 rtl:-scale-x-100" />
+          </button>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+/** The home page, in place of the conversation: what is running and what
  * waits on the user right now, today's conversations and token usage, and
- * each agent's plan limits (5-hour and weekly windows). */
+ * each agent's plan limits (5-hour and weekly windows). Its cards can be
+ * reordered and resized; the layout is kept per device. */
 export function HomePanel({ session, onOpenConversation }: Props) {
   const t = useT();
   // Re-reads "today" each minute so the board rolls over at midnight.
@@ -186,42 +298,86 @@ export function HomePanel({ session, onOpenConversation }: Props) {
       {trailing}
     </button>
   );
-  const emptyLine = (text: string) => <p className="py-2 text-body-2-regular text-text-tertiary">{text}</p>;
+  const emptyLine = (text: string) => <p className="px-2 py-2 text-body-2-regular text-text-tertiary">{text}</p>;
+  const statusTag = (dot: string, label: string) => (
+    <span className="flex shrink-0 items-center gap-1.5 text-body-2-regular text-text-secondary">
+      <span aria-hidden className={cx('size-2 rounded-full', dot)} />
+      {label}
+    </span>
+  );
 
-  return (
-    <ScrollArea className="h-full" contentClassName="px-5 pb-6" surface="full">
-      <div className="mx-auto flex w-full max-w-5xl flex-col gap-4 pt-1">
-        <div className="grid w-full grid-cols-2 gap-4 lg:grid-cols-4">
-          <StatTile label={t('home.running')} value={running.length} dot={running.length ? 'bg-chart-7 animate-pulse motion-reduce:animate-none' : 'bg-chart-track'} />
-          <StatTile label={t('home.waiting')} value={waiting.length} dot={waiting.length ? 'bg-chart-8' : 'bg-chart-track'} />
-          <StatTile label={t('home.todayConversations')} value={todayRows.length} />
-          <StatTile label={t('home.todayTokens')} value={formatTokens(todayTokens)} />
-        </div>
+  // --- Layout ----------------------------------------------------------------
+  const layout = useHomeLayout();
+  const [editing, setEditing] = useState(false);
+  const gridRef = useRef<HTMLDivElement>(null);
+  const [gridWidth, setGridWidth] = useState(0);
+  useEffect(() => {
+    const element = gridRef.current;
+    if (!element) return;
+    const observer = new ResizeObserver(([entry]) => setGridWidth(entry.contentRect.width));
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+  // The grid folds to two columns, then one, as the page narrows.
+  const columns = gridWidth >= 880 || gridWidth === 0 ? HOME_COLUMNS : gridWidth >= 520 ? 2 : 1;
+  const columnWidth = (gridWidth - GRID_GAP * (columns - 1)) / columns;
+  const sensors = useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 180, tolerance: 8 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+  const onDragEnd = ({ active, over }: DragEndEvent) => {
+    if (!over || active.id === over.id) return;
+    const from = layout.findIndex((item) => item.id === active.id);
+    const to = layout.findIndex((item) => item.id === over.id);
+    if (from >= 0 && to >= 0) setHomeLayout(arrayMove(layout, from, to));
+  };
+  const resize = (id: HomeWidgetId, patch: Partial<Pick<HomeWidgetLayout, 'span' | 'height'>>) => {
+    setHomeLayout(layout.map((item) => (item.id === id ? { ...item, ...patch } : item)));
+  };
 
-        <div className="grid w-full items-start gap-4 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
-          <div className="flex min-w-0 flex-col gap-4">
-            <section className={SECTION} aria-label={t('home.running')}>
-              <SectionTitle count={running.length}>{t('home.running')}</SectionTitle>
-              {running.length ? running.map((conversation) => conversationRow(conversation, (
-                <span className="flex shrink-0 items-center gap-1.5 text-body-2-regular text-text-secondary">
-                  <span aria-hidden className="size-2 rounded-full bg-chart-7 animate-pulse motion-reduce:animate-none" />
-                  {t('sidebar.statusWorking')}
-                </span>
-              ))) : emptyLine(t('home.runningEmpty'))}
-            </section>
-            <section className={SECTION} aria-label={t('home.waiting')}>
-              <SectionTitle count={waiting.length}>{t('home.waiting')}</SectionTitle>
-              {waiting.length ? waiting.map(({ conversation, reason }) => conversationRow(conversation, (
-                <span className="flex shrink-0 items-center gap-1.5 text-body-2-regular text-text-secondary">
-                  <span aria-hidden className="size-2 rounded-full bg-chart-8" />
-                  {reason}
-                </span>
-              ))) : emptyLine(t('home.waitingEmpty'))}
-            </section>
-          </div>
-
-          <div className="flex min-w-0 flex-col gap-4">
-            {plans.length ? plans.map((snapshot) => (
+  /** A card's name (for its handles) and content; `fixed` cards have a set
+   * height, so their lists scroll inside it. */
+  const widgets: Record<HomeWidgetId, { name: string; render: (fixed: boolean) => ReactNode }> = {
+    'running-count': {
+      name: t('home.countCard', { name: t('home.running') }),
+      render: () => <StatTile label={t('home.running')} value={running.length} dot={running.length ? 'bg-chart-7 animate-pulse motion-reduce:animate-none' : 'bg-chart-track'} />,
+    },
+    'waiting-count': {
+      name: t('home.countCard', { name: t('home.waiting') }),
+      render: () => <StatTile label={t('home.waiting')} value={waiting.length} dot={waiting.length ? 'bg-chart-8' : 'bg-chart-track'} />,
+    },
+    'today-count': { name: t('home.todayConversations'), render: () => <StatTile label={t('home.todayConversations')} value={todayRows.length} /> },
+    'today-tokens': { name: t('home.todayTokens'), render: () => <StatTile label={t('home.todayTokens')} value={formatTokens(todayTokens)} /> },
+    running: {
+      name: t('home.running'),
+      render: (fixed) => (
+        <ListSection title={t('home.running')} count={running.length} fixed={fixed}>
+          {running.length ? running.map((conversation) => conversationRow(conversation, statusTag('bg-chart-7 animate-pulse motion-reduce:animate-none', t('sidebar.statusWorking')))) : emptyLine(t('home.runningEmpty'))}
+        </ListSection>
+      ),
+    },
+    waiting: {
+      name: t('home.waiting'),
+      render: (fixed) => (
+        <ListSection title={t('home.waiting')} count={waiting.length} fixed={fixed}>
+          {waiting.length ? waiting.map(({ conversation, reason }) => conversationRow(conversation, statusTag('bg-chart-8', reason))) : emptyLine(t('home.waitingEmpty'))}
+        </ListSection>
+      ),
+    },
+    limits: {
+      name: t('home.limits'),
+      render: (fixed) => {
+        if (!plans.length) {
+          return (
+            <ListSection title={t('home.limits')} fixed={fixed}>
+              {emptyLine(quotas === undefined ? t('usage.quotaLoading') : t('home.limitsEmpty'))}
+            </ListSection>
+          );
+        }
+        const cards = (
+          <div className="grid w-full grid-cols-[repeat(auto-fit,minmax(16rem,1fr))] content-start gap-4">
+            {plans.map((snapshot) => (
               <AgentLimitsCard
                 key={snapshot.provider}
                 className="rounded-[20px]"
@@ -235,17 +391,16 @@ export function HomePanel({ session, onOpenConversation }: Props) {
                 limits={quotaLimits(snapshot)}
                 labels={{ limits: t('home.limits') }}
               />
-            )) : (
-              <section className={SECTION}>
-                <SectionTitle>{t('home.limits')}</SectionTitle>
-                {emptyLine(quotas === undefined ? t('usage.quotaLoading') : t('home.limitsEmpty'))}
-              </section>
-            )}
+            ))}
           </div>
-        </div>
-
-        <section className={SECTION} aria-label={t('home.todayList')}>
-          <SectionTitle count={todayRows.length}>{t('home.todayList')}</SectionTitle>
+        );
+        return fixed ? <ScrollArea className="h-full" surface="full">{cards}</ScrollArea> : cards;
+      },
+    },
+    today: {
+      name: t('home.todayList'),
+      render: (fixed) => (
+        <ListSection title={t('home.todayList')} count={todayRows.length} fixed={fixed}>
           {todayRows.length ? todayRows.map(({ conversation, tokens, turns, at }) => conversationRow(conversation, (
             <span className="flex shrink-0 items-center gap-4 text-body-2-regular text-text-secondary tabular-nums">
               {turns ? <span className="flex items-center gap-1"><RiChat3Line aria-hidden className="size-3.5 text-foreground-icon-tertiary" />{t('home.turns', { count: turns })}</span> : null}
@@ -253,31 +408,74 @@ export function HomePanel({ session, onOpenConversation }: Props) {
               <span className="w-12 text-end text-text-tertiary">{clock(at)}</span>
             </span>
           ))) : <EmptyState className="min-h-32" size="sm" icon={RiCheckDoubleLine} title={t('home.todayEmpty')} />}
+        </ListSection>
+      ),
+    },
+    hourly: {
+      name: t('home.hourly'),
+      render: () => (
+        <AgentsChartCard
+          className="h-full"
+          title={t('home.hourly')}
+          total={hourly.reduce((total, value) => total + value, 0)}
+          days={hourly}
+          formatValue={formatTokens}
+          dayLabel={(index) => `${String(index).padStart(2, '0')}:00`}
+          periodLabel={dayOffset === 0 ? t('usage.today') : pickedDate.toLocaleDateString(getLocale(), { month: 'short', day: 'numeric' })}
+          onPrev={() => setDayOffset((offset) => offset - 1)}
+          onNext={() => setDayOffset((offset) => Math.min(0, offset + 1))}
+          prevLabel={t('home.previousDay')}
+          nextLabel={t('home.nextDay')}
+          startLabel="00:00"
+          endLabel="23:00"
+        />
+      ),
+    },
+    shares: {
+      name: t('usage.tokenShare'),
+      render: () => (shares[0].items.length ? (
+        <BarListCard className="h-full" tabs={shares} vivid metricLabel={t('usage.tokenShare')} format={formatTokens} limit={6} />
+      ) : (
+        <section className={cx(SECTION, 'h-full')}>
+          <EmptyState className="min-h-40" size="sm" icon={RiPulseLine} title={t('usage.emptyTitle')} />
         </section>
+      )),
+    },
+  };
 
-        <div className="grid w-full gap-4 lg:grid-cols-2">
-          <AgentsChartCard
-            title={t('home.hourly')}
-            total={hourly.reduce((total, value) => total + value, 0)}
-            days={hourly}
-            formatValue={formatTokens}
-            dayLabel={(index) => `${String(index).padStart(2, '0')}:00`}
-            periodLabel={dayOffset === 0 ? t('usage.today') : pickedDate.toLocaleDateString(getLocale(), { month: 'short', day: 'numeric' })}
-            onPrev={() => setDayOffset((offset) => offset - 1)}
-            onNext={() => setDayOffset((offset) => Math.min(0, offset + 1))}
-            prevLabel={t('home.previousDay')}
-            nextLabel={t('home.nextDay')}
-            startLabel="00:00"
-            endLabel="23:00"
-          />
-          {shares[0].items.length ? (
-            <BarListCard tabs={shares} vivid metricLabel={t('usage.tokenShare')} format={formatTokens} limit={6} />
+  return (
+    <ScrollArea className="h-full" contentClassName="px-5 pb-6" surface="full">
+      <div className="mx-auto flex w-full max-w-5xl flex-col gap-3 pt-1">
+        <div className="flex min-h-8 items-center justify-end gap-2">
+          {editing ? (
+            <>
+              <p className="min-w-0 flex-1 truncate text-body-2-regular text-text-tertiary">{t('home.editHint')}</p>
+              <Button variant="secondary" size="small" leadingIcon={RiArrowGoBackLine} onClick={resetHomeLayout}>{t('home.reset')}</Button>
+              <Button variant="primary" size="small" onClick={() => setEditing(false)}>{t('ssh.done')}</Button>
+            </>
           ) : (
-            <section className={SECTION}>
-              <EmptyState className="min-h-40" size="sm" icon={RiPulseLine} title={t('usage.emptyTitle')} />
-            </section>
+            <Button variant="ghost" size="small" leadingIcon={RiLayoutGridLine} onClick={() => setEditing(true)}>{t('home.customize')}</Button>
           )}
         </div>
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+          <SortableContext items={layout.map((item) => item.id)} strategy={rectSortingStrategy}>
+            <div ref={gridRef} className="grid w-full gap-4" style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}>
+              {layout.map((item) => (
+                <HomeWidget
+                  key={item.id}
+                  item={item}
+                  name={widgets[item.id].name}
+                  editing={editing}
+                  columns={columns}
+                  columnWidth={columnWidth}
+                  onResize={(patch) => resize(item.id, patch)}
+                >
+                  {widgets[item.id].render(item.height !== null)}
+                </HomeWidget>
+              ))}
+            </div>
+          </SortableContext>
+        </DndContext>
       </div>
     </ScrollArea>
   );

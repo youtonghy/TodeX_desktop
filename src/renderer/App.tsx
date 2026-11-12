@@ -164,7 +164,7 @@ function writeLayoutOpen(next: LayoutOpenState) {
 export function App() {
   const t = useT();
   const themeSource = useAppearance().theme;
-  const [panel, setPanel] = useState<DesktopPanel | null>(null);
+  const [panel, setPanel] = useState<DesktopPanel | null>('home');
   const [settingsSectionRequest, setSettingsSectionRequest] = useState<SettingsSectionRequest>();
   const panelScopeRef = useRef('');
   const [slashCommand, setSlashCommand] = useState<string>();
@@ -228,7 +228,7 @@ export function App() {
   const profileActive = panel === 'profile';
   // A full page in the conversation's place: it sits on the full surface and
   // the Workbench stays hidden.
-  // And the home board.
+  // And the home page, which the app starts on.
   const homeActive = panel === 'home';
   const pageActive = kanbanActive || profileActive || homeActive;
   const features = useFeatureModes();
@@ -477,7 +477,7 @@ export function App() {
   // A category to show (About, from the update menu or the About route).
   useEffect(() => { if (!settingsOpen) setSettingsSectionRequest(undefined); }, [settingsOpen]);
   const modalPanel = settingsOpen;
-  const overlayPanel = panelScopeRef.current === scopeKey && panel && panel !== 'kanban' && panel !== 'profile' && panel !== 'ssh' && !modalPanel && !isWorkbenchTab(panel) ? panel : null;
+  const overlayPanel = panelScopeRef.current === scopeKey && panel && panel !== 'kanban' && panel !== 'profile' && panel !== 'home' && panel !== 'ssh' && !modalPanel && !isWorkbenchTab(panel) ? panel : null;
 
   const asideContent = (
     !scopeKey || !layout.hydrated ? null : (

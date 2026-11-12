@@ -17,7 +17,7 @@ export type DesktopPanel =
   /** Workbench tab with the agents one conversation called (Agent Calling). */
   | 'agent-calls'
   | 'kanban'
-  /** The home board (live status, today, plan limits); renders as the main content inside AppLayout. */
+  /** The home page the app starts on (live status, today, plan limits); renders as the main content inside AppLayout. */
   | 'home'
   /** Read-only Workbench tab following one agent `ssh_exec` call. */
   | 'ssh-exec'

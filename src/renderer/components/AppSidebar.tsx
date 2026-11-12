@@ -1,4 +1,4 @@
-import { RiPushpin2Fill, RiLockLine, RiSpyLine, RiAddLine, RiArrowRightSLine, RiCheckLine, RiFolderReduceLine, RiFoldersLine, RiFolderTransferLine, RiPencilLine, RiEdit2Line, RiErrorWarningLine, RiFolder3Line, RiFolderOpenLine, RiGitBranchLine, RiDeleteBinLine, RiArrowDownSLine, RiBookOpenLine, RiCalendarTodoLine, RiDashboardLine, RiMoreLine, RiPaletteLine, RiPriceTag3Line, RiSettings3Line, RiTerminalLine, RiTimeLine, RiTimerLine } from '@remixicon/react';
+import { RiPushpin2Fill, RiLockLine, RiSpyLine, RiAddLine, RiArrowRightSLine, RiCheckLine, RiFolderReduceLine, RiFoldersLine, RiFolderTransferLine, RiPencilLine, RiEdit2Line, RiErrorWarningLine, RiFolder3Line, RiFolderOpenLine, RiGitBranchLine, RiDeleteBinLine, RiArrowDownSLine, RiBookOpenLine, RiCalendarTodoLine, RiHome5Line, RiMoreLine, RiPaletteLine, RiPriceTag3Line, RiSettings3Line, RiTerminalLine, RiTimeLine, RiTimerLine } from '@remixicon/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { MouseEvent, ReactNode } from 'react';
 import {
@@ -1770,7 +1770,7 @@ export function AppSidebar({
     {
       key: 'home',
       label: t('sidebar.home'),
-      icon: RiDashboardLine,
+      icon: RiHome5Line,
       isSelected: Boolean(homeActive),
       onClick: () => {
         if (mobile) onCloseMobile?.();
