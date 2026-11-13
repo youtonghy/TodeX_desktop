@@ -8,6 +8,7 @@ import type { V2ApiClient } from '@todex/protocol/v2';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { useT } from '../i18n';
 import { SettingsCard, SettingsGroup, SettingsNote, SettingsRow } from './settings/SettingsRows';
+import { LiveViewPlacementSetting } from './LiveViewPlacementSetting';
 import { IconAction } from './ui/icon-action';
 import { ProgressBar } from './ui/progress-bar';
 import { toast } from './ui/toast';
@@ -63,6 +64,7 @@ export function AgentBrowserSettings({ session, backendId, api, settings, onSett
 
   return (
     <div className="flex flex-col gap-6">
+      <LiveViewPlacementSetting tool="browser" />
       <SettingsGroup label={t('agentBrowser.componentSection')}>
         <SettingsCard>
           <SettingsRow

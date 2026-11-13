@@ -23,10 +23,12 @@ export type DesktopPanel =
   | 'ssh-exec'
   /** The agent's desktop browser for one conversation (desktop: live; web: screenshots). */
   | 'agent-browser'
+  /** The agent's Computer Use screen for one conversation. */
+  | 'agent-computer'
   /** SSH hosts, keys and connections; renders as the main content inside AppLayout. */
   | 'ssh';
 
-export type WorkbenchTab = 'terminal' | 'browser' | 'files' | 'git-diff' | 'ssh-exec' | 'subagents' | 'agent-calls' | 'agent-browser';
+export type WorkbenchTab = 'terminal' | 'browser' | 'files' | 'git-diff' | 'ssh-exec' | 'subagents' | 'agent-calls' | 'agent-browser' | 'agent-computer';
 
 export type OpenPanelOptions = {
   workspaceId?: string;
@@ -37,7 +39,7 @@ export type OpenPanelOptions = {
 };
 
 export function isWorkbenchTab(panel: DesktopPanel | null): panel is WorkbenchTab {
-  return panel === 'terminal' || panel === 'browser' || panel === 'files' || panel === 'git-diff' || panel === 'ssh-exec' || panel === 'subagents' || panel === 'agent-calls' || panel === 'agent-browser';
+  return panel === 'terminal' || panel === 'browser' || panel === 'files' || panel === 'git-diff' || panel === 'ssh-exec' || panel === 'subagents' || panel === 'agent-calls' || panel === 'agent-browser' || panel === 'agent-computer';
 }
 
 /** Agent SSH, Subagents and Agent calls tabs are opened by the agent's own
@@ -98,6 +100,8 @@ export type WorkbenchItem = {
   agentCalls?: { conversationId: string };
   /** Session-only `agent-browser` tab of one conversation. */
   agentBrowser?: { conversationId: string };
+  /** Session-only `agent-computer` tab of one conversation. */
+  agentComputer?: { conversationId: string };
 };
 
 /** Imperative requests from outside the Workbench (the SSH view, or a new
@@ -112,4 +116,5 @@ export type WorkbenchRequest =
   | { id: number; kind: 'subagents'; conversationId: string }
   | { id: number; kind: 'agent-calls'; conversationId: string }
   | { id: number; kind: 'agent-browser'; conversationId: string }
+  | { id: number; kind: 'agent-computer'; conversationId: string }
   | { id: number; kind: 'close'; itemId: string };

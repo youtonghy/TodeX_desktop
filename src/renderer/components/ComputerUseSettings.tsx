@@ -7,6 +7,7 @@ import { Switch } from '@/components/base/switch/switch';
 import type { AgentComputerEngine, AgentComputerPermission, AgentDesktopEngineStatus, AgentDesktopSettings } from '@todex/protocol/agentDesktop';
 import { useT } from '../i18n';
 import { SettingsCard, SettingsGroup, SettingsNote, SettingsRow } from './settings/SettingsRows';
+import { LiveViewPlacementSetting } from './LiveViewPlacementSetting';
 
 const ROW_SELECT_TRIGGER = 'h-8 w-auto gap-1 rounded-lg px-2 py-1.5';
 const ENGINES: AgentComputerEngine[] = ['native', 'agentDesktop'];
@@ -48,6 +49,8 @@ export function ComputerUseSettings({ settings, saving, onEnable, onRequestPermi
         </SettingsRow>
         {status.reason && !(missing && status.supported) ? <SettingsNote>{status.reason}</SettingsNote> : null}
       </SettingsCard>
+
+      {status.supported ? <LiveViewPlacementSetting tool="computer" /> : null}
 
       {/* Absent from backends with only the built-in engine. */}
       {settings.computerEngine && settings.computerEngines && status.supported ? (
