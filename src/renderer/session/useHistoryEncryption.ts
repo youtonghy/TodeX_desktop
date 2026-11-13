@@ -113,7 +113,7 @@ const UPDATE_DEBOUNCE_MS = 300;
 /** How long a history command waits for a connecting socket. */
 const CONNECT_WAIT_MS = 15_000;
 
-export function useHistoryEncryption({ backends, focusBackendId, sendCommand, onUnlocked }: {
+export function useHistoryEncryption({ backends, focusBackendId, sendCommand, onUnlocked, autoGrantDeviceIds }: {
   backends: Readonly<Record<string, HistoryBackendLink>>;
   /** The backend the visible conversation belongs to: notices follow it. */
   focusBackendId: string;
@@ -121,6 +121,10 @@ export function useHistoryEncryption({ backends, focusBackendId, sendCommand, on
   /** Keys arrived (grant, recovery import): locked rows of these
    * conversations (all when omitted) may now open. */
   onUnlocked: (conversationIds?: readonly string[]) => void;
+  /** Devices whose pending grants on a backend are fulfilled without
+   * asking: the members of its device group, whose approval covered
+   * history (docs/mesh-v1.md "History"). */
+  autoGrantDeviceIds?: (backendId: string) => ReadonlySet<string>;
 }) {
   const [views, setViews] = useState<Record<string, HistoryEncryptionView>>({});
   const [grantRuns, setGrantRuns] = useState<Record<string, HistoryGrantRun>>({});
@@ -128,8 +132,8 @@ export function useHistoryEncryption({ backends, focusBackendId, sendCommand, on
   const [dismissedRecoveryNotices, setDismissedRecoveryNotices] = useState(readDismissedRecoveryNotices);
   const grantRunsRef = useRef(grantRuns);
   grantRunsRef.current = grantRuns;
-  const live = useRef({ backends, sendCommand, onUnlocked, views });
-  live.current = { backends, sendCommand, onUnlocked, views };
+  const live = useRef({ backends, sendCommand, onUnlocked, views, autoGrantDeviceIds });
+  live.current = { backends, sendCommand, onUnlocked, views, autoGrantDeviceIds };
   const decryptors = useRef(new Map<string, { decryptor: HistoryDecryptor; ready: Promise<void> }>());
   const liveChains = useRef(new Map<string, Promise<void>>());
   const titles = useRef(new Map<string, string | null>());
@@ -622,6 +626,29 @@ export function useHistoryEncryption({ backends, focusBackendId, sendCommand, on
     return actions;
   };
 
+  // Grants of the backend's device group need no approval here: re-wrap them
+  // as soon as they show up (one run per grant; a failed one retries on the
+  // next state read).
+  useEffect(() => {
+    for (const view of Object.values(views)) {
+      const devices = live.current.autoGrantDeviceIds?.(view.backendId);
+      if (!devices?.size || !view.state || view.accessRevoked || !view.localRid) continue;
+      for (const grant of view.state.grants) {
+        if (grant.status !== 'pending' || !grant.publicKey || grant.rid === view.localRid || !devices.has(grant.deviceId)) continue;
+        if (grantControllers.current.has(grant.grantId) || grantRunsRef.current[grant.grantId]?.error) continue;
+        void actionsFor(view.backendId).authorizeGrant(grant).catch(() => undefined);
+      }
+    }
+  });
+
+  /** Fulfills `deviceId`'s pending grant with this device's key for
+   * `backendId` (adding a paired backend to a device group). */
+  const authorizeDevice = useCallback(async (backendId: string, deviceId: string) => {
+    const grants = parseHistoryEncryptionState(await send(backendId, historyCommands.get())).grants;
+    const grant = grants.find((item) => item.deviceId === deviceId && item.status === 'pending' && item.publicKey);
+    if (grant) await actionsFor(backendId).authorizeGrant(grant);
+  }, [send]);
+
   /** Forgets everything held for a removed backend profile. */
   const forgetBackend = useCallback(async (backendId: string) => {
     decryptors.current.get(backendId)?.decryptor.clear();
@@ -693,6 +720,7 @@ export function useHistoryEncryption({ backends, focusBackendId, sendCommand, on
     receiveUpdate,
     forgetBackend,
     unlocked,
+    authorizeDevice,
     /** Everything the settings page of one backend shows and does. */
     forBackend: (backendId: string) => ({
       view: viewOf(backendId),

@@ -14,6 +14,7 @@ const SETTINGS_TABS = {
   功能: 'features',
   外观: 'appearance',
   后端连接: 'backends',
+  后端组: 'mesh',
   'CLI 管理': 'cli',
   'SSH 连接': 'ssh',
   通知: 'notifications',
@@ -207,6 +208,22 @@ test('settings: computer use permissions', async ({ page, openDemo }) => {
   await expect(page.getByText('等待授权', { exact: true })).toBeVisible();
   await settle(page);
   await expect(page).toHaveScreenshot('settings-computer-use-permissions-light.png', { mask: volatile(page) });
+});
+
+// A device group: this device, a second device and the demo backend, plus a
+// device asking to join (approving it compares the verification code).
+test('settings: backend group with a join request', async ({ page, openDemo }) => {
+  await openDemo('light', 'mesh=1');
+  await page.getByRole('button', { name: '设置', exact: true }).click();
+  await settingsSection(page, '后端组').click();
+  await expect(page.getByText('Pixel 9', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText('iPhone', { exact: true })).toBeVisible();
+  await settle(page);
+  await expect(page).toHaveScreenshot('settings-mesh-group-light.png', { mask: volatile(page) });
+  await page.getByRole('button', { name: '批准', exact: true }).first().click();
+  await expect(page.getByRole('dialog', { name: '批准 Pixel 9 加入？' })).toBeVisible();
+  await settle(page);
+  await expect(page).toHaveScreenshot('settings-mesh-approve-light.png', { mask: volatile(page) });
 });
 
 // SSH settings with the connection approval switched to per command.

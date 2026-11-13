@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode, type Ref } from 'react';
-import { RiApps2Line, RiCodeBoxLine, RiComputerLine, RiHistoryLine, RiInformationLine, RiNotification3Line, RiPaletteLine, RiServerLine, RiSettings3Line, RiTeamLine, RiTerminalBoxLine } from '@remixicon/react';
+import { RiApps2Line, RiCodeBoxLine, RiComputerLine, RiGroupLine, RiHistoryLine, RiInformationLine, RiNotification3Line, RiPaletteLine, RiServerLine, RiSettings3Line, RiTeamLine, RiTerminalBoxLine } from '@remixicon/react';
 import { Button } from '@/components/base/buttons/button';
 import { Select, SelectItem } from '@/components/base/select/select';
 import { Switch } from '@/components/base/switch/switch';
@@ -7,6 +7,7 @@ import { SettingsContent, SettingsNav, type SettingsNavGroup } from '@/component
 import { AgentCallingSettings } from '../components/AgentCallingSettings';
 import { AgentDesktopSettings, type AgentDesktopPage } from '../components/AgentDesktopSettings';
 import { BackendConnectionSettings } from '../components/settings/BackendConnectionSettings';
+import { MeshGroupSettings } from '../components/settings/MeshGroupSettings';
 import { AppearanceSettings } from '../components/AppearanceSettings';
 import { TerminalSettings } from '../components/settings/TerminalSettings';
 import { FeatureSettings } from '../components/FeatureSettings';
@@ -25,7 +26,7 @@ import { HistoryCacheSettings } from '../components/settings/HistoryCacheSetting
 import { slots } from '../platform/slots';
 import { LOCALE_LABELS, SUPPORTED_LOCALES, getLocalePreference, isLocale, setLocalePreference, useT, type LocalePreference } from '../i18n';
 
-export type SettingsSection = 'general' | 'features' | 'appearance' | 'connection' | 'local-backend' | 'container' | 'cli' | 'ssh' | 'notifications' | 'agent' | 'agent-calling' | 'about';
+export type SettingsSection = 'general' | 'features' | 'appearance' | 'connection' | 'mesh' | 'local-backend' | 'container' | 'cli' | 'ssh' | 'notifications' | 'agent' | 'agent-calling' | 'about';
 /** Show a category on open or while open; `at` makes a repeat request distinct. */
 export type SettingsSectionRequest = { section: SettingsSection; at: number };
 
@@ -113,6 +114,7 @@ export function SettingsPanel({ session, historyRecoverySetup = false, repairPai
     ] },
     { id: 'connections', label: t('settings.groupConnections'), items: [
       { id: 'connection', label: t('settings.backendConnections'), icon: RiServerLine },
+      ...(platform.deployment ? [] : [{ id: 'mesh' as const, label: t('mesh.title'), icon: RiGroupLine }]),
       ...slots.settingsSections.map((item) => ({ id: item.id, label: t(item.labelKey), icon: item.icon })),
       { id: 'ssh', label: t('settings.ssh'), icon: RiTerminalBoxLine },
     ] },
@@ -217,6 +219,12 @@ export function SettingsPanel({ session, historyRecoverySetup = false, repairPai
             footer={platform.clearLocalData ? <ClearLocalData session={session} clear={platform.clearLocalData} /> : undefined}
           />
         </SettingsPage>
+
+        {platform.deployment ? null : (
+          <SettingsPage {...page('mesh')}>
+            <MeshGroupSettings session={session} />
+          </SettingsPage>
+        )}
 
         {slots.settingsSections.map(({ id, Component }) => (hostVisited.has(id) ? (
           <SettingsPage key={id} {...page(id)}>

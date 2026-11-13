@@ -1,7 +1,11 @@
 import type { BackendConnectionProfile as ProtocolBackendConnectionProfile } from '@todex/protocol/todex';
 import { t } from '../i18n';
 
-export type BackendConnectionProfile = ProtocolBackendConnectionProfile & { labelColor?: string };
+/** A backend this client reaches as a node of a device group
+ * (TodeX_backend docs/mesh-v1.md); see useMeshGroups. */
+export type BackendMeshNode = { groupId: string; nodeId: string };
+
+export type BackendConnectionProfile = ProtocolBackendConnectionProfile & { labelColor?: string; mesh?: BackendMeshNode };
 
 export const BACKEND_LABEL_COLORS = [
   { value: '#3b82f6', get label() { return t('color.blue'); } },

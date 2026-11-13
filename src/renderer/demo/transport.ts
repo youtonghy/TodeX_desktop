@@ -12,6 +12,7 @@ import type {
 } from '@todex/protocol/secureTransport';
 import type { AgentCallingSettings, ApiKeySummary, ConversationEvent, ConversationManifest, DshPackage, DshPluginList, DshPluginOperation, DshPluginRow, McpCatalog, McpServerCatalogDescriptor, ProviderKind, SkillCatalog, SkillCatalogDescriptor } from '@todex/protocol/v2';
 import { applyMergePatch, setAt, type SettingsObject } from '../lib/cliSettings';
+import { demoMesh } from './mesh';
 import * as fixtures from './fixtures';
 
 const encoder = new TextEncoder();
@@ -854,7 +855,7 @@ function route(request: SecureRequest): SecureResponse {
       case '/v2/transport-policy':
         return json({ requiredProtocol: 'none' });
       case '/v2/version':
-        return json({ name: 'todex-agentd', version: '2.2.0', data_dir: '/home/demo/.todex-agent', workspace_root: fixtures.DEMO_ROOT, scratch_workspace_root: '/home/demo/.todex-agent/workspace' });
+        return json({ name: 'todex-agentd', version: '2.2.0', data_dir: '/home/demo/.todex-agent', workspace_root: fixtures.DEMO_ROOT, scratch_workspace_root: '/home/demo/.todex-agent/workspace', mesh: 1 });
       case '/v2/providers':
         return json({ providers: fixtures.demoProviders });
       case '/v2/providers/models':
@@ -1156,6 +1157,16 @@ class DemoSocket implements SecureSocket {
         });
       }
       result = { conversationId: String(payload.conversationId ?? ''), stoppedTaskIds: taskIds };
+    } else if (message.type === 'mesh.state.get' || message.type === 'mesh.node.get') {
+      // `?mesh=1`: the demo backend is the node of the demo group.
+      const mesh = demoMesh(fixtures.DEMO_SERVER_URL);
+      const inGroup = new URLSearchParams(window.location.search).get('mesh') === '1';
+      result = message.type === 'mesh.node.get'
+        ? { nodeId: mesh.nodeId, nodePublicKey: '', nodeInfo: mesh.nodeInfo, groups: inGroup ? [mesh.group.groupId] : [] }
+        : { nodeId: mesh.nodeId, nodeInfo: mesh.nodeInfo, groups: inGroup ? [{ groupId: mesh.group.groupId, chain: mesh.group.chain, nodeInfos: [] }] : [] };
+    } else if (message.type === 'mesh.join.list') {
+      const inGroup = new URLSearchParams(window.location.search).get('mesh') === '1';
+      result = { requests: inGroup ? [demoMesh(fixtures.DEMO_SERVER_URL).joinRequest] : [] };
     } else if (message.type === 'conversation.warm') {
       // The demo has no agent processes to start.
       result = { conversationId: String(payload.conversationId ?? ''), warmed: false, reason: 'demo' };

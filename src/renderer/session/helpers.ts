@@ -114,6 +114,8 @@ export type ServerVersion = {
   terminalReplay?: number;
   /** `1` when an attach that cannot continue sends a screen snapshot. */
   terminalSnapshot?: number;
+  /** `1` when the backend can join device groups (docs/mesh-v1.md). */
+  mesh?: number;
   /** Where the backend runs; `host` on backends that predate it. */
   deployment: BackendDeployment;
   /** Host ↔ backend folder pairs; empty when the backend publishes none. */
@@ -1558,6 +1560,11 @@ export function settingsFromProfile(profile: BackendConnectionProfile, current: 
   return { ...current, serverUrl: normalizeServerUrl(profile.serverUrl), deviceSecret: profile.deviceSecret, tenantId: profile.tenantId, encryptionProtocol: profile.encryptionProtocol, encryptionPublicKey: profile.encryptionPublicKey, transportVerified: profile.transportVerified === true };
 }
 
+function meshNodeOf(value: unknown): { groupId: string; nodeId: string } | undefined {
+  const raw = value as { groupId?: unknown; nodeId?: unknown } | null;
+  return raw && typeof raw.groupId === 'string' && typeof raw.nodeId === 'string' ? { groupId: raw.groupId, nodeId: raw.nodeId } : undefined;
+}
+
 export function normalizeBackendConnectionProfile(value: unknown): BackendConnectionProfile | null {
   if (!value || typeof value !== 'object') return null;
   const raw = value as Record<string, unknown>;
@@ -1565,7 +1572,7 @@ export function normalizeBackendConnectionProfile(value: unknown): BackendConnec
   const serverUrl = typeof raw.serverUrl === 'string' ? raw.serverUrl.trim() : '';
   if (!id || !serverUrl) return null;
   const now = Date.now();
-  return { id, labelColor: normalizeBackendLabelColor(raw.labelColor), name: typeof raw.name === 'string' && raw.name.trim() ? raw.name.trim() : t('session.backend'), serverUrl: normalizeServerUrl(serverUrl), deviceSecret: typeof raw.deviceSecret === 'string' ? raw.deviceSecret : '', tenantId: typeof raw.tenantId === 'string' && raw.tenantId.trim() ? raw.tenantId.trim() : 'local', encryptionProtocol: raw.encryptionProtocol === 'x25519' || raw.encryptionProtocol === 'ml-kem-768' ? raw.encryptionProtocol : 'none', encryptionPublicKey: typeof raw.encryptionPublicKey === 'string' ? raw.encryptionPublicKey : '', transportVerified: raw.transportVerified === true, ...(raw.disabled === true ? { disabled: true } : {}), createdAt: typeof raw.createdAt === 'number' ? raw.createdAt : now, updatedAt: typeof raw.updatedAt === 'number' ? raw.updatedAt : now };
+  return { id, labelColor: normalizeBackendLabelColor(raw.labelColor), name: typeof raw.name === 'string' && raw.name.trim() ? raw.name.trim() : t('session.backend'), serverUrl: normalizeServerUrl(serverUrl), deviceSecret: typeof raw.deviceSecret === 'string' ? raw.deviceSecret : '', tenantId: typeof raw.tenantId === 'string' && raw.tenantId.trim() ? raw.tenantId.trim() : 'local', encryptionProtocol: raw.encryptionProtocol === 'x25519' || raw.encryptionProtocol === 'ml-kem-768' ? raw.encryptionProtocol : 'none', encryptionPublicKey: typeof raw.encryptionPublicKey === 'string' ? raw.encryptionPublicKey : '', transportVerified: raw.transportVerified === true, ...(raw.disabled === true ? { disabled: true } : {}), ...(meshNodeOf(raw.mesh) ? { mesh: meshNodeOf(raw.mesh) } : {}), createdAt: typeof raw.createdAt === 'number' ? raw.createdAt : now, updatedAt: typeof raw.updatedAt === 'number' ? raw.updatedAt : now };
 }
 
 const DEVICE_IDENTITY_CACHE_LIMIT = 16;

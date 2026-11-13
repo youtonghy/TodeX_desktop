@@ -1,6 +1,7 @@
 import {
   beginDevicePairing as beginSharedDevicePairing,
   type DevicePairingErrorCode,
+  type DevicePairingMesh,
   type DevicePairingRequest,
 } from '@todex/protocol/devicePairing';
 import type { DeviceIdentity } from '@todex/protocol/deviceAuth';
@@ -38,9 +39,11 @@ const PAIRING_MESSAGES: Record<DevicePairingErrorCode, MessageKey> = {
   unsupported: 'pair.errUnsupported',
 };
 
-/** The shared pairing v3 flow (`@todex/protocol/devicePairing`) with this client's error wording. */
-export function beginDevicePairing(serverUrl: string, deviceName: string, device: DeviceIdentity, signal?: AbortSignal): Promise<DevicePairingRequest> {
+/** The shared pairing v3 flow (`@todex/protocol/devicePairing`) with this
+ * client's error wording; `mesh` joins a device group instead. */
+export function beginDevicePairing(serverUrl: string, deviceName: string, device: DeviceIdentity, signal?: AbortSignal, mesh?: DevicePairingMesh): Promise<DevicePairingRequest> {
   return beginSharedDevicePairing(serverUrl, deviceName, device, signal, {
     message: (code, params) => t(PAIRING_MESSAGES[code], params.status === undefined ? undefined : { status: params.status }),
+    ...(mesh ? { mesh } : {}),
   });
 }

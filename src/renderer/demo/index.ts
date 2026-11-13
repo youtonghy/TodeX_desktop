@@ -29,6 +29,8 @@ import {
   demoWorkspaces,
 } from './fixtures';
 import { demoOfflineTransport, demoSecondTransport, demoTransport, installDemoFetch } from './transport';
+import { DEMO_MESH_DEVICE_SECRET, demoMesh } from './mesh';
+import { MESH_GROUPS_STORAGE_KEY, meshDeviceSecretKey } from '../session/meshGroups';
 
 export function installDemoMode(): boolean {
   if (window.todexDesktop) {
@@ -73,6 +75,22 @@ export function installDemoMode(): boolean {
     // Never a real key: the fixtures transport neither signs nor checks.
     bridge.secureStore = {
       get: async (key) => (key.startsWith(`${DEVICE_SECRET_STORAGE_KEY}.`) ? 'demo-device-secret' : null),
+      set: async () => undefined,
+      available: async () => true,
+    };
+  }
+  // `mesh=1`: the demo backend is a node of a device group this device is
+  // in, with a second device and a device asking to join.
+  if (params.get('mesh') === '1') {
+    const mesh = demoMesh(DEMO_SERVER_URL);
+    store.set(BACKEND_CONNECTIONS_STORAGE_KEY, [{
+      id: 'default-backend', name: 'MBP', serverUrl: DEMO_SERVER_URL, labelColor: '#3b82f6', tenantId: 'default',
+      encryptionProtocol: 'none', encryptionPublicKey: '', transportVerified: false, createdAt: 0, updatedAt: 0,
+      mesh: { groupId: mesh.group.groupId, nodeId: mesh.nodeId },
+    }]);
+    store.set(MESH_GROUPS_STORAGE_KEY, [mesh.group]);
+    bridge.secureStore = {
+      get: async (key) => (key.startsWith(`${DEVICE_SECRET_STORAGE_KEY}.`) || key === meshDeviceSecretKey(mesh.group.groupId) ? DEMO_MESH_DEVICE_SECRET : null),
       set: async () => undefined,
       available: async () => true,
     };

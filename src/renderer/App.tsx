@@ -291,7 +291,8 @@ export function App() {
     // About and CLI management (with each agent's skills and MCPs, accounts
     // and cleanup) are settings categories now; their routes still open them.
     const section = name === 'About' ? 'about'
-      : name === 'CliManager' || name === 'AgentProviders' || name === 'Cleanup' || name === 'Capabilities' ? 'cli' : null;
+      : name === 'CliManager' || name === 'AgentProviders' || name === 'Cleanup' || name === 'Capabilities' ? 'cli'
+        : name === 'MeshGroups' ? 'mesh' : null;
     if (section) {
       setSettingsSectionRequest({ section, at: Date.now() });
       setPanel('settings');

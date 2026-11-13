@@ -61,6 +61,7 @@ import { TRANSPORT_V2_WS_CLOSE_CODE, TransportCryptoError } from '@todex/protoco
 import { startSocketVerification, type SocketVerification } from '@todex/protocol/socketVerification';
 import { HISTORY_ENCRYPTION_UPDATED, historyRetryPrompt, historyRetryRequest, historyRetrySequence } from '@todex/protocol/historyEncryption';
 import { historyErrorMessage, useHistoryEncryption, type HistoryEncryptionSession } from './useHistoryEncryption';
+import { MESH_UPDATED_EVENT, useMeshGroups, type MeshGroupsSession, type MeshLink } from './useMeshGroups';
 import { HISTORY_KEY_REQUIRED, HISTORY_READ_ONLY } from '@todex/protocol/historyEncryption';
 import { retryWithDelays } from '@todex/protocol/retry';
 import { probeBackendConnection, nextReconnectDelayMs, inspectServerUrl, credentialMatchesOrigin } from '@todex/protocol/connectionProbe';
@@ -389,6 +390,8 @@ function withEntry<Value>(record: Record<string, Value>, key: string, value: Val
   return record[key] === value ? record : { ...record, [key]: value };
 }
 
+const NO_DEVICES: ReadonlySet<string> = new Set();
+
 export function useTodeXSession(openPanel: OpenPanelFn) {
   // Session state outside React: high-frequency conversation state and the
   // records code reads synchronously (see conversationStore.ts).
@@ -551,6 +554,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   // End-to-end encrypted history: every page is decrypted before it reaches
   // the projection (set once the hook below has run).
   const historyEncryptionRef = useRef<HistoryEncryptionSession | null>(null);
+  const meshGroupsRef = useRef<MeshGroupsSession | null>(null);
   const withDecryptedTitles = (backendId: string, manifests: ConversationManifest[]) =>
     historyEncryptionRef.current?.withDecryptedTitles(backendId, manifests) ?? manifests;
   const withDecryptedManifest = async (backendId: string, manifest: ConversationManifest): Promise<ConversationManifest> =>
@@ -3011,6 +3015,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         historyEncryptionRef.current?.receiveUpdate(backendId, parsed.payload);
         return;
       }
+      if (messageType === MESH_UPDATED_EVENT) {
+        meshGroupsRef.current?.receiveEvent(backendId, parsed.payload);
+        return;
+      }
       if (messageType === 'agentBrowser.frame') {
         const frame = parsed.payload as AgentBrowserFrame | undefined;
         if (frame?.conversationId) agentBrowserWatchersRef.current.get(frame.conversationId)?.forEach(listener => listener(frame));
@@ -3249,6 +3257,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   ), [historyLinksKey]);
   const historyEncryption = useHistoryEncryption({
     backends: stableHistoryLinks,
+    // A device group's devices are let in once, history included.
+    autoGrantDeviceIds: (backendId) => meshGroupsRef.current?.autoGrantDeviceIds(backendId) ?? NO_DEVICES,
     focusBackendId: activeBackendConnectionId,
     sendCommand: (backendId, message, timeoutMs) => sendProtocolCommand(message, timeoutMs, backendId),
     // Keys arrived: drop the projections (of the named conversations, or
@@ -4396,7 +4406,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     // A self-hosted deployment fixes the backend list (its settings hide
     // the add button); stay on the first backend instead.
     if (platform.deployment) return backendConnectionsRef.current[0];
-    const id = createRequestId('backend');
+    // Device groups pick the id first, to store the history key under it.
+    const id = profile?.id ?? createRequestId('backend');
     // A new backend never inherits the current device key or transport pin.
     const next: BackendConnectionProfile = { ...profileFromSettings(connectionRoutingRef.current, t('session.newBackend'), id), ...UNPAIRED_TRANSPORT, ...profile, id, createdAt: Date.now(), updatedAt: Date.now() };
     setBackendConnections((current) => [...current, next]);
@@ -4465,6 +4476,45 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     }));
     if (winner.disabled) pairingConnectPendingRef.current.add(winnerId);
   }, [closeSocket]);
+
+  // Device groups: one profile per node of each group, kept in step with
+  // the group's roster (useMeshGroups). Keyed by content so health probes
+  // do not re-run its effects.
+  const meshLinksKey = JSON.stringify(backendConnections.map((profile) => {
+    const status = linkStatusByBackend[profile.id];
+    return [profile.id, status?.state ?? 'idle', status?.serverVersion ? status.serverVersion.mesh === 1 : null];
+  }));
+  const meshLinks = useMemo(() => Object.fromEntries(
+    (JSON.parse(meshLinksKey) as [string, MeshLink['state'], boolean | null][]).map(([backendId, state, mesh]) => [
+      backendId, { state, mesh: mesh ?? undefined },
+    ]),
+  ), [meshLinksKey]);
+  const meshGroups = useMeshGroups({
+    hydrated,
+    profiles: backendConnections,
+    links: meshLinks,
+    send: (profileId, frame, timeoutMs) => sendProtocolCommand({ id: createRequestId('mesh'), ...frame }, timeoutMs, profileId),
+    addProfile: (profile) => { addBackendConnection(profile); },
+    updateProfile: updateBackendConnection,
+    removeProfile: removeBackendConnection,
+    approveCredentials: onDevicePairingApproved,
+    history: {
+      authorizeDevice: async (profileId, deviceId) => { await historyEncryptionRef.current?.authorizeDevice(profileId, deviceId); },
+    },
+    deviceName: platform.productName,
+    onNotice: (notice) => {
+      if (notice.kind === 'removed') {
+        toast.warning(t('mesh.removedNotice', { name: notice.groupName }));
+        return;
+      }
+      toast.info(t('mesh.joinRequestedNotice', { name: notice.request.deviceName, group: notice.request.groupName }), {
+        description: t('mesh.joinRequestedCode', { code: notice.request.verificationCode }),
+        timeout: 0,
+        actionProps: { children: t('mesh.review'), onPress: () => openPanel('MeshGroups') },
+      });
+    },
+  });
+  meshGroupsRef.current = meshGroups;
 
   /** Opens a workspace. None is listed once per backend: `noneBackendId`
    * picks which backend's None conversations it shows and starts. */
@@ -7037,6 +7087,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     activeBackendConnectionId,
     /** Connection status of every backend, by profile id. */
     backendLinkStatus: linkStatusByBackend,
+    /** Device groups this client is in (TodeX_backend docs/mesh-v1.md). */
+    meshGroups,
     /** Backend of the None workspace in view (the sidebar lists None once
      * per backend). */
     noWorkspaceBackendId,
