@@ -42,6 +42,10 @@ export function installBrowserDesktopBridge(): void {
       },
       available: async () => false,
     },
+    // A browser cannot listen for LAN beacons.
+    mesh: {
+      beacons: async () => [],
+    },
     dialog: {
       openDirectory: async () => null,
     },

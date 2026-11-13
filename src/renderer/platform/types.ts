@@ -84,6 +84,8 @@ export type Platform = {
     reveal: (path: string) => Promise<void>;
   };
   preview?: PlatformPreview;
+  /** LAN beacons of device group nodes (docs/mesh-v1.md); desktop only. */
+  meshBeacons?: () => Promise<{ nodeId: string; address: string; port: number; seenAt: number }[]>;
   /** Removes every key and secret this client stored (web "clear local data"). */
   clearLocalData?: () => Promise<void>;
   /** Persistence of the on-device history cache (session/historyCache.ts);

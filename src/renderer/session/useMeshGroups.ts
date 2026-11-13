@@ -9,6 +9,10 @@ import {
   meshCommands,
   meshMemberForJoinRequest,
   meshNodeMember,
+  meshRelayExpiry,
+  meshRelayTicket,
+  meshRelayUrl,
+  parseMeshPresence,
   meshRecoveryKeys,
   parseMeshInvite,
   parseMeshJoinRequests,
@@ -20,8 +24,10 @@ import {
   type MeshJoinRequest,
   type MeshMember,
   type MeshNodeInfo,
+  type MeshRelayRole,
   type MeshSignedDoc,
 } from '@todex/protocol/mesh';
+import { platform } from '../platform';
 import { recoveryWordsFromSeed } from '@todex/protocol/recoveryKey';
 import { createRequestId } from '@todex/protocol/todex';
 import { t } from '../i18n';
@@ -38,6 +44,7 @@ import {
 import type { ConnectionState } from './helpers';
 import {
   MESH_GROUPS_STORAGE_KEY,
+  beaconUrls,
   candidateUrls,
   mergeNodeState,
   meshDeviceSecretKey,
@@ -46,8 +53,20 @@ import {
   normalizeStoredMeshGroups,
   rememberUrl,
   storedChain,
+  type MeshBeacon,
   type StoredMeshGroup,
 } from './meshGroups';
+
+/** This device's group preferences: `relay` off never relays. */
+const MESH_PREFS_STORAGE_KEY = `${platform.storagePrefix}.meshPrefs.v1`;
+type MeshPrefs = { relay: boolean };
+/** Unreachable this long before the next address is tried. */
+const ROTATE_AFTER_MS = 15_000;
+/** How often a relayed node's direct addresses are checked. */
+const DIRECT_PROBE_MS = 60_000;
+/** Relay tickets this device issues, and when they are renewed. */
+const RELAY_TICKET_MS = 24 * 60 * 60 * 1000;
+const RELAY_RENEW_MS = 60 * 60 * 1000;
 
 // Device groups on this client (TodeX_backend docs/mesh-v1.md). Every node of
 // a group gets a backend profile (`profile.mesh`) signed with the group's
@@ -68,6 +87,12 @@ export type MeshMemberView = MeshMember & {
   profileId?: string;
   state?: ConnectionState;
   info?: MeshNodeInfo;
+  /** Node members reached through another node: that node's name. */
+  via?: string;
+  /** Device members: connected to a node this client sees. */
+  online?: boolean;
+  /** Device members: when a node last saw it leave. */
+  lastSeen?: number;
 };
 
 export type MeshGroupView = {
@@ -125,6 +150,12 @@ export function useMeshGroups({
   const [loaded, setLoaded] = useState(false);
   const [joinRequests, setJoinRequests] = useState<Record<string, MeshJoinRequest[]>>({});
   const [joinProgress, setJoinProgress] = useState<MeshJoinProgress>({ status: 'idle' });
+  const [prefs, setPrefsState] = useState<MeshPrefs>({ relay: true });
+  const prefsRef = useRef(prefs);
+  prefsRef.current = prefs;
+  /** Per node profile: the group's presence as that node reported it. */
+  const [presence, setPresence] = useState<Record<string, ReturnType<typeof parseMeshPresence>>>({});
+  const beacons = useRef<MeshBeacon[]>([]);
   const groupsRef = useRef(groups);
   groupsRef.current = groups;
   const live = useRef({ profiles, links, send, addProfile, updateProfile, removeProfile, approveCredentials, history, deviceName, onNotice });
@@ -145,6 +176,9 @@ export function useMeshGroups({
   useEffect(() => {
     if (!hydrated) return;
     let alive = true;
+    void loadJson<Partial<MeshPrefs> | null>(MESH_PREFS_STORAGE_KEY, null).then((value) => {
+      if (alive && value) setPrefsState({ relay: value.relay !== false });
+    });
     void loadJson<unknown>(MESH_GROUPS_STORAGE_KEY, []).then((value) => {
       if (!alive) return;
       const stored = normalizeStoredMeshGroups(value);
@@ -184,6 +218,16 @@ export function useMeshGroups({
     await deleteHistorySeed(meshHistoryKeyId(groupId)).catch(() => undefined);
   }, [setGroups]);
 
+  /** Which group devices `profileId`'s node has connected. */
+  const refreshPresence = useCallback(async (profileId: string, groupId: string) => {
+    try {
+      const reported = parseMeshPresence(await live.current.send(profileId, meshCommands.presenceGet(groupId)));
+      setPresence((current) => ({ ...current, [profileId]: reported }));
+    } catch {
+      // Older nodes do not report presence.
+    }
+  }, []);
+
   /** Reads one node's group state and join requests and merges them. */
   const syncing = useRef(new Map<string, Promise<void>>());
   const notified = useRef(new Set<string>());
@@ -203,7 +247,7 @@ export function useMeshGroups({
       const remote = state.groups.find((item) => item.groupId === stored.groupId);
       const outcome = mergeNodeState(stored, { nodeId: state.nodeId, nodeInfo: state.nodeInfo, chain: remote?.chain, nodeInfos: remote?.nodeInfos });
       let group = outcome.group;
-      const remembered = rememberUrl(group, state.nodeId, profile.serverUrl);
+      const remembered = profile.mesh.via ? null : rememberUrl(group, state.nodeId, profile.serverUrl);
       if (remembered) group = remembered;
       if (outcome.removed) {
         live.current.onNotice({ kind: 'removed', groupName: group.name });
@@ -223,6 +267,7 @@ export function useMeshGroups({
         live.current.onNotice({ kind: 'joinRequested', request: { ...request, profileId, groupName: group.name } });
       }
       setJoinRequests((current) => ({ ...current, [profileId]: requests }));
+      await refreshPresence(profileId, group.groupId);
     })().catch(() => undefined).finally(() => { syncing.current.delete(profileId); });
     syncing.current.set(profileId, run);
     return run;
@@ -246,9 +291,13 @@ export function useMeshGroups({
   }, [links, loaded, profiles, syncProfile]);
 
   /** `mesh.updated` from a backend. */
-  const receiveEvent = useCallback((profileId: string, _payload: unknown) => {
-    if (live.current.profiles.find((profile) => profile.id === profileId)?.mesh) void syncProfile(profileId);
-  }, [syncProfile]);
+  const receiveEvent = useCallback((profileId: string, payload: unknown) => {
+    const mesh = live.current.profiles.find((profile) => profile.id === profileId)?.mesh;
+    if (!mesh) return;
+    // Arrivals and departures only change who is online.
+    if ((payload as { reason?: unknown } | null)?.reason === 'presence') void refreshPresence(profileId, mesh.groupId);
+    else void syncProfile(profileId);
+  }, [refreshPresence, syncProfile]);
 
   // Profiles follow the rosters: one per node of each group, pinned to the
   // transport key its signed info announces; nodes the roster dropped lose
@@ -284,7 +333,7 @@ export function useMeshGroups({
           }
           continue;
         }
-        const url = candidateUrls(group, info, member.id)[0];
+        const url = candidateUrls(group, info, member.id, { pinned: member.addresses, beacons: beaconUrls(beacons.current, member.id) })[0];
         const key = `${group.groupId}/${member.id}`;
         if (!info || !url || creating.current.has(key)) continue;
         creating.current.add(key);
@@ -323,38 +372,131 @@ export function useMeshGroups({
     }
   }, [groups, identityOf, loaded, profiles]);
 
-  // A node that stays unreachable is tried at its next known address.
-  const failing = useRef(new Map<string, { since: number; rotatedAt: number }>());
+  // LAN beacons (desktop): another source of node addresses.
   useEffect(() => {
-    const check = () => {
+    const read = platform.meshBeacons;
+    if (!read) return;
+    let alive = true;
+    const poll = () => { void read().then((list) => { if (alive) beacons.current = list; }, () => undefined); };
+    poll();
+    const timer = setInterval(poll, 15_000);
+    return () => { alive = false; clearInterval(timer); };
+  }, []);
+
+  // Getting back to a node: an unreachable node is tried at each of its
+  // addresses in turn; when every one failed (and this device relays), it is
+  // reached through another connected node of the group. A relayed node's
+  // direct addresses are checked every minute and win as soon as one
+  // answers; its ticket is renewed before it expires.
+  const failing = useRef(new Map<string, { since: number; rotatedAt: number; tried: Set<string>; probedAt: number }>());
+  useEffect(() => {
+    const credentialsOf = (profile: BackendConnectionProfile): MeshPairingCredentials => ({
+      deviceSecret: profile.deviceSecret, encryptionProtocol: profile.encryptionProtocol,
+      encryptionPublicKey: profile.encryptionPublicKey, transportVerified: profile.transportVerified,
+    });
+    const moveTo = (profile: BackendConnectionProfile, serverUrl: string, via?: string) => {
+      const credentials = credentialsOf(profile);
+      const { via: _via, ...mesh } = profile.mesh!;
+      live.current.updateProfile(profile.id, { serverUrl, mesh: via ? { ...mesh, via } : mesh, ...credentials });
+      live.current.approveCredentials(profile.id, credentials);
+    };
+    const relayFor = async (profile: BackendConnectionProfile, chain: MeshChain): Promise<{ url: string; via: string } | null> => {
+      const target = chain.head.members.find((member) => member.id === profile.mesh!.nodeId);
+      if (!prefsRef.current.relay || !target || target.relayTarget === false) return null;
+      const roleOf = (nodeId: string) => chain.head.members.find((member) => member.id === nodeId)?.relay ?? 'allowed';
+      const relays = live.current.profiles
+        .filter((item) => item.id !== profile.id && item.mesh?.groupId === profile.mesh!.groupId && !item.mesh.via && !item.disabled
+          && live.current.links[item.id]?.state === 'open' && /^https?:\/\//.test(item.serverUrl) && roleOf(item.mesh.nodeId) !== 'denied')
+        .sort((a, b) => Number(roleOf(b.mesh!.nodeId) === 'preferred') - Number(roleOf(a.mesh!.nodeId) === 'preferred'));
+      const relay = relays[0];
+      if (!relay) return null;
+      const identity = await identityOf(profile.mesh!.groupId);
+      const ticket = meshRelayTicket({
+        deviceSecretKey: decodeBase64Url(identity.secretKey), deviceId: identity.deviceId,
+        relayNodeId: relay.mesh!.nodeId, targetNodeId: profile.mesh!.nodeId, expiresAt: Date.now() + RELAY_TICKET_MS,
+      });
+      return { url: meshRelayUrl(relay.serverUrl, profile.mesh!.nodeId, ticket), via: relay.mesh!.nodeId };
+    };
+    const reachable = async (url: string) => {
+      try {
+        const response = await fetch(`${url}/health`, { signal: AbortSignal.timeout(3_000) });
+        return response.ok;
+      } catch {
+        return false;
+      }
+    };
+    let running = false;
+    const check = async () => {
       const now = Date.now();
       for (const profile of live.current.profiles) {
         if (!profile.mesh || profile.disabled) continue;
-        const state = live.current.links[profile.id]?.state;
-        if (state === 'open' || state === 'connecting' || state === undefined) {
-          if (state === 'open') failing.current.delete(profile.id);
-          continue;
-        }
-        const entry = failing.current.get(profile.id) ?? { since: now, rotatedAt: 0 };
-        failing.current.set(profile.id, entry);
-        if (now - entry.since < 15_000 || now - entry.rotatedAt < 15_000) continue;
         const group = groupsRef.current.find((item) => item.groupId === profile.mesh!.groupId);
         const chain = group ? storedChain(group) : null;
         if (!group || !chain) continue;
-        const urls = candidateUrls(group, nodeInfosOf(group, chain).get(profile.mesh.nodeId), profile.mesh.nodeId);
-        if (urls.length < 2) continue;
-        const next = urls[(urls.indexOf(profile.serverUrl) + 1) % urls.length];
+        const member = chain.head.members.find((item) => item.id === profile.mesh!.nodeId);
+        const urls = candidateUrls(group, nodeInfosOf(group, chain).get(profile.mesh.nodeId), profile.mesh.nodeId, {
+          pinned: member?.addresses, beacons: beaconUrls(beacons.current, profile.mesh.nodeId),
+        });
+        const state = live.current.links[profile.id]?.state;
+        const entry = failing.current.get(profile.id) ?? { since: now, rotatedAt: 0, tried: new Set<string>(), probedAt: now };
+        if (state === 'open') {
+          failing.current.set(profile.id, { ...entry, since: now, tried: new Set() });
+          if (!profile.mesh.via) continue;
+          const expiry = meshRelayExpiry(profile.serverUrl);
+          if (now - entry.probedAt >= DIRECT_PROBE_MS) {
+            failing.current.set(profile.id, { ...entry, since: now, tried: new Set(), probedAt: now });
+            for (const url of urls) {
+              if (await reachable(url)) {
+                moveTo(profile, url);
+                break;
+              }
+            }
+          } else if (expiry !== null && expiry - now < RELAY_RENEW_MS) {
+            const relay = await relayFor(profile, chain);
+            if (relay) moveTo(profile, relay.url, relay.via);
+          }
+          continue;
+        }
+        if (state === 'connecting' || state === undefined) continue;
+        failing.current.set(profile.id, entry);
+        if (now - entry.since < ROTATE_AFTER_MS || now - entry.rotatedAt < ROTATE_AFTER_MS) continue;
         entry.rotatedAt = now;
-        const credentials = {
-          deviceSecret: profile.deviceSecret, encryptionProtocol: profile.encryptionProtocol,
-          encryptionPublicKey: profile.encryptionPublicKey, transportVerified: profile.transportVerified,
-        };
-        live.current.updateProfile(profile.id, { serverUrl: next, ...credentials });
-        live.current.approveCredentials(profile.id, credentials);
+        if (!profile.mesh.via) entry.tried.add(profile.serverUrl);
+        const next = urls.find((url) => !entry.tried.has(url));
+        if (next) {
+          moveTo(profile, next);
+          continue;
+        }
+        // Every address failed (or the relay did): relay, else start over.
+        const relay = profile.mesh.via ? null : await relayFor(profile, chain);
+        entry.tried = new Set();
+        if (relay) moveTo(profile, relay.url, relay.via);
+        else if (urls[0] && (profile.mesh.via || urls.length > 1)) moveTo(profile, urls[0]);
       }
     };
-    const timer = setInterval(check, 5_000);
+    const timer = setInterval(() => {
+      if (running) return;
+      running = true;
+      void check().finally(() => { running = false; });
+    }, 5_000);
     return () => clearInterval(timer);
+  }, [identityOf]);
+
+  const setRelayEnabled = useCallback((relay: boolean) => {
+    const next = { relay };
+    setPrefsState(next);
+    void saveJson(MESH_PREFS_STORAGE_KEY, next);
+  }, []);
+
+  /** Tries a node again from its best address. */
+  const retryNode = useCallback((profileId: string) => {
+    const profile = live.current.profiles.find((item) => item.id === profileId);
+    if (!profile?.mesh) return;
+    failing.current.delete(profileId);
+    live.current.approveCredentials(profileId, {
+      deviceSecret: profile.deviceSecret, encryptionProtocol: profile.encryptionProtocol,
+      encryptionPublicKey: profile.encryptionPublicKey, transportVerified: profile.transportVerified,
+    });
   }, []);
 
   /** A new group with this device in it; returns the recovery words. */
@@ -564,6 +706,21 @@ export function useMeshGroups({
     if (group?.deviceId === memberId) await forgetGroup(groupId);
   }, [editRoster, forgetGroup]);
 
+  /** Changes one node's roster entry: pinned addresses, relay role, or
+   * whether it may be reached through a relay. */
+  const updateNode = useCallback(async (groupId: string, nodeId: string, patch: { addresses?: string[]; relay?: MeshRelayRole; relayTarget?: boolean }) => {
+    await editRoster(groupId, (chain) => ({
+      members: chain.head.members.map((member) => {
+        if (member.id !== nodeId || member.kind !== 'node') return member;
+        const next: MeshMember = { ...member, ...patch };
+        if (!next.addresses?.length) delete next.addresses;
+        if (next.relay === 'allowed') delete next.relay;
+        if (next.relayTarget !== false) delete next.relayTarget;
+        return next;
+      }),
+    }));
+  }, [editRoster]);
+
   /** Leaves the group; the last device dissolves it (every node leaves). */
   const leaveGroup = useCallback(async (groupId: string) => {
     const group = groupsRef.current.find((item) => item.groupId === groupId);
@@ -592,22 +749,31 @@ export function useMeshGroups({
   const views = useMemo<MeshGroupView[]>(() => groups.map((group) => {
     const chain = storedChain(group);
     const infos = chain ? nodeInfosOf(group, chain) : new Map<string, MeshNodeInfo>();
+    const reports = profiles.filter((item) => item.mesh?.groupId === group.groupId).flatMap((item) => (presence[item.id] ? [presence[item.id]] : []));
+    const nameOf = (nodeId: string) => chain?.head.members.find((item) => item.id === nodeId)?.name ?? nodeId;
     const members: MeshMemberView[] = (chain?.head.members ?? []).map((member) => {
       const profile = member.kind === 'node' ? profiles.find((item) => item.mesh?.groupId === group.groupId && item.mesh.nodeId === member.id) : undefined;
+      const self = member.id === group.deviceId;
+      const lastSeen = Math.max(0, ...reports.map((report) => report.lastSeen[member.id] ?? 0));
       return {
-        ...member, self: member.id === group.deviceId,
+        ...member, self,
         ...(profile ? { profileId: profile.id, state: links[profile.id]?.state ?? 'idle' } : {}),
+        ...(profile?.mesh?.via ? { via: nameOf(profile.mesh.via) } : {}),
         ...(infos.get(member.id) ? { info: infos.get(member.id) } : {}),
+        ...(member.kind === 'device' ? {
+          online: self || reports.some((report) => report.connected.some((item) => item.deviceId === member.id)),
+          ...(lastSeen ? { lastSeen } : {}),
+        } : {}),
       };
     });
     const inviteNodes = members.filter((member) => member.kind === 'node').map((member) => ({
-      nodeId: member.id, name: member.name, urls: candidateUrls(group, member.info, member.id),
+      nodeId: member.id, name: member.name, urls: candidateUrls(group, member.info, member.id, { pinned: member.addresses }),
     })).filter((node) => node.urls.length);
     return {
       groupId: group.groupId, name: chain?.head.name ?? group.name, version: chain?.head.version ?? 0, deviceId: group.deviceId,
       members, pending: !chain, invite: inviteNodes.length ? encodeMeshInvite({ groupId: group.groupId, name: chain?.head.name ?? group.name, nodes: inviteNodes }) : '',
     };
-  }), [groups, links, profiles]);
+  }), [groups, links, presence, profiles]);
 
   const pendingRequests = useMemo<MeshJoinView[]>(() => Object.entries(joinRequests).flatMap(([profileId, requests]) => {
     const groupId = profiles.find((profile) => profile.id === profileId)?.mesh?.groupId;
@@ -632,6 +798,10 @@ export function useMeshGroups({
     leaveGroup,
     autoGrantDeviceIds,
     receiveEvent,
+    relayEnabled: prefs.relay,
+    setRelayEnabled,
+    retryNode,
+    updateNode,
   };
 }
 

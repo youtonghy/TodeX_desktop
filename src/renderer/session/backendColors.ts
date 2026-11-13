@@ -3,7 +3,12 @@ import { t } from '../i18n';
 
 /** A backend this client reaches as a node of a device group
  * (TodeX_backend docs/mesh-v1.md); see useMeshGroups. */
-export type BackendMeshNode = { groupId: string; nodeId: string };
+export type BackendMeshNode = {
+  groupId: string;
+  nodeId: string;
+  /** Reached through this node of the group (a relay), not directly. */
+  via?: string;
+};
 
 export type BackendConnectionProfile = ProtocolBackendConnectionProfile & { labelColor?: string; mesh?: BackendMeshNode };
 

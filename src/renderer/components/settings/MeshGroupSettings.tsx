@@ -1,17 +1,19 @@
 import { useState } from 'react';
-import { RiComputerLine, RiDeleteBinLine, RiGroupLine, RiServerLine } from '@remixicon/react';
+import { RiComputerLine, RiDeleteBinLine, RiGroupLine, RiServerLine, RiSettings3Line } from '@remixicon/react';
 import { Chip } from '@/components/base/badges/chip';
 import { Button } from '@/components/base/buttons/button';
 import { Input } from '@/components/base/input/input';
 import { RadioGroup } from '@/components/base/radio/radio';
 import { RadioCard } from '@/components/base/radio/radio-card';
 import { SegmentedControl, SegmentedControlItem } from '@/components/base/segmented-control/segmented-control';
+import { Select, SelectItem } from '@/components/base/select/select';
+import { Switch } from '@/components/base/switch/switch';
 import { Textarea } from '@/components/base/textarea/textarea';
-import { isMeshJoinCode } from '@todex/protocol/mesh';
+import { isMeshAddress, isMeshJoinCode, type MeshRelayRole } from '@todex/protocol/mesh';
 import { connectionStateLabel } from '../../session/helpers';
 import type { MeshGroupView, MeshJoinView, MeshMemberView } from '../../session/useMeshGroups';
 import type { TodeXSession } from '../../session/useTodeXSession';
-import { useT } from '../../i18n';
+import { getLocale, useT } from '../../i18n';
 import { Alert } from '../ui/alert';
 import { CodeBlock } from '../ui/code-block';
 import { EmptyState } from '../ui/empty-state';
@@ -35,6 +37,7 @@ type Dialog =
   | { kind: 'addBackend'; group: MeshGroupView }
   | { kind: 'approve'; request: MeshJoinView }
   | { kind: 'remove'; group: MeshGroupView; member: MeshMemberView }
+  | { kind: 'node'; group: MeshGroupView; member: MeshMemberView }
   | { kind: 'leave'; group: MeshGroupView };
 
 export function MeshGroupSettings({ session }: { session: TodeXSession }) {
@@ -121,9 +124,20 @@ export function MeshGroupSettings({ session }: { session: TodeXSession }) {
                   ? (member.info?.urls[0] ?? member.id)
                   : member.id}
               >
-                {member.kind === 'node'
-                  ? <Chip variant="caption" color={STATE_COLORS[member.state ?? 'idle']}>{member.profileId ? connectionStateLabel(member.state ?? 'idle') : t('mesh.nodeUnknown')}</Chip>
-                  : null}
+                {member.kind === 'node' ? (
+                  <>
+                    {member.via ? <Chip variant="caption" color="blue">{t('mesh.viaRelay', { name: member.via })}</Chip> : null}
+                    <Chip variant="caption" color={STATE_COLORS[member.state ?? 'idle']}>{member.profileId ? connectionStateLabel(member.state ?? 'idle') : t('mesh.nodeUnknown')}</Chip>
+                    {member.profileId && (member.state === 'error' || member.state === 'closed') ? (
+                      <Button size="small" variant="secondary" onClick={() => mesh.retryNode(member.profileId!)}>{t('mesh.retry')}</Button>
+                    ) : null}
+                    <IconAction icon={RiSettings3Line} size="sm" aria-label={t('mesh.nodeSettings', { name: member.name })} onClick={() => setDialog({ kind: 'node', group, member })} />
+                  </>
+                ) : (
+                  <Chip variant="caption" color={member.online ? 'lime' : 'neutral'}>
+                    {member.online ? t('mesh.online') : member.lastSeen ? t('mesh.lastSeen', { when: relativeTime(member.lastSeen) }) : t('mesh.offline')}
+                  </Chip>
+                )}
                 {member.self ? null : (
                   <IconAction icon={RiDeleteBinLine} size="sm" aria-label={t('mesh.removeMember', { name: member.name })} onClick={() => setDialog({ kind: 'remove', group, member })} />
                 )}
@@ -136,6 +150,26 @@ export function MeshGroupSettings({ session }: { session: TodeXSession }) {
           </SettingsCard>
         </SettingsGroup>
       ))}
+
+      {mesh.groups.length ? (
+        <SettingsGroup label={t('mesh.thisDeviceSettings')}>
+          <SettingsCard>
+            <SettingsRow label={t('mesh.useRelay')} description={t('mesh.useRelayHint')}>
+              <Switch size="sm" aria-label={t('mesh.useRelay')} isSelected={mesh.relayEnabled} onChange={mesh.setRelayEnabled} />
+            </SettingsRow>
+          </SettingsCard>
+        </SettingsGroup>
+      ) : null}
+
+      {dialog?.kind === 'node' ? (
+        <NodeDialog
+          member={dialog.member}
+          busy={busy}
+          error={error}
+          onClose={close}
+          onSave={(patch) => void run(() => mesh.updateNode(dialog.group.groupId, dialog.member.id, patch))}
+        />
+      ) : null}
 
       <CreateDialog
         isOpen={dialog?.kind === 'create'}
@@ -221,6 +255,75 @@ export function MeshGroupSettings({ session }: { session: TodeXSession }) {
         {error ? <Alert status="danger" title={error} /> : null}
       </ConfirmDialog>
     </>
+  );
+}
+
+/** "5 分钟前" / "2 hours ago". */
+function relativeTime(at: number): string {
+  const format = new Intl.RelativeTimeFormat(getLocale(), { numeric: 'auto' });
+  const minutes = Math.round((at - Date.now()) / 60_000);
+  if (minutes > -60) return format.format(Math.min(minutes, 0), 'minute');
+  const hours = Math.round(minutes / 60);
+  if (hours > -24) return format.format(hours, 'hour');
+  return format.format(Math.round(hours / 24), 'day');
+}
+
+/** A node's group settings: pinned addresses and relaying. */
+function NodeDialog({ member, busy, error, onClose, onSave }: {
+  member: MeshMemberView;
+  busy: boolean;
+  error: string;
+  onClose: () => void;
+  onSave: (patch: { addresses: string[]; relay: MeshRelayRole; relayTarget: boolean }) => void;
+}) {
+  const t = useT();
+  const [addresses, setAddresses] = useState<string[]>(member.addresses ?? []);
+  const [draft, setDraft] = useState('');
+  const [relay, setRelay] = useState<MeshRelayRole>(member.relay ?? 'allowed');
+  const [relayTarget, setRelayTarget] = useState(member.relayTarget !== false);
+  const candidate = draft.trim().replace(/\/+$/, '');
+  const canAdd = isMeshAddress(candidate) && !addresses.includes(candidate) && addresses.length < 16;
+  return (
+    <Modal
+      isOpen
+      onOpenChange={(open) => { if (!open) onClose(); }}
+      title={t('mesh.nodeSettings', { name: member.name })}
+      description={t('mesh.nodeSettingsHint')}
+      footer={(
+        <>
+          <Button size="small" variant="secondary" onClick={onClose}>{t('common.cancel')}</Button>
+          <Button size="small" disabled={busy} onClick={() => onSave({ addresses, relay, relayTarget })}>{t('mesh.save')}</Button>
+        </>
+      )}
+    >
+      <div className="flex flex-col gap-4">
+        <SettingsGroup label={t('mesh.pinnedAddresses')} description={t('mesh.pinnedAddressesHint')}>
+          <SettingsCard>
+            {addresses.map((address) => (
+              <SettingsRow key={address} label={<span className="font-mono text-body-2-regular">{address}</span>}>
+                <IconAction icon={RiDeleteBinLine} size="sm" aria-label={t('mesh.removeAddress', { address })} onClick={() => setAddresses(addresses.filter((item) => item !== address))} />
+              </SettingsRow>
+            ))}
+            <SettingsRow label={<Input aria-label={t('mesh.newAddress')} name="mesh-address" size="small" placeholder="https://nas.example.net:7345" value={draft} onChange={setDraft} />}>
+              <Button size="small" variant="secondary" disabled={!canAdd} onClick={() => { setAddresses([...addresses, candidate]); setDraft(''); }}>{t('mesh.addAddress')}</Button>
+            </SettingsRow>
+          </SettingsCard>
+        </SettingsGroup>
+        <SettingsCard>
+          <SettingsRow label={t('mesh.relayRole')} description={t('mesh.relayRoleHint')}>
+            <Select aria-label={t('mesh.relayRole')} selectedKey={relay} triggerClassName="h-8 w-auto gap-1 rounded-lg px-2 py-1.5" onSelectionChange={(value) => { if (value === 'preferred' || value === 'allowed' || value === 'denied') setRelay(value); }}>
+              <SelectItem id="preferred" textValue={t('mesh.relayPreferred')}>{t('mesh.relayPreferred')}</SelectItem>
+              <SelectItem id="allowed" textValue={t('mesh.relayAllowed')}>{t('mesh.relayAllowed')}</SelectItem>
+              <SelectItem id="denied" textValue={t('mesh.relayDenied')}>{t('mesh.relayDenied')}</SelectItem>
+            </Select>
+          </SettingsRow>
+          <SettingsRow label={t('mesh.relayTarget')} description={t('mesh.relayTargetHint')}>
+            <Switch size="sm" aria-label={t('mesh.relayTarget')} isSelected={relayTarget} onChange={setRelayTarget} />
+          </SettingsRow>
+        </SettingsCard>
+        {error ? <Alert status="danger" title={error} /> : null}
+      </div>
+    </Modal>
   );
 }
 

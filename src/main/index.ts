@@ -25,6 +25,10 @@ import {
   redactUrlQuery,
   type DebugLogLevel,
 } from './debugLogger';
+import { MeshBeaconListener } from './meshBeacons';
+
+/** LAN beacons of device group nodes, for the renderer's address list. */
+const meshBeacons = new MeshBeaconListener();
 
 const execFileAsync = promisify(execFile);
 
@@ -867,6 +871,7 @@ app.whenReady().then(() => {
   });
 
   handleIpc('secureStore:available', () => requireSecureStorage().then(() => true, () => false));
+  handleIpc('mesh:beacons', () => meshBeacons.list());
 
   handleIpc('dialog:openDirectory', async () => {
     const result = await dialog.showOpenDialog({

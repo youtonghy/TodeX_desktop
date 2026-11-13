@@ -48,6 +48,7 @@ export const platform: Platform = {
     reveal: (path) => bridge().shell.showItemInFolder(path),
   },
   get preview() { return bridge().preview; },
+  meshBeacons: () => bridge().mesh.beacons(),
   historyCache: createIndexedDbHistoryCacheStore(),
   get legacyAgentBrowser() { return bridge().legacyAgentBrowser; },
   containers: {

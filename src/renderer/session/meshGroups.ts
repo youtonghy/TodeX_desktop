@@ -6,6 +6,7 @@
 
 import {
   meshChainWins,
+  meshRelayExpiry,
   verifyMeshChain,
   verifyMeshNodeInfo,
   type MeshChain,
@@ -172,15 +173,34 @@ export function mergeNodeState(
   return { group, changed, push: !removed && (behind || (listsNode && missingInfo)), removed };
 }
 
-/** Addresses to try for a node, best first: those that worked, then what
- * the node announces. */
-export function candidateUrls(group: StoredMeshGroup, info: MeshNodeInfo | undefined, nodeId: string): string[] {
-  const urls = [...(group.nodeUrls[nodeId] ?? []), ...(info?.urls ?? [])].map((url) => normalizeServerUrl(url));
+/** Addresses to try for a node, best first: those that worked, the ones a
+ * user pinned in the roster, the ones its LAN beacon showed, then what the
+ * node announces. Relay addresses are never candidates. */
+export function candidateUrls(
+  group: StoredMeshGroup,
+  info: MeshNodeInfo | undefined,
+  nodeId: string,
+  extra: { pinned?: readonly string[]; beacons?: readonly string[] } = {},
+): string[] {
+  const urls = [...(group.nodeUrls[nodeId] ?? []), ...(extra.pinned ?? []), ...(extra.beacons ?? []), ...(info?.urls ?? [])]
+    .filter((url) => meshRelayExpiry(url) === null)
+    .map((url) => normalizeServerUrl(url));
   return [...new Set(urls.filter(Boolean))].slice(0, MAX_NODE_URLS);
 }
 
+/** `http://<sender>:<port>` of each recent beacon of `nodeId`. */
+export function beaconUrls(beacons: readonly MeshBeacon[], nodeId: string): string[] {
+  return beacons
+    .filter((beacon) => beacon.nodeId === nodeId)
+    .sort((a, b) => b.seenAt - a.seenAt)
+    .map((beacon) => `http://${beacon.address.includes(':') ? `[${beacon.address}]` : beacon.address}:${beacon.port}`);
+}
+
+export type MeshBeacon = { nodeId: string; address: string; port: number; seenAt: number };
+
 /** Records that `url` reached `nodeId`: it moves to the front. */
 export function rememberUrl(group: StoredMeshGroup, nodeId: string, url: string): StoredMeshGroup | null {
+  if (meshRelayExpiry(url) !== null) return null;
   const normalized = normalizeServerUrl(url);
   const current = group.nodeUrls[nodeId] ?? [];
   if (current[0] === normalized) return null;

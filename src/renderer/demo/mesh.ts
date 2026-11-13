@@ -27,6 +27,7 @@ export const DEMO_MESH_DEVICE_SECRET = encodeBase64Url(seed(0x31));
 export type DemoMesh = {
   group: StoredMeshGroup;
   nodeId: string;
+  phoneId: string;
   nodeInfo: MeshSignedDoc;
   joinRequest: MeshJoinRequest;
 };
@@ -53,6 +54,7 @@ export function demoMesh(serverUrl: string): DemoMesh {
   const joinerMember = meshDeviceMember({ publicKey: joiner, name: 'Pixel 9', historyKey: history(0x33), addedAt: NOW });
   built = {
     nodeId: node.id,
+    phoneId: phone.id,
     nodeInfo,
     group: {
       groupId, name: '家里', chain, nodeInfos: { [node.id]: nodeInfo }, nodeUrls: { [node.id]: [serverUrl] },

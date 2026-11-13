@@ -23,6 +23,10 @@ export type TodeXDesktopApi = {
     /** Whether OS-backed encryption is available, i.e. `set` can succeed. */
     available: () => Promise<boolean>;
   };
+  /** Device groups: LAN beacons of group nodes seen in the last two minutes. */
+  mesh: {
+    beacons: () => Promise<{ nodeId: string; address: string; port: number; seenAt: number }[]>;
+  };
   dialog: {
     openDirectory: () => Promise<string | null>;
   };

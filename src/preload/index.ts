@@ -80,6 +80,9 @@ const api = {
     set: (key: string, value: string | null) => invoke('secureStore:set', key, value) as Promise<void>,
     available: () => invoke('secureStore:available') as Promise<boolean>,
   },
+  mesh: {
+    beacons: () => invoke('mesh:beacons') as Promise<{ nodeId: string; address: string; port: number; seenAt: number }[]>,
+  },
   dialog: {
     openDirectory: () => invoke('dialog:openDirectory') as Promise<string | null>,
   },

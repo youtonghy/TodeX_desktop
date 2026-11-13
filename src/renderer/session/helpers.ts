@@ -1560,9 +1560,10 @@ export function settingsFromProfile(profile: BackendConnectionProfile, current: 
   return { ...current, serverUrl: normalizeServerUrl(profile.serverUrl), deviceSecret: profile.deviceSecret, tenantId: profile.tenantId, encryptionProtocol: profile.encryptionProtocol, encryptionPublicKey: profile.encryptionPublicKey, transportVerified: profile.transportVerified === true };
 }
 
-function meshNodeOf(value: unknown): { groupId: string; nodeId: string } | undefined {
-  const raw = value as { groupId?: unknown; nodeId?: unknown } | null;
-  return raw && typeof raw.groupId === 'string' && typeof raw.nodeId === 'string' ? { groupId: raw.groupId, nodeId: raw.nodeId } : undefined;
+function meshNodeOf(value: unknown): { groupId: string; nodeId: string; via?: string } | undefined {
+  const raw = value as { groupId?: unknown; nodeId?: unknown; via?: unknown } | null;
+  if (!raw || typeof raw.groupId !== 'string' || typeof raw.nodeId !== 'string') return undefined;
+  return { groupId: raw.groupId, nodeId: raw.nodeId, ...(typeof raw.via === 'string' ? { via: raw.via } : {}) };
 }
 
 export function normalizeBackendConnectionProfile(value: unknown): BackendConnectionProfile | null {

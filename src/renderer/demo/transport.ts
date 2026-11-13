@@ -1164,6 +1164,11 @@ class DemoSocket implements SecureSocket {
       result = message.type === 'mesh.node.get'
         ? { nodeId: mesh.nodeId, nodePublicKey: '', nodeInfo: mesh.nodeInfo, groups: inGroup ? [mesh.group.groupId] : [] }
         : { nodeId: mesh.nodeId, nodeInfo: mesh.nodeInfo, groups: inGroup ? [{ groupId: mesh.group.groupId, chain: mesh.group.chain, nodeInfos: [] }] : [] };
+    } else if (message.type === 'mesh.presence.get') {
+      // This device is connected; the iPhone left two hours ago.
+      const mesh = demoMesh(fixtures.DEMO_SERVER_URL);
+      const phone = mesh.group.chain.length ? mesh.phoneId : '';
+      result = { nodeId: mesh.nodeId, connected: [{ deviceId: mesh.group.deviceId, connections: 1, connectedAt: Date.now() - 600_000 }], lastSeen: phone ? { [phone]: Date.now() - 7_200_000 } : {} };
     } else if (message.type === 'mesh.join.list') {
       const inGroup = new URLSearchParams(window.location.search).get('mesh') === '1';
       result = { requests: inGroup ? [demoMesh(fixtures.DEMO_SERVER_URL).joinRequest] : [] };

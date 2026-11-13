@@ -224,6 +224,11 @@ test('settings: backend group with a join request', async ({ page, openDemo }) =
   await expect(page.getByRole('dialog', { name: '批准 Pixel 9 加入？' })).toBeVisible();
   await settle(page);
   await expect(page).toHaveScreenshot('settings-mesh-approve-light.png', { mask: volatile(page) });
+  await page.getByRole('button', { name: '取消', exact: true }).click();
+  await page.getByRole('button', { name: 'MBP 的组设置' }).click();
+  await expect(page.getByRole('dialog', { name: 'MBP 的组设置' })).toBeVisible();
+  await settle(page);
+  await expect(page).toHaveScreenshot('settings-mesh-node-light.png', { mask: volatile(page) });
 });
 
 // SSH settings with the connection approval switched to per command.
