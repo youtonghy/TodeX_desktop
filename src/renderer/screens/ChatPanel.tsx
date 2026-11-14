@@ -24,6 +24,7 @@ import {
   RiRouteLine,
   RiShieldCheckLine,
   RiShieldLine,
+  RiSparkling2Line,
   RiSpeedUpLine,
   RiSpyLine,
   RiStopFill,
@@ -55,6 +56,7 @@ import { PROMPT_UPLOAD_MAX_BYTES, isPromptUploadUnsupported, pastedTextDispositi
 import { ComposerAttachmentPreview } from '../components/ComposerAttachmentPreview';
 import { SentAttachmentList } from '../components/chat/AttachmentTile';
 import {
+  COMPOSER_CONTROL,
   COMPOSER_CONTROL_ICON,
   ComposerPopover,
   ComposerRoundButton,
@@ -71,6 +73,7 @@ import type { ChatRenderItem } from '../components/conversationTimeline';
 import { awaitedBackgroundTasks, type BackgroundTask } from '@todex/protocol/conversationRuntime';
 import { EFFORT_TEXT, ModelReasoningCard } from '../components/ModelReasoningCard';
 import { ProviderIcon } from '../components/ProviderIcon';
+import { resolveSmartStage, smartWorkModeAvailable, SMART_EXECUTE_PERMISSION } from '../session/smartWorkMode';
 import type { TodeXSession } from '../session/useTodeXSession';
 import {
   conversationPermissionCapabilities,
@@ -161,6 +164,7 @@ const PROVIDER_NOTICES = {
   background_tasks_ended: 'chat.providerNotice.backgroundTasksEnded',
   bypass_mode_disabled: 'chat.providerNotice.bypassModeDisabledNoLayer',
   context_lost: 'chat.providerNotice.contextLost',
+  plan_handoff: 'chat.providerNotice.planHandoff',
 } as const satisfies Record<NonNullable<TimelineEntry['providerNotice']>, MessageKey>;
 
 /** Why background work was lost (`background_tasks_ended`'s `reason`, the
@@ -185,7 +189,7 @@ const SETTINGS_SOURCES: Record<string, MessageKey> = {
 };
 
 /** `agent` names the conversation's agent (Claude Code, Pi, …). */
-function providerNoticeText(notice: NonNullable<TimelineEntry['providerNotice']>, entry: TimelineEntry, agent: string): string {
+function providerNoticeText(notice: NonNullable<TimelineEntry['providerNotice']>, entry: TimelineEntry, agent: string, modelLabel: (id: string) => string): string {
   const source = entry.providerNoticeSettingsSource;
   const layer = source ? (SETTINGS_SOURCES[source] ? t(SETTINGS_SOURCES[source]) : source) : '';
   switch (notice) {
@@ -201,6 +205,13 @@ function providerNoticeText(notice: NonNullable<TimelineEntry['providerNotice']>
       return layer ? t('chat.providerNotice.bypassModeDisabled', { agent, layer }) : t(PROVIDER_NOTICES[notice], { agent });
     case 'context_lost':
       return t(PROVIDER_NOTICES[notice], { agent });
+    case 'plan_handoff': {
+      if (!entry.providerNoticeModel) return t('chat.providerNotice.planHandoffNoModel');
+      const model = modelLabel(entry.providerNoticeModel);
+      return entry.providerNoticeApplied === 'next_turn'
+        ? t('chat.providerNotice.planHandoffNextTurn', { model })
+        : t(PROVIDER_NOTICES[notice], { model });
+    }
   }
 }
 
@@ -875,7 +886,10 @@ const ChatTimelineItem = memo(function ChatTimelineItem({
   if (entry.providerNotice) {
     return (
       <p data-message-id={entry.id} role="note" title={entry.subtitle || undefined} className="py-1 text-center text-caption-1-regular text-text-tertiary">
-        {providerNoticeText(entry.providerNotice, entry, agentName)}
+        {providerNoticeText(entry.providerNotice, entry, agentName, (id) => (
+          // Only Claude Code hands a plan off (smart work mode).
+          session.providerModels['claude-code']?.find((item) => item.id === id)?.displayName || id
+        ))}
       </p>
     );
   }
@@ -1535,11 +1549,16 @@ export function ChatPanel({ session }: Props) {
     && providerDescriptor?.capabilities.backgroundTaskStop === true;
   const liveProviderModels = session.providerModels[currentProvider as ProviderKind];
   const providerModels = liveProviderModels?.length ? liveProviderModels : providerDescriptor?.models ?? [];
-  const currentModel = conversation.model || providerModels.find((item) => item.isDefault)?.id || (currentProvider === 'codex' ? workspace.model || session.settings.defaultModel : '');
+  const permissionConfig = conversationPermissionCapabilities(conversation, session.v2Providers);
+  // Smart work mode: the phase's model and effort come from its setting.
+  const smartAvailable = smartWorkModeAvailable(currentProvider, permissionConfig);
+  const smartPhase = conversation.mode === 'smart' && smartAvailable ? conversation.smartPhase ?? 'plan' : null;
+  const smartStage = smartPhase ? resolveSmartStage(session.smartWorkMode[smartPhase], providerModels) : null;
+  const currentModel = smartStage?.model || conversation.model || providerModels.find((item) => item.isDefault)?.id || (currentProvider === 'codex' ? workspace.model || session.settings.defaultModel : '');
   const currentModelDescriptor = providerModels.find((item) => item.id === currentModel);
   const supportedReasoningEfforts = currentModelDescriptor?.supportedReasoningEfforts ?? [];
   // An unset Pi/agent effort is meaningful: let the provider apply its own default.
-  const currentReasoningEffort = conversation.reasoningEffort ?? null;
+  const currentReasoningEffort = smartStage ? smartStage.reasoningEffort : conversation.reasoningEffort ?? null;
   const displayedReasoningEffort = currentReasoningEffort
     ?? currentModelDescriptor?.defaultReasoningEffort
     ?? (supportedReasoningEfforts.includes('medium') ? 'medium' : supportedReasoningEfforts[0])
@@ -1550,13 +1569,14 @@ export function ChatPanel({ session }: Props) {
   const contextModelId = contextUsage?.model || currentModel;
   const currentContextWindow = contextUsage?.contextWindow
     ?? providerModels.find((item) => item.id === contextModelId || item.id.endsWith(`/${contextModelId}`))?.contextWindow;
-  const permissionConfig = conversationPermissionCapabilities(conversation, session.v2Providers);
   // Client menu order, limited to the modes the agent declares.
   const permissionModes = PERMISSION_MODES.filter((mode) => permissionConfig?.modes?.includes(mode));
-  const currentPermission = session.resolvePermissionMode(conversation, workspace);
+  // Smart execution always runs with auto-approval.
+  const currentPermission = smartPhase === 'execute' ? SMART_EXECUTE_PERMISSION : session.resolvePermissionMode(conversation, workspace);
   const fixedPermission = permissionModes.length === 1;
   const canChoosePermission = permissionModes.length > 0;
-  const permissionHint = agentProvider === 'pi' ? t('chat.permissionHintPi')
+  const permissionHint = smartPhase === 'execute' ? t('chat.smartPermissionHint')
+    : agentProvider === 'pi' ? t('chat.permissionHintPi')
     : !canChoosePermission ? t('chat.permissionHintUnavailable')
       : !currentPermission ? t('chat.permissionHintReselect')
         : t('chat.permissionHintApply');
@@ -1818,6 +1838,17 @@ export function ChatPanel({ session }: Props) {
   const canSend = !readOnly && !executionUnknown && submissionStatus !== 'sending'
     && Boolean(draft.trim() || attachments.length > 0 || selectedSkillAttachments.length > 0);
   const effortClass = displayedEffortLevel ? EFFORT_TEXT[displayedEffortLevel] : undefined;
+  const modelTrigger = (
+    <>
+      <RiCpuLine aria-hidden className={cx(COMPOSER_CONTROL_ICON, effortClass ?? (displayedReasoningEffort ? 'text-text-accent' : undefined))} />
+      <span className="composer-control__text">{currentModelDescriptor?.displayName || modelDisplayLabel(currentModel, session.modelCatalog)}</span>
+      {displayedReasoningEffort ? (
+        <span className={cx('composer-control__effort text-caption-1-semibold', effortClass ?? 'text-text-accent')}>
+          · {reasoningEffortLabel(displayedReasoningEffort)}
+        </span>
+      ) : null}
+    </>
+  );
   const focusComposerFromPadding = (event: ReactMouseEvent<HTMLElement>) => {
     if (event.target === event.currentTarget) {
       event.preventDefault();
@@ -2311,41 +2342,51 @@ export function ChatPanel({ session }: Props) {
                         session.switchConversationAgent(conversation.id, key as ProviderKind);
                       }}
                     />
-                    <ComposerPopover
-                      label={t('chat.selectModel')}
-                      dialogLabel={t('chat.modelPopover')}
-                      isDisabled={readOnly || providerModels.length === 0}
-                      triggerClassName="composer-model-control__trigger"
-                      data-effort={displayedEffortLevel}
-                      popoverClassName="w-[min(20.5rem,calc(100vw-2rem))]"
-                      trigger={(
-                        <>
-                          <RiCpuLine aria-hidden className={cx(COMPOSER_CONTROL_ICON, effortClass ?? (displayedReasoningEffort ? 'text-text-accent' : undefined))} />
-                          <span className="composer-control__text">{currentModelDescriptor?.displayName || modelDisplayLabel(currentModel, session.modelCatalog)}</span>
-                          {displayedReasoningEffort ? (
-                            <span className={cx('composer-control__effort text-caption-1-semibold', effortClass ?? 'text-text-accent')}>
-                              · {reasoningEffortLabel(displayedReasoningEffort)}
-                            </span>
-                          ) : null}
-                        </>
-                      )}
-                    >
-                      <ModelReasoningCard
-                        currentModel={currentModel}
-                        currentModelDescriptor={currentModelDescriptor}
-                        modelCatalog={session.modelCatalog}
-                        providerModels={providerModels}
-                        supportedReasoningEfforts={supportedReasoningEfforts}
-                        currentReasoningEffort={currentReasoningEffort}
-                        displayedReasoningEffort={displayedReasoningEffort}
-                        onSelectModel={(modelId) => {
-                          session.applyConversationModelSelection(conversation.id, modelId, null);
-                        }}
-                        onSelectReasoningEffort={(effort) => {
-                          session.applyConversationModelSelection(conversation.id, currentModel, effort);
-                        }}
-                      />
-                    </ComposerPopover>
+                    {smartStage ? (
+                      <TooltipTrigger delay={200}>
+                        <Focusable>
+                          <span
+                            role="button"
+                            tabIndex={0}
+                            aria-disabled="true"
+                            aria-label={t('chat.selectModel')}
+                            aria-description={t('chat.smartModelHint')}
+                            data-disabled="true"
+                            data-effort={displayedEffortLevel}
+                            className={cx(COMPOSER_CONTROL, 'composer-model-control__trigger')}
+                          >
+                            {modelTrigger}
+                          </span>
+                        </Focusable>
+                        <Tooltip placement="top">{t('chat.smartModelHint')}</Tooltip>
+                      </TooltipTrigger>
+                    ) : (
+                      <ComposerPopover
+                        label={t('chat.selectModel')}
+                        dialogLabel={t('chat.modelPopover')}
+                        isDisabled={readOnly || providerModels.length === 0}
+                        triggerClassName="composer-model-control__trigger"
+                        data-effort={displayedEffortLevel}
+                        popoverClassName="w-[min(20.5rem,calc(100vw-2rem))]"
+                        trigger={modelTrigger}
+                      >
+                        <ModelReasoningCard
+                          currentModel={currentModel}
+                          currentModelDescriptor={currentModelDescriptor}
+                          modelCatalog={session.modelCatalog}
+                          providerModels={providerModels}
+                          supportedReasoningEfforts={supportedReasoningEfforts}
+                          currentReasoningEffort={currentReasoningEffort}
+                          displayedReasoningEffort={displayedReasoningEffort}
+                          onSelectModel={(modelId) => {
+                            session.applyConversationModelSelection(conversation.id, modelId, null);
+                          }}
+                          onSelectReasoningEffort={(effort) => {
+                            session.applyConversationModelSelection(conversation.id, currentModel, effort);
+                          }}
+                        />
+                      </ComposerPopover>
+                    )}
                     <ComposerSelect
                       label={t('chat.selectPermission')}
                       hint={permissionHint}
@@ -2354,7 +2395,7 @@ export function ChatPanel({ session }: Props) {
                       textTitle={permissionHint}
                       selectedKey={currentPermission}
                       showIndicator={!fixedPermission}
-                      isDisabled={readOnly || thinking || executionUnknown || !canChoosePermission || (fixedPermission && currentPermission !== null)}
+                      isDisabled={readOnly || thinking || executionUnknown || !canChoosePermission || smartPhase === 'execute' || (fixedPermission && currentPermission !== null)}
                       options={permissionModes.map((mode) => ({ id: mode, label: permissionModeLabel(mode), icon: permissionModeIcon(mode) }))}
                       onChange={(key) => {
                         if (permissionModes.includes(key as PermissionMode)) {
@@ -2366,16 +2407,19 @@ export function ChatPanel({ session }: Props) {
                       label={t('chat.selectWorkMode')}
                       hint={t('chat.workModeApply')}
                       icon={<RiListCheck2 aria-hidden className={COMPOSER_CONTROL_ICON} />}
-                      text={conversation.mode === 'plan' ? t('chat.modePlan') : t('chat.modeImplement')}
+                      text={smartPhase === 'execute' ? t('chat.modeSmartExecuting') : smartPhase ? t('chat.modeSmartPlanning')
+                        : conversation.mode === 'plan' ? t('chat.modePlan') : t('chat.modeImplement')}
                       textTitle={t('chat.workModeApply')}
-                      selectedKey={conversation.mode === 'plan' ? 'plan' : 'implement'}
+                      selectedKey={smartPhase ? 'smart' : conversation.mode === 'plan' ? 'plan' : 'implement'}
                       isDisabled={readOnly || thinking || executionUnknown}
                       options={[
                         { id: 'implement', label: t('chat.modeImplement'), icon: <RiCodeSSlashLine aria-hidden className={OPTION_ICON} /> },
                         { id: 'plan', label: t('chat.modePlan'), icon: <RiRouteLine aria-hidden className={cx(OPTION_ICON, '-scale-y-100')} /> },
+                        ...(smartAvailable ? [{ id: 'smart', label: t('chat.modeSmart'), icon: <RiSparkling2Line aria-hidden className={OPTION_ICON} /> }] : []),
                       ]}
                       onChange={(key) => {
-                        if (key === 'plan' || key === 'implement') {
+                        // Smart, even when already chosen, starts over with a plan.
+                        if (key === 'plan' || key === 'implement' || key === 'smart') {
                           void session.applyConversationWorkMode(conversation.id, key);
                         }
                       }}

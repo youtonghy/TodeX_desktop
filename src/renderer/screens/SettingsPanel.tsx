@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode, type Ref } from 'react';
-import { RiApps2Line, RiCodeBoxLine, RiComputerLine, RiGroupLine, RiHistoryLine, RiInformationLine, RiNotification3Line, RiPaletteLine, RiServerLine, RiSettings3Line, RiTeamLine, RiTerminalBoxLine } from '@remixicon/react';
+import { RiApps2Line, RiCodeBoxLine, RiComputerLine, RiGroupLine, RiHistoryLine, RiInformationLine, RiNotification3Line, RiPaletteLine, RiServerLine, RiSettings3Line, RiSparkling2Line, RiTeamLine, RiTerminalBoxLine } from '@remixicon/react';
 import { Button } from '@/components/base/buttons/button';
 import { Select, SelectItem } from '@/components/base/select/select';
 import { Switch } from '@/components/base/switch/switch';
@@ -12,6 +12,7 @@ import { AppearanceSettings } from '../components/AppearanceSettings';
 import { TerminalSettings } from '../components/settings/TerminalSettings';
 import { FeatureSettings } from '../components/FeatureSettings';
 import { SettingsCard, SettingsEntry, SettingsGroup, SettingsRow, SettingsSubpage } from '../components/settings/SettingsRows';
+import { SmartWorkModeSettings } from '../components/settings/SmartWorkModeSettings';
 import { SshConnectionSettings } from '../components/settings/SshConnectionSettings';
 import { TodexHistoryCleanup } from '../components/cleanup/TodexHistoryCleanup';
 import type { CliPage } from '../components/cli/CliAgentPage';
@@ -26,7 +27,7 @@ import { HistoryCacheSettings } from '../components/settings/HistoryCacheSetting
 import { slots } from '../platform/slots';
 import { LOCALE_LABELS, SUPPORTED_LOCALES, getLocalePreference, isLocale, setLocalePreference, useT, type LocalePreference } from '../i18n';
 
-export type SettingsSection = 'general' | 'features' | 'appearance' | 'connection' | 'mesh' | 'local-backend' | 'container' | 'cli' | 'ssh' | 'notifications' | 'agent' | 'agent-calling' | 'about';
+export type SettingsSection = 'general' | 'features' | 'appearance' | 'connection' | 'mesh' | 'local-backend' | 'container' | 'cli' | 'ssh' | 'notifications' | 'agent' | 'agent-calling' | 'smart-work-mode' | 'about';
 /** Show a category on open or while open; `at` makes a repeat request distinct. */
 export type SettingsSectionRequest = { section: SettingsSection; at: number };
 
@@ -122,6 +123,7 @@ export function SettingsPanel({ session, historyRecoverySetup = false, repairPai
       { id: 'cli', label: t('app.cliManager'), icon: RiCodeBoxLine },
       { id: 'agent', label: t('agentDesktop.title'), icon: RiComputerLine },
       { id: 'agent-calling', label: t('agentCalling.title'), icon: RiTeamLine },
+      { id: 'smart-work-mode', label: t('smart.title'), icon: RiSparkling2Line },
     ] },
     { id: 'todex', label: t('settings.groupTodex'), items: [
       { id: 'about', label: t('app.about'), icon: RiInformationLine },
@@ -268,6 +270,10 @@ export function SettingsPanel({ session, historyRecoverySetup = false, repairPai
 
         <SettingsPage {...page('agent-calling')}>
           <AgentCallingSettings session={session} />
+        </SettingsPage>
+
+        <SettingsPage {...page('smart-work-mode')}>
+          <SmartWorkModeSettings session={session} />
         </SettingsPage>
 
         <SettingsPage {...page('about')}>

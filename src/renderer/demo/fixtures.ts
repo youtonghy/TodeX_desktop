@@ -19,6 +19,7 @@ import type { UsageRecord } from '@todex/protocol/mobileParity';
 import type { AgentDesktopSettings } from '@todex/protocol/agentDesktop';
 import type { SshHostsResponse, SshKeysResponse } from '@todex/protocol/ssh';
 import type { GitScanResult, GitStatusSummary, GitWorkspaceSnapshot } from '../lib/gitWorkspace';
+import type { ConversationRecord } from '../session/helpers';
 
 export const DEMO_SERVER_URL = 'http://127.0.0.1:7399';
 /** The second backend of `?demo&backends=2` (the config sync preview). */
@@ -338,7 +339,32 @@ export const demoJournals: Journal[] = [
       .answer('暗色模式下 4 处文本对比度不足，已调整为 4.5:1 以上。', { model: 'gpt-5.5', input: 9_000, output: 800, cacheRead: 30_000, cacheWrite: 0 });
     j.event('goal.updated', { provider: 'codex', goal: { objective: '让所有组件通过 WCAG AA 对比度检查', status: 'active', tokensUsed: 184_000, timeUsedSeconds: 1_260, tokenBudget: null } });
   }),
+  // Smart work mode: Claude plans with one model; once the plan is approved
+  // the backend hands it off (`plan_handoff`) to the execute model.
+  journal('8e9f0a1b-2c3d-4e5f-8a6b-7c8d9e0f1a2b', designTokens, 'claude-code', '拆分主题构建脚本', NOW - 5 * DAY, (j) => {
+    j.user('build-tokens.ts 已经 600 多行了，先出个拆分方案，确认后再动手。')
+      .think('先读构建脚本，按职责划分：读取导出、颜色换算、写 CSS 与类型声明。')
+      .tool('Read', { file_path: 'scripts/build-tokens.ts' }, 'export async function buildTokens() {\n  // 读取 Figma 导出、换算 OKLCH、写入 dist……\n}')
+      .tool('ExitPlanMode', { plan: '1. 拆出 `readExport.ts`\n2. 拆出 `color.ts`（OKLCH 换算）\n3. 拆出 `emit.ts`（CSS 与 d.ts）\n4. 补快照测试' }, 'User has approved your plan.')
+      .event('provider.event', {
+        provider: 'claude-code', providerMethod: 'plan_handoff',
+        metadata: { workMode: 'implement', model: 'opus', reasoningEffort: 'medium', permissionMode: 'auto', applied: 'now', reason: 'plan_approved' },
+      })
+      .tool('Write', { file_path: 'scripts/tokens/color.ts' }, 'File created successfully at: scripts/tokens/color.ts')
+      .tool('Bash', { command: 'pnpm build:tokens && pnpm test tokens', description: 'Build tokens and run tests' }, 'Built 96 tokens → dist/tokens.css\n ✓ tokens.snap.test.ts (3 tests)')
+      .answer('已按计划拆成 `readExport.ts`、`color.ts` 和 `emit.ts` 三个模块，`build-tokens.ts` 只负责串联，输出与拆分前逐字节一致，并补了 3 个快照测试。', { model: 'opus', input: 26_000, output: 2_600, cacheRead: 88_000, cacheWrite: 5_200 });
+  }),
 ];
+
+/** The smart work mode conversation (Claude Code), already handed off to execution. */
+export const demoSmartConversationId = '8e9f0a1b-2c3d-4e5f-8a6b-7c8d9e0f1a2b';
+
+/** Local record fields a manifest does not carry (seeded into the store). */
+export function demoConversationRecord(journal: Journal, record: ConversationRecord): ConversationRecord {
+  return journal.manifest.id === demoSmartConversationId
+    ? { ...record, mode: 'smart', smartPhase: 'execute', smartPhaseSequence: journal.manifest.lastSequence }
+    : record;
+}
 
 // `?demo&board=busy`: one conversation waits on a permission prompt, so the
 // home board shows its waiting list.

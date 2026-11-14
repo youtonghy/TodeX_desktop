@@ -23,6 +23,7 @@ import {
   DEMO_SECOND_SERVER_URL,
   DEMO_SERVER_URL,
   demoActiveConversationId,
+  demoConversationRecord,
   demoJournals,
   demoOfflineWorkspaces,
   demoUsageRecords,
@@ -42,7 +43,7 @@ export function installDemoMode(): boolean {
   const store = new Map<string, unknown>([
     [SETTINGS_STORAGE_KEY, settings],
     [WORKSPACES_STORAGE_KEY, demoWorkspaces],
-    [CONVERSATIONS_STORAGE_KEY, demoJournals.map((journal) => conversationFromManifest(journal.manifest, journal.manifest.workspaceId ?? demoWorkspaces[0].id))],
+    [CONVERSATIONS_STORAGE_KEY, demoJournals.map((journal) => demoConversationRecord(journal, conversationFromManifest(journal.manifest, journal.manifest.workspaceId ?? demoWorkspaces[0].id)))],
     [ACTIVE_SELECTION_STORAGE_KEY, { workspaceId: demoWorkspaces[0].id, conversationId: demoActiveConversationId }],
     [USAGE_RECORDS_STORAGE_KEY, demoUsageRecords],
   ]);

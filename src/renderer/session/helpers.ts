@@ -212,7 +212,13 @@ export type ConversationRecord = {
   sessionId: string;
   threadId: string;
   localAdapterState?: LocalAdapterState;
-  mode?: 'plan' | 'implement';
+  /** `smart`: Claude Code plans, then implements once the plan is approved
+   * (session/smartWorkMode.ts); `smartPhase` says which comes next. */
+  mode?: 'plan' | 'implement' | 'smart';
+  smartPhase?: 'plan' | 'execute';
+  /** Journal sequence at which `smartPhase` was last set: a replayed
+   * `plan_handoff` at or below it never overrides a later manual choice. */
+  smartPhaseSequence?: number;
   permissionMode?: PermissionMode;
   goalStatus?: string;
   goalObjective?: string;
@@ -1042,6 +1048,10 @@ export type TimelineEntry = {
   providerNoticeCause?: 'settings' | 'unavailable';
   /** The settings layer behind the notice (`metadata.settingsSource`). */
   providerNoticeSettingsSource?: string;
+  /** `plan_handoff`: the model implementation continues with. */
+  providerNoticeModel?: string;
+  /** `plan_handoff`: `next_turn` when the switch applies from the next message. */
+  providerNoticeApplied?: 'now' | 'next_turn';
 };
 
 export function workspaceDisplayName(workspace: Pick<WorkspaceRecord, 'name' | 'path'>): string {

@@ -1,6 +1,7 @@
 import { normalizeBackendLabelColor, type BackendConnectionProfile } from './backendColors';
 import { ipcDaemonConflicts, moveBackendRecords, ownerBackendId, resolveNoWorkspaceBackendId, tagLegacyBackendRecords } from './backendRouting';
 import { useWorkbenchSharing } from './useWorkbenchSharing';
+import { SMART_WORK_MODE_PROVIDER, smartPromptFields, smartWorkModeAvailable, useSmartWorkMode } from './smartWorkMode';
 import {
   completionNotificationBody,
   requestNotificationBody,
@@ -399,6 +400,12 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   if (!storesRef.current) storesRef.current = createConversationStores();
   const stores = storesRef.current;
   const workbenchSharingState = useWorkbenchSharing();
+  const smartWorkModeState = useSmartWorkMode();
+  const smartWorkModeRef = useRef(smartWorkModeState.smartWorkMode);
+  smartWorkModeRef.current = smartWorkModeState.smartWorkMode;
+  /** Smart conversations warned once each about a configured plan skill
+   * the catalog does not list (`conversationId\nskill`). */
+  const smartSkillWarningsRef = useRef(new Set<string>());
   const completionNotificationsState = useCompletionNotifications();
   /** Live agent browser views: conversation → frame listeners. The socket
    * watches a conversation while it has listeners (re-sent on reconnect). */
@@ -714,6 +721,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   };
   const forgetVanishedPrivateRef = useRef<(backendId: string, manifests: readonly ConversationManifest[]) => void>(() => undefined);
   const [capabilityCatalogs, setCapabilityCatalogs] = useState<Partial<Record<ProviderKind, CatalogState>>>({});
+  const capabilityCatalogsRef = useRef(capabilityCatalogs);
+  capabilityCatalogsRef.current = capabilityCatalogs;
   const [providerModelsByBackend, setProviderModelsByBackend] = useState<Record<string, ProviderModelCatalog>>({});
   const [providerModelPreferences, setProviderModelPreferences] = useState<ProviderModelPreferences>({});
   const [providerCommandsByBackend, setProviderCommandsByBackend] = useState<Record<string, Partial<Record<ProviderKind, ProviderCommandDescriptor[]>>>>({});
@@ -1403,7 +1412,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
                   nativeStatus: conversation.nativeStatus || '',
                   archived: conversation.archived === true,
                   localAdapterState: 'idle' as LocalAdapterState,
-                  mode: (conversation.mode === 'plan' ? 'plan' : 'implement') as ConversationRecord['mode'],
+                  mode: (conversation.mode === 'plan' || conversation.mode === 'smart' ? conversation.mode : 'implement') as ConversationRecord['mode'],
+                  smartPhase: (conversation.mode === 'smart' ? (conversation.smartPhase === 'execute' ? 'execute' : 'plan') : undefined) as ConversationRecord['smartPhase'],
+                  smartPhaseSequence: conversation.mode === 'smart' && typeof conversation.smartPhaseSequence === 'number'
+                    && Number.isFinite(conversation.smartPhaseSequence) ? conversation.smartPhaseSequence : undefined,
                   goalStatus: conversation.goalStatus || '',
                   goalObjective: conversation.goalObjective || '',
                   // Records predating read tracking start out as read so the
@@ -2080,6 +2092,17 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   }, []);
 
   const lastSequenceTimersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  /** An approved plan in a smart conversation moves it on to execution. A
+   * live handoff always applies; a replayed one only when it is newer than
+   * the last time the phase was set, so replay never undoes a later manual
+   * choice. Not remembered as the agent's run modes. */
+  const applySmartPlanHandoff = (localId: string, sequence: number, live: boolean) => {
+    const record = stores.conversations.get().find((item) => item.id === localId);
+    if (record?.mode !== 'smart') return;
+    if (!live && sequence <= (record.smartPhaseSequence ?? 0)) return;
+    if (record.smartPhase === 'execute' && (record.smartPhaseSequence ?? 0) >= sequence) return;
+    updateConversation(localId, { smartPhase: 'execute', smartPhaseSequence: Math.max(sequence, record.smartPhaseSequence ?? 0) });
+  };
   runtimeUpdateRef.current = (state, appliedEvents, recovering, live) => {
     const conversation = stores.conversations.get().find((item) => item.v2ConversationId === state.conversationId || item.id === state.conversationId);
     if (!conversation) return;
@@ -2158,6 +2181,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         submission.phase = 'running';
         setSubmissionStatusByConversation((current) => ({ ...current, [localId]: 'running' }));
       }
+      if (type === 'provider.event' && data.providerMethod === 'plan_handoff') applySmartPlanHandoff(localId, event.sequence, live.has(event.sequence));
       if (type === 'followups.updated') {
         // The daemon's queue after a failure tells whether it continues the
         // prompt. A snapshot that neither continues nor pauses predates it.
@@ -4873,18 +4897,30 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
 
   const applyConversationWorkMode = useCallback(async (
     conversationId: string,
-    mode: 'plan' | 'implement',
+    mode: 'plan' | 'implement' | 'smart',
   ): Promise<boolean> => {
     const context = getConversationContext(conversationId);
     if (!context) return false;
     const config = conversationPermissionCapabilities(context.conversation, providersForConversation(context.conversation));
-    if (mode === 'plan' && !config?.supportsPlan) {
+    if ((mode === 'plan' && !config?.supportsPlan) || (mode === 'smart' && !smartWorkModeAvailable(context.conversation.provider, config))) {
       setLastError(t('sess.workModeUnsupported'));
       return false;
     }
     if (pendingV2SubmissionsRef.current.has(conversationId) || thinkingConversationsRef.current[conversationId] === true) {
       setLastError(t('sess.workModeWait'));
       return false;
+    }
+    if (mode === 'smart') {
+      // Choosing Smart (again) starts over with a plan. The phase is stamped
+      // with the newest applied sequence, so a replayed older plan handoff
+      // cannot move it on. Smart is never remembered as the agent's mode.
+      const v2Id = context.conversation.v2ConversationId;
+      const latest = Math.max(
+        (v2Id ? conversationRecoveryRef.current?.get(v2Id)?.appliedSequence : undefined) ?? 0,
+        context.conversation.lastSequence ?? 0,
+      );
+      updateConversation(conversationId, { mode, smartPhase: 'plan', smartPhaseSequence: latest });
+      return true;
     }
     updateConversation(conversationId, { mode });
     rememberProviderRunModes(
@@ -5219,6 +5255,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       conversation = { ...(conversation ?? createDefaultConversation(workspace)),
         backendConnectionId: backendId, provider: source.provider, providerProfile: source.providerProfile,
         model: source.model, reasoningEffort: source.reasoningEffort, mode: source.mode,
+        ...(source.mode === 'smart' ? { smartPhase: 'plan' as const, smartPhaseSequence: 0 } : {}),
         permissionMode: source.permissionMode };
       const record = conversation;
       setConversations(current => [record, ...current.filter(item => item.id !== record.id)]);
@@ -5371,7 +5408,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           const created = fetched.title ? fetched : { ...fetched, title: forkTitle };
           const record = { ...conversationFromManifest(created, workspace.id), backendConnectionId: conversation.backendConnectionId,
             model: conversation.model, reasoningEffort: conversation.reasoningEffort,
-            permissionMode: conversation.permissionMode, mode: conversation.mode };
+            permissionMode: conversation.permissionMode, mode: conversation.mode,
+            // A smart fork plans again; the copied history (up to the fork's
+            // last sequence) holds handoffs that must not move it on.
+            ...(conversation.mode === 'smart' ? { smartPhase: 'plan' as const, smartPhaseSequence: created.lastSequence ?? 0 } : {}) };
           setConversations((current) => [record, ...current.filter((item) => item.id !== record.id)]);
           setActiveWorkspaceId(workspace.id);
           setActiveConversationId(record.id);
@@ -5484,6 +5524,34 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   ): Record<string, unknown> => {
     const skillRefs = promptSkillsFromAttachments(skills);
     const content = promptContentFromAttachments(attachments);
+    if (conversation.mode === 'smart' && conversation.provider === SMART_WORK_MODE_PROVIDER) {
+      // Smart work mode: the phase's configured model and effort; a plan also
+      // carries the plan skill and what to run once it is approved.
+      const backendId = backendIdForConversation(conversation.id);
+      const catalog = capabilityCatalogsRef.current[SMART_WORK_MODE_PROVIDER];
+      const providerModels = providerModelsByBackendRef.current[backendId]?.[SMART_WORK_MODE_PROVIDER]?.length
+        ? providerModelsByBackendRef.current[backendId]![SMART_WORK_MODE_PROVIDER]!
+        : providersForConversation(conversation).find((item) => item.id === SMART_WORK_MODE_PROVIDER)?.models ?? [];
+      const smart = smartPromptFields(smartWorkModeRef.current, conversation.smartPhase ?? 'plan', providerModels,
+        catalog?.status === 'ready' ? catalog.skills?.skills : undefined);
+      const warningKey = `${conversation.id}\n${smart.missingSkill ?? ''}`;
+      if (smart.missingSkill && !smartSkillWarningsRef.current.has(warningKey)) {
+        smartSkillWarningsRef.current.add(warningKey);
+        toast.warning(t('smart.skillMissing', { skill: smart.missingSkill }));
+      }
+      const refs = smart.skill && !skillRefs.some((item) => item.resourceId === smart.skill!.resourceId)
+        ? [...skillRefs, smart.skill] : skillRefs;
+      return {
+        text,
+        permissionMode: smart.permissionMode ?? permissionMode,
+        workMode: smart.workMode,
+        model: smart.model,
+        ...(smart.reasoningEffort ? { reasoningEffort: smart.reasoningEffort } : {}),
+        ...(smart.afterPlan ? { afterPlan: smart.afterPlan } : {}),
+        ...(refs.length ? { skills: refs } : {}),
+        ...(content.length ? { content } : {}),
+      };
+    }
     const model = conversation.provider === 'codex'
       ? conversation.model || workspace.model || settings.defaultModel || undefined
       : conversation.model || undefined;
@@ -5691,6 +5759,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         setLastError(t('sess.planModeUnsupported'));
         return false;
       }
+      if (conversation.mode === 'smart' && !smartWorkModeAvailable(conversation.provider, permissionConfig)) {
+        setLastError(t('sess.smartModeUnsupported'));
+        return false;
+      }
 
       if (pendingV2SubmissionsRef.current.has(conversation.id)) {
         setLastError(t('sess.previousPending'));
@@ -5792,7 +5864,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
             ...v2PromptFields(readyConversation, workspace, permissionMode, text, skills, attachments),
           },
         });
-        updateConversation(readyConversation.id, { permissionMode, mode: readyConversation.mode === 'plan' ? 'plan' : 'implement' });
+        updateConversation(readyConversation.id, { permissionMode,
+          mode: readyConversation.mode === 'plan' || readyConversation.mode === 'smart' ? readyConversation.mode : 'implement' });
         if (typeof result.turnId === 'string') submission.turnId = result.turnId;
         const terminal = submission.turnId ? settledV2TurnsRef.current.get(`${v2Id}:${submission.turnId}`) : undefined;
         if (terminal) {
@@ -7074,6 +7147,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   return {
     watchAgentBrowser,
     ...workbenchSharingState,
+    ...smartWorkModeState,
     ...completionNotificationsState,
     hydrated,
     directorySyncStatus,
