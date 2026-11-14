@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { RiGlobalLine, RiStopCircleLine } from '@remixicon/react';
+import { RiArrowDownSLine, RiArrowUpSLine, RiGlobalLine, RiStopCircleLine } from '@remixicon/react';
 import { Chip } from '@/components/base/badges/chip';
 import { Button } from '@/components/base/buttons/button';
+import { IconAction } from '@/components/ui/icon-action';
 import { toast } from '@/components/ui/toast';
 import type { AgentBrowserFrame } from '@todex/protocol/agentDesktop';
 import type { TodeXSession } from '../session/useTodeXSession';
@@ -28,14 +29,22 @@ function decodeFrameBytes(data: string): Uint8Array<ArrayBuffer> {
 /**
  * The agent's browser tab for one conversation, live: it runs on the
  * backend's computer and streams here over the session socket while this
- * pane is shown. Without a live frame the latest screenshot stands in.
+ * view is shown. Without a live frame the latest screenshot stands in.
+ * `pane` fills a side-panel tab and streams while `isActive`; `card` is
+ * pinned above the composer while the tab is open, and streams unless
+ * folded.
  */
-export function AgentBrowserLiveView({ session, conversationId, isActive }: {
+export function AgentBrowserLiveView({ session, conversationId, isActive = true, variant = 'pane' }: {
   session: TodeXSession;
+  /** The local conversation id. */
   conversationId: string;
-  isActive: boolean;
+  isActive?: boolean;
+  variant?: 'pane' | 'card';
 }) {
   const t = useT();
+  const card = variant === 'card';
+  const [folded, setFolded] = useState(false);
+  const streaming = card ? !folded : isActive;
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [live, setLive] = useState(false);
   const [closed, setClosed] = useState(false);
@@ -76,7 +85,7 @@ export function AgentBrowserLiveView({ session, conversationId, isActive }: {
 
   // Live frames while shown; only the newest frame waits for decoding.
   useEffect(() => {
-    if (!isActive || !visible) {
+    if (!streaming || !visible) {
       setLive(false);
       return;
     }
@@ -121,7 +130,7 @@ export function AgentBrowserLiveView({ session, conversationId, isActive }: {
       alive = false;
       unwatch();
     };
-  }, [backendConversationId, isActive, visible, watchAgentBrowser]);
+  }, [backendConversationId, streaming, visible, watchAgentBrowser]);
 
   // Without live frames: the latest screenshot the agent took.
   useEffect(() => {
@@ -145,6 +154,41 @@ export function AgentBrowserLiveView({ session, conversationId, isActive }: {
   };
 
   const open = Boolean(state?.tabOpen) && !closed;
+  const screen = (
+    <>
+      <canvas ref={canvasRef} className={live ? 'h-full w-full object-contain' : 'hidden'} aria-label={t('agentBrowser.frame')} />
+      {!live && still ? <img src={still.dataUrl} alt={t('agentBrowser.screenshot')} className="h-full w-full object-contain" /> : null}
+      {!live && !still ? (
+        <p className="px-6 text-center text-body-regular text-text-secondary">{open ? t('agentBrowser.waiting') : t('agentBrowser.closed')}</p>
+      ) : null}
+    </>
+  );
+  if (card) {
+    // Only while the agent's tab is open; the side panel keeps the history.
+    if (!open) return null;
+    return (
+      <div className="mb-3 overflow-hidden rounded-2xl border border-chart-8 bg-background-primary-default">
+        <div className="flex items-center gap-2 px-3 py-2">
+          <RiGlobalLine className="size-4 shrink-0 text-foreground-icon-secondary" />
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-caption-1-medium text-text-primary">{page?.title || page?.url || t('agentBrowser.title')}</p>
+            {latest ? <p className="truncate text-caption-1-regular text-text-tertiary">{latest.summary}{page?.url ? ` · ${page.url}` : ''}</p> : null}
+          </div>
+          {live ? <Chip variant="caption" color="yellow">{t('agentBrowser.live')}</Chip> : null}
+          <IconAction
+            icon={folded ? RiArrowUpSLine : RiArrowDownSLine}
+            size="sm"
+            aria-label={folded ? t('computerLive.expand') : t('computerLive.collapse')}
+            onClick={() => setFolded(value => !value)}
+          />
+          <Button size="small" variant="danger" leadingIcon={RiStopCircleLine} disabled={stopping} onClick={() => { void stop(); }}>
+            {t('agentBrowser.stop')}
+          </Button>
+        </div>
+        {folded ? null : <div className="flex h-60 items-center justify-center bg-background-secondary-default">{screen}</div>}
+      </div>
+    );
+  }
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex items-center gap-2 border-b border-separator-border px-3 py-2">
@@ -162,11 +206,7 @@ export function AgentBrowserLiveView({ session, conversationId, isActive }: {
       </div>
       {/* Outlined so the user always sees which page the agent controls. */}
       <div className="relative flex min-h-0 flex-1 items-center justify-center bg-background-secondary-default outline outline-2 -outline-offset-2 outline-chart-8">
-        <canvas ref={canvasRef} className={live ? 'h-full w-full object-contain' : 'hidden'} aria-label={t('agentBrowser.frame')} />
-        {!live && still ? <img src={still.dataUrl} alt={t('agentBrowser.screenshot')} className="h-full w-full object-contain" /> : null}
-        {!live && !still ? (
-          <p className="px-6 text-center text-body-regular text-text-secondary">{open ? t('agentBrowser.waiting') : t('agentBrowser.closed')}</p>
-        ) : null}
+        {screen}
       </div>
     </div>
   );

@@ -445,6 +445,12 @@ export function AppSidebar({
   // row holds only that backend's None conversations (an untagged draft
   // belongs to the None in view).
   const activeRowId = isNoneWorkspaceId(session.activeWorkspaceId) ? noneWorkspaceRowId(session.noWorkspaceBackendId) : session.activeWorkspaceId;
+  // A standalone page (home, terminal, plan, profile) replaces the
+  // conversation in the main area, so the list stops marking the workspace
+  // and conversation behind it; picking one of them leaves the page.
+  const standalonePageActive = Boolean(homeActive) || terminalActive || kanbanActive || profileActive;
+  const selectedRowId = standalonePageActive ? '' : activeRowId;
+  const selectedConversationId = standalonePageActive ? null : session.activeConversationId;
   const rowIdOf = useCallback((conversation: TodeXSession['conversations'][number]) => (
     isNoneWorkspaceId(conversation.workspaceId)
       ? noneWorkspaceRowId(ownerBackendId(conversation, null, session.noWorkspaceBackendId))
@@ -1112,7 +1118,7 @@ export function AppSidebar({
   // One conversation row's pieces, shared by the split list (grid rows) and
   // the unified workspace tree (tree leaves).
   const conversationRow = (conversation: TodeXSession['conversations'][number]) => {
-    const isSelected = conversation.id === session.activeConversationId;
+    const isSelected = conversation.id === selectedConversationId;
     const status = getConversationStatus(statusSession, conversation, timelineInfoMap[conversation.id]?.latestEntry, timelineInfoMap[conversation.id]?.latestIncomingAt);
     const taskMeta = conversationTaskMetaMap[conversation.id];
     // A daemon-paused follow-up queue waiting out a provider rate
@@ -1206,7 +1212,7 @@ export function AppSidebar({
 
   // `scope` places a tag-view row under its tag section (no dragging there).
   const renderWorkspaceItem = (workspace: WorkspaceRecord, group: { entry: WorkspaceGroupEntry; last: boolean; folded: boolean } | null, scope?: { key: string; folded: boolean }) => {
-    const isSelected = workspace.id === activeRowId;
+    const isSelected = workspace.id === selectedRowId;
     // A group-after drop on an expanded group marks the group's last row.
     const drop = dropTarget?.kind === 'workspace' && dropTarget.id === workspace.id
       ? dropTarget.position
@@ -1303,7 +1309,7 @@ export function AppSidebar({
   const renderGroupItems = (entry: WorkspaceGroupEntry) => {
     const folded = isGroupFolded(entry.id);
     const name = entry.name || t('sidebar.newGroupName');
-    const containsSelected = entry.workspaces.some((workspace) => workspace.id === activeRowId);
+    const containsSelected = entry.workspaces.some((workspace) => workspace.id === selectedRowId);
     const statuses = entry.workspaces
       .map((workspace) => workspaceStatusMap[workspace.id])
       .filter((status): status is NonNullable<typeof status> => Boolean(status))
@@ -1354,7 +1360,7 @@ export function AppSidebar({
     const folded = isGroupFolded(key);
     const name = section.tag ?? t('sidebar.untagged');
     const workspaces = tagSectionWorkspaces(section);
-    const containsSelected = workspaces.some((workspace) => workspace.id === activeRowId);
+    const containsSelected = workspaces.some((workspace) => workspace.id === selectedRowId);
     const header = (
       <GridListItem
         key={key}
@@ -1448,7 +1454,7 @@ export function AppSidebar({
   // branches (folder, chevron, guides) holding their workspaces; lone
   // workspaces are root leaves. The icon rail keeps the flat grid list.
   const workspaceTreeItem = (workspace: WorkspaceRecord, group: { entry: WorkspaceGroupEntry; last: boolean } | null, scope?: string): ReactNode => {
-    const isSelected = workspace.id === activeRowId;
+    const isSelected = workspace.id === selectedRowId;
     const drop = dropTarget?.kind === 'workspace' && dropTarget.id === workspace.id
       ? dropTarget.position
       : group?.last && dropTarget?.kind === 'group' && dropTarget.id === group.entry.id && dropTarget.position === 'after'
@@ -1536,7 +1542,7 @@ export function AppSidebar({
   const groupTreeItem = (entry: WorkspaceGroupEntry, scope?: string): ReactNode => {
     const folded = isGroupFolded(entry.id);
     const name = entry.name || t('sidebar.newGroupName');
-    const containsSelected = entry.workspaces.some((workspace) => workspace.id === activeRowId);
+    const containsSelected = entry.workspaces.some((workspace) => workspace.id === selectedRowId);
     const statuses = entry.workspaces
       .map((workspace) => workspaceStatusMap[workspace.id])
       .filter((status): status is NonNullable<typeof status> => Boolean(status))
@@ -1594,7 +1600,7 @@ export function AppSidebar({
     const folded = isGroupFolded(key);
     const name = section.tag ?? t('sidebar.untagged');
     const workspaces = tagSectionWorkspaces(section);
-    const containsSelected = workspaces.some((workspace) => workspace.id === activeRowId);
+    const containsSelected = workspaces.some((workspace) => workspace.id === selectedRowId);
     const statuses = workspaces
       .map((workspace) => workspaceStatusMap[workspace.id])
       .filter((status): status is NonNullable<typeof status> => Boolean(status))
@@ -1651,16 +1657,16 @@ export function AppSidebar({
     : displayedEntries.flatMap((entry) => entryBranches(entry));
   const expandedGroupKeys = new Set<Key>(treeBranches.filter((branch) => branch.open).map((branch) => branch.key));
   // Every row key of the active workspace (several in the tag view).
-  const selectedWorkspaceKeys = !activeRowId ? [] : !tagView ? [activeRowId] : [
-    ...(tagNoneEntries.some((entry) => (entry.kind === 'group' ? entry.workspaces.some((workspace) => workspace.id === activeRowId) : entry.workspace.id === activeRowId)) ? [activeRowId] : []),
+  const selectedWorkspaceKeys = !selectedRowId ? [] : !tagView ? [selectedRowId] : [
+    ...(tagNoneEntries.some((entry) => (entry.kind === 'group' ? entry.workspaces.some((workspace) => workspace.id === selectedRowId) : entry.workspace.id === selectedRowId)) ? [selectedRowId] : []),
     ...tagSections.flatMap((section) => section.entries
-      .filter((entry) => (entry.kind === 'group' ? entry.workspaces.some((workspace) => workspace.id === activeRowId) : entry.workspace.id === activeRowId))
-      .map(() => scopedKey(tagSectionKey(section), activeRowId))),
+      .filter((entry) => (entry.kind === 'group' ? entry.workspaces.some((workspace) => workspace.id === selectedRowId) : entry.workspace.id === selectedRowId))
+      .map(() => scopedKey(tagSectionKey(section), selectedRowId))),
   ];
   // Unified layout: the tree selects the active conversation under each of
   // those rows; the workspace row only fills while folded.
-  const selectedTreeKeys = !nested ? selectedWorkspaceKeys : !session.activeConversationId ? [] : selectedWorkspaceKeys.map((key) => (
-    `${key.slice(0, key.length - activeRowId.length)}conversation:${session.activeConversationId}`
+  const selectedTreeKeys = !nested ? selectedWorkspaceKeys : !selectedConversationId ? [] : selectedWorkspaceKeys.map((key) => (
+    `${key.slice(0, key.length - selectedRowId.length)}conversation:${selectedConversationId}`
   ));
   // A row key picked in the list: tag and group headers fold, workspaces open.
   const activateWorkspaceKey = (rawKey: string) => {
@@ -1699,6 +1705,7 @@ export function AppSidebar({
     }
     if (session.workspaces.find((item) => item.id === key)?.pathMissing) return;
     openWorkspaceRow(key);
+    onSelectConversation?.();
   };
 
   // Cached data renders immediately; the directory sync only blocks an

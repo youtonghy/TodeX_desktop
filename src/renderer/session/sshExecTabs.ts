@@ -94,7 +94,7 @@ export function sessionSshExecTabsFor(storageKey: string): WorkbenchItem[] {
 }
 
 export function rememberSessionSshExecTabs(storageKey: string, items: WorkbenchItem[]): void {
-  const execItems = items.filter(item => item.type === 'ssh-exec' || item.type === 'subagents' || item.type === 'agent-calls' || item.type === 'agent-browser');
+  const execItems = items.filter(item => item.type === 'ssh-exec' || item.type === 'subagents' || item.type === 'agent-calls' || item.type === 'agent-browser' || item.type === 'agent-computer');
   if (execItems.length) sessionSshExecTabs.set(storageKey, execItems);
   else sessionSshExecTabs.delete(storageKey);
 }

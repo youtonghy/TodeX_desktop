@@ -231,6 +231,38 @@ test('settings: backend group with a join request', async ({ page, openDemo }) =
   await expect(page).toHaveScreenshot('settings-mesh-node-light.png', { mask: volatile(page) });
 });
 
+// The agent starts using the backend's computer: by default its live view
+// opens as a side-panel tab.
+test('computer use live view in the side panel', async ({ page, openDemo }) => {
+  await openDemo('light', 'live=computer');
+  await expect(page.getByText('Agent 正在操作 lumen-devbox').first()).toBeVisible();
+  await expect(page.getByRole('img', { name: '被控制电脑的实时画面' })).toBeVisible();
+  await settle(page);
+  await expect(page).toHaveScreenshot('computer-live-sidebar-light.png', { mask: volatile(page) });
+});
+
+// With "Above the composer" picked for the browser, its live view is pinned
+// there and no side-panel tab opens.
+test('agent browser live view above the composer', async ({ page, openDemo }) => {
+  await page.addInitScript(() => localStorage.setItem('todex.agentDesktop.v1', JSON.stringify({ browserPlacement: 'composer' })));
+  await openDemo('light', 'live=browser');
+  await expect(page.getByRole('img', { name: 'Agent 最新截图' })).toBeVisible();
+  await settle(page);
+  await expect(page).toHaveScreenshot('browser-live-composer-light.png', { mask: volatile(page) });
+});
+
+// Both live view placement rows on the Computer Use page.
+test('settings: live view placement', async ({ page, openDemo }) => {
+  await openDemo('light');
+  await page.getByRole('button', { name: '设置', exact: true }).click();
+  await settingsSection(page, 'Agent 桌面工具').click();
+  await page.getByRole('button', { name: /^Computer Use/ }).click();
+  await page.getByRole('radio', { name: '输入框上方' }).click();
+  await expect(page.getByRole('radio', { name: '输入框上方' })).toBeChecked();
+  await settle(page);
+  await expect(page).toHaveScreenshot('settings-live-view-placement-light.png', { mask: volatile(page) });
+});
+
 // SSH settings with the connection approval switched to per command.
 test('settings: SSH approval per command', async ({ page, openDemo }) => {
   await openDemo('light');

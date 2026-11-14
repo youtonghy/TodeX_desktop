@@ -18,7 +18,8 @@ import { cx } from '@/utils/cx';
 import { ConversationSplit, useMediaQuery } from './components/ConversationSplit';
 import { useWorkbenchLayout } from './session/useWorkbenchLayout';
 import { sshWorkbenchScopeKey, workbenchScopeKey } from './session/workbenchLayout';
-import { createAgentBrowserWatch, takeNewAgentBrowserTab } from './session/agentBrowserTabs';
+import { createAgentBrowserWatch, createAgentComputerWatch, takeNewAgentBrowserTab, takeNewAgentComputerSession } from './session/agentBrowserTabs';
+import { getAgentDesktopPreferences, useAgentDesktopPreferences } from './session/agentDesktopPreferences';
 import { createRunWatch, takeNewAgentCalls, takeNewSshExecs, takeNewSubagents } from './session/sshExecTabs';
 import { useTodeXSession, type TodeXSession } from './session/useTodeXSession';
 import { ConversationHeaderDetails } from './components/ConversationHeaderDetails';
@@ -367,12 +368,14 @@ export function App() {
   const subagentWatchRef = useRef(createRunWatch());
   const agentCallWatchRef = useRef(createRunWatch());
   const agentBrowserWatchRef = useRef(createAgentBrowserWatch());
+  const agentComputerWatchRef = useRef(createAgentComputerWatch());
+  const agentDesktopPreferences = useAgentDesktopPreferences();
   const viewedConversationId = session.activeConversation?.id ?? '';
   const viewedRecovering = viewedConversationId ? session.recoveringConversations[viewedConversationId] === true : false;
   useEffect(() => {
     const check = () => {
       const viewedRuntime = viewedConversationId ? session.stores.runtime.get()[viewedConversationId] : undefined;
-      const open = (kind: 'ssh-exec' | 'subagents' | 'agent-calls' | 'agent-browser') => {
+      const open = (kind: 'ssh-exec' | 'subagents' | 'agent-calls' | 'agent-browser' | 'agent-computer') => {
         if (sshActive || !scopeKey) return;
         queueWorkbenchRequest(id => ({ id, kind, conversationId: viewedConversationId }));
         persistAsideOpen(true);
@@ -386,11 +389,33 @@ export function App() {
       // after the tab closed) opens the live view; lifetimes present when the
       // conversation became the viewed one, failed calls, and a panel the user
       // closed during the same lifetime do not.
-      if (takeNewAgentBrowserTab(agentBrowserWatchRef.current, viewedConversationId, viewedRuntime, viewedRecovering)) open('agent-browser');
+      // Only where Settings puts the live views in the side panel (the
+      // default); otherwise they are pinned above the composer instead.
+      const placements = getAgentDesktopPreferences();
+      if (takeNewAgentBrowserTab(agentBrowserWatchRef.current, viewedConversationId, viewedRuntime, viewedRecovering) && placements.browserPlacement === 'sidebar') open('agent-browser');
+      // A Computer Use session starting (or awaiting the host's
+      // confirmation) opens its live view the same way.
+      if (takeNewAgentComputerSession(agentComputerWatchRef.current, viewedConversationId, viewedRuntime, viewedRecovering) && placements.computerPlacement === 'sidebar') open('agent-computer');
     };
     check();
     return session.stores.runtime.subscribe(check);
   }, [persistAsideOpen, queueWorkbenchRequest, scopeKey, session.stores, sshActive, viewedConversationId, viewedRecovering]);
+  // Moving a live view to the side panel while the agent is using that tool
+  // brings it there at once (the composer card goes away by itself).
+  const placementsRef = useRef(agentDesktopPreferences);
+  useEffect(() => {
+    const before = placementsRef.current;
+    placementsRef.current = agentDesktopPreferences;
+    if (sshActive || !scopeKey || !viewedConversationId) return;
+    const runtime = session.stores.runtime.get()[viewedConversationId];
+    if (!runtime) return;
+    const moved = (kind: 'agent-browser' | 'agent-computer') => {
+      queueWorkbenchRequest(id => ({ id, kind, conversationId: viewedConversationId }));
+      persistAsideOpen(true);
+    };
+    if (before.browserPlacement !== 'sidebar' && agentDesktopPreferences.browserPlacement === 'sidebar' && runtime.desktopBrowser.tabOpen) moved('agent-browser');
+    if (before.computerPlacement !== 'sidebar' && agentDesktopPreferences.computerPlacement === 'sidebar' && (runtime.desktopComputer.active || runtime.desktopComputer.awaitingHost)) moved('agent-computer');
+  }, [agentDesktopPreferences, persistAsideOpen, queueWorkbenchRequest, scopeKey, session.stores, sshActive, viewedConversationId]);
   const changeWorkbenchTab = useCallback((next: WorkbenchTab) => {
     setWorkbenchTab(next);
     setPanelTarget({});

@@ -4,10 +4,12 @@ import { Chip } from '@/components/base/badges/chip';
 import { Button } from '@/components/base/buttons/button';
 import { IconAction } from '@/components/ui/icon-action';
 import { toast } from '@/components/ui/toast';
+import { cx } from '@/utils/cx';
 import type { DesktopComputerState } from '@todex/protocol/conversationRuntime';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { useT } from '../i18n';
 import { backendApi } from '../session/helpers';
+import { useConversationRuntime } from '../session/conversationStore';
 
 /** Polling cadence of the live frame while it is visible. */
 const FRAME_INTERVAL_MS = 350;
@@ -15,18 +17,42 @@ const FRAME_INTERVAL_MS = 350;
 const FRAME_RETRY_MS = 2000;
 
 /**
- * Pinned above the composer while the conversation's agent controls the
- * backend's computer: its screen, live while visible (the latest screenshot
- * the agent took otherwise), the latest action, and Stop. While the person
- * at that computer has not confirmed the first use, it says so.
+ * The Computer Use live view as a side-panel tab for one conversation
+ * (`conversationId` is the local id): it stays after the session ends and
+ * only polls while it is the shown tab.
  */
-export function ComputerLiveView({ session, conversationId, state }: {
+export function ComputerLivePane({ session, conversationId, isActive }: {
   session: TodeXSession;
   conversationId: string;
+  isActive: boolean;
+}) {
+  const state = useConversationRuntime(session.stores, conversationId)?.desktopComputer;
+  // The backend knows the conversation by its v2 id, not the local one.
+  const backendConversationId = session.conversations.find(item => item.id === conversationId)?.v2ConversationId ?? conversationId;
+  return <ComputerLiveView session={session} conversationId={backendConversationId} state={state} variant="pane" isActive={isActive} />;
+}
+
+/**
+ * While the conversation's agent controls the backend's computer: its
+ * screen, live while visible (the latest screenshot the agent took
+ * otherwise), the latest action, and Stop. While the person at that
+ * computer has not confirmed the first use, it says so. `card` pins it
+ * above the composer (only while in use, collapsible); `pane` fills a
+ * side-panel tab and polls only while `isActive`.
+ */
+export function ComputerLiveView({ session, conversationId, state, variant = 'card', isActive = true }: {
+  session: TodeXSession;
+  /** The backend's (v2) conversation id. */
+  conversationId: string;
   state: DesktopComputerState | undefined;
+  variant?: 'card' | 'pane';
+  isActive?: boolean;
 }) {
   const t = useT();
-  const [collapsed, setCollapsed] = useState(false);
+  const pane = variant === 'pane';
+  const [folded, setFolded] = useState(false);
+  // Not shown: nothing to poll for.
+  const collapsed = pane ? !isActive : folded;
   const [stopping, setStopping] = useState(false);
   const [frame, setFrame] = useState<string | null>(null);
   const [shot, setShot] = useState<{ shotId: string; dataUrl: string } | null>(null);
@@ -85,16 +111,6 @@ export function ComputerLiveView({ session, conversationId, state }: {
     return () => { alive = false; };
   }, [active, api, collapsed, conversationId, frame, latestShotId, shot?.shotId]);
 
-  if (awaiting) {
-    return (
-      <div className="mb-3 flex items-center gap-2 rounded-2xl border border-chart-8 bg-status-yellow-background px-3 py-2">
-        <RiComputerLine className="size-4 shrink-0 text-status-yellow-text" />
-        <p className="text-caption-1-regular text-text-primary">{t('computerLive.awaitingHost', { device })}</p>
-      </div>
-    );
-  }
-  if (!active) return null;
-
   const stop = async () => {
     setStopping(true);
     try {
@@ -105,8 +121,46 @@ export function ComputerLiveView({ session, conversationId, state }: {
       setStopping(false);
     }
   };
-
   const image = frame ?? shot?.dataUrl;
+
+  if (pane) {
+    return (
+      <div className="flex h-full min-h-0 flex-col">
+        <div className="flex items-center gap-2 border-b border-separator-border px-3 py-2">
+          <RiComputerLine className="size-4 shrink-0 text-foreground-icon-secondary" />
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-body-medium text-text-primary">{active ? t('computerLive.title', { device }) : t('computerSettings.title')}</p>
+            {latest ? <p className="truncate text-caption-1-regular text-text-tertiary">{latest.summary}{latest.app ? ` · ${latest.app}` : ''}</p> : null}
+          </div>
+          {frame ? <Chip variant="caption" color="yellow">{t('computerLive.live')}</Chip> : null}
+          <Button size="small" variant="danger" leadingIcon={RiStopCircleLine} disabled={!active || stopping} onClick={() => { void stop(); }}>
+            {t('computerLive.stop')}
+          </Button>
+        </div>
+        {/* Outlined while in use so the user always sees the agent is in control. */}
+        <div className={cx('relative flex min-h-0 flex-1 items-center justify-center bg-background-secondary-default', active && 'outline outline-2 -outline-offset-2 outline-chart-8')}>
+          {active && image ? (
+            <img src={image} alt={t(frame ? 'computerLive.frame' : 'computerLive.screenshot')} className="h-full w-full object-contain" />
+          ) : (
+            <p className="px-6 text-center text-body-regular text-text-secondary">
+              {awaiting ? t('computerLive.awaitingHost', { device }) : active ? t('computerLive.waiting') : t('computerLive.ended', { device })}
+            </p>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  if (awaiting) {
+    return (
+      <div className="mb-3 flex items-center gap-2 rounded-2xl border border-chart-8 bg-status-yellow-background px-3 py-2">
+        <RiComputerLine className="size-4 shrink-0 text-status-yellow-text" />
+        <p className="text-caption-1-regular text-text-primary">{t('computerLive.awaitingHost', { device })}</p>
+      </div>
+    );
+  }
+  if (!active) return null;
+
   return (
     <div className="mb-3 overflow-hidden rounded-2xl border border-chart-8 bg-background-primary-default">
       <div className="flex items-center gap-2 px-3 py-2">
@@ -120,7 +174,7 @@ export function ComputerLiveView({ session, conversationId, state }: {
           icon={collapsed ? RiArrowUpSLine : RiArrowDownSLine}
           size="sm"
           aria-label={collapsed ? t('computerLive.expand') : t('computerLive.collapse')}
-          onClick={() => setCollapsed(value => !value)}
+          onClick={() => setFolded(value => !value)}
         />
         <Button size="small" variant="danger" leadingIcon={RiStopCircleLine} disabled={stopping} onClick={() => { void stop(); }}>
           {t('computerLive.stop')}

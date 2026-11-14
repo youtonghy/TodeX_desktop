@@ -848,6 +848,16 @@ function route(request: SecureRequest): SecureResponse {
   const dshPluginsResponse = demoDshPluginsRoute(method, path, readBody(request));
   if (dshPluginsResponse) return dshPluginsResponse;
 
+  const liveFrame = path.match(/^\/v2\/conversations\/[^/]+\/agent-desktop\/frame$/);
+  if (liveFrame && method === 'GET') {
+    if (DEMO_LIVE !== 'computer') return json({ error: { code: 'NOT_FOUND', message: 'no screen session' } }, 404);
+    return json({ mimeType: 'image/svg+xml', dataUrl: demoScreen('computer') });
+  }
+  const agentShot = path.match(/^\/v2\/conversations\/[^/]+\/agent-shots\/([^/]+)$/);
+  if (agentShot && method === 'GET') {
+    const shotId = decodeURIComponent(agentShot[1]);
+    return json({ shotId, mimeType: 'image/svg+xml', dataUrl: demoScreen(shotId) });
+  }
   if (method === 'GET') {
     switch (path) {
       case '/health':
@@ -1134,6 +1144,7 @@ class DemoSocket implements SecureSocket {
         const backfill = replay(journal, new URLSearchParams({ afterSequence: String(payload.afterSequence ?? 0), limit: String(payload.limit ?? 200) }));
         for (const event of backfill.events) this.emit({ type: 'conversation.event', payload: event });
         result = { conversationId: journal.manifest.id, nextSequence: backfill.nextSequence, hasMore: backfill.hasMore };
+        startDemoLiveTool(journal);
       }
     } else if (message.type === 'conversation.prompt') {
       const journal = journals.get(String(payload.conversationId));
@@ -1207,6 +1218,40 @@ let turnScript: ((text: string, turnId: string) => DemoTurnStep[] | null) | null
 
 export function setDemoTurnScript(script: typeof turnScript): void {
   turnScript = script;
+}
+
+// `?live=computer` / `?live=browser`: once the active conversation is
+// opened, its agent starts using the backend's computer or browser, so the
+// live views (side panel or above the composer) have something to show.
+const DEMO_LIVE = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('live') : null;
+let demoLiveStarted = false;
+
+function startDemoLiveTool(journal: Journal): void {
+  if (demoLiveStarted || journal.manifest.id !== fixtures.demoActiveConversationId || (DEMO_LIVE !== 'computer' && DEMO_LIVE !== 'browser')) return;
+  demoLiveStarted = true;
+  const turnId = `${journal.manifest.id}-live`;
+  // After the subscription's backfill, so it arrives as something new.
+  setTimeout(() => {
+    if (DEMO_LIVE === 'computer') {
+      appendDemoEvent(journal, turnId, 'desktop.computer.session', { status: 'started', deviceId: 'host', deviceName: 'lumen-devbox' });
+      appendDemoEvent(journal, turnId, 'desktop.computer.action', { actionId: 'demo-computer-1', tool: 'computer_act', ok: true, summary: '点击“保存”', app: 'TextEdit', path: 'background', shotId: 'demo-shot-computer', deviceId: 'host', deviceName: 'lumen-devbox' });
+    } else {
+      appendDemoEvent(journal, turnId, 'desktop.browser.action', { actionId: 'demo-browser-1', tool: 'browser_open', ok: true, summary: '打开 localhost:5173/checkout', url: 'http://localhost:5173/checkout', title: '结账 · Lumen', shotId: 'demo-shot-browser', deviceName: 'lumen-devbox' });
+    }
+  }, 600);
+}
+
+/** A stand-in screen for the demo's live views. */
+function demoScreen(kind: string): string {
+  const browser = kind.includes('browser');
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="800" viewBox="0 0 1280 800"><rect width="1280" height="800" fill="#dfe3ea"/>`
+    + `<rect x="${browser ? 0 : 160}" y="${browser ? 0 : 110}" width="${browser ? 1280 : 960}" height="${browser ? 800 : 580}" rx="${browser ? 0 : 14}" fill="#ffffff"/>`
+    + `<rect x="${browser ? 0 : 160}" y="${browser ? 0 : 110}" width="${browser ? 1280 : 960}" height="56" fill="#f1f3f6"/>`
+    + `<text x="${browser ? 40 : 200}" y="${browser ? 36 : 146}" font-family="Helvetica, Arial, sans-serif" font-size="22" fill="#4b5563">${browser ? 'localhost:5173/checkout' : 'TextEdit — 未命名'}</text>`
+    + `<text x="${browser ? 80 : 220}" y="${browser ? 160 : 240}" font-family="Helvetica, Arial, sans-serif" font-size="40" fill="#111827">${browser ? '结账' : '发布说明草稿'}</text>`
+    + `<rect x="${browser ? 80 : 220}" y="${browser ? 210 : 290}" width="520" height="18" rx="9" fill="#e5e7eb"/><rect x="${browser ? 80 : 220}" y="${browser ? 250 : 330}" width="420" height="18" rx="9" fill="#e5e7eb"/>`
+    + `<rect x="${browser ? 80 : 900}" y="${browser ? 320 : 600}" width="160" height="52" rx="10" fill="#2563eb"/></svg>`;
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
 
 type DemoRun = { turnId: string; timers: ReturnType<typeof setTimeout>[]; onCancel?: () => void };

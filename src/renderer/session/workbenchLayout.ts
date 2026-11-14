@@ -40,7 +40,7 @@ function safeTarget(value: unknown): OpenPanelOptions {
 
 export function normalizeWorkbenchLayout(value: unknown): SavedLayout {
   const source = value && typeof value === 'object' ? value as Record<string, unknown> : {};
-  // 'ssh-exec', 'subagents', 'agent-calls' and 'agent-browser' tabs are session-only, so a saved layout never points at one;
+  // 'ssh-exec', 'subagents', 'agent-calls', 'agent-browser' and 'agent-computer' tabs are session-only, so a saved layout never points at one;
   // a 'browser' tab falls back to the terminal where the host has no browser tab.
   const stored = ['terminal', 'files', 'git-diff', ...(platform.preview ? ['browser'] : [])];
   const tab = stored.includes(String(source.tab)) ? source.tab as WorkbenchTab : 'terminal';

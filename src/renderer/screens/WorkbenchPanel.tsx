@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ButtonHTMLAttributes, ComponentType, MouseEvent as ReactMouseEvent, ReactNode, RefObject } from 'react';
-import { RiAppsLine, RiCloseLine, RiDeleteBinLine, RiDownload2Line, RiEdit2Line, RiFolderAddLine, RiLinksLine, RiLink, RiServerLine, RiTerminalBoxLine, RiTerminalWindowLine, RiUpload2Line, RiGitBranchLine, RiAddLine, RiArrowLeftDoubleLine, RiArrowRightDoubleLine, RiExternalLinkLine, RiBracesLine, RiFileCodeLine, RiFileLine, RiFilePdf2Line, RiFileSettingsLine, RiFileTextLine, RiFileZipLine, RiImageLine, RiLockLine, RiMarkdownLine, RiFolder3Line, RiFolderOpenLine, RiGlobalLine, RiLayoutColumnLine, RiLayoutRowLine, RiRefreshLine, RiRobot2Line, RiStopCircleLine, RiTeamLine } from '@remixicon/react';
+import { RiAppsLine, RiComputerLine, RiCloseLine, RiDeleteBinLine, RiDownload2Line, RiEdit2Line, RiFolderAddLine, RiLinksLine, RiLink, RiServerLine, RiTerminalBoxLine, RiTerminalWindowLine, RiUpload2Line, RiGitBranchLine, RiAddLine, RiArrowLeftDoubleLine, RiArrowRightDoubleLine, RiExternalLinkLine, RiBracesLine, RiFileCodeLine, RiFileLine, RiFilePdf2Line, RiFileSettingsLine, RiFileTextLine, RiFileZipLine, RiImageLine, RiLockLine, RiMarkdownLine, RiFolder3Line, RiFolderOpenLine, RiGlobalLine, RiLayoutColumnLine, RiLayoutRowLine, RiRefreshLine, RiRobot2Line, RiStopCircleLine, RiTeamLine } from '@remixicon/react';
 import { Focusable, Pressable } from 'react-aria-components';
 import type { Key, Selection } from 'react-aria-components';
 import { Badge } from '@/components/base/badges/badge';
@@ -24,6 +24,7 @@ import { GitDiffText } from '../components/GitDiffText';
 import { XtermTerminal, type XtermTerminalHandlers } from '../components/XtermTerminal';
 import { SshExecPane } from '../components/ssh/SshExecPane';
 import { AgentBrowserLiveView } from '../components/AgentBrowserLiveView';
+import { ComputerLivePane } from '../components/ComputerLiveView';
 import { ExpandableAction } from '../components/ExpandableAction';
 import { rememberSessionSshExecTabs, sessionSshExecTabsFor, useSshExecClear, visibleSshExecs } from '../session/sshExecTabs';
 import type { TodeXSession } from '../session/useTodeXSession';
@@ -89,7 +90,7 @@ type StoredWorkbenchState = {
   activeId: string;
 };
 
-/** Types written to the tab store; 'ssh-exec', 'subagents', 'agent-calls' and 'agent-browser' tabs are session-only. */
+/** Types written to the tab store; 'ssh-exec', 'subagents', 'agent-calls', 'agent-browser' and 'agent-computer' tabs are session-only. */
 const WORKBENCH_TYPES = new Set<WorkbenchTab>(['terminal', ...(slots.BrowserPane ? ['browser' as const] : []), 'files', 'git-diff']);
 
 const WORKBENCH_LABEL_KEYS: Record<WorkbenchTab, MessageKey> = {
@@ -101,6 +102,7 @@ const WORKBENCH_LABEL_KEYS: Record<WorkbenchTab, MessageKey> = {
   subagents: 'app.subagents',
   'agent-calls': 'agentCalls.title',
   'agent-browser': 'agentBrowser.title',
+  'agent-computer': 'computerSettings.title',
 };
 
 const workbenchLabel = (tab: WorkbenchTab) => t(WORKBENCH_LABEL_KEYS[tab]);
@@ -114,6 +116,7 @@ const WORKBENCH_ICONS = {
   subagents: RiRobot2Line,
   'agent-calls': RiTeamLine,
   'agent-browser': RiGlobalLine,
+  'agent-computer': RiComputerLine,
 };
 
 const REMOTE_ICONS = {
@@ -355,6 +358,17 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
         if (items.some(item => item.id === request.itemId)) closeTab(request.itemId);
         continue;
       }
+      if (request.kind === 'agent-computer') {
+        const existing = [...items, ...added].find(item => item.agentComputer?.conversationId === request.conversationId);
+        if (existing) {
+          opened = existing;
+          continue;
+        }
+        const item: WorkbenchItem = { id: `agent-computer-${Date.now()}-${request.id}`, type: 'agent-computer', title: t('computerSettings.title'), agentComputer: { conversationId: request.conversationId } };
+        added.push(item);
+        opened = item;
+        continue;
+      }
       if (request.kind === 'agent-browser') {
         const existing = [...items, ...added].find(item => item.agentBrowser?.conversationId === request.conversationId);
         if (existing) {
@@ -461,6 +475,8 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
       ? ''
       : item.type === 'agent-browser'
       ? [...(tabRuntimes[item.agentBrowser?.conversationId ?? '']?.browserActions ?? [])].reverse().find(action => action.url)?.url || ''
+      : item.type === 'agent-computer'
+      ? ''
       : item.ssh
       ? `ssh ${item.ssh.host}`
       : item.remote
@@ -606,6 +622,7 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
             {item.type === 'ssh-exec' && item.sshExec ? <SshExecPane conversationId={item.sshExec.conversationId} runs={tabRuntimes[item.sshExec.conversationId]?.sshExecs ?? NO_SSH_EXECS} isActive={item.id === active?.id} /> : null}
             {item.type === 'subagents' && item.subagents ? <SubagentsPanel session={session} conversationId={item.subagents.conversationId} /> : null}
             {item.type === 'agent-calls' && item.agentCalls ? <AgentCallsPanel session={session} conversationId={item.agentCalls.conversationId} /> : null}
+            {item.type === 'agent-computer' && item.agentComputer ? <ComputerLivePane session={session} isActive={shown && item.id === active?.id} conversationId={item.agentComputer.conversationId} /> : null}
             {item.type === 'agent-browser' && item.agentBrowser ? <AgentBrowserLiveView session={session} isActive={shown && item.id === active?.id} conversationId={item.agentBrowser.conversationId} /> : null}
           </div>
         ))}

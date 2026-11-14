@@ -2,6 +2,8 @@ import { ConversationControls } from '../components/ConversationControls';
 import { PiExtensionPanel } from '../components/PiExtensionPanel';
 import { piCommandCompatibility, piTodexCommands } from '../session/providerCommands';
 import { ComputerLiveView } from '../components/ComputerLiveView';
+import { AgentBrowserLiveView } from '../components/AgentBrowserLiveView';
+import { useAgentDesktopPreferences } from '../session/agentDesktopPreferences';
 import { ConversationGoalBar } from '../components/ConversationGoal';
 import { ConversationScheduleBar } from '../components/ConversationSchedule';
 import { NoticeToast } from '../components/NoticeToast';
@@ -1097,6 +1099,7 @@ export function ChatPanel({ session }: Props) {
   // conversations stream.
   const conversationTimeline = useConversationTimeline(session.stores, conversation?.id);
   const conversationRuntime = useConversationRuntime(session.stores, conversation?.id);
+  const agentDesktopPreferences = useAgentDesktopPreferences();
   const chatEntries = useMemo(() => sortChatEntries(conversationTimeline
     .filter((entry) => isChatTimelineEntry(entry) && !isChatReminderEntry(entry))), [conversationTimeline]);
   const items = useMemo(() => buildChatRenderItems(chatEntries), [chatEntries]);
@@ -1969,7 +1972,9 @@ export function ChatPanel({ session }: Props) {
       />
       <div className="shrink-0 px-4 pt-2 pb-4">
         <div className="relative mx-auto max-w-2xl">
-          <ComputerLiveView session={session} conversationId={conversation.v2ConversationId ?? conversation.id} state={conversationRuntime?.desktopComputer} />
+          {/* Pinned here only when chosen in Settings; by default both live in the side panel. */}
+          {agentDesktopPreferences.browserPlacement === 'composer' ? <AgentBrowserLiveView session={session} conversationId={conversation.id} variant="card" /> : null}
+          {agentDesktopPreferences.computerPlacement === 'composer' ? <ComputerLiveView session={session} conversationId={conversation.v2ConversationId ?? conversation.id} state={conversationRuntime?.desktopComputer} /> : null}
           {readOnly ? null : permissionRequests.map(request => <PermissionRequestCard
             key={request.requestId}
             request={request}
