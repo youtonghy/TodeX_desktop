@@ -740,6 +740,7 @@ export const zhCN = {
   'computerSettings.grant': '请求授权',
   'computerSettings.grantHint': '系统授权提示会出现在 {host} 上，请在那里为 todex-agentd 授权。若没有弹出提示，会直接打开该电脑的系统设置对应页面，请在那里勾选 todex-agentd。',
   'computerSettings.grantHintMac': '点击“请求授权”后，{host} 会打开系统设置，并在窗口下方出现一个浮窗：把其中的 todex-agentd 图标拖进列表即可授权。',
+  'computerSettings.screenRestartHint': 'macOS 只在后端重启后才应用新的屏幕录制授权：刚授权后，请重启 {host} 上的 TodeX 后端。',
   'computerSettings.waiting': '等待授权',
   'computerSettings.legacyBackend': '此后端仍在桌面端执行 Computer Use，请升级后端后再使用。',
   'computerSettings.permissions': '系统权限',

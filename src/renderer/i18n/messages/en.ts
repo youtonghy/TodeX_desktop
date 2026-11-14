@@ -740,6 +740,7 @@ export const en: Messages = {
   'computerSettings.grant': 'Request permissions',
   'computerSettings.grantHint': 'The system prompts appear on {host}; grant them to todex-agentd there. If no prompt appears, the matching System Settings page opens on that computer: switch todex-agentd on there.',
   'computerSettings.grantHintMac': 'Request a permission and System Settings opens on {host} with a floating panel below its window: drag the todex-agentd icon from the panel into the list to grant it.',
+  'computerSettings.screenRestartHint': 'macOS applies a new Screen Recording grant only after a restart: once granted, restart the TodeX backend on {host}.',
   'computerSettings.waiting': 'Waiting for grant',
   'computerSettings.legacyBackend': 'This backend still runs Computer Use on desktops. Update it to use Computer Use.',
   'computerSettings.permissions': 'System permissions',

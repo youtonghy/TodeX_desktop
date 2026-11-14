@@ -740,6 +740,7 @@ export const ko: Messages = {
   'computerSettings.grant': '권한 요청',
   'computerSettings.grantHint': '시스템 권한 요청은 {host}에 표시됩니다. 그곳에서 todex-agentd에 권한을 주세요. 요청이 나타나지 않으면 해당 컴퓨터에서 시스템 설정의 해당 페이지가 열리니 todex-agentd를 켜 주세요.',
   'computerSettings.grantHintMac': '“권한 요청”을 누르면 {host}에서 시스템 설정이 열리고 창 아래에 플로팅 패널이 나타납니다. 패널의 todex-agentd 아이콘을 목록으로 드래그하면 권한이 부여됩니다.',
+  'computerSettings.screenRestartHint': 'macOS는 새 화면 기록 권한을 재시작 후에만 적용합니다. 권한을 부여한 뒤 {host}의 TodeX 백엔드를 재시작하세요.',
   'computerSettings.waiting': '승인 대기 중',
   'computerSettings.legacyBackend': '이 백엔드는 아직 데스크톱에서 Computer Use를 실행합니다. 사용하려면 백엔드를 업데이트하세요.',
   'computerSettings.permissions': '시스템 권한',

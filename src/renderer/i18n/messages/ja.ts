@@ -740,6 +740,7 @@ export const ja: Messages = {
   'computerSettings.grant': '許可をリクエスト',
   'computerSettings.grantHint': 'システムの確認は {host} に表示されます。そこで todex-agentd に許可してください。表示されない場合は、そのコンピュータで該当するシステム設定のページが開くので、todex-agentd をオンにしてください。',
   'computerSettings.grantHintMac': '「許可をリクエスト」を押すと、{host} でシステム設定が開き、ウインドウの下にフローティングパネルが表示されます。パネルの todex-agentd アイコンをリストにドラッグすると許可されます。',
+  'computerSettings.screenRestartHint': 'macOS は新しい画面収録の許可を再起動後にのみ適用します。許可したら {host} の TodeX バックエンドを再起動してください。',
   'computerSettings.waiting': '許可待ち',
   'computerSettings.legacyBackend': 'このバックエンドはまだデスクトップで Computer Use を実行しています。使うにはバックエンドを更新してください。',
   'computerSettings.permissions': 'システム権限',

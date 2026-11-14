@@ -102,6 +102,7 @@ export function ComputerUseSettings({ settings, saving, onEnable, onRequestPermi
                 )}
               </SettingsRow>
             ))}
+            {status.platform === 'macos' ? <SettingsNote>{t('computerSettings.screenRestartHint', { host: status.host })}</SettingsNote> : null}
           </SettingsCard>
         </SettingsGroup>
       ) : null}
