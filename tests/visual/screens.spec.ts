@@ -20,6 +20,7 @@ const SETTINGS_TABS = {
   通知: 'notifications',
   'Agent 桌面工具': 'agent-desktop',
   'Agent 调用': 'agent-calling',
+  智能工作模式: 'smart-work-mode',
   关于: 'about',
 };
 
@@ -343,6 +344,27 @@ test('config sync: both values of an item, secrets hidden', async ({ page, openD
   await expect(mcp.getByText('"••••"')).toBeVisible();
   await settle(page);
   await expect(page).toHaveScreenshot('config-sync-values-light.png', { mask: volatile(page) });
+});
+
+// Claude Code offers Smart next to Implement and Plan.
+test('composer work mode menu with Smart', async ({ page, openDemo }) => {
+  await openDemo('light');
+  await page.getByRole('button', { name: /选择工作模式/ }).click();
+  await expect(page.getByRole('option', { name: '智能' })).toBeVisible();
+  await settle(page);
+  await expect(page).toHaveScreenshot('work-mode-menu-smart-light.png', { mask: volatile(page) });
+});
+
+// A smart conversation after its plan was approved: one quiet handoff line,
+// and the composer runs the execute stage's model with auto-approval.
+test('smart conversation with a plan handoff', async ({ page, openDemo }) => {
+  await openDemo('light');
+  await page.getByText('design-tokens', { exact: true }).click();
+  await page.getByText('拆分主题构建脚本').first().click();
+  await expect(page.getByRole('note').filter({ hasText: '已批准计划，已切换到 Opus · 自动审批执行' })).toBeVisible();
+  await expect(page.getByRole('button', { name: /选择工作模式/ })).toContainText('智能 · 执行中');
+  await settle(page);
+  await expect(page).toHaveScreenshot('smart-plan-handoff-light.png', { mask: volatile(page) });
 });
 
 test('fork from an earlier reply', async ({ page, openDemo }) => {
