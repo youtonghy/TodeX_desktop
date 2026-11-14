@@ -1448,6 +1448,8 @@ export const en: Messages = {
   'cap.noMcps': 'No MCP Servers found.',
   'cap.statusActive': 'Active',
   'cap.statusShadowed': 'Shadowed',
+  'cap.linked': "Linked",
+  'cap.linkedHint': "Installed as a symbolic link: read-only here; change it where the link points",
   'cap.statusInactive': 'Inactive',
   'cap.statusInvalid': 'Invalid',
   'cap.statusAvailable': 'Available',

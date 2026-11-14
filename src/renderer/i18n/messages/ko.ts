@@ -1448,6 +1448,8 @@ export const ko: Messages = {
   'cap.noMcps': 'MCP Server를 찾을 수 없습니다.',
   'cap.statusActive': '현재 활성화됨',
   'cap.statusShadowed': '가려짐',
+  'cap.linked': "링크",
+  'cap.linkedHint': "심볼릭 링크로 설치되어 여기서는 읽기 전용입니다. 링크가 가리키는 곳에서 수정하세요",
   'cap.statusInactive': '비활성',
   'cap.statusInvalid': '유효하지 않음',
   'cap.statusAvailable': '사용 가능',

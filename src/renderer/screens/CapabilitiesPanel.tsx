@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { RiAddLine, RiArrowDownSLine, RiDeleteBinLine, RiEditLine, RiFlashlightLine, RiGitlabLine, RiRefreshLine } from '@remixicon/react';
 import type { CatalogScope, McpCatalog, McpServerCatalogDescriptor, McpServerConfig, ProviderDescriptor, ProviderKind, SkillCatalog, SkillCatalogDescriptor } from '@todex/protocol/v2';
 import { providerDisplayName } from '@todex/protocol/v2';
+import { Chip } from '@/components/base/badges/chip';
 import { Button } from '@/components/base/buttons/button';
 import { PillTab, PillTabList } from '@/components/base/tabs/pill-tab';
 import { Tab, TabList, Tabs } from '@/components/base/tabs/tabs';
@@ -108,7 +109,9 @@ export function CapabilitiesPanel({
     const items = selectedCatalogs.flatMap((item) => (item.skills?.skills ?? []).map((skill) => ({
       skill,
       provider: (item.skills?.provider ?? choice) as ProviderKind,
-      editable: Boolean(manager && item.skills?.editable),
+      // A skill installed as a symlink is read-only here: edits would land in
+      // the other tool's copy the link points at.
+      editable: Boolean(manager && item.skills?.editable && !skill.linked),
     })));
     // Resource ids are provider-scoped, so the common view folds one shared
     // skill across providers by name and source, like the MCP list below.
@@ -392,7 +395,10 @@ function SkillRow({
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between gap-2">
-            <p className="truncate text-body-semibold text-text-primary">{item.name}</p>
+            <div className="flex min-w-0 items-center gap-2">
+              <p className="truncate text-body-semibold text-text-primary">{item.name}</p>
+              {item.linked ? <Chip variant="caption" color="neutral" title={t('cap.linkedHint')}>{t('cap.linked')}</Chip> : null}
+            </div>
             <div className="flex shrink-0 items-center gap-2">
               <span className={selected ? 'text-caption-1-medium text-text-accent' : 'text-caption-1-regular text-text-secondary'}>
                 {selected ? t('cap.attached') : status}

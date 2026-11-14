@@ -264,6 +264,20 @@ test('settings: live view placement', async ({ page, openDemo }) => {
   await expect(page).toHaveScreenshot('settings-live-view-placement-light.png', { mask: volatile(page) });
 });
 
+// Claude Code's skills: a skill installed as a symlink is tagged and has
+// no edit or delete action.
+test('settings: Claude Code skills with a linked skill', async ({ page, openDemo }) => {
+  await openDemo('light');
+  await page.getByRole('button', { name: '设置', exact: true }).click();
+  await settingsSection(page, 'CLI 管理').click();
+  await page.getByRole('button', { name: /^Claude Code/ }).first().click();
+  await page.getByRole('tab', { name: 'MCP / Skill' }).click();
+  await expect(page.locator('p', { hasText: /^plan-gate$/ })).toBeVisible();
+  await expect(page.getByText('链接', { exact: true })).toBeVisible();
+  await settle(page);
+  await expect(page).toHaveScreenshot('settings-claude-skills-linked-light.png', { mask: volatile(page) });
+});
+
 // SSH settings with the connection approval switched to per command.
 test('settings: SSH approval per command', async ({ page, openDemo }) => {
   await openDemo('light');

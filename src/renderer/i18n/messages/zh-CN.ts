@@ -1448,6 +1448,8 @@ export const zhCN = {
   'cap.noMcps': '没有找到 MCP Server。',
   'cap.statusActive': '当前启用',
   'cap.statusShadowed': '被覆盖',
+  'cap.linked': "链接",
+  'cap.linkedHint': "通过符号链接安装，在此只读；请在链接指向的位置修改",
   'cap.statusInactive': '未启用',
   'cap.statusInvalid': '无效',
   'cap.statusAvailable': '可用',

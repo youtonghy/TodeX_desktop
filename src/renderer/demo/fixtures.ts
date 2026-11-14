@@ -486,6 +486,8 @@ export function demoSkills(providerKind: ProviderKind): SkillCatalog {
       { resourceId: `${providerKind}:skill:frontend-review`, name: 'frontend-review', description: '按设计规范审查 UI 的间距、层级与对比度', scope: 'project', source: '.claude/skills/frontend-review', active: true, valid: true },
       { resourceId: `${providerKind}:skill:release-notes`, name: 'release-notes', description: '根据合并的 PR 生成发布说明', scope: 'user', source: '~/.agents/shared/skills/release-notes', active: true, valid: true },
       { resourceId: `${providerKind}:skill:db-migration`, name: 'db-migration', description: '生成可回滚的数据库迁移脚本', scope: 'project', source: '.claude/skills/db-migration', active: false, valid: true },
+      // Installed as a symlink (~/.claude/skills/plan-gate -> ~/.codex/skills/plan-gate): read-only.
+      { resourceId: `${providerKind}:skill:plan-gate`, name: 'plan-gate', description: '复杂任务先只读调查并给出完整计划，批准后再实施', scope: 'user', source: '~/.claude/skills/plan-gate', active: true, valid: true, linked: true },
     ],
   };
 }

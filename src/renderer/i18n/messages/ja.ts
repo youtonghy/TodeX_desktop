@@ -1448,6 +1448,8 @@ export const ja: Messages = {
   'cap.noMcps': 'MCP Server が見つかりません。',
   'cap.statusActive': '現在有効',
   'cap.statusShadowed': '上書き済み',
+  'cap.linked': "リンク",
+  'cap.linkedHint': "シンボリックリンクとしてインストールされているため、ここでは読み取り専用です。リンク先で変更してください",
   'cap.statusInactive': '未有効',
   'cap.statusInvalid': '無効',
   'cap.statusAvailable': '利用可能',
