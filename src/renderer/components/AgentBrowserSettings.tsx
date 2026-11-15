@@ -3,7 +3,7 @@ import { RiAddLine, RiDeleteBinLine, RiDownloadLine, RiFolder3Line, RiGlobalLine
 import { Chip } from '@/components/base/badges/chip';
 import { Button } from '@/components/base/buttons/button';
 import { Select, SelectItem } from '@/components/base/select/select';
-import type { AgentBrowserProfiles, AgentDesktopSettings } from '@todex/protocol/agentDesktop';
+import type { AgentBrowserEngine, AgentBrowserInstall, AgentBrowserProfiles, AgentDesktopSettings } from '@todex/protocol/agentDesktop';
 import type { V2ApiClient } from '@todex/protocol/v2';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { useT } from '../i18n';
@@ -13,10 +13,15 @@ import { IconAction } from './ui/icon-action';
 import { ProgressBar } from './ui/progress-bar';
 import { toast } from './ui/toast';
 
+const ROW_SELECT_TRIGGER = 'h-8 w-auto gap-1 rounded-lg px-2 py-1.5';
+const ENGINES: AgentBrowserEngine[] = ['chromium', 'kitesurf'];
+const ENGINE_LABELS = { chromium: 'agentBrowser.engineChromium', kitesurf: 'agentBrowser.engineKitesurf' } as const;
+
 /**
- * The agent browser's settings page: its Chromium on the backend's computer
- * (download, progress, problems) and the per-workspace browser profiles,
- * which keep cookies and storage apart and can be switched or deleted.
+ * The agent browser's settings page: its engine on the backend's computer
+ * (Chromium, or the experimental Kitesurf; download, progress, problems) and
+ * the per-workspace browser profiles Chromium uses, which keep cookies and
+ * storage apart and can be switched or deleted.
  */
 export function AgentBrowserSettings({ session, backendId, api, settings, onSettings }: {
   session: TodeXSession;
@@ -52,7 +57,9 @@ export function AgentBrowserSettings({ session, backendId, api, settings, onSett
   };
 
   if (!status) return <p className="text-body-regular text-text-secondary">{t('agentBrowser.legacyBackend')}</p>;
-  const chromium = status.chromium;
+  // Backends without `engine` run Chromium only.
+  const engine = status.engine ?? 'chromium';
+  const kitesurf = engine === 'kitesurf' ? status.engines?.kitesurf : undefined;
   // The open workspace counts only when it lives on that backend.
   const workspace = backendId === session.activeBackendConnectionId ? session.activeWorkspace : null;
   const workspaceKey = workspace ? (workspace.id || workspace.path) : '';
@@ -60,41 +67,65 @@ export function AgentBrowserSettings({ session, backendId, api, settings, onSett
   const usedBy = (profileId: string) => Object.entries(profiles.workspaces)
     .filter(([, id]) => id === profileId)
     .map(([key]) => session.workspaces.find(item => item.id === key || item.path === key)?.name || key.split(/[\\/]/).pop() || key);
-  const progress = chromium.progress === undefined ? undefined : Math.round(chromium.progress * 100);
+  const install = () => { void run(async () => onSettings(await api.installAgentBrowser())); };
 
   return (
     <div className="flex flex-col gap-6">
       <LiveViewPlacementSetting tool="browser" />
       <SettingsGroup label={t('agentBrowser.componentSection')}>
         <SettingsCard>
-          <SettingsRow
-            icon={RiGlobalLine}
-            label="Chromium"
-            description={chromium.installed
-              ? t('agentBrowser.chromiumVersion', { version: chromium.version })
-              : chromium.downloading
-                ? t('agentBrowser.chromiumDownloading', { progress: progress ?? 0 })
-                : t('agentBrowser.chromiumMissing')}
-          >
-            {chromium.installed ? (
-              <Chip variant="caption" color="lime">{t('agentDesktop.statusReady')}</Chip>
-            ) : !chromium.downloading ? (
-              <Button size="small" variant="secondary" leadingIcon={RiDownloadLine} disabled={busy} onClick={() => { void run(async () => onSettings(await api.installAgentBrowser())); }}>
-                {t('agentBrowser.install')}
-              </Button>
-            ) : null}
-          </SettingsRow>
-          {chromium.downloading ? (
-            <SettingsNote>
-              <ProgressBar aria-label={t('agentBrowser.chromiumDownloading', { progress: progress ?? 0 })} showValue={false} value={progress} />
-            </SettingsNote>
+          {status.engine ? (
+            <SettingsRow label={t('agentBrowser.engine')} description={t('agentBrowser.engineHint', { host: status.host })}>
+              <Select
+                aria-label={t('agentBrowser.engine')}
+                selectedKey={engine}
+                isDisabled={busy}
+                triggerClassName={ROW_SELECT_TRIGGER}
+                onSelectionChange={value => {
+                  if (ENGINES.includes(value as AgentBrowserEngine) && value !== engine) {
+                    void run(async () => onSettings(await api.setAgentBrowserEngine(value as AgentBrowserEngine)));
+                  }
+                }}
+              >
+                {ENGINES.map(id => <SelectItem key={id} id={id} textValue={t(ENGINE_LABELS[id])}>{t(ENGINE_LABELS[id])}</SelectItem>)}
+              </Select>
+            </SettingsRow>
           ) : null}
-          {chromium.error ? <SettingsNote tone="danger">{chromium.error}</SettingsNote> : null}
-          {status.reason && chromium.installed ? <SettingsNote>{status.reason}</SettingsNote> : null}
+          {kitesurf ? (
+            <>
+              <SettingsNote>{t('agentBrowser.kitesurfHint')}</SettingsNote>
+              {kitesurf.supported ? (
+                <EngineInstallRow
+                  name="Kitesurf"
+                  install={kitesurf}
+                  busy={busy}
+                  downloading={t('agentBrowser.kitesurfDownloading', { progress: percent(kitesurf) })}
+                  missing={t('agentBrowser.kitesurfMissing')}
+                  onInstall={install}
+                />
+              ) : null}
+              {kitesurf.error ? <SettingsNote tone="danger">{kitesurf.error}</SettingsNote> : null}
+              {status.reason && (kitesurf.installed || !kitesurf.supported) ? <SettingsNote>{status.reason}</SettingsNote> : null}
+            </>
+          ) : (
+            <>
+              <EngineInstallRow
+                name="Chromium"
+                install={status.chromium}
+                busy={busy}
+                downloading={t('agentBrowser.chromiumDownloading', { progress: percent(status.chromium) })}
+                missing={t('agentBrowser.chromiumMissing')}
+                onInstall={install}
+              />
+              {status.chromium.error ? <SettingsNote tone="danger">{status.chromium.error}</SettingsNote> : null}
+              {status.reason && status.chromium.installed ? <SettingsNote>{status.reason}</SettingsNote> : null}
+            </>
+          )}
         </SettingsCard>
       </SettingsGroup>
 
-      {workspace ? (
+      {/* Kitesurf keeps nothing between tabs: no workspace profile applies. */}
+      {workspace && !kitesurf ? (
         <SettingsGroup label={t('agentBrowser.workspaceSection')} description={t('agentDesktop.partitionSwitchHint')}>
           <SettingsCard>
             <SettingsRow
@@ -124,8 +155,8 @@ export function AgentBrowserSettings({ session, backendId, api, settings, onSett
 
       <SettingsGroup
         label={t('agentBrowser.profilesSection')}
-        description={t('agentBrowser.profilesHint')}
-        action={workspace ? (
+        description={t(kitesurf ? 'agentBrowser.kitesurfProfilesHint' : 'agentBrowser.profilesHint')}
+        action={workspace && !kitesurf ? (
           <Button
             size="small"
             variant="secondary"
@@ -173,5 +204,47 @@ export function AgentBrowserSettings({ session, backendId, api, settings, onSett
         </SettingsCard>
       </SettingsGroup>
     </div>
+  );
+}
+
+function percent(install: AgentBrowserInstall) {
+  return Math.round((install.progress ?? 0) * 100);
+}
+
+/** One engine's install on the backend's computer: version, download and its progress. */
+function EngineInstallRow({ name, install, busy, downloading, missing, onInstall }: {
+  name: string;
+  install: AgentBrowserInstall;
+  busy: boolean;
+  /** Description while downloading. */
+  downloading: string;
+  /** Description while not installed. */
+  missing: string;
+  onInstall: () => void;
+}) {
+  const t = useT();
+  return (
+    <>
+      <SettingsRow
+        icon={RiGlobalLine}
+        label={name}
+        description={install.installed
+          ? t('agentBrowser.chromiumVersion', { version: install.version })
+          : install.downloading ? downloading : missing}
+      >
+        {install.installed ? (
+          <Chip variant="caption" color="lime">{t('agentDesktop.statusReady')}</Chip>
+        ) : !install.downloading ? (
+          <Button size="small" variant="secondary" leadingIcon={RiDownloadLine} disabled={busy} onClick={onInstall}>
+            {t('agentBrowser.install')}
+          </Button>
+        ) : null}
+      </SettingsRow>
+      {install.downloading ? (
+        <SettingsNote>
+          <ProgressBar aria-label={downloading} showValue={false} value={percent(install)} />
+        </SettingsNote>
+      ) : null}
+    </>
   );
 }

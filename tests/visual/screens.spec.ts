@@ -199,6 +199,30 @@ test('settings: computer use engine', async ({ page, openDemo }) => {
   await expect(page).toHaveScreenshot('settings-computer-use-engine-light.png', { mask: volatile(page) });
 });
 
+// The agent browser's page: its engine, Chromium and the workspace profiles.
+test('settings: agent browser', async ({ page, openDemo }) => {
+  await openDemo('light');
+  await page.getByRole('button', { name: '设置', exact: true }).click();
+  await settingsSection(page, 'Agent 桌面工具').click();
+  await page.getByRole('button', { name: /^Agent 浏览器/ }).click();
+  await expect(page.getByRole('button', { name: 'Chromium 引擎' })).toBeVisible();
+  await settle(page);
+  await expect(page).toHaveScreenshot('settings-agent-browser-light.png', { mask: volatile(page) });
+});
+
+// The same page with the experimental Kitesurf engine picked: no workspace profile.
+test('settings: agent browser kitesurf', async ({ page, openDemo }) => {
+  await openDemo('light');
+  await page.getByRole('button', { name: '设置', exact: true }).click();
+  await settingsSection(page, 'Agent 桌面工具').click();
+  await page.getByRole('button', { name: /^Agent 浏览器/ }).click();
+  await page.getByRole('button', { name: 'Chromium 引擎' }).click();
+  await page.getByRole('option', { name: 'Kitesurf（实验）' }).click();
+  await expect(page.getByText('已就绪')).toBeVisible();
+  await settle(page);
+  await expect(page).toHaveScreenshot('settings-agent-browser-kitesurf-light.png', { mask: volatile(page) });
+});
+
 // Computer Use on a Mac without its OS permissions, one of them asked for.
 test('settings: computer use permissions', async ({ page, openDemo }) => {
   await openDemo('light', 'computer=ungranted');

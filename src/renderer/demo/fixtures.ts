@@ -607,6 +607,10 @@ export const demoAgentDesktop: AgentDesktopSettings = {
     available: true,
     host: 'lumen-devbox',
     chromium: { version: '152.0.7977.78', installed: true, downloading: false, overridden: false },
+    engine: 'chromium',
+    engines: {
+      kitesurf: { version: '2026.11.13-4a29038', installed: false, downloading: false, overridden: false, supported: true, available: false, reason: 'Kitesurf is not installed yet.' },
+    },
   },
   computer: {
     supported: true,

@@ -147,7 +147,9 @@ function BackendDesktopSettings({ session, backend, page, onPageChange }: {
       return (
         <SettingsSubpage
           title={t('agentBrowser.title')}
-          description={settings.browser ? t('agentBrowser.settingsHint', { host: settings.browser.host }) : undefined}
+          description={settings.browser
+            ? t(settings.browser.engine === 'kitesurf' ? 'agentBrowser.settingsHintKitesurf' : 'agentBrowser.settingsHint', { host: settings.browser.host })
+            : undefined}
           onBack={back}
         >
           <AgentBrowserSettings session={session} backendId={backend.backendId} api={api} settings={settings} onSettings={setSettings} />
@@ -217,13 +219,17 @@ function BackendDesktopSettings({ session, backend, page, onPageChange }: {
 type Summary = { label: string; color: ChipColor };
 
 function browserSummary(settings: Settings, t: ReturnType<typeof useT>): Summary {
-  const chromium = settings.browser?.chromium;
-  if (!chromium) return { label: t('agentDesktop.statusUpdateBackend'), color: 'warning' };
-  if (chromium.installed) return settings.browser?.available === false
+  const browser = settings.browser;
+  if (!browser?.chromium) return { label: t('agentDesktop.statusUpdateBackend'), color: 'warning' };
+  // The chosen engine's install; Chromium on backends without engines.
+  const kitesurf = browser.engine === 'kitesurf' ? browser.engines?.kitesurf : undefined;
+  if (kitesurf && !kitesurf.supported) return { label: t('agentDesktop.statusUnavailable'), color: 'default' };
+  const install = kitesurf ?? browser.chromium;
+  if (install.installed) return browser.available === false
     ? { label: t('agentDesktop.statusUnavailable'), color: 'warning' }
     : { label: t('agentDesktop.statusReady'), color: 'success' };
-  if (chromium.downloading) return { label: t('agentDesktop.statusDownloading', { progress: Math.round((chromium.progress ?? 0) * 100) }), color: 'default' };
-  return { label: t('agentDesktop.statusNotInstalled'), color: chromium.error ? 'danger' : 'warning' };
+  if (install.downloading) return { label: t('agentDesktop.statusDownloading', { progress: Math.round((install.progress ?? 0) * 100) }), color: 'default' };
+  return { label: t('agentDesktop.statusNotInstalled'), color: install.error ? 'danger' : 'warning' };
 }
 
 function computerSummary(settings: Settings, t: ReturnType<typeof useT>): Summary {

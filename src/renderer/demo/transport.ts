@@ -1096,6 +1096,20 @@ function route(request: SecureRequest): SecureResponse {
       const asked = body.permission === 'accessibility' && !accessibility ? 'accessibility' : !screen ? 'screen' : !accessibility ? 'accessibility' : undefined;
       agentDesktop = { ...agentDesktop, computer: { ...agentDesktop.computer, permissionRequest: asked } };
     }
+    // The demo backend "installs" Kitesurf at once, too.
+    if ((body.browserEngine === 'chromium' || body.browserEngine === 'kitesurf') && agentDesktop.browser) {
+      const kitesurf = agentDesktop.browser.engines?.kitesurf;
+      const installed = body.browserEngine === 'kitesurf' || kitesurf?.installed === true;
+      agentDesktop = {
+        ...agentDesktop,
+        browser: {
+          ...agentDesktop.browser,
+          engine: body.browserEngine,
+          available: true,
+          engines: { kitesurf: { version: '2026.11.13-4a29038', installed, downloading: false, overridden: false, supported: true, available: installed, ...(installed ? {} : { reason: 'Kitesurf is not installed yet.' }) } },
+        },
+      };
+    }
     // The demo backend "installs" agent-desktop at once.
     if (body.computerEngine === 'native' || body.computerEngine === 'agentDesktop') {
       const installed = body.computerEngine === 'agentDesktop' || agentDesktop.computerEngines?.agentDesktop.installed === true;
