@@ -3,7 +3,7 @@ import { RiAddLine, RiDeleteBinLine, RiDownloadLine, RiFolder3Line, RiGlobalLine
 import { Chip } from '@/components/base/badges/chip';
 import { Button } from '@/components/base/buttons/button';
 import { Select, SelectItem } from '@/components/base/select/select';
-import type { AgentBrowserEngine, AgentBrowserInstall, AgentBrowserProfiles, AgentDesktopSettings } from '@todex/protocol/agentDesktop';
+import type { AgentBrowserEngine, AgentBrowserHostApproval, AgentBrowserInstall, AgentBrowserProfiles, AgentDesktopSettings } from '@todex/protocol/agentDesktop';
 import type { V2ApiClient } from '@todex/protocol/v2';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { useT } from '../i18n';
@@ -16,6 +16,8 @@ import { toast } from './ui/toast-store';
 const ROW_SELECT_TRIGGER = 'h-8 w-auto gap-1 rounded-lg px-2 py-1.5';
 const ENGINES: AgentBrowserEngine[] = ['chromium', 'kitesurf'];
 const ENGINE_LABELS = { chromium: 'agentBrowser.engineChromium', kitesurf: 'agentBrowser.engineKitesurf' } as const;
+const HOST_APPROVALS: AgentBrowserHostApproval[] = ['ask', 'auto'];
+const HOST_APPROVAL_LABELS = { ask: 'agentBrowser.hostApprovalAsk', auto: 'agentBrowser.hostApprovalAuto' } as const;
 
 /**
  * The agent browser's settings page: its engine on the backend's computer
@@ -215,6 +217,27 @@ export function AgentBrowserSettings({ session, backendId, api, settings, onSett
       {hosts ? (
         <SettingsGroup label={t('agentBrowser.hostsSection')} description={t('agentBrowser.hostsHint')}>
           <SettingsCard>
+            {/* Backends without `hostApproval` always ask. */}
+            {status.hostApproval ? (
+              <SettingsRow
+                label={t('agentBrowser.hostApproval')}
+                description={t(status.hostApproval === 'auto' ? 'agentBrowser.hostApprovalAutoHint' : 'agentBrowser.hostApprovalAskHint')}
+              >
+                <Select
+                  aria-label={t('agentBrowser.hostApproval')}
+                  selectedKey={status.hostApproval}
+                  isDisabled={busy}
+                  triggerClassName={ROW_SELECT_TRIGGER}
+                  onSelectionChange={value => {
+                    if (HOST_APPROVALS.includes(value as AgentBrowserHostApproval) && value !== status.hostApproval) {
+                      void run(async () => onSettings(await api.setAgentBrowserHostApproval(value as AgentBrowserHostApproval)));
+                    }
+                  }}
+                >
+                  {HOST_APPROVALS.map(id => <SelectItem key={id} id={id} textValue={t(HOST_APPROVAL_LABELS[id])}>{t(HOST_APPROVAL_LABELS[id])}</SelectItem>)}
+                </Select>
+              </SettingsRow>
+            ) : null}
             {hosts.length ? hosts.map(host => (
               <SettingsRow key={host} icon={RiLink} label={<bdi dir="ltr" className="truncate">{host}</bdi>}>
                 <IconAction

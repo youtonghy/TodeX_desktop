@@ -611,6 +611,7 @@ export const demoAgentDesktop: AgentDesktopSettings = {
     engines: {
       kitesurf: { version: '2026.11.13-4a29038', installed: false, downloading: false, overridden: false, supported: true, available: false, reason: 'Kitesurf is not installed yet.' },
     },
+    hostApproval: 'ask',
   },
   computer: {
     supported: true,

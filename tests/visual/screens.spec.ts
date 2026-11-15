@@ -212,6 +212,22 @@ test('settings: agent browser', async ({ page, openDemo }) => {
   await expect(page).toHaveScreenshot('settings-agent-browser-light.png', { mask: volatile(page) });
 });
 
+// The same page with site approval turned off: no question per site.
+test('settings: agent browser without site approval', async ({ page, openDemo }) => {
+  await openDemo('light');
+  await page.getByRole('button', { name: '设置', exact: true }).click();
+  await settingsSection(page, 'Agent 桌面工具').click();
+  await page.getByRole('button', { name: /^Agent 浏览器/ }).click();
+  const approval = page.getByRole('button', { name: /站点审核/ });
+  await approval.scrollIntoViewIfNeeded();
+  await approval.click();
+  await page.getByRole('option', { name: '无需审核' }).click();
+  await expect(page.getByText('对话获准使用浏览器后，打开任何站点都不再询问')).toBeVisible();
+  await page.getByText('docs.example.com').scrollIntoViewIfNeeded();
+  await settle(page);
+  await expect(page).toHaveScreenshot('settings-agent-browser-no-approval-light.png', { mask: volatile(page) });
+});
+
 // The same page with the experimental Kitesurf engine picked: no workspace profile.
 test('settings: agent browser kitesurf', async ({ page, openDemo }) => {
   await openDemo('light');

@@ -1112,6 +1112,9 @@ function route(request: SecureRequest): SecureResponse {
       const asked = body.permission === 'accessibility' && !accessibility ? 'accessibility' : !screen ? 'screen' : !accessibility ? 'accessibility' : undefined;
       agentDesktop = { ...agentDesktop, computer: { ...agentDesktop.computer, permissionRequest: asked } };
     }
+    if ((body.browserHostApproval === 'ask' || body.browserHostApproval === 'auto') && agentDesktop.browser) {
+      agentDesktop = { ...agentDesktop, browser: { ...agentDesktop.browser, hostApproval: body.browserHostApproval } };
+    }
     // The demo backend "installs" Kitesurf at once, too.
     if ((body.browserEngine === 'chromium' || body.browserEngine === 'kitesurf') && agentDesktop.browser) {
       const kitesurf = agentDesktop.browser.engines?.kitesurf;
