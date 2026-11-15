@@ -35,7 +35,7 @@ import { Tooltip, TooltipTrigger } from '@/components/base/tooltip/tooltip';
 import { IconAction } from '@/components/ui/icon-action';
 import { Menu, MenuItem, MenuPopover, MenuSeparator, MenuTrigger } from '@/components/ui/menu';
 import { ConfirmDialog } from '@/components/ui/modal';
-import { toast } from '@/components/ui/toast';
+import { toast } from '@/components/ui/toast-store';
 import { cx } from '@/utils/cx';
 import { useSidebarPins } from '../session/useSidebarPins';
 import { searchConversations } from '../session/conversationSearch';
@@ -57,12 +57,14 @@ import { RenameDialog } from './RenameDialog';
 import { WorkspaceTagsDialog } from './WorkspaceTagsDialog';
 import { WorkspaceHoverTooltip } from './WorkspaceHoverTooltip';
 import { AppIcon } from './AppIcon';
-import { WORKSPACE_ICON_CHOICES, WORKSPACE_RING_STYLES, WorkspaceStatusRing, ringStyleKey, workspaceIconComponent } from './WorkspaceIcon';
+import { WorkspaceStatusRing } from './WorkspaceIcon';
+import { WORKSPACE_ICON_CHOICES, WORKSPACE_RING_STYLES, ringStyleKey, workspaceIconComponent } from './workspaceIcons';
 import type { TodeXSession } from '../session/useTodeXSession';
 import type { ProviderKind } from '@todex/protocol/v2';
 import { connectionStateLabel, conversationDisplayTitle, isReadOnlyConversation, isPrivateConversation, formatResetInstant, getConversationStatus, healthLabelOf, isConversationHighlighted, isListedConversation, isNoneWorkspaceId, NONE_WORKSPACE_ID, noneWorkspaceRowBackendId, noneWorkspaceRowId, workspaceDisplayName, type TimelineEntry } from '../session/helpers';
 import { ownerBackendId } from '../session/backendRouting';
-import { ShortcutHint, shortcutKeys, useAppShortcuts, type ShortcutId } from '../lib/shortcuts';
+import { ShortcutHint } from './ShortcutHint';
+import { shortcutKeys, useAppShortcuts, type ShortcutId } from '../lib/shortcuts';
 import { useT } from '../i18n';
 
 type Props = {

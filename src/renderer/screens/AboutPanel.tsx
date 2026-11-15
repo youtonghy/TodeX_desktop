@@ -2,7 +2,7 @@ import { RiFileCopyLine, RiGithubLine, RiServerLine } from '@remixicon/react';
 import { Chip } from '@/components/base/badges/chip';
 import { Button } from '@/components/base/buttons/button';
 import { IconAction } from '@/components/ui/icon-action';
-import { toast } from '@/components/ui/toast';
+import { toast } from '@/components/ui/toast-store';
 import { AppIcon } from '../components/AppIcon';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { connectionStateLabel } from '../session/helpers';

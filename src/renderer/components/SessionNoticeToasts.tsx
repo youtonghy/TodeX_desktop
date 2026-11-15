@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { connectionFailureLabel, type ConnectionHealth } from '../session/helpers';
 import { useT } from '../i18n';
-import { useNoticeToast } from './NoticeToast';
+import { useNoticeToast } from './useNoticeToast';
 
 type Props = {
   lastError: string;

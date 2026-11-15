@@ -10,7 +10,7 @@ import { CopyCodeButton } from '@/components/ui/code-block';
 import { EmptyState } from '@/components/ui/empty-state';
 import { IconAction } from '@/components/ui/icon-action';
 import { ConfirmDialog, Modal } from '@/components/ui/modal';
-import { toast } from '@/components/ui/toast';
+import { toast } from '@/components/ui/toast-store';
 import { useT, type MessageKey } from '../../i18n';
 import { SettingsCard, SettingsGroup } from '../settings/SettingsRows';
 import { APPROVAL_LABELS, ApiKeyFormModal, formatKeyDate, type ApiKeyFormValues } from './ApiKeyFormModal';

@@ -9,7 +9,7 @@ import { Textarea } from '@/components/base/textarea/textarea';
 import { Alert } from '@/components/ui/alert';
 import { IconAction } from '@/components/ui/icon-action';
 import { Spinner } from '@/components/ui/spinner';
-import { toast } from '@/components/ui/toast';
+import { toast } from '@/components/ui/toast-store';
 import { SettingsCard, SettingsGroup, SETTINGS_ROW } from '@/components/settings/SettingsRows';
 import { useT, type MessageKey } from '@/i18n';
 import { cx } from '@/utils/cx';

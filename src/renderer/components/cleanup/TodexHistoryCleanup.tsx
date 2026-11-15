@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Chip } from '@/components/base/badges/chip';
 import { BackendSelect } from '@/components/ui/backend-select';
-import { toast } from '@/components/ui/toast';
+import { toast } from '@/components/ui/toast-store';
 import type { ConversationStorageEntry, HistoryCleanupPolicyResponse } from '@todex/protocol/v2';
 import {
   CleanupPolicyCard,

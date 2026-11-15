@@ -31,7 +31,7 @@ import { ConfirmDialog } from '../ui/modal';
 import { CodeBlock } from '../ui/code-block';
 import { ProgressBar } from '../ui/progress-bar';
 import { Spinner } from '../ui/spinner';
-import { toast } from '../ui/toast';
+import { toast } from '../ui/toast-store';
 import { SettingsCard, SettingsGroup, SettingsNote, SettingsRow, SettingsValueField } from './SettingsRows';
 
 const ADMIN_POLL_MS = 3000;

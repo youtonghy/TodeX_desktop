@@ -11,29 +11,19 @@ import { BACKEND_LABEL_COLORS, backendLabelColor, type BackendConnectionProfile 
 import { daemonPeer } from '../../session/daemonPeers';
 import { UNPAIRED_TRANSPORT, backendApi, connectionStateLabel, healthLabelOf, isVersionMismatch } from '../../session/helpers';
 import type { ConfigSyncPreset } from '../../session/useConfigSync';
-import type { BackendLinkStatus, TodeXSession } from '../../session/useTodeXSession';
+import type { TodeXSession } from '../../session/useTodeXSession';
 import { useT } from '../../i18n';
 import { DevicePairingPanel } from '../DevicePairingPanel';
 import { HistoryEncryptionPanel } from '../HistoryEncryptionPanel';
 import { ConfirmDialog } from '../ui/modal';
 import { ConfigSyncSettings } from './ConfigSyncSettings';
 import { SettingsCard, SettingsEntry, SettingsGroup, SettingsRow, SettingsSubpage } from './SettingsRows';
-
-/** `page` value of the config sync page (backend ids never take this form). */
-export const CONFIG_SYNC_PAGE = '__config-sync__';
-
-/** What "sync agent config to a new backend" preselects; SSH hosts are
- * left out because the target rarely holds the matching private keys. */
-export const AGENT_CONFIG_CATEGORIES: ConfigSyncPreset['categories'] = ['accounts', 'settings', 'mcp', 'skills'];
+import { AGENT_CONFIG_CATEGORIES, CONFIG_SYNC_PAGE, agentConfigSource, linkOf } from './backendConnection';
 
 const STATE_COLORS = { open: 'lime', connecting: 'yellow', error: 'rose', closed: 'neutral', idle: 'neutral' } as const;
 
 function BackendDot({ profile }: { profile: BackendConnectionProfile }) {
   return <span aria-hidden="true" className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: backendLabelColor(profile) }} />;
-}
-
-function linkOf(session: TodeXSession, backendId: string): BackendLinkStatus | undefined {
-  return session.backendLinkStatus[backendId];
 }
 
 /**
@@ -129,17 +119,6 @@ export function BackendConnectionSettings({ session, page, onPageChange, deviceN
       </SettingsCard>
       {footer}
     </>
-  );
-}
-
-/** The backend to copy agent config from: the paired backend other than
- * `targetId` that connected most recently, else the first paired one. */
-export function agentConfigSource(session: TodeXSession, targetId: string): BackendConnectionProfile | undefined {
-  const candidates = session.backendConnections.filter(item => item.id !== targetId && item.deviceSecret);
-  const openedAt = (item: BackendConnectionProfile) => linkOf(session, item.id)?.openedAt ?? 0;
-  return candidates.reduce<BackendConnectionProfile | undefined>(
-    (best, item) => (!best || openedAt(item) > openedAt(best) ? item : best),
-    undefined,
   );
 }
 

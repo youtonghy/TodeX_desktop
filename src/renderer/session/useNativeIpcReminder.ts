@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { ipcServerUrl } from '@todex/protocol/ipcServerUrl';
-import { toast } from '@/components/ui/toast';
+import { toast } from '@/components/ui/toast-store';
 import { t } from '../i18n';
 import { debugLog } from '../lib/debugLogger';
 import { loadJson } from '../lib/storage';

@@ -1,7 +1,7 @@
 import type { SshFailureKind } from '@todex/protocol/ssh';
 import type { V2ApiClient } from '@todex/protocol/v2';
 import type { MessageKey } from '../../i18n';
-import { toast } from '@/components/ui/toast';
+import { toast } from '@/components/ui/toast-store';
 
 export type SshApi = () => V2ApiClient;
 

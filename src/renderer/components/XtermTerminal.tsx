@@ -23,7 +23,7 @@ import { Input } from '@/components/base/input/input';
 import { ConfirmDialog } from '@/components/ui/modal';
 import { ContextMenu, Menu, MenuItem, MenuSeparator } from '@/components/ui/menu';
 import { IconAction } from '@/components/ui/icon-action';
-import { toast } from '@/components/ui/toast';
+import { toast } from '@/components/ui/toast-store';
 import { cx } from '@/utils/cx';
 import { t as translate, useT } from '../i18n';
 import { platform } from '../platform';

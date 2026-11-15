@@ -10,7 +10,7 @@ import { Alert } from '@/components/ui/alert';
 import { IconAction } from '@/components/ui/icon-action';
 import { ConfirmDialog } from '@/components/ui/modal';
 import { Spinner, SpinnerIcon } from '@/components/ui/spinner';
-import { toast } from '@/components/ui/toast';
+import { toast } from '@/components/ui/toast-store';
 import { useT, type MessageKey } from '@/i18n';
 
 const POLL_MS = 1500;

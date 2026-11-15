@@ -15,7 +15,7 @@ import { BackendScopeRow } from './settings/BackendScopeRow';
 import { AgentBrowserSettings } from './AgentBrowserSettings';
 import { ComputerUseSettings } from './ComputerUseSettings';
 import { SettingsCard, SettingsEntry, SettingsNote, SettingsRow, SettingsSubpage } from './settings/SettingsRows';
-import { toast } from './ui/toast';
+import { toast } from './ui/toast-store';
 
 /** A tool with its own settings page; `null` is the settings overview. */
 export type AgentDesktopPage = 'browser' | 'computer';

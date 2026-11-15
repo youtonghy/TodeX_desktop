@@ -9,7 +9,7 @@ import { errorMessage, formatTimestamp, type SshApi } from './sshShared';
 import { Chip } from '@/components/base/badges/chip';
 import { IconAction } from '@/components/ui/icon-action';
 import { SpinnerIcon } from '@/components/ui/spinner';
-import { toast } from '@/components/ui/toast';
+import { toast } from '@/components/ui/toast-store';
 
 /** BoardUI settings-row recipe: a grouped secondary card of hairline rows. */
 const GROUP = 'flex flex-col rounded-2xl bg-background-secondary-default ps-3';

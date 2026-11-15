@@ -5,7 +5,7 @@ import { Input } from '@/components/base/input/input';
 import { Select, SelectItem } from '@/components/base/select/select';
 import { Textarea } from '@/components/base/textarea/textarea';
 import { Modal } from '@/components/ui/modal';
-import { toast } from '@/components/ui/toast';
+import { toast } from '@/components/ui/toast-store';
 import { useT } from '../i18n';
 
 const SKILL_NAME = /^[A-Za-z0-9_-][A-Za-z0-9._-]{0,99}$/;

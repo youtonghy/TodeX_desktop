@@ -15,7 +15,7 @@ import { Alert } from '@/components/ui/alert';
 import { Menu, MenuItem, MenuPopover, MenuTrigger } from '@/components/ui/menu';
 import { Modal } from '@/components/ui/modal';
 import { SpinnerIcon } from '@/components/ui/spinner';
-import { toast } from '@/components/ui/toast';
+import { toast } from '@/components/ui/toast-store';
 import { cx } from '@/utils/cx';
 
 function SaveButton({ saving, disabled, onClick, children }: { saving: boolean; disabled?: boolean; onClick: () => void; children: ReactNode }) {

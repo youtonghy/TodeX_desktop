@@ -16,10 +16,10 @@ import { ConfirmDialog, Modal } from '@/components/ui/modal';
 import { Resizable, type PanelImperativeHandle } from '@/components/ui/resizable';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Spinner } from '@/components/ui/spinner';
-import { toast } from '@/components/ui/toast';
+import { toast } from '@/components/ui/toast-store';
 import { cx } from '@/utils/cx';
 import { WorkspaceFilePreview, type PreviewFile, type ReferenceSelection, type WorkspaceFileSaveOutcome } from '../components/WorkspaceFilePreview';
-import { useNoticeToast } from '../components/NoticeToast';
+import { useNoticeToast } from '../components/useNoticeToast';
 import { GitDiffText } from '../components/GitDiffText';
 import { XtermTerminal, type XtermTerminalHandlers } from '../components/XtermTerminal';
 import { SshExecPane } from '../components/ssh/SshExecPane';
@@ -39,7 +39,8 @@ import {
   type TerminalTarget,
 } from '../session/helpers';
 import { isSystemWorkbenchTab, type OpenPanelOptions, type WorkbenchItem, type WorkbenchRequest, type WorkbenchTab } from '../lib/panels';
-import { ShortcutHint, useAppShortcuts, workbenchTabShortcut, type ShortcutId } from '../lib/shortcuts';
+import { ShortcutHint } from '../components/ShortcutHint';
+import { useAppShortcuts, workbenchTabShortcut, type ShortcutId } from '../lib/shortcuts';
 import { normalizeWorkbenchLayout } from '../session/workbenchLayout';
 import { SETTINGS_STORAGE_KEY, attachmentId, backendApi, referenceToken, uniqueReferenceName } from '../session/helpers';
 import { isConflictError } from '@todex/protocol/connectionError';

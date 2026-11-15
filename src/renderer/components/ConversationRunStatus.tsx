@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentPropsWithRef, type ReactNode } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentPropsWithRef, type ReactNode } from 'react';
 import { RiArrowLeftSLine, RiArrowRightSLine, RiCheckLine, RiCloseLine, RiEditLine, RiExternalLinkLine, RiFileList3Line, RiShieldFlashLine, RiTerminalBoxLine } from '@remixicon/react';
 import { Form } from 'react-aria-components';
 import { AnimatePresence, motion, useReducedMotion, type Variants } from 'motion/react';
@@ -19,9 +19,10 @@ import { RadioDot } from '@/components/base/radio/radio';
 import { Select, SelectItem } from '@/components/base/select/select';
 import { Textarea } from '@/components/base/textarea/textarea';
 import { SpinnerIcon } from '@/components/ui/spinner';
-import { toast } from '@/components/ui/toast';
+import { toast } from '@/components/ui/toast-store';
 import { cx } from '@/utils/cx';
-import { useNoticeToast } from './NoticeToast';
+import { useNoticeToast } from './useNoticeToast';
+import { ConversationPromptInputContext, type ConversationPromptInputContextValue, type PromptStatus } from './useConversationPromptInput';
 import { getLocale, t, useLocale, useT } from '../i18n';
 import { isMacLike } from '../lib/shortcuts';
 import { agentToolRequestTitle } from '../session/completionNotifications';
@@ -66,25 +67,6 @@ export function ConversationRunStatus({ submissionStatus, runtime, compaction, o
       <ShimmerText>{t('runStatus.compacting')}</ShimmerText>
     </div> : null}
   </>;
-}
-
-type PromptStatus = 'ready' | 'submitted' | 'streaming' | 'error';
-
-type ConversationPromptInputContextValue = {
-  value: string;
-  status: PromptStatus;
-  isDisabled: boolean;
-  /** Submits through the composer's submission guard. */
-  submit: () => void;
-  stop?: () => void;
-  setValue: (value: string) => void;
-};
-
-const ConversationPromptInputContext = createContext<ConversationPromptInputContextValue | null>(null);
-
-/** The composer state for controls inside `ConversationPromptInput` (send / stop buttons, fields). */
-export function useConversationPromptInput() {
-  return useContext(ConversationPromptInputContext);
 }
 
 export type ConversationPromptInputProps = Omit<ComponentPropsWithRef<'div'>, 'onSubmit'> & {

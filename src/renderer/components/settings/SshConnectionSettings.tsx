@@ -16,7 +16,7 @@ import { AgentLocalTerminalSettings } from './AgentLocalTerminalSettings';
 import { AgentOutputFilterSettings } from './AgentOutputFilterSettings';
 import { AgentSshApprovalSettings } from './AgentSshApprovalSettings';
 import { BackendScopeRow } from './BackendScopeRow';
-import { toast } from '../ui/toast';
+import { toast } from '../ui/toast-store';
 import { SettingsCard, SettingsNote, SettingsRow } from './SettingsRows';
 
 type Range = { min: number; max: number };

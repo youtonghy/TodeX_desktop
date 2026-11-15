@@ -15,7 +15,7 @@ import type { BackendDeployment } from '@todex/protocol/pathMapping';
 import { normalizeServerUrl, type BackendConnectionProfile } from '@todex/protocol/todex';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { useT } from '../i18n';
-import { useNoticeToast } from './NoticeToast';
+import { useNoticeToast } from './useNoticeToast';
 import { approveContainerPairing } from '../lib/localApproval';
 import { SETTINGS_ROW, SettingsCard, SettingsValueField } from './settings/SettingsRows';
 import { Spinner, SpinnerIcon } from './ui/spinner';

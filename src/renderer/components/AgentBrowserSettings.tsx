@@ -11,7 +11,7 @@ import { SettingsCard, SettingsGroup, SettingsNote, SettingsRow } from './settin
 import { LiveViewPlacementSetting } from './LiveViewPlacementSetting';
 import { IconAction } from './ui/icon-action';
 import { ProgressBar } from './ui/progress-bar';
-import { toast } from './ui/toast';
+import { toast } from './ui/toast-store';
 
 const ROW_SELECT_TRIGGER = 'h-8 w-auto gap-1 rounded-lg px-2 py-1.5';
 const ENGINES: AgentBrowserEngine[] = ['chromium', 'kitesurf'];

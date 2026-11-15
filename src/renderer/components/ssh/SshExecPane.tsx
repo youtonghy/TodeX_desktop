@@ -34,7 +34,7 @@ import { IconAction } from '@/components/ui/icon-action';
 import { ScratchReveal } from '@/components/ui/scratch-reveal';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Spinner } from '@/components/ui/spinner';
-import { toast } from '@/components/ui/toast';
+import { toast } from '@/components/ui/toast-store';
 import { cx } from '@/utils/cx';
 
 type ChipColor = 'neutral' | 'blue' | 'lime' | 'yellow' | 'rose';

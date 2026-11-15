@@ -3,7 +3,7 @@ import { RiArrowDownSLine, RiArrowUpSLine, RiGlobalLine, RiStopCircleLine } from
 import { Chip } from '@/components/base/badges/chip';
 import { Button } from '@/components/base/buttons/button';
 import { IconAction } from '@/components/ui/icon-action';
-import { toast } from '@/components/ui/toast';
+import { toast } from '@/components/ui/toast-store';
 import type { AgentBrowserFrame } from '@todex/protocol/agentDesktop';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { useT } from '../i18n';

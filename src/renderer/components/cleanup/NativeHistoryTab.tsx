@@ -3,7 +3,7 @@ import { Chip } from '@/components/base/badges/chip';
 import { Select, SelectItem } from '@/components/base/select/select';
 import { Modal } from '@/components/ui/modal';
 import { SpinnerIcon } from '@/components/ui/spinner';
-import { toast } from '@/components/ui/toast';
+import { toast } from '@/components/ui/toast-store';
 import { cx } from '@/utils/cx';
 import type {
   HistoryCleanupPolicyResponse,

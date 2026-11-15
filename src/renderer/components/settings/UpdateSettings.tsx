@@ -1,32 +1,14 @@
-import { useEffect, useState } from 'react';
 import { RiDownload2Line, RiExternalLinkLine, RiRefreshLine, RiRestartLine } from '@remixicon/react';
 import { Button } from '@/components/base/buttons/button';
 import { LinkButton } from '@/components/base/buttons/link-button';
 import { Switch } from '@/components/base/switch/switch';
-import type { UpdateState } from '../../../preload/index';
 import { getLocale, useT } from '../../i18n';
 import { ProgressBar } from '../ui/progress-bar';
 import { SpinnerIcon } from '../ui/spinner';
 import { SettingsCard, SettingsGroup, SettingsNote, SettingsRow } from './SettingsRows';
+import { useUpdateState } from './useUpdateState';
 
 const RELEASES_URL = 'https://github.com/youtonghy/TodeX_desktop/releases';
-
-/** The main process's update state, live; `null` until the first read. */
-export function useUpdateState(): UpdateState | null {
-  const [state, setState] = useState<UpdateState | null>(null);
-  useEffect(() => {
-    let live = true;
-    const unsubscribe = window.todexDesktop.updates.onState(setState);
-    void window.todexDesktop.updates.getState().then((initial) => {
-      if (live) setState((current) => current ?? initial);
-    });
-    return () => {
-      live = false;
-      unsubscribe();
-    };
-  }, []);
-  return state;
-}
 
 /** Desktop-only "Software update" card on the About settings page. */
 export function UpdateSettings() {

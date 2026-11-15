@@ -11,7 +11,7 @@ import { SegmentedControl, SegmentedControlItem } from '@/components/base/segmen
 import { Select, SelectItem } from '@/components/base/select/select';
 import { Modal } from '@/components/ui/modal';
 import { SpinnerIcon } from '@/components/ui/spinner';
-import { toast } from '@/components/ui/toast';
+import { toast } from '@/components/ui/toast-store';
 
 export const SSH_FORWARD_KIND_LABEL_KEYS: Record<SshForwardKind, MessageKey> = {
   local: 'ssh.forwards.kindLocal',

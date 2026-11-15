@@ -3,10 +3,10 @@ import { RiChatSmile2Line, RiStopCircleLine, RiTeamLine } from '@remixicon/react
 import { isActiveAgentCallStatus, type AgentCallSession, type AgentCallStatus, type AgentCallTurn } from '@todex/protocol/agentCalling';
 import { providerDisplayName } from '@todex/protocol/v2';
 import { Badge } from '@/components/base/badges/badge';
-import { Chip, type ChipProps } from '@/components/base/badges/chip';
+import { Chip } from '@/components/base/badges/chip';
 import { Button } from '@/components/base/buttons/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { toast } from '@/components/ui/toast';
+import { toast } from '@/components/ui/toast-store';
 import { cx } from '@/utils/cx';
 import { ProviderIcon } from '../components/ProviderIcon';
 import { ToolCallCard, ToolCallText, type ToolCallState } from '../components/chat/ToolCallCard';
@@ -14,6 +14,7 @@ import { ToolElapsed } from '../components/chat/ToolRunStatus';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { useT, type MessageKey } from '../i18n';
 import { SubagentText } from './SubagentsPanel';
+import { AGENT_CALL_STATUS_COLORS, AGENT_CALL_STATUS_LABELS } from './agentCallStatus';
 
 type Props = {
   session: TodeXSession;
@@ -22,24 +23,6 @@ type Props = {
 };
 
 const NO_CALLS: AgentCallSession[] = [];
-
-export const AGENT_CALL_STATUS_LABELS: Record<AgentCallStatus, MessageKey> = {
-  running: 'agentCalls.statusRunning',
-  waiting_permission: 'agentCalls.statusWaitingPermission',
-  completed: 'agentCalls.statusCompleted',
-  failed: 'agentCalls.statusFailed',
-  cancelled: 'agentCalls.statusCancelled',
-  interrupted: 'agentCalls.statusInterrupted',
-};
-
-export const AGENT_CALL_STATUS_COLORS: Record<AgentCallStatus, NonNullable<ChipProps['color']>> = {
-  running: 'blue',
-  waiting_permission: 'yellow',
-  completed: 'lime',
-  failed: 'rose',
-  cancelled: 'neutral',
-  interrupted: 'yellow',
-};
 
 const STATUS_TOOL_STATE: Record<AgentCallStatus, ToolCallState> = {
   running: 'running',

@@ -11,7 +11,7 @@ import { IconAction } from '@/components/ui/icon-action';
 import { ConfirmDialog } from '@/components/ui/modal';
 import { Meter } from '@/components/ui/progress-bar';
 import { SpinnerIcon } from '@/components/ui/spinner';
-import { toast } from '@/components/ui/toast';
+import { toast } from '@/components/ui/toast-store';
 import { cx } from '@/utils/cx';
 import type { HistoryCleanupPolicy, HistoryCleanupPolicyResponse, HistoryCleanupResult } from '@todex/protocol/v2';
 import { ProviderIcon } from '../ProviderIcon';

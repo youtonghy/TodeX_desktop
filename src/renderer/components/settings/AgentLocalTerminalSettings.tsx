@@ -5,7 +5,7 @@ import { AGENT_LOCAL_HOST, isNotFoundError, type AgentLocalTerminal } from '@tod
 import { useT } from '../../i18n';
 import { backendApi } from '../../session/helpers';
 import type { PanelBackend } from '../../session/panelBackend';
-import { toast } from '../ui/toast';
+import { toast } from '../ui/toast-store';
 import { SettingsCard, SettingsGroup, SettingsNote, SettingsRow } from './SettingsRows';
 
 /**

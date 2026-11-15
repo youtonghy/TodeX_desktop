@@ -15,7 +15,7 @@ import {
 } from '@todex/protocol/todex';
 import { loadJson, saveJson } from '../lib/storage';
 import { KANBAN_TASKS_STORAGE_KEY, WORKSPACE_SYNC_DEBOUNCE_MS, backendFetch, readBackendError, type BackendTransportProfile } from './helpers';
-import { toast } from '../components/ui/toast';
+import { toast } from '../components/ui/toast-store';
 import { t } from '../i18n';
 
 export type { KanbanTask, KanbanTaskPriority, KanbanTaskSchedule, KanbanTaskStatus, KanbanTimeZone };

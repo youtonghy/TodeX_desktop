@@ -12,7 +12,7 @@ import { SETTINGS_ROW, SettingsCard, SettingsGroup, SettingsNote } from './setti
 import { ConfirmDialog, Modal } from './ui/modal';
 import { ProgressBar } from './ui/progress-bar';
 import { Spinner, SpinnerIcon } from './ui/spinner';
-import { toast } from './ui/toast';
+import { toast } from './ui/toast-store';
 
 type Props = {
   history: HistoryEncryptionBackend;

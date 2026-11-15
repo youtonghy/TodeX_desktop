@@ -8,7 +8,7 @@ import { Select, SelectItem } from '@/components/base/select/select';
 import { Textarea } from '@/components/base/textarea/textarea';
 import { Alert } from '@/components/ui/alert';
 import { Spinner } from '@/components/ui/spinner';
-import { toast } from '@/components/ui/toast';
+import { toast } from '@/components/ui/toast-store';
 import { useT } from '@/i18n';
 import { CLI_SETTINGS } from '@/lib/cliSettings';
 

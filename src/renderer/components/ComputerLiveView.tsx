@@ -3,7 +3,7 @@ import { RiArrowDownSLine, RiArrowUpSLine, RiComputerLine, RiStopCircleLine } fr
 import { Chip } from '@/components/base/badges/chip';
 import { Button } from '@/components/base/buttons/button';
 import { IconAction } from '@/components/ui/icon-action';
-import { toast } from '@/components/ui/toast';
+import { toast } from '@/components/ui/toast-store';
 import { cx } from '@/utils/cx';
 import type { DesktopComputerState } from '@todex/protocol/conversationRuntime';
 import type { TodeXSession } from '../session/useTodeXSession';

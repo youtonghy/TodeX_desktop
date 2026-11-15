@@ -5,7 +5,7 @@ import { useT } from '../../i18n';
 import type { HistoryTailCache } from '../../session/historyCache';
 import { formatBytes } from '../../session/helpers';
 import { ConfirmDialog } from '../ui/modal';
-import { toast } from '../ui/toast';
+import { toast } from '../ui/toast-store';
 import { SettingsRow } from './SettingsRows';
 
 /** Settings → General → Storage rows of the on-device history cache. */

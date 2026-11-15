@@ -5,7 +5,7 @@ import { CodeBlock } from '@/components/ui/code-block';
 import { Markdown } from '@/components/ui/markdown';
 import { ConfirmDialog, Modal } from '@/components/ui/modal';
 import { SpinnerIcon } from '@/components/ui/spinner';
-import { toast } from '@/components/ui/toast';
+import { toast } from '@/components/ui/toast-store';
 import { baseMarkdownComponents } from './markdownComponents';
 import { lineRangeForOffsets, selectionInside, selectionStartOffset, type TextLineRange } from '../lib/selection';
 import { buildConflictMergeDocument, conflictMarkersRemain, WORKSPACE_FILE_MAX_TEXT_BYTES } from '../session/helpers';

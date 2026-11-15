@@ -12,7 +12,7 @@ const PLATFORM_FILES = new Set([
   'main.tsx',
   'demo/index.ts',
   'platform/index.ts',
-  'platform/slots.tsx',
+  'platform/slots.ts',
   'lib/storage.ts',
   'lib/historyKeyStore.ts',
   'lib/sshPasswordStore.ts',

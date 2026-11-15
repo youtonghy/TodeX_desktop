@@ -18,7 +18,7 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { IconAction } from '@/components/ui/icon-action';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Spinner, SpinnerIcon } from '@/components/ui/spinner';
-import { toast } from '@/components/ui/toast';
+import { toast } from '@/components/ui/toast-store';
 import { BackendSelect } from '@/components/ui/backend-select';
 
 type SshTab = 'hosts' | 'keys' | 'connections' | 'forwards';

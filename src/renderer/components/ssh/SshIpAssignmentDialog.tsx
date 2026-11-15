@@ -15,7 +15,7 @@ import { Select, SelectItem } from '@/components/base/select/select';
 import { IconAction } from '@/components/ui/icon-action';
 import { Modal } from '@/components/ui/modal';
 import { SpinnerIcon } from '@/components/ui/spinner';
-import { toast } from '@/components/ui/toast';
+import { toast } from '@/components/ui/toast-store';
 
 /** Normalizes `7000 - 7010` to `7000-7010`. */
 function normalizePortEntry(entry: string): string {

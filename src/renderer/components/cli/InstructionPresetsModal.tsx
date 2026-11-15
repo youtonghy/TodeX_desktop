@@ -10,7 +10,7 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { Modal } from '@/components/ui/modal';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Spinner } from '@/components/ui/spinner';
-import { toast } from '@/components/ui/toast';
+import { toast } from '@/components/ui/toast-store';
 import { useT } from '@/i18n';
 import { cx } from '@/utils/cx';
 import { cliDisplayName, reportPresetSync } from './CliInstructionsTab';

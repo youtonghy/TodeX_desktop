@@ -2,33 +2,21 @@
 // local backend and containers, updates and the Workbench browser tab.
 import { useEffect, useRef } from 'react';
 import { RiBox3Line, RiHardDrive3Line } from '@remixicon/react';
-import { toast } from '@/components/ui/toast';
+import { toast } from '@/components/ui/toast-store';
 import { BrowserPane } from '../components/BrowserPane';
-import { ContainerFreezer } from '../components/container/ContainerFreezer';
-import { ContainerMountCleanup } from '../components/container/ContainerMountCleanup';
 import { ContainerSettings } from '../components/settings/ContainerSettings';
 import { LocalBackendSettings } from '../components/settings/LocalBackendSettings';
 import { UpdateSettings } from '../components/settings/UpdateSettings';
-import { ContainerSetupNotices, useContainerWorkspaceFlow } from '../components/workspace/ContainerWorkspaceFlow';
+import { useContainerWorkspaceFlow } from '../components/workspace/useContainerWorkspaceFlow';
 import { useIpcDaemonConflicts } from '../session/useIpcDaemonConflicts';
 import { useNativeIpcReminder } from '../session/useNativeIpcReminder';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { useT } from '../i18n';
+import { AppOverlays } from './AppOverlays';
 import { platform } from './index';
 import type { PlatformSettingsSection, PlatformSlots } from './types';
 
 const containersAvailable = () => window.todexDesktop.container.available;
-
-function AppOverlays({ session }: { session: TodeXSession }) {
-  if (!containersAvailable()) return null;
-  return (
-    <>
-      {session.hydrated ? <ContainerMountCleanup session={session} /> : null}
-      {session.hydrated ? <ContainerFreezer session={session} /> : null}
-      <ContainerSetupNotices />
-    </>
-  );
-}
 
 /** The native "Check for Updates…" item shows the About settings page; a
  * release downloaded in the background offers a restart once per version. */

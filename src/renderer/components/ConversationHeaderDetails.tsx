@@ -8,7 +8,8 @@ import { cx } from '@/utils/cx';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { isV2Conversation } from '../session/helpers';
 import { ProviderIcon } from './ProviderIcon';
-import { GitStatusDisplay, useConversationGitStatus } from './GitStatusIndicator';
+import { GitStatusDisplay } from './GitStatusIndicator';
+import { useConversationGitStatus } from './useConversationGitStatus';
 import { useT } from '../i18n';
 
 type Props = { session: TodeXSession; title: string; gitOpen: boolean; onOpenGit: () => void };

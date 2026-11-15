@@ -15,7 +15,8 @@ import { modelDisplayLabel, reasoningEffortLabel } from '../../session/helpers';
 import { resolveSmartStage, SMART_WORK_MODE_PROVIDER, type SmartStage, type SmartWorkModeConfig } from '../../session/smartWorkMode';
 import type { TodeXSession } from '../../session/useTodeXSession';
 import { COMPOSER_POPOVER } from '../chat/ComposerControls';
-import { EFFORT_TEXT, ModelReasoningCard } from '../ModelReasoningCard';
+import { ModelReasoningCard } from '../ModelReasoningCard';
+import { EFFORT_TEXT } from '../modelReasoning';
 import { SettingsCard, SettingsGroup, SettingsNote, SettingsRow, SettingsValueField } from './SettingsRows';
 
 /** Compact select trigger for the right side of a settings row (as in SettingsPanel). */

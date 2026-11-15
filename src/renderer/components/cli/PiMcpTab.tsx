@@ -13,7 +13,7 @@ import { Alert } from '@/components/ui/alert';
 import { IconAction } from '@/components/ui/icon-action';
 import { ConfirmDialog, Modal } from '@/components/ui/modal';
 import { Spinner } from '@/components/ui/spinner';
-import { toast } from '@/components/ui/toast';
+import { toast } from '@/components/ui/toast-store';
 import { SettingsCard, SettingsGroup, SettingsRow } from '@/components/settings/SettingsRows';
 import { useT, type MessageKey } from '@/i18n';
 import {

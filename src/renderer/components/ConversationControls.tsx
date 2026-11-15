@@ -1,5 +1,5 @@
 import { Button } from '@/components/base/buttons/button';
-import { useNoticeToast } from './NoticeToast';
+import { useNoticeToast } from './useNoticeToast';
 import type { ConversationRuntime } from '@todex/protocol/conversationRuntime';
 import { formatResetInstant } from '../session/helpers';
 import { useT } from '../i18n';

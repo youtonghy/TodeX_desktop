@@ -12,7 +12,7 @@ import { backendApi } from '../session/helpers';
 import { usePanelBackend, type PanelBackend } from '../session/panelBackend';
 import { BackendScopeRow } from './settings/BackendScopeRow';
 import { SettingsCard, SettingsGroup, SettingsNote, SettingsRow, SettingsValueField } from './settings/SettingsRows';
-import { toast } from './ui/toast';
+import { toast } from './ui/toast-store';
 import { AgentScopeSettings, ROW_SELECT_TRIGGER, scopeAllowsAgent } from './agentCalling/AgentScopeSettings';
 import { APPROVAL_LABELS, APPROVALS } from './agentCalling/ApiKeyFormModal';
 import { ApiKeysSection } from './agentCalling/ApiKeysSection';

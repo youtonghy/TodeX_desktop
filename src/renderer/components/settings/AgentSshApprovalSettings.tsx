@@ -6,7 +6,7 @@ import { isNotFoundError, type AgentSshApproval, type AgentSshApprovalScope } fr
 import { useT } from '../../i18n';
 import { backendApi } from '../../session/helpers';
 import type { PanelBackend } from '../../session/panelBackend';
-import { toast } from '../ui/toast';
+import { toast } from '../ui/toast-store';
 import { SettingsCard, SettingsGroup, SettingsRow } from './SettingsRows';
 
 /**

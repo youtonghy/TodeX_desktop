@@ -18,6 +18,7 @@ import { AppIcon } from '../components/AppIcon';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { getLocale, t, useT } from '../i18n';
 import type { UsageRecord } from '../session/helpers';
+import { dayKey, formatTokens } from './usageFormat';
 
 type Props = {
   session: TodeXSession;
@@ -61,25 +62,12 @@ function sum(records: UsageRecord[]): UsageTotals {
   return records.reduce(addUsage, EMPTY_TOTALS);
 }
 
-export function formatTokens(value: number): string {
-  return new Intl.NumberFormat(getLocale(), {
-    notation: value >= 10_000 ? 'compact' : 'standard',
-    maximumFractionDigits: 1,
-  }).format(value);
-}
-
 function modelName(value: string): string {
   return value === 'unknown' ? t('usage.unknown') : value;
 }
 
 function titleCase(value: string): string {
   return value === 'unknown' ? t('usage.unknown') : value.charAt(0).toUpperCase() + value.slice(1);
-}
-
-/** Local calendar day key, YYYY-MM-DD. */
-export function dayKey(date: Date): string {
-  const pad = (value: number) => String(value).padStart(2, '0');
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
 function startOfDay(date: Date): Date {

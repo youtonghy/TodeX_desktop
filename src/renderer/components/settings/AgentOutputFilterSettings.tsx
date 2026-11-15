@@ -16,7 +16,7 @@ import {
 import { useT, type MessageKey } from '../../i18n';
 import { backendApi } from '../../session/helpers';
 import type { PanelBackend } from '../../session/panelBackend';
-import { toast } from '../ui/toast';
+import { toast } from '../ui/toast-store';
 import { SETTINGS_ROW, SettingsCard, SettingsGroup, SettingsRow } from './SettingsRows';
 
 const CATEGORY_KEYS: Record<AgentOutputFilterCategory, { label: MessageKey; hint: MessageKey }> = {

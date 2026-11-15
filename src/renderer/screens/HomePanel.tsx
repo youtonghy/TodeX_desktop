@@ -22,7 +22,7 @@ import { HOME_COLUMNS, HOME_MIN_HEIGHT, isHomeWidgetId, resetHomeLayout, setHome
 import { quotaLimits } from '../session/quota';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { getLocale, useT } from '../i18n';
-import { dayKey, formatTokens } from './ProfilePanel';
+import { dayKey, formatTokens } from './usageFormat';
 
 type Props = { session: TodeXSession; onOpenConversation: () => void };
 

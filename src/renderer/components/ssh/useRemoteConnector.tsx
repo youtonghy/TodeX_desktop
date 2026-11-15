@@ -7,7 +7,7 @@ import { Button } from '@/components/base/buttons/button';
 import { Checkbox } from '@/components/base/checkbox/checkbox';
 import { Input } from '@/components/base/input/input';
 import { Modal } from '@/components/ui/modal';
-import { toast } from '@/components/ui/toast';
+import { toast } from '@/components/ui/toast-store';
 
 export type RemoteConnectTarget =
   | { kind: 'sftp'; host: string; label: string }

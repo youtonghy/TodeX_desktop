@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { RiTimerLine } from '@remixicon/react';
 import { Focusable } from 'react-aria-components';
 import type { ConversationSchedule } from '@todex/protocol/v2';
@@ -9,34 +9,8 @@ import { cx } from '@/utils/cx';
 import { formatResetInstant } from '../session/helpers';
 import { useT } from '../i18n';
 import { ScheduleConversationDialog } from './ScheduleConversationDialog';
-
-const MINUTE = 60_000;
-
-/** Re-renders every `interval` ms while `active`, for countdowns. */
-export function useNow(active: boolean, interval = MINUTE): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (!active) return undefined;
-    setNow(Date.now());
-    const timer = window.setInterval(() => setNow(Date.now()), interval);
-    return () => window.clearInterval(timer);
-  }, [active, interval]);
-  return now;
-}
-
-/** "2 days 3 hours" style time left; under a minute reads as "sending soon". */
-export function useScheduleTimeLeft() {
-  const t = useT();
-  return (ms: number) => {
-    const minutes = Math.floor(ms / MINUTE);
-    if (minutes < 1) return t('schedule.dueSoon');
-    const days = Math.floor(minutes / 1440);
-    const hours = Math.floor((minutes % 1440) / 60);
-    if (days > 0) return t('schedule.leftDays', { days, hours });
-    if (hours > 0) return t('schedule.leftHours', { hours, minutes: minutes % 60 });
-    return t('schedule.leftMinutes', { minutes });
-  };
-}
+import { useNow } from './useNow';
+import { useScheduleTimeLeft } from './useScheduleTimeLeft';
 
 /** The sidebar's countdown icon for a scheduled conversation. */
 export function ConversationScheduleIcon({ schedule, className }: { schedule: ConversationSchedule; className?: string }) {

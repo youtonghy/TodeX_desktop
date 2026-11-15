@@ -6,7 +6,7 @@ import { Input } from '@/components/base/input/input';
 import { Checkbox } from '@/components/base/checkbox/checkbox';
 import { Select, SelectItem } from '@/components/base/select/select';
 import { Switch } from '@/components/base/switch/switch';
-import type { ContainerInfo, ContainerProgress, DockerEnvironment, DockerProblem } from '../../../preload/containerTypes';
+import type { ContainerInfo, ContainerProgress, DockerEnvironment } from '../../../preload/containerTypes';
 import type { LocalAdminStatus } from '../../../preload/localBackendTypes';
 import { useT } from '../../i18n';
 import { backendBusy, connectContainer, containerProfiles } from '../../session/containerConnection';
@@ -17,9 +17,10 @@ import { CreateContainerDialog } from '../container/CreateContainerDialog';
 import { ContainerLogsDialog } from '../container/ContainerLogsDialog';
 import { ConfirmDialog } from '../ui/modal';
 import { Spinner } from '../ui/spinner';
-import { toast } from '../ui/toast';
+import { toast } from '../ui/toast-store';
 import { InstanceAdmin } from './LocalBackendSettings';
 import { SettingsCard, SettingsGroup, SettingsNote, SettingsRow, SettingsValueField } from './SettingsRows';
+import { dockerProblemText } from './dockerProblem';
 
 const README_URL = 'https://github.com/youtonghy/TodeX_container#readme';
 const DOCKER_INSTALL_URL = 'https://docs.docker.com/get-started/get-docker/';
@@ -79,10 +80,6 @@ function PortNumberRow({ label, description, value, min, max, onCommit }: {
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-export function dockerProblemText(t: T, problem: DockerProblem): string {
-  return t(problem === 'missing' ? 'container.env.missing' : problem === 'permission' ? 'container.env.permission' : 'container.env.daemonDown');
 }
 
 /** Why the shared local socket cannot be used, or null when it can. */

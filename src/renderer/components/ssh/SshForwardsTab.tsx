@@ -19,7 +19,7 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { IconAction } from '@/components/ui/icon-action';
 import { ConfirmDialog } from '@/components/ui/modal';
 import { Spinner, SpinnerIcon } from '@/components/ui/spinner';
-import { toast } from '@/components/ui/toast';
+import { toast } from '@/components/ui/toast-store';
 
 const GROUP = 'flex flex-col rounded-3xl border border-border-button-default bg-background-primary-default ps-4 shadow-card';
 const ROW = 'flex min-w-0 flex-col gap-1.5 border-b border-separator-border py-2.5 pe-2.5 last:border-b-0';

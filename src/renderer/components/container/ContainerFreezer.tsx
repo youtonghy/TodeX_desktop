@@ -8,7 +8,7 @@ import { noteContainerProfiles } from '../../session/containerProfileIds';
 import { backendActive, idleExpired } from '../../session/containerIdle';
 import { CONTAINER_PREFS_KEY } from '../../session/containerPrefs';
 import type { TodeXSession } from '../../session/useTodeXSession';
-import { toast } from '../ui/toast';
+import { toast } from '../ui/toast-store';
 
 const SAMPLE_MS = 30_000;
 

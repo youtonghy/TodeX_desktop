@@ -25,7 +25,7 @@ import { ComboBox, ComboBoxItem } from '@/components/ui/combo-box';
 import { IconAction } from '@/components/ui/icon-action';
 import { ConfirmDialog } from '@/components/ui/modal';
 import { Spinner, SpinnerIcon } from '@/components/ui/spinner';
-import { toast } from '@/components/ui/toast';
+import { toast } from '@/components/ui/toast-store';
 import { cx } from '@/utils/cx';
 import {
   AGENT_PROVIDER_TRANSFER_FORMAT,

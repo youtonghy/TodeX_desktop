@@ -19,7 +19,7 @@ import type { CliPage } from '../components/cli/CliAgentPage';
 import { AboutPanel } from './AboutPanel';
 import { CliManagerPanel } from './CliManagerPanel';
 import { ScrollArea } from '../components/ui/scroll-area';
-import { toast } from '../components/ui/toast';
+import { toast } from '../components/ui/toast-store';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { platform } from '../platform';
 import { historyTailCache } from '../session/historyCache';

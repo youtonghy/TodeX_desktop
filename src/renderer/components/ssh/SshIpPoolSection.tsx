@@ -19,7 +19,7 @@ import { CodeBlock } from '@/components/ui/code-block';
 import { IconAction } from '@/components/ui/icon-action';
 import { Modal } from '@/components/ui/modal';
 import { SpinnerIcon } from '@/components/ui/spinner';
-import { toast } from '@/components/ui/toast';
+import { toast } from '@/components/ui/toast-store';
 
 /** BoardUI settings-row recipe: a grouped secondary card of hairline rows. */
 const GROUP = 'flex flex-col rounded-3xl border border-border-button-default bg-background-primary-default ps-4 shadow-card';

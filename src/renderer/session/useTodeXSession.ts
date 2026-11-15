@@ -21,7 +21,7 @@ import { uploadedPromptContent } from '@todex/protocol/promptUploads';
 import { isIpcServerUrl } from '@todex/protocol/ipcServerUrl';
 import { configureKanbanRouting, configureKanbanSync, syncKanbanTasksFromBackend } from './kanbanTasks';
 import { t } from '../i18n';
-import { toast } from '../components/ui/toast';
+import { toast } from '../components/ui/toast-store';
 import { piExtensionPlainText } from '../components/piExtensionPresentation';
 import { PiExtensionEffects, canApplyPluginDraft } from './piExtensionEffects';
 import { commandContextKey, findPromptCommand, routePiSlashCommand, type ProviderCommandCatalog } from './providerCommands';

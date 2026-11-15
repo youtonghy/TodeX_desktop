@@ -1,6 +1,6 @@
 import { loadSshPassword } from '../../lib/sshPasswordStore';
 import type { EnteredPassword } from './useRemoteConnector';
-import { toast } from '@/components/ui/toast';
+import { toast } from '@/components/ui/toast-store';
 
 export type AskSshPassword = (label: string, sshHost?: boolean) => Promise<EnteredPassword | null>;
 export type RememberSshPassword = (alias: string, entered: EnteredPassword) => Promise<void>;

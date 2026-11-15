@@ -1,8 +1,8 @@
-import { useEffect, useRef, useSyncExternalStore, type ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { Resizable, type PanelImperativeHandle } from '@/components/ui/resizable';
 
 /** Width of the conversation rail left behind when the conversation collapses. */
-export const CHAT_RAIL_SIZE = '3rem';
+const CHAT_RAIL_SIZE = '3rem';
 
 type Props = {
   autoSaveId: string;
@@ -90,15 +90,4 @@ function syncCollapsed(panel: PanelImperativeHandle | null, collapsed: boolean) 
   }
   if (collapsed && !current) panel.collapse();
   else if (!collapsed && current) panel.expand();
-}
-
-export function useMediaQuery(query: string): boolean {
-  return useSyncExternalStore(
-    (onChange) => {
-      const media = window.matchMedia(query);
-      media.addEventListener('change', onChange);
-      return () => media.removeEventListener('change', onChange);
-    },
-    () => window.matchMedia(query).matches,
-  );
 }

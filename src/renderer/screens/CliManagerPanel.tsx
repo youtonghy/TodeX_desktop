@@ -7,7 +7,7 @@ import { Card } from '@/components/ui/card';
 import { EmptyState } from '@/components/ui/empty-state';
 import { IconAction } from '@/components/ui/icon-action';
 import { Spinner, SpinnerIcon } from '@/components/ui/spinner';
-import { toast } from '@/components/ui/toast';
+import { toast } from '@/components/ui/toast-store';
 import { cx } from '@/utils/cx';
 import {
   type CliOperationAction,

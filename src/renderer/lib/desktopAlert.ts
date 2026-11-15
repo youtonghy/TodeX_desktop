@@ -1,4 +1,4 @@
-import { toast } from '@/components/ui/toast';
+import { toast } from '@/components/ui/toast-store';
 
 export type DesktopAlertButton = {
   text: string;

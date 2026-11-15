@@ -18,7 +18,7 @@ import { IconAction } from '@/components/ui/icon-action';
 import { ContextMenu, Menu, MenuItem, MenuPopover, MenuSection, MenuSeparator, MenuTrigger } from '@/components/ui/menu';
 import { ConfirmDialog } from '@/components/ui/modal';
 import { SpinnerIcon } from '@/components/ui/spinner';
-import { toast } from '@/components/ui/toast';
+import { toast } from '@/components/ui/toast-store';
 import { cx } from '@/utils/cx';
 
 /** Rounded tile holding a card's leading glyph. */
