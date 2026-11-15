@@ -199,13 +199,15 @@ test('settings: computer use engine', async ({ page, openDemo }) => {
   await expect(page).toHaveScreenshot('settings-computer-use-engine-light.png', { mask: volatile(page) });
 });
 
-// The agent browser's page: its engine, Chromium and the workspace profiles.
+// The agent browser's page: its engine, Chromium, the workspace profiles and
+// the sites it may always open.
 test('settings: agent browser', async ({ page, openDemo }) => {
   await openDemo('light');
   await page.getByRole('button', { name: '设置', exact: true }).click();
   await settingsSection(page, 'Agent 桌面工具').click();
   await page.getByRole('button', { name: /^Agent 浏览器/ }).click();
   await expect(page.getByRole('button', { name: 'Chromium 引擎' })).toBeVisible();
+  await expect(page.getByText('docs.example.com')).toBeVisible();
   await settle(page);
   await expect(page).toHaveScreenshot('settings-agent-browser-light.png', { mask: volatile(page) });
 });

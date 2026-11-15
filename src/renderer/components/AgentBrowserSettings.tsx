@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { RiAddLine, RiDeleteBinLine, RiDownloadLine, RiFolder3Line, RiGlobalLine, RiUserLine } from '@remixicon/react';
+import { RiAddLine, RiDeleteBinLine, RiDownloadLine, RiFolder3Line, RiGlobalLine, RiLink, RiUserLine } from '@remixicon/react';
 import { Chip } from '@/components/base/badges/chip';
 import { Button } from '@/components/base/buttons/button';
 import { Select, SelectItem } from '@/components/base/select/select';
@@ -19,9 +19,10 @@ const ENGINE_LABELS = { chromium: 'agentBrowser.engineChromium', kitesurf: 'agen
 
 /**
  * The agent browser's settings page: its engine on the backend's computer
- * (Chromium, or the experimental Kitesurf; download, progress, problems) and
- * the per-workspace browser profiles Chromium uses, which keep cookies and
- * storage apart and can be switched or deleted.
+ * (Chromium, or the experimental Kitesurf; download, progress, problems), the
+ * per-workspace browser profiles Chromium uses, which keep cookies and storage
+ * apart and can be switched or deleted, and the hosts beyond that computer
+ * the user always allows agents to open, which can be removed.
  */
 export function AgentBrowserSettings({ session, backendId, api, settings, onSettings }: {
   session: TodeXSession;
@@ -33,6 +34,8 @@ export function AgentBrowserSettings({ session, backendId, api, settings, onSett
 }) {
   const t = useT();
   const [profiles, setProfiles] = useState<AgentBrowserProfiles>({ profiles: [], workspaces: {} });
+  // `null`: the backend has no host list (older backends open local pages only).
+  const [hosts, setHosts] = useState<string[] | null>(null);
   const [busy, setBusy] = useState(false);
   const status = settings.browser;
 
@@ -41,6 +44,11 @@ export function AgentBrowserSettings({ session, backendId, api, settings, onSett
       setProfiles(await api.getAgentBrowserProfiles());
     } catch {
       // Older backends have no profiles route; the page explains below.
+    }
+    try {
+      setHosts((await api.getAgentBrowserHosts()).hosts);
+    } catch {
+      setHosts(null);
     }
   }, [api]);
   useEffect(() => { void reload(); }, [reload]);
@@ -203,6 +211,24 @@ export function AgentBrowserSettings({ session, backendId, api, settings, onSett
           }) : <SettingsNote className="py-3 text-body-regular">{t('agentDesktop.partitionNone')}</SettingsNote>}
         </SettingsCard>
       </SettingsGroup>
+
+      {hosts ? (
+        <SettingsGroup label={t('agentBrowser.hostsSection')} description={t('agentBrowser.hostsHint')}>
+          <SettingsCard>
+            {hosts.length ? hosts.map(host => (
+              <SettingsRow key={host} icon={RiLink} label={<bdi dir="ltr" className="truncate">{host}</bdi>}>
+                <IconAction
+                  icon={RiDeleteBinLine}
+                  size="sm"
+                  disabled={busy}
+                  aria-label={t('agentBrowser.hostRemove', { host })}
+                  onClick={() => { void run(async () => setHosts((await api.removeAgentBrowserHost(host)).hosts)); }}
+                />
+              </SettingsRow>
+            )) : <SettingsNote className="py-3 text-body-regular">{t('agentBrowser.hostsNone')}</SettingsNote>}
+          </SettingsCard>
+        </SettingsGroup>
+      ) : null}
     </div>
   );
 }

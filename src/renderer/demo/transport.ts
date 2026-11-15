@@ -834,6 +834,8 @@ function catalogRoute(method: string, path: string, provider: ProviderKind, body
   return notFound(method, path);
 }
 
+let demoBrowserHosts = ['192.168.8.1', 'docs.example.com'];
+
 function route(request: SecureRequest): SecureResponse {
   const method = request.method.toUpperCase();
   const url = new URL(request.path, fixtures.DEMO_SERVER_URL);
@@ -853,6 +855,14 @@ function route(request: SecureRequest): SecureResponse {
   if (piPluginsResponse) return piPluginsResponse;
   const dshPluginsResponse = demoDshPluginsRoute(method, path, readBody(request));
   if (dshPluginsResponse) return dshPluginsResponse;
+
+  // Sites the agent browser may always open: a public one and the router.
+  if (path === '/v2/agent-browser/hosts' && method === 'GET') return json({ hosts: demoBrowserHosts });
+  const removedHost = path.match(/^\/v2\/agent-browser\/hosts\/(.+)$/)?.[1];
+  if (removedHost && method === 'DELETE') {
+    demoBrowserHosts = demoBrowserHosts.filter(host => host !== decodeURIComponent(removedHost));
+    return json({ hosts: demoBrowserHosts });
+  }
 
   const liveFrame = path.match(/^\/v2\/conversations\/[^/]+\/agent-desktop\/frame$/);
   if (liveFrame && method === 'GET') {

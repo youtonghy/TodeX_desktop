@@ -699,6 +699,8 @@ function permissionOptionLabel(option: boolean | PermissionOption, t: ReturnType
   if (option.kind === 'abort_turn') return t('runStatus.rejectStop');
   switch (option.name) {
     case 'Allow once': return t('runStatus.allowOnce');
+    // Saved for every conversation (agent browser hosts).
+    case 'Always allow': return t('runStatus.allowAlways');
     case 'Allow for session': return t('runStatus.allowSession');
     // The agent tools' own approvals (MCP tool, desktop browser grant).
     case 'Always allow in this conversation':
