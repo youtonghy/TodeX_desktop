@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { decodeBase64Url, deviceIdentityFromSecret, generateDeviceIdentity, type DeviceIdentity } from '@todex/protocol/deviceAuth';
 import { generateHistoryRecipientKeyPair } from '@todex/protocol/historyCrypto';
+import { isIpcServerUrl } from '@todex/protocol/ipcServerUrl';
 import {
   MESH_UPDATED_EVENT,
   appendMeshRoster,
   createMeshGenesis,
   encodeMeshInvite,
+  isMeshAddress,
   meshCommands,
   meshMemberForJoinRequest,
   meshNodeMember,
@@ -34,6 +36,7 @@ import { t } from '../i18n';
 import { loadJson, loadSecret, removeSecret, saveJson, saveSecret } from '../lib/storage';
 import { deleteHistorySeed, loadHistorySeed, saveHistorySeed } from '../lib/historyKeyStore';
 import type { BackendConnectionProfile } from './backendColors';
+import { isStandbyProfile } from './backendRouting';
 import {
   DevicePairingRetryableError,
   PAIRING_POLL_INTERVAL_MS,
@@ -76,6 +79,11 @@ const RELAY_RENEW_MS = 60 * 60 * 1000;
 // infos), and pushed back when the node is behind; `mesh.updated` re-reads.
 // Join requests of every connected node are listed for approval here; an
 // approval appends the new device to the roster, so the node lets it in.
+//
+// A node this client also reaches over IPC (the desktop's own backend) keeps
+// its group profile as a standby (`isStandbyProfile`): connected, so this
+// device is present in the group and its roster and joins flow, while the
+// IPC profile carries the data. Group addresses are always network ones.
 
 export type MeshPairingCredentials = Pick<BackendConnectionProfile, 'deviceSecret' | 'encryptionProtocol' | 'encryptionPublicKey' | 'transportVerified'>;
 
@@ -83,6 +91,9 @@ export type MeshLink = { state: ConnectionState; mesh: boolean | undefined };
 
 export type MeshMemberView = MeshMember & {
   self: boolean;
+  /** Node members: the backend this client reaches over IPC; its data goes
+   * there, and the group link only keeps this device present. */
+  local?: boolean;
   /** Node members: their profile and its connection state. */
   profileId?: string;
   state?: ConnectionState;
@@ -155,6 +166,10 @@ export function useMeshGroups({
   prefsRef.current = prefs;
   /** Per node profile: the group's presence as that node reported it. */
   const [presence, setPresence] = useState<Record<string, ReturnType<typeof parseMeshPresence>>>({});
+  /** Per IPC profile: the group node id of the daemon it serves. */
+  const [ipcNodeIds, setIpcNodeIds] = useState<Record<string, string>>({});
+  const ipcNodeIdsRef = useRef(ipcNodeIds);
+  ipcNodeIdsRef.current = ipcNodeIds;
   const beacons = useRef<MeshBeacon[]>([]);
   const groupsRef = useRef(groups);
   groupsRef.current = groups;
@@ -198,6 +213,14 @@ export function useMeshGroups({
   const profileOf = (groupId: string, nodeId: string) => live.current.profiles.find((profile) => profile.mesh?.groupId === groupId && profile.mesh.nodeId === nodeId);
   const connectedProfiles = (groupId: string) => live.current.profiles.filter((profile) => profile.mesh?.groupId === groupId
     && live.current.links[profile.id]?.state === 'open' && live.current.links[profile.id]?.mesh);
+  /** The enabled IPC profile serving node `nodeId` (the transport key its
+   * info announces, or the node id the IPC daemon reported). */
+  const ipcProfileOf = (nodeId: string, info: MeshNodeInfo | undefined) => live.current.profiles.find((profile) => (
+    !profile.disabled && !profile.mesh && isIpcServerUrl(profile.serverUrl) && (
+      ipcNodeIdsRef.current[profile.id] === nodeId
+      || Boolean(info?.transportPublicKey && profile.transportVerified && profile.encryptionPublicKey === info.transportPublicKey)
+    )
+  ));
 
   /** Sends the group's chain and node infos to every connected node of it. */
   const pushToAll = useCallback(async (group: StoredMeshGroup, extraProfileIds: string[] = []) => {
@@ -209,8 +232,12 @@ export function useMeshGroups({
   /** Forgets a group this device left or was removed from: its profiles,
    * keys and record. */
   const forgetGroup = useCallback(async (groupId: string) => {
+    const groupSecret = await loadSecret(meshDeviceSecretKey(groupId)).catch(() => null);
     for (const profile of live.current.profiles) {
       if (profile.mesh?.groupId === groupId) live.current.removeProfile(profile.id);
+      // An IPC profile an older client switched to the group key loses its
+      // access with the group: it pairs again with a key of its own.
+      else if (groupSecret && profile.deviceSecret === groupSecret) live.current.updateProfile(profile.id, { deviceSecret: '', transportVerified: false });
     }
     setGroups(groupsRef.current.filter((item) => item.groupId !== groupId));
     setJoinRequests((current) => Object.fromEntries(Object.entries(current).filter(([profileId]) => live.current.profiles.find((profile) => profile.id === profileId)?.mesh?.groupId !== groupId)));
@@ -247,7 +274,7 @@ export function useMeshGroups({
       const remote = state.groups.find((item) => item.groupId === stored.groupId);
       const outcome = mergeNodeState(stored, { nodeId: state.nodeId, nodeInfo: state.nodeInfo, chain: remote?.chain, nodeInfos: remote?.nodeInfos });
       let group = outcome.group;
-      const remembered = profile.mesh.via ? null : rememberUrl(group, state.nodeId, profile.serverUrl);
+      const remembered = profile.mesh.via || !isMeshAddress(profile.serverUrl) ? null : rememberUrl(group, state.nodeId, profile.serverUrl);
       if (remembered) group = remembered;
       if (outcome.removed) {
         live.current.onNotice({ kind: 'removed', groupName: group.name });
@@ -333,7 +360,7 @@ export function useMeshGroups({
           }
           continue;
         }
-        const url = candidateUrls(group, info, member.id, { pinned: member.addresses, beacons: beaconUrls(beacons.current, member.id) })[0];
+        const url = nodeUrls(group, info, member.id, { pinned: member.addresses, beacons: beaconUrls(beacons.current, member.id) })[0];
         const key = `${group.groupId}/${member.id}`;
         if (!info || !url || creating.current.has(key)) continue;
         creating.current.add(key);
@@ -347,7 +374,9 @@ export function useMeshGroups({
             // registers it.
             await saveHistorySeed(id, seed);
             seed.fill(0);
-            live.current.addProfile({ id, name: member.name, serverUrl: url, tenantId: 'local', mesh: { groupId: group.groupId, nodeId: member.id } });
+            // A node served over IPC starts as its standby link.
+            const standby = Boolean(ipcProfileOf(member.id, info));
+            live.current.addProfile({ id, name: member.name, serverUrl: url, tenantId: 'local', mesh: { groupId: group.groupId, nodeId: member.id }, ...(standby ? { disabled: true } : {}) });
             live.current.approveCredentials(id, {
               deviceSecret: identity.secretKey,
               encryptionProtocol: info.transportProtocol,
@@ -370,7 +399,42 @@ export function useMeshGroups({
     for (const profile of profiles) {
       if (profile.mesh && !known.has(profile.mesh.groupId)) live.current.removeProfile(profile.id);
     }
-  }, [groups, identityOf, loaded, profiles]);
+  }, [groups, identityOf, ipcNodeIds, loaded, profiles]);
+
+  // The node id behind each connected IPC profile, read once per profile.
+  const askingNode = useRef(new Set<string>());
+  useEffect(() => {
+    for (const profile of profiles) {
+      const link = links[profile.id];
+      if (profile.mesh || !isIpcServerUrl(profile.serverUrl) || link?.state !== 'open' || link.mesh !== true) continue;
+      if (ipcNodeIds[profile.id] || askingNode.current.has(profile.id)) continue;
+      askingNode.current.add(profile.id);
+      void live.current.send(profile.id, meshCommands.nodeGet()).then((response) => {
+        if (typeof response.nodeId === 'string' && response.nodeId) {
+          const nodeId = response.nodeId;
+          setIpcNodeIds((current) => (current[profile.id] === nodeId ? current : { ...current, [profile.id]: nodeId }));
+        }
+      }, () => undefined).finally(() => { askingNode.current.delete(profile.id); });
+    }
+  }, [ipcNodeIds, links, profiles]);
+
+  // Repairs what older clients stored: an IPC profile turned into a group
+  // node profile goes back to being the IPC profile (the node gets a standby
+  // of its own), and IPC addresses leave the groups' address lists.
+  const repaired = useRef(false);
+  useEffect(() => {
+    if (!loaded || repaired.current) return;
+    repaired.current = true;
+    for (const profile of profiles) {
+      if (profile.mesh && isIpcServerUrl(profile.serverUrl)) live.current.updateProfile(profile.id, { mesh: undefined });
+    }
+    const cleaned = groupsRef.current.map((group) => {
+      const entries = Object.entries(group.nodeUrls);
+      if (entries.every(([, urls]) => urls.every(isMeshAddress))) return group;
+      return { ...group, nodeUrls: Object.fromEntries(entries.map(([nodeId, urls]) => [nodeId, urls.filter(isMeshAddress)])) };
+    });
+    if (cleaned.some((group, index) => group !== groupsRef.current[index])) setGroups(cleaned);
+  }, [loaded, profiles, setGroups]);
 
   // LAN beacons (desktop): another source of node addresses.
   useEffect(() => {
@@ -405,7 +469,7 @@ export function useMeshGroups({
       if (!prefsRef.current.relay || !target || target.relayTarget === false) return null;
       const roleOf = (nodeId: string) => chain.head.members.find((member) => member.id === nodeId)?.relay ?? 'allowed';
       const relays = live.current.profiles
-        .filter((item) => item.id !== profile.id && item.mesh?.groupId === profile.mesh!.groupId && !item.mesh.via && !item.disabled
+        .filter((item) => item.id !== profile.id && item.mesh?.groupId === profile.mesh!.groupId && !item.mesh.via
           && live.current.links[item.id]?.state === 'open' && /^https?:\/\//.test(item.serverUrl) && roleOf(item.mesh.nodeId) !== 'denied')
         .sort((a, b) => Number(roleOf(b.mesh!.nodeId) === 'preferred') - Number(roleOf(a.mesh!.nodeId) === 'preferred'));
       const relay = relays[0];
@@ -429,12 +493,13 @@ export function useMeshGroups({
     const check = async () => {
       const now = Date.now();
       for (const profile of live.current.profiles) {
-        if (!profile.mesh || profile.disabled) continue;
+        // Standby links (disabled group node profiles) are kept up too.
+        if (!profile.mesh) continue;
         const group = groupsRef.current.find((item) => item.groupId === profile.mesh!.groupId);
         const chain = group ? storedChain(group) : null;
         if (!group || !chain) continue;
         const member = chain.head.members.find((item) => item.id === profile.mesh!.nodeId);
-        const urls = candidateUrls(group, nodeInfosOf(group, chain).get(profile.mesh.nodeId), profile.mesh.nodeId, {
+        const urls = nodeUrls(group, nodeInfosOf(group, chain).get(profile.mesh.nodeId), profile.mesh.nodeId, {
           pinned: member?.addresses, beacons: beaconUrls(beacons.current, profile.mesh.nodeId),
         });
         const state = live.current.links[profile.id]?.state;
@@ -554,11 +619,22 @@ export function useMeshGroups({
       members: [...chain.head.members.filter((member) => member.id !== nodeId),
         meshNodeMember({ publicKey: decodeBase64Url(nodePublicKey), name: profile.name || info.name, addedBy: self })],
     }), [profileId]);
-    const withInfo = { ...group, nodeInfos: { ...group.nodeInfos, [nodeId]: nodeInfoDoc }, nodeUrls: { ...group.nodeUrls, [nodeId]: [profile.serverUrl] } };
+    const ipc = isIpcServerUrl(profile.serverUrl);
+    const withInfo = {
+      ...group, nodeInfos: { ...group.nodeInfos, [nodeId]: nodeInfoDoc },
+      ...(ipc ? {} : { nodeUrls: { ...group.nodeUrls, [nodeId]: [profile.serverUrl] } }),
+    };
     replaceGroup(withInfo);
     // The node opened a grant for the group key: this profile's own history
-    // key still opens everything, so it re-wraps before switching keys.
+    // key still opens everything, so it re-wraps (before switching keys).
     await live.current.history.authorizeDevice(profileId, identity.deviceId);
+    if (ipc) {
+      // The IPC profile stays as it is and keeps the data; the node's group
+      // profile is created at its network addresses as a standby.
+      setIpcNodeIds((current) => ({ ...current, [profileId]: nodeId }));
+      await pushToAll(withInfo);
+      return;
+    }
     const seed = await loadHistorySeed(meshHistoryKeyId(groupId));
     if (!seed) throw new Error(t('mesh.keyMissing'));
     await saveHistorySeed(profileId, seed);
@@ -751,12 +827,17 @@ export function useMeshGroups({
     const infos = chain ? nodeInfosOf(group, chain) : new Map<string, MeshNodeInfo>();
     const reports = profiles.filter((item) => item.mesh?.groupId === group.groupId).flatMap((item) => (presence[item.id] ? [presence[item.id]] : []));
     const nameOf = (nodeId: string) => chain?.head.members.find((item) => item.id === nodeId)?.name ?? nodeId;
+    const ipcNodes = new Set(Object.entries(ipcNodeIds)
+      .filter(([profileId]) => profiles.some((item) => item.id === profileId && !item.disabled))
+      .map(([, nodeId]) => nodeId));
     const members: MeshMemberView[] = (chain?.head.members ?? []).map((member) => {
       const profile = member.kind === 'node' ? profiles.find((item) => item.mesh?.groupId === group.groupId && item.mesh.nodeId === member.id) : undefined;
       const self = member.id === group.deviceId;
+      const local = member.kind === 'node' && (isStandbyProfile(profile) || ipcNodes.has(member.id));
       const lastSeen = Math.max(0, ...reports.map((report) => report.lastSeen[member.id] ?? 0));
       return {
         ...member, self,
+        ...(local ? { local } : {}),
         ...(profile ? { profileId: profile.id, state: links[profile.id]?.state ?? 'idle' } : {}),
         ...(profile?.mesh?.via ? { via: nameOf(profile.mesh.via) } : {}),
         ...(infos.get(member.id) ? { info: infos.get(member.id) } : {}),
@@ -767,13 +848,13 @@ export function useMeshGroups({
       };
     });
     const inviteNodes = members.filter((member) => member.kind === 'node').map((member) => ({
-      nodeId: member.id, name: member.name, urls: candidateUrls(group, member.info, member.id, { pinned: member.addresses }),
+      nodeId: member.id, name: member.name, urls: nodeUrls(group, member.info, member.id, { pinned: member.addresses }),
     })).filter((node) => node.urls.length);
     return {
       groupId: group.groupId, name: chain?.head.name ?? group.name, version: chain?.head.version ?? 0, deviceId: group.deviceId,
       members, pending: !chain, invite: inviteNodes.length ? encodeMeshInvite({ groupId: group.groupId, name: chain?.head.name ?? group.name, nodes: inviteNodes }) : '',
     };
-  }), [groups, links, presence, profiles]);
+  }), [groups, ipcNodeIds, links, presence, profiles]);
 
   const pendingRequests = useMemo<MeshJoinView[]>(() => Object.entries(joinRequests).flatMap(([profileId, requests]) => {
     const groupId = profiles.find((profile) => profile.id === profileId)?.mesh?.groupId;
@@ -798,6 +879,7 @@ export function useMeshGroups({
     leaveGroup,
     autoGrantDeviceIds,
     receiveEvent,
+    ipcNodeIds,
     relayEnabled: prefs.relay,
     setRelayEnabled,
     retryNode,
@@ -807,6 +889,12 @@ export function useMeshGroups({
 
 export type MeshGroupsSession = ReturnType<typeof useMeshGroups>;
 export { MESH_UPDATED_EVENT };
+
+/** A node's addresses to try, best first: network ones only (an IPC socket
+ * reaches this machine's backend, never a group node). */
+function nodeUrls(...args: Parameters<typeof candidateUrls>): string[] {
+  return candidateUrls(...args).filter(isMeshAddress);
+}
 
 function hostOf(serverUrl: string): string {
   try {

@@ -8,6 +8,7 @@ import { Button } from '@/components/base/buttons/button';
 import { Input } from '@/components/base/input/input';
 import { cx } from '@/utils/cx';
 import { BACKEND_LABEL_COLORS, backendLabelColor, type BackendConnectionProfile } from '../../session/backendColors';
+import { isStandbyProfile } from '../../session/backendRouting';
 import { daemonPeer } from '../../session/daemonPeers';
 import { UNPAIRED_TRANSPORT, backendApi, connectionStateLabel, healthLabelOf, isVersionMismatch } from '../../session/helpers';
 import type { ConfigSyncPreset } from '../../session/useConfigSync';
@@ -97,7 +98,9 @@ export function BackendConnectionSettings({ session, page, onPageChange, deviceN
                     <Chip variant="caption" color={item.deviceSecret ? 'neutral' : 'yellow'}>
                       {item.deviceSecret ? t('settings.backendPaired') : t('settings.backendUnpaired')}
                     </Chip>
-                    {item.disabled
+                    {isStandbyProfile(item)
+                      ? <Chip variant="caption" color={STATE_COLORS[state]}>{t('settings.backendStandby')}</Chip>
+                      : item.disabled
                       ? <Chip variant="caption" color="neutral">{t('settings.backendDisabled')}</Chip>
                       : <Chip variant="caption" color={STATE_COLORS[state]}>{connectionStateLabel(state)}</Chip>}
                   </>
@@ -252,7 +255,9 @@ function BackendDetail({ session, profile, deviceName, pairingAutoStart, history
             <Input aria-label="Tenant" name="Tenant" size="small" className="w-64" value={profile.tenantId} onChange={(tenantId) => session.updateBackendConnection(profile.id, { tenantId })} />
           </SettingsRow>
         </SettingsCard>
-        {profile.disabled ? (
+        {isStandbyProfile(profile) ? (
+          <p className="px-3 text-body-2-regular text-text-secondary">{t('settings.backendStandbyHint', { state: connectionStateLabel(state) })}</p>
+        ) : profile.disabled ? (
           <div className="flex flex-wrap items-center gap-3 px-3">
             <Button size="small" disabled={!peer} onClick={() => peer && session.replaceBackendConnection(peer.id, profile.id)}>
               {t('settings.backendUseThis')}

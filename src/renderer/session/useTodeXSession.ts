@@ -1,5 +1,5 @@
 import { normalizeBackendLabelColor, type BackendConnectionProfile } from './backendColors';
-import { ipcDaemonConflicts, moveBackendRecords, ownerBackendId, resolveNoWorkspaceBackendId, tagLegacyBackendRecords } from './backendRouting';
+import { ipcDaemonConflicts, isStandbyProfile, moveBackendRecords, ownerBackendId, resolveNoWorkspaceBackendId, tagLegacyBackendRecords } from './backendRouting';
 import { useWorkbenchSharing } from './useWorkbenchSharing';
 import { SMART_WORK_MODE_PROVIDER, smartPromptFields, smartWorkModeAvailable, useSmartWorkMode } from './smartWorkMode';
 import {
@@ -1731,9 +1731,11 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     });
   }, [activeBackendConnectionId]);
 
-  // Every open backend syncs its workspaces and kanban tasks periodically.
+  // Every open backend syncs its workspaces and kanban tasks periodically
+  // (a group node's standby link carries no data).
   const openBackendIdsKey = Object.entries(linkStatusByBackend)
-    .filter(([, status]) => status.state === 'open').map(([backendId]) => backendId).sort().join('\n');
+    .filter(([backendId, status]) => status.state === 'open' && !isStandbyProfile(backendConnections.find((profile) => profile.id === backendId)))
+    .map(([backendId]) => backendId).sort().join('\n');
   useEffect(() => {
     if (!hydrated) return;
     const openIds = new Set(openBackendIdsKey ? openBackendIdsKey.split('\n') : []);
@@ -3043,6 +3045,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         meshGroupsRef.current?.receiveEvent(backendId, parsed.payload);
         return;
       }
+      // A group node's standby link: its daemon's events reach this client
+      // over IPC, where its records are filed.
+      if (isStandbyProfile(profileFor(backendId))) return;
       if (messageType === 'agentBrowser.frame') {
         const frame = parsed.payload as AgentBrowserFrame | undefined;
         if (frame?.conversationId) agentBrowserWatchersRef.current.get(frame.conversationId)?.forEach(listener => listener(frame));
@@ -3486,8 +3491,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
 
   /** Open (or reopen) one backend's socket. */
   const connectBackend = useCallback((backendId: string) => {
-    // A disabled profile's backend is served by another profile.
-    if (profileFor(backendId)?.disabled) return;
+    // A disabled profile's backend is served by another profile; a group
+    // node's profile still connects, as the standby link of the group.
+    const target = profileFor(backendId);
+    if (target?.disabled && !isStandbyProfile(target)) return;
     const link = linkFor(backendId);
     link.manualDisconnect = false;
     setAutoConnectEnabled(true);
@@ -3645,6 +3652,12 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         patchLinkStatus(backendId, (current) => ({ state: 'open', epoch: current.epoch + 1, error: '', openedAt: Date.now() }));
         void checkConnectionHealth(backendId);
         void refreshServerVersion(backendId);
+        // A standby link only keeps this device in its group: no workspaces,
+        // conversations or subscriptions (the IPC profile has them).
+        if (isStandbyProfile(profileFor(backendId))) {
+          link.commands.flush();
+          return;
+        }
         // Only the open conversation replays history eagerly. Other
         // conversations subscribe at their known high-water mark and
         // recover on demand (open, or a live event exposing a gap), so a
@@ -3912,7 +3925,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     }
     autoConnectStartedRef.current = true;
     for (const profile of backendConnectionsRef.current) {
-      if (profile.serverUrl.trim() && !profile.disabled && !linksRef.current.has(profile.id)) connectBackend(profile.id);
+      if (profile.serverUrl.trim() && (!profile.disabled || isStandbyProfile(profile)) && !linksRef.current.has(profile.id)) connectBackend(profile.id);
     }
   }, [autoConnectEnabled, connectBackend, hydrated]);
 
@@ -4499,7 +4512,22 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       return profile;
     }));
     if (winner.disabled) pairingConnectPendingRef.current.add(winnerId);
+    // A group node keeps its link as the standby that holds this device in
+    // the group; only its data moved.
+    if (profiles.find((profile) => profile.id === loserId)?.mesh) pairingConnectPendingRef.current.add(loserId);
   }, [closeSocket]);
+
+  /** A standby group node profile whose IPC profile is gone carries its
+   * daemon's data again: it is enabled and reconnects as a full backend. */
+  const resumeStandbyConnection = useCallback((id: string) => {
+    if (!isStandbyProfile(profileFor(id))) return;
+    setBackendConnections((current) => current.map((profile) => {
+      if (profile.id !== id) return profile;
+      const { disabled: _disabled, ...enabled } = profile;
+      return { ...enabled, updatedAt: Date.now() };
+    }));
+    pairingConnectPendingRef.current.add(id);
+  }, []);
 
   // Device groups: one profile per node of each group, kept in step with
   // the group's roster (useMeshGroups). Keyed by content so health probes
@@ -7170,6 +7198,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     addBackendConnection,
     removeBackendConnection,
     replaceBackendConnection,
+    resumeStandbyConnection,
     workspaces,
     conversations,
     activeWorkspaceId,

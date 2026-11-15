@@ -1,9 +1,9 @@
 import { deviceIdentityFromSecret, generateDeviceIdentity } from '@todex/protocol/deviceAuth';
 import { ipcServerInstance, ipcServerUrl, isIpcServerUrl } from '@todex/protocol/ipcServerUrl';
 import { isLoopbackHostname } from '@todex/protocol/loopback';
-import type { BackendConnectionProfile } from '@todex/protocol/todex';
 import type { LocalNativeEndpoint } from '../../preload/localBackendTypes';
-import { ipcDaemonConflicts, reusableNativeProfile } from './backendRouting';
+import type { BackendConnectionProfile } from './backendColors';
+import { ipcDaemonConflicts, reusableNativeProfile, type IpcNodeOf } from './backendRouting';
 import { NATIVE_INSTANCE, daemonPeer } from './daemonPeers';
 
 export { daemonPeer };
@@ -126,9 +126,11 @@ export async function ensureManagedConnection(session: ManagedSession, options: 
   const serverUrl = ipcServerUrl(options.instance);
   const existing = managedProfile(session.backendConnections, options.instance);
   const nativePort = options.nativePort;
+  // A group node profile keeps the group's addresses: the IPC profile is
+  // created beside it, and it stays connected as the node's standby.
   const reusable = !existing && options.instance === NATIVE_INSTANCE && typeof nativePort === 'number'
     ? reusableNativeProfile(
-      session.backendConnections,
+      session.backendConnections.filter((item) => !item.mesh),
       isIpcServerUrl,
       (url) => reachesNativePort(url, nativePort),
       (item) => item.transportVerified && Boolean(deviceIdentityFromSecret(item.deviceSecret)),
@@ -183,11 +185,11 @@ function reachesNativePort(serverUrl: string, port: number): boolean {
  * the native daemon's endpoint known, a loopback profile on its port counts
  * even before the IPC profile pinned a key.
  */
-export function daemonConflicts(profiles: BackendConnectionProfile[], endpoint: LocalNativeEndpoint | null) {
+export function daemonConflicts(profiles: BackendConnectionProfile[], endpoint: LocalNativeEndpoint | null, nodeOf?: IpcNodeOf) {
   const port = endpoint?.running ? endpoint.port : null;
   return ipcDaemonConflicts(profiles, isIpcServerUrl, (ipcUrl, serverUrl) => (
     port !== null && ipcServerInstance(ipcUrl) === NATIVE_INSTANCE && reachesNativePort(serverUrl, port)
-  ));
+  ), nodeOf);
 }
 
 
@@ -204,7 +206,8 @@ export function nativeIpcCandidate(
   const { port } = endpoint;
   if (!endpoint.running || !endpoint.ipcPath || port === null) return undefined;
   if (managedProfile(profiles, NATIVE_INSTANCE)) return undefined;
-  return profiles.find((profile) => isConnected(profile.id) && reachesNativePort(profile.serverUrl, port));
+  // A group node profile is not switched: the IPC profile joins it instead.
+  return profiles.find((profile) => !profile.mesh && isConnected(profile.id) && reachesNativePort(profile.serverUrl, port));
 }
 
 /**

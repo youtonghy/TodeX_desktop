@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   ipcDaemonConflicts,
+  isStandbyProfile,
   moveBackendRecords,
+  orphanedStandbyProfiles,
   ownerBackendId,
   resolveNoWorkspaceBackendId,
   reusableNativeProfile,
@@ -138,4 +140,36 @@ test('connecting the native daemon reuses its paired loopback profile', () => {
     profile('new', 'http://127.0.0.1:7345', { updatedAt: 7 }),
   ]), 'new');
   assert.equal(pick([profile('off', 'http://127.0.0.1:7345', { disabled: true })]), 'off');
+});
+
+test('a group node served over IPC loses to the IPC profile and becomes its standby', () => {
+  const node = (id: string, nodeId: string, key = '', extra: { disabled?: boolean } = {}) => ({
+    ...daemonProfile(id, `http://192.168.1.5:7345/${id}`, key, extra), mesh: { nodeId },
+  });
+  const ipc = daemonProfile('ipc', 'todex-ipc://local');
+  // Matched by the node id the IPC daemon reported, even without a pinned key.
+  const nodeOf = (id: string) => (id === 'ipc' ? 'node_local' : undefined);
+  assert.deepEqual(ipcDaemonConflicts([ipc, node('local', 'node_local'), node('remote', 'node_remote')], isIpc, undefined, nodeOf), [
+    { loserId: 'local', winnerId: 'ipc' },
+  ]);
+  // Or by the transport key, as any profile of the daemon.
+  assert.deepEqual(ipcDaemonConflicts([daemonProfile('ipc', 'todex-ipc://local', 'k1'), node('local', 'node_x', 'k1')], isIpc), [
+    { loserId: 'local', winnerId: 'ipc' },
+  ]);
+  assert.equal(isStandbyProfile(node('local', 'node_local', '', { disabled: true })), true);
+  assert.equal(isStandbyProfile(daemonProfile('tcp', 'http://127.0.0.1:7345', '', { disabled: true })), false);
+  assert.equal(isStandbyProfile(node('local', 'node_local')), false);
+});
+
+test('a standby carries the data again once no IPC profile serves its daemon', () => {
+  const standby = { ...daemonProfile('local', 'http://192.168.1.5:7345', 'k1', { disabled: true }), mesh: { nodeId: 'node_local' } };
+  const ids = (items: { id: string }[]) => items.map((item) => item.id);
+  // Served by key, by node id, or by an IPC profile not connected yet: stays.
+  assert.deepEqual(ids(orphanedStandbyProfiles([standby, daemonProfile('ipc', 'todex-ipc://local', 'k1')], isIpc, () => 'node_other')), []);
+  assert.deepEqual(ids(orphanedStandbyProfiles([standby, daemonProfile('ipc', 'todex-ipc://local')], isIpc, () => 'node_local')), []);
+  assert.deepEqual(ids(orphanedStandbyProfiles([standby, daemonProfile('ipc', 'todex-ipc://local')], isIpc)), []);
+  // The IPC profile was removed, disabled, or serves another node.
+  assert.deepEqual(ids(orphanedStandbyProfiles([standby], isIpc)), ['local']);
+  assert.deepEqual(ids(orphanedStandbyProfiles([standby, daemonProfile('ipc', 'todex-ipc://local', 'k1', { disabled: true })], isIpc)), ['local']);
+  assert.deepEqual(ids(orphanedStandbyProfiles([standby, daemonProfile('ipc', 'todex-ipc://box', 'k2')], isIpc, () => 'node_box')), ['local']);
 });

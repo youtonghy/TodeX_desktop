@@ -81,14 +81,18 @@ export function installDemoMode(): boolean {
     };
   }
   // `mesh=1`: the demo backend is a node of a device group this device is
-  // in, with a second device and a device asking to join.
-  if (params.get('mesh') === '1') {
+  // in, with a second device and a device asking to join. `mesh=local`: the
+  // same group, with the demo backend reached over IPC as this computer's
+  // backend; the group's link to it is the standby.
+  const meshMode = params.get('mesh');
+  if (meshMode === '1' || meshMode === 'local') {
     const mesh = demoMesh(DEMO_SERVER_URL);
-    store.set(BACKEND_CONNECTIONS_STORAGE_KEY, [{
-      id: 'default-backend', name: 'MBP', serverUrl: DEMO_SERVER_URL, labelColor: '#3b82f6', tenantId: 'default',
-      encryptionProtocol: 'none', encryptionPublicKey: '', transportVerified: false, createdAt: 0, updatedAt: 0,
-      mesh: { groupId: mesh.group.groupId, nodeId: mesh.nodeId },
-    }]);
+    const node = { groupId: mesh.group.groupId, nodeId: mesh.nodeId };
+    const profile = { name: 'MBP', labelColor: '#3b82f6', tenantId: 'default', encryptionProtocol: 'none', encryptionPublicKey: '', transportVerified: false, createdAt: 0, updatedAt: 0 };
+    store.set(BACKEND_CONNECTIONS_STORAGE_KEY, meshMode === 'local' ? [
+      { ...profile, id: 'default-backend', serverUrl: 'todex-ipc://local' },
+      { ...profile, id: 'demo-mesh-standby', serverUrl: DEMO_SERVER_URL, disabled: true, mesh: node },
+    ] : [{ ...profile, id: 'default-backend', serverUrl: DEMO_SERVER_URL, mesh: node }]);
     store.set(MESH_GROUPS_STORAGE_KEY, [mesh.group]);
     bridge.secureStore = {
       get: async (key) => (key.startsWith(`${DEVICE_SECRET_STORAGE_KEY}.`) || key === meshDeviceSecretKey(mesh.group.groupId) ? DEMO_MESH_DEVICE_SECRET : null),

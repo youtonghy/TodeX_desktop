@@ -118,6 +118,7 @@ export function MeshGroupSettings({ session }: { session: TodeXSession }) {
                   <span className="flex items-center gap-2">
                     <span className="truncate">{member.name}</span>
                     {member.self ? <Chip variant="caption" color="neutral">{t('mesh.thisDevice')}</Chip> : null}
+                    {member.local ? <Chip variant="caption" color="cyan">{t('mesh.localNode')}</Chip> : null}
                   </span>
                 )}
                 description={member.kind === 'node'
@@ -127,7 +128,7 @@ export function MeshGroupSettings({ session }: { session: TodeXSession }) {
                 {member.kind === 'node' ? (
                   <>
                     {member.via ? <Chip variant="caption" color="blue">{t('mesh.viaRelay', { name: member.via })}</Chip> : null}
-                    <Chip variant="caption" color={STATE_COLORS[member.state ?? 'idle']}>{member.profileId ? connectionStateLabel(member.state ?? 'idle') : t('mesh.nodeUnknown')}</Chip>
+                    <Chip variant="caption" color={STATE_COLORS[member.state ?? 'idle']}>{member.profileId ? connectionStateLabel(member.state ?? 'idle') : member.local ? t('mesh.localNoAddress') : t('mesh.nodeUnknown')}</Chip>
                     {member.profileId && (member.state === 'error' || member.state === 'closed') ? (
                       <Button size="small" variant="secondary" onClick={() => mesh.retryNode(member.profileId!)}>{t('mesh.retry')}</Button>
                     ) : null}
@@ -450,8 +451,11 @@ function AddBackendDialog({ session, group, busy, error, onClose, onAddPaired, o
   onAddWithCode: (url: string, code: string) => void;
 }) {
   const t = useT();
-  // Paired point-to-point backends that are connected and support groups.
+  // Paired point-to-point backends that are connected and support groups,
+  // except an IPC backend that already is a node of this group.
+  const nodeIds = new Set(group.members.filter((member) => member.kind === 'node').map((member) => member.id));
   const paired = session.backendConnections.filter((profile) => !profile.mesh && !profile.disabled && profile.transportVerified
+    && !nodeIds.has(session.meshGroups.ipcNodeIds[profile.id] ?? '')
     && session.backendLinkStatus[profile.id]?.state === 'open' && session.backendLinkStatus[profile.id]?.serverVersion?.mesh === 1);
   const [mode, setMode] = useState<'paired' | 'code'>(paired.length ? 'paired' : 'code');
   const [selected, setSelected] = useState(paired[0]?.id ?? '');

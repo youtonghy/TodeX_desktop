@@ -15,6 +15,12 @@ import { applyMergePatch, setAt, type SettingsObject } from '../lib/cliSettings'
 import { demoMesh } from './mesh';
 import * as fixtures from './fixtures';
 
+/** `?mesh=1` or `?mesh=local`: the demo backend is a node of the demo group. */
+function demoInMeshGroup(): boolean {
+  const mode = new URLSearchParams(window.location.search).get('mesh');
+  return mode === '1' || mode === 'local';
+}
+
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
@@ -1184,9 +1190,9 @@ class DemoSocket implements SecureSocket {
       }
       result = { conversationId: String(payload.conversationId ?? ''), stoppedTaskIds: taskIds };
     } else if (message.type === 'mesh.state.get' || message.type === 'mesh.node.get') {
-      // `?mesh=1`: the demo backend is the node of the demo group.
+      // `?mesh=1` (or `local`): the demo backend is the node of the demo group.
       const mesh = demoMesh(fixtures.DEMO_SERVER_URL);
-      const inGroup = new URLSearchParams(window.location.search).get('mesh') === '1';
+      const inGroup = demoInMeshGroup();
       result = message.type === 'mesh.node.get'
         ? { nodeId: mesh.nodeId, nodePublicKey: '', nodeInfo: mesh.nodeInfo, groups: inGroup ? [mesh.group.groupId] : [] }
         : { nodeId: mesh.nodeId, nodeInfo: mesh.nodeInfo, groups: inGroup ? [{ groupId: mesh.group.groupId, chain: mesh.group.chain, nodeInfos: [] }] : [] };
@@ -1196,8 +1202,7 @@ class DemoSocket implements SecureSocket {
       const phone = mesh.group.chain.length ? mesh.phoneId : '';
       result = { nodeId: mesh.nodeId, connected: [{ deviceId: mesh.group.deviceId, connections: 1, connectedAt: Date.now() - 600_000 }], lastSeen: phone ? { [phone]: Date.now() - 7_200_000 } : {} };
     } else if (message.type === 'mesh.join.list') {
-      const inGroup = new URLSearchParams(window.location.search).get('mesh') === '1';
-      result = { requests: inGroup ? [demoMesh(fixtures.DEMO_SERVER_URL).joinRequest] : [] };
+      result = { requests: demoInMeshGroup() ? [demoMesh(fixtures.DEMO_SERVER_URL).joinRequest] : [] };
     } else if (message.type === 'conversation.warm') {
       // The demo has no agent processes to start.
       result = { conversationId: String(payload.conversationId ?? ''), warmed: false, reason: 'demo' };

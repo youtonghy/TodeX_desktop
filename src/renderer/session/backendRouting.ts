@@ -69,33 +69,74 @@ type DaemonProfileLike = ProfileLike & {
   encryptionPublicKey: string;
   transportVerified: boolean;
   disabled?: boolean;
+  mesh?: { nodeId: string };
 };
+
+/** The group node id of the daemon an IPC profile serves, once known. */
+export type IpcNodeOf = (ipcProfileId: string) => string | undefined;
+
+/**
+ * A device-group node profile whose daemon an IPC profile serves: it stays
+ * connected so this device is present in the group and its roster, joins
+ * and presence keep flowing, but carries no data (the IPC profile does).
+ */
+export function isStandbyProfile(profile: { disabled?: boolean; mesh?: unknown } | null | undefined): boolean {
+  return Boolean(profile?.disabled && profile.mesh);
+}
+
+function sameDaemonKey(ipc: DaemonProfileLike, other: DaemonProfileLike): boolean {
+  return Boolean(ipc.transportVerified && ipc.encryptionPublicKey)
+    && other.transportVerified && other.encryptionPublicKey === ipc.encryptionPublicKey;
+}
 
 /**
  * Profiles that reach a backend another profile already serves over IPC.
  * Two profiles name the same daemon when both pinned the same transport key,
- * or when `reachesSameDaemon` says the TCP address is the IPC daemon's
- * listener. Each enabled TCP profile that does is paired with the IPC
+ * when `reachesSameDaemon` says the TCP address is the IPC daemon's
+ * listener, or when a group node profile names the node `nodeOf` learned
+ * over IPC. Each enabled TCP profile that does is paired with the IPC
  * profile that takes over: one daemon, one enabled profile, so its records
- * (whose ids the daemon issues) are listed once.
+ * (whose ids the daemon issues) are listed once. A group node profile that
+ * loses stays connected as a standby (`isStandbyProfile`).
  */
 export function ipcDaemonConflicts<P extends DaemonProfileLike>(
   profiles: readonly P[],
   isIpc: (serverUrl: string) => boolean,
   reachesSameDaemon: (ipcUrl: string, serverUrl: string) => boolean = () => false,
+  nodeOf: IpcNodeOf = () => undefined,
 ): Array<{ loserId: string; winnerId: string }> {
   const enabled = profiles.filter((profile) => !profile.disabled);
   const conflicts: Array<{ loserId: string; winnerId: string }> = [];
   for (const winner of enabled) {
     if (!isIpc(winner.serverUrl)) continue;
-    const pinned = winner.transportVerified && winner.encryptionPublicKey;
+    const node = nodeOf(winner.id);
     for (const loser of enabled) {
       if (loser === winner || isIpc(loser.serverUrl) || conflicts.some((item) => item.loserId === loser.id)) continue;
-      const sameKey = Boolean(pinned) && loser.transportVerified && loser.encryptionPublicKey === winner.encryptionPublicKey;
-      if (sameKey || reachesSameDaemon(winner.serverUrl, loser.serverUrl)) conflicts.push({ loserId: loser.id, winnerId: winner.id });
+      const sameNode = Boolean(node) && loser.mesh?.nodeId === node;
+      if (sameDaemonKey(winner, loser) || sameNode || reachesSameDaemon(winner.serverUrl, loser.serverUrl)) {
+        conflicts.push({ loserId: loser.id, winnerId: winner.id });
+      }
     }
   }
   return conflicts;
+}
+
+/**
+ * Standby group node profiles no enabled IPC profile serves any more (it
+ * was removed or swapped out): they carry their daemon's data again. An IPC
+ * profile whose node is not known yet (not connected so far) still counts,
+ * so a standby does not flip back and forth while the IPC link starts.
+ */
+export function orphanedStandbyProfiles<P extends DaemonProfileLike>(
+  profiles: readonly P[],
+  isIpc: (serverUrl: string) => boolean,
+  nodeOf: IpcNodeOf = () => undefined,
+): P[] {
+  const ipcProfiles = profiles.filter((profile) => !profile.disabled && isIpc(profile.serverUrl));
+  return profiles.filter((standby) => isStandbyProfile(standby) && !ipcProfiles.some((ipc) => {
+    const node = nodeOf(ipc.id);
+    return sameDaemonKey(ipc, standby) || node === undefined || node === standby.mesh!.nodeId;
+  }));
 }
 
 /**

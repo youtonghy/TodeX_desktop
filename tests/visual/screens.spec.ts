@@ -256,6 +256,24 @@ test('settings: backend group with a join request', async ({ page, openDemo }) =
   await expect(page).toHaveScreenshot('settings-mesh-node-light.png', { mask: volatile(page) });
 });
 
+// This computer's backend is a node of the group and is reached over IPC:
+// the group keeps its link to the node as a standby, and the data goes over
+// the IPC profile.
+test('settings: backend group with this computer over IPC', async ({ page, openDemo }) => {
+  await openDemo('light', 'mesh=local');
+  await page.getByRole('button', { name: '设置', exact: true }).click();
+  await settingsSection(page, '后端组').click();
+  await expect(page.getByText('本机 · 数据走 IPC', { exact: true })).toBeVisible();
+  await expect(page.getByText('已连接', { exact: true }).first()).toBeVisible();
+  await settle(page);
+  await expect(page).toHaveScreenshot('settings-mesh-local-light.png', { mask: volatile(page) });
+  await settingsSection(page, '后端连接').click();
+  await page.locator('[data-backend-id="demo-mesh-standby"]').click();
+  await expect(page.getByText(/这是设备组到本机 backend 的连接/)).toBeVisible();
+  await settle(page);
+  await expect(page).toHaveScreenshot('settings-backend-standby-light.png', { mask: volatile(page) });
+});
+
 // The agent starts using the backend's computer: by default its live view
 // opens as a side-panel tab.
 test('computer use live view in the side panel', async ({ page, openDemo }) => {
