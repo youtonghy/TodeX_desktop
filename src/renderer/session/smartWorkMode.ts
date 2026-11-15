@@ -71,7 +71,7 @@ export function smartWorkModeAvailable(
  * the model does not support to its default. With no list, the stage is
  * used as configured. */
 export function resolveSmartStage(stage: SmartStage, models: readonly ProviderModelDescriptor[]): SmartStage {
-  if (models.length === 0) return stage;
+  if (models.length === 0) return { model: stage.model, reasoningEffort: stage.reasoningEffort };
   const descriptor = models.find((item) => item.id === stage.model)
     ?? models.find((item) => item.isDefault)
     ?? models[0];
