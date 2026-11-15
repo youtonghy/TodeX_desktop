@@ -271,7 +271,9 @@ test('settings: backend group with this computer over IPC', async ({ page, openD
   await page.locator('[data-backend-id="demo-mesh-standby"]').click();
   await expect(page.getByText(/这是设备组到本机 backend 的连接/)).toBeVisible();
   await settle(page);
-  await expect(page).toHaveScreenshot('settings-backend-standby-light.png', { mask: volatile(page) });
+  // The measured latency (and the version chip it pushes along) differs per run.
+  const health = page.getByText(/^后端在线 · \d+ ms/).locator('..');
+  await expect(page).toHaveScreenshot('settings-backend-standby-light.png', { mask: [...volatile(page), health] });
 });
 
 // The agent starts using the backend's computer: by default its live view
