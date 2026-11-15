@@ -3080,6 +3080,8 @@ export const zhCN = {
   'chat.providerNotice.planHandoff': '已批准计划，已切换到 {model} · 自动审批执行',
   'chat.providerNotice.planHandoffNextTurn': '已批准计划，下一条消息起切换到 {model} · 自动审批执行',
   'chat.providerNotice.planHandoffNoModel': '已批准计划，已切换到执行 · 自动审批执行',
+  'chat.providerNotice.planReentered': 'Claude 重新进入计划，已切换到 {model} 规划',
+  'chat.providerNotice.planReenteredNoModel': 'Claude 重新进入计划',
   'sess.smartModeUnsupported': '当前 Agent 不支持智能工作模式，请改用其他工作模式。',
   'smart.title': '智能工作模式',
   'smart.description': '适用于 Claude Code：先用计划模型制定计划，批准后自动切换到执行模型并自动审批执行。在输入框的工作模式中选择「智能」即可使用。',

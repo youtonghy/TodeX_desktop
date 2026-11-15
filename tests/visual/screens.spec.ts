@@ -443,6 +443,23 @@ test('smart conversation with a plan handoff', async ({ page, openDemo }) => {
   await expect(page).toHaveScreenshot('smart-plan-handoff-light.png', { mask: volatile(page) });
 });
 
+// The same smart conversation taking on a new task: Claude enters Plan mode
+// on its own (`plan_reentered`), so it plans again on the plan model and the
+// composer shows the planning stage.
+test('smart conversation re-entering planning', async ({ page, openDemo }) => {
+  await openDemo('light');
+  await page.getByText('design-tokens', { exact: true }).click();
+  await page.getByText('拆分主题构建脚本').first().click();
+  await expect(page.getByRole('button', { name: /选择工作模式/ })).toContainText('智能 · 执行中');
+  await page.getByRole('textbox', { name: '消息输入' }).fill('先给导出加进度提示出个计划');
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('note').filter({ hasText: /^Claude 重新进入计划，已切换到 .+ 规划$/ })).toBeVisible();
+  await expect(page.getByText('计划待批准', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: /选择工作模式/ })).toContainText('智能 · 计划中');
+  await settle(page);
+  await expect(page).toHaveScreenshot('smart-plan-reentered-light.png', { mask: volatile(page) });
+});
+
 // A plan handed in for approval (Claude ExitPlanMode as a plan review): the
 // plan is its own timeline row and the composer card approves it or sends
 // requested changes back.

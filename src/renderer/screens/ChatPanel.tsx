@@ -167,6 +167,7 @@ const PROVIDER_NOTICES = {
   bypass_mode_disabled: 'chat.providerNotice.bypassModeDisabledNoLayer',
   context_lost: 'chat.providerNotice.contextLost',
   plan_handoff: 'chat.providerNotice.planHandoff',
+  plan_reentered: 'chat.providerNotice.planReentered',
 } as const satisfies Record<NonNullable<TimelineEntry['providerNotice']>, MessageKey>;
 
 /** Why background work was lost (`background_tasks_ended`'s `reason`, the
@@ -214,6 +215,10 @@ function providerNoticeText(notice: NonNullable<TimelineEntry['providerNotice']>
         ? t('chat.providerNotice.planHandoffNextTurn', { model })
         : t(PROVIDER_NOTICES[notice], { model });
     }
+    case 'plan_reentered':
+      return entry.providerNoticeModel
+        ? t(PROVIDER_NOTICES[notice], { model: modelLabel(entry.providerNoticeModel) })
+        : t('chat.providerNotice.planReenteredNoModel');
   }
 }
 
@@ -891,7 +896,7 @@ const ChatTimelineItem = memo(function ChatTimelineItem({
     return (
       <p data-message-id={entry.id} role="note" title={entry.subtitle || undefined} className="py-1 text-center text-caption-1-regular text-text-tertiary">
         {providerNoticeText(entry.providerNotice, entry, agentName, (id) => (
-          // Only Claude Code hands a plan off (smart work mode).
+          // Only Claude Code hands a plan off or re-plans (smart work mode).
           session.providerModels['claude-code']?.find((item) => item.id === id)?.displayName || id
         ))}
       </p>

@@ -3080,6 +3080,8 @@ export const ko: Messages = {
   'chat.providerNotice.planHandoff': '계획이 승인되어 {model}(으)로 전환했습니다 · 자동 승인으로 실행',
   'chat.providerNotice.planHandoffNextTurn': '계획이 승인되었습니다. 다음 메시지부터 {model}(으)로 전환합니다 · 자동 승인으로 실행',
   'chat.providerNotice.planHandoffNoModel': '계획이 승인되어 실행으로 전환했습니다 · 자동 승인',
+  'chat.providerNotice.planReentered': 'Claude가 계획으로 돌아가 {model}(으)로 전환했습니다',
+  'chat.providerNotice.planReenteredNoModel': 'Claude가 계획으로 돌아갔습니다',
   'sess.smartModeUnsupported': '현재 Agent는 스마트 작업 모드를 지원하지 않습니다. 다른 작업 모드를 선택하세요.',
   'smart.title': '스마트 작업 모드',
   'smart.description': 'Claude Code용: 계획 모델로 계획을 세우고, 계획을 승인하면 실행 모델로 자동 전환해 자동 승인으로 실행합니다. 입력창의 작업 모드에서 "스마트"를 선택해 사용하세요.',

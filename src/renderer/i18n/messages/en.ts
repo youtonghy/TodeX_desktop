@@ -3080,6 +3080,8 @@ export const en: Messages = {
   'chat.providerNotice.planHandoff': 'Plan approved; switched to {model} · executing with auto-approval',
   'chat.providerNotice.planHandoffNextTurn': 'Plan approved; switching to {model} from the next message · executing with auto-approval',
   'chat.providerNotice.planHandoffNoModel': 'Plan approved; switched to execution · auto-approval',
+  'chat.providerNotice.planReentered': 'Claude went back to planning; switched to {model}',
+  'chat.providerNotice.planReenteredNoModel': 'Claude went back to planning',
   'sess.smartModeUnsupported': 'The current Agent does not support Smart work mode; pick another work mode.',
   'smart.title': 'Smart work mode',
   'smart.description': 'For Claude Code: plan with one model, then, once you approve the plan, switch to an execution model that runs with auto-approval. Choose Smart as the work mode in the composer to use it.',

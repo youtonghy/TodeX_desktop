@@ -3080,6 +3080,8 @@ export const ja: Messages = {
   'chat.providerNotice.planHandoff': '計画が承認され、{model} に切り替えました · 自動承認で実行',
   'chat.providerNotice.planHandoffNextTurn': '計画が承認されました。次のメッセージから {model} に切り替えます · 自動承認で実行',
   'chat.providerNotice.planHandoffNoModel': '計画が承認され、実行に切り替えました · 自動承認',
+  'chat.providerNotice.planReentered': 'Claude が計画に戻り、{model} に切り替えました',
+  'chat.providerNotice.planReenteredNoModel': 'Claude が計画に戻りました',
   'sess.smartModeUnsupported': '現在の Agent はスマート作業モードに対応していません。別の作業モードを選んでください。',
   'smart.title': 'スマート作業モード',
   'smart.description': 'Claude Code 向け：計画用モデルで計画を立て、承認後は実行用モデルに自動で切り替えて自動承認で実行します。入力欄の作業モードで「スマート」を選ぶと使えます。',

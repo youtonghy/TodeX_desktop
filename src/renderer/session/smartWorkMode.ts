@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { PermissionMode, PromptAfterPlan, PromptSkillRef, ProviderDescriptor, ProviderModelDescriptor, SkillCatalogDescriptor } from '@todex/protocol/v2';
+import type { PermissionMode, PromptAfterPlan, PromptReplan, PromptSkillRef, ProviderDescriptor, ProviderModelDescriptor, SkillCatalogDescriptor } from '@todex/protocol/v2';
 import { loadJson, saveJson } from '../lib/storage';
 import { platform } from '../platform';
 
@@ -7,8 +7,11 @@ import { platform } from '../platform';
  * Smart work mode (Claude Code): a conversation plans first with one model,
  * then, once the user approves the plan, the backend switches it to
  * implement with another model and auto-approved permissions (the prompt's
- * `afterPlan`, reported back as a `plan_handoff` provider notice). One
- * global configuration per device.
+ * `afterPlan`, reported back as a `plan_handoff` provider notice). During
+ * execution it plans again when a message attaches the configured plan skill
+ * ([`smartPromptPhase`]) or when Claude enters Plan mode on its own (the
+ * prompt's `replan`, reported back as a `plan_reentered` notice). One global
+ * configuration per device.
  */
 
 export type SmartPhase = 'plan' | 'execute';
@@ -86,24 +89,45 @@ export type SmartPromptFields = {
   /** Execute phase only; plan prompts keep the conversation's mode. */
   permissionMode?: PermissionMode;
   afterPlan?: PromptAfterPlan;
+  /** Execute phase only: the plan model Claude switches to if it enters
+   * Plan mode on its own; sent when the backend supports it. */
+  replan?: PromptReplan;
   /** The configured plan skill, when the catalog lists it. */
   skill?: PromptSkillRef;
   /** The configured plan skill name the catalog did not list. */
   missingSkill?: string;
 };
 
-/** How a smart conversation's next prompt runs in `phase`. */
+/** The phase a smart conversation's next prompt runs in: during execution,
+ * a message that attaches the configured plan skill starts a new plan. */
+export function smartPromptPhase(
+  config: SmartWorkModeConfig,
+  phase: SmartPhase,
+  attachedSkills: readonly { name: string }[],
+): SmartPhase {
+  const planSkill = config.plan.skill;
+  return phase === 'execute' && planSkill && attachedSkills.some((skill) => skill.name === planSkill) ? 'plan' : phase;
+}
+
+/** How a smart conversation's next prompt runs in `phase`. `supportsReplan`:
+ * the backend takes `replan` on execute prompts. */
 export function smartPromptFields(
   config: SmartWorkModeConfig,
   phase: SmartPhase,
   models: readonly ProviderModelDescriptor[],
   skills: readonly SkillCatalogDescriptor[] | undefined,
+  supportsReplan = false,
 ): SmartPromptFields {
   const execute = resolveSmartStage(config.execute, models);
-  if (phase === 'execute') {
-    return { workMode: 'implement', ...execute, permissionMode: SMART_EXECUTE_PERMISSION };
-  }
   const plan = resolveSmartStage(config.plan, models);
+  if (phase === 'execute') {
+    return {
+      workMode: 'implement',
+      ...execute,
+      permissionMode: SMART_EXECUTE_PERMISSION,
+      ...(supportsReplan ? { replan: { model: plan.model, reasoningEffort: plan.reasoningEffort } } : {}),
+    };
+  }
   const skillName = config.plan.skill;
   const skill = skillName
     ? skills?.find((item) => item.name === skillName && item.valid && item.active)

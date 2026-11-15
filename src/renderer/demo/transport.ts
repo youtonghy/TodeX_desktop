@@ -1181,7 +1181,7 @@ class DemoSocket implements SecureSocket {
       }
     } else if (message.type === 'conversation.prompt') {
       const journal = journals.get(String(payload.conversationId));
-      if (journal) result = { conversationId: journal.manifest.id, turnId: playCannedTurn(journal, String(payload.text ?? '')) };
+      if (journal) result = { conversationId: journal.manifest.id, turnId: playCannedTurn(journal, String(payload.text ?? ''), smartRun(payload)) };
     } else if (message.type === 'conversation.permission.respond') {
       const answer = demoPermissions.get(String(payload.permissionId ?? ''));
       const decision = (payload.decision ?? {}) as { outcome?: unknown; data?: unknown };
@@ -1348,7 +1348,20 @@ function cancelDemoTurn(journal: Journal, turnId?: string): boolean {
 }
 
 /** Streams a short scripted turn so prompts typed in the preview get an answer. */
-function playCannedTurn(journal: Journal, text: string): string {
+/** A smart work mode prompt's plan switches (`afterPlan`, `replan`). */
+type SmartRun = { afterPlan?: { model?: string }; replan?: { model?: string; reasoningEffort?: string | null } };
+
+function smartRun(payload: Record<string, unknown>): SmartRun {
+  const record = (value: unknown) => (value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined);
+  const afterPlan = record(payload.afterPlan);
+  const replan = record(payload.replan);
+  return {
+    ...(afterPlan ? { afterPlan: { model: String(afterPlan.model ?? '') } } : {}),
+    ...(replan ? { replan: { model: String(replan.model ?? ''), reasoningEffort: typeof replan.reasoningEffort === 'string' ? replan.reasoningEffort : null } } : {}),
+  };
+}
+
+function playCannedTurn(journal: Journal, text: string, smart: SmartRun = {}): string {
   const turnId = `${journal.manifest.id}-live-${Date.now()}`;
   const scripted = turnScript?.(text, turnId);
   if (scripted) {
@@ -1364,7 +1377,7 @@ function playCannedTurn(journal: Journal, text: string): string {
     return turnId;
   }
   if (/计划|plan/i.test(text) && journal.manifest.provider === 'claude-code' && !journal.manifest.parentConversationId) {
-    playPlanTurn(journal, turnId, text);
+    playPlanTurn(journal, turnId, text, smart);
     return turnId;
   }
   const toolCallId = `${turnId}-call`;
@@ -1500,15 +1513,24 @@ function playSshTurn(journal: Journal, turnId: string, text: string): void {
 /** A Claude Code prompt asking for a plan plays a turn that hands one in
  * for approval (`ExitPlanMode` as a plan review); approving runs it, and
  * requesting changes sends the note back. */
-function playPlanTurn(journal: Journal, turnId: string, text: string): void {
+function playPlanTurn(journal: Journal, turnId: string, text: string, smart: SmartRun = {}): void {
   const permissionId = `${turnId}-plan`;
   const toolCallId = `${turnId}-exit-plan`;
   const toolName = 'ExitPlanMode';
   const plan = '## 给导出加上进度提示\n\n1. 在 `exportReport()` 里按页上报进度\n2. 导出对话框显示进度条和剩余页数\n3. 取消导出时清理临时文件\n4. 补一个大报表的导出测试';
   const args = { plan };
+  // A smart conversation that was executing: Claude enters Plan mode on its
+  // own, so the backend switches to the plan model (`plan_reentered`).
+  const replan = smart.replan;
+  // An approved plan hands off to the model it started from.
+  const handoffModel = smart.afterPlan?.model || (replan ? 'opus' : '');
   scheduleDemoTurn(journal, turnId, [
     [0, 'message.created', { role: 'user', content: text }],
     [150, 'turn.started', { status: 'running' }],
+    ...(replan ? [[300, 'provider.event', {
+      provider: 'claude-code', providerMethod: 'plan_reentered',
+      metadata: { workMode: 'plan', model: replan.model, reasoningEffort: replan.reasoningEffort ?? null },
+    }] satisfies DemoStep] : []),
     [500, 'tool.started', { toolCallId, toolName, arguments: args }],
     [700, 'permission.requested', () => {
       demoPermissions.set(permissionId, (outcome, data) => {
@@ -1516,6 +1538,12 @@ function playPlanTurn(journal: Journal, turnId: string, text: string): void {
         const approved = outcome.startsWith('allow');
         const feedback = typeof data?.feedback === 'string' ? data.feedback : '';
         appendDemoEvent(journal, turnId, 'permission.resolved', { permissionId, outcome });
+        if (approved && handoffModel) {
+          appendDemoEvent(journal, turnId, 'provider.event', {
+            provider: 'claude-code', providerMethod: 'plan_handoff',
+            metadata: { workMode: 'implement', model: handoffModel, permissionMode: 'auto', applied: 'now', reason: 'plan_approved' },
+          });
+        }
         scheduleDemoTurn(journal, turnId, [
           [300, 'tool.completed', { toolCallId, toolName, arguments: args, isError: !approved, result: approved ? 'User has approved your plan.' : 'The user did not approve the plan.' }],
           [900, 'message.completed', {

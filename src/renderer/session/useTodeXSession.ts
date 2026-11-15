@@ -1,7 +1,7 @@
 import { normalizeBackendLabelColor, type BackendConnectionProfile } from './backendColors';
 import { ipcDaemonConflicts, isStandbyProfile, moveBackendRecords, ownerBackendId, resolveNoWorkspaceBackendId, tagLegacyBackendRecords } from './backendRouting';
 import { useWorkbenchSharing } from './useWorkbenchSharing';
-import { SMART_WORK_MODE_PROVIDER, smartPromptFields, smartWorkModeAvailable, useSmartWorkMode } from './smartWorkMode';
+import { SMART_WORK_MODE_PROVIDER, smartPromptFields, smartPromptPhase, smartWorkModeAvailable, useSmartWorkMode } from './smartWorkMode';
 import {
   completionNotificationBody,
   requestNotificationBody,
@@ -2094,16 +2094,18 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   }, []);
 
   const lastSequenceTimersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
-  /** An approved plan in a smart conversation moves it on to execution. A
-   * live handoff always applies; a replayed one only when it is newer than
-   * the last time the phase was set, so replay never undoes a later manual
-   * choice. Not remembered as the agent's run modes. */
-  const applySmartPlanHandoff = (localId: string, sequence: number, live: boolean) => {
+  /** A smart conversation's phase follows the backend: an approved plan
+   * (`plan_handoff`) moves it on to execution, Claude entering Plan mode on
+   * its own (`plan_reentered`) back to planning. A live event always
+   * applies; a replayed one only when it is newer than the last time the
+   * phase was set, so replay never undoes a later manual choice. Not
+   * remembered as the agent's run modes. */
+  const applySmartPhaseEvent = (localId: string, sequence: number, live: boolean, phase: 'plan' | 'execute') => {
     const record = stores.conversations.get().find((item) => item.id === localId);
     if (record?.mode !== 'smart') return;
     if (!live && sequence <= (record.smartPhaseSequence ?? 0)) return;
-    if (record.smartPhase === 'execute' && (record.smartPhaseSequence ?? 0) >= sequence) return;
-    updateConversation(localId, { smartPhase: 'execute', smartPhaseSequence: Math.max(sequence, record.smartPhaseSequence ?? 0) });
+    if (record.smartPhase === phase && (record.smartPhaseSequence ?? 0) >= sequence) return;
+    updateConversation(localId, { smartPhase: phase, smartPhaseSequence: Math.max(sequence, record.smartPhaseSequence ?? 0) });
   };
   runtimeUpdateRef.current = (state, appliedEvents, recovering, live) => {
     const conversation = stores.conversations.get().find((item) => item.v2ConversationId === state.conversationId || item.id === state.conversationId);
@@ -2183,7 +2185,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         submission.phase = 'running';
         setSubmissionStatusByConversation((current) => ({ ...current, [localId]: 'running' }));
       }
-      if (type === 'provider.event' && data.providerMethod === 'plan_handoff') applySmartPlanHandoff(localId, event.sequence, live.has(event.sequence));
+      if (type === 'provider.event' && data.providerMethod === 'plan_handoff') applySmartPhaseEvent(localId, event.sequence, live.has(event.sequence), 'execute');
+      if (type === 'provider.event' && data.providerMethod === 'plan_reentered') applySmartPhaseEvent(localId, event.sequence, live.has(event.sequence), 'plan');
       if (type === 'followups.updated') {
         // The daemon's queue after a failure tells whether it continues the
         // prompt. A snapshot that neither continues nor pauses predates it.
@@ -4923,6 +4926,28 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     return true;
   }, [activeBackendConnectionId, getConversationContext, rememberProviderRunModes, updateConversation]);
 
+  /** A smart conversation starting over with a plan. The phase is stamped
+   * with the newest applied sequence, so a replayed older plan handoff
+   * cannot move it on. */
+  const smartPlanRestart = useCallback((conversation: ConversationRecord): Pick<ConversationRecord, 'smartPhase' | 'smartPhaseSequence'> => {
+    const v2Id = conversation.v2ConversationId;
+    const latest = Math.max(
+      (v2Id ? conversationRecoveryRef.current?.get(v2Id)?.appliedSequence : undefined) ?? 0,
+      conversation.lastSequence ?? 0,
+    );
+    return { smartPhase: 'plan', smartPhaseSequence: latest };
+  }, []);
+
+  /** A message attaching the configured plan skill during execution starts
+   * a new plan (see `smartPromptPhase`); called once that message is sent. */
+  const restartSmartPlanForSkills = useCallback((conversationId: string, skills: SelectedSkillAttachment[]) => {
+    const record = stores.conversations.get().find((item) => item.id === conversationId);
+    if (record?.mode !== 'smart' || record.provider !== SMART_WORK_MODE_PROVIDER) return;
+    const phase = record.smartPhase ?? 'plan';
+    if (phase === 'plan' || smartPromptPhase(smartWorkModeRef.current, phase, skills) !== 'plan') return;
+    updateConversation(conversationId, smartPlanRestart(record));
+  }, [smartPlanRestart, updateConversation]);
+
   const applyConversationWorkMode = useCallback(async (
     conversationId: string,
     mode: 'plan' | 'implement' | 'smart',
@@ -4939,15 +4964,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       return false;
     }
     if (mode === 'smart') {
-      // Choosing Smart (again) starts over with a plan. The phase is stamped
-      // with the newest applied sequence, so a replayed older plan handoff
-      // cannot move it on. Smart is never remembered as the agent's mode.
-      const v2Id = context.conversation.v2ConversationId;
-      const latest = Math.max(
-        (v2Id ? conversationRecoveryRef.current?.get(v2Id)?.appliedSequence : undefined) ?? 0,
-        context.conversation.lastSequence ?? 0,
-      );
-      updateConversation(conversationId, { mode, smartPhase: 'plan', smartPhaseSequence: latest });
+      // Choosing Smart (again) starts over with a plan. Smart is never
+      // remembered as the agent's mode.
+      updateConversation(conversationId, { mode, ...smartPlanRestart(context.conversation) });
       return true;
     }
     updateConversation(conversationId, { mode });
@@ -4957,7 +4976,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       { workMode: mode },
     );
     return true;
-  }, [activeBackendConnectionId, getConversationContext, rememberProviderRunModes, updateConversation]);
+  }, [activeBackendConnectionId, getConversationContext, rememberProviderRunModes, smartPlanRestart, updateConversation]);
 
   const applyPermissionProfile = useCallback(async (
     conversationId: string,
@@ -5560,8 +5579,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       const providerModels = providerModelsByBackendRef.current[backendId]?.[SMART_WORK_MODE_PROVIDER]?.length
         ? providerModelsByBackendRef.current[backendId]![SMART_WORK_MODE_PROVIDER]!
         : providersForConversation(conversation).find((item) => item.id === SMART_WORK_MODE_PROVIDER)?.models ?? [];
-      const smart = smartPromptFields(smartWorkModeRef.current, conversation.smartPhase ?? 'plan', providerModels,
-        catalog?.status === 'ready' ? catalog.skills?.skills : undefined);
+      const phase = smartPromptPhase(smartWorkModeRef.current, conversation.smartPhase ?? 'plan', skills);
+      const supportsReplan = conversationPermissionCapabilities(conversation, providersForConversation(conversation))?.supportsReplan === true;
+      const smart = smartPromptFields(smartWorkModeRef.current, phase, providerModels,
+        catalog?.status === 'ready' ? catalog.skills?.skills : undefined, supportsReplan);
       const warningKey = `${conversation.id}\n${smart.missingSkill ?? ''}`;
       if (smart.missingSkill && !smartSkillWarningsRef.current.has(warningKey)) {
         smartSkillWarningsRef.current.add(warningKey);
@@ -5576,6 +5597,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         model: smart.model,
         ...(smart.reasoningEffort ? { reasoningEffort: smart.reasoningEffort } : {}),
         ...(smart.afterPlan ? { afterPlan: smart.afterPlan } : {}),
+        ...(smart.replan ? { replan: smart.replan } : {}),
         ...(refs.length ? { skills: refs } : {}),
         ...(content.length ? { content } : {}),
       };
@@ -5894,6 +5916,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         });
         updateConversation(readyConversation.id, { permissionMode,
           mode: readyConversation.mode === 'plan' || readyConversation.mode === 'smart' ? readyConversation.mode : 'implement' });
+        restartSmartPlanForSkills(readyConversation.id, skills);
         if (typeof result.turnId === 'string') submission.turnId = result.turnId;
         const terminal = submission.turnId ? settledV2TurnsRef.current.get(`${v2Id}:${submission.turnId}`) : undefined;
         if (terminal) {
@@ -5970,7 +5993,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         }
       }
     },
-    [updateSentAttachmentRecords, appendTimeline, awaitBackendContinuation, getConversationContext, materializeV2Conversation, reconcilePendingSubmission, v2PromptFields, sendProtocolCommand, setConversationAttachments, setConversationChatDraft, setConversationSelectedSkills, setConversationThinking, updateConversation, autoConnectEnabled, connectBackend],
+    [updateSentAttachmentRecords, appendTimeline, awaitBackendContinuation, getConversationContext, materializeV2Conversation, reconcilePendingSubmission, restartSmartPlanForSkills, v2PromptFields, sendProtocolCommand, setConversationAttachments, setConversationChatDraft, setConversationSelectedSkills, setConversationThinking, updateConversation, autoConnectEnabled, connectBackend],
   );
 
   /** Adds one message to the backend queue (`conversation.queue.add`) and
@@ -6006,6 +6029,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       const result = await sendProtocolCommand({ id: createRequestId('queue-add'), ...frame });
       const started = result.status === 'started';
       if (started) setConversationThinking(conversation.id, true);
+      restartSmartPlanForSkills(conversation.id, item.skills);
       return { status: started ? 'started' : 'queued' };
     } catch (error) {
       if (!(error instanceof ProtocolCommandError && error.state === 'unknown')) {
@@ -6014,7 +6038,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       }
       return { error };
     }
-  }, [getConversationContext, sendProtocolCommand, setConversationThinking, updateSentAttachmentRecords, v2PromptFields]);
+  }, [getConversationContext, restartSmartPlanForSkills, sendProtocolCommand, setConversationThinking, updateSentAttachmentRecords, v2PromptFields]);
 
   /** Hands a follow-up to the backend queue. Resolves 'started' when the
    * conversation was idle and the backend began it at once, false when it
