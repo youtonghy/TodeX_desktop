@@ -1,10 +1,11 @@
 import React, { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentPropsWithRef, type ReactNode } from 'react';
-import { RiArrowLeftSLine, RiArrowRightSLine, RiCheckLine, RiCloseLine, RiExternalLinkLine, RiShieldFlashLine, RiTerminalBoxLine } from '@remixicon/react';
+import { RiArrowLeftSLine, RiArrowRightSLine, RiCheckLine, RiCloseLine, RiEditLine, RiExternalLinkLine, RiFileList3Line, RiShieldFlashLine, RiTerminalBoxLine } from '@remixicon/react';
 import { Form } from 'react-aria-components';
 import { AnimatePresence, motion, useReducedMotion, type Variants } from 'motion/react';
 import { usageTotalTokens, type ConversationRuntime } from '@todex/protocol/conversationRuntime';
 import type { ContextCompactionState } from '@todex/protocol/v2';
-import { permissionActions, permissionDeviceGate, permissionRequestSummary, type PendingRequest, type PermissionOption } from '@todex/protocol/todex';
+import { permissionActions, permissionDeviceGate, permissionPlanText, permissionRequestSummary, type PendingRequest, type PermissionOption } from '@todex/protocol/todex';
+import { permissionAcceptsFeedback } from '@todex/protocol/permissionForm';
 import { deviceIdentityFromSecret } from '@todex/protocol/deviceAuth';
 import type { UsageRecord } from '@todex/protocol/mobileParity';
 import { ShimmerText } from '@/components/application/agent-log/agent-log';
@@ -632,6 +633,7 @@ export function ConversationPermissionActions({ request, deviceSecret, onSelect 
       ? t('runStatus.answerOnDevice', { devices: gate.deviceNames.join(', ') })
       : t('runStatus.answerOnOtherDevice')}</p>;
   }
+  if (isPlanReview(request)) return <PlanReviewActions key={request.requestId} request={request} onSelect={onSelect} />;
   const form = permissionForm(request);
   if (form?.mode === 'user_input' && !form.unsupported) return <UserInputQuestions key={request.requestId} request={request} form={form} onSelect={onSelect} />;
   if (form) return <PermissionResponseForm key={request.requestId} request={request} form={form} onSelect={onSelect} />;
@@ -649,6 +651,63 @@ export function ConversationPermissionActions({ request, deviceSecret, onSelect 
       {permissionOptionLabel(option, t)}
     </Button>;
   })}</div>;
+}
+
+/** A plan the agent asks to have approved (Claude `ExitPlanMode`, Grok Build). */
+function isPlanReview(request: PendingRequest): boolean {
+  return request.data.kind === 'plan' || permissionPlanText(request) !== undefined;
+}
+
+/// A plan review answers with "approve" or "request changes"; requesting
+/// changes opens a note the agent receives with the rejection, when the
+/// backend accepts one (`kind: "plan"`; older backends asked a plain tool
+/// approval, which takes no note).
+function PlanReviewActions({ request, onSelect }: {
+  request: PendingRequest;
+  onSelect: (option: boolean | PermissionOption, data?: PermissionAnswerData) => void;
+}) {
+  const t = useT();
+  const [revising, setRevising] = useState(false);
+  const [feedback, setFeedback] = useState('');
+  const options = permissionActions(request);
+  const approve = options.find(option => typeof option === 'boolean' ? option : option.kind === 'allow_once')
+    ?? options.find(option => typeof option !== 'boolean' && option.kind.startsWith('allow'));
+  const reject = options.find(option => typeof option === 'boolean' ? !option : option.kind === 'reject_once')
+    ?? options.find(option => typeof option !== 'boolean' && option.kind.startsWith('reject'));
+  const acceptsNote = reject !== undefined && permissionAcceptsFeedback(request, reject);
+  const sendChanges = () => {
+    if (!reject) return;
+    const note = feedback.trim();
+    onSelect(reject, acceptsNote && note ? { feedback: note } : undefined);
+  };
+  if (revising && acceptsNote) {
+    return <div className="flex flex-col gap-2">
+      <Textarea
+        className="w-full"
+        aria-label={t('runStatus.planChangesLabel')}
+        placeholder={t('runStatus.planChangesPlaceholder')}
+        autoResize
+        rows={2}
+        maxRows={8}
+        value={feedback}
+        onChange={setFeedback}
+        autoFocus
+        onKeyDown={event => {
+          if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); sendChanges(); }
+          if (event.key === 'Escape') { event.preventDefault(); setRevising(false); }
+        }}
+      />
+      <div className="flex flex-wrap justify-end gap-2">
+        <Button size="small" variant="secondary" onClick={() => setRevising(false)}>{t('common.cancel')}</Button>
+        <Button size="small" leadingIcon={RiEditLine} onClick={sendChanges}>{t('runStatus.planSendChanges')}</Button>
+      </div>
+    </div>;
+  }
+  return <div className="flex flex-wrap gap-2">
+    {approve !== undefined ? <Button size="small" leadingIcon={RiCheckLine} onClick={() => onSelect(approve)}>{t('runStatus.planApprove')}</Button> : null}
+    {reject !== undefined ? <Button size="small" variant="secondary" leadingIcon={RiEditLine}
+      onClick={() => { if (acceptsNote) setRevising(true); else onSelect(reject); }}>{t('runStatus.planRequestChanges')}</Button> : null}
+  </div>;
 }
 
 /// Backends send English option names; localize the shared approval ones and
@@ -671,10 +730,12 @@ function permissionOptionLabel(option: boolean | PermissionOption, t: ReturnType
 
 /// Composer-side approval card: says what will run (the full command, never
 /// clipped) and why the provider asked before offering the actions.
-export function PermissionRequestCard({ request, fallbackTitle, deviceSecret, onSelect }: {
+export function PermissionRequestCard({ request, fallbackTitle, deviceSecret, planHint, onSelect }: {
   request: PendingRequest;
   fallbackTitle: string;
   deviceSecret?: string;
+  /** A plan review's line under the title: what approving starts. */
+  planHint?: string;
   onSelect: (option: boolean | PermissionOption, data?: PermissionAnswerData) => void;
 }) {
   const t = useT();
@@ -682,6 +743,20 @@ export function PermissionRequestCard({ request, fallbackTitle, deviceSecret, on
   const heading = summary.command ? t('runStatus.runCommand')
     : summary.tool ? t('runStatus.useTool', { tool: summary.tool })
       : agentToolRequestTitle(request, t) ?? fallbackTitle;
+  // A plan review: the plan itself is the timeline row just above, so the
+  // card says what approving does instead of repeating it.
+  if (isPlanReview(request)) {
+    return <div className="mb-3 flex flex-col gap-2 rounded-2xl border border-border-button-default bg-background-primary-default p-3 shadow-xs">
+      <div className="flex items-start gap-2">
+        <RiFileList3Line className="mt-0.5 size-4 shrink-0 text-foreground-icon-secondary" aria-hidden />
+        <div className="min-w-0 flex-1">
+          <p className="text-body-medium text-text-primary">{t('runStatus.planReviewTitle')}</p>
+          <p className="mt-0.5 text-body-2-regular text-text-secondary">{planHint ?? t('runStatus.planReviewHint')}</p>
+        </div>
+      </div>
+      <ConversationPermissionActions request={request} deviceSecret={deviceSecret} onSelect={onSelect} />
+    </div>;
+  }
   return <div className="mb-3 flex flex-col gap-2 rounded-2xl border border-border-button-default bg-background-primary-default p-3 shadow-xs">
     <div className="flex items-start gap-2">
       {summary.command ? <RiTerminalBoxLine className="mt-0.5 size-4 shrink-0 text-foreground-icon-secondary" aria-hidden /> : null}

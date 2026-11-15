@@ -1151,8 +1151,9 @@ class DemoSocket implements SecureSocket {
       if (journal) result = { conversationId: journal.manifest.id, turnId: playCannedTurn(journal, String(payload.text ?? '')) };
     } else if (message.type === 'conversation.permission.respond') {
       const answer = demoPermissions.get(String(payload.permissionId ?? ''));
-      const decision = (payload.decision ?? {}) as { outcome?: unknown };
-      if (answer) answer(typeof decision.outcome === 'string' ? decision.outcome : 'reject_once');
+      const decision = (payload.decision ?? {}) as { outcome?: unknown; data?: unknown };
+      const data = decision.data && typeof decision.data === 'object' ? decision.data as Record<string, unknown> : undefined;
+      if (answer) answer(typeof decision.outcome === 'string' ? decision.outcome : 'reject_once', data);
       result = { conversationId: String(payload.conversationId ?? ''), permissionId: String(payload.permissionId ?? ''), resolved: Boolean(answer) };
     } else if (message.type === 'conversation.backgroundTasks.stop') {
       // Stops what the newest `background_tasks_pending` notice still awaits.
@@ -1330,6 +1331,10 @@ function playCannedTurn(journal: Journal, text: string): string {
     playSshTurn(journal, turnId, text);
     return turnId;
   }
+  if (/计划|plan/i.test(text) && journal.manifest.provider === 'claude-code' && !journal.manifest.parentConversationId) {
+    playPlanTurn(journal, turnId, text);
+    return turnId;
+  }
   const toolCallId = `${turnId}-call`;
   scheduleDemoTurn(journal, turnId, [
     [0, 'message.created', { role: 'user', content: text }],
@@ -1410,7 +1415,7 @@ function playAgentCallTurn(journal: Journal, turnId: string, text: string): void
 }
 
 /** Pending demo permission prompts: permission id → answer with an outcome. */
-const demoPermissions = new Map<string, (outcome: string) => void>();
+const demoPermissions = new Map<string, (outcome: string, data?: Record<string, unknown>) => void>();
 
 /** A prompt mentioning SSH or a server plays a turn whose `ssh_exec` first
  * asks to connect to the demo host (the per-host approval, on by default),
@@ -1454,6 +1459,50 @@ function playSshTurn(journal: Journal, turnId: string, text: string): void {
         options: [
           { optionId: 'allow', kind: 'allow_always', name: 'Allow for this conversation' },
           { optionId: 'reject', kind: 'reject_once', name: 'Deny' },
+        ],
+      };
+    }],
+  ], () => demoPermissions.delete(permissionId));
+}
+
+/** A Claude Code prompt asking for a plan plays a turn that hands one in
+ * for approval (`ExitPlanMode` as a plan review); approving runs it, and
+ * requesting changes sends the note back. */
+function playPlanTurn(journal: Journal, turnId: string, text: string): void {
+  const permissionId = `${turnId}-plan`;
+  const toolCallId = `${turnId}-exit-plan`;
+  const toolName = 'ExitPlanMode';
+  const plan = '## 给导出加上进度提示\n\n1. 在 `exportReport()` 里按页上报进度\n2. 导出对话框显示进度条和剩余页数\n3. 取消导出时清理临时文件\n4. 补一个大报表的导出测试';
+  const args = { plan };
+  scheduleDemoTurn(journal, turnId, [
+    [0, 'message.created', { role: 'user', content: text }],
+    [150, 'turn.started', { status: 'running' }],
+    [500, 'tool.started', { toolCallId, toolName, arguments: args }],
+    [700, 'permission.requested', () => {
+      demoPermissions.set(permissionId, (outcome, data) => {
+        demoPermissions.delete(permissionId);
+        const approved = outcome.startsWith('allow');
+        const feedback = typeof data?.feedback === 'string' ? data.feedback : '';
+        appendDemoEvent(journal, turnId, 'permission.resolved', { permissionId, outcome });
+        scheduleDemoTurn(journal, turnId, [
+          [300, 'tool.completed', { toolCallId, toolName, arguments: args, isError: !approved, result: approved ? 'User has approved your plan.' : 'The user did not approve the plan.' }],
+          [900, 'message.completed', {
+            role: 'assistant',
+            message: { role: 'assistant', content: [{ type: 'text', text: approved ? '计划已批准，开始实施第 1 步。' : feedback ? `好的，我按你的意见修改计划：${feedback}` : '好的，计划先不执行。你希望改哪里？' }] },
+            block: { category: 'assistant_final', id: `${turnId}-answer`, turnId, phase: 'completed' },
+          }],
+          [1000, 'turn.completed', { status: 'completed' }],
+        ]);
+      });
+      return {
+        permissionId,
+        providerRequestId: permissionId,
+        kind: 'plan',
+        title: "Approve Claude's plan?",
+        details: { tool_name: toolName, input: args, plan },
+        options: [
+          { optionId: 'approve', kind: 'allow_once', name: 'Approve' },
+          { optionId: 'request_changes', kind: 'reject_once', name: 'Request changes' },
         ],
       };
     }],

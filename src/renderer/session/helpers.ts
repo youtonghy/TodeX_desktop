@@ -1052,6 +1052,9 @@ export type TimelineEntry = {
   providerNoticeModel?: string;
   /** `plan_handoff`: `next_turn` when the switch applies from the next message. */
   providerNoticeApplied?: 'now' | 'next_turn';
+  /** A plan review's plan text (`@todex/protocol/mobileParity`): the row
+   * renders as the plan instead of folding into the work steps. */
+  plan?: string;
 };
 
 export function workspaceDisplayName(workspace: Pick<WorkspaceRecord, 'name' | 'path'>): string {

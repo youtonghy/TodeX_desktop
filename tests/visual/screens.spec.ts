@@ -381,6 +381,31 @@ test('smart conversation with a plan handoff', async ({ page, openDemo }) => {
   await expect(page).toHaveScreenshot('smart-plan-handoff-light.png', { mask: volatile(page) });
 });
 
+// A plan handed in for approval (Claude ExitPlanMode as a plan review): the
+// plan is its own timeline row and the composer card approves it or sends
+// requested changes back.
+for (const theme of ['light', 'dark'] as Theme[]) {
+  test(`plan review (${theme})`, async ({ page, openDemo }) => {
+    await openDemo(theme);
+    await page.getByText('design-tokens', { exact: true }).click();
+    await page.getByText('拆分主题构建脚本').first().click();
+    await page.getByRole('textbox', { name: '消息输入' }).fill('先给导出加进度提示出个计划');
+    await page.keyboard.press('Enter');
+    const title = page.getByText('计划待批准', { exact: true });
+    await expect(title).toBeVisible();
+    const plan = page.getByRole('region', { name: '计划' }).filter({ hasText: '给导出加上进度提示' });
+    const card = title.locator('xpath=ancestor::div[contains(@class, "rounded-2xl")][1]');
+    await settle(page);
+    await expect(plan).toHaveScreenshot(`plan-review-plan-${theme}.png`);
+    await expect(card).toHaveScreenshot(`plan-review-card-${theme}.png`);
+    await card.getByRole('button', { name: '要求修改' }).click();
+    await card.getByRole('textbox', { name: '修改意见' }).fill('取消时也要提示用户');
+    await card.getByRole('button', { name: '发送修改意见' }).click();
+    await expect(page.getByText('好的，我按你的意见修改计划：取消时也要提示用户')).toBeVisible();
+    await expect(title).toBeHidden();
+  });
+}
+
 test('fork from an earlier reply', async ({ page, openDemo }) => {
   await openDemo('light');
   await page.getByText('design-tokens', { exact: true }).click();

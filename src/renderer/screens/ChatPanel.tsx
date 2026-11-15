@@ -66,6 +66,7 @@ import {
 import { CopyGlyph, FeedbackButton } from '../components/chat/MessageActions';
 import { ProcessDisclosure, ProcessStep, ProcessSteps } from '../components/chat/ProcessDisclosure';
 import { ToolCallCard, type ToolCallState } from '../components/chat/ToolCallCard';
+import { PlanReviewCard } from '../components/chat/PlanReviewCard';
 import { ToolElapsed } from '../components/chat/ToolRunStatus';
 import { TurnNavigator, type ChatTurn } from '../components/chat/TurnNavigator';
 import { activeChatProcessId, buildChatRenderItems, isChatTimelineEntry, isChatToolEntry, latestIncomingEntryIds, sortChatEntries } from '../components/conversationTimeline';
@@ -111,7 +112,7 @@ import {
 import { selectionInside } from '../lib/selection';
 import { quotaLimits, quotaMessage } from '../session/quota';
 import { backendApi } from '../session/helpers';
-import { findCapabilityHashTrigger, insertCapabilityReference, normalizeReasoningEffort } from '@todex/protocol/todex';
+import { EXIT_PLAN_MODE_TOOL, findCapabilityHashTrigger, insertCapabilityReference, normalizeReasoningEffort } from '@todex/protocol/todex';
 import { buildCapabilitySuggestions, capabilityCatalogsPending, type CapabilitySuggestion } from '@todex/protocol/capabilityCatalog';
 import {
   buildCapabilityReferenceSuggestions,
@@ -327,7 +328,9 @@ function toolCardPresentation(entry: TimelineEntry, active: boolean, background 
   // Agent Calling tools (`mcp__todex_agents__*`) read as what they do.
   const agentTool = agentCallingToolFromName(tool.name);
   return {
-    label: agentTool ? t(AGENT_CALLING_TOOL_LABELS[agentTool]) : tool.name || toolKindLabel(tool.kind),
+    label: agentTool ? t(AGENT_CALLING_TOOL_LABELS[agentTool])
+      : tool.name === EXIT_PLAN_MODE_TOOL ? t('chat.toolSubmitPlan')
+        : tool.name || toolKindLabel(tool.kind),
     summary: agentTool ? agentCallingToolSummary(tool.argsText) || tool.summary : tool.summary,
     argsText: tool.argsText,
     output: outputIsError ? undefined : tool.outputText,
@@ -891,6 +894,13 @@ const ChatTimelineItem = memo(function ChatTimelineItem({
           session.providerModels['claude-code']?.find((item) => item.id === id)?.displayName || id
         ))}
       </p>
+    );
+  }
+  if (entry.plan !== undefined) {
+    return (
+      <RowEntrance enter={animateEntrance} data-message-id={entry.id} className="py-1">
+        <PlanReviewCard id={entry.id} plan={entry.plan} components={markdownComponents} />
+      </RowEntrance>
     );
   }
   if (isChatToolEntry(entry)) {
@@ -1554,6 +1564,8 @@ export function ChatPanel({ session }: Props) {
   const smartAvailable = smartWorkModeAvailable(currentProvider, permissionConfig);
   const smartPhase = conversation.mode === 'smart' && smartAvailable ? conversation.smartPhase ?? 'plan' : null;
   const smartStage = smartPhase ? resolveSmartStage(session.smartWorkMode[smartPhase], providerModels) : null;
+  // What approving a smart conversation's plan switches to.
+  const smartExecuteStage = smartPhase === 'plan' ? resolveSmartStage(session.smartWorkMode.execute, providerModels) : null;
   const currentModel = smartStage?.model || conversation.model || providerModels.find((item) => item.isDefault)?.id || (currentProvider === 'codex' ? workspace.model || session.settings.defaultModel : '');
   const currentModelDescriptor = providerModels.find((item) => item.id === currentModel);
   const supportedReasoningEfforts = currentModelDescriptor?.supportedReasoningEfforts ?? [];
@@ -1928,7 +1940,8 @@ export function ChatPanel({ session }: Props) {
               groupPendingCount={item.type === 'executionGroup'
                 ? item.entries.filter((entry) => entry.requestId && session.pendingRequests.some((request) => request.requestId === entry.requestId)).length
                 : 0}
-              request={item.type === 'entry' && !readOnly
+              // A plan row is answered from the composer's approval card.
+              request={item.type === 'entry' && !readOnly && item.entry.plan === undefined
                 ? session.pendingRequests.find((pendingItem) => pendingItem.requestId && (item.entry.requestId === pendingItem.requestId || item.entry.raw.includes(pendingItem.requestId)))
                 : undefined}
               isActionable={item.type === 'entry' && actionableIncoming.has(item.entry.id)}
@@ -2011,6 +2024,9 @@ export function ChatPanel({ session }: Props) {
             request={request}
             fallbackTitle={sessionPermissionIds.has(request.requestId) ? t('chat.piPluginRequest') : request.title || t('chat.permissionApproval')}
             deviceSecret={session.settings.deviceSecret}
+            planHint={smartPhase === 'plan' && smartExecuteStage
+              ? t('runStatus.planReviewSmartHint', { model: providerModels.find((item) => item.id === smartExecuteStage.model)?.displayName || modelDisplayLabel(smartExecuteStage.model, session.modelCatalog) })
+              : undefined}
             onSelect={(option, data) => { session.sendApprovalResponse(option, request, data); }}
           />)}
           {currentProvider === 'pi' && runtime ? <PiExtensionPanel placement="aboveEditor"

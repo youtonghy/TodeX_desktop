@@ -294,6 +294,9 @@ const copyAnswer = `错误提示已统一为中文，颜色改用设计规范里
 
 浅色和暗色模式下都检查过对比度，均满足 WCAG AA。`;
 
+/** The plan the smart conversation handed in before its handoff. */
+const SMART_DEMO_PLAN = '1. 拆出 `readExport.ts`\n2. 拆出 `color.ts`（OKLCH 换算）\n3. 拆出 `emit.ts`（CSS 与 d.ts）\n4. 补快照测试';
+
 export const demoJournals: Journal[] = [
   journal('9b2f6c1e-4a7d-4f1e-9c3a-1d2e3f4a5b6c', lumenWeb, 'claude-code', '重构结账页表单校验', NOW - 3 * HOUR, (j) => {
     j.user('结账页的表单校验逻辑分散在三个组件里，帮我统一成一个 schema，并补上单元测试。')
@@ -345,7 +348,13 @@ export const demoJournals: Journal[] = [
     j.user('build-tokens.ts 已经 600 多行了，先出个拆分方案，确认后再动手。')
       .think('先读构建脚本，按职责划分：读取导出、颜色换算、写 CSS 与类型声明。')
       .tool('Read', { file_path: 'scripts/build-tokens.ts' }, 'export async function buildTokens() {\n  // 读取 Figma 导出、换算 OKLCH、写入 dist……\n}')
-      .tool('ExitPlanMode', { plan: '1. 拆出 `readExport.ts`\n2. 拆出 `color.ts`（OKLCH 换算）\n3. 拆出 `emit.ts`（CSS 与 d.ts）\n4. 补快照测试' }, 'User has approved your plan.')
+      .tool('ExitPlanMode', { plan: SMART_DEMO_PLAN }, 'User has approved your plan.')
+      .event('permission.requested', {
+        permissionId: 'perm-smart-plan', kind: 'plan', title: "Approve Claude's plan?",
+        details: { tool_name: 'ExitPlanMode', input: { plan: SMART_DEMO_PLAN }, plan: SMART_DEMO_PLAN },
+        options: [{ optionId: 'approve', kind: 'allow_once', name: 'Approve' }, { optionId: 'request_changes', kind: 'reject_once', name: 'Request changes' }],
+      })
+      .event('permission.resolved', { permissionId: 'perm-smart-plan', outcome: 'allow_once', optionId: 'approve' })
       .event('provider.event', {
         provider: 'claude-code', providerMethod: 'plan_handoff',
         metadata: { workMode: 'implement', model: 'opus', reasoningEffort: 'medium', permissionMode: 'auto', applied: 'now', reason: 'plan_approved' },
