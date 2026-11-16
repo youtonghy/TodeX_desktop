@@ -16,6 +16,7 @@ import type { TodeXSession } from '../../session/useTodeXSession';
 import { useT } from '../../i18n';
 import { DevicePairingPanel } from '../DevicePairingPanel';
 import { HistoryEncryptionPanel } from '../HistoryEncryptionPanel';
+import { EmptyState } from '../ui/empty-state';
 import { ConfirmDialog } from '../ui/modal';
 import { ConfigSyncSettings } from './ConfigSyncSettings';
 import { SettingsCard, SettingsEntry, SettingsGroup, SettingsRow, SettingsSubpage } from './SettingsRows';
@@ -69,6 +70,9 @@ export function BackendConnectionSettings({ session, page, onPageChange, deviceN
       />
     );
   }
+  // Point-to-point backends only: group nodes (and their standbys) are listed
+  // under Backend groups. Their own page still opens for re-pairing and history.
+  const pointToPoint = session.backendConnections.filter((item) => !item.mesh);
 
   return (
     <>
@@ -81,7 +85,10 @@ export function BackendConnectionSettings({ session, page, onPageChange, deviceN
         )}
       >
         <SettingsCard>
-          {session.backendConnections.map((item) => {
+          {pointToPoint.length ? null : (
+            <EmptyState size="sm" title={t('settings.noPointToPoint')} description={t('settings.noPointToPointHint')} />
+          )}
+          {pointToPoint.map((item) => {
             const link = linkOf(session, item.id);
             const state = link?.state ?? 'idle';
             const mismatch = isVersionMismatch(__TODEX_BUILD_VERSION__, link?.serverVersion?.version);
@@ -98,9 +105,7 @@ export function BackendConnectionSettings({ session, page, onPageChange, deviceN
                     <Chip variant="caption" color={item.deviceSecret ? 'neutral' : 'yellow'}>
                       {item.deviceSecret ? t('settings.backendPaired') : t('settings.backendUnpaired')}
                     </Chip>
-                    {isStandbyProfile(item)
-                      ? <Chip variant="caption" color={STATE_COLORS[state]}>{t('settings.backendStandby')}</Chip>
-                      : item.disabled
+                    {item.disabled
                       ? <Chip variant="caption" color="neutral">{t('settings.backendDisabled')}</Chip>
                       : <Chip variant="caption" color={STATE_COLORS[state]}>{connectionStateLabel(state)}</Chip>}
                   </>

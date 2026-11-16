@@ -279,6 +279,12 @@ test('settings: backend group with a join request', async ({ page, openDemo }) =
   await expect(page.getByRole('img', { name: '邀请二维码' })).toBeVisible();
   await settle(page);
   await expect(page).toHaveScreenshot('settings-mesh-invite-light.png', { mask: volatile(page) });
+  await page.keyboard.press('Escape');
+  // The only backend is a group node, so Backend connections is empty.
+  await settingsSection(page, '后端连接').click();
+  await expect(page.getByText('还没有点对点后端', { exact: true })).toBeVisible();
+  await settle(page);
+  await expect(page).toHaveScreenshot('settings-backends-groups-only-light.png', { mask: volatile(page) });
 });
 
 // This computer's backend is a node of the group and is reached over IPC:
@@ -292,13 +298,11 @@ test('settings: backend group with this computer over IPC', async ({ page, openD
   await expect(page.getByText('已连接', { exact: true }).first()).toBeVisible();
   await settle(page);
   await expect(page).toHaveScreenshot('settings-mesh-local-light.png', { mask: volatile(page) });
+  // Backend connections lists point-to-point backends only: the group's
+  // standby link to this computer stays under Backend groups.
   await settingsSection(page, '后端连接').click();
-  await page.locator('[data-backend-id="demo-mesh-standby"]').click();
-  await expect(page.getByText(/这是设备组到本机 backend 的连接/)).toBeVisible();
-  await settle(page);
-  // The measured latency (and the version chip it pushes along) differs per run.
-  const health = page.getByText(/^后端在线 · \d+ ms/).locator('..');
-  await expect(page).toHaveScreenshot('settings-backend-standby-light.png', { mask: [...volatile(page), health] });
+  await expect(page.locator('[data-backend-id="default-backend"]')).toBeVisible();
+  await expect(page.locator('[data-backend-id="demo-mesh-standby"]')).toHaveCount(0);
 });
 
 // The agent starts using the backend's computer: by default its live view
