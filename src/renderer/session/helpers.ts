@@ -583,7 +583,9 @@ export function getConversationStatus(
   ) {
     return { kind: 'issue', color: 'bg-chart-8', border: 'border-chart-8', label: t('sidebar.statusIssue') };
   }
-  const incomingAt = latestIncomingAt ?? (latestEntry?.kind === 'incoming' ? latestEntry.at : 0);
+  // Timeline rows of an idle background conversation are released from
+  // memory, so the persisted turn completion keeps a reply unread until seen.
+  const incomingAt = Math.max(latestIncomingAt ?? (latestEntry?.kind === 'incoming' ? latestEntry.at : 0), conversation.lastCompletedAt ?? 0);
   if (incomingAt > lastReadAt) {
     return { kind: 'unread', color: 'bg-accent-500', border: 'border-accent-500', label: t('sidebar.statusUnread') };
   }

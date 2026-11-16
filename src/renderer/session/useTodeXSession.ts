@@ -2606,11 +2606,11 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     setConversations((current) => {
       const index = current.findIndex((item) => item.id === conversationId);
       if (index < 0) return current;
-      const readAt = Date.now();
       // Already read past everything it shows: no write, no re-render.
-      if ((current[index].lastReadAt ?? 0) >= Math.min(seenUntil, readAt)) return current;
+      if ((current[index].lastReadAt ?? 0) >= seenUntil) return current;
+      // seenUntil may carry a backend clock ahead of this one (turn times).
       const next = [...current];
-      next[index] = { ...next[index], lastReadAt: readAt };
+      next[index] = { ...next[index], lastReadAt: Math.max(Date.now(), seenUntil) };
       return next;
     });
   }, []);
