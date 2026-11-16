@@ -1279,7 +1279,7 @@ function startDemoLiveTool(journal: Journal): void {
   setTimeout(() => {
     if (DEMO_LIVE === 'computer') {
       appendDemoEvent(journal, turnId, 'desktop.computer.session', { status: 'started', deviceId: 'host', deviceName: 'lumen-devbox' });
-      appendDemoEvent(journal, turnId, 'desktop.computer.action', { actionId: 'demo-computer-1', tool: 'computer_act', ok: true, summary: '点击“保存”', app: 'TextEdit', path: 'background', shotId: 'demo-shot-computer', deviceId: 'host', deviceName: 'lumen-devbox' });
+      appendDemoEvent(journal, turnId, 'desktop.computer.action', { actionId: 'demo-computer-1', tool: 'computer_act', ok: true, summary: '点击“保存”', app: 'TextEdit', path: 'background', point: { x: 0.765625, y: 0.7825 }, shotId: 'demo-shot-computer', deviceId: 'host', deviceName: 'lumen-devbox' });
     } else {
       appendDemoEvent(journal, turnId, 'desktop.browser.action', { actionId: 'demo-browser-1', tool: 'browser_open', ok: true, summary: '打开 localhost:5173/checkout', url: 'http://localhost:5173/checkout', title: '结账 · Lumen', shotId: 'demo-shot-browser', deviceName: 'lumen-devbox' });
     }

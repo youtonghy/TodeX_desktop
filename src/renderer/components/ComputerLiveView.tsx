@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { RiArrowDownSLine, RiArrowUpSLine, RiComputerLine, RiStopCircleLine } from '@remixicon/react';
 import { Chip } from '@/components/base/badges/chip';
 import { Button } from '@/components/base/buttons/button';
@@ -72,6 +72,16 @@ export function ComputerLiveView({ session, conversationId, state, variant = 'ca
     return undefined;
   }, [state?.actions]);
   const device = state?.deviceName || t('computerLive.host');
+  // Where the agent last acted, as fractions of the live display; the
+  // cursor stays there through actions without a point (typing, keys).
+  const cursor = useMemo(() => {
+    const actions = state?.actions ?? [];
+    for (let index = actions.length - 1; index >= 0; index--) {
+      const point = actions[index].point;
+      if (point) return point;
+    }
+    return undefined;
+  }, [state?.actions]);
 
   // Live: the host's screen, only while shown and the page is visible.
   useEffect(() => {
@@ -140,7 +150,7 @@ export function ComputerLiveView({ session, conversationId, state, variant = 'ca
         {/* Outlined while in use so the user always sees the agent is in control. */}
         <div className={cx('relative flex min-h-0 flex-1 items-center justify-center bg-background-secondary-default', active && 'outline outline-2 -outline-offset-2 outline-chart-8')}>
           {active && image ? (
-            <img src={image} alt={t(frame ? 'computerLive.frame' : 'computerLive.screenshot')} className="h-full w-full object-contain" />
+            <LiveScreen src={image} alt={t(frame ? 'computerLive.frame' : 'computerLive.screenshot')} cursor={frame ? cursor : undefined} />
           ) : (
             <p className="px-6 text-center text-body-regular text-text-secondary">
               {awaiting ? t('computerLive.awaitingHost', { device }) : active ? t('computerLive.waiting') : t('computerLive.ended', { device })}
@@ -183,12 +193,83 @@ export function ComputerLiveView({ session, conversationId, state, variant = 'ca
       {collapsed ? null : (
         <div className="flex h-60 items-center justify-center bg-background-secondary-default">
           {image ? (
-            <img src={image} alt={t(frame ? 'computerLive.frame' : 'computerLive.screenshot')} className="h-full w-full object-contain" />
+            <LiveScreen src={image} alt={t(frame ? 'computerLive.frame' : 'computerLive.screenshot')} cursor={frame ? cursor : undefined} />
           ) : (
             <p className="text-caption-1-regular text-text-secondary">{t('computerLive.waiting')}</p>
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+/** The part of a box an `object-contain` image covers, in CSS pixels. */
+type Contained = { left: number; top: number; width: number; height: number };
+
+function containedRect(box: { width: number; height: number }, natural: { width: number; height: number }): Contained | null {
+  if (!box.width || !box.height || !natural.width || !natural.height) return null;
+  const scale = Math.min(box.width / natural.width, box.height / natural.height);
+  const width = natural.width * scale;
+  const height = natural.height * scale;
+  return { left: (box.width - width) / 2, top: (box.height - height) / 2, width, height };
+}
+
+/**
+ * The host's screen with the AI cursor at the agent's latest landing point.
+ * `cursor` is only given for live frames: they show the display the point
+ * is measured against, while a screenshot may show one window.
+ */
+function LiveScreen({ src, alt, cursor }: {
+  src: string;
+  alt: string;
+  cursor: { x: number; y: number } | undefined;
+}) {
+  const boxRef = useRef<HTMLDivElement>(null);
+  const imageRef = useRef<HTMLImageElement>(null);
+  const [area, setArea] = useState<Contained | null>(null);
+
+  useLayoutEffect(() => {
+    const box = boxRef.current;
+    const image = imageRef.current;
+    if (!box || !image) return;
+    const measure = () => {
+      const next = containedRect(
+        { width: box.clientWidth, height: box.clientHeight },
+        { width: image.naturalWidth, height: image.naturalHeight },
+      );
+      setArea(previous => (
+        previous && next
+        && previous.left === next.left && previous.top === next.top
+        && previous.width === next.width && previous.height === next.height
+          ? previous
+          : next
+      ));
+    };
+    measure();
+    image.addEventListener('load', measure);
+    const observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(measure);
+    observer?.observe(box);
+    return () => {
+      image.removeEventListener('load', measure);
+      observer?.disconnect();
+    };
+  }, []);
+
+  return (
+    <div ref={boxRef} className="relative h-full w-full overflow-hidden">
+      <img ref={imageRef} src={src} alt={alt} className="h-full w-full object-contain" />
+      {cursor && area ? (
+        <svg
+          aria-hidden
+          data-testid="computer-ai-cursor"
+          viewBox="0 0 16 22"
+          className="pointer-events-none absolute left-0 top-0 h-5.5 w-4 fill-chart-8-active stroke-text-white transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
+          // The tip (1.5, 1.5 in the view box) sits on the point.
+          style={{ transform: `translate(${area.left + cursor.x * area.width - 1.5}px, ${area.top + cursor.y * area.height - 1.5}px)` }}
+        >
+          <path d="M1.5 1.5v17l4.2-3.8 2.8 6.3 2.8-1.2-2.8-6.1h5.6z" strokeWidth={1.5} strokeLinejoin="round" />
+        </svg>
+      ) : null}
     </div>
   );
 }
