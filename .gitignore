@@ -11,3 +11,7 @@ release/
 .playwright-cli/
 test-results/
 playwright-report/
+
+# agent tooling
+.pi/
+.claude/
