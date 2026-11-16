@@ -4,12 +4,15 @@ import {
   ipcDaemonConflicts,
   isStandbyProfile,
   moveBackendRecords,
+  moveProfileKeyedEntries,
   orphanedStandbyProfiles,
   ownerBackendId,
   resolveNoWorkspaceBackendId,
   reusableNativeProfile,
+  sameDaemonProfiles,
   tagLegacyBackendRecords,
 } from '../src/renderer/session/backendRouting.ts';
+import { needsSiblingGrant } from '../src/renderer/session/siblingHistoryGrants.ts';
 
 const profiles = [
   { id: 'b2', createdAt: 20 },
@@ -172,4 +175,47 @@ test('a standby carries the data again once no IPC profile serves its daemon', (
   assert.deepEqual(ids(orphanedStandbyProfiles([standby], isIpc)), ['local']);
   assert.deepEqual(ids(orphanedStandbyProfiles([standby, daemonProfile('ipc', 'todex-ipc://local', 'k1', { disabled: true })], isIpc)), ['local']);
   assert.deepEqual(ids(orphanedStandbyProfiles([standby, daemonProfile('ipc', 'todex-ipc://box', 'k2')], isIpc, () => 'node_box')), ['local']);
+});
+
+test('the profiles of one daemon are the others that pinned its transport key', () => {
+  const items = [
+    daemonProfile('ipc', 'todex-ipc://local', 'k1'),
+    { ...daemonProfile('standby', 'http://192.168.1.5:7345', 'k1', { disabled: true }), mesh: { nodeId: 'node_local' } },
+    daemonProfile('remote', 'https://remote.example', 'k2'),
+    daemonProfile('unpaired', 'http://127.0.0.1:7345'),
+  ];
+  const ids = (id: string) => sameDaemonProfiles(items, id).map((item) => item.id);
+  assert.deepEqual(ids('ipc'), ['standby']);
+  assert.deepEqual(ids('standby'), ['ipc']);
+  assert.deepEqual(ids('remote'), []);
+  // No pinned key, no daemon to compare.
+  assert.deepEqual(ids('unpaired'), []);
+  assert.deepEqual(ids('gone'), []);
+});
+
+test('provider preferences follow their records to the other profile', () => {
+  const entries = { 'ipc::codex': 1, 'ipc::pi': 2, 'standby::pi': 3, 'other::codex': 4 };
+  assert.deepEqual(moveProfileKeyedEntries(entries, 'ipc', 'standby'), { 'standby::pi': 3, 'other::codex': 4, 'standby::codex': 1 });
+  assert.equal(moveProfileKeyedEntries(entries, 'none', 'standby'), entries);
+});
+
+test('a profile asks its siblings for history once, while one can grant it', () => {
+  const ready = (localRid: string, grants: { rid: string }[] = [], extra: Record<string, unknown> = {}) => ({
+    status: 'ready', localRid, state: { grants, myAccess: 'active' }, ...extra,
+  });
+  const holder = ready('r_old');
+  assert.equal(needsSiblingGrant(ready('r_new'), [holder]), true);
+  // Asked before, in any state (a dismissed grant is not asked again).
+  assert.equal(needsSiblingGrant(ready('r_new', [{ rid: 'r_new' }]), [holder]), false);
+  // Another device's grant does not count as this one's.
+  assert.equal(needsSiblingGrant(ready('r_new', [{ rid: 'r_web' }]), [holder]), true);
+  // Nobody to fulfil it: no sibling, one not ready, the same key, or revoked.
+  assert.equal(needsSiblingGrant(ready('r_new'), []), false);
+  assert.equal(needsSiblingGrant(ready('r_new'), [undefined, { status: 'loading' }]), false);
+  assert.equal(needsSiblingGrant(ready('r_new'), [ready('r_new')]), false);
+  assert.equal(needsSiblingGrant(ready('r_new'), [ready('r_old', [], { accessRevoked: true })]), false);
+  // This profile is not ready to ask.
+  assert.equal(needsSiblingGrant({ status: 'loading' }, [holder]), false);
+  assert.equal(needsSiblingGrant(ready('r_new', [], { accessRevoked: true }), [holder]), false);
+  assert.equal(needsSiblingGrant({ ...ready('r_new'), state: { grants: [], myAccess: 'revoked' } }, [holder]), false);
 });

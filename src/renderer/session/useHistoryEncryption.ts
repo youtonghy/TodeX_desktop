@@ -32,6 +32,7 @@ import type { ConversationManifest } from '@todex/protocol/v2';
 import { t } from '../i18n';
 import { deleteHistorySeed, loadHistorySeed, saveHistorySeed } from '../lib/historyKeyStore';
 import { historyTailCache } from './historyCache';
+import { needsSiblingGrant } from './siblingHistoryGrants';
 
 // End-to-end encrypted conversation history (TodeX_backend
 // docs/history-encryption.md) for every connected backend. History is always
@@ -113,7 +114,10 @@ const UPDATE_DEBOUNCE_MS = 300;
 /** How long a history command waits for a connecting socket. */
 const CONNECT_WAIT_MS = 15_000;
 
-export function useHistoryEncryption({ backends, focusBackendId, sendCommand, onUnlocked, autoGrantDeviceIds }: {
+/** Another profile of the same daemon, as this device (see `sameDaemonProfiles`). */
+export type HistorySiblingProfile = { backendId: string; deviceId: string };
+
+export function useHistoryEncryption({ backends, focusBackendId, sendCommand, onUnlocked, autoGrantDeviceIds, siblingProfiles }: {
   backends: Readonly<Record<string, HistoryBackendLink>>;
   /** The backend the visible conversation belongs to: notices follow it. */
   focusBackendId: string;
@@ -125,6 +129,10 @@ export function useHistoryEncryption({ backends, focusBackendId, sendCommand, on
    * asking: the members of its device group, whose approval covered
    * history (docs/mesh-v1.md "History"). */
   autoGrantDeviceIds?: (backendId: string) => ReadonlySet<string>;
+  /** This app's other profiles of the backend's daemon: their history
+   * grants are fulfilled without asking, and a profile that cannot read
+   * history they can asks them for it (siblingHistoryGrants.ts). */
+  siblingProfiles?: (backendId: string) => readonly HistorySiblingProfile[];
 }) {
   const [views, setViews] = useState<Record<string, HistoryEncryptionView>>({});
   const [grantRuns, setGrantRuns] = useState<Record<string, HistoryGrantRun>>({});
@@ -132,8 +140,8 @@ export function useHistoryEncryption({ backends, focusBackendId, sendCommand, on
   const [dismissedRecoveryNotices, setDismissedRecoveryNotices] = useState(readDismissedRecoveryNotices);
   const grantRunsRef = useRef(grantRuns);
   grantRunsRef.current = grantRuns;
-  const live = useRef({ backends, sendCommand, onUnlocked, views, autoGrantDeviceIds });
-  live.current = { backends, sendCommand, onUnlocked, views, autoGrantDeviceIds };
+  const live = useRef({ backends, sendCommand, onUnlocked, views, autoGrantDeviceIds, siblingProfiles });
+  live.current = { backends, sendCommand, onUnlocked, views, autoGrantDeviceIds, siblingProfiles };
   const decryptors = useRef(new Map<string, { decryptor: HistoryDecryptor; ready: Promise<void> }>());
   const liveChains = useRef(new Map<string, Promise<void>>());
   const titles = useRef(new Map<string, string | null>());
@@ -626,18 +634,43 @@ export function useHistoryEncryption({ backends, focusBackendId, sendCommand, on
     return actions;
   };
 
-  // Grants of the backend's device group need no approval here: re-wrap them
-  // as soon as they show up (one run per grant; a failed one retries on the
-  // next state read).
+  // Grants of the backend's device group, and of this app's other profiles
+  // of its daemon, need no approval here: re-wrap them as soon as they show
+  // up (one run per grant; a failed one retries on the next state read).
   useEffect(() => {
     for (const view of Object.values(views)) {
-      const devices = live.current.autoGrantDeviceIds?.(view.backendId);
+      const siblings = live.current.siblingProfiles?.(view.backendId) ?? [];
+      const group = live.current.autoGrantDeviceIds?.(view.backendId);
+      const devices = siblings.length ? new Set([...(group ?? []), ...siblings.map((sibling) => sibling.deviceId)]) : group;
       if (!devices?.size || !view.state || view.accessRevoked || !view.localRid) continue;
       for (const grant of view.state.grants) {
         if (grant.status !== 'pending' || !grant.publicKey || grant.rid === view.localRid || !devices.has(grant.deviceId)) continue;
         if (grantControllers.current.has(grant.grantId) || grantRunsRef.current[grant.grantId]?.error) continue;
         void actionsFor(view.backendId).authorizeGrant(grant).catch(() => undefined);
       }
+    }
+  });
+
+  // A profile that cannot read the history its siblings can (created after
+  // it was written) asks for a grant once; the siblings, told to re-read
+  // their state, fulfil it above. One request runs at a time per key; a
+  // failed one is asked again only after a later state read.
+  const siblingRequests = useRef(new Map<string, { state: HistoryEncryptionState | undefined; running: boolean }>());
+  useEffect(() => {
+    for (const view of Object.values(views)) {
+      const siblings = live.current.siblingProfiles?.(view.backendId) ?? [];
+      if (!needsSiblingGrant(view, siblings.map((sibling) => views[sibling.backendId]))) continue;
+      const key = `${view.backendId}\0${view.localRid}`;
+      const previous = siblingRequests.current.get(key);
+      if (previous && (previous.running || previous.state === view.state)) continue;
+      const attempt = { state: view.state, running: true };
+      siblingRequests.current.set(key, attempt);
+      void actionsFor(view.backendId).requestGrant().then(
+        () => Promise.all(siblings.map((sibling) => refresh(sibling.backendId, false))),
+        (error: unknown) => {
+          console.warn('history: requesting a grant from this device\'s other profiles failed', error);
+        },
+      ).finally(() => { attempt.running = false; });
     }
   });
 

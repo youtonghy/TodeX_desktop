@@ -90,6 +90,36 @@ function sameDaemonKey(ipc: DaemonProfileLike, other: DaemonProfileLike): boolea
 }
 
 /**
+ * The other profiles of `profileId`'s daemon: both pinned the same transport
+ * key (an IPC profile and the loopback or group node profile it took over,
+ * say). Each holds its own device key and history key for that one backend,
+ * so history readable by one can be granted to the others without asking.
+ */
+export function sameDaemonProfiles<P extends DaemonProfileLike>(profiles: readonly P[], profileId: string): P[] {
+  const profile = profiles.find((item) => item.id === profileId);
+  if (!profile?.transportVerified || !profile.encryptionPublicKey) return [];
+  return profiles.filter((other) => other.id !== profileId && sameDaemonKey(profile, other));
+}
+
+/**
+ * Entries of a record keyed `<profileId>::<rest>` (provider model
+ * preferences) re-filed from `fromId` to `toId`; an entry `toId` already has
+ * wins. Returns the input when nothing moved.
+ */
+export function moveProfileKeyedEntries<V>(entries: Readonly<Record<string, V>>, fromId: string, toId: string): Record<string, V> {
+  const prefix = `${fromId}::`;
+  let moved: Record<string, V> | null = null;
+  for (const [key, value] of Object.entries(entries)) {
+    if (!key.startsWith(prefix)) continue;
+    moved ??= { ...entries };
+    delete moved[key];
+    const target = `${toId}::${key.slice(prefix.length)}`;
+    if (!(target in entries)) moved[target] = value;
+  }
+  return moved ?? (entries as Record<string, V>);
+}
+
+/**
  * Profiles that reach a backend another profile already serves over IPC.
  * Two profiles name the same daemon when both pinned the same transport key,
  * when `reachesSameDaemon` says the TCP address is the IPC daemon's

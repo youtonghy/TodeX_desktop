@@ -1,5 +1,6 @@
 import { normalizeBackendLabelColor, type BackendConnectionProfile } from './backendColors';
-import { ipcDaemonConflicts, isStandbyProfile, moveBackendRecords, ownerBackendId, resolveNoWorkspaceBackendId, tagLegacyBackendRecords } from './backendRouting';
+import { ipcDaemonConflicts, isStandbyProfile, moveBackendRecords, moveProfileKeyedEntries, ownerBackendId, resolveNoWorkspaceBackendId, sameDaemonProfiles, tagLegacyBackendRecords } from './backendRouting';
+import { deviceIdentityFromSecret } from '@todex/protocol/deviceAuth';
 import { useWorkbenchSharing } from './useWorkbenchSharing';
 import { SMART_WORK_MODE_PROVIDER, smartPromptFields, smartPromptPhase, smartWorkModeAvailable, useSmartWorkMode } from './smartWorkMode';
 import {
@@ -96,7 +97,7 @@ import { loadJson, loadSecret, removeSecret, saveJson, saveSecret } from '../lib
 import { ConnectionError } from '@todex/protocol/connectionError';
 import { desktopAlert } from '../lib/desktopAlert';
 import { gitDiffUnsupported, readGitWorkingTreeDiff } from '../lib/gitWorkspace';
-import { loadSshPassword } from '../lib/sshPasswordStore';
+import { copySshPasswords, loadSshPassword } from '../lib/sshPasswordStore';
 import { createConcurrencyLimit } from '../lib/concurrencyLimit';
 import { type OpenPanelOptions } from '../lib/panels';
 import { historyTailCache } from './historyCache';
@@ -3291,6 +3292,12 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     backends: stableHistoryLinks,
     // A device group's devices are let in once, history included.
     autoGrantDeviceIds: (backendId) => meshGroupsRef.current?.autoGrantDeviceIds(backendId) ?? NO_DEVICES,
+    // This app's other profiles of the same daemon hold their own keys on
+    // this computer: history moves between them without asking.
+    siblingProfiles: (backendId) => sameDaemonProfiles(backendConnectionsRef.current, backendId).flatMap((profile) => {
+      const identity = deviceIdentityFromSecret(profile.deviceSecret);
+      return identity ? [{ backendId: profile.id, deviceId: identity.deviceId }] : [];
+    }),
     focusBackendId: activeBackendConnectionId,
     sendCommand: (backendId, message, timeoutMs) => sendProtocolCommand(message, timeoutMs, backendId),
     // Keys arrived: drop the projections (of the named conversations, or
@@ -4454,11 +4461,46 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     return next;
   }, []);
 
+  /** Files what this app keeps per profile under `toId`, a profile of the
+   * same daemon as `fromId`: workspaces and conversations (one copy of each
+   * id the daemon issued), provider model preferences, and saved SSH
+   * passwords (copied; `fromId` keeps its own). */
+  const fileProfileRecordsUnder = useCallback((fromId: string, toId: string) => {
+    const moved = moveBackendRecords({
+      workspaces: stores.workspaces.get(),
+      conversations: stores.conversations.get(),
+      tombstones: stores.workspaceTombstones.get(),
+    }, fromId, toId);
+    setWorkspaces(moved.workspaces);
+    setConversations(moved.conversations);
+    setWorkspaceTombstones(moved.tombstones);
+    const keptConversationId = moved.conversationIds.get(activeConversationRef.current);
+    if (keptConversationId) setActiveConversationId(keptConversationId);
+    setNoneBackendSelection((current) => (current === fromId ? toId : current));
+    setProviderModelPreferences((current) => {
+      const next = moveProfileKeyedEntries(current, fromId, toId);
+      providerModelPreferencesRef.current = next;
+      return next;
+    });
+    const target = profileFor(toId);
+    if (!target) return;
+    void backendApi(target).listSshHosts()
+      .then(({ hosts }) => copySshPasswords(fromId, toId, hosts.map((host) => host.alias)))
+      .catch((error: unknown) => {
+        console.warn('saved SSH passwords were not copied to the backend profile now holding them', error);
+      });
+  }, []);
+
   /** Removes a backend profile: its connection closes, and its device key
    * and history keys are forgotten. The last backend cannot be removed. */
   const removeBackendConnection = useCallback((id: string) => {
     const profiles = backendConnectionsRef.current;
     if (platform.deployment || profiles.length <= 1 || !profiles.some((profile) => profile.id === id)) return;
+    // Another profile of the same daemon (enabled first, else the group
+    // standby that takes the data back) keeps what was filed under this one.
+    const siblings = sameDaemonProfiles(profiles, id);
+    const heir = siblings.find((profile) => !profile.disabled) ?? siblings.find(isStandbyProfile);
+    if (heir) fileProfileRecordsUnder(id, heir.id);
     closeSocket(id, true);
     linksRef.current.get(id)?.commands.dispose();
     linksRef.current.delete(id);
@@ -4474,7 +4516,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       setLastError(error instanceof Error ? error.message : t('history.keyFailed'));
     });
     setBackendConnections((current) => current.filter((profile) => profile.id !== id));
-  }, [closeSocket]);
+  }, [closeSocket, fileProfileRecordsUnder]);
 
   /** Hands backend `loserId` over to `winnerId`, a profile of the same
    * daemon (its IPC connection, say): the loser disconnects and stays
@@ -4495,17 +4537,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     setLinkStatusByBackend(({ [loserId]: _removed, ...rest }) => rest);
     setV2ConversationsByBackend(({ [loserId]: _removed, ...rest }) => rest);
     setDirectorySyncByBackend(({ [loserId]: _removed, ...rest }) => rest);
-    const moved = moveBackendRecords({
-      workspaces: stores.workspaces.get(),
-      conversations: stores.conversations.get(),
-      tombstones: stores.workspaceTombstones.get(),
-    }, loserId, winnerId);
-    setWorkspaces(moved.workspaces);
-    setConversations(moved.conversations);
-    setWorkspaceTombstones(moved.tombstones);
-    const keptConversationId = moved.conversationIds.get(activeConversationRef.current);
-    if (keptConversationId) setActiveConversationId(keptConversationId);
-    setNoneBackendSelection((current) => (current === loserId ? winnerId : current));
+    fileProfileRecordsUnder(loserId, winnerId);
     setBackendConnections((current) => current.map((profile) => {
       if (profile.id === loserId) return { ...profile, disabled: true, updatedAt: Date.now() };
       if (profile.id === winnerId && profile.disabled) {
@@ -4518,19 +4550,24 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     // A group node keeps its link as the standby that holds this device in
     // the group; only its data moved.
     if (profiles.find((profile) => profile.id === loserId)?.mesh) pairingConnectPendingRef.current.add(loserId);
-  }, [closeSocket]);
+  }, [closeSocket, fileProfileRecordsUnder]);
 
   /** A standby group node profile whose IPC profile is gone carries its
    * daemon's data again: it is enabled and reconnects as a full backend. */
   const resumeStandbyConnection = useCallback((id: string) => {
     if (!isStandbyProfile(profileFor(id))) return;
+    // The records an IPC profile of this daemon took over (it was swapped
+    // out, so it stays disabled) come back with the data.
+    for (const ipc of sameDaemonProfiles(backendConnectionsRef.current, id)) {
+      if (ipc.disabled && isIpcServerUrl(ipc.serverUrl)) fileProfileRecordsUnder(ipc.id, id);
+    }
     setBackendConnections((current) => current.map((profile) => {
       if (profile.id !== id) return profile;
       const { disabled: _disabled, ...enabled } = profile;
       return { ...enabled, updatedAt: Date.now() };
     }));
     pairingConnectPendingRef.current.add(id);
-  }, []);
+  }, [fileProfileRecordsUnder]);
 
   // Device groups: one profile per node of each group, kept in step with
   // the group's roster (useMeshGroups). Keyed by content so health probes

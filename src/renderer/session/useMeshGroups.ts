@@ -628,27 +628,35 @@ export function useMeshGroups({
       ...group, nodeInfos: { ...group.nodeInfos, [nodeId]: nodeInfoDoc },
       ...(ipc ? {} : { nodeUrls: { ...group.nodeUrls, [nodeId]: [profile.serverUrl] } }),
     };
-    replaceGroup(withInfo);
-    // The node opened a grant for the group key: this profile's own history
-    // key still opens everything, so it re-wraps (before switching keys).
-    await live.current.history.authorizeDevice(profileId, identity.deviceId);
-    if (ipc) {
-      // The IPC profile stays as it is and keeps the data; the node's group
-      // profile is created at its network addresses as a standby.
-      setIpcNodeIds((current) => ({ ...current, [profileId]: nodeId }));
-      await pushToAll(withInfo);
-      return;
+    // This profile becomes the node's group profile below: until it carries
+    // `mesh`, the roster effect must not create a second one for the node.
+    const reserved = `${groupId}/${nodeId}`;
+    if (!ipc) creating.current.add(reserved);
+    try {
+      replaceGroup(withInfo);
+      // The node opened a grant for the group key: this profile's own history
+      // key still opens everything, so it re-wraps (before switching keys).
+      await live.current.history.authorizeDevice(profileId, identity.deviceId);
+      if (ipc) {
+        // The IPC profile stays as it is and keeps the data; the node's group
+        // profile is created at its network addresses as a standby.
+        setIpcNodeIds((current) => ({ ...current, [profileId]: nodeId }));
+        await pushToAll(withInfo);
+        return;
+      }
+      const seed = await loadHistorySeed(meshHistoryKeyId(groupId));
+      if (!seed) throw new Error(t('mesh.keyMissing'));
+      await saveHistorySeed(profileId, seed);
+      seed.fill(0);
+      const credentials = {
+        deviceSecret: identity.secretKey, encryptionProtocol: info.transportProtocol,
+        encryptionPublicKey: info.transportPublicKey, transportVerified: true,
+      };
+      live.current.updateProfile(profileId, { ...credentials, mesh: { groupId, nodeId } });
+      live.current.approveCredentials(profileId, credentials);
+    } finally {
+      if (!ipc) creating.current.delete(reserved);
     }
-    const seed = await loadHistorySeed(meshHistoryKeyId(groupId));
-    if (!seed) throw new Error(t('mesh.keyMissing'));
-    await saveHistorySeed(profileId, seed);
-    seed.fill(0);
-    const credentials = {
-      deviceSecret: identity.secretKey, encryptionProtocol: info.transportProtocol,
-      encryptionPublicKey: info.transportPublicKey, transportVerified: true,
-    };
-    live.current.updateProfile(profileId, { ...credentials, mesh: { groupId, nodeId } });
-    live.current.approveCredentials(profileId, credentials);
     await pushToAll(withInfo);
   }, [editRoster, identityOf, pushToAll, replaceGroup]);
 

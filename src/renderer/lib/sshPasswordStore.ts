@@ -30,3 +30,13 @@ export async function loadSshPassword(backendId: string, alias: string): Promise
 export async function saveSshPassword(backendId: string, alias: string, password: string | null): Promise<void> {
   await window.todexDesktop.secureStore.set(passwordKey(backendId, alias), password || null);
 }
+
+/** Copies the passwords saved under `fromId` for `aliases` to `toId`, a
+ * profile of the same backend; one `toId` already has is kept. */
+export async function copySshPasswords(fromId: string, toId: string, aliases: readonly string[]): Promise<void> {
+  for (const alias of aliases) {
+    const password = await window.todexDesktop.secureStore.get(passwordKey(fromId, alias));
+    if (!password || await window.todexDesktop.secureStore.get(passwordKey(toId, alias))) continue;
+    await window.todexDesktop.secureStore.set(passwordKey(toId, alias), password);
+  }
+}
