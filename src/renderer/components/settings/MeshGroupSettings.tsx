@@ -19,6 +19,7 @@ import { CodeBlock } from '../ui/code-block';
 import { EmptyState } from '../ui/empty-state';
 import { IconAction } from '../ui/icon-action';
 import { ConfirmDialog, Modal } from '../ui/modal';
+import { QrCode } from '../ui/qr-code';
 import { Spinner } from '../ui/spinner';
 import { SettingsCard, SettingsGroup, SettingsNote, SettingsRow } from './SettingsRows';
 
@@ -436,7 +437,17 @@ function InviteDialog({ group, onClose }: { group: MeshGroupView | null; onClose
       description={t('mesh.inviteHint')}
       footer={<Button size="small" onClick={onClose}>{t('common.close')}</Button>}
     >
-      {group ? <CodeBlock code={group.invite} title={t('mesh.inviteLabel')} codeClassName="whitespace-pre-wrap break-all" /> : null}
+      {group ? (
+        <div className="flex flex-col gap-3">
+          {group.inviteQr ? (
+            <div className="flex flex-col items-center gap-2">
+              <QrCode text={group.inviteQr.text} label={t('mesh.inviteQr')} className="h-72 w-72" />
+              {group.inviteQr.trimmed ? <p className="text-center text-body-2-regular text-text-secondary">{t('mesh.inviteQrTrimmed')}</p> : null}
+            </div>
+          ) : null}
+          <CodeBlock code={group.invite} title={t('mesh.inviteLabel')} codeClassName="whitespace-pre-wrap break-all" />
+        </div>
+      ) : null}
     </Modal>
   );
 }

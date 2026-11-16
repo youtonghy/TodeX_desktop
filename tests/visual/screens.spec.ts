@@ -272,6 +272,13 @@ test('settings: backend group with a join request', async ({ page, openDemo }) =
   await expect(page.getByRole('dialog', { name: 'MBP 的组设置' })).toBeVisible();
   await settle(page);
   await expect(page).toHaveScreenshot('settings-mesh-node-light.png', { mask: volatile(page) });
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog', { name: 'MBP 的组设置' })).toBeHidden();
+  // The invite as a QR code a phone scans, above the text to paste.
+  await page.getByRole('button', { name: '邀请设备', exact: true }).click();
+  await expect(page.getByRole('img', { name: '邀请二维码' })).toBeVisible();
+  await settle(page);
+  await expect(page).toHaveScreenshot('settings-mesh-invite-light.png', { mask: volatile(page) });
 });
 
 // This computer's backend is a node of the group and is reached over IPC:

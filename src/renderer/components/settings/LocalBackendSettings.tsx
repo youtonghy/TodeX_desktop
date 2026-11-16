@@ -26,10 +26,10 @@ import {
 } from '../../session/localPairing';
 import { useT } from '../../i18n';
 import { loadJson, saveJson } from '../../lib/storage';
-import { RecoveryQrCode } from '../HistoryEncryptionPanel';
 import { ConfirmDialog } from '../ui/modal';
 import { CodeBlock } from '../ui/code-block';
 import { ProgressBar } from '../ui/progress-bar';
+import { QrCode } from '../ui/qr-code';
 import { Spinner } from '../ui/spinner';
 import { toast } from '../ui/toast-store';
 import { SettingsCard, SettingsGroup, SettingsNote, SettingsRow, SettingsValueField } from './SettingsRows';
@@ -448,7 +448,7 @@ export function InstanceAdmin({ instance, status: initialStatus, ipcConnected, c
               ))}
               <SettingsNote>
                 <div className="flex flex-col items-center gap-2 py-2">
-                  <RecoveryQrCode payload={status.pairingLink} label={t('localBackend.pairingQr')} />
+                  <QrCode text={status.pairingLink} label={t('localBackend.pairingQr')} />
                   <span className="text-body-2-regular text-text-secondary">{t('localBackend.pairingQrHint')}</span>
                 </div>
               </SettingsNote>

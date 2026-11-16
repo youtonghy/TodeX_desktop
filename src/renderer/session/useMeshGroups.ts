@@ -7,6 +7,7 @@ import {
   appendMeshRoster,
   createMeshGenesis,
   encodeMeshInvite,
+  encodeMeshInviteForQr,
   isMeshAddress,
   meshCommands,
   meshMemberForJoinRequest,
@@ -115,6 +116,9 @@ export type MeshGroupView = {
   /** Waiting for the first roster after joining. */
   pending: boolean;
   invite: string;
+  /** The invite as a QR code carries it (`encodeMeshInviteForQr`), or null
+   * when no node fits one. */
+  inviteQr: { text: string; trimmed: boolean } | null;
 };
 
 export type MeshJoinView = MeshJoinRequest & { profileId: string; groupName: string };
@@ -850,9 +854,12 @@ export function useMeshGroups({
     const inviteNodes = members.filter((member) => member.kind === 'node').map((member) => ({
       nodeId: member.id, name: member.name, urls: nodeUrls(group, member.info, member.id, { pinned: member.addresses }),
     })).filter((node) => node.urls.length);
+    const invite = { groupId: group.groupId, name: chain?.head.name ?? group.name, nodes: inviteNodes };
     return {
       groupId: group.groupId, name: chain?.head.name ?? group.name, version: chain?.head.version ?? 0, deviceId: group.deviceId,
-      members, pending: !chain, invite: inviteNodes.length ? encodeMeshInvite({ groupId: group.groupId, name: chain?.head.name ?? group.name, nodes: inviteNodes }) : '',
+      members, pending: !chain,
+      invite: inviteNodes.length ? encodeMeshInvite(invite) : '',
+      inviteQr: inviteNodes.length ? encodeMeshInviteForQr(invite) : null,
     };
   }), [groups, ipcNodeIds, links, presence, profiles]);
 

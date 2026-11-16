@@ -1,16 +1,16 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Chip } from '@/components/base/badges/chip';
 import { Button } from '@/components/base/buttons/button';
 import { Checkbox } from '@/components/base/checkbox/checkbox';
 import { Textarea } from '@/components/base/textarea/textarea';
 import { cx } from '@/utils/cx';
-import { encodeQrCode } from '@todex/protocol/qrCode';
 import type { HistoryRecipient, HistoryRevokedDevice, HistoryRewrapProgress } from '@todex/protocol/historyEncryption';
 import type { HistoryEncryptionBackend, RecoveryKeyDraft } from '../session/useHistoryEncryption';
 import { useT } from '../i18n';
 import { SETTINGS_ROW, SettingsCard, SettingsGroup, SettingsNote } from './settings/SettingsRows';
 import { ConfirmDialog, Modal } from './ui/modal';
 import { ProgressBar } from './ui/progress-bar';
+import { QrCode } from './ui/qr-code';
 import { Spinner, SpinnerIcon } from './ui/spinner';
 import { toast } from './ui/toast-store';
 
@@ -23,19 +23,6 @@ type Props = {
 /** Showing a new recovery key before it is uploaded (docs/history-encryption.md §3.3). */
 type RecoveryStep = { draft: RecoveryKeyDraft } | null;
 type Confirm = { kind: 'revoke'; recipient: HistoryRecipient } | { kind: 'restore'; device: HistoryRevokedDevice } | { kind: 'resetKey' } | null;
-
-export function RecoveryQrCode({ payload, label }: { payload: string; label: string }) {
-  const qr = useMemo(() => encodeQrCode(payload), [payload]);
-  const quiet = 4;
-  const size = qr.size + quiet * 2;
-  const path = qr.modules.flatMap((row, y) => row.flatMap((dark, x) => dark ? [`M${x + quiet} ${y + quiet}h1v1h-1z`] : [])).join('');
-  // A scannable code stays black on white in both themes.
-  return (
-    <svg role="img" aria-label={label} viewBox={`0 0 ${size} ${size}`} className="h-44 w-44 rounded-md bg-white" shapeRendering="crispEdges">
-      <path d={path} fill="#000" />
-    </svg>
-  );
-}
 
 function progressText(t: ReturnType<typeof useT>, progress: HistoryRewrapProgress): string {
   return t('history.progress', { processed: progress.processed, added: progress.added, skipped: progress.skipped });
@@ -311,7 +298,7 @@ export function HistoryEncryptionPanel({ history, autoStartRecovery = false }: P
             <ol aria-label={t('history.recoveryWords')} className="grid grid-cols-3 gap-x-3 gap-y-1 font-mono text-caption-1-regular text-text-primary sm:grid-cols-4">
               {step.draft.words.map((word, index) => <li key={index}><span className="text-text-tertiary">{index + 1}.</span> {word}</li>)}
             </ol>
-            <div className="flex justify-center"><RecoveryQrCode payload={step.draft.qrPayload} label={t('history.recoveryQr')} /></div>
+            <div className="flex justify-center"><QrCode text={step.draft.qrPayload} label={t('history.recoveryQr')} /></div>
             <Checkbox isSelected={savedConfirmed} onChange={setSavedConfirmed}>{t('history.recoverySavedConfirm')}</Checkbox>
           </div>
         ) : null}
