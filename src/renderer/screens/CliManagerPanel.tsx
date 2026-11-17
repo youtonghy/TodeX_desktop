@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { RiArrowDownSLine, RiDeleteBin6Line, RiDownload2Line, RiDownloadCloud2Line, RiFileList3Line, RiPuzzle2Line, RiRefreshLine, RiServerLine, RiSettings3Line, RiTerminalBoxLine } from '@remixicon/react';
+import { RiArrowDownSLine, RiDownload2Line, RiDownloadCloud2Line, RiFileList3Line, RiPuzzle2Line, RiRefreshLine, RiServerLine, RiSettings3Line, RiTerminalBoxLine } from '@remixicon/react';
 import { Chip, type ChipProps } from '@/components/base/badges/chip';
 import { Button } from '@/components/base/buttons/button';
 import { Divider } from '@/components/base/divider/divider';
@@ -185,21 +185,6 @@ export function CliManagerPanel({ session, page = null, onPageChange = () => {} 
   };
 
   const [presetsOpen, setPresetsOpen] = useState(false);
-  const [removingIntegration, setRemovingIntegration] = useState(false);
-  // TodeX keeps a PreToolUse hook and its MCP servers in Antigravity's global
-  // config (shared with the Antigravity app); this takes them out again.
-  const removeAntigravityIntegration = async () => {
-    setRemovingIntegration(true);
-    try {
-      const { removed } = await api().removeAntigravityIntegration();
-      toast.success(t(removed ? 'cli.antigravityIntegrationRemoved' : 'cli.antigravityIntegrationAbsent'));
-    } catch (error) {
-      toast.danger(error instanceof Error ? error.message : t('cli.antigravityIntegrationRemoveFailed'));
-    } finally {
-      setRemovingIntegration(false);
-    }
-  };
-
   const activeBackend = backend.profile;
   const isRunning = (id: string) => operations[id as ManagedCliProvider]?.status === 'running';
   const isBusy = (id: string) => isRunning(id) || submitting.has(id as ManagedCliProvider);
@@ -257,22 +242,9 @@ export function CliManagerPanel({ session, page = null, onPageChange = () => {} 
           ) : (
             <Chip variant="caption" color={status.color}>{t(status.labelKey)}</Chip>
           )}
-          {hasPage || cli.id === 'antigravity' ? (
+          {hasPage ? (
             <div className="flex shrink-0 items-center gap-0.5">
-              {cli.id === 'antigravity' ? (
-                <IconAction
-                  icon={removingIntegration ? SpinnerIcon : RiDeleteBin6Line}
-                  size="sm"
-                  aria-label={t('cli.antigravityRemoveIntegration')}
-                  tooltip
-                  aria-busy={removingIntegration || undefined}
-                  disabled={removingIntegration}
-                  onClick={() => void removeAntigravityIntegration()}
-                />
-              ) : null}
-              {hasPage ? (
-                <IconAction icon={RiSettings3Line} size="sm" aria-label={t('cliSettings.title', { name: cli.name })} tooltip={t('cliSettings.open')} onClick={() => onPageChange(cli.id)} />
-              ) : null}
+              <IconAction icon={RiSettings3Line} size="sm" aria-label={t('cliSettings.title', { name: cli.name })} tooltip={t('cliSettings.open')} onClick={() => onPageChange(cli.id)} />
             </div>
           ) : null}
         </div>
