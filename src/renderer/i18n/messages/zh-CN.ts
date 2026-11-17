@@ -2383,6 +2383,8 @@ export const zhCN = {
   'sess.compactWait': '请等待当前任务结束后再压缩上下文。',
   'sess.compactNoInstructions': "该 Agent 的压缩不支持附带指令，请只发送 /compact。",
   'sess.goalUnsupported': '该 Agent 不支持原生目标。',
+  'plan.title': '计划',
+  'plan.label': '计划步骤',
   'goal.title': '目标 · {objective}',
   'goal.usage': '{tokens} tokens · {minutes} 分钟',
   'goal.pause': '暂停',

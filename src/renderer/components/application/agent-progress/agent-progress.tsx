@@ -4,6 +4,7 @@ import { useTemplateCopy } from "@/components/foundations/template-copy/template
 
 import { useEffect, useId, useState, type ReactNode } from "react";
 import { AnimatePresence, LayoutGroup, motion } from "motion/react";
+import { RiArrowDownSLine } from "@remixicon/react";
 import { cx } from "@/utils/cx";
 
 export const DEFAULT_AGENT_PROGRESS_STEPS = [
@@ -616,28 +617,53 @@ function ActiveStepSpinner() {
  * The agent-progress module driven by real steps instead of the demo clock:
  * the header ring fills with the share of finished steps, each row shows its
  * state (finished rows struck through, the running one outlined), and a row
- * opens through `onSelect`. `footer` sits under the list (e.g. an add field).
+ * opens through `onSelect` (rows are plain text without it). `description`
+ * sits under the header, `footer` under the list (e.g. an add field). With
+ * `onExpandedChange` the header toggles the list (`expanded`, default open).
  */
 export function TaskProgress({
   items,
   status,
   onSelect,
   footer,
+  description,
+  expanded = true,
+  onExpandedChange,
   label,
   className,
 }: {
   items: readonly TaskProgressItem[];
   /** Header label, e.g. "3 left" / "All done". */
   status: string;
-  onSelect: (id: string) => void;
+  onSelect?: (id: string) => void;
   footer?: ReactNode;
+  description?: ReactNode;
+  expanded?: boolean;
+  onExpandedChange?: (expanded: boolean) => void;
   /** Accessible name of the list. */
   label: string;
   className?: string;
 }) {
   const layoutGroupId = useId();
+  const listId = useId();
   const doneCount = items.filter((item) => item.state === "done").length;
   const share = items.length ? doneCount / items.length : 0;
+  const header = (
+    <>
+      <svg aria-hidden viewBox="0 0 16 16" width={16} height={16} className="shrink-0 -rotate-90">
+        <circle cx="8" cy="8" r="6.75" fill="none" stroke="var(--color-border-button-default)" strokeWidth="2.5" />
+        <motion.circle
+          cx="8" cy="8" r="6.75" fill="none"
+          stroke="var(--color-agent-progress-ring)" strokeWidth="2.5" strokeLinecap="round"
+          initial={false}
+          animate={{ pathLength: share, opacity: share > 0 ? 1 : 0 }}
+          transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
+        />
+      </svg>
+      <AnimatedStatusLabel label={status} className="flex-1 text-body-medium text-text-secondary" />
+      <span className="text-body-2-medium text-text-tertiary tabular-nums">{doneCount}/{items.length}</span>
+    </>
+  );
   return (
     <div
       className={cx(
@@ -645,36 +671,32 @@ export function TaskProgress({
         className,
       )}
     >
-      <div className="flex h-6 w-full items-center gap-2 ps-1 pt-1">
-        <svg aria-hidden viewBox="0 0 16 16" width={16} height={16} className="shrink-0 -rotate-90">
-          <circle cx="8" cy="8" r="6.75" fill="none" stroke="var(--color-border-button-default)" strokeWidth="2.5" />
-          <motion.circle
-            cx="8" cy="8" r="6.75" fill="none"
-            stroke="var(--color-agent-progress-ring)" strokeWidth="2.5" strokeLinecap="round"
-            initial={false}
-            animate={{ pathLength: share, opacity: share > 0 ? 1 : 0 }}
-            transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
+      {onExpandedChange ? (
+        <button
+          type="button"
+          aria-expanded={expanded}
+          aria-controls={expanded ? listId : undefined}
+          onClick={() => onExpandedChange(!expanded)}
+          className="flex h-6 w-full cursor-pointer items-center gap-2 rounded-md ps-1 pt-1 text-start outline-none focus-visible:ring-2 focus-visible:ring-border-focus-ring"
+        >
+          {header}
+          <RiArrowDownSLine
+            aria-hidden
+            className={cx("size-4 shrink-0 text-foreground-icon-tertiary transition-transform duration-200 ease-out motion-reduce:transition-none", !expanded && "-rotate-90 rtl:rotate-90")}
           />
-        </svg>
-        <AnimatedStatusLabel label={status} className="flex-1 text-body-medium text-text-secondary" />
-        <span className="text-body-2-medium text-text-tertiary tabular-nums">{doneCount}/{items.length}</span>
-      </div>
-      <LayoutGroup id={layoutGroupId}>
-        <ul aria-label={label} className={cx("flex flex-col gap-1.5", items.length > 0 && "mt-[9px]")}>
-          {items.map((item) => {
-            const complete = item.state === "done";
-            const active = item.state === "active";
-            return (
-              <motion.li key={item.id} layout="position" transition={ACTIVE_BORDER_TRANSITION} className="min-h-8 w-full">
-                <button
-                  type="button"
-                  onClick={() => onSelect(item.id)}
-                  className={cx(
-                    "relative flex h-8 w-full cursor-pointer items-center gap-2 rounded-full text-start outline-none transition-[padding,background-color] duration-300 ease-out",
-                    "hover:bg-background-secondary-hover focus-visible:ring-2 focus-visible:ring-border-focus-ring",
-                    active ? "ps-[9px] pe-[13px]" : "px-1",
-                  )}
-                >
+        </button>
+      ) : (
+        <div className="flex h-6 w-full items-center gap-2 ps-1 pt-1">{header}</div>
+      )}
+      {description ? <div className="mt-1 ps-1 text-body-2-regular text-text-tertiary">{description}</div> : null}
+      {expanded ? (
+        <LayoutGroup id={layoutGroupId}>
+          <ul id={listId} aria-label={label} className={cx("flex flex-col gap-1.5", items.length > 0 && "mt-[9px]")}>
+            {items.map((item) => {
+              const complete = item.state === "done";
+              const active = item.state === "active";
+              const row = (
+                <>
                   {active && (
                     <motion.span
                       layoutId="active-step-border"
@@ -692,12 +714,29 @@ export function TaskProgress({
                     <AnimatedStepLabel label={item.label} complete={complete} active={active} />
                   </span>
                   {item.trailing ? <span className="relative z-10 flex shrink-0 items-center gap-1.5">{item.trailing}</span> : null}
-                </button>
-              </motion.li>
-            );
-          })}
-        </ul>
-      </LayoutGroup>
+                </>
+              );
+              const rowClass = cx(
+                "relative flex h-8 w-full items-center gap-2 rounded-full text-start transition-[padding,background-color] duration-300 ease-out",
+                active ? "ps-[9px] pe-[13px]" : "px-1",
+              );
+              return (
+                <motion.li key={item.id} layout="position" transition={ACTIVE_BORDER_TRANSITION} className="min-h-8 w-full">
+                  {onSelect ? (
+                    <button
+                      type="button"
+                      onClick={() => onSelect(item.id)}
+                      className={cx(rowClass, "cursor-pointer outline-none hover:bg-background-secondary-hover focus-visible:ring-2 focus-visible:ring-border-focus-ring")}
+                    >
+                      {row}
+                    </button>
+                  ) : <div className={rowClass}>{row}</div>}
+                </motion.li>
+              );
+            })}
+          </ul>
+        </LayoutGroup>
+      ) : null}
       {footer ? <div className="mt-1.5">{footer}</div> : null}
     </div>
   );

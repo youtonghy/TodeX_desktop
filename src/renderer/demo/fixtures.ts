@@ -315,7 +315,7 @@ export const demoJournals: Journal[] = [
   }),
   journal('3c8d1f2a-6b4e-4d9a-8f1b-2a3b4c5d6e7f', lumenWeb, 'codex', '排查 Safari 下商品卡片抖动', NOW - 25 * MINUTE, (j) => {
     // Codex warns about its own config file and auto-reviews a command
-    // (`provider_warning` / `auto_review` notices).
+    // (`provider_warning` / `auto_review` notices) while it works through a plan.
     j.user('Safari 17 下商品卡片在滚动时会抖动，帮我查一下原因。')
       .event('provider.event', {
         provider: 'codex', providerMethod: 'provider_warning', nativeMethod: 'configWarning',
@@ -323,6 +323,15 @@ export const demoJournals: Journal[] = [
       })
       .think('抖动通常来自 sticky 元素与 transform 的组合，或图片尺寸在加载后变化。先搜索 sticky 和 will-change。')
       .tool('shell', { command: ['rg', '-n', 'position: sticky|will-change', 'src/catalog'] }, 'src/catalog/ProductCard.css:12:  position: sticky;\nsrc/catalog/ProductCard.css:13:  will-change: transform;')
+      // Codex's working plan (`turn/plan/updated`), shown above the composer.
+      .event('plan.updated', {
+        provider: 'codex', explanation: '先确认抖动来源，再用 WebKit 测试复现并修复。',
+        steps: [
+          { text: '定位 sticky 与 will-change 的组合', status: 'completed' },
+          { text: '用 WebKit 跑商品卡片测试复现抖动', status: 'in_progress' },
+          { text: '移除多余的 will-change 并补回归测试', status: 'pending' },
+        ],
+      })
       .event('provider.event', {
         provider: 'codex', providerMethod: 'auto_review', nativeMethod: 'item/autoApprovalReview/completed',
         metadata: { status: 'approved', reason: 'pnpm exec playwright test --project=webkit catalog', riskLevel: 'low', rationale: 'Runs the project\'s own tests; no writes outside the workspace.' },

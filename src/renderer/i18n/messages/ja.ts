@@ -2383,6 +2383,8 @@ export const ja: Messages = {
   'sess.compactWait': 'コンテキストを圧縮する前に、現在のタスク終了をお待ちください。',
   'sess.compactNoInstructions': "この Agent の圧縮は指示を受け付けません。/compact だけを送ってください。",
   'sess.goalUnsupported': 'この Agent にはネイティブの目標がありません。',
+  'plan.title': '計画',
+  'plan.label': '計画のステップ',
   'goal.title': '目標 · {objective}',
   'goal.usage': '{tokens} tokens · {minutes} 分',
   'goal.pause': '一時停止',

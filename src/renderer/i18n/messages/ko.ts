@@ -2383,6 +2383,8 @@ export const ko: Messages = {
   'sess.compactWait': '컨텍스트를 압축하기 전에 현재 작업이 끝날 때까지 기다려 주세요.',
   'sess.compactNoInstructions': "이 Agent의 압축은 지시를 받지 않습니다. /compact만 보내세요.",
   'sess.goalUnsupported': '이 Agent에는 기본 목표 기능이 없습니다.',
+  'plan.title': '계획',
+  'plan.label': '계획 단계',
   'goal.title': '목표 · {objective}',
   'goal.usage': '{tokens} tokens · {minutes}분',
   'goal.pause': '일시 중지',

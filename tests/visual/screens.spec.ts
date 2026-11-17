@@ -131,6 +131,23 @@ for (const theme of ['light', 'dark'] as Theme[]) {
       await expect(page).toHaveScreenshot(`goal-${theme}.png`, { mask: volatile(page) });
     });
 
+    // The running Codex turn's plan: a collapsible checklist above the composer.
+    test('agent plan steps above the composer', async ({ page, openDemo }) => {
+      await openDemo(theme);
+      await page.getByText('排查 Safari 下商品卡片抖动').first().click();
+      const steps = page.getByRole('list', { name: '计划步骤' });
+      await expect(steps.getByRole('listitem')).toHaveCount(3);
+      await expect(page.getByText('先确认抖动来源，再用 WebKit 测试复现并修复。')).toBeVisible();
+      const header = page.getByRole('button', { name: '计划 1/3', exact: true });
+      await expect(header).toHaveAttribute('aria-expanded', 'true');
+      const elapsed = page.getByText(/^\d+m \d{2}s$/);
+      await settle(page);
+      await expect(page).toHaveScreenshot(`plan-steps-${theme}.png`, { mask: [...volatile(page), elapsed] });
+      await header.click();
+      await expect(header).toHaveAttribute('aria-expanded', 'false');
+      await expect(steps).toBeHidden();
+    });
+
     // Codex's own warning and auto-review outcome: one quiet line each.
     test('Codex warning and auto-review notices', async ({ page, openDemo }) => {
       await openDemo(theme);

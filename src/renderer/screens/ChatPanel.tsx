@@ -5,6 +5,7 @@ import { ComputerLiveView } from '../components/ComputerLiveView';
 import { AgentBrowserLiveView } from '../components/AgentBrowserLiveView';
 import { useAgentDesktopPreferences } from '../session/agentDesktopPreferences';
 import { ConversationGoalBar } from '../components/ConversationGoal';
+import { ConversationPlanBar } from '../components/ConversationPlan';
 import { ConversationScheduleBar } from '../components/ConversationSchedule';
 import { NoticeToast } from '../components/NoticeToast';
 import {
@@ -2271,6 +2272,7 @@ export function ChatPanel({ session }: Props) {
               onChange={(action) => session.sendConversationGoal(conversation.id, action)}
             />
           ) : null}
+          {runtime?.plan ? <ConversationPlanBar key={runtime.plan.turnId} className="mb-2" plan={runtime.plan} /> : null}
           {isPrivateConversation(conversation) ? (
             <Alert
               className="mb-2"

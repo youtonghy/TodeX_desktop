@@ -2383,6 +2383,8 @@ export const en: Messages = {
   'sess.compactWait': 'Please wait for the current task to finish before compacting context.',
   'sess.compactNoInstructions': "This agent's compaction takes no instructions; send /compact on its own.",
   'sess.goalUnsupported': 'This agent has no native goal.',
+  'plan.title': 'Plan',
+  'plan.label': 'Plan steps',
   'goal.title': 'Goal · {objective}',
   'goal.usage': '{tokens} tokens · {minutes} min',
   'goal.pause': 'Pause',
