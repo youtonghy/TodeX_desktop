@@ -668,7 +668,7 @@ codex app-server proxy [--sock PATH] # stdio ⇄ 控制 socket 双向桥
 
 | 位置 | 方法 |
 | :-- | :-- |
-| `provider/codex.rs` | `initialize`、`initialized`、`thread/start`、`thread/resume`、`turn/start`、`turn/interrupt`（`compact` 路径）、`thread/compact/start`、`model/list`、`account/read` |
+| `provider/codex.rs` + `provider/codex/runtime.rs` | `initialize`、`initialized`、`thread/start`、`thread/resume`、`thread/fork`、`thread/compact/start`、`thread/memoryMode/set`、`turn/start`、`turn/steer`、`turn/interrupt`、`turn/settings/update`、`thread/queue/add\|delete\|list\|start`、`thread/goal/set\|get\|clear`、`model/list`、`account/read`、`account/rateLimits/read` |
 | `codex_gateway/mod.rs` | `initialize`、`initialized`、`turn/start`、`turn/steer`、`turn/interrupt`、`review/start`、`mcpServerStatus/list`、`mcpServer/resource/read`、`mcpServer/tool/call`、`mcpServer/oauth/login`、`config/mcpServer/reload`，其余按 `request_type` 原样透传 |
 
 按方法名字面统计：`provider/codex.rs` 覆盖约 26 个、`codex_gateway/mod.rs` 覆盖 23 个（含通知与服务端请求），相对 86 + 11 的总量仍有大量未消费的方法——具体缺口见 §6.1 与 §10。
@@ -1335,6 +1335,13 @@ CLI 的 `queue`/`archive`/`delete`/`fork` 和桌面应用主进程共用的一�
 ## 10. TodeX 现状对照与改进建议
 
 按「改动能带来多少收益」排序。每条都标了当前的代码位置和对应协议依据。
+
+> **2026-11-17 复核**（对照 `TodeX_backend` 代码）：
+>
+> - **线上只有 `provider/codex.rs` 这一条链路**：桌面、Web、移动端的聊天都走 `/v2/conversations` + `/v2/ws` 的 `conversation.*`。`codex_gateway`（`codex.local.*`）没有任何客户端在发，后端自己称之为旧网关，只剩历史回放和真机 e2e 在用。下文 §10.3、§10.6、§10.11 中针对 gateway 的部分对用户没有实际影响。
+> - 下文说 TodeX「没用」的几项，provider 链路其实已经在用：`turn/start` 顶层 `effort`、对象形式的 `sandboxPolicy`（§10.5、§10.6）、`turn/settings/update`（§10.10）、`thread/queue/*`（§10.9）、`thread/goal/*`、`approvalsReviewer: "auto_review"`、`capabilities.experimentalApi`。`provider/codex.rs` 的审批也早已支持 `acceptForSession` 与 `cancel`（选项 `allow_always`、`abort_turn`）。
+> - 已落地：§10.2（`initialize` 的 `optOutNotificationMethods` 退订 TodeX 不用的通知，5 处握手共用一份请求）；§10.3 的 provider 部分（命令审批的选项按 `availableDecisions` 生成，只允许 `cancel` 时拒绝回 `cancel`；不提供会写入用户规则的 amendment 决策）；§10.4（`configWarning` / `deprecationNotice` / `warning` / `guardianWarning` 与自动审查结论显示为会话里的提示行，`providerMethod` 为 `provider_warning` / `auto_review`）；`currentTime/read` 由 daemon 直接回复；客户端对未知推理强度显示其原名，Codex 强度列表补上 `ultra`。契约见 `TodeX_backend/docs/API.md`。
+> - 仍未做：§10.1 共享 daemon / `unix://` 传输、§10.7–10.9 的 `command/exec`、`fs/*`、分页历史，以及计划步骤条 UI（后端已发 `plan.updated`，客户端尚未渲染）。
 
 ### 10.1 一条常驻 app-server 代替「每会话一个进程」
 
