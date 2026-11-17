@@ -4,6 +4,8 @@
 
 取证时间：2026-11-17。取证手段：`agy --help`/子命令实测、ACP stdio 实测、CLI 日志、`app.asar` 主进程源码、以及 IDA Pro MCP 加载 `agy`（session `4969c9e0`）后对二进制内嵌 protobuf 描述符的解析。
 
+> **状态更新（2026-11-17）**：TodeX 已按 §7 P0 改用 `agy acp` 驱动 Antigravity（后端提交 `7dcf60b`）。下文描述 print 模式、全局钩子、`--settings` 放行与 `antigravity.rs` 行号的段落，记录的是改造前的实现。改造中实测补充：`agy acp` 会下发 `tool_call` / `tool_call_update`（带非标准的 `name` / `args`，`rawInput` 为 PascalCase 参数）；会话绑定到进程的工作目录，忽略 `session/new` 的 `cwd`；把带强度后缀的变体 ID 设到 `model` 配置项时，agy 会同时设好 `thought_level`（包括 `xhigh`）；`session/resume` 不恢复模型与模式；取消后 `session/prompt` 以 `cancelled` 返回，进程可继续使用；额度耗尽的错误以 `⚠` 开头的消息文本下发，响应仍是 `end_turn`，但不带 `usage`。现行行为见 `TodeX_backend/docs/API.md` 的 Antigravity 段落。
+
 标记约定：
 
 - **实测**：本次运行验证过的行为。
@@ -501,7 +503,7 @@ language_server --standalone --override_ide_name antigravity --subclient_type hu
 
 ## 7. 对 TodeX 的改造建议（按收益排序）
 
-### P0 — 用 ACP 取代「跳过权限 + 全局钩子」
+### P0 — 用 ACP 取代「跳过权限 + 全局钩子」（已完成，2026-11-17）
 
 现状：ask/full-access 轮一律 `--dangerously-skip-permissions`，再由全局 `PreToolUse` 钩子把每个工具调用转发回 daemon 审批（`antigravity.rs:12-14`、`agy_hook.rs`）。这条链路有三个结构性代价：钩子是**同步阻塞**的、只覆盖 `PreToolUse`、并且要往用户全局配置里写文件（被桌面应用和 IDE 共享）。
 
