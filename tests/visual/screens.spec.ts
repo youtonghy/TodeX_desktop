@@ -119,6 +119,16 @@ for (const theme of ['light', 'dark'] as Theme[]) {
       await expect(page).toHaveScreenshot(`goal-${theme}.png`, { mask: volatile(page) });
     });
 
+    // Codex's own warning and auto-review outcome: one quiet line each.
+    test('Codex warning and auto-review notices', async ({ page, openDemo }) => {
+      await openDemo(theme);
+      await page.getByText('排查 Safari 下商品卡片抖动').first().click();
+      await expect(page.getByRole('note').filter({ hasText: 'Codex CLI 配置警告' })).toBeVisible();
+      await expect(page.getByRole('note').filter({ hasText: 'Codex CLI 自动审查已批准：pnpm exec playwright' })).toBeVisible();
+      await settle(page);
+      await expect(page).toHaveScreenshot(`codex-notices-${theme}.png`, { mask: volatile(page) });
+    });
+
     test('waiting on background tasks after the turn', async ({ page, openDemo }) => {
       await openDemo(theme);
       await page.getByText('lumen-api', { exact: true }).click();

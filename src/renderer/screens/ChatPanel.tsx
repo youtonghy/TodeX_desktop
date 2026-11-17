@@ -163,11 +163,13 @@ const PROVIDER_TURN_NOTICES = {
 /** Provider notices shown as one quiet line (`TimelineEntry.providerNotice`). */
 const PROVIDER_NOTICES = {
   auto_mode_unavailable: 'chat.providerNotice.autoModeUnavailable',
+  auto_review: 'chat.providerNotice.autoReviewApproved',
   background_tasks_ended: 'chat.providerNotice.backgroundTasksEnded',
   bypass_mode_disabled: 'chat.providerNotice.bypassModeDisabledNoLayer',
   context_lost: 'chat.providerNotice.contextLost',
   plan_handoff: 'chat.providerNotice.planHandoff',
   plan_reentered: 'chat.providerNotice.planReentered',
+  provider_warning: 'chat.providerNotice.warning',
 } as const satisfies Record<NonNullable<TimelineEntry['providerNotice']>, MessageKey>;
 
 /** Why background work was lost (`background_tasks_ended`'s `reason`, the
@@ -189,6 +191,23 @@ const SETTINGS_SOURCES: Record<string, MessageKey> = {
   localSettings: 'chat.settingsSource.localSettings',
   policySettings: 'chat.settingsSource.policySettings',
   flagSettings: 'chat.settingsSource.flagSettings',
+};
+
+/** An agent warning's lead-in, by `metadata.kind`. */
+const PROVIDER_WARNINGS: Record<NonNullable<TimelineEntry['providerNoticeWarningKind']>, MessageKey> = {
+  config: 'chat.providerNotice.configWarning',
+  deprecation: 'chat.providerNotice.deprecationNotice',
+  guardian: 'chat.providerNotice.guardianWarning',
+  warning: 'chat.providerNotice.warning',
+};
+
+/** An auto-review notice, by its outcome. */
+const AUTO_REVIEWS: Record<NonNullable<TimelineEntry['providerNoticeReviewStatus']>, MessageKey> = {
+  approved: 'chat.providerNotice.autoReviewApproved',
+  denied: 'chat.providerNotice.autoReviewDenied',
+  timedOut: 'chat.providerNotice.autoReviewTimedOut',
+  aborted: 'chat.providerNotice.autoReviewAborted',
+  strictReviewRequired: 'chat.providerNotice.autoReviewNeedsPerson',
 };
 
 /** `agent` names the conversation's agent (Claude Code, Pi, …). */
@@ -219,6 +238,14 @@ function providerNoticeText(notice: NonNullable<TimelineEntry['providerNotice']>
       return entry.providerNoticeModel
         ? t(PROVIDER_NOTICES[notice], { model: modelLabel(entry.providerNoticeModel) })
         : t('chat.providerNotice.planReenteredNoModel');
+    case 'provider_warning':
+    case 'auto_review': {
+      // The agent's own text (the warning, or what was reviewed) follows.
+      const lead = notice === 'provider_warning'
+        ? t(PROVIDER_WARNINGS[entry.providerNoticeWarningKind ?? 'warning'], { agent })
+        : t(AUTO_REVIEWS[entry.providerNoticeReviewStatus ?? 'approved'], { agent });
+      return entry.subtitle ? t('chat.providerNotice.withSubject', { notice: lead, subject: entry.subtitle }) : lead;
+    }
   }
 }
 
@@ -894,7 +921,7 @@ const ChatTimelineItem = memo(function ChatTimelineItem({
   }
   if (entry.providerNotice) {
     return (
-      <p data-message-id={entry.id} role="note" title={entry.subtitle || undefined} className="py-1 text-center text-caption-1-regular text-text-tertiary">
+      <p data-message-id={entry.id} role="note" title={entry.providerNoticeDetail || entry.subtitle || undefined} className="py-1 text-center text-caption-1-regular text-text-tertiary">
         {providerNoticeText(entry.providerNotice, entry, agentName, (id) => (
           // Only Claude Code hands a plan off or re-plans (smart work mode).
           session.providerModels['claude-code']?.find((item) => item.id === id)?.displayName || id

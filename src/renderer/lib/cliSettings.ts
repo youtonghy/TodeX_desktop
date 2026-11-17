@@ -148,7 +148,8 @@ export const CLAUDE_SETTINGS: CliSettingsSchema = {
 
 // Codex CLI `config.toml` keys as of codex-cli 0.162 (config.schema.json).
 // `approval_policy = "untrusted"` is a hard error there, so it is not offered.
-const CODEX_EFFORTS = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
+// Efforts are open strings since 0.167; `ultra` is offered by newer models.
+const CODEX_EFFORTS = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
 
 export const CODEX_SETTINGS: CliSettingsSchema = {
   provider: 'codex',

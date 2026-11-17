@@ -9,7 +9,7 @@ export const OPENCODE_THINKING_LEVELS = ['minimal', 'low', 'medium', 'high', 'xh
 
 /// Codex `model_reasoning_effort` values (codex-rs `ReasoningEffort`); rarer
 /// or model-defined ones stay editable through JSON mode.
-export const CODEX_REASONING_EFFORTS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
+export const CODEX_REASONING_EFFORTS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'] as const;
 
 /// DeepSeek Harness routes take pi-ai's levels, which match Pi's.
 const usesPiLevels = (agent: ManagedProviderAgent) => agent === 'pi' || agent === 'deepseek-harness';

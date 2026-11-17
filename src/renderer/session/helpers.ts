@@ -92,8 +92,10 @@ import {
   shouldAppendV2ConversationEvent as sharedShouldAppendV2ConversationEvent,
   type ConversationBlockCategory,
   type ConversationBlockPhase,
+  type AutoReviewStatus,
   type ProviderNotice,
   type ProviderTurnTrigger,
+  type ProviderWarningKind,
 } from '@todex/protocol/mobileParity';
 
 export type ServerVersion = {
@@ -1054,6 +1056,12 @@ export type TimelineEntry = {
   providerNoticeModel?: string;
   /** `plan_handoff`: `next_turn` when the switch applies from the next message. */
   providerNoticeApplied?: 'now' | 'next_turn';
+  /** `provider_warning`: what kind of warning it is (`metadata.kind`). */
+  providerNoticeWarningKind?: ProviderWarningKind;
+  /** `auto_review`: the review's outcome (`metadata.status`). */
+  providerNoticeReviewStatus?: AutoReviewStatus;
+  /** A warning's details or config file, an auto-review's rationale. */
+  providerNoticeDetail?: string;
   /** A plan review's plan text (`@todex/protocol/mobileParity`): the row
    * renders as the plan instead of folding into the work steps. */
   plan?: string;
@@ -1201,9 +1209,11 @@ export const REASONING_EFFORT_LABELS: Record<string, string> = {
   ultracode: 'ultracode',
 };
 
+/** A model may name an effort TodeX does not know yet; it is shown as named. */
 export function reasoningEffortLabel(value: string | null | undefined): string {
   const normalized = normalizeReasoningEffort(value);
-  return normalized ? REASONING_EFFORT_LABELS[normalized] ?? normalized : 'default';
+  if (normalized) return REASONING_EFFORT_LABELS[normalized] ?? normalized;
+  return value?.trim() || 'default';
 }
 
 export function modelDisplayLabel(model: string | null | undefined, catalog: CodexModelCatalogItem[]): string {

@@ -314,9 +314,19 @@ export const demoJournals: Journal[] = [
       .answer(copyAnswer, { model: 'opus', input: 21_300, output: 2_150, cacheRead: 96_000, cacheWrite: 4_100 });
   }),
   journal('3c8d1f2a-6b4e-4d9a-8f1b-2a3b4c5d6e7f', lumenWeb, 'codex', '排查 Safari 下商品卡片抖动', NOW - 25 * MINUTE, (j) => {
+    // Codex warns about its own config file and auto-reviews a command
+    // (`provider_warning` / `auto_review` notices).
     j.user('Safari 17 下商品卡片在滚动时会抖动，帮我查一下原因。')
+      .event('provider.event', {
+        provider: 'codex', providerMethod: 'provider_warning', nativeMethod: 'configWarning',
+        metadata: { kind: 'config', reason: 'Codex is ignoring 1 unrecognized configuration setting: `mcp_servers.context7.type`', path: '~/.codex/config.toml' },
+      })
       .think('抖动通常来自 sticky 元素与 transform 的组合，或图片尺寸在加载后变化。先搜索 sticky 和 will-change。')
       .tool('shell', { command: ['rg', '-n', 'position: sticky|will-change', 'src/catalog'] }, 'src/catalog/ProductCard.css:12:  position: sticky;\nsrc/catalog/ProductCard.css:13:  will-change: transform;')
+      .event('provider.event', {
+        provider: 'codex', providerMethod: 'auto_review', nativeMethod: 'item/autoApprovalReview/completed',
+        metadata: { status: 'approved', reason: 'pnpm exec playwright test --project=webkit catalog', riskLevel: 'low', rationale: 'Runs the project\'s own tests; no writes outside the workspace.' },
+      })
       .tool('shell', { command: ['pnpm', 'exec', 'playwright', 'test', '--project=webkit', 'catalog'] });
   }),
   journal('5e6f7a8b-9c0d-4e1f-a2b3-c4d5e6f7a8b9', lumenWeb, 'pi', '为订单列表加分页', NOW - 2 * DAY, (j) => {
