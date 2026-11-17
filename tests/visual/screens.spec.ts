@@ -125,8 +125,12 @@ for (const theme of ['light', 'dark'] as Theme[]) {
       await page.getByText('排查 Safari 下商品卡片抖动').first().click();
       await expect(page.getByRole('note').filter({ hasText: 'Codex CLI 配置警告' })).toBeVisible();
       await expect(page.getByRole('note').filter({ hasText: 'Codex CLI 自动审查已批准：pnpm exec playwright' })).toBeVisible();
+      // The conversation is still running: its folded steps show the running
+      // tool's elapsed time, which ticks while the test runs.
+      const elapsed = page.getByText(/^\d+m \d{2}s$/);
+      await expect(elapsed).toBeVisible();
       await settle(page);
-      await expect(page).toHaveScreenshot(`codex-notices-${theme}.png`, { mask: volatile(page) });
+      await expect(page).toHaveScreenshot(`codex-notices-${theme}.png`, { mask: [...volatile(page), elapsed] });
     });
 
     test('waiting on background tasks after the turn', async ({ page, openDemo }) => {
