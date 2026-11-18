@@ -36,6 +36,7 @@ import type { ComponentProps, Dispatch, KeyboardEvent, MouseEvent as ReactMouseE
 import { Focusable, ListBox as AriaListBox, ListBoxItem as AriaListBoxItem, type ListBoxItemRenderProps } from 'react-aria-components';
 import { motion, useReducedMotion } from 'motion/react';
 import { ShimmerText } from '@/components/application/agent-log/agent-log';
+import { AgentThinking, AgentThinkingIndicator } from '@/components/application/agent-thinking/agent-thinking';
 import { Chip } from '@/components/application/task-list/task-list';
 import { ComposerLoader } from '@/components/application/composer-loader/composer-loader';
 import { AgentLimitsCard } from '@/components/application/agent-limits/agent-limits-card';
@@ -395,6 +396,14 @@ const ACTION_RUNNING_KEYS: Record<ToolAction, MessageKey> = {
   agent: 'chat.actionRunning.agent',
   other: 'chat.actionRunning.other',
 };
+/** The running phrase before a call's arguments arrive ("Running a command"). */
+const ACTION_RUNNING_ANY_KEYS: Partial<Record<ToolAction, MessageKey>> = {
+  read: 'chat.actionRunningAny.read',
+  search: 'chat.actionRunningAny.search',
+  edit: 'chat.actionRunningAny.edit',
+  command: 'chat.actionRunningAny.command',
+  web: 'chat.actionRunningAny.web',
+};
 const ACTION_DONE_KEYS: Record<ToolAction, MessageKey> = {
   read: 'chat.actionDone.read',
   search: 'chat.actionDone.search',
@@ -443,13 +452,16 @@ function toolStepTitle(tool: ToolCardPresentation): { title: string; chips?: Rea
   return { title: tool.summary ? `${tool.label} · ${tool.summary}` : tool.label };
 }
 
-/** The running call, phrased for a folded group's header ("Reading page.tsx");
- * undefined when there is nothing specific to say. */
+/** The running call, phrased for a folded group's header ("Reading page.tsx",
+ * or "Reading files" before its arguments stream in); undefined when there is
+ * nothing specific to say. */
 function runningActionLabel(tool: ToolCardPresentation): string | undefined {
   if (tool.action === 'agent') return t(ACTION_RUNNING_KEYS.agent);
   const target = tool.targets[0] ? fileName(tool.targets[0])
     : tool.action === 'other' ? tool.label : tool.summary;
-  return target ? t(ACTION_RUNNING_KEYS[tool.action], { target }) : undefined;
+  if (target) return t(ACTION_RUNNING_KEYS[tool.action], { target });
+  const generic = ACTION_RUNNING_ANY_KEYS[tool.action];
+  return generic ? t(generic) : undefined;
 }
 
 /** A finished run, tallied by what it did ("Edited 2 files · Ran 3 commands").
@@ -935,7 +947,9 @@ const ChatTimelineItem = memo(function ChatTimelineItem({
     return (
       <RowEntrance enter={animateEntrance}>
         <ProcessDisclosure
-          icon={RiListCheck3}
+          // The agent at work animates the header; a finished run, or one
+          // waiting on the user's approval, rests on the list glyph.
+          icon={isStreamingGroup && groupPendingCount === 0 ? AgentThinkingIndicator : RiListCheck3}
           title={progressGroupLabel(item.entries, isStreamingGroup, groupPendingCount)}
           running={isStreamingGroup}
           meta={foldedElapsed}
@@ -2057,12 +2071,15 @@ export function ChatPanel({ session }: Props) {
               </Button>
             </div>
           ) : items.length === 0 ? (
-            <p className="py-16 text-center text-body-regular text-text-tertiary" role="status">
-              {thinking ? t('chat.working')
-                : session.openStatusByConversation[conversation.id] === 'opening' ? t('chat.openingHistory')
+            thinking ? (
+              <AgentThinking variant="wave" tone="subtle" showTimer={false} label={t('chat.working')} className="justify-center py-16" />
+            ) : (
+              <p className="py-16 text-center text-body-regular text-text-tertiary" role="status">
+                {session.openStatusByConversation[conversation.id] === 'opening' ? t('chat.openingHistory')
                   : session.recoveringConversations[conversation.id] ? t('chat.recovering')
                     : t('chat.emptyHint')}
-            </p>
+              </p>
+            )
           ) : null}
           {items.map((item) => (
             <ErrorBoundary key={chatRenderItemKey(item)} label="chat row" fallback={() => <RowRenderError />}>
@@ -2097,9 +2114,7 @@ export function ChatPanel({ session }: Props) {
           ))}
           {showTrailingStatus ? (
             backgroundTaskCount > 0 ? <BackgroundTasksStatus tasks={backgroundTasks} items={items} /> : (
-              <p className="min-h-7 py-1 text-body-regular" role="status">
-                <ShimmerText>{t('chat.working')}</ShimmerText>
-              </p>
+              <AgentThinking variant="wave" showTimer={false} label={t('chat.working')} className="min-h-7 py-1" />
             )
           ) : null}
         </div>

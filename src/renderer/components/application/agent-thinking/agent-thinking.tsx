@@ -90,7 +90,7 @@ function dotOpacities(variant: "wave" | "spin", phase: number) {
   });
 }
 
-function DotsIndicator({ variant }: { variant: "wave" | "spin" }) {
+function DotsIndicator({ variant, className }: { variant: "wave" | "spin"; className?: string }) {
   const localize = useTemplateCopy();
   const [opacities, setOpacities] = useState<number[]>(DOTS_SEED);
 
@@ -107,7 +107,7 @@ function DotsIndicator({ variant }: { variant: "wave" | "spin" }) {
   return localize((
     <span
       aria-hidden
-      className="grid shrink-0"
+      className={cx("grid shrink-0", className)}
       style={{
         gridTemplateColumns: `repeat(${DOTS_GRID}, ${DOTS_SIZE}px)`,
         gap: DOTS_GAP,
@@ -127,6 +127,22 @@ function DotsIndicator({ variant }: { variant: "wave" | "spin" }) {
       ))}
     </span>
   ));
+}
+
+/**
+ * The dot-grid indicator on its own, 16px square like a `size-4` icon, so a
+ * row that already owns its label and timer can show the agent at work.
+ * Takes the colour of its text (`className`).
+ */
+export function AgentThinkingIndicator({
+  variant = "wave",
+  className,
+}: {
+  variant?: "wave" | "spin";
+  className?: string;
+  "aria-hidden"?: boolean | "true" | "false";
+}) {
+  return <DotsIndicator variant={variant} className={className} />;
 }
 
 /* ------------------------------------------------------------------ stars */
