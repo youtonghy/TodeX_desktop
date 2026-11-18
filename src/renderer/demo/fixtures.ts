@@ -395,10 +395,14 @@ export function demoConversationRecord(journal: Journal, record: ConversationRec
     : record;
 }
 
-// `?demo&board=busy`: one conversation waits on a permission prompt, so the
-// home board shows its waiting list.
-if (typeof location !== 'undefined' && new URLSearchParams(location.search).get('board') === 'busy') {
-  demoJournals[3].manifest.status = 'waiting_permission';
+// `?demo&board=busy` (and the site's `?autoplay` walkthrough): one
+// conversation waits on a permission prompt, so the home board shows its
+// waiting list.
+if (typeof location !== 'undefined') {
+  const params = new URLSearchParams(location.search);
+  if (params.get('board') === 'busy' || params.has('autoplay')) {
+    demoJournals[3].manifest.status = 'waiting_permission';
+  }
 }
 
 function privateJournal(source: Journal): Journal {

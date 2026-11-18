@@ -12,8 +12,13 @@ import type {
 } from '@todex/protocol/secureTransport';
 import type { AgentCallingSettings, ApiKeySummary, ConversationEvent, ConversationManifest, DshPackage, DshPluginList, DshPluginOperation, DshPluginRow, McpCatalog, McpServerCatalogDescriptor, ProviderKind, SkillCatalog, SkillCatalogDescriptor } from '@todex/protocol/v2';
 import { applyMergePatch, setAt, type SettingsObject } from '../lib/cliSettings';
+import { isDevVersion } from '../session/helpers';
 import { demoMesh } from './mesh';
 import * as fixtures from './fixtures';
+
+const demoBackendVersion = isDevVersion(__TODEX_BUILD_VERSION__)
+  ? '2.2.0'
+  : __TODEX_BUILD_VERSION__.trim().replace(/^v/i, '');
 
 /** `?mesh=1` or `?mesh=local`: the demo backend is a node of the demo group. */
 function demoInMeshGroup(): boolean {
@@ -881,7 +886,7 @@ function route(request: SecureRequest): SecureResponse {
       case '/v2/transport-policy':
         return json({ requiredProtocol: 'none' });
       case '/v2/version':
-        return json({ name: 'todex-agentd', version: '2.2.0', data_dir: '/home/demo/.todex-agent', workspace_root: fixtures.DEMO_ROOT, scratch_workspace_root: '/home/demo/.todex-agent/workspace', mesh: 1 });
+        return json({ name: 'todex-agentd', version: demoBackendVersion, data_dir: '/home/demo/.todex-agent', workspace_root: fixtures.DEMO_ROOT, scratch_workspace_root: '/home/demo/.todex-agent/workspace', mesh: 1 });
       case '/v2/providers':
         return json({ providers: fixtures.demoProviders });
       case '/v2/providers/models':
