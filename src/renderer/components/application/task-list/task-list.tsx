@@ -127,7 +127,7 @@ function TaskTitle({ label, running }: { label: string; running: boolean }) {
   );
 }
 
-function Chip({ chip }: { chip: TaskListChip }) {
+export function Chip({ chip }: { chip: TaskListChip }) {
   return (
     <span
       className={cx(

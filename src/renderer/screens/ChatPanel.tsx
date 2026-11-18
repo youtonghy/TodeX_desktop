@@ -35,6 +35,7 @@ import type { ComponentProps, Dispatch, KeyboardEvent, MouseEvent as ReactMouseE
 import { Focusable, ListBox as AriaListBox, ListBoxItem as AriaListBoxItem, type ListBoxItemRenderProps } from 'react-aria-components';
 import { motion, useReducedMotion } from 'motion/react';
 import { ShimmerText } from '@/components/application/agent-log/agent-log';
+import { Chip } from '@/components/application/task-list/task-list';
 import { ComposerLoader } from '@/components/application/composer-loader/composer-loader';
 import { AgentLimitsCard } from '@/components/application/agent-limits/agent-limits-card';
 import { Button } from '@/components/base/buttons/button';
@@ -130,7 +131,7 @@ import {
 import type { SshHost } from '@todex/protocol/ssh';
 import type { HostApp } from '@todex/protocol/agentDesktop';
 import { ConnectionError } from '@todex/protocol/connectionError';
-import { describeToolCall, type ToolCallKind } from '@todex/protocol/toolPresentation';
+import { describeToolCall, summarizeToolActions, type ToolAction, type ToolCallKind } from '@todex/protocol/toolPresentation';
 import { agentCallingToolFromName, agentCallingToolSummary, type AgentCallingTool } from '@todex/protocol/agentCalling';
 import { isThinkingProgressEntry } from '@todex/protocol/mobileParity';
 import { getLocale, t, useT, type MessageKey } from '../i18n';
@@ -369,7 +370,102 @@ function toolCardPresentation(entry: TimelineEntry, active: boolean, background 
     output: outputIsError ? undefined : tool.outputText,
     errorText: state === 'failed' ? (tool.errorText ?? tool.outputText) : undefined,
     state,
+    action: tool.action,
+    targets: tool.targets,
   };
+}
+
+type ToolCardPresentation = ReturnType<typeof toolCardPresentation>;
+
+/** Step verbs for calls whose action reads well on its own ("Read", "Run"). */
+const ACTION_STEP_KEYS: Partial<Record<ToolAction, MessageKey>> = {
+  read: 'chat.actionStep.read',
+  search: 'chat.actionStep.search',
+  edit: 'chat.actionStep.edit',
+  command: 'chat.actionStep.command',
+  web: 'chat.actionStep.web',
+};
+const ACTION_RUNNING_KEYS: Record<ToolAction, MessageKey> = {
+  read: 'chat.actionRunning.read',
+  search: 'chat.actionRunning.search',
+  edit: 'chat.actionRunning.edit',
+  command: 'chat.actionRunning.command',
+  web: 'chat.actionRunning.web',
+  agent: 'chat.actionRunning.agent',
+  other: 'chat.actionRunning.other',
+};
+const ACTION_DONE_KEYS: Record<ToolAction, MessageKey> = {
+  read: 'chat.actionDone.read',
+  search: 'chat.actionDone.search',
+  edit: 'chat.actionDone.edit',
+  command: 'chat.actionDone.command',
+  web: 'chat.actionDone.web',
+  agent: 'chat.actionDone.agent',
+  other: 'chat.actionDone.other',
+};
+/** File chips shown on one step before the rest fold into "+N". */
+const MAX_STEP_CHIPS = 3;
+/** Actions named in a finished run's title before the rest fold into "N more steps". */
+const MAX_SUMMARY_ACTIONS = 3;
+
+function fileName(path: string): string {
+  return path.split(/[\\/]/).filter(Boolean).pop() || path;
+}
+
+/** The files a read or edit touches, as BoardUI task-list chips with the
+ * full path on hover. */
+function ToolTargetChips({ targets }: { targets: readonly string[] }) {
+  const shown = targets.slice(0, MAX_STEP_CHIPS);
+  return (
+    <>
+      {shown.map((path) => (
+        <span key={path} title={path} className="inline-flex min-w-0">
+          <Chip chip={{ label: fileName(path) }} />
+        </span>
+      ))}
+      {targets.length > shown.length ? (
+        <span className="ms-1 shrink-0 text-caption-1-regular text-text-tertiary">+{targets.length - shown.length}</span>
+      ) : null}
+    </>
+  );
+}
+
+/** A step names what the call does: "Read [page.tsx]", "Run pnpm test".
+ * Calls the client cannot phrase keep "Tool · key argument". */
+function toolStepTitle(tool: ToolCardPresentation): { title: string; chips?: ReactNode } {
+  const verb = ACTION_STEP_KEYS[tool.action];
+  if (verb && (tool.action === 'read' || tool.action === 'edit')) {
+    if (tool.targets.length) return { title: t(verb), chips: <ToolTargetChips targets={tool.targets} /> };
+  } else if (verb && tool.summary) {
+    return { title: `${t(verb)} ${tool.summary}` };
+  }
+  return { title: tool.summary ? `${tool.label} · ${tool.summary}` : tool.label };
+}
+
+/** The running call, phrased for a folded group's header ("Reading page.tsx");
+ * undefined when there is nothing specific to say. */
+function runningActionLabel(tool: ToolCardPresentation): string | undefined {
+  if (tool.action === 'agent') return t(ACTION_RUNNING_KEYS.agent);
+  const target = tool.targets[0] ? fileName(tool.targets[0])
+    : tool.action === 'other' ? tool.label : tool.summary;
+  return target ? t(ACTION_RUNNING_KEYS[tool.action], { target }) : undefined;
+}
+
+/** A finished run, tallied by what it did ("Edited 2 files · Ran 3 commands").
+ * Runs still holding unloaded summary stubs keep the generic title. */
+function finishedGroupLabel(entries: readonly TimelineEntry[]): string {
+  const calls: ToolCardPresentation[] = [];
+  for (const entry of entries) {
+    if (!isChatToolEntry(entry)) continue;
+    if (entry.detailStub) return t('chat.workProcess');
+    calls.push(toolCardPresentation(entry, false));
+  }
+  const actions = summarizeToolActions(calls);
+  if (!actions.length) return t('chat.workProcess');
+  const parts = actions.slice(0, MAX_SUMMARY_ACTIONS).map(({ action, count }) => t(ACTION_DONE_KEYS[action], { count }));
+  const rest = actions.slice(MAX_SUMMARY_ACTIONS).reduce((sum, { count }) => sum + count, 0);
+  if (rest) parts.push(t('chat.actionDoneMore', { count: rest }));
+  return parts.join(' · ');
 }
 
 /** Elapsed time in the header of a tool row or the folded group holding it. */
@@ -432,7 +528,7 @@ function BackgroundTasksStatus({ tasks, items }: { tasks: readonly BackgroundTas
                 {tool ? (
                   <ToolCallCard
                     state={tool.state}
-                    title={tool.summary || tool.label}
+                    {...toolStepTitle(tool)}
                     argsText={tool.argsText}
                     output={tool.output}
                     errorText={tool.errorText}
@@ -469,13 +565,17 @@ function permissionModeIcon(mode: PermissionMode): ReactNode {
   }
 }
 
-// Localized equivalent of progressGroupLabel from @todex/protocol/mobileParity.
-function progressGroupLabel(entries: readonly { category?: string }[], active: boolean, pendingCount = 0): string {
+// Localized progressGroupLabel from @todex/protocol/mobileParity, naming the
+// running call and, once done, what the run did.
+function progressGroupLabel(entries: readonly TimelineEntry[], active: boolean, pendingCount = 0): string {
   if (pendingCount > 0) return t('chat.pendingApproval');
-  if (!active) return t('chat.workProcess');
-  const latestCategory = entries[entries.length - 1]?.category;
-  if (latestCategory === 'reasoning') return t('chat.thinking');
-  if (latestCategory === 'tool' || latestCategory === 'approval') return t('chat.executing');
+  if (!active) return finishedGroupLabel(entries);
+  const latest = entries[entries.length - 1];
+  if (latest?.category === 'reasoning') return t('chat.thinking');
+  if (latest && isChatToolEntry(latest) && !latest.detailStub) {
+    return runningActionLabel(toolCardPresentation(latest, true)) ?? t('chat.executing');
+  }
+  if (latest?.category === 'tool' || latest?.category === 'approval') return t('chat.executing');
   return t('chat.working');
 }
 
@@ -885,12 +985,14 @@ const ChatTimelineItem = memo(function ChatTimelineItem({
                   );
                 }
                 const tool = toolCardPresentation(entry, isStreamingGroup, launchesBackgroundTask(entry, backgroundToolIds));
+                const step = toolStepTitle(tool);
                 return (
                   <ProcessStep key={entry.id} last={last}>
                     <ToolCallCard
                       state={tool.state}
                       meta={toolElapsed(entry, tool.state === 'running')}
-                      title={tool.summary ? `${tool.label} · ${tool.summary}` : tool.label}
+                      title={step.title}
+                      chips={step.chips}
                       argsText={tool.argsText}
                       output={tool.output}
                       errorText={tool.errorText}
@@ -938,13 +1040,15 @@ const ChatTimelineItem = memo(function ChatTimelineItem({
   }
   if (isChatToolEntry(entry)) {
     const tool = toolCardPresentation(entry, thinking, launchesBackgroundTask(entry, backgroundToolIds));
+    const step = toolStepTitle(tool);
     return (
       <RowEntrance enter={animateEntrance}>
         <ToolCallCard
           state={tool.state}
           meta={toolElapsed(entry, tool.state === 'running')}
           prefix={(thinking ? t('chat.toolCalling') : t('chat.toolCalled')).trim()}
-          title={tool.summary ? `${tool.label} · ${tool.summary}` : tool.label}
+          title={step.title}
+          chips={step.chips}
           argsText={tool.argsText}
           output={tool.output}
           errorText={tool.errorText}

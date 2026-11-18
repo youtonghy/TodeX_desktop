@@ -86,6 +86,8 @@ export interface ToolCallCardProps {
   prefix?: string;
   /** Small element between the status glyph and the title (an agent icon). */
   leading?: ReactNode;
+  /** Resource chips after the title (the files a read or edit touches). */
+  chips?: ReactNode;
   /** Shimmers the title; defaults to `state === 'running'`. */
   active?: boolean;
   /** Trailing content in the header (duration, status chip). */
@@ -113,6 +115,7 @@ export function ToolCallCard({
   title,
   prefix,
   leading,
+  chips,
   active,
   meta,
   footer,
@@ -159,7 +162,8 @@ export function ToolCallCard({
         {leading}
         <span className="flex min-w-0 flex-1 items-baseline gap-1 text-body-regular text-text-secondary">
           {prefix ? <span className="shrink-0 text-text-tertiary">{prefix}</span> : null}
-          <span className="min-w-0 truncate">{shimmer ? <ShimmerText>{title}</ShimmerText> : title}</span>
+          <span className={cx('min-w-0 truncate', chips ? 'shrink-0' : undefined)}>{shimmer ? <ShimmerText>{title}</ShimmerText> : title}</span>
+          {chips ? <span className="flex min-w-0 items-center overflow-hidden">{chips}</span> : null}
         </span>
         {meta}
         {expandable ? (

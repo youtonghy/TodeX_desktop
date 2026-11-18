@@ -31,6 +31,18 @@ for (const theme of ['light', 'dark'] as Theme[]) {
       await expect(page).toHaveScreenshot(`workbench-${theme}.png`, { mask: volatile(page) });
     });
 
+    // A finished run is titled by what it did; its steps name the action and
+    // the files it touched as chips.
+    test('expanded execution group', async ({ page, openDemo }) => {
+      await openDemo(theme);
+      const header = page.getByRole('button', { name: '编辑 2 个文件 · 运行 1 条命令 · 读取 1 个文件 · 另 1 步' });
+      await header.click();
+      await expect(page.getByRole('button', { name: /^读取 PaymentForm\.tsx/ })).toBeVisible();
+      const group = header.locator('xpath=ancestor::section[1]');
+      await settle(page);
+      await expect(group).toHaveScreenshot(`execution-group-${theme}.png`);
+    });
+
     // `board=busy`: a conversation waits on a permission prompt, so both live lists have rows.
     test('home page', async ({ page, openDemo }) => {
       await openDemo(theme, 'board=busy', 'home');
