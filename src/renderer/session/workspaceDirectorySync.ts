@@ -38,17 +38,23 @@ export function flagWorkspaceMissing(workspace: WorkspaceRecord, missingKeys: Re
 
 /** Merges backend `backendId`'s directory answer into `workspaces`. The
  * None workspace is local-only and stays out of the merge; workspaces
- * deleted here (`tombstones`) are not merged back. */
+ * deleted here (`tombstones`) are not merged back. Workspaces the backend
+ * reports deleted (`backendDeleted`, deleted on another device) leave the
+ * local list unless edited here since, so this device does not push them
+ * back. */
 export function mergeWorkspaceDirectory(options: {
   backendId: string;
   remote: WorkspaceRecord[];
   rejections: WorkspaceSyncRejection[];
   workspaces: WorkspaceRecord[];
   tombstones: WorkspaceTombstone[];
+  backendDeleted?: readonly WorkspaceTombstone[];
 }): WorkspaceDirectoryMerge {
-  const { backendId, remote, rejections, workspaces, tombstones } = options;
+  const { backendId, remote, rejections, workspaces, tombstones, backendDeleted = [] } = options;
   const missingKeys = new Set(rejections.map((item) => normalizeWorkspacePath(item.path)));
-  const localScoped = workspaces.filter((workspace) => !isNoneWorkspaceId(workspace.id) && workspace.backendConnectionId === backendId);
+  const deletedElsewhere = (workspace: WorkspaceRecord) => backendDeleted.some((item) => workspaceMatchesTombstone(workspace, item));
+  const localScoped = workspaces.filter((workspace) => !isNoneWorkspaceId(workspace.id) && workspace.backendConnectionId === backendId
+    && !deletedElsewhere(workspace));
   const scopedTombstones = tombstones.filter((item) => item.backendConnectionId === backendId);
   const tagged = remote.map((workspace) => ({ ...workspace, backendConnectionId: backendId }));
   const keptRemote = tagged.filter((workspace) => !scopedTombstones.some((item) => workspaceMatchesTombstone(workspace, item)));

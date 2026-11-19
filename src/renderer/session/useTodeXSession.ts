@@ -90,6 +90,7 @@ import {
     nextWorkspaceSortOrder,
   remapWorkspaceScopedRecords,
   prepareWorkspaceSyncPayload,
+  parseWorkspaceSyncDeleted,
   parseWorkspaceSyncRejected,
   parseWorkspaceSyncResponse,
   } from '@todex/protocol/todex';
@@ -1651,6 +1652,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         rejections: remoteRejections,
         workspaces: stores.workspaces.get(),
         tombstones: stores.workspaceTombstones.get(),
+        // Deleted on another device (TodeX_backend docs/API.md): drop the local copy instead of pushing it back.
+        backendDeleted: parseWorkspaceSyncDeleted(syncBody) ?? [],
       });
       // Deleted here while the backend still lists them: delete them again,
       // in case the first DELETE never reached it.
