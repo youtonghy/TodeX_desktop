@@ -1,5 +1,5 @@
 import { normalizeBackendLabelColor, type BackendConnectionProfile } from './backendColors';
-import { ipcDaemonConflicts, isStandbyProfile, moveBackendRecords, moveProfileKeyedEntries, ownerBackendId, resolveNoWorkspaceBackendId, sameDaemonProfiles, tagLegacyBackendRecords } from './backendRouting';
+import { ipcDaemonConflicts, isStandbyProfile, moveBackendRecords, moveProfileKeyedEntries, ownerBackendId, resolveNoWorkspaceBackendId, sameDaemonProfiles, tagLegacyBackendRecords, workspaceRemovalScope } from './backendRouting';
 import { deviceIdentityFromSecret } from '@todex/protocol/deviceAuth';
 import { useWorkbenchSharing } from './useWorkbenchSharing';
 import { SMART_WORK_MODE_PROVIDER, smartPromptFields, smartPromptPhase, smartWorkModeAvailable, useSmartWorkMode } from './smartWorkMode';
@@ -2605,10 +2605,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     return [...open.values()];
   }, [permissionRuntimes, recoveringConversations, conversations]);
 
+  // Edits the record the sidebar lists for `id` (the first): another
+  // backend's workspace at the same path keeps its own settings.
   const updateWorkspace = useCallback((id: string, patch: Partial<WorkspaceRecord>) => {
-    setWorkspaces((current) =>
-      current.map((workspace) =>
-        workspace.id === id
+    setWorkspaces((current) => {
+      const target = current.find((workspace) => workspace.id === id);
+      return current.map((workspace) =>
+        workspace === target
           ? {
               ...workspace,
               ...patch,
@@ -2619,8 +2622,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
                 : null),
             }
           : workspace,
-      ),
-    );
+      );
+    });
   }, []);
 
   const clearWorkspaceTombstone = useCallback((path: string, backendConnectionId: string | null) => {
@@ -4848,29 +4851,39 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     requestSystemNotificationsRef.current.clear();
   }, []);
 
+  /** Deletes workspace `workspaceId` of backend `backendConnectionId` (by
+   * default the first record with that id, the one the sidebar lists).
+   * Backends name workspaces after their path, so another backend may hold a
+   * workspace with the same id: its record, conversations, drafts and
+   * terminals stay. */
   const removeWorkspace = useCallback(
-    (workspaceId: string) => {
+    (workspaceId: string, backendConnectionId?: string) => {
       if (isNoneWorkspaceId(workspaceId)) {
         return;
       }
-      const removedWorkspace = workspaces.find((workspace) => workspace.id === workspaceId);
+      const backendOf = (record: { backendConnectionId?: string | null } | undefined) => record?.backendConnectionId || activeBackendConnectionId;
+      const backendId = backendConnectionId || backendOf(workspaces.find((workspace) => workspace.id === workspaceId));
+      const scope = workspaceRemovalScope(workspaces, conversations, workspaceId, backendId, activeBackendConnectionId);
+      const removedWorkspace = workspaces.find(scope.workspace);
       if (removedWorkspace) {
         // A tombstone keeps the merge-based sync from resurrecting the
         // workspace while the backend record is still around or unreachable.
         const tombstone: WorkspaceTombstone = {
           id: removedWorkspace.id,
           path: removedWorkspace.path,
-          backendConnectionId: removedWorkspace.backendConnectionId ?? activeBackendConnectionId,
+          backendConnectionId: backendId,
           deletedAt: Date.now(),
         };
+        // Another backend's tombstone for the same path stays.
         const nextTombstones = [
           tombstone,
           ...stores.workspaceTombstones.get().filter((item) =>
-            item.id !== tombstone.id && normalizeWorkspacePath(item.path) !== normalizeWorkspacePath(tombstone.path)),
+            (item.backendConnectionId || activeBackendConnectionId) !== backendId
+            || (item.id !== tombstone.id && normalizeWorkspacePath(item.path) !== normalizeWorkspacePath(tombstone.path))),
         ].slice(0, MAX_WORKSPACE_TOMBSTONES);
         setWorkspaceTombstones(nextTombstones);
       }
-      const ownerProfile = profileFor(removedWorkspace?.backendConnectionId ?? activeBackendConnectionId);
+      const ownerProfile = profileFor(backendId);
       if (removedWorkspace && ownerProfile && linkStatusRef.current[ownerProfile.id]?.state === 'open') {
         void backendFetch(ownerProfile, {
           method: 'DELETE',
@@ -4880,19 +4893,20 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           if (!response.ok && response.status !== 404) throw await readBackendError(response, t('sess.workspaceDeleteSyncFailed'));
         }).catch((error) => setLastError(error instanceof Error ? error.message : t('sess.workspaceDeleteSyncFailed')));
       }
-      const removedConversationIds = conversations
-        .filter((conversation) => conversation.workspaceId === workspaceId)
-        .map((conversation) => conversation.id);
+      const removedConversationIds = scope.conversationIds;
+      const removed = new Set(removedConversationIds);
       // Release the websocket subscription slots held by this workspace's
       // conversations; they no longer exist locally.
       for (const conversation of conversations) {
-        if (conversation.workspaceId === workspaceId && conversation.v2ConversationId) {
+        if (removed.has(conversation.id) && conversation.v2ConversationId) {
           unsubscribeV2Conversation(conversation.v2ConversationId);
         }
       }
-      setWorkspaces((current) => current.filter((workspace) => workspace.id !== workspaceId));
-      setConversations((current) => current.filter((conversation) => conversation.workspaceId !== workspaceId));
-      setTimeline((current) => current.filter((entry) => entry.workspaceId !== workspaceId && !removedConversationIds.includes(entry.conversationId ?? '')));
+      setWorkspaces((current) => current.filter((workspace) => !scope.workspace(workspace)));
+      setConversations((current) => current.filter((conversation) => !removed.has(conversation.id)));
+      // Entries of a kept conversation (another backend's) stay.
+      setTimeline((current) => current.filter((entry) => !removed.has(entry.conversationId ?? '')
+        && (entry.workspaceId !== workspaceId || Boolean(entry.conversationId))));
       const pruneConversationState = <T,>(current: Record<string, T>) => {
         const next = { ...current };
         removedConversationIds.forEach((id) => {
@@ -4907,20 +4921,22 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       setSelectedSkills(pruneConversationState);
       setTurnIds(pruneConversationState);
       setThinkingConversations(pruneConversationState);
-      stopTerminalsWhere((terminal) => terminal.workspaceId === workspaceId || removedConversationIds.includes(terminal.conversationId));
+      stopTerminalsWhere(scope.terminal);
       setTerminalById((current) => {
         const next = { ...current };
         Object.entries(next).forEach(([terminalId, terminal]) => {
-          if (terminal.workspaceId === workspaceId || removedConversationIds.includes(terminal.conversationId)) {
+          if (scope.terminal(terminal)) {
             delete next[terminalId];
           }
         });
         return next;
       });
       if (activeWorkspaceId === workspaceId) {
-        const next = workspaces.find((workspace) => workspace.id !== workspaceId);
+        // The other backend's workspace with this id, if any, takes its row.
+        const next = workspaces.find((workspace) => workspace.id === workspaceId && !scope.workspace(workspace))
+          ?? workspaces.find((workspace) => workspace.id !== workspaceId);
         setActiveWorkspaceId(next?.id ?? '');
-        setActiveConversationId(conversations.find((conversation) => conversation.workspaceId === next?.id)?.id ?? '');
+        setActiveConversationId(conversations.find((conversation) => conversation.workspaceId === next?.id && !removed.has(conversation.id))?.id ?? '');
       }
     },
     [activeBackendConnectionId, activeWorkspaceId, conversations, unsubscribeV2Conversation, workspaces],

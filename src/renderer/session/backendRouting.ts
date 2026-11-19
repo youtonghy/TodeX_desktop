@@ -34,6 +34,40 @@ export function ownerBackendId(
   return conversation?.backendConnectionId || workspace?.backendConnectionId || noWorkspaceBackendId;
 }
 
+/** What deleting workspace `workspaceId` of backend `backendId` removes
+ * locally. Backends name a workspace after its canonical path, so two
+ * backends' workspaces at the same path share an id: the backend tells them
+ * apart. Untagged records follow `fallbackBackendId` (the active backend);
+ * an untagged conversation follows the first workspace with its id, as
+ * everywhere else. Terminals go with their workspace or a removed
+ * conversation. */
+export function workspaceRemovalScope<W extends WorkspaceLike, C extends ConversationLike & { id: string }>(
+  workspaces: readonly W[],
+  conversations: readonly C[],
+  workspaceId: string,
+  backendId: string,
+  fallbackBackendId: string,
+): {
+  workspace: (workspace: W) => boolean;
+  conversation: (conversation: C) => boolean;
+  terminal: (terminal: { workspaceId: string; conversationId: string; backendConnectionId?: string | null }) => boolean;
+  conversationIds: string[];
+} {
+  const backendOf = (record: { backendConnectionId?: string | null }) => record.backendConnectionId || fallbackBackendId;
+  const firstWorkspace = workspaces.find((workspace) => workspace.id === workspaceId);
+  const conversation = (item: C) => item.workspaceId === workspaceId
+    && ownerBackendId(item, firstWorkspace, fallbackBackendId) === backendId;
+  const conversationIds = conversations.filter(conversation).map((item) => item.id);
+  const removed = new Set(conversationIds);
+  return {
+    workspace: (workspace) => workspace.id === workspaceId && backendOf(workspace) === backendId,
+    conversation,
+    terminal: (terminal) => removed.has(terminal.conversationId)
+      || (terminal.workspaceId === workspaceId && backendOf(terminal) === backendId),
+    conversationIds,
+  };
+}
+
 /** Records saved before every backend stayed connected may lack a backend
  * tag: they belonged to whichever backend was active, so they are tagged
  * with it once. None-workspace drafts that never reached a backend stay

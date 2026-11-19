@@ -557,7 +557,7 @@ export function AppSidebar({
   const [editingTags, setEditingTags] = useState<{ kind: 'workspace' | 'group'; id: string; tags: string[] } | null>(null);
   const [renaming, setRenaming] = useState<{ kind: 'workspace' | 'conversation'; id: string; name: string } | null>(null);
   // Delete asks first; `local` marks a legacy record that is only archived.
-  const [deleting, setDeleting] = useState<{ kind: 'workspace' | 'conversation'; id: string; local?: boolean } | null>(null);
+  const [deleting, setDeleting] = useState<{ kind: 'workspace' | 'conversation'; id: string; local?: boolean; backendConnectionId?: string } | null>(null);
   const [deletePending, setDeletePending] = useState(false);
   // Other configured backends that are not connected right now.
   const offlineBackends = session.backendConnections.filter((profile) => (
@@ -1090,7 +1090,9 @@ export function AppSidebar({
       if (action === 'rename') setRenaming({ kind: 'workspace', id: workspace.id, name: workspace.name });
       else if (action === 'edit') onEditWorkspace(workspace.id);
       else if (action === 'tags') setEditingTags({ kind: 'workspace', id: workspace.id, tags: workspace.tags ?? [] });
-      else if (action === 'delete') setDeleting({ kind: 'workspace', id: workspace.id });
+      // The row's own backend: another backend may list a workspace with
+      // the same id (same path).
+      else if (action === 'delete') setDeleting({ kind: 'workspace', id: workspace.id, backendConnectionId: workspace.backendConnectionId ?? undefined });
     } else {
       const conversation = session.conversations.find((item) => item.id === menu.id);
       if (!conversation) return;
@@ -1104,7 +1106,7 @@ export function AppSidebar({
   const confirmDelete = async () => {
     if (!deleting || deletePending) return;
     if (deleting.kind === 'workspace') {
-      session.removeWorkspace(deleting.id);
+      session.removeWorkspace(deleting.id, deleting.backendConnectionId);
       setDeleting(null);
       return;
     }

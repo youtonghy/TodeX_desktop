@@ -2112,7 +2112,8 @@ export function mergeManifestConversations(
         && existing.workspaceId === workspace.id
         && (!manifest.scratchWorkspace || existing.workspacePath === manifest.workspace)
         && existing.lastSequence === lastSequence
-        && existing.updatedAt === updatedAt;
+        && existing.updatedAt === updatedAt
+        && existing.backendConnectionId === backendConnectionId;
       if (!same) {
         changed = true;
         next[existingIndex] = {
@@ -2130,13 +2131,16 @@ export function mergeManifestConversations(
           ...(manifest.scratchWorkspace ? { workspacePath: manifest.workspace } : {}),
           lastSequence,
           updatedAt,
+          backendConnectionId,
         };
       }
     } else {
       const base = conversationFromManifest(manifest, workspace.id);
       const record = { ...base, ...initialRunModes?.(base, workspace) };
-      // The None workspace spans backends; its conversations carry their own.
-      next.unshift(manifest.scratchWorkspace ? { ...record, backendConnectionId } : record);
+      // Every listed conversation carries its backend: the None workspace
+      // spans backends, and two backends' workspaces at the same path share
+      // an id, so the workspace alone cannot tell whose it is.
+      next.unshift({ ...record, backendConnectionId });
       changed = true;
     }
   }
