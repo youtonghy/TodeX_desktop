@@ -23,6 +23,59 @@ export interface ReleaseUpdater {
   downloadUpdate(): Promise<unknown>;
 }
 
+/** The part of electron-updater's `autoUpdater` the verified updater drives. */
+export interface InstallingUpdater extends ReleaseUpdater {
+  autoInstallOnAppQuit: boolean;
+  on(event: 'update-downloaded', listener: (event: { downloadedFile: string; version: string }) => void): unknown;
+  /** Internal to electron-updater's BaseUpdater: registers the quit handler,
+   * and returns at once while `autoInstallOnAppQuit` is off. */
+  addQuitHandler?: () => void;
+}
+
+/**
+ * The updater as the controller sees it: a download only counts once
+ * `verify` accepted the file (the release signature). Until then nothing
+ * installs it, not even on quit: install-on-quit stays off while
+ * downloading, and an unverified file is discarded. On Windows and Linux
+ * the verified update then installs when the app quits; Squirrel.Mac
+ * (`darwin`) fetches the update only on an explicit quitAndInstall while
+ * install-on-quit stays off, which keeps that path working there.
+ */
+export function createVerifiedUpdater(
+  updater: InstallingUpdater,
+  options: {
+    platform: string;
+    verify: (download: { downloadedFile: string; version: string }) => Promise<void>;
+    discard: (file: string) => Promise<void>;
+    unverified: (reason: string) => Error;
+  },
+): ReleaseUpdater {
+  let downloaded: { downloadedFile: string; version: string } | undefined;
+  updater.on('update-downloaded', (event) => { downloaded = event; });
+  return {
+    checkForUpdates: () => updater.checkForUpdates(),
+    async downloadUpdate() {
+      updater.autoInstallOnAppQuit = false;
+      downloaded = undefined;
+      await updater.downloadUpdate();
+      const download = downloaded as { downloadedFile: string; version: string } | undefined;
+      if (!download) throw options.unverified('no downloaded file was reported');
+      try {
+        await options.verify(download);
+      } catch (error) {
+        await options.discard(download.downloadedFile).catch(() => undefined);
+        throw options.unverified(error instanceof Error ? error.message : String(error));
+      }
+      if (options.platform !== 'darwin') {
+        updater.autoInstallOnAppQuit = true;
+        // electron-updater registers its quit handler when a download
+        // finishes, and only while install-on-quit is on (it was off then).
+        updater.addQuitHandler?.();
+      }
+    },
+  };
+}
+
 export type UpdateStatus = 'unsupported' | 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'error';
 
 /** What the settings page shows; mirrored to every window on change. */

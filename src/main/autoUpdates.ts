@@ -4,7 +4,7 @@ import { rm } from 'node:fs/promises';
 import { basename } from 'node:path';
 import { app, BrowserWindow, Menu, MenuItem, net, powerMonitor } from 'electron';
 import electronUpdater, { type UpdateDownloadedEvent } from 'electron-updater';
-import { canAutoUpdate, createUpdateController, type ReleaseUpdater, type UpdateController, type UpdateState } from './updatePolicy';
+import { canAutoUpdate, createUpdateController, createVerifiedUpdater, type InstallingUpdater, type ReleaseUpdater, type UpdateController, type UpdateState } from './updatePolicy';
 import { MAX_SUMS_BYTES, verifyUpdateDownload } from './updateSignature';
 import { mainT } from './i18n';
 
@@ -119,41 +119,13 @@ async function verifyDownloadedUpdate(download: UpdateDownloadedEvent): Promise<
   verifyUpdateDownload({ version: download.version, fileName: basename(download.downloadedFile), fileSha256, sums, signature });
 }
 
-/**
- * The updater as the controller sees it: a download only counts once the
- * file verified against the release signature. Until then nothing installs
- * it, not even on quit.
- */
 function verifiedUpdater(): ReleaseUpdater {
-  const { autoUpdater } = electronUpdater;
-  let downloaded: UpdateDownloadedEvent | undefined;
-  autoUpdater.on('update-downloaded', (event) => { downloaded = event; });
-  return {
-    checkForUpdates: () => autoUpdater.checkForUpdates(),
-    async downloadUpdate() {
-      autoUpdater.autoInstallOnAppQuit = false;
-      downloaded = undefined;
-      await autoUpdater.downloadUpdate();
-      const download = downloaded as UpdateDownloadedEvent | undefined;
-      if (!download) throw new Error(mainT('main.updateUnverified', { reason: 'no downloaded file was reported' }));
-      try {
-        await verifyDownloadedUpdate(download);
-      } catch (error) {
-        await rm(download.downloadedFile, { force: true }).catch(() => undefined);
-        throw new Error(mainT('main.updateUnverified', { reason: error instanceof Error ? error.message : String(error) }));
-      }
-      // Squirrel.Mac fetches the update only on quitAndInstall while this
-      // stays off, which keeps an explicit install working there; elsewhere
-      // the verified update may now also install when the app quits.
-      if (process.platform !== 'darwin') {
-        // Off until a download verified against the release signature (verifiedUpdater).
-  autoUpdater.autoInstallOnAppQuit = false;
-        // electron-updater registers its quit handler when a download finishes,
-        // and only while install-on-quit is on (it was off until now).
-        (autoUpdater as unknown as { addQuitHandler?: () => void }).addQuitHandler?.();
-      }
-    },
-  };
+  return createVerifiedUpdater(electronUpdater.autoUpdater as unknown as InstallingUpdater, {
+    platform: process.platform,
+    verify: (download) => verifyDownloadedUpdate(download as UpdateDownloadedEvent),
+    discard: (file) => rm(file, { force: true }),
+    unverified: (reason) => new Error(mainT('main.updateUnverified', { reason })),
+  });
 }
 
 export function startAutoUpdates(buildVersion: string, options: AutoUpdateOptions): void {

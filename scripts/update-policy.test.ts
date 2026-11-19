@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { canAutoUpdate, createUpdateController, isNewerRelease } from '../src/main/updatePolicy.ts';
+import { canAutoUpdate, createUpdateController, createVerifiedUpdater, isNewerRelease, type InstallingUpdater } from '../src/main/updatePolicy.ts';
 
 test('only matching versioned packaged builds can contact releases', () => {
   assert.equal(canAutoUpdate(true, '1.2.3', '1.2.3'), true);
@@ -104,4 +104,50 @@ test('checks never download ineligible release versions', async () => {
     }, '1.0.0', { autoDownload: true });
     assert.equal((await controller.check()).status, 'idle');
   }
+});
+
+/** A fake electron-updater: `addQuitHandler` registers only while
+ * install-on-quit is on, as BaseUpdater's does. */
+function fakeInstallingUpdater() {
+  let listener: ((event: { downloadedFile: string; version: string }) => void) | undefined;
+  const updater = {
+    autoInstallOnAppQuit: true,
+    quitHandlerAdded: false,
+    checkForUpdates: async () => null,
+    downloadUpdate: async () => { listener?.({ downloadedFile: '/tmp/TodeX-2.0.0.exe', version: '2.0.0' }); },
+    on: (_event: 'update-downloaded', next: typeof listener) => { listener = next; },
+    addQuitHandler() { if (updater.autoInstallOnAppQuit) updater.quitHandlerAdded = true; },
+  };
+  return updater;
+}
+
+const verifiedOptions = (platform: string, verify: () => Promise<void>, discarded: string[] = []) => ({
+  platform,
+  verify,
+  discard: async (file: string) => { discarded.push(file); },
+  unverified: (reason: string) => new Error(`unverified: ${reason}`),
+});
+
+test('a verified download installs on quit outside macOS', async () => {
+  for (const platform of ['win32', 'linux']) {
+    const updater = fakeInstallingUpdater();
+    await createVerifiedUpdater(updater as InstallingUpdater, verifiedOptions(platform, async () => undefined)).downloadUpdate();
+    assert.equal(updater.autoInstallOnAppQuit, true, platform);
+    assert.equal(updater.quitHandlerAdded, true, platform);
+  }
+  // Squirrel.Mac installs only through an explicit quitAndInstall.
+  const mac = fakeInstallingUpdater();
+  await createVerifiedUpdater(mac as InstallingUpdater, verifiedOptions('darwin', async () => undefined)).downloadUpdate();
+  assert.equal(mac.autoInstallOnAppQuit, false);
+  assert.equal(mac.quitHandlerAdded, false);
+});
+
+test('an unverified download is discarded and never installs on quit', async () => {
+  const updater = fakeInstallingUpdater();
+  const discarded: string[] = [];
+  const verified = createVerifiedUpdater(updater as InstallingUpdater, verifiedOptions('win32', async () => { throw new Error('bad signature'); }, discarded));
+  await assert.rejects(verified.downloadUpdate(), /unverified: bad signature/);
+  assert.deepEqual(discarded, ['/tmp/TodeX-2.0.0.exe']);
+  assert.equal(updater.autoInstallOnAppQuit, false);
+  assert.equal(updater.quitHandlerAdded, false);
 });
