@@ -2336,6 +2336,10 @@ export const ja: Messages = {
   'notify.unread': '未読',
   'notify.category': '通知のカテゴリ',
   'notify.openConversation': '会話を開く',
+  'notify.restoredConversation': '会話',
+  'notify.restoredReply': '完了し、新しい返信があります',
+  'notify.restoredRequest': 'あなたの対応を待っていました',
+  'notify.restoredNotice': '拡張機能の通知',
   'notify.justNow': 'たった今',
 
   // piExt

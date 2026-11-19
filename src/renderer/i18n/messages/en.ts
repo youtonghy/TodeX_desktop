@@ -2336,6 +2336,10 @@ export const en: Messages = {
   'notify.unread': 'Unread',
   'notify.category': 'Notification category',
   'notify.openConversation': 'Open conversation',
+  'notify.restoredConversation': 'Conversation',
+  'notify.restoredReply': 'Finished with a new reply',
+  'notify.restoredRequest': 'Was waiting for your input',
+  'notify.restoredNotice': 'Extension notice',
   'notify.justNow': 'Just now',
 
   // piExt

@@ -601,12 +601,17 @@ export function AppSidebar({
   // Notification history (finished conversations, app notices) for the header panel.
   const feed = useNotificationFeed();
   const unreadNotifications = feed.filter((item) => !item.read).length;
+  // Entries about a conversation come back from storage without their text:
+  // they name the conversation and what happened.
+  const restoredTitle = (item: (typeof feed)[number]) => session.conversations.find((conversation) => conversation.id === item.conversationId)?.title?.trim() || t('notify.restoredConversation');
+  const restoredDescription = (item: (typeof feed)[number]) => (item.kind !== 'conversation' ? t('notify.restoredNotice')
+    : item.status === 'success' ? t('notify.restoredReply') : t('notify.restoredRequest'));
   const notificationItems: NotificationCenterItem[] = feed.map((item) => ({
     id: item.id,
     category: item.kind === 'conversation' ? 'mentions' : 'system',
     group: '',
-    title: item.title,
-    description: item.description,
+    title: item.restored ? restoredTitle(item) : item.title,
+    description: item.restored ? restoredDescription(item) : item.description,
     timestamp: relativeTime(item.at),
     unread: !item.read,
     status: item.status,

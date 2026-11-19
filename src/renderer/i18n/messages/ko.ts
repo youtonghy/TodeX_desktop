@@ -2336,6 +2336,10 @@ export const ko: Messages = {
   'notify.unread': '읽지 않음',
   'notify.category': '알림 분류',
   'notify.openConversation': '대화 열기',
+  'notify.restoredConversation': '대화',
+  'notify.restoredReply': '완료되었으며 새 답장이 있습니다',
+  'notify.restoredRequest': '사용자의 처리를 기다렸습니다',
+  'notify.restoredNotice': '확장 알림',
   'notify.justNow': '방금',
 
   // piExt

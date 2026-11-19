@@ -13,7 +13,7 @@ import {
   useCompletionNotifications,
 } from './completionNotifications';
 import { addNotification, forgetConversationNotifications } from './notificationFeed';
-import { bindSentAttachmentEvents, prepareSentAttachments, pruneSentAttachmentRecords, type SentAttachmentRecord } from './sentAttachments';
+import { attachmentsFromRequestContent, bindSentAttachmentEvents, prepareSentAttachments, pruneSentAttachmentRecords, restoreSentAttachmentRecords, storedSentAttachmentRecords, type SentAttachmentRecord } from './sentAttachments';
 import { ManifestEpochs, flagWorkspaceMissing, mergeWorkspaceDirectory } from './workspaceDirectorySync';
 import { createConversationStores, sameRecordValues, visibleTimeline, type ConversationStores } from './conversationStore';
 import { useStoreSelector } from './store/createStore';
@@ -1267,8 +1267,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     const pruned = pruneSentAttachmentRecords(next);
     sentAttachmentRecordsRef.current = pruned;
     setSentAttachmentRecords(pruned);
-    // Receipts of private conversations hold prompt text and previews: memory only.
-    scheduleJsonSave(SENT_ATTACHMENTS_STORAGE_KEY, withoutPrivateEntries(pruned, privateConversationIds(stores.conversations.get())));
+    // Only which messages had attachments is stored; their text, names and
+    // previews stay in memory and come back from the encrypted history.
+    // Private conversations store nothing.
+    scheduleJsonSave(SENT_ATTACHMENTS_STORAGE_KEY, storedSentAttachmentRecords(withoutPrivateEntries(pruned, privateConversationIds(stores.conversations.get()))));
   }, [scheduleJsonSave]);
 
   useEffect(() => {
@@ -1332,7 +1334,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         loadJson<WorkspaceRecord[]>(WORKSPACES_STORAGE_KEY, []),
         loadJson<ConversationRecord[]>(CONVERSATIONS_STORAGE_KEY, []),
         loadJson<TimelineEntry[]>(TIMELINE_STORAGE_KEY, []),
-        loadJson<SentAttachmentRecord[]>(SENT_ATTACHMENTS_STORAGE_KEY, []),
+        loadJson<unknown>(SENT_ATTACHMENTS_STORAGE_KEY, []),
         loadJson<{ workspaceId?: string; conversationId?: string; noneBackendId?: string } | null>(ACTIVE_SELECTION_STORAGE_KEY, null),
         loadJson<WorkspaceMentionHistory[]>(MENTION_HISTORY_STORAGE_KEY, []),
         loadJson<Partial<ExperimentalFeatureSettings> | null>(EXPERIMENTAL_FEATURES_STORAGE_KEY, null),
@@ -1472,9 +1474,11 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       setWorkspaceTombstones(records.tombstones);
       setConversations(records.conversations);
       setTimeline(storedTimeline.slice(0, MAX_TIMELINE_ITEMS));
-      const attachmentRecords = pruneSentAttachmentRecords(Array.isArray(storedSentAttachments) ? storedSentAttachments : []);
+      const { records: attachmentRecords, hadContent } = restoreSentAttachmentRecords(storedSentAttachments);
       sentAttachmentRecordsRef.current = attachmentRecords;
       setSentAttachmentRecords(attachmentRecords);
+      // Older builds stored prompt text and previews here: overwrite them.
+      if (hadContent) void saveJson(SENT_ATTACHMENTS_STORAGE_KEY, storedSentAttachmentRecords(attachmentRecords)).catch(() => undefined);
       setMentionHistory(storedMentionHistory);
       setExperimentalFeatures(normalizeExperimentalFeatures(storedExperimentalFeatures));
       setUsageRecords(normalizeUsageRecords(storedUsageRecords));
@@ -2111,6 +2115,34 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     if (record.smartPhase === phase && (record.smartPhaseSequence ?? 0) >= sequence) return;
     updateConversation(localId, { smartPhase: phase, smartPhaseSequence: Math.max(sequence, record.smartPhaseSequence ?? 0) });
   };
+  /** Receipts read back from storage hold only ids: a shown message they
+   * belong to is read once in full detail, whose `retryRequest` holds the
+   * text and attachments it was sent with. Messages without one keep what
+   * the summary shows. */
+  const refilledAttachmentEvents = useRef(new Set<string>());
+  const refillSentAttachments = (localId: string, v2Id: string, timeline: readonly TimelineEntry[]) => {
+    for (const record of sentAttachmentRecordsRef.current) {
+      if (!record.restored || record.conversationId !== localId || !record.eventId || refilledAttachmentEvents.current.has(record.eventId)) continue;
+      const entry = timeline.find((item) => item.id === record.eventId && item.kind === 'outgoing');
+      if (!entry || entry.detailLocked || typeof entry.sequence !== 'number') continue;
+      const eventId = record.eventId;
+      const sequence = entry.sequence;
+      refilledAttachmentEvents.current.add(eventId);
+      void decryptedHistoryReplay(v2Id, v2ApiForConversation(v2Id).replayEvents(v2Id, sequence - 1, 1), 'full').then((page) => {
+        const request = historyRetryRequest(page.events.find((event) => event.sequence === sequence)?.payload);
+        if (!request) return;
+        const attachments = attachmentsFromRequestContent(eventId, request.content);
+        updateSentAttachmentRecords(sentAttachmentRecordsRef.current.map((item) => (
+          item.eventId === eventId && item.conversationId === localId && item.restored
+            ? { conversationId: item.conversationId, requestId: item.requestId, eventId, ...(item.turnId ? { turnId: item.turnId } : {}), text: request.text, attachments }
+            : item
+        )));
+      }, (error: unknown) => {
+        // One attempt per message and session: the row keeps its summary.
+        console.warn('attachments: reading a sent message back failed', error);
+      });
+    }
+  };
   runtimeUpdateRef.current = (state, appliedEvents, recovering, live) => {
     const conversation = stores.conversations.get().find((item) => item.v2ConversationId === state.conversationId || item.id === state.conversationId);
     if (!conversation) return;
@@ -2125,7 +2157,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       const effect = extensionEffectsRef.current.consume(event, state);
       if (effect?.kind === 'notice') {
         const title = t('sess.piNoticeTitle', { conversation: conversation.title || t('sess.piConversation'), level: effect.notice.level === 'error' ? t('pi.noticeError') : effect.notice.level === 'warning' ? t('pi.noticeWarning') : t('pi.noticeInfo') });
-        const options = { description: piExtensionPlainText(effect.notice.message).slice(0, 300), timeout: 6000 };
+        // The notice is the conversation's content: its history entry keeps
+        // only the conversation, and a private one's is never stored.
+        const options = {
+          description: piExtensionPlainText(effect.notice.message).slice(0, 300), timeout: 6000,
+          conversationId: localId, workspaceId: conversation.workspaceId,
+          ...(isPrivateConversation(conversation) ? { ephemeral: true } : {}),
+        };
         if (effect.notice.level === 'error') toast.danger(title, options);
         else if (effect.notice.level === 'warning') toast.warning(title, options);
         else toast.info(title, options);
@@ -2146,6 +2184,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     setRecoveringConversations((current) => (current[localId] === recovering ? current : { ...current, [localId]: recovering }));
     const boundAttachments = bindSentAttachmentEvents(sentAttachmentRecordsRef.current, localId, appliedEvents);
     if (boundAttachments !== sentAttachmentRecordsRef.current) updateSentAttachmentRecords(boundAttachments);
+    refillSentAttachments(localId, state.conversationId, state.timeline);
     setTimeline((current) => capTimelinePerConversation([
       ...state.timeline.map((entry) => stampTimelineEntry(entry, localId)),
       ...current.filter((entry) => entry.conversationId !== localId),
@@ -6477,7 +6516,11 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     }
     setConversations((current) => current.filter((item) => !removedIds.has(item.id)));
     pruneConversationState([...removedIds], { drafts: true });
-  }, [pruneConversationState, unsubscribeV2Conversation]);
+    forgetConversationNotifications(removedIds);
+    if (sentAttachmentRecordsRef.current.some((record) => removedIds.has(record.conversationId))) {
+      updateSentAttachmentRecords(sentAttachmentRecordsRef.current.filter((record) => !removedIds.has(record.conversationId)));
+    }
+  }, [pruneConversationState, unsubscribeV2Conversation, updateSentAttachmentRecords]);
 
   // A private conversation its backend no longer lists died with a daemon
   // restart: everything this client held of it goes (record, subscription,

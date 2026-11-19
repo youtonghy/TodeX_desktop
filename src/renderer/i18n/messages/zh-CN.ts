@@ -2336,6 +2336,10 @@ export const zhCN = {
   'notify.unread': '未读',
   'notify.category': '通知分类',
   'notify.openConversation': '打开对话',
+  'notify.restoredConversation': '对话',
+  'notify.restoredReply': '已完成，有新回复',
+  'notify.restoredRequest': '曾等待你处理',
+  'notify.restoredNotice': '扩展通知',
   'notify.justNow': '刚刚',
 
   // piExt

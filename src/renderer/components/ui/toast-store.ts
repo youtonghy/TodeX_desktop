@@ -21,6 +21,12 @@ export type ToastOptions = {
   /** Milliseconds before it leaves on its own; 0 keeps it until dismissed. */
   timeout?: number;
   actionProps?: ToastAction;
+  /** The conversation the notice is about: its history entry is stored
+   * without the title and text (they are conversation content). */
+  conversationId?: string;
+  workspaceId?: string;
+  /** About a private conversation: the history entry is never stored. */
+  ephemeral?: boolean;
 };
 
 export type ToastItem = ToastOptions & {
@@ -58,6 +64,9 @@ function show(variant: ToastVariant, title: ReactNode, options: ToastOptions = {
       status: FEED_STATUS[variant],
       title,
       description: typeof options.description === 'string' ? options.description : '',
+      ...(options.conversationId ? { conversationId: options.conversationId } : {}),
+      ...(options.workspaceId ? { workspaceId: options.workspaceId } : {}),
+      ...(options.ephemeral ? { ephemeral: true } : {}),
     });
   }
   return key;
