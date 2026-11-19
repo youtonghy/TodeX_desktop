@@ -124,6 +124,7 @@ import {
   SOCKET_EVENT_BATCH_SIZE,
   SOCKET_FRAME_DECODE_BATCH_SIZE,
   SOCKET_FRAME_DECODE_BUDGET_MS,
+  MAX_PENDING_DECRYPT_CHARS,
   MAX_PENDING_SOCKET_FRAMES,
   nextSocketBacklogStreak,
   type SocketBacklogStreak,
@@ -1261,6 +1262,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     // frames stay queued.
     pendingSocketFramesRef.current = pendingSocketFramesRef.current.filter((frame) => frame.backendId !== backendId);
     link.pendingFrames = 0;
+    // So are its events still waiting for decryption.
+    historyEncryptionRef.current?.dropLiveDecryption(backendId);
   }, [patchLinkStatus]);
 
   const updateSentAttachmentRecords = useCallback((next: SentAttachmentRecord[]) => {
@@ -3123,7 +3126,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         const history = historyEncryptionRef.current;
         if (rawConversationId && !isPrivateBackendConversation(rawConversationId)) historyTailCache?.capture(backendId, rawConversationId, [raw], parsed.frames);
         if (!history || !rawConversationId) deliver(raw);
-        else history.receiveSocketEvent(backendId, rawConversationId, raw, parsed.frames, parsed.delivery === 'replay' ? 'summary' : 'full', deliver, setLastError);
+        else history.receiveSocketEvent(backendId, rawConversationId, raw, parsed.frames, parsed.delivery === 'replay' ? 'summary' : 'full', deliver, setLastError, text.length);
         return;
       }
       enqueueServerEvent(parsed as unknown as ServerEvent);
@@ -3168,7 +3171,11 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const enqueueSocketFrame = useCallback((frame: PendingSocketFrame) => {
     const link = linksRef.current.get(frame.backendId);
     if (!link) return;
-    if (link.pendingFrames >= MAX_PENDING_SOCKET_FRAMES) {
+    // Frames still waiting for decryption count too: they were decoded, but
+    // their events are held until a wrap is fetched or a frame inflated.
+    const decrypting = historyEncryptionRef.current?.liveDecryptBacklog(frame.backendId);
+    if (link.pendingFrames + (decrypting?.events ?? 0) >= MAX_PENDING_SOCKET_FRAMES
+      || (decrypting?.chars ?? 0) >= MAX_PENDING_DECRYPT_CHARS) {
       // The renderer fell too far behind this backend's socket. Drop its
       // backlog and reconnect it like any transient drop (other backends keep
       // theirs): resubscribing replays each conversation from its cursor, and

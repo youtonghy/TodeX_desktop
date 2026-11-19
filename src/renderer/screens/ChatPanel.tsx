@@ -1023,9 +1023,10 @@ const ChatTimelineItem = memo(function ChatTimelineItem({
   }
   const entry = item.entry;
   // End-to-end encrypted history this device holds no key for: one quiet
-  // line per turn (docs/history-encryption.md §5.3).
+  // line per turn (docs/history-encryption.md §5.3). Content that failed
+  // its integrity check says so instead.
   if (entry.detailLocked) {
-    return <p data-message-id={entry.id} role="note" className="py-1 text-center text-caption-1-regular text-text-tertiary">{t('chat.historyLocked')}</p>;
+    return <p data-message-id={entry.id} role="note" className="py-1 text-center text-caption-1-regular text-text-tertiary">{t(entry.detailCorrupt ? 'chat.historyCorrupt' : 'chat.historyLocked')}</p>;
   }
   // A turn the agent started on its own (a background task finished, a
   // wakeup fired) has no user message: one quiet line says why it began.

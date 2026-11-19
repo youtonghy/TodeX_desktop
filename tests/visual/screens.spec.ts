@@ -549,6 +549,17 @@ test('fork from an earlier reply', async ({ page, openDemo }) => {
   await expect(page).toHaveScreenshot('fork-from-reply-light.png', { mask: volatile(page) });
 });
 
+// End-to-end encrypted history this device cannot read: a turn it holds no
+// key for, and one whose content failed its integrity check, each one quiet
+// line.
+test('unreadable encrypted history', async ({ page, openDemo }) => {
+  await openDemo('light', 'history=unreadable');
+  await expect(page.getByRole('note').filter({ hasText: '此设备尚未获授权查看这段历史' })).toBeVisible();
+  await expect(page.getByRole('note').filter({ hasText: '这段历史未通过完整性校验，内容已隐藏' })).toBeVisible();
+  await settle(page);
+  await expect(page).toHaveScreenshot('unreadable-history-light.png', { mask: volatile(page) });
+});
+
 test('new private conversation', async ({ page, openDemo }) => {
   await openDemo('light');
   await page.getByRole('button', { name: '新建隐私对话' }).click();

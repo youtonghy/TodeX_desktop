@@ -3086,6 +3086,7 @@ export const ko: Messages = {
 
   // history encryption
   'chat.historyLocked': '이 기기는 아직 이 기록을 볼 권한이 없습니다',
+  'chat.historyCorrupt': '이 기록은 무결성 검사를 통과하지 못해 숨겨졌습니다',
   'chat.providerTurn.backgroundTask': '백그라운드 작업이 끝나 {agent}가 작업을 이어갔습니다',
   'chat.providerTurn.wakeup': '예약된 깨우기로 {agent}가 작업을 이어갔습니다',
   'chat.providerTurn.cron': '예약 작업이 실행되어 {agent}가 작업을 이어갔습니다',

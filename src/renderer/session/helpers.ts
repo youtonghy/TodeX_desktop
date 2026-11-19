@@ -1041,6 +1041,8 @@ export type TimelineEntry = {
   detailStub?: boolean;
   /** Encrypted history this device holds no key for (one notice per turn). */
   detailLocked?: boolean;
+  /** With `detailLocked`: the content failed its integrity check. */
+  detailCorrupt?: boolean;
   /** Opens a turn the provider started on its own; `subtitle` holds its
    * summary, if any. */
   providerTrigger?: ProviderTurnTrigger;
@@ -1321,11 +1323,14 @@ export const WORKSPACE_SYNC_DEBOUNCE_MS = 900;
 export const SOCKET_EVENT_BATCH_SIZE = 24;
 export const SOCKET_FRAME_DECODE_BATCH_SIZE = 8;
 export const SOCKET_FRAME_DECODE_BUDGET_MS = 10;
-/** Opened socket messages waiting to be decoded. A renderer this far behind
- * drops the backlog and reconnects; resubscribing replays every
- * conversation from its cursor, so memory stays bounded without losing
- * events. */
+/** Opened socket messages waiting to be decoded or decrypted. A renderer
+ * this far behind drops the backlog and reconnects; resubscribing replays
+ * every conversation from its cursor, so memory stays bounded without
+ * losing events. */
 export const MAX_PENDING_SOCKET_FRAMES = 5000;
+/** Characters of socket messages waiting for decryption (a wrap fetch or a
+ * frame inflate) a backend may hold before its backlog is dropped likewise. */
+export const MAX_PENDING_DECRYPT_CHARS = 32 * 1024 * 1024;
 /** A backlog drop this soon after the previous one belongs to the same storm.
  * Every verified reconnect resets the normal attempt counter, so without this
  * a renderer that keeps falling behind would reconnect at the base delay

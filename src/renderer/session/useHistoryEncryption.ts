@@ -170,6 +170,10 @@ export function useHistoryEncryption({ backends, focusBackendId, sendCommand, on
   live.current = { backends, sendCommand, onUnlocked, views, autoGrantRecipients, siblingProfiles };
   const decryptors = useRef(new Map<string, { decryptor: HistoryDecryptor; ready: Promise<void> }>());
   const liveChains = useRef(new Map<string, Promise<void>>());
+  /** Live events per backend waiting in `liveChains`, counted against the
+   * socket backlog; `dropLiveDecryption` replaces the entry, and events of a
+   * replaced one are neither decrypted nor delivered. */
+  const liveBacklog = useRef(new Map<string, { events: number; chars: number }>());
   const titles = useRef(new Map<string, string | null>());
   const grantControllers = useRef(new Map<string, AbortController>());
   /** Backends that revoked this device. */
@@ -284,7 +288,7 @@ export function useHistoryEncryption({ backends, focusBackendId, sendCommand, on
   /** Live and backfilled socket events, decrypted in arrival order per
    * conversation. Plaintext and warm-cache events deliver synchronously. */
   const receiveSocketEvent = useCallback((backendId: string, conversationId: string, event: HistoryWireEvent, frames: unknown,
-    detail: HistoryDetail, deliver: (event: HistoryWireEvent) => void, onError: (message: string) => void) => {
+    detail: HistoryDetail, deliver: (event: HistoryWireEvent) => void, onError: (message: string) => void, chars = 0) => {
     const chainKey = `${backendId}\0${conversationId}`;
     const pending = liveChains.current.get(chainKey);
     const encrypted = isHistoryEncryptedPayload(event.payload);
@@ -294,21 +298,47 @@ export function useHistoryEncryption({ backends, focusBackendId, sendCommand, on
       const opened = decryptors.current.get(backendId)?.decryptor.tryDecryptEvents([event], { frames: parsedFrames, detail, conversationId });
       if (opened) { deliver(opened[0]); return; }
     }
+    let backlog = liveBacklog.current.get(backendId);
+    if (!backlog) liveBacklog.current.set(backendId, backlog = { events: 0, chars: 0 });
+    const queued = backlog;
+    queued.events += 1;
+    queued.chars += chars;
+    const current = () => liveBacklog.current.get(backendId) === queued;
     const next: Promise<void> = (pending ?? Promise.resolve()).then(async () => {
+      if (!current()) return;
       if (!encrypted) { deliver(event); return; }
       const { decryptor, ready } = decryptorFor(backendId);
       await ready;
       const [opened] = await decryptor.decryptEvents([event], { frames: parsedFrames, detail, conversationId });
-      deliver(opened);
+      if (current()) deliver(opened);
     }).catch((error: unknown) => {
       // Not delivered: the sequence gap makes the runtime replay it from the
       // journal once wraps can be fetched again.
-      onError(error instanceof Error ? error.message : t('history.decryptFailed'));
+      if (current()) onError(error instanceof Error ? error.message : t('history.decryptFailed'));
     }).finally(() => {
+      queued.events -= 1;
+      queued.chars -= chars;
       if (liveChains.current.get(chainKey) === next) liveChains.current.delete(chainKey);
     });
     liveChains.current.set(chainKey, next);
   }, [decryptorFor]);
+
+  /** Live events of `backendId` still waiting to be decrypted. */
+  const liveDecryptBacklog = useCallback((backendId: string) => {
+    const backlog = liveBacklog.current.get(backendId);
+    return { events: backlog?.events ?? 0, chars: backlog?.chars ?? 0 };
+  }, []);
+
+  /** Abandons `backendId`'s live events still waiting to be decrypted (its
+   * socket was closed): they are not delivered, and its next events start
+   * fresh chains. The resubscription replays them from the cursor. */
+  const dropLiveDecryption = useCallback((backendId: string) => {
+    if (!liveBacklog.current.has(backendId)) return;
+    liveBacklog.current.delete(backendId);
+    for (const key of [...liveChains.current.keys()]) {
+      if (key.startsWith(`${backendId}\0`)) liveChains.current.delete(key);
+    }
+  }, []);
 
   const titleKey = (backendId: string, manifest: ConversationManifest) => `${backendId}\0${manifest.id}\0${manifest.titleEnc?.kid}\0${manifest.titleEnc?.ct}`;
 
@@ -784,6 +814,8 @@ export function useHistoryEncryption({ backends, focusBackendId, sendCommand, on
     titleRevision,
     decryptPage,
     receiveSocketEvent,
+    liveDecryptBacklog,
+    dropLiveDecryption,
     withDecryptedTitles,
     decryptManifestTitles,
     rememberTitle,

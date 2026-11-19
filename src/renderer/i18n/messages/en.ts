@@ -3086,6 +3086,7 @@ export const en: Messages = {
 
   // history encryption
   'chat.historyLocked': 'This device is not yet authorized to view this part of the history',
+  'chat.historyCorrupt': 'This part of the history failed its integrity check and is hidden',
   'chat.providerTurn.backgroundTask': 'Background task finished — {agent} continued',
   'chat.providerTurn.wakeup': 'Scheduled wakeup — {agent} continued',
   'chat.providerTurn.cron': 'Scheduled task fired — {agent} continued',

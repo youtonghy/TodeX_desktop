@@ -3086,6 +3086,7 @@ export const zhCN = {
 
   // history encryption
   'chat.historyLocked': '此设备尚未获授权查看这段历史',
+  'chat.historyCorrupt': '这段历史未通过完整性校验，内容已隐藏',
   'chat.providerTurn.backgroundTask': '后台任务完成，{agent} 继续工作',
   'chat.providerTurn.wakeup': '定时唤醒，{agent} 继续工作',
   'chat.providerTurn.cron': '定时任务触发，{agent} 继续工作',

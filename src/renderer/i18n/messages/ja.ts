@@ -3086,6 +3086,7 @@ export const ja: Messages = {
 
   // history encryption
   'chat.historyLocked': 'このデバイスはこの履歴をまだ表示する権限がありません',
+  'chat.historyCorrupt': 'この履歴は整合性チェックに失敗したため、非表示になっています',
   'chat.providerTurn.backgroundTask': 'バックグラウンドタスクが完了し、{agent} が作業を続けました',
   'chat.providerTurn.wakeup': 'スケジュールされた起動で {agent} が作業を続けました',
   'chat.providerTurn.cron': '定期タスクが実行され、{agent} が作業を続けました',

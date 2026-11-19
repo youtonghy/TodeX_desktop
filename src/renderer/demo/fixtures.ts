@@ -405,6 +405,35 @@ if (typeof location !== 'undefined') {
   }
 }
 
+/** Two turns of end-to-end encrypted history appended to `target`: one this
+ * device holds no key for, and one whose content failed its integrity check
+ * (the envelopes the decryptor leaves, `detailLocked` / `detailCorrupt`). */
+function appendUnreadableHistory(target: Journal) {
+  let time = Date.parse(target.events.at(-1)!.time);
+  const push = (turnId: string, type: string, payload: Record<string, unknown>) => {
+    time += 6_000;
+    target.events.push({
+      schemaVersion: 2, eventId: `${target.manifest.id}-e${target.events.length + 1}`, conversationId: target.manifest.id,
+      sequence: target.events.length + 1, time: iso(time), type, provider: target.manifest.provider, payload: { turnId, ...payload },
+    });
+  };
+  for (const [suffix, flags] of [['locked', { detailLocked: true }], ['corrupt', { detailLocked: true, detailCorrupt: true }]] as const) {
+    const turnId = `${target.manifest.id}-${suffix}`;
+    push(turnId, 'turn.started', { status: 'running' });
+    push(turnId, 'message.created', { role: 'user', ...flags });
+    push(turnId, 'message.delta', { role: 'assistant', ...flags });
+    push(turnId, 'turn.completed', { status: 'completed' });
+  }
+  target.manifest.lastSequence = target.events.length;
+  target.manifest.updatedAt = iso(time);
+}
+
+// `?history=unreadable`: the open conversation ends with history this device
+// cannot read, once locked and once damaged.
+if (typeof location !== 'undefined' && new URLSearchParams(location.search).get('history') === 'unreadable') {
+  appendUnreadableHistory(demoJournals[0]);
+}
+
 function privateJournal(source: Journal): Journal {
   return { ...source, manifest: { ...source.manifest, ephemeral: true } };
 }
