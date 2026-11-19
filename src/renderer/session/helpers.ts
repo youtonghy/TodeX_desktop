@@ -2088,6 +2088,11 @@ export function mergeManifestConversations(
     const existingIndex = next.findIndex((item) => item.v2ConversationId === manifest.id || item.id === manifest.id);
     if (existingIndex >= 0) {
       const existing = next[existingIndex];
+      // Another backend's conversation (it listed the same id first) is
+      // not this listing's to change.
+      if (existing.backendConnectionId && existing.backendConnectionId !== backendConnectionId) {
+        continue;
+      }
       // Local timestamps stay put unless the backend reports a newer one;
       // a manifest without parseable times must not re-stamp the record.
       const manifestUpdatedAt = Date.parse(manifest.updatedAt) || 0;
