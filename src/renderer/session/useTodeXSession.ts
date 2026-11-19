@@ -2131,7 +2131,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       const eventId = record.eventId;
       const sequence = entry.sequence;
       refilledAttachmentEvents.current.add(eventId);
-      void decryptedHistoryReplay(v2Id, v2ApiForConversation(v2Id).replayEvents(v2Id, sequence - 1, 1), 'full').then((page) => {
+      void Promise.resolve().then(() => decryptedHistoryReplay(v2Id, v2ApiForConversation(v2Id).replayEvents(v2Id, sequence - 1, 1), 'full')).then((page) => {
         const request = historyRetryRequest(page.events.find((event) => event.sequence === sequence)?.payload);
         if (!request) return;
         const attachments = attachmentsFromRequestContent(eventId, request.content);
@@ -2187,7 +2187,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     setRecoveringConversations((current) => (current[localId] === recovering ? current : { ...current, [localId]: recovering }));
     const boundAttachments = bindSentAttachmentEvents(sentAttachmentRecordsRef.current, localId, appliedEvents);
     if (boundAttachments !== sentAttachmentRecordsRef.current) updateSentAttachmentRecords(boundAttachments);
-    refillSentAttachments(localId, state.conversationId, state.timeline);
+    if (conversation.v2ConversationId) refillSentAttachments(localId, conversation.v2ConversationId, state.timeline);
     setTimeline((current) => capTimelinePerConversation([
       ...state.timeline.map((entry) => stampTimelineEntry(entry, localId)),
       ...current.filter((entry) => entry.conversationId !== localId),
