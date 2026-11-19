@@ -4283,5 +4283,6 @@ export const zhCN = {
   'private.compactRefused': "隐私对话不能压缩上下文",
   'private.exportRefused': "隐私对话的内容不能引用到其他对话",
   'private.notReady': "隐私对话还在创建，请稍后再添加附件",
+  'private.uploadConversationGone': '对话已被删除，附件没有上传',
   'private.cleared': "隐私对话已随守护进程重启清除",
 } satisfies Record<string, string>;

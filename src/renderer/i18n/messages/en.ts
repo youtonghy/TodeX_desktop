@@ -4283,5 +4283,6 @@ export const en: Messages = {
   'private.compactRefused': "Private conversations cannot be compacted",
   'private.exportRefused': "A private conversation cannot be referenced from another conversation",
   'private.notReady': "The private conversation is still being created; add attachments in a moment",
+  'private.uploadConversationGone': 'The conversation was deleted; the attachment was not uploaded',
   'private.cleared': "Private conversations were cleared by a daemon restart",
 };

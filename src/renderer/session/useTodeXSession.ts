@@ -6816,8 +6816,15 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     // A private conversation's files go to its private folder, deleted with
     // it; it was created on the backend when it was opened.
     const conversation = stores.conversations.get().find((item) => item.id === conversationId);
-    if (isPrivateConversation(conversation) && !conversation?.v2ConversationId) throw new Error(t('private.notReady'));
-    return uploadPromptFile(backendApi(profile), name, blob, isPrivateConversation(conversation) ? conversation?.v2ConversationId : undefined);
+    // Gone already: it may have been private, and without its id the file
+    // would land in the shared upload folder instead of being dropped.
+    if (!conversation) throw new Error(t('private.uploadConversationGone'));
+    if (!isPrivateConversation(conversation)) return uploadPromptFile(backendApi(profile), name, blob);
+    const privateId = conversation.v2ConversationId;
+    if (!privateId) throw new Error(t('private.notReady'));
+    // Deleted mid-upload: the remaining chunks are not sent.
+    const stillWanted = () => stores.conversations.get().some((item) => item.id === conversationId && item.v2ConversationId === privateId);
+    return uploadPromptFile(backendApi(profile), name, blob, privateId, stillWanted);
   }, []);
 
   /** Sets, pauses, resumes or clears the goal an agent pursues on its own

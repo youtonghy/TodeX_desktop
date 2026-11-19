@@ -4283,5 +4283,6 @@ export const ko: Messages = {
   'private.compactRefused': "비공개 대화는 압축할 수 없습니다",
   'private.exportRefused': "비공개 대화는 다른 대화에서 참조할 수 없습니다",
   'private.notReady': "비공개 대화를 만드는 중입니다. 잠시 후 첨부하세요",
+  'private.uploadConversationGone': '대화가 삭제되어 첨부 파일을 업로드하지 않았습니다',
   'private.cleared': "데몬 재시작으로 비공개 대화가 삭제되었습니다",
 };

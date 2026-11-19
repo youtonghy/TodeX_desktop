@@ -4283,5 +4283,6 @@ export const ja: Messages = {
   'private.compactRefused': "プライベート会話はコンパクトにできません",
   'private.exportRefused': "プライベート会話は他の会話から参照できません",
   'private.notReady': "プライベート会話を作成中です。少し待ってから添付してください",
+  'private.uploadConversationGone': '会話が削除されたため、添付ファイルはアップロードされませんでした',
   'private.cleared': "デーモンの再起動によりプライベート会話は消去されました",
 };
