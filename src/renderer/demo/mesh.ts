@@ -21,6 +21,9 @@ const NOW = Date.UTC(2026, 10, 1, 9, 0);
 const seed = (byte: number) => new Uint8Array(32).fill(byte);
 const history = (byte: number) => historyRecipientKeyPairFromSeed(seed(byte)).publicKey;
 
+/** A second node (`mesh=leaving`): offline, so it never confirms. */
+export const DEMO_MESH_NAS_ID = 'node_demo_nas';
+
 /** This device's group key (base64url Ed25519 seed). */
 export const DEMO_MESH_DEVICE_SECRET = encodeBase64Url(seed(0x31));
 

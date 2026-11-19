@@ -50,12 +50,15 @@ import {
   MESH_GROUPS_STORAGE_KEY,
   beaconUrls,
   candidateUrls,
+  confirmLeave,
+  leaveDelivered,
   mergeNodeState,
   meshDeviceSecretKey,
   meshHistoryKeyId,
   nodeInfosOf,
   normalizeStoredMeshGroups,
   rememberUrl,
+  startLeave,
   storedChain,
   type MeshBeacon,
   type StoredMeshGroup,
@@ -115,6 +118,9 @@ export type MeshGroupView = {
   members: MeshMemberView[];
   /** Waiting for the first roster after joining. */
   pending: boolean;
+  /** This device is leaving: the nodes that have not confirmed the final
+   * roster yet. */
+  leaving?: { pendingNodes: Array<{ id: string; name: string; state: ConnectionState }> };
   invite: string;
   /** The invite as a QR code carries it (`encodeMeshInviteForQr`), or null
    * when no node fits one. */
@@ -227,11 +233,23 @@ export function useMeshGroups({
     )
   ));
 
-  /** Sends the group's chain and node infos to every connected node of it. */
-  const pushToAll = useCallback(async (group: StoredMeshGroup, extraProfileIds: string[] = []) => {
+  /** Sends the group's chain and node infos to every connected node of it.
+   * Returns the nodes that accepted it; a node that did not catches up from
+   * a device later (or, while this device leaves, from the next push). */
+  const pushToAll = useCallback(async (group: StoredMeshGroup, extraProfileIds: string[] = []): Promise<Set<string>> => {
     const ids = new Set([...connectedProfiles(group.groupId).map((profile) => profile.id), ...extraProfileIds]);
     const infos = Object.values(group.nodeInfos);
-    await Promise.all([...ids].map((profileId) => live.current.send(profileId, meshCommands.statePush(group.chain, infos)).catch(() => undefined)));
+    const confirmed = new Set<string>();
+    await Promise.all([...ids].map(async (profileId) => {
+      try {
+        await live.current.send(profileId, meshCommands.statePush(group.chain, infos));
+        const nodeId = live.current.profiles.find((profile) => profile.id === profileId)?.mesh?.nodeId;
+        if (nodeId) confirmed.add(nodeId);
+      } catch {
+        // Not delivered: see above.
+      }
+    }));
+    return confirmed;
   }, []);
 
   /** Forgets a group this device left or was removed from: its profiles,
@@ -249,6 +267,19 @@ export function useMeshGroups({
     await removeSecret(meshDeviceSecretKey(groupId)).catch(() => undefined);
     await deleteHistorySeed(meshHistoryKeyId(groupId)).catch(() => undefined);
   }, [setGroups]);
+
+  /** Records that node `nodeId` confirmed this device's final roster, and
+   * forgets the group once the leave is delivered. */
+  const settleLeave = useCallback(async (groupId: string, nodeId: string | null) => {
+    const group = groupsRef.current.find((item) => item.groupId === groupId);
+    if (!group?.leaving) return;
+    const leaving = nodeId ? confirmLeave(group.leaving, nodeId) : group.leaving;
+    if (leaveDelivered(leaving)) {
+      await forgetGroup(groupId);
+      return;
+    }
+    if (leaving !== group.leaving) replaceGroup({ ...group, leaving });
+  }, [forgetGroup, replaceGroup]);
 
   /** Which group devices `profileId`'s node has connected. */
   const refreshPresence = useCallback(async (profileId: string, groupId: string) => {
@@ -271,6 +302,13 @@ export function useMeshGroups({
       const groupId = profile?.mesh?.groupId;
       const stored = groupsRef.current.find((item) => item.groupId === groupId);
       if (!profile?.mesh || !stored) return;
+      if (stored.leaving) {
+        // This device is leaving: the node only needs the final roster.
+        if (!stored.leaving.pendingNodes.includes(profile.mesh.nodeId)) return;
+        await live.current.send(profileId, meshCommands.statePush(stored.chain, Object.values(stored.nodeInfos)));
+        await settleLeave(stored.groupId, profile.mesh.nodeId);
+        return;
+      }
       const state = parseMeshNodeState(await live.current.send(profileId, meshCommands.stateGet()));
       if (state.nodeId !== profile.mesh.nodeId) {
         // The invite named the node; the node's own answer wins.
@@ -303,7 +341,7 @@ export function useMeshGroups({
     })().catch(() => undefined).finally(() => { syncing.current.delete(profileId); });
     syncing.current.set(profileId, run);
     return run;
-  }, [forgetGroup, replaceGroup]);
+  }, [forgetGroup, replaceGroup, settleLeave]);
 
   // Sync on every (re)connect of a node that speaks mesh.
   const synced = useRef(new Set<string>());
@@ -594,7 +632,12 @@ export function useMeshGroups({
 
   /** The chain with `edit` applied on the newest version this client can
    * see, signed by this device; stored and pushed to every connected node. */
-  const editRoster = useCallback(async (groupId: string, edit: (chain: MeshChain, self: string) => { members?: MeshMember[]; name?: string }, extraProfileIds: string[] = []) => {
+  const editRoster = useCallback(async (
+    groupId: string,
+    edit: (chain: MeshChain, self: string) => { members?: MeshMember[]; name?: string },
+    extraProfileIds: string[] = [],
+    onPushed?: (confirmed: Set<string>) => void,
+  ) => {
     for (const profile of connectedProfiles(groupId)) await syncProfile(profile.id);
     const group = groupsRef.current.find((item) => item.groupId === groupId);
     const chain = group ? storedChain(group) : null;
@@ -602,7 +645,7 @@ export function useMeshGroups({
     const identity = await identityOf(groupId);
     const docs = appendMeshRoster(chain, { signerSecretKey: decodeBase64Url(identity.secretKey), ...edit(chain, identity.deviceId) });
     const next = { ...group, chain: docs, name: edit(chain, identity.deviceId).name ?? group.name };
-    await pushToAll(next, extraProfileIds);
+    onPushed?.(await pushToAll(next, extraProfileIds));
     replaceGroup(next);
     return next;
   }, [identityOf, pushToAll, replaceGroup, syncProfile]);
@@ -812,21 +855,48 @@ export function useMeshGroups({
     }));
   }, [editRoster]);
 
-  /** Leaves the group; the last device dissolves it (every node leaves). */
+  /** Leaves the group; the last device dissolves it (every node leaves).
+   * The group is forgotten once the final roster reached its nodes (every
+   * node when dissolving, any one when other devices carry it on); until
+   * then it stays as leaving, and the roster goes out again whenever a node
+   * reconnects. `forgetLeavingGroup` gives up on that. */
   const leaveGroup = useCallback(async (groupId: string) => {
     const group = groupsRef.current.find((item) => item.groupId === groupId);
     const chain = group ? storedChain(group) : null;
-    if (group && chain) {
-      const otherDevices = chain.head.members.some((member) => member.kind === 'device' && member.id !== group.deviceId);
-      const nodeProfiles = connectedProfiles(groupId).map((profile) => profile.id);
-      await editRoster(groupId, (current, self) => ({
-        members: otherDevices
-          ? current.head.members.filter((member) => member.id !== self)
-          : current.head.members.filter((member) => member.kind === 'device'),
-      }), nodeProfiles);
+    if (!group || !chain) {
+      await forgetGroup(groupId);
+      return;
     }
-    await forgetGroup(groupId);
-  }, [editRoster, forgetGroup]);
+    const otherDevices = chain.head.members.some((member) => member.kind === 'device' && member.id !== group.deviceId);
+    const nodes = chain.head.members.filter((member) => member.kind === 'node').map((member) => ({ id: member.id, name: member.name }));
+    const nodeProfiles = connectedProfiles(groupId).map((profile) => profile.id);
+    let confirmed = new Set<string>();
+    const next = await editRoster(groupId, (current, self) => ({
+      members: otherDevices
+        ? current.head.members.filter((member) => member.id !== self)
+        : current.head.members.filter((member) => member.kind === 'device'),
+    }), nodeProfiles, (pushed) => { confirmed = pushed; });
+    replaceGroup({ ...next, leaving: startLeave(nodes, otherDevices, confirmed) });
+    await settleLeave(groupId, null);
+  }, [editRoster, forgetGroup, replaceGroup, settleLeave]);
+
+  /** Forgets a group this device is still leaving without waiting for its
+   * nodes: they keep the old roster (and this device in it) until another
+   * device or the recovery key changes it. */
+  const forgetLeavingGroup = useCallback(async (groupId: string) => {
+    if (groupsRef.current.find((item) => item.groupId === groupId)?.leaving) await forgetGroup(groupId);
+  }, [forgetGroup]);
+
+  /** Pushes a leaving device's final roster to its unconfirmed nodes now. */
+  const retryLeave = useCallback(async (groupId: string) => {
+    const group = groupsRef.current.find((item) => item.groupId === groupId);
+    if (!group?.leaving) return;
+    for (const profile of live.current.profiles) {
+      if (profile.mesh?.groupId !== groupId || !group.leaving.pendingNodes.includes(profile.mesh.nodeId)) continue;
+      if (live.current.links[profile.id]?.state === 'open') await syncProfile(profile.id);
+      else retryNode(profile.id);
+    }
+  }, [retryNode, syncProfile]);
 
   /** The other devices of `profileId`'s group, each with the history key
    * the verified roster lists for it: their history grants for that key are
@@ -869,9 +939,16 @@ export function useMeshGroups({
       nodeId: member.id, name: member.name, urls: nodeUrls(group, member.info, member.id, { pinned: member.addresses }),
     })).filter((node) => node.urls.length);
     const invite = { groupId: group.groupId, name: chain?.head.name ?? group.name, nodes: inviteNodes };
+    const leaving = group.leaving ? {
+      pendingNodes: group.leaving.pendingNodes.map((id) => {
+        const profile = profiles.find((item) => item.mesh?.groupId === group.groupId && item.mesh.nodeId === id);
+        return { id, name: group.leaving!.nodeNames[id] || profile?.name || id, state: (profile ? links[profile.id]?.state : undefined) ?? 'idle' };
+      }),
+    } : undefined;
     return {
       groupId: group.groupId, name: chain?.head.name ?? group.name, version: chain?.head.version ?? 0, deviceId: group.deviceId,
       members, pending: !chain,
+      ...(leaving ? { leaving } : {}),
       invite: inviteNodes.length ? encodeMeshInvite(invite) : '',
       inviteQr: inviteNodes.length ? encodeMeshInviteForQr(invite) : null,
     };
@@ -898,6 +975,8 @@ export function useMeshGroups({
     rejectJoin,
     removeMember,
     leaveGroup,
+    retryLeave,
+    forgetLeavingGroup,
     autoGrantRecipients,
     receiveEvent,
     ipcNodeIds,

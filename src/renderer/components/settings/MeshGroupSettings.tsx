@@ -39,7 +39,8 @@ type Dialog =
   | { kind: 'approve'; request: MeshJoinView }
   | { kind: 'remove'; group: MeshGroupView; member: MeshMemberView }
   | { kind: 'node'; group: MeshGroupView; member: MeshMemberView }
-  | { kind: 'leave'; group: MeshGroupView };
+  | { kind: 'leave'; group: MeshGroupView }
+  | { kind: 'forgetLeaving'; group: MeshGroupView };
 
 export function MeshGroupSettings({ session }: { session: TodeXSession }) {
   const t = useT();
@@ -97,7 +98,23 @@ export function MeshGroupSettings({ session }: { session: TodeXSession }) {
             {actions}
           </EmptyState>
         </SettingsCard>
-      ) : mesh.groups.map((group, index) => (
+      ) : mesh.groups.map((group, index) => group.leaving ? (
+        // Leaving: only the nodes still to confirm the final roster, and the
+        // ways to finish.
+        <SettingsGroup key={group.groupId} label={group.name} description={t('mesh.leavingHint')} action={index === 0 ? actions : undefined}>
+          <SettingsCard>
+            {group.leaving.pendingNodes.map((node) => (
+              <SettingsRow key={node.id} icon={RiServerLine} label={node.name} description={t('mesh.leavingNode')}>
+                <Chip variant="caption" color={STATE_COLORS[node.state]}>{connectionStateLabel(node.state)}</Chip>
+              </SettingsRow>
+            ))}
+            <SettingsRow label={t('mesh.leavingActions')} description={t('mesh.leavingActionsHint')}>
+              <Button size="small" variant="secondary" onClick={() => void mesh.retryLeave(group.groupId).catch(() => undefined)}>{t('mesh.retry')}</Button>
+              <Button size="small" variant="secondary" onClick={() => setDialog({ kind: 'forgetLeaving', group })}>{t('mesh.forgetLeaving')}</Button>
+            </SettingsRow>
+          </SettingsCard>
+        </SettingsGroup>
+      ) : (
         <SettingsGroup
           key={group.groupId}
           label={group.name}
@@ -253,6 +270,19 @@ export function MeshGroupSettings({ session }: { session: TodeXSession }) {
         tone="danger"
         isPending={busy}
         onConfirm={() => { if (dialog?.kind === 'leave') void run(() => mesh.leaveGroup(dialog.group.groupId)); }}
+      >
+        {error ? <Alert status="danger" title={error} /> : null}
+      </ConfirmDialog>
+      <ConfirmDialog
+        isOpen={dialog?.kind === 'forgetLeaving'}
+        onOpenChange={(open) => { if (!open) close(); }}
+        title={t('mesh.forgetLeavingTitle', { name: dialog?.kind === 'forgetLeaving' ? dialog.group.name : '' })}
+        description={t('mesh.forgetLeavingHint')}
+        confirmLabel={t('mesh.forgetLeaving')}
+        cancelLabel={t('common.cancel')}
+        tone="danger"
+        isPending={busy}
+        onConfirm={() => { if (dialog?.kind === 'forgetLeaving') void run(() => mesh.forgetLeavingGroup(dialog.group.groupId)); }}
       >
         {error ? <Alert status="danger" title={error} /> : null}
       </ConfirmDialog>

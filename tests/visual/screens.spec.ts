@@ -330,6 +330,23 @@ test('settings: backend group with a join request', async ({ page, openDemo }) =
   await expect(page).toHaveScreenshot('settings-backends-groups-only-light.png', { mask: volatile(page) });
 });
 
+// Leaving a group whose final roster one node has not confirmed yet: the
+// group stays as leaving until it does, or the user removes it anyway.
+test('settings: leaving a backend group', async ({ page, openDemo }) => {
+  await openDemo('light', 'mesh=leaving');
+  await page.getByRole('button', { name: '设置', exact: true }).click();
+  await settingsSection(page, '后端组').click();
+  await expect(page.getByText('NAS', { exact: true })).toBeVisible();
+  await expect(page.getByText('尚未确认', { exact: true })).toBeVisible();
+  await expect(page.getByText('iPhone', { exact: true })).toHaveCount(0);
+  await settle(page);
+  await expect(page).toHaveScreenshot('settings-mesh-leaving-light.png', { mask: volatile(page) });
+  await page.getByRole('button', { name: '从本应用移除', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: '不等确认就移除“家里”？' })).toBeVisible();
+  await settle(page);
+  await expect(page).toHaveScreenshot('settings-mesh-forget-leaving-light.png', { mask: volatile(page) });
+});
+
 // This computer's backend is a node of the group and is reached over IPC:
 // the group keeps its link to the node as a standby, and the data goes over
 // the IPC profile.
