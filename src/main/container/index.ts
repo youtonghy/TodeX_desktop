@@ -118,10 +118,17 @@ export class ContainerManager {
   private environmentCache: DockerEnvironment | null = null;
   private readonly setupJobs = new Map<string, { controller: AbortController; sender: WebContents }>();
   private nextSetupJob = 1;
+  private readonly watchedSetupSenders = new Set<WebContents>();
   private cleanupTimer: NodeJS.Timeout | null = null;
   private sender: WebContents | null = null;
 
-  constructor(private readonly host: ContainerHost) {}
+  private readonly host: ContainerHost;
+
+  // A plain field (not a parameter property) keeps the module loadable by
+  // `node --experimental-strip-types` in scripts/container-setup.test.ts.
+  constructor(host: ContainerHost) {
+    this.host = host;
+  }
 
   // ---- reading ----------------------------------------------------------------
 
@@ -488,16 +495,26 @@ export class ContainerManager {
   runSetup(sender: WebContents, name: string, cwd: unknown, script: unknown): Promise<string> {
     if (typeof cwd !== 'string' || !posix.isAbsolute(cwd) || /[\0\n]/.test(cwd)) throw new TypeError('cwd');
     if (typeof script !== 'string' || !script.trim() || script.length > SETUP_SCRIPT_LIMIT) throw new TypeError('script');
+    // Registered before the first await, so a window that closes or reloads
+    // while the container is looked up cancels the run before it starts.
+    const jobId = `setup-${this.nextSetupJob++}`;
+    const controller = new AbortController();
+    this.setupJobs.set(jobId, { controller, sender });
+    this.watchSetupSender(sender);
     return (async () => {
-      const info = (await this.list()).find((item) => item.name === name);
-      if (!info?.container || info.state !== 'running') throw new Error(`${name} is not running`);
+      let info: ContainerInfo | undefined;
+      try {
+        info = (await this.list()).find((item) => item.name === name);
+        if (controller.signal.aborted || sender.isDestroyed()) throw new Error('the setup was cancelled');
+        if (!info?.container || info.state !== 'running') throw new Error(`${name} is not running`);
+      } catch (error) {
+        this.setupJobs.delete(jobId);
+        throw error;
+      }
       const container = info.container;
-      const jobId = `setup-${this.nextSetupJob++}`;
-      const controller = new AbortController();
       // Ends the local `docker exec` client once the script is gone (or could not be signalled).
       const client = new AbortController();
       const pgidFile = `/tmp/todex-setup-${randomUUID()}.pgid`;
-      this.setupJobs.set(jobId, { controller, sender });
       const send = (channel: string, payload: SetupOutput | SetupDone) => {
         if (!sender.isDestroyed()) sender.send(channel, payload);
       };
@@ -555,6 +572,17 @@ export class ContainerManager {
   /** Cancels the setup runs `sender` started (it reloaded, crashed or closed). */
   abortSetupsOf(sender: WebContents): void {
     for (const job of this.setupJobs.values()) if (job.sender === sender) job.controller.abort();
+  }
+
+  /** One `destroyed` listener per window that started a setup run: a closed
+   * window cancels its runs (a reload or crash is handled by the caller). */
+  private watchSetupSender(sender: WebContents): void {
+    if (this.watchedSetupSenders.has(sender)) return;
+    this.watchedSetupSenders.add(sender);
+    sender.once('destroyed', () => {
+      this.watchedSetupSenders.delete(sender);
+      this.abortSetupsOf(sender);
+    });
   }
 
   /**

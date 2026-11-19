@@ -65,3 +65,32 @@ test('output lines are batched by time and size', async () => {
   batcher.flush();
   assert.equal(batches.length, 3);
 });
+
+/** A window stand-in: `destroyed` fires on close, as WebContents' does. */
+function fakeSender() {
+  const listeners: Array<() => void> = [];
+  let destroyed = false;
+  return {
+    isDestroyed: () => destroyed,
+    send: () => undefined,
+    once: (_event: 'destroyed', listener: () => void) => { listeners.push(listener); },
+    close() { destroyed = true; listeners.splice(0).forEach((listener) => listener()); },
+  };
+}
+
+test('a window that closes or reloads while the container is looked up never starts the setup', async () => {
+  const { ContainerManager } = await import('../src/main/container/index.ts');
+  for (const end of ['close', 'reload'] as const) {
+    const manager = new ContainerManager({ log: () => undefined } as never);
+    let release: (value: never[]) => void = () => undefined;
+    // The Docker query is still pending when the window goes away.
+    (manager as unknown as { list: () => Promise<never[]> }).list = () => new Promise((resolve) => { release = resolve; });
+    const sender = fakeSender();
+    const run = manager.runSetup(sender as never, 'dev', '/workspace', 'echo hi');
+    if (end === 'close') sender.close();
+    else manager.abortSetupsOf(sender as never);
+    release([]);
+    await assert.rejects(run, /cancelled/, end);
+    assert.equal((manager as unknown as { setupJobs: Map<string, unknown> }).setupJobs.size, 0, end);
+  }
+});
