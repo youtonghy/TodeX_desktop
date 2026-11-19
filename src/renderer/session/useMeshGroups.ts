@@ -130,8 +130,9 @@ export type MeshJoinProgress =
   | { status: 'error'; error: string };
 
 type HistoryGrantActions = {
-  /** Re-wraps this profile's history for `deviceId`'s pending grant, if any. */
-  authorizeDevice: (profileId: string, deviceId: string) => Promise<void>;
+  /** Re-wraps this profile's history for `deviceId`'s pending grant, if
+   * any, provided the grant is for `historyKey` (its key in the roster). */
+  authorizeDevice: (profileId: string, deviceId: string, historyKey: string) => Promise<void>;
 };
 
 export function useMeshGroups({
@@ -636,7 +637,9 @@ export function useMeshGroups({
       replaceGroup(withInfo);
       // The node opened a grant for the group key: this profile's own history
       // key still opens everything, so it re-wraps (before switching keys).
-      await live.current.history.authorizeDevice(profileId, identity.deviceId);
+      const historyKey = storedChain(withInfo)?.head.members.find((member) => member.id === identity.deviceId)?.historyKey;
+      if (!historyKey) throw new Error(t('mesh.groupMissing'));
+      await live.current.history.authorizeDevice(profileId, identity.deviceId, historyKey);
       if (ipc) {
         // The IPC profile stays as it is and keeps the data; the node's group
         // profile is created at its network addresses as a standby.
@@ -825,13 +828,16 @@ export function useMeshGroups({
     await forgetGroup(groupId);
   }, [editRoster, forgetGroup]);
 
-  /** Device ids of `profileId`'s group: their history grants are fulfilled
-   * without asking (approving the device covered history). */
-  const autoGrantDeviceIds = useCallback((profileId: string): ReadonlySet<string> => {
+  /** The other devices of `profileId`'s group, each with the history key
+   * the verified roster lists for it: their history grants for that key are
+   * fulfilled without asking (approving the device covered history). */
+  const autoGrantRecipients = useCallback((profileId: string): ReadonlyMap<string, string> => {
     const groupId = live.current.profiles.find((profile) => profile.id === profileId)?.mesh?.groupId;
     const group = groupsRef.current.find((item) => item.groupId === groupId);
     const chain = group ? storedChain(group) : null;
-    return new Set(chain ? chain.head.members.filter((member) => member.kind === 'device' && member.id !== group!.deviceId).map((member) => member.id) : []);
+    return new Map(chain ? chain.head.members.flatMap((member) => (
+      member.kind === 'device' && member.id !== group!.deviceId && member.historyKey ? [[member.id, member.historyKey] as const] : []
+    )) : []);
   }, []);
 
   const views = useMemo<MeshGroupView[]>(() => groups.map((group) => {
@@ -892,7 +898,7 @@ export function useMeshGroups({
     rejectJoin,
     removeMember,
     leaveGroup,
-    autoGrantDeviceIds,
+    autoGrantRecipients,
     receiveEvent,
     ipcNodeIds,
     relayEnabled: prefs.relay,

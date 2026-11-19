@@ -71,7 +71,11 @@ export type HistoryEncryptionView = {
 
 export type HistoryGrantRun = { running: boolean; progress: HistoryRewrapProgress; error?: string };
 
-export type RecoveryKeyDraft = { seed: Uint8Array; words: string[]; qrPayload: string };
+/** A recovery key being shown to the user. Its public key and rid are
+ * derived once, when the draft is made, and the seed is wiped right after:
+ * every attempt to save it uploads the same key, and only the words and QR
+ * code the user writes down can recreate the secret. */
+export type RecoveryKeyDraft = { publicKey: Uint8Array; rid: string; words: string[]; qrPayload: string };
 
 /** Readable text for the error codes history encryption introduces. */
 export function historyErrorMessage(code: string): string | null {
@@ -117,7 +121,27 @@ const CONNECT_WAIT_MS = 15_000;
 /** Another profile of the same daemon, as this device (see `sameDaemonProfiles`). */
 export type HistorySiblingProfile = { backendId: string; deviceId: string };
 
-export function useHistoryEncryption({ backends, focusBackendId, sendCommand, onUnlocked, autoGrantDeviceIds, siblingProfiles }: {
+/** Recipient id a grant must carry to be fulfilled without asking: the rid of
+ * the history key the client itself trusts for that device (the signed
+ * roster, or a sibling profile's own key on this computer), never just the
+ * device id and key the backend reports. */
+export function trustedGrantRid(
+  grant: HistoryGrant,
+  groupKeys: ReadonlyMap<string, string> | undefined,
+  siblingRids: ReadonlyMap<string, string>,
+): string | null {
+  const sibling = siblingRids.get(grant.deviceId);
+  if (sibling) return sibling;
+  const rosterKey = groupKeys?.get(grant.deviceId);
+  if (!rosterKey) return null;
+  try {
+    return ridOf(decodeBase64UrlBytes(rosterKey));
+  } catch {
+    return null;
+  }
+}
+
+export function useHistoryEncryption({ backends, focusBackendId, sendCommand, onUnlocked, autoGrantRecipients, siblingProfiles }: {
   backends: Readonly<Record<string, HistoryBackendLink>>;
   /** The backend the visible conversation belongs to: notices follow it. */
   focusBackendId: string;
@@ -126,9 +150,11 @@ export function useHistoryEncryption({ backends, focusBackendId, sendCommand, on
    * conversations (all when omitted) may now open. */
   onUnlocked: (conversationIds?: readonly string[]) => void;
   /** Devices whose pending grants on a backend are fulfilled without
-   * asking: the members of its device group, whose approval covered
-   * history (docs/mesh-v1.md "History"). */
-  autoGrantDeviceIds?: (backendId: string) => ReadonlySet<string>;
+   * asking, with the history public key (base64url) the verified roster
+   * lists for each: the members of its device group, whose approval covered
+   * history (docs/mesh-v1.md "History"). A grant whose key differs waits
+   * for a manual decision. */
+  autoGrantRecipients?: (backendId: string) => ReadonlyMap<string, string>;
   /** This app's other profiles of the backend's daemon: their history
    * grants are fulfilled without asking, and a profile that cannot read
    * history they can asks them for it (siblingHistoryGrants.ts). */
@@ -140,8 +166,8 @@ export function useHistoryEncryption({ backends, focusBackendId, sendCommand, on
   const [dismissedRecoveryNotices, setDismissedRecoveryNotices] = useState(readDismissedRecoveryNotices);
   const grantRunsRef = useRef(grantRuns);
   grantRunsRef.current = grantRuns;
-  const live = useRef({ backends, sendCommand, onUnlocked, views, autoGrantDeviceIds, siblingProfiles });
-  live.current = { backends, sendCommand, onUnlocked, views, autoGrantDeviceIds, siblingProfiles };
+  const live = useRef({ backends, sendCommand, onUnlocked, views, autoGrantRecipients, siblingProfiles });
+  live.current = { backends, sendCommand, onUnlocked, views, autoGrantRecipients, siblingProfiles };
   const decryptors = useRef(new Map<string, { decryptor: HistoryDecryptor; ready: Promise<void> }>());
   const liveChains = useRef(new Map<string, Promise<void>>());
   const titles = useRef(new Map<string, string | null>());
@@ -528,17 +554,19 @@ export function useHistoryEncryption({ backends, focusBackendId, sendCommand, on
     restoreDevice: (deviceId: string) => applyState(backendId, historyCommands.restoreDevice(deviceId)),
     /** A fresh recovery key, shown to the user before anything is uploaded. */
     createRecoveryDraft: (): RecoveryKeyDraft => {
-      const { secretKey } = generateHistoryRecipientKeyPair();
-      return { seed: secretKey, words: recoveryWordsFromSeed(secretKey), qrPayload: recoveryQrPayload(secretKey) };
-    },
-    /** Uploads only the recovery public key; the seed is zeroed here. */
-    confirmRecoveryKey: async (draft: RecoveryKeyDraft) => {
+      const { secretKey, publicKey } = generateHistoryRecipientKeyPair();
       try {
-        await send(backendId, historyCommands.setRecovery(historyRecipientKeyPairFromSeed(draft.seed).publicKey));
+        return { publicKey, rid: ridOf(publicKey), words: recoveryWordsFromSeed(secretKey), qrPayload: recoveryQrPayload(secretKey) };
       } finally {
-        draft.seed.fill(0);
+        secretKey.fill(0);
       }
+    },
+    /** Uploads the draft's recovery public key. Safe to call again after a
+     * failure: it always sends the key the shown words belong to. */
+    confirmRecoveryKey: async (draft: RecoveryKeyDraft) => {
+      const result = await send(backendId, historyCommands.setRecovery(draft.publicKey));
       await refresh(backendId, false);
+      if (result.rid !== draft.rid) throw new Error(t('history.recoveryMismatch'));
     },
     requestGrant: async () => {
       const result = await send(backendId, historyCommands.requestGrant());
@@ -570,7 +598,7 @@ export function useHistoryEncryption({ backends, focusBackendId, sendCommand, on
       let last = start;
       try {
         const result = await rewrapHistoryKeys({
-          send: (frame) => send(backendId, frame), sourceSeed: seed, targetPublicKey, grantId: grant.grantId,
+          send: (frame) => send(backendId, frame), sourceSeed: seed, targetPublicKey, expectedTargetRid: grant.rid, grantId: grant.grantId,
           cursor: start.cursor, signal: controller.signal,
           onProgress: (progress) => {
             last = { processed: start.processed + progress.processed, added: start.added + progress.added, skipped: start.skipped + progress.skipped, ...(progress.cursor ? { cursor: progress.cursor } : {}) };
@@ -639,12 +667,18 @@ export function useHistoryEncryption({ backends, focusBackendId, sendCommand, on
   // up (one run per grant; a failed one retries on the next state read).
   useEffect(() => {
     for (const view of Object.values(views)) {
-      const siblings = live.current.siblingProfiles?.(view.backendId) ?? [];
-      const group = live.current.autoGrantDeviceIds?.(view.backendId);
-      const devices = siblings.length ? new Set([...(group ?? []), ...siblings.map((sibling) => sibling.deviceId)]) : group;
-      if (!devices?.size || !view.state || view.accessRevoked || !view.localRid) continue;
+      // A sibling's key is its own seed on this computer, so its rid is
+      // known locally (`localRid` of its view).
+      const siblingRids = new Map((live.current.siblingProfiles?.(view.backendId) ?? []).flatMap((sibling) => {
+        const rid = views[sibling.backendId]?.localRid;
+        return rid ? [[sibling.deviceId, rid] as const] : [];
+      }));
+      const group = live.current.autoGrantRecipients?.(view.backendId);
+      if ((!group?.size && !siblingRids.size) || !view.state || view.accessRevoked || !view.localRid) continue;
       for (const grant of view.state.grants) {
-        if (grant.status !== 'pending' || !grant.publicKey || grant.rid === view.localRid || !devices.has(grant.deviceId)) continue;
+        if (grant.status !== 'pending' || !grant.publicKey || grant.rid === view.localRid) continue;
+        // `authorizeGrant` also checks the key hashes to `grant.rid`.
+        if (trustedGrantRid(grant, group, siblingRids) !== grant.rid) continue;
         if (grantControllers.current.has(grant.grantId) || grantRunsRef.current[grant.grantId]?.error) continue;
         void actionsFor(view.backendId).authorizeGrant(grant).catch(() => undefined);
       }
@@ -675,11 +709,15 @@ export function useHistoryEncryption({ backends, focusBackendId, sendCommand, on
   });
 
   /** Fulfills `deviceId`'s pending grant with this device's key for
-   * `backendId` (adding a paired backend to a device group). */
-  const authorizeDevice = useCallback(async (backendId: string, deviceId: string) => {
+   * `backendId` (adding a paired backend to a device group). `historyKey`
+   * is the device's key in the verified roster: a grant for another key is
+   * refused. */
+  const authorizeDevice = useCallback(async (backendId: string, deviceId: string, historyKey: string) => {
     const grants = parseHistoryEncryptionState(await send(backendId, historyCommands.get())).grants;
     const grant = grants.find((item) => item.deviceId === deviceId && item.status === 'pending' && item.publicKey);
-    if (grant) await actionsFor(backendId).authorizeGrant(grant);
+    if (!grant) return;
+    if (trustedGrantRid(grant, new Map([[deviceId, historyKey]]), new Map()) !== grant.rid) throw new Error(t('history.grantKeyMismatch'));
+    await actionsFor(backendId).authorizeGrant(grant);
   }, [send]);
 
   /** Forgets everything held for a removed backend profile. */

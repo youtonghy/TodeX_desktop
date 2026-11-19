@@ -3188,6 +3188,8 @@ export const ja: Messages = {
   'history.grantPaused': '一時停止しました。後で再開できます',
   'history.grantFailed': '許可に失敗しました',
   'history.grantRecipientMissing': 'このデバイスの公開鍵が見つかりません。失効した可能性があります',
+  'history.grantKeyMismatch': 'このデバイスの公開鍵がグループまたはこのコンピューターの記録と一致しません。確認してから手動で承認してください',
+  'history.recoveryMismatch': 'バックエンドに登録された回復キーが表示中のキーと一致しないため、保存されませんでした。回復キーを作り直してください',
   'history.dismiss': '無視',
   'history.progress': '{processed} 個の鍵を処理、{added} 個を許可、{skipped} 個をスキップ',
   'history.importRecovery': '回復キーをインポート',

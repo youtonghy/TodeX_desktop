@@ -393,7 +393,7 @@ function withEntry<Value>(record: Record<string, Value>, key: string, value: Val
   return record[key] === value ? record : { ...record, [key]: value };
 }
 
-const NO_DEVICES: ReadonlySet<string> = new Set();
+const NO_DEVICES: ReadonlyMap<string, string> = new Map();
 
 export function useTodeXSession(openPanel: OpenPanelFn) {
   // Session state outside React: high-frequency conversation state and the
@@ -3294,7 +3294,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const historyEncryption = useHistoryEncryption({
     backends: stableHistoryLinks,
     // A device group's devices are let in once, history included.
-    autoGrantDeviceIds: (backendId) => meshGroupsRef.current?.autoGrantDeviceIds(backendId) ?? NO_DEVICES,
+    autoGrantRecipients: (backendId) => meshGroupsRef.current?.autoGrantRecipients(backendId) ?? NO_DEVICES,
     // This app's other profiles of the same daemon hold their own keys on
     // this computer: history moves between them without asking.
     siblingProfiles: (backendId) => sameDaemonProfiles(backendConnectionsRef.current, backendId).flatMap((profile) => {
@@ -4594,7 +4594,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     removeProfile: removeBackendConnection,
     approveCredentials: onDevicePairingApproved,
     history: {
-      authorizeDevice: async (profileId, deviceId) => { await historyEncryptionRef.current?.authorizeDevice(profileId, deviceId); },
+      authorizeDevice: async (profileId, deviceId, historyKey) => { await historyEncryptionRef.current?.authorizeDevice(profileId, deviceId, historyKey); },
     },
     deviceName: platform.productName,
     onNotice: (notice) => {

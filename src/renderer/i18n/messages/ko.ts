@@ -3188,6 +3188,8 @@ export const ko: Messages = {
   'history.grantPaused': '일시 중지했습니다. 나중에 계속할 수 있습니다',
   'history.grantFailed': '승인 실패',
   'history.grantRecipientMissing': '기기의 공개 키를 찾을 수 없습니다. 해지되었을 수 있습니다',
+  'history.grantKeyMismatch': '이 기기의 공개 키가 기기 그룹 또는 이 컴퓨터에 기록된 키와 일치하지 않습니다. 확인한 뒤 직접 승인하세요',
+  'history.recoveryMismatch': '백엔드에 등록된 복구 키가 표시된 키와 달라 저장되지 않았습니다. 복구 키를 다시 만드세요',
   'history.dismiss': '무시',
   'history.progress': '키 {processed}개 처리, {added}개 승인, {skipped}개 건너뜀',
   'history.importRecovery': '복구 키 가져오기',

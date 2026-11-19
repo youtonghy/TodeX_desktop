@@ -45,8 +45,6 @@ export function HistoryEncryptionPanel({ history, autoStartRecovery = false }: P
   const sectionRef = useRef<HTMLElement>(null);
   const autoStarted = useRef(false);
 
-  // A recovery key never outlives the dialog that shows it.
-  useEffect(() => () => { step?.draft.seed.fill(0); }, [step]);
   useEffect(() => { setStep(null); setConfirm(null); setImportProgress(null); setRequestedGrant(''); }, [view.backendId]);
   // Updates are pushed while connected; opening the panel still re-reads the
   // state in case one was missed.

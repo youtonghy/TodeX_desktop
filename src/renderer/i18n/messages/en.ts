@@ -3188,6 +3188,8 @@ export const en: Messages = {
   'history.grantPaused': 'Paused; you can resume later',
   'history.grantFailed': 'Authorization failed',
   'history.grantRecipientMissing': 'The device\'s public key was not found; it may have been revoked',
+  'history.grantKeyMismatch': 'The device\'s public key does not match the key its group or this computer holds for it; authorize it manually after checking',
+  'history.recoveryMismatch': 'The backend registered a different recovery key than the one shown; it was not saved. Create a new recovery key',
   'history.dismiss': 'Dismiss',
   'history.progress': '{processed} keys processed, {added} granted, {skipped} skipped',
   'history.importRecovery': 'Import recovery key',

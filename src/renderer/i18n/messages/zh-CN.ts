@@ -3188,6 +3188,8 @@ export const zhCN = {
   'history.grantPaused': '授权已暂停，可稍后继续',
   'history.grantFailed': '授权失败',
   'history.grantRecipientMissing': '找不到该设备的公钥，它可能已被吊销',
+  'history.grantKeyMismatch': '该设备的公钥与设备组或本机记录的不一致，请核实后手动授权',
+  'history.recoveryMismatch': '后端登记的恢复密钥与显示的不一致，未保存。请重新创建恢复密钥',
   'history.dismiss': '忽略',
   'history.progress': '已处理 {processed} 个密钥，新增授权 {added} 个，跳过 {skipped} 个',
   'history.importRecovery': '导入恢复密钥',
