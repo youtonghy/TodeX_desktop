@@ -121,6 +121,9 @@ function scanContainerSockets(): ContainerInstance[] {
   return found;
 }
 
+/** How long the settings page waits for one backend's local admin status. */
+const ADMIN_STATUS_TIMEOUT_MS = 4000;
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -411,7 +414,7 @@ export class LocalBackendManager {
   private async adminStatus(socketPath: string | null): Promise<{ admin: LocalAdminStatus | null; adminError: string | null }> {
     if (!socketPath) return { admin: null, adminError: null };
     try {
-      return { admin: await socketJson<LocalAdminStatus>(socketPath, 'GET', `${LOCAL_ADMIN_PREFIX}/status`, undefined, 4000), adminError: null };
+      return { admin: await socketJson<LocalAdminStatus>(socketPath, 'GET', `${LOCAL_ADMIN_PREFIX}/status`, undefined, ADMIN_STATUS_TIMEOUT_MS), adminError: null };
     } catch (error) {
       return { admin: null, adminError: errorMessage(error) };
     }
@@ -445,11 +448,13 @@ export class LocalBackendManager {
     }
     await this.refreshInstances();
     this.dockerContainers = await dockerInstances();
-    const containers: ContainerState[] = [];
-    for (const item of this.containers.values()) {
+    // Probed together: a paused container's socket never answers, so it is
+    // skipped, and one slow container does not hold up the rest.
+    const containers: ContainerState[] = await Promise.all([...this.containers.values()].map(async (item) => {
       const docker = this.dockerContainers.find((entry) => entry.instance === item.name);
-      containers.push({ id: item.id, name: item.name, socketPath: item.socketPath, container: docker?.container ?? null, ...await this.adminStatus(item.socketPath) });
-    }
+      const status = docker?.paused ? { admin: null, adminError: 'the container is paused' } : await this.adminStatus(item.socketPath);
+      return { id: item.id, name: item.name, socketPath: item.socketPath, container: docker?.container ?? null, ...status };
+    }));
     for (const docker of this.dockerContainers) {
       if (containers.some((entry) => entry.name === docker.instance)) continue;
       containers.push({ id: `docker-${docker.container}`, name: docker.instance, socketPath: null, container: docker.container, admin: null, adminError: null });

@@ -199,3 +199,12 @@ test('an unsigned old release is accepted only as the exact matching version', (
   assert.equal(signatureRequired('2.3.7', '2.3.7'), true);
   assert.equal(signatureRequired('3.0.0', null), true);
 });
+
+test('docker ps tells paused TodeX containers apart', async () => {
+  const { parseDockerInstances } = await import('../src/main/localBackend/cli.ts');
+  const stdout = 'todex-a\ta\t0.0.0.0:7345->7345/tcp\trunning\ntodex-b\t\t\tpaused\n';
+  assert.deepEqual(parseDockerInstances(stdout), [
+    { container: 'todex-a', instance: 'a', ports: '0.0.0.0:7345->7345/tcp', paused: false },
+    { container: 'todex-b', instance: 'todex-b', ports: '', paused: true },
+  ]);
+});

@@ -121,19 +121,34 @@ export function dockerPairApprove(container: string, verificationCode: string): 
   return runBackend('docker', ['exec', '-u', 'todex', container, 'todex-agentd', 'pair', 'approve', verificationCode], 30_000);
 }
 
-export type DockerInstance = { container: string; instance: string; ports: string };
+export type DockerInstance = {
+  container: string;
+  instance: string;
+  ports: string;
+  /** Frozen (`docker pause`, e.g. idle freezing): its socket stays but does
+   * not answer. */
+  paused: boolean;
+};
 
-/** Running TodeX containers (`io.todex.instance` label); empty when docker is missing. */
+const DOCKER_PS_FORMAT = '{{.Names}}\t{{.Label "io.todex.instance"}}\t{{.Ports}}\t{{.State}}';
+
+/** Running (or paused) TodeX containers (`io.todex.instance` label); empty when docker is missing. */
 export async function dockerInstances(): Promise<DockerInstance[]> {
   let stdout: string;
   try {
-    stdout = await runBackend('docker', ['ps', '--filter', 'label=io.todex.instance', '--format', '{{.Names}}\t{{.Label "io.todex.instance"}}\t{{.Ports}}'], 10_000);
+    stdout = await runBackend('docker', ['ps', '--filter', 'label=io.todex.instance', '--format', DOCKER_PS_FORMAT], 10_000);
   } catch {
     return [];
   }
-  return stdout.split(/\r?\n/).map((line) => line.split('\t')).filter((parts) => parts[0]).map(([container, instance, ports]) => ({
+  return parseDockerInstances(stdout);
+}
+
+/** `docker ps` output in `DOCKER_PS_FORMAT`. */
+export function parseDockerInstances(stdout: string): DockerInstance[] {
+  return stdout.split(/\r?\n/).map((line) => line.split('\t')).filter((parts) => parts[0]).map(([container, instance, ports, state]) => ({
     container,
     instance: instance || container,
     ports: ports ?? '',
+    paused: state?.trim() === 'paused',
   }));
 }
