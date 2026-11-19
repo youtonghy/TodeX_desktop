@@ -344,6 +344,8 @@ function flushStore(): void {
   try {
     writeStoreFile(storePath(), JSON.stringify(storeCache));
   } catch (error) {
+    // Still unsaved: the next write (or quitting) tries again.
+    storeDirty = true;
     debugLog('error', 'store.flush.error', { error });
   }
 }
@@ -360,6 +362,33 @@ function scheduleStoreWrite(): void {
 function writeStore(value: StoreShape): void {
   storeCache = value;
   scheduleStoreWrite();
+}
+
+/** Sets (or, with `undefined`, removes) `key` and writes the store file
+ * before returning, pending debounced changes included; on failure the key
+ * is put back and the error thrown. For values a caller acts on right away:
+ * a history key is registered with a backend as soon as it is saved, and
+ * must still be here after a crash. */
+function writeStoreKeyNow(key: string, value: unknown): void {
+  const store = readStore();
+  const had = Object.hasOwn(store, key);
+  const previous = store[key];
+  if (value === undefined) delete store[key];
+  else store[key] = value;
+  if (storeWriteTimer) {
+    clearTimeout(storeWriteTimer);
+    storeWriteTimer = null;
+  }
+  try {
+    writeStoreFile(storePath(), JSON.stringify(store));
+    storeDirty = false;
+  } catch (error) {
+    if (had) store[key] = previous;
+    else delete store[key];
+    // Other pending changes still need their write.
+    scheduleStoreWrite();
+    throw error;
+  }
 }
 
 function initializeDebugLogging(): void {
@@ -855,18 +884,15 @@ app.whenReady().then(() => {
     if (value !== null && value !== undefined && typeof value !== 'string') {
       throw new Error('secureStore values must be strings');
     }
+    // Resolves once the change is on disk (see writeStoreKeyNow).
     return enqueueSecureStore(storeKey, async () => {
       if (value === null || value === undefined) {
-        const next = readStore();
-        delete next[storeKey];
-        writeStore(next);
+        writeStoreKeyNow(storeKey, undefined);
         return;
       }
       await requireSecureStorage();
       const sealed = (await safeStorage.encryptStringAsync(value)).toString('base64');
-      const next = readStore();
-      next[storeKey] = sealed;
-      writeStore(next);
+      writeStoreKeyNow(storeKey, sealed);
     });
   });
 

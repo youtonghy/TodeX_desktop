@@ -60,6 +60,31 @@ test('opens the window with the renderer and an isolated profile', async () => {
   expect(userData.startsWith(sandbox)).toBe(true);
 });
 
+test('a secureStore value is on disk when set resolves', async () => {
+  const userData = await app.evaluate(({ app }) => app.getPath('userData'));
+  const result = await page.evaluate(async () => {
+    const available = await window.todexDesktop.secureStore.available();
+    try {
+      await window.todexDesktop.secureStore.set('e2e.durable', 'sealed-value');
+      return { available, stored: true };
+    } catch {
+      return { available, stored: false };
+    }
+  });
+  // Read right away: no debounce window may pass before the file has it.
+  const file = JSON.parse(readFileSync(join(userData, 'todex-desktop-store.json'), 'utf8')) as Record<string, unknown>;
+  expect(result.stored).toBe(result.available);
+  if (result.available) {
+    expect(typeof file['secure:e2e.durable']).toBe('string');
+    expect(JSON.stringify(file)).not.toContain('sealed-value');
+    await page.evaluate(() => window.todexDesktop.secureStore.set('e2e.durable', null));
+    const cleared = JSON.parse(readFileSync(join(userData, 'todex-desktop-store.json'), 'utf8')) as Record<string, unknown>;
+    expect('secure:e2e.durable' in cleared).toBe(false);
+  } else {
+    expect('secure:e2e.durable' in file).toBe(false);
+  }
+});
+
 test('exposes a frozen preload bridge whose calls reach main', async () => {
   const bridge = await page.evaluate(async () => ({
     frozen: Object.isFrozen(window.todexDesktop),
