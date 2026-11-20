@@ -2630,6 +2630,8 @@ export const ko: Messages = {
   'ap.grokModelHint': '선택 사항이며 [models].default에 기록됩니다 (예: grok-build)',
 
   // ssh
+  'sshSettings.acceptNewHostKeys': '첫 연결 시 호스트 지문 자동 신뢰',
+  'sshSettings.acceptNewHostKeysHint': '새 호스트의 지문은 확인 없이 known_hosts에 기록됩니다. 기록된 지문이 바뀌면 여전히 연결을 거부합니다. 끄면 확인하지 않은 호스트는 먼저 터미널에서 확인해야 합니다.',
   'sshSettings.keepAlive': '연결 유지',
   'sshSettings.keepAliveHint': '서버에 주기적으로 확인 신호를 보냅니다. 네트워크가 끊기면 약 {seconds}초 안에 끊어진 공유 연결을 감지해 닫고, 다음 연결 때 다시 만듭니다. 이보다 오래 끊기면 열린 세션도 종료됩니다.',
   'sshSettings.interval': '확인 간격(초)',

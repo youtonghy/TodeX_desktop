@@ -2630,6 +2630,8 @@ export const zhCN = {
   'ap.grokModelHint': '可选，写入 [models].default，如 grok-build',
 
   // ssh
+  'sshSettings.acceptNewHostKeys': '首次连接时自动信任主机指纹',
+  'sshSettings.acceptNewHostKeysHint': '新主机的指纹会自动记入 known_hosts，无需手动确认；已记录的指纹发生变化时仍会拒绝连接。关闭后，未确认过的主机需先在终端中手动确认。',
   'sshSettings.keepAlive': '连接保活',
   'sshSettings.keepAliveHint': '定期向服务器发送探测。网络断开后约 {seconds} 秒内发现并关闭失效的共享连接，下次连接时自动重建；网络中断超过这个时间时会话也会断开。',
   'sshSettings.interval': '探测间隔（秒）',

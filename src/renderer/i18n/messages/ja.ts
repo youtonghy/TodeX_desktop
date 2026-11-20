@@ -2630,6 +2630,8 @@ export const ja: Messages = {
   'ap.grokModelHint': '任意。[models].default に書き込まれます（例: grok-build）',
 
   // ssh
+  'sshSettings.acceptNewHostKeys': '初回接続時にホストのフィンガープリントを自動で信頼',
+  'sshSettings.acceptNewHostKeysHint': '新しいホストのフィンガープリントは確認なしで known_hosts に記録されます。記録済みのフィンガープリントが変わった場合は引き続き接続を拒否します。オフにすると、未確認のホストは先にターミナルで確認する必要があります。',
   'sshSettings.keepAlive': 'キープアライブ',
   'sshSettings.keepAliveHint': 'サーバーへ定期的にプローブを送ります。ネットワークが切れると約 {seconds} 秒以内に無効な共有接続を検出して閉じ、次回の接続時に自動で張り直します。これより長い切断ではセッションも切断されます。',
   'sshSettings.interval': 'プローブ間隔（秒）',

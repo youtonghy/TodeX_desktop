@@ -124,6 +124,20 @@ function BackendSshSettings({ backend }: { backend: PanelBackend }) {
 
   return (
     <div className="flex flex-col gap-6">
+      {/* Absent on backends that predate the setting (they check strictly). */}
+      {settings?.acceptNewHostKeys !== undefined ? (
+        <SettingsCard>
+          <SettingsRow label={t('sshSettings.acceptNewHostKeys')} description={t('sshSettings.acceptNewHostKeysHint')}>
+            <Switch
+              size="sm"
+              aria-label={t('sshSettings.acceptNewHostKeys')}
+              isSelected={settings.acceptNewHostKeys}
+              isDisabled={disabled}
+              onChange={(selected) => { void save({ ...settings, acceptNewHostKeys: selected }, { keepDraft: true }); }}
+            />
+          </SettingsRow>
+        </SettingsCard>
+      ) : null}
       <SettingsCard>
         <SettingsRow label={t('sshSettings.keepAlive')} description={detectSeconds === undefined ? undefined : t('sshSettings.keepAliveHint', { seconds: detectSeconds })}>
           <Switch

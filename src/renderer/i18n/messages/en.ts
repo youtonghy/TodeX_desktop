@@ -2630,6 +2630,8 @@ export const en: Messages = {
   'ap.grokModelHint': 'Optional; written to [models].default, e.g. grok-build',
 
   // ssh
+  'sshSettings.acceptNewHostKeys': 'Trust host fingerprints on first connection',
+  'sshSettings.acceptNewHostKeysHint': 'A new host\'s fingerprint is recorded in known_hosts without asking. A recorded fingerprint that changes is still refused. When off, hosts you have not confirmed must be confirmed in a terminal first.',
   'sshSettings.keepAlive': 'Keepalive',
   'sshSettings.keepAliveHint': 'Probes the server regularly. After the network drops, the dead shared connection is noticed and closed within about {seconds} seconds and rebuilt on the next connection; an outage longer than that also ends open sessions.',
   'sshSettings.interval': 'Probe interval (seconds)',

@@ -614,6 +614,8 @@ function demoDelete(ids: string[]) {
 let agentDesktop = { ...fixtures.demoAgentDesktop };
 /** `/v2/ssh/agent-approval`: on and per host, the daemon's default. */
 let agentSshApproval: { enabled: boolean; scope: 'host' | 'command' } = { enabled: true, scope: 'host' };
+/** `/v2/ssh/settings`: the daemon's defaults. */
+let sshConnectionSettings = { serverAliveEnabled: false, serverAliveInterval: 15, serverAliveCountMax: 3, acceptNewHostKeys: true };
 
 // Agent Calling: settings as the daemon reports them; listener changes only
 // take effect "after a restart", so they leave `listening`/`baseUrl` alone.
@@ -977,6 +979,8 @@ function route(request: SecureRequest): SecureResponse {
         return json(fixtures.demoSshKeys);
       case '/v2/ssh/agent-approval':
         return json(agentSshApproval);
+      case '/v2/ssh/settings':
+        return json(sshConnectionSettings);
       case '/v2/agent-browser/profiles':
         return json({ profiles: [{ id: 'default', name: '默认资料', createdAt: Date.now() }], workspaces: {} });
       case '/v2/git/workspace':
@@ -1131,6 +1135,16 @@ function route(request: SecureRequest): SecureResponse {
     const target = journals.get(decodeURIComponent(cancel[1]));
     if (!target) return notFound(method, path);
     return json({ conversationId: target.manifest.id, cancelled: cancelDemoTurn(target, typeof body.turnId === 'string' ? body.turnId : undefined), turnId: body.turnId ?? null });
+  }
+  if (path === '/v2/ssh/settings' && method === 'PUT') {
+    sshConnectionSettings = {
+      ...sshConnectionSettings,
+      ...(typeof body.serverAliveEnabled === 'boolean' ? { serverAliveEnabled: body.serverAliveEnabled } : {}),
+      ...(typeof body.serverAliveInterval === 'number' ? { serverAliveInterval: body.serverAliveInterval } : {}),
+      ...(typeof body.serverAliveCountMax === 'number' ? { serverAliveCountMax: body.serverAliveCountMax } : {}),
+      acceptNewHostKeys: body.acceptNewHostKeys !== false,
+    };
+    return json(sshConnectionSettings);
   }
   if (path === '/v2/ssh/agent-approval' && method === 'PUT') {
     if (typeof body.enabled !== 'boolean' || (body.scope !== 'host' && body.scope !== 'command')) {

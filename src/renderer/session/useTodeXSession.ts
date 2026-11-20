@@ -2937,8 +2937,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     const conversation = stores.conversations.get().find((item) => terminalIdForConversation(item.id) === terminalId);
     const conversationId = conversation?.id ?? activeConversationRef.current;
 
-    // ssh exits with 255 when the saved password is rejected or the host key
-    // is not yet confirmed (askpass never answers that); sign in at the prompt.
+    // ssh exits with 255 when the saved password is rejected, or when the host
+    // key is unknown and the backend checks host keys strictly (askpass never
+    // answers that prompt); sign in at the interactive prompt instead.
     const known = terminalByIdRef.current[terminalId];
     if (
       event.type === 'terminal.exited'
