@@ -4,278 +4,193 @@
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="src/renderer/assets/brand/t-icon-dark-beige.png" />
     <source media="(prefers-color-scheme: light)" srcset="src/renderer/assets/brand/t-icon-light.png" />
-    <img src="src/renderer/assets/brand/t-icon-dark-beige.png" alt="TodeX" width="160" height="160" />
+    <img src="src/renderer/assets/brand/t-icon-dark-beige.png" alt="TodeX" width="120" height="120" />
   </picture>
 </p>
 
 <p align="center">
-  <strong>Native macOS desktop client for <code>todex-agentd</code> built with Electron, React 19, and BoardUI.</strong>
+  <strong>One desktop workspace for every coding agent you run: Codex, Claude Code, Pi, Grok Build, OpenCode and more, on this computer or on any backend you pair with.</strong>
 </p>
 
 <p align="center">
-  <a href="README.md">English</a> •
-  <a href="README.zh-CN.md">简体中文</a>
+  <a href="README.md">English</a> · <a href="README.zh-CN.md">简体中文</a>
 </p>
 
----
+![TodeX Desktop home](docs/screenshots/home-en.png)
 
-## Overview
+TodeX Desktop is the desktop client of TodeX. It connects to one or more TodeX backends (`todex-agentd`), which run the agent CLIs on their machine, and gives you one place to start conversations, follow agents live, approve their actions, review their changes and manage the machines they work on. It runs on macOS, Windows and Linux, in light and dark themes, in English, 简体中文, 日本語 and 한국어.
 
-**TodeX Desktop** is a desktop client for [`todex-agentd`](../TodeX_backend), delivering a coding workspace environment on macOS.
+## Contents
 
-Built with **Electron 44**, **React 19**, **Vite 7**, **Tailwind CSS v4**, and **BoardUI**, TodeX Desktop features a 3-pane layout optimized for wide screens. It shares the transport and protocol library (`@todex/protocol`, from [`TodeX_protocol`](../TodeX_protocol)) with the web client, while leveraging native desktop capabilities like local file pickers and multi-tab developer workbenches.
+- [Home at a glance](#home-at-a-glance)
+- [Conversations](#conversations)
+- [Models, reasoning and work modes](#models-reasoning-and-work-modes)
+- [Plans and the task board](#plans-and-the-task-board)
+- [Private and scheduled conversations](#private-and-scheduled-conversations)
+- [Workbench, terminal and SSH](#workbench-terminal-and-ssh)
+- [Agent desktop tools: browser and Computer Use](#agent-desktop-tools-browser-and-computer-use)
+- [Backends, groups and config sync](#backends-groups-and-config-sync)
+- [Agent CLI management](#agent-cli-management)
+- [Agent Calling](#agent-calling)
+- [Usage profile](#usage-profile)
+- [Local backend and TodeX containers](#local-backend-and-todex-containers)
+- [Security and privacy](#security-and-privacy)
+- [Install and get started](#install-and-get-started)
+- [Development](#development)
 
----
+## Home at a glance
 
-## Key Features
+The home page shows what needs you right now: conversations that are running, conversations waiting for your reply or approval, today's conversations and token usage, and each agent's plan limits (for example Claude Code's 5-hour and 7-day windows) with their reset times. **Customize layout** adds, removes and rearranges the cards.
 
-- **Desktop 3-Pane Interface**:
-  - **Left Sidebar**: Workspace directory explorer, active conversation history, agent switcher badges, thread lifecycle actions (New, Rename, Fork, Delete), and quick settings.
-  - **Center Chat Panel**: Full conversation timeline with streaming Markdown rendering, Shiki syntax highlighting, KaTeX math formulas, interactive approval cards (commands, file diffs, tool calls), and prompt input with searchable model selection (case-insensitive name matching), draggable reasoning effort, Codex Fast mode, a two-level `@` reference menu (pick a type, then search: `@file:`, `@folder:`, `@chat:` to attach another conversation of the workspace as Markdown, `@skill:`, `@mcp:`, `@ssh:` for SSH hosts with agent access, `@app:` for apps on the backend computer for Computer Use), `/` slash commands, and `#` skill/MCP suggestions. Reasoning and tool details are lazily mounted only after expansion, while final answers remain isolated from context and execution events.
-  - **Right Workbench Panel**: Multi-tab workspace drawer offering:
-    - **Slash Commands**: Reference of provider commands.
-    - **Git Diff**: Live inspection of working directory changes.
-    - **Terminal**: Embedded xterm.js PTY session with direct keyboard input, ANSI output, and automatic row/column synchronization.
-    - **Capabilities**: Real-time read-only catalog of active Skills and MCP servers.
-    - **Browser**: Loopback pages and workspace HTML files in a native view (own `persist:todex-preview` partition), with an element picker that adds a reference to the chat draft. `localhost` means the backend's computer: every loopback request is forwarded through the backend's `POST /v2/browser/proxy` (over the encrypted transport), so a dev server on a remote backend host opens under its own origin. WebSockets (dev-server hot reload) are not forwarded yet; use Refresh.
-    - **Agent browser**: When agent desktop tools are on, a live view of the browser tab the agent drives for the current conversation on the backend's computer (streamed over the session socket), with its latest step and a Stop button.
-  - **Terminal view (sidebar)**: Manage the backend host's SSH hosts (auto-read from `~/.ssh/config`, manual add/import, connection test, per-host Agent access, plus a built-in `Local` host that opens a login terminal on the backend machine over `ssh localhost` on Linux/macOS backends), SSH keys (list, import, generate) and FTP sites; open SSH terminals and SFTP/FTP file browsers as Workbench tabs.
-    - **Experiments**: Feature toggles and developer diagnostics.
-- **Pairing & Connection Management**:
-  - Inspect the active Backend's Codex, Pi, Claude Code, Grok Build, and ACP CLI inventory, compare installed and latest versions, install missing CLIs in one click, and start managed CLI upgrades.
-  - Export and import one agent's provider accounts as a JSON file to sync them between hosts (the file holds keys in plain text).
-  - Connect via direct host/port URL; requests are signed with the per-device key enrolled through device verification.
-  - [Device verification](docs/device-verification.md) (pairing v3, commit then reveal): enter only the backend address, compare the random code (and the transport key fingerprint) with the backend TUI and approve once. The code also authenticates the backend's transport public key, so approval enrolls this device's signing key and pins that key in one step, then connects.
-  - No manual key entry, paste or QR import: Settings shows the pinned protocol, key fingerprint and verified state read-only, with a **Re-pair** action. Changing the address clears the device key and the pin; re-pairing the same backend keeps the device key.
-  - **Parallel backends**: Settings › Backend connections manages every backend (add, remove); opening one shows its connection, device verification and history encryption. Each backend stays connected and serves its own workspaces, so switching workspaces never disconnects or reconnects. New conversations outside any workspace (None) start on the backend chosen there, by default the first one added.
-  - Clear connection diagnostic states (categorizes connection errors such as unstarted backend, port mismatch, token error, deprecated `/v1` endpoints, or handshake issues).
-- **Native OS Integration**:
-  - Secure Electron architecture: Preload bridge with isolated context (`contextBridge`) and `nodeIntegration: false`.
-  - Native file and directory chooser dialogs for loopback local workspaces.
-  - Electron `userData` file persistence (`todex.desktop.*`).
-- **Agent desktop tools** (`todex_desktop` MCP, switched on per backend in Settings; the Settings overview keeps the switch and one entry per tool, each opening the tool's own page):
-  - The **agent browser** (`browser_*`) runs in the backend, as a Chromium window on the computer the backend runs on (so `localhost` is that computer); this app only watches it live in the Workbench. Any paired device approves a conversation's first use. Top-level pages are limited to loopback; downloads and site permission prompts are refused; typing into a password field asks first.
-  - The agent browser's settings page shows the backend's Chromium (download it there) and its per-workspace browser profiles (switch, create, delete with their cookies, storage and cache). Data left from when the browser ran in this app can be cleared from the Settings overview.
-  - **Computer Use** (`computer_*`) runs in the backend on the computer it runs on, not here: this app shows a live view of that computer above the composer (the latest screenshot when the live frame is unavailable) with Stop, and its settings page shows the host's switch and Screen Recording / Accessibility status and asks for them there. Each conversation's first use is confirmed by someone at that computer. The same page picks the engine: the built-in one, or the optional [agent-desktop](https://github.com/vercel-labs/agent-desktop) engine (experimental), which the backend downloads and which adds set value, select, toggle, expand and scroll-into-view actions; safety checks, screenshots and typing stay the same.
-- **Transport Encryption** ([transport v2](docs/device-verification.md#传输加密transport-v2)):
-  - **X25519** or **ML-KEM-768** (post-quantum) key agreement against the backend key pinned at pairing, via the `@noble` cryptography suite; every session key mixes in fresh server randomness.
-  - With a pinned key every call is encrypted, loopback included: the WebSocket uses `tv=2` binary frames and every REST request goes through the `POST /v2/sealed` tunnel. Only `/health`, `/v2/transport-policy` and device verification are called directly.
-  - Without a pinned key only a loopback backend can be reached (in plaintext); a remote address is refused with a prompt to pair with encryption. A changed backend protocol asks for re-pairing instead of downgrading, and a key saved without device-pairing verification (older manual imports) is refused on every host, loopback included, until the backend is paired again.
-- **End-to-end encrypted history** ([history encryption](docs/device-verification.md#历史记录加密)): conversation history is always encrypted; there is no switch. Each device registers its own history key on first connect, and Settings warns until a recovery key is set. Conversations stored before encryption are read-only (view, export, archive, delete).
+| Light | Dark |
+| :---: | :---: |
+| ![Home, light](docs/screenshots/home-en.png) | ![Home, dark](docs/screenshots/home-dark-en.png) |
 
----
+## Conversations
 
-## Architecture & Relation to Mobile App
+The sidebar groups workspaces into folders and lists their conversations with live status (running, waiting, planning, done). Open one to follow the agent as it works:
 
-```
-+-----------------------------------------------------------------------------------+
-|                                  TodeX Desktop                                    |
-|                                                                                   |
-|  +-----------------------------------------------------------------------------+  |
-|  |                            Electron Main & Preload                          |  |
-|  |       (IPC Handlers, Native Dialogs, Safe Storage, Window Management)       |  |
-|  +-----------------------------------------------------------------------------+  |
-|                                         |                                         |
-|  +-----------------------------------------------------------------------------+  |
-|  |                             React 19 Renderer                               |  |
-|  |  +-------------------+  +------------------------+  +--------------------+  |  |
-|  |  |    Left Sidebar   |  |    Center Chat Panel   |  |   Right Workbench  |  |  |
-|  |  |  (Workspaces &    |  |  (Timeline, Streaming, |  |  (Git Diff, PTY,   |  |  |
-|  |  |   Conversations)  |  |   Approvals, Inputs)   |  |   Skills, MCPs)    |  |  |
-|  |  +-------------------+  +------------------------+  +--------------------+  |  |
-|  |  +-----------------------------------------------------------------------+  |  |
-|  |  |                 BoardUI components (source-owned)                     |  |  |
-|  |  +-----------------------------------------------------------------------+  |  |
-|  +-----------------------------------------------------------------------------+  |
-|                                         |                                         |
-|  +-----------------------------------------------------------------------------+  |
-|  |                @todex/protocol (Shared, from TodeX_protocol)               |  |
-|  |         (v2 Client, Transport, Heartbeat, Crypto Sessions, Probes)          |  |
-|  +-----------------------------------------------------------------------------+  |
-+-----------------------------------------------------------------------------------+
-                                          |
-                               WebSocket / REST /v2
-                                          v
-+-----------------------------------------------------------------------------------+
-|                             todex-agentd (Backend)                                |
-+-----------------------------------------------------------------------------------+
-```
+- Streaming answers with Markdown, highlighted code and math. Each run's steps fold into one line ("Edited 1 file · Ran 1 command") that expands to the commands, file diffs and tool calls.
+- Approval cards for commands, file edits and tool calls, answered once or for the whole conversation.
+- The header shows the agent, Git branch, worktree and the size of the change.
+- Rename, pin, fork (also from any reply), archive and delete conversations.
+- The composer takes images and files by paste or drag and drop, and has three quick menus: `@` references a file, folder, another conversation, a skill, an MCP server, an SSH host or an app for Computer Use; `/` runs the agent's slash commands; `#` suggests skills and MCP servers.
+- Messages you send while the agent is busy wait in a queue. Conversations keep running when you close the window, because the backend runs them, and every paired device sees the same state.
 
-### Desktop vs Mobile Comparison
+| Light | Dark |
+| :---: | :---: |
+| ![Conversation, light](docs/screenshots/conversation-en.png) | ![Conversation, dark](docs/screenshots/conversation-dark-en.png) |
 
-| Dimension | Mobile Client (`Todex_mobile`) | Desktop Client (`TodeX_desktop`) |
+While an agent works, its plan checklist and its goal stay above the composer, so you can see how far it has come without scrolling.
+
+| Plan steps of a running turn | Agent goal |
+| :---: | :---: |
+| ![Plan steps](docs/screenshots/plan-steps-en.png) | ![Goal](docs/screenshots/goal-en.png) |
+
+## Models, reasoning and work modes
+
+Pick the model from a searchable list and drag the reasoning effort; Codex also offers Fast mode. Each conversation has a work mode: **Implement**, **Plan** (the agent proposes a plan for you to review first) or, for Claude Code, **Smart**: plan with one model, then, once you approve the plan, switch to an execution model that runs with auto-approval.
+
+| Model and reasoning effort | Work modes |
+| :---: | :---: |
+| ![Model picker](docs/screenshots/model-card-en.png) | ![Work modes](docs/screenshots/work-mode-en.png) |
+
+## Plans and the task board
+
+**Plan** is a task board per workspace: tasks with priority, due date and status, pinned to the conversations that work on them. Switch between the board and a calendar.
+
+| Board | Calendar |
+| :---: | :---: |
+| ![Task board](docs/screenshots/task-board-en.png) | ![Plan calendar](docs/screenshots/plan-calendar-en.png) |
+
+## Private and scheduled conversations
+
+A **private conversation** keeps its content only in the backend's memory: nothing goes into history, and it is gone after a restart (changes the agent makes to workspace files are kept as usual). A **scheduled conversation** sends its prompt at the time you pick, even while the app is closed.
+
+![Private conversation](docs/screenshots/private-conversation-en.png)
+
+## Workbench, terminal and SSH
+
+The workbench opens beside the conversation as tabs: the Git diff of the working tree, terminals on the backend machine, workspace files, a browser for local dev servers (with an element picker that adds a reference to your message), and live views of what the agent is doing.
+
+The **Terminal** page manages the backend machine's SSH hosts (read from `~/.ssh/config`, added by hand or imported, plus a built-in `Local` host), SSH keys (list, import, generate), FTP sites, open connections and port forwarding. Hosts open as terminals or SFTP/FTP file browsers in the workbench. Turn on **Agent access** for a host to let agents run commands there, approved per conversation or per command.
+
+![Terminal hosts](docs/screenshots/terminal-hosts-en.png)
+
+## Agent desktop tools: browser and Computer Use
+
+Turn on agent desktop tools for a backend and agents can work on that backend's computer:
+
+- **Agent browser**: the agent drives a real browser tab there (so `localhost` is that computer), with its own browser profile per workspace. You watch it live; any paired device approves a conversation's first use, and sites beyond the local machine need approval, once or always.
+- **Computer Use**: the agent sees and operates that computer's apps. Someone at that computer confirms each conversation's first use, and a live view with a **Stop** button appears in the app, as a workbench tab or above the composer.
+
+| Live view of Computer Use | Settings |
+| :---: | :---: |
+| ![Computer Use live view](docs/screenshots/computer-live-en.png) | ![Agent desktop tools settings](docs/screenshots/settings-agent-desktop-en.png) |
+
+## Backends, groups and config sync
+
+TodeX Desktop stays connected to every backend you add, so switching workspaces never reconnects. Pairing a backend takes only its address and a code you compare with the backend before approving; there are no tokens or keys to copy.
+
+**Backend groups** join devices and backends into one group: approve a new device by comparing its code, invite one with a QR code, and reach a backend through another member of the group when its own address doesn't answer (relayed traffic stays end-to-end encrypted). **Config sync** compares two backends side by side and copies the agent accounts, settings, MCP servers and skills you tick; nothing on the target is deleted and secrets stay hidden.
+
+| Backend connections | Backend groups |
+| :---: | :---: |
+| ![Backend connections](docs/screenshots/settings-backends-en.png) | ![Backend groups](docs/screenshots/settings-mesh-en.png) |
+
+![Config sync](docs/screenshots/config-sync-en.png)
+
+## Agent CLI management
+
+See every agent CLI on a backend with its installed and latest version, update it in one click, and install the ones that are missing. Switch between an agent's provider accounts, and export or import them as a file to move them between machines (the file holds keys in plain text). Shared MCP servers, skills and `AGENTS.md` presets live on the same page.
+
+![CLI management](docs/screenshots/settings-cli-en.png)
+
+## Agent Calling
+
+Agents can call each other: an agent in a conversation hands a task to another agent and model in a child conversation of the same workspace. You choose which agents and models can be called and how their permission requests are answered. The same scope applies to scripts and services that call agents through the backend's external API with an API key, which you also create here.
+
+![Agent Calling](docs/screenshots/settings-agent-calling-en.png)
+
+## Usage profile
+
+The profile page adds up token usage per agent and model: input, output, cache reads and writes, cache hit rate, an activity heatmap, active hours and active conversations per month.
+
+![Profile](docs/screenshots/profile-en.png)
+
+## Local backend and TodeX containers
+
+You don't need a terminal to run a backend:
+
+- **Settings › Local backend** downloads the backend release that matches this app, verifies it and starts it on this computer. The app talks to it over a local socket and approves its own pairing. The page mirrors the backend's console: listen address and port, workspace roots, start at login, the pairing QR code, and approving or revoking devices. You can turn the network listener off so that only this app can reach the backend.
+- **Settings › TodeX Container** runs agents in [TodeX containers](https://github.com/youtonghy/TodeX_container) on this machine's Docker: check the Docker setup; create, start, stop, upgrade and delete containers; and create a **container workspace** from a host folder, with setup commands (suggested from the folder's lockfiles) and optional copying of agent config from another backend. Idle containers can freeze automatically and wake up when you use them again.
+
+## Security and privacy
+
+- **Device verification**: each device pairs once by comparing a code with the backend. The backend's key is pinned at the same time, and every request is signed by this device.
+- **Encrypted transport**: every call to a paired backend is encrypted (X25519 or post-quantum ML-KEM-768), even on the same machine. If the backend's key changes, the app asks you to pair again instead of falling back to plaintext.
+- **End-to-end encrypted history**: conversation history is always encrypted with keys your devices hold. Set a recovery key in Settings; a new device gets access when another device approves it.
+- The app connects only to backends you added, keeps device and history keys in the system keychain, and opens web pages in isolated views that can't reach the app's data.
+
+Details: [device verification](docs/device-verification.md).
+
+## Install and get started
+
+Download the installer for your platform from [Releases](https://github.com/youtonghy/TodeX_desktop/releases): Windows x64 and ARM64, macOS (Apple Silicon) and Linux x64 (AppImage), with SHA-256 checksums. The app checks for updates and installs a verified one; see [automatic updates](docs/automatic-updates.md). Windows builds are unsigned, so SmartScreen may ask you to confirm the first launch.
+
+Then open **Settings › Local backend** to deploy a backend on this computer, or add an existing one under **Settings › Backend connections** (default address `http://127.0.0.1:7345`) and approve the pairing on that backend.
+
+| What you see | Likely cause | What to do |
 | :--- | :--- | :--- |
-| **Framework** | Swift + UIKit | Electron 44 + React 19 (Vite) |
-| **UI Components** | UIKit (Liquid Glass) | BoardUI + React Aria (Tailwind v4) |
-| **Layout** | Mobile Stack Navigation | 3-Pane Resizable Desktop Layout |
-| **Protocol Layer** | Swift port (`TodexCore`) | `@todex/protocol` alias mapped to `../TodeX_protocol/src` |
-| **Local Storage** | iOS Keychain / local persistence | Electron `userData` JSON (`todex.desktop.*`); device and history keys sealed with the OS keychain (safeStorage) |
-| **Pairing Input** | Camera scan of the address QR, then device verification | Backend address, then device verification |
+| Backend unreachable | The backend isn't running, or the address or port is wrong. | Start `todex-agentd` and check the address. |
+| Encrypted pairing required | A remote backend that hasn't been paired, or its encryption changed. | Run device verification (**Re-pair**) in Settings. |
+| WebSocket failure | Requests work but the live connection doesn't. | Check firewalls and proxies; if the backend's key changed, pair again. |
+| Agent unavailable | The agent CLI isn't installed or signed in on the backend. | Install it from **CLI management** and sign in on the backend machine. |
 
----
+## Development
 
-## Prerequisites & Setup
-
-### Requirements
-
-- **Node.js**: 22.0.0 or higher
-- **pnpm**: 11.0.0 or higher
-- **TodeX Backend**: A `todex-agentd` instance. Settings → **Local backend** can deploy one on this machine (see below), or connect to any running instance (default `http://127.0.0.1:7345`).
-- **BoardUI Pro key (optional)**: BoardUI components are committed as source, so installing dependencies needs no key. Only adding a BoardUI Pro component needs one, read from `BOARDUI_KEY`.
-
-### 1. Check Out the Shared Protocol
-
-The renderer imports `@todex/protocol` from a sibling `../TodeX_protocol` checkout.
-To add BoardUI components later:
-
-```bash
-pnpm dlx @collectui/bdui add <name> -p src/renderer                    # free components
-pnpm dlx @collectui/bdui add <name> -p src/renderer --key "$BOARDUI_KEY" # Pro components
-```
-
-> [!WARNING]
-> Do not commit API keys or auth tokens to the repository.
-
-### 2. Install Dependencies
+The app needs a [TodeX_protocol](https://github.com/youtonghy/TodeX_protocol) checkout next to this repository, Node.js 22+ and pnpm 11+.
 
 ```bash
 pnpm install
+pnpm run dev            # run the app in development mode
+pnpm run dev:demo       # preview the interface with demo data in a browser (the screenshots above come from it)
+pnpm run typecheck
+pnpm run test:visual    # screenshot tests of the main screens
+pnpm run test:electron  # smoke tests of the desktop shell
+pnpm run package        # build installers
 ```
 
-*Note: If the Electron binary download is interrupted, run:*
+Screenshot baselines are rendered only in CI; see [AGENTS.md](AGENTS.md#ui-tests-and-visual-regression-ci) for how to refresh them. Development builds (`DEV0.0.0`) write a detailed log to `userData/logs/todex-desktop-debug.log` (override with `TODEX_DESKTOP_LOG_PATH`), with tokens, keys and attachment contents redacted. App icon assets: [docs/app-icons.md](docs/app-icons.md).
 
-```bash
-rm -rf node_modules/electron/dist
-node node_modules/electron/install.js
-```
+## Related repositories
 
-### 3. Launch Development Mode
-
-```bash
-pnpm run dev
-```
-
-The desktop window will launch at 1280×800.
-
----
-
-## Available Scripts
-
-| Command | Description |
-| :--- | :--- |
-| `pnpm run dev` | Runs `predev` checks and starts the Electron app in Vite dev mode. |
-| `pnpm run dev:demo` | Serves the renderer alone with in-memory demo data for design previews; open the printed `?demo` URL in a browser. Add `&backends=2` for a second paired backend with slightly different config (the config sync screen), or `&board=busy` for a conversation waiting on a permission prompt (the home page's waiting list). |
-| `pnpm run build` | Builds the main process, preload script, and renderer assets. |
-| `pnpm run package` | Builds and packages the Electron application with electron-builder. |
-| `pnpm run preview` | Previews the production build locally. |
-| `pnpm run typecheck` | Validates TypeScript types across main and renderer targets. |
-| `pnpm run check:electron` | Verifies that the native Electron binary is intact. |
-| `pnpm run test:updates` | Unit tests for the main-process policies, plus the static IPC contract between preload and main (`scripts/ipc-contract.test.ts`). |
-| `pnpm run test:visual` | Screenshot regression of the main screens in the `?demo` preview (headless Chromium, light and dark). |
-| `pnpm run test:electron` | Builds main + preload and smoke-tests the real Electron shell against an isolated, offline profile. |
-
-### Tests
-
-`test:visual` compares full-window screenshots under `tests/visual/__screenshots__` against the demo preview with a fixed clock and reduced motion. Baselines are rendered only in CI's `mcr.microsoft.com/playwright` image, since fonts rasterize differently elsewhere, so local runs show diffs but must not overwrite baselines. A new screenshot fails CI until its baseline is committed; that run renders it: download the `visual-baselines` artifact of the *Desktop checks* run and commit it. After an intended UI change, run *Desktop checks* manually (`gh workflow run checks.yml --ref <branch> -f update-screenshots=true`) and commit the re-rendered artifact. Open `playwright-report/` or the `visual-report` artifact to inspect diffs.
-
-`test:electron` gives the app its own `HOME` and `XDG_CONFIG_HOME` and a backend URL nobody serves, so it never touches the real profile or a daemon; native dialogs are replaced in main via `electronApp.evaluate`. On a Wayland desktop pass `TODEX_E2E_ELECTRON_ARGS=--ozone-platform=wayland`; CI runs it under `xvfb-run`. The window is shown while the tests run.
-
-## Desktop Releases
-
-Desktop packages are created manually from **Actions > Release desktop packages**.
-Enter a stable semantic version such as `1.2.3`; after validation, the workflow
-injects it into the application metadata and About page in Settings, then publishes Windows
-x64 and ARM64 NSIS installers, a macOS Apple Silicon DMG, a Linux x64 AppImage,
-and SHA-256 checksums to the `v1.2.3` GitHub Release.
-
-Development builds display `DEV0.0.0`; `package.json` keeps the valid placeholder
-version `0.0.0` until packaging receives a release version from CI.
-
-### Development logs
-
-Detailed desktop diagnostics are enabled only for builds whose version is exactly
-`DEV0.0.0`. By default they are written to
-`Electron userData/logs/todex-desktop-debug.log`; the resolved path is persisted in
-`todex-desktop-store.json` under `todex.desktop.debug.logPath`. Set
-`TODEX_DESKTOP_LOG_PATH` to override it for a local run. Logs include window, IPC,
-HTTP, WebSocket, and uncaught-error events, while redacting or truncating tokens,
-cookies, keys, and attachment contents.
-
-Windows packages are unsigned, so SmartScreen may require approval on first launch.
-macOS releases now require signing; see [automatic updates](docs/automatic-updates.md)
-for the required GitHub Actions secrets and migration from unsigned installations.
-The build checks out the mobile
-repository's `main` branch beside this repository because the desktop client shares
-its protocol source, then pins the resolved commit across every platform. If that
-repository is private, configure a `PROTOCOL_REPO_TOKEN` Actions secret with read
-access.
-
----
-
-## Local Backend
-
-Settings → **Local backend** runs `todex-agentd` on this computer without a terminal:
-
-- **Deploy and connect** downloads the backend release with the same version as this Desktop (the latest release for dev builds) from GitHub, checks it against the release's `SHA256SUMS` and its `--version`, keeps it under `userData/backend/bin/<version>/`, and starts the daemon with the shared data directory `~/.todex-agent` (the same one the backend CLI and TUI use). A daemon that is already running is adopted instead.
-- Desktop talks to it over a local IPC channel (a Unix socket, or a named pipe on Windows), not TCP: profiles of these backends have the URL `todex-ipc://local`. Pairing is approved automatically through the backend's socket-only local-admin API, which accepts only processes of the same OS user.
-- A Desktop-managed daemon does not self-update; when Desktop updates, **Switch to matching version** restarts it on the matching build.
-- The page mirrors the backend TUI: listen address and port, pairing encryption, workspace roots, start at login, resets, the pairing QR code and transport fingerprint, and approving, rejecting or revoking devices. The listener stays on `127.0.0.1` until you change it; set `0.0.0.0` or an interface IP (and restart) to let other TodeX clients pair with this machine.
-- One backend, one data connection: a TCP profile of a backend Desktop also reaches over IPC is turned off and its workspaces and conversations move to the IPC profile. When this computer's backend is also a node of a backend group, the group keeps its network connection to the node open as a standby, so this device stays present in the group and roster changes and join requests keep arriving, while workspaces, conversations and every request go over IPC. Remove the IPC profile and the group connection carries the data again. Each of these profiles is its own device with its own history key; when one cannot read history another one can (it was paired later), it asks for a grant and Desktop fulfils it from the other profile without asking, so switching between IPC, TCP and the group keeps the conversation history readable. The workspaces, conversations, provider model choices and saved SSH passwords filed under a profile follow the data when it moves.
-- Once Desktop is connected over IPC, the **Network listener** switch can turn TCP off (after a restart): other devices, browsers and the web client can no longer connect, only Desktop's IPC connection remains, and agent tools keep working through an internal loopback-only port. Turn it back on here or in the backend TUI (press `b`).
-- TodeX containers are managed under Settings → **TodeX Container** (below).
-
-## TodeX Container
-
-Settings → **TodeX Container** runs agents in [TodeX containers](https://github.com/youtonghy/TodeX_container) on this machine's Docker:
-
-- **Docker environment** checks the `docker` CLI, the daemon (not installed, not running, or no permission — e.g. not in the `docker` group), Compose v2, whether containers can share their local socket, and which image tags are present.
-- **Containers** lists every container labeled `io.todex.instance`. Ones created by `todexc` or Desktop live under `~/.config/todex-container/<name>/` (`settings.env`, `mounts`, `compose.yaml`, in exactly the format `todexc` writes, so either tool can manage them) and can be started, stopped, restarted, upgraded (pull and recreate), remounted, inspected (logs) and deleted; deleting keeps the home volume `todex-<name>-home` unless you tick it. Plain `docker compose` containers can only be started, stopped, connected and inspected. Containers sharing their socket also get the backend admin cards of the Local backend page.
-- **Automatic cleanup** (a minute after start, then every 6 hours): remove TodeX image versions no container uses (on by default), remove containers stopped for 1/7/30 days (settings and home volume kept), unmount folders no workspace of this app uses once the container is idle, and stop Desktop-created containers when TodeX quits. Home volumes are never deleted automatically.
-- **New workspace → Container workspace** picks a host folder and a container (or a new one: free name `todex`, `todex-2`, …), mounts the folder (same path on Linux and macOS, `/workspace/<folder>` on Windows; a running container is recreated, after a confirmation when a turn runs there), waits for the backend, pairs and connects, and creates the workspace at the folder's container path. It then offers to install agent CLIs in the container and to copy agent config (accounts, settings, MCP, skills) from another connected backend with config sync.
-- **Setup commands** (Container workspace, first step): a template picker (suggested from the folder's lockfiles: pnpm, npm, yarn, uv, requirements.txt, git submodules) and an editable list of commands. Once the workspace exists they run one by one in the container at the workspace path as the `todex` user (`bash -c`, stopping at the first failure), with live output; they can go on in the background and report when done.
-- **Auto-freeze** (off by default; 15 min to 4 h): a container whose backend had no running or permission-waiting turn, running terminal, or queued/scheduled prompt for that long — as this Desktop sees it — is frozen with `docker pause` (processes and memory kept) and its connection closed quietly. Sending in one of its conversations, opening a terminal or one of its workspaces, or **Resume** on the settings page thaws it and reconnects; the held message is then sent. Other devices using the container are not visible to this Desktop.
-- On Linux, Desktop pairs over the container's shared socket (`todex-ipc://container-<name>`), and containers it creates publish no host port (`TODEX_PUBLISH=0`, todexc `--no-publish`). Docker Desktop, rootless Docker, Podman and userns-remap cannot use the socket: Desktop publishes the container on `http://127.0.0.1:<port>` (recreating a socket-only one) and approves the pairing with `docker exec … todex-agentd pair approve`.
-- **Host ports**: a published container gets a random free port from the range in Settings → TodeX Container (17345–17444 by default), never the native backend's port (its configured one, 7345 when unknown, also while it is stopped). A container whose port is taken, or that sits on the native backend's port, moves to a new port when Desktop starts or recreates it, and running ones on the native port move at launch (Docker restarts them at boot). The old port is kept in `former-ports`, and a paired profile still aimed at it is re-pointed once a sealed request with its pinned key succeeds on the new port.
-
-## Connection & Troubleshooting
-
-The Settings screen in TodeX Desktop provides clear diagnostic feedback:
-
-| Diagnostic State | Cause | Resolution |
-| :--- | :--- | :--- |
-| **Backend Unreachable** | Cannot reach `/v2/version` or `/health`. | Ensure `todex-agentd` is running and the port is correct. |
-| **Invalid Backend URL** | The provided URL cannot be parsed. | Use a standard origin format such as `http://127.0.0.1:7345`. |
-| **Authentication Failed** | HTTP 401/403 returned by backend. | Enter the correct `Auth Token` matching the backend configuration. |
-| **Deprecated Protocol** | The URL path contains `/v1`. | Update the connection URL to use `/v2`. |
-| **WebSocket Failure** | HTTP probes succeed but `/v2/ws` fails. | Check network firewall rules. A `4400` close means the pinned key does not match: re-pair in Settings → Device verification. |
-| **Encrypted pairing required** | A remote backend without a pinned transport key, or the backend now requires another protocol. | Run device verification (or **Re-pair**) in Settings; approval pins the key. |
-| **Agent Unavailable** | Provider shows `available = false`. | Verify that the underlying agent CLI (`codex`, `pi`, `claude`) is installed and authenticated. |
-
----
-
-## Security
-
-- **Process Isolation**: The renderer process runs with `nodeIntegration: false` and `contextIsolation: true`.
-- **Preload IPC**: Dialogs, secure storage and the workspace file actions (open, open with, reveal) are routed through guarded IPC channels. The renderer cannot read local files through IPC; the file actions accept absolute paths only, and a plain open refuses executables and app bundles.
-- **App window**: Navigation, redirects and subframe navigation are limited to the app's own entry; web permissions other than notifications and clipboard writes are denied.
-- **Backend origin**: The bundled renderer's WebSockets send `Origin: todex-desktop://app` instead of `file://` (or `null`); anonymous loopback backends accept that value and refuse `null` / `file://`. This needs a backend with the matching origin rule.
-- **Strict Scope**: Only connects to explicitly configured agent daemon endpoints.
-- **Browser views**: Workbench pages run in sandboxed `WebContentsView`s with their own partition, never the app's storage; their top-level navigation is checked in the main process.
-
----
-
-## Related Repositories
-
-- **[TodeX Backend](../TodeX_backend)**: Rust backend daemon (`todex-agentd`).
-- **[TodeX Protocol](../TodeX_protocol)**: Shared `@todex/protocol` sources consumed by this client and the web client.
-- **[Todex Mobile](../Todex_mobile)**: Swift + UIKit mobile app.
-
----
+- [TodeX Backend](https://github.com/youtonghy/TodeX_backend): the `todex-agentd` backend that runs the agents
+- [TodeX Web](https://github.com/youtonghy/TodeX_web): the same experience in a browser
+- [TodeX Native](https://github.com/youtonghy/TodeX_native): the mobile app
+- [TodeX Container](https://github.com/youtonghy/TodeX_container): a Docker image with the backend and agent CLIs
+- [TodeX Protocol](https://github.com/youtonghy/TodeX_protocol): the client library shared by the desktop and web clients
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## App icons
-
-Desktop and Web share the same T artwork, with light and dark variants for the interface and documentation. See [app icon assets](docs/app-icons.md) for previews, file roles, and update instructions.
+MIT License.

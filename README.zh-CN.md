@@ -1,276 +1,196 @@
-# TodeX 桌面端 (`TodeX_desktop`)
+# TodeX 桌面端
 
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="src/renderer/assets/brand/t-icon-dark-beige.png" />
     <source media="(prefers-color-scheme: light)" srcset="src/renderer/assets/brand/t-icon-light.png" />
-    <img src="src/renderer/assets/brand/t-icon-dark-beige.png" alt="TodeX" width="160" height="160" />
+    <img src="src/renderer/assets/brand/t-icon-dark-beige.png" alt="TodeX" width="120" height="120" />
   </picture>
 </p>
 
-正式打包版本支持 GitHub Release 自动更新，详见[自动更新与发布配置](docs/automatic-updates.md)。
-
 <p align="center">
-  <strong>基于 Electron、React 19 与 BoardUI 构建的原生 macOS 桌面客户端，连接 <code>todex-agentd</code>。</strong>
+  <strong>一个桌面工作台，管理你运行的所有编程 Agent：Codex、Claude Code、Pi、Grok Build、OpenCode 等，无论它们跑在本机还是任何已配对的后端上。</strong>
 </p>
 
 <p align="center">
-  <a href="README.md">English</a> •
-  <a href="README.zh-CN.md">简体中文</a>
+  <a href="README.md">English</a> · <a href="README.zh-CN.md">简体中文</a>
 </p>
 
----
+![TodeX 桌面端首页](docs/screenshots/home-zh.png)
 
-## 概述
+TodeX 桌面端是 TodeX 的桌面客户端。它连接一个或多个 TodeX 后端（`todex-agentd`），由后端在所在机器上运行各个 Agent CLI；你在一个地方就能发起对话、实时跟进 Agent、批准它的操作、检查它的改动，并管理它工作的机器。支持 macOS、Windows 和 Linux，浅色与深色主题，界面语言有 English、简体中文、日本語、한국어。
 
-**TodeX Desktop** 是连接 [`todex-agentd`](../TodeX_backend) 后端服务的桌面客户端，为 macOS 开发者提供沉浸式编程工作台。
+## 目录
 
-桌面端采用 **Electron 44**、**React 19**、**Vite 7**、**Tailwind CSS v4** 和 **BoardUI** 构建，设计了专为宽屏优化的经典三栏工作台布局。它与 Web 客户端共享核心通信协议库（`@todex/protocol`，来自 [`TodeX_protocol`](../TodeX_protocol)），同时充分利用桌面端原生能力，如系统原生目录选择器以及多标签页开发者工作台。
+- [首页总览](#首页总览)
+- [对话](#对话)
+- [模型、思考强度与工作模式](#模型思考强度与工作模式)
+- [计划与任务看板](#计划与任务看板)
+- [隐私对话与定时对话](#隐私对话与定时对话)
+- [工作台、终端与 SSH](#工作台终端与-ssh)
+- [Agent 桌面工具：浏览器与 Computer Use](#agent-桌面工具浏览器与-computer-use)
+- [后端连接、后端组与配置同步](#后端连接后端组与配置同步)
+- [Agent CLI 管理](#agent-cli-管理)
+- [Agent 调用](#agent-调用)
+- [个人主页](#个人主页)
+- [本机后端与 TodeX 容器](#本机后端与-todex-容器)
+- [安全与隐私](#安全与隐私)
+- [安装与上手](#安装与上手)
+- [开发](#开发)
 
----
+## 首页总览
 
-## 核心特性
+首页集中展示眼下需要你处理的事：正在运行的对话、等待你回复或授权的对话、今日对话数与 Token 用量，以及各 Agent 的套餐限额（例如 Claude Code 的 5 小时和 7 天窗口）和重置时间。点 **自定义布局** 可以增删、重排卡片。
 
-- **桌面三栏工作台界面**：
-  - **左侧边栏（Sidebar）**：工作区目录管理、会话历史列表、Agent 标识徽章、会话生命周期操作（新建、重命名、Fork、删除）与快速设置。
-  - **中央聊天面板（Chat Panel）**：完整会话时间线、流式 Markdown 实时渲染、Shiki 语法高亮、KaTeX 数学公式渲染、交互式审批卡片（命令执行、文件变更对比、工具调用），以及支持模型搜索选择（按名称匹配，不区分大小写）、可拖动思考强度、Codex Fast 模式、两级 `@` 引用菜单（先选类型再搜索：`@file:`、`@folder:`、`@chat:` 将工作区内其他对话导出为 Markdown 附加、`@skill:`、`@mcp:`、`@ssh:` 已开启 Agent 访问的 SSH 主机、`@app:` 后端电脑上的应用（供 Computer Use 使用））、`/` 斜杠命令与 `#` Skill/MCP 建议的输入框。推理与工具详情仅在用户展开后按需挂载，最终答复与上下文、执行事件保持独立。
-  - **右侧工作台面板（Workbench Panel）**：
-    - **斜杠命令（Slash Commands）**：快速查看与调用当前 Agent 的可用命令。
-    - **Git Diff**：工作区实时代码改动差异检查。
-    - **终端（Terminal）**：基于 xterm.js 的交互式 PTY 会话，支持原始键盘输入、ANSI 输出与行列尺寸自动同步。
-    - **能力目录（Capabilities）**：实时查看当前生效的 Skills 与 MCP Servers。
-    - **浏览器（Browser）**：以原生视图打开回环页面与工作区 HTML 文件（独立的 `persist:todex-preview` 分区），元素拾取会把引用写入聊天草稿。`localhost` 指后端所在电脑：所有回环请求都经后端的 `POST /v2/browser/proxy`（走加密传输）转发，远程后端主机上的开发服务器也能以原 origin 打开。WebSocket（开发服务器热更新）暂不转发，请手动刷新。
-    - **Agent 浏览器**：开启 Agent 桌面工具后，实时显示当前会话的 Agent 在后端所在电脑上操作的浏览器标签（经会话连接推送画面），附最新一步操作与“停止”按钮。
-  - **终端视图（侧边栏）**：管理后端主机的 SSH 主机（自动读取 `~/.ssh/config`、手动添加/导入、连接测试、按主机开启 Agent 访问；Linux/macOS 后端另有内置的 `Local` 主机，通过 `ssh localhost` 打开后端机器的登录终端）、SSH 密钥（查看、导入、生成）与 FTP 站点；在右侧工作台中打开 SSH 终端和 SFTP/FTP 文件浏览。
-    - **实验特性（Experiments）**：特性开关与开发者诊断面板。
-- **配对与连接管理**：
-  - 查看当前后端连接的 Codex、Pi、Claude Code、Grok Build 与 ACP CLI，比较当前/最新版本，一键安装缺失的 CLI 或升级受管 CLI。
-  - Agent 账户支持按 Agent 导出/导入供应商 JSON 文件，便于多台主机同步（文件含明文密钥）。
-  - 支持通过主机/端口直接连接；请求使用设备验证登记的设备密钥签名。
-  - [设备验证](docs/device-verification.md)（配对 v3，先承诺后揭示）：只需填写后端地址，与后端 TUI 核对随机验证码（及传输公钥指纹）并批准一次。验证码同时认证后端的传输公钥，批准即登记此设备的签名密钥并一次性固定该公钥，然后自动连接。
-  - 不再支持手动填写、粘贴或二维码导入公钥：「设置」只读显示加密方式、公钥指纹与验证状态，并提供「重新配对」。修改地址会清除设备密钥与固定的公钥；重新配对同一后端沿用原设备密钥。
-  - **多后端并行**：「设置 › 后端连接」统一管理所有后端（新增、删除），点击后端进入它的连接、设备验证与历史加密设置。每个后端各自保持连接并服务自己的工作区，切换工作区不会断开或重连；不属于任何工作区（None）的新对话在设置中选定的后端上创建，默认是最先添加的后端。
-  - 分类明确的连接诊断状态（清晰展示后端未启动、端口错误、Token 失效、已废弃的 `/v1` 协议或握手异常等原因）。
-- **原生系统深度集成**：
-  - 安全隔离的 Electron 架构：开启 Preload 上下文隔离（`contextIsolation: true`），禁用渲染进程 Node 集成（`nodeIntegration: false`）。
-  - 本地工作区支持调用 macOS 原生系统文件夹选择对话框。
-  - 数据安全保存在 Electron `userData` 目录中（`todex.desktop.*`）。
-- **Agent 桌面工具**（`todex_desktop` MCP，在设置中按后端开启；设置主界面只保留总开关和每个工具的入口，点击进入该工具的独立设置页）：
-  - **Agent 浏览器**（`browser_*`）由后端执行：在后端所在的电脑上打开 Chromium 窗口（因此 `localhost` 指那台电脑），本应用只在工作台中实时观看。会话首次使用可由任意已配对设备确认。顶层页面只允许回环地址；拒绝下载与网站权限请求；向密码框输入前会先询问。
-  - Agent 浏览器设置页显示后端的 Chromium（可在那里下载）以及按工作区划分的浏览器资料（切换、新建、删除，连同 Cookie、存储与缓存）；浏览器曾在本应用运行时留下的数据可在设置主界面清除。
-  - **Computer Use**（`computer_*`）由后端在其所在的电脑上执行，不在本机执行：本应用在输入框上方显示那台电脑的实时画面（无法获取实时画面时显示最新截图）和“停止”按钮；其设置页显示后端主机的开关与屏幕录制 / 辅助功能授权状态，并可在那台电脑上请求授权。每个会话的首次使用需由那台电脑前的人确认。同一设置页可选择引擎：内置引擎，或可选的 [agent-desktop](https://github.com/vercel-labs/agent-desktop) 引擎（实验），后者由后端下载，并新增设置值、选择、切换、展开和滚动到可见等动作；安全检查、截图和文字输入保持不变。
-- **后量子传输加密**（[transport v2](docs/device-verification.md#传输加密transport-v2)）：
-  - 集成 `@noble` 密码学套件，以配对时固定的后端公钥做 **X25519** 或 **ML-KEM-768**（后量子）密钥协商，每个会话密钥都混入服务端新鲜随机数。
-  - 固定了公钥时所有通信都加密，回环地址也一样：WebSocket 使用 `tv=2` 二进制帧，所有 REST 请求经 `POST /v2/sealed` 隧道。只有 `/health`、`/v2/transport-policy` 与设备验证直接请求。
-  - 未固定公钥时只能以明文连接回环地址上的后端；连接远程地址会被拒绝并提示加密配对。后端改变加密方式时提示重新配对，不会降级为明文；未经设备配对验证的已保存公钥（旧版本手动导入）在任何地址（包括回环）都会被拒绝，需重新配对。
-- **端到端加密历史**（[历史记录加密](docs/device-verification.md#历史记录加密)）：会话历史始终加密，没有开关。每台设备首次连接时自动登记自己的历史密钥；未设置恢复密钥时设置页会一直提醒。加密之前保存的旧对话只读（可查看、导出、归档、删除）。
+| 浅色 | 深色 |
+| :---: | :---: |
+| ![首页（浅色）](docs/screenshots/home-zh.png) | ![首页（深色）](docs/screenshots/home-dark-zh.png) |
 
----
+## 对话
 
-## 架构设计与移动端关系
+侧边栏把工作区按文件夹分组，并列出各自的对话和实时状态（运行中、等待中、规划中、已完成）。打开一个对话即可跟进 Agent 的工作：
 
-```
-+-----------------------------------------------------------------------------------+
-|                                  TodeX Desktop                                    |
-|                                                                                   |
-|  +-----------------------------------------------------------------------------+  |
-|  |                            Electron 主进程与 Preload                         |  |
-|  |       (IPC 通信, 系统对话框, 本地安全存储, 窗口生命周期管理)                |  |
-|  +-----------------------------------------------------------------------------+  |
-|                                         |                                         |
-|  +-----------------------------------------------------------------------------+  |
-|  |                             React 19 渲染进程                               |  |
-|  |  +-------------------+  +------------------------+  +--------------------+  |  |
-|  |  |     左侧边栏      |  |      中央聊天面板      |  |     右侧工作台     |  |  |
-|  |  | (工作区与会话列表)|  | (时间线, 流式渲染, 审批)|  | (Git Diff, PTY,    |  |  |
-|  |  |                   |  |  输入框建议与附件)      |  |  Skills, MCPs)     |  |  |
-|  |  +-------------------+  +------------------------+  +--------------------+  |  |
-|  |  +-----------------------------------------------------------------------+  |  |
-|  |  |                 BoardUI 组件（以源码形式纳入项目）                    |  |  |
-|  |  +-----------------------------------------------------------------------+  |  |
-|  +-----------------------------------------------------------------------------+  |
-|                                         |                                         |
-|  +-----------------------------------------------------------------------------+  |
-|  |              @todex/protocol (共享协议层, 来自 TodeX_protocol)             |  |
-|  |         (v2 客户端, 传输层, 心跳探测, 加密协商, 连接健康检测)               |  |
-|  +-----------------------------------------------------------------------------+  |
-+-----------------------------------------------------------------------------------+
-                                          |
-                               WebSocket / REST /v2
-                                          v
-+-----------------------------------------------------------------------------------+
-|                             todex-agentd (后端服务)                              |
-+-----------------------------------------------------------------------------------+
-```
+- 流式回答，支持 Markdown、代码高亮和数学公式。每轮执行的步骤折叠成一行（如“编辑 1 个文件 · 运行 1 条命令”），展开可看命令、文件 diff 和工具调用。
+- 命令、文件修改和工具调用的授权卡片，可以只允许一次，也可以在整个对话内允许。
+- 标题栏显示 Agent、Git 分支、工作树和改动规模。
+- 对话可重命名、置顶、分叉（也能从任意一条回复分叉）、归档和删除。
+- 输入框支持粘贴或拖入图片和文件，并有三个快捷菜单：`@` 引用文件、文件夹、其他对话、Skill、MCP 服务器、SSH 主机或 Computer Use 要操作的应用；`/` 执行 Agent 的斜杠命令；`#` 推荐 Skill 和 MCP 服务器。
+- Agent 忙时发出的消息会进入队列。关掉窗口对话也会继续运行，因为它由后端执行，所有已配对设备看到的状态都一致。
 
-### 桌面端与移动端对照
+| 浅色 | 深色 |
+| :---: | :---: |
+| ![对话（浅色）](docs/screenshots/conversation-zh.png) | ![对话（深色）](docs/screenshots/conversation-dark-zh.png) |
 
-| 维度 | 移动端 (`Todex_mobile`) | 桌面端 (`TodeX_desktop`) |
+Agent 工作时，它的计划清单和目标会固定在输入框上方，不用滚动就知道进展到哪一步。
+
+| 运行中的计划步骤 | Agent 目标 |
+| :---: | :---: |
+| ![计划步骤](docs/screenshots/plan-steps-zh.png) | ![目标](docs/screenshots/goal-zh.png) |
+
+## 模型、思考强度与工作模式
+
+在可搜索的列表里选模型，拖动滑块调整思考强度；Codex 还提供 Fast 模式。每个对话都有工作模式：**实现**、**计划**（Agent 先给出计划，由你审阅），以及 Claude Code 的 **智能** 模式：先用一个模型做规划，你批准计划后自动切换到执行模型，并以自动审批的方式执行。
+
+| 模型与思考强度 | 工作模式 |
+| :---: | :---: |
+| ![模型选择](docs/screenshots/model-card-zh.png) | ![工作模式](docs/screenshots/work-mode-zh.png) |
+
+## 计划与任务看板
+
+**计划** 是按工作区划分的任务看板：任务有优先级、截止日期和状态，可以固定到处理它的对话上。看板和日历两种视图随时切换。
+
+| 看板 | 日历 |
+| :---: | :---: |
+| ![任务看板](docs/screenshots/task-board-zh.png) | ![计划日历](docs/screenshots/plan-calendar-zh.png) |
+
+## 隐私对话与定时对话
+
+**隐私对话** 的内容只保存在后端内存里：不写入历史记录，后端重启后即消失（Agent 对工作区文件的修改照常保留）。**定时对话** 会在你选定的时间发送提示词，即使应用已经关闭。
+
+![隐私对话](docs/screenshots/private-conversation-zh.png)
+
+## 工作台、终端与 SSH
+
+工作台在对话旁边以标签页打开：工作树的 Git diff、后端机器上的终端、工作区文件、用于本地开发服务器的浏览器（带元素拾取器，可把页面元素作为引用加入消息），以及 Agent 当前操作的实时画面。
+
+**终端** 页面管理后端机器的 SSH 主机（自动读取 `~/.ssh/config`，也可手动添加或导入，另有内置的 `Local` 主机）、SSH 密钥（查看、导入、生成）、FTP 站点、当前连接和端口转发。主机可在工作台中打开为终端或 SFTP/FTP 文件浏览器。为主机打开 **Agent 访问** 后，Agent 就能在上面执行命令，可按对话或逐条命令审批。
+
+![终端主机](docs/screenshots/terminal-hosts-zh.png)
+
+## Agent 桌面工具：浏览器与 Computer Use
+
+为某个后端打开 Agent 桌面工具后，Agent 就能在那台后端的电脑上工作：
+
+- **Agent 浏览器**：Agent 在那台电脑上操作真实的浏览器标签页（所以 `localhost` 指的是那台电脑），每个工作区有独立的浏览器配置。你可以实时观看；对话首次使用时由任一已配对设备批准，访问本机以外的站点需要单独批准（一次或始终）。
+- **Computer Use**：Agent 查看并操作那台电脑上的应用。每个对话首次使用时，由那台电脑前的人确认；应用里会出现带 **停止** 按钮的实时画面，可放在工作台标签页或输入框上方。
+
+| Computer Use 实时画面 | 设置 |
+| :---: | :---: |
+| ![Computer Use 实时画面](docs/screenshots/computer-live-zh.png) | ![Agent 桌面工具设置](docs/screenshots/settings-agent-desktop-zh.png) |
+
+## 后端连接、后端组与配置同步
+
+TodeX 桌面端与你添加的每个后端保持连接，切换工作区不会断开重连。配对后端只需要它的地址，再与后端核对一次验证码并批准，不需要复制任何令牌或密钥。
+
+**后端组** 把多台设备和后端组成一组：核对验证码批准新设备、用二维码邀请设备，当某个后端自己的地址连不上时，还能经由组内其他成员中转（中转流量依然端到端加密）。**配置同步** 把两个后端并排对比，复制你勾选的 Agent 账号、设置、MCP 服务器和 Skill；不会删除目标上的任何内容，密钥类内容始终隐藏。
+
+| 后端连接 | 后端组 |
+| :---: | :---: |
+| ![后端连接](docs/screenshots/settings-backends-zh.png) | ![后端组](docs/screenshots/settings-mesh-zh.png) |
+
+![配置同步](docs/screenshots/config-sync-zh.png)
+
+## Agent CLI 管理
+
+查看后端上每个 Agent CLI 的已装版本和最新版本，一键升级，缺少的也能直接安装。可以在 Agent 的多个服务商账号之间切换，也能把它们导出、导入为文件，在机器之间迁移（文件里的密钥是明文）。共享的 MCP 服务器、Skill 和 `AGENTS.md` 预设也在同一页面管理。
+
+![CLI 管理](docs/screenshots/settings-cli-zh.png)
+
+## Agent 调用
+
+Agent 之间可以互相调用：对话中的 Agent 能把任务交给另一个 Agent 和模型，在同一工作区的子对话里完成。你决定哪些 Agent 和模型可以被调用，以及被调用 Agent 的授权请求如何处理。脚本和服务通过后端的外部 API 用 API Key 调用 Agent 时，也受同样的范围限制；API Key 同样在这里创建。
+
+![Agent 调用](docs/screenshots/settings-agent-calling-zh.png)
+
+## 个人主页
+
+个人主页按 Agent 和模型汇总 Token 用量：输入、输出、缓存读写、缓存命中率、活跃热力图、活跃时段，以及每月的活跃对话。
+
+![个人主页](docs/screenshots/profile-zh.png)
+
+## 本机后端与 TodeX 容器
+
+运行后端不需要打开终端：
+
+- **设置 › 本机后端** 会下载与本应用版本匹配的后端发行版，校验后在本机启动。应用通过本地套接字与它通信，并自动完成配对。这个页面与后端控制台一致：监听地址和端口、工作区根目录、登录时启动、配对二维码，以及批准或撤销设备。你还可以关闭网络监听，让后端只接受本应用的连接。
+- **设置 › TodeX 容器** 在本机 Docker 上用 [TodeX 容器](https://github.com/youtonghy/TodeX_container) 运行 Agent：检查 Docker 环境；创建、启动、停止、升级和删除容器；从宿主机文件夹创建 **容器工作区**，可配置初始化命令（根据文件夹里的锁文件自动推荐），并可从其他后端复制 Agent 配置。空闲容器可以自动冻结，再次使用时自动唤醒。
+
+## 安全与隐私
+
+- **设备验证**：每台设备只需配对一次，与后端核对验证码即可。后端的密钥在同一步被固定下来，此后每个请求都由本设备签名。
+- **传输加密**：与已配对后端之间的所有通信都加密（X25519 或抗量子的 ML-KEM-768），即使在同一台机器上也是如此。后端密钥变化时，应用会要求重新配对，而不会退回明文。
+- **端到端加密的历史记录**：对话历史始终由你的设备持有的密钥加密。请在设置中设置恢复密钥；新设备在另一台设备批准后即可读取历史。
+- 应用只连接你添加的后端，设备密钥和历史密钥存放在系统钥匙串中，网页在隔离视图中打开，无法访问应用自身的数据。
+
+详见 [设备验证](docs/device-verification.md)。
+
+## 安装与上手
+
+从 [Releases](https://github.com/youtonghy/TodeX_desktop/releases) 下载对应平台的安装包：Windows x64 和 ARM64、macOS（Apple Silicon）、Linux x64（AppImage），附 SHA-256 校验和。应用会检查更新并安装校验过的新版本，详见 [自动更新](docs/automatic-updates.md)。Windows 安装包未签名，首次启动时 SmartScreen 可能需要你确认。
+
+安装后打开 **设置 › 本机后端** 在本机部署后端，或在 **设置 › 后端连接** 添加已有后端（默认地址 `http://127.0.0.1:7345`），并在该后端上批准配对。
+
+| 看到的提示 | 可能原因 | 处理方法 |
 | :--- | :--- | :--- |
-| **基础框架** | Swift + UIKit | Electron 44 + React 19 (Vite) |
-| **UI 组件库** | UIKit（Liquid Glass） | BoardUI + React Aria (Tailwind v4) |
-| **界面布局** | 移动端堆叠导航（Stack Navigation） | 三栏可调节桌面工作台布局 |
-| **协议层实现** | Swift 实现（`TodexCore`） | `@todex/protocol` 路径别名映射至 `../TodeX_protocol/src` |
-| **本地持久化** | iOS Keychain / 本地持久化 | Electron `userData` JSON 文件（`todex.desktop.*`）；设备密钥与历史密钥由系统钥匙串（safeStorage）加密 |
-| **配对输入** | 摄像头扫描地址二维码，再做设备验证 | 填写后端地址，再做设备验证 |
+| 后端不可达 | 后端没有运行，或地址、端口有误。 | 启动 `todex-agentd` 并检查地址。 |
+| 需要加密配对 | 远程后端尚未配对，或它的加密方式变了。 | 在设置中进行设备验证（**重新配对**）。 |
+| WebSocket 失败 | 普通请求正常，但实时连接失败。 | 检查防火墙和代理；如果后端密钥变了，请重新配对。 |
+| Agent 不可用 | 后端上没有安装或登录该 Agent CLI。 | 在 **CLI 管理** 中安装，并在后端机器上登录。 |
 
----
+## 开发
 
-## 前置条件与环境配置
-
-### 环境要求
-
-- **Node.js**：22.0.0 或更高版本
-- **pnpm**：11.0.0 或更高版本
-- **TodeX 后端**：一个 `todex-agentd` 实例。可在 设置 → **本机 Backend** 中一键部署到本机（见下文），也可连接任意正在运行的实例（默认 `http://127.0.0.1:7345`）。
-- **BoardUI Pro 密钥（可选）**：BoardUI 组件以源码形式提交在仓库中，安装依赖不需要密钥。只有添加 BoardUI Pro 组件时才需要，从 `BOARDUI_KEY` 读取。
-
-### 1. 检出共享协议库
-
-渲染进程从相邻目录 `../TodeX_protocol` 引入 `@todex/protocol`。之后如需添加 BoardUI 组件：
-
-```bash
-pnpm dlx @collectui/bdui add <组件名> -p src/renderer                    # 免费组件
-pnpm dlx @collectui/bdui add <组件名> -p src/renderer --key "$BOARDUI_KEY" # Pro 组件
-```
-
-> [!WARNING]
-> 请勿将敏感密钥或 Token 提交至 Git 仓库。
-
-### 2. 安装依赖
+需要在本仓库旁边检出 [TodeX_protocol](https://github.com/youtonghy/TodeX_protocol)，并安装 Node.js 22+ 和 pnpm 11+。
 
 ```bash
 pnpm install
+pnpm run dev            # 以开发模式运行应用
+pnpm run dev:demo       # 在浏览器中用演示数据预览界面（上面的截图即来自这里）
+pnpm run typecheck
+pnpm run test:visual    # 主要界面的截图测试
+pnpm run test:electron  # 桌面外壳的冒烟测试
+pnpm run package        # 打包安装程序
 ```
 
-*说明：如果 Electron 预编译二进制下载意外中断，可执行以下命令重新下载：*
-
-```bash
-rm -rf node_modules/electron/dist
-node node_modules/electron/install.js
-```
-
-### 3. 启动本地开发
-
-```bash
-pnpm run dev
-```
-
-启动后会弹出 1280×800 尺寸的桌面客户端窗口。
-
----
-
-## 常用脚本命令
-
-| 脚本命令 | 说明 |
-| :--- | :--- |
-| `pnpm run dev` | 执行前置检查并在 Vite 开发模式下启动 Electron 应用。 |
-| `pnpm run dev:demo` | 仅启动渲染进程并使用内存演示数据，用于设计预览；在浏览器中打开输出的 `?demo` 地址。 |
-| `pnpm run build` | 编译构建主进程、Preload 脚本及渲染进程生产资源。 |
-| `pnpm run package` | 使用 electron-builder 编译并打包 Electron 应用。 |
-| `pnpm run preview` | 本地预览生产构建产物。 |
-| `pnpm run typecheck` | 执行全工程 TypeScript 类型静态检查。 |
-| `pnpm run check:electron` | 校验本地 Electron 二进制文件完整性。 |
-| `pnpm run test:updates` | 主进程策略的单元测试，以及 preload 与主进程之间的静态 IPC 契约（`scripts/ipc-contract.test.ts`）。 |
-| `pnpm run test:visual` | 在 `?demo` 演示预览中对主要界面做截图回归（无头 Chromium，浅色与深色）。 |
-| `pnpm run test:electron` | 构建主进程与 preload，并在隔离、离线的配置下对真实 Electron 外壳做冒烟测试。 |
-
-### 测试
-
-`test:visual` 在固定时钟、减少动效的演示预览中截取整窗截图，与 `tests/visual/__screenshots__` 下的基准图对比。基准图只在 CI 的 `mcr.microsoft.com/playwright` 镜像中渲染（其他系统的字体光栅化不同），本地运行只用于查看差异，不要覆盖基准图。新增截图在提交基准图之前会让 CI 失败，该次运行会渲染出基准图：下载 *Desktop checks* 运行的 `visual-baselines` 产物并提交。有意修改 UI 后，手动运行 *Desktop checks*（`gh workflow run checks.yml --ref <分支> -f update-screenshots=true`），提交重新渲染的产物。差异可在 `playwright-report/` 或 `visual-report` 产物中查看。
-
-`test:electron` 为应用提供独立的 `HOME`、`XDG_CONFIG_HOME` 和一个无人监听的后端地址，不会触碰真实配置或 daemon；原生对话框通过 `electronApp.evaluate` 在主进程中替换。在 Wayland 桌面上需传入 `TODEX_E2E_ELECTRON_ARGS=--ozone-platform=wayland`；CI 在 `xvfb-run` 下运行。测试期间窗口会显示出来。
-
-## 桌面端发布
-
-桌面安装包通过 **Actions > Release desktop packages** 手动发布。输入 `1.2.3`
-这样的稳定语义版本后，工作流会把版本注入应用元数据和设置中的“关于”页面，验证应用并
-发布 Windows x64、Windows ARM64 NSIS 安装程序、macOS Apple Silicon DMG、Linux
-x64 AppImage 和 SHA-256 校验文件。
-
-开发构建显示 `DEV0.0.0`；`package.json` 保留格式合法的 `0.0.0` 占位版本，
-直到 CI 打包时传入正式版本。
-
-### 开发日志
-
-只有版本为 `DEV0.0.0` 的开发构建会启用详细桌面诊断日志。默认日志写入
-`Electron userData/logs/todex-desktop-debug.log`，实际路径会保存到
-`todex-desktop-store.json` 的 `todex.desktop.debug.logPath` 键中；也可以通过
-`TODEX_DESKTOP_LOG_PATH` 临时指定日志文件。日志包含窗口、IPC、HTTP、WebSocket
-和未捕获异常等运行信息，并会对 Token、Cookie、密钥和附件内容脱敏或截断。
-
-Windows 与 macOS 安装包目前没有代码签名，首次运行时可能需要用户手动通过
-SmartScreen 或 Gatekeeper。由于桌面端直接共享移动端协议源码，构建时会把移动端
-仓库的 `main` 分支检出到相邻目录，并将验证时解析出的提交固定用于全部平台。如果
-该仓库是私有仓库，需要配置具有只读权限的 `PROTOCOL_REPO_TOKEN` Actions Secret。
-
----
-
-
-## 本机 Backend
-
-设置 → **本机 Backend** 无需终端即可在这台电脑上运行 `todex-agentd`：
-
-- **部署并连接**：从 GitHub 下载与当前 Desktop 同版本的 backend（开发版取最新发布），用发布附带的 `SHA256SUMS` 和 `--version` 校验后存放在 `userData/backend/bin/<版本>/`，并使用与 backend CLI、TUI 共用的数据目录 `~/.todex-agent` 启动守护进程。已经在运行的守护进程会被直接接管。
-- Desktop 通过本机 IPC（Unix socket，Windows 为命名管道）而非 TCP 与它通信，这类连接的地址是 `todex-ipc://local`。配对由 backend 仅在 socket 上提供的本地管理接口自动批准，该接口只接受同一系统用户的进程。
-- 由 Desktop 管理的守护进程不会自更新；Desktop 升级后，用 **切换到同版本** 以匹配的构建重启它。
-- 页面与 backend TUI 一一对应：监听地址和端口、配对加密、工作区根目录、登录自启、重置、配对二维码与传输公钥指纹，以及批准、拒绝、吊销设备。监听地址默认保持 `127.0.0.1`；改为 `0.0.0.0` 或网卡 IP 并重启后，其他 TodeX 客户端即可与这台机器配对。
-- 同一个 backend 只保留一条数据连接：Desktop 已经通过 IPC 连上的 backend，若还有指向它的 TCP 连接，该 TCP 连接会被停用，其工作区和对话转到 IPC 连接下。如果这台电脑的 backend 同时是某个后端组的节点，组到该节点的网络连接会作为保活连接继续保持，使本设备在组内保持在线、继续收到名单变化和加入申请；工作区、对话和所有请求仍走 IPC。删除 IPC 连接后，组连接会重新承载数据。这些连接各自是一台独立设备，各有自己的历史密钥；某个连接读不到另一个连接能读的历史时（它配对得更晚），会自动申请授权，Desktop 用另一个连接的密钥直接完成，无需确认，所以在 IPC、TCP 和后端组之间切换后历史仍可读。归在某个连接下的工作区、对话、provider 模型选择和已保存的 SSH 密码会随数据一起转移。
-- Desktop 通过 IPC 连接后，可以关闭 **网络接口**（重启后生效）：backend 不再监听 TCP 地址，其他设备、浏览器和 Web 端都无法连接，只剩 Desktop 的 IPC 连接；agent 工具经一个仅本机的内部端口照常工作。可随时在此或 backend TUI（按 `b`）重新打开。
-- TodeX 容器在 设置 → **TodeX Container** 中管理（见下文）。
-
-## TodeX Container
-
-设置 → **TodeX Container** 在本机 Docker 上的 [TodeX 容器](https://github.com/youtonghy/TodeX_container)里运行 Agent：
-
-- **Docker 环境**检测 `docker` 命令、守护进程（未安装、未运行、没有权限，例如不在 `docker` 组）、Compose v2、容器能否共享本机 socket，以及本机已有的镜像版本。
-- **容器**列出所有带 `io.todex.instance` 标签的容器。由 `todexc` 或 Desktop 创建的容器保存在 `~/.config/todex-container/<名称>/`（`settings.env`、`mounts`、`compose.yaml`，格式与 `todexc` 完全一致，两边都能管理），可以启动、停止、重启、升级（拉取并重建）、修改挂载、查看日志和删除；删除时默认保留 home 卷 `todex-<名称>-home`。直接用 `docker compose` 启动的容器只能启动、停止、连接和查看日志。共享了 socket 的容器还会显示与本机 Backend 页相同的后端管理卡片。
-- **自动清理**（启动后一分钟一次，之后每 6 小时一次）：删除没有容器在用的旧镜像（默认开启）、删除停止超过 1/7/30 天的容器（保留设置和 home 卷）、在容器空闲时卸载本机工作区不再使用的目录、退出 TodeX 时停止由 Desktop 创建的容器。home 卷永远不会被自动删除。
-- **新建工作区 → 容器工作区**：选择本机目录和容器（或新建容器，名称自动取 `todex`、`todex-2`……），把目录挂载进去（Linux、macOS 原路径挂载，Windows 挂到 `/workspace/<目录名>`；容器正在运行时会重建，若有进行中的回合会先确认），等待后端就绪，自动配对并连接，再用容器内路径创建工作区。之后询问要在容器里安装哪些 Agent CLI，以及是否从另一个已连接的后端同步 Agent 配置（账号、设置、MCP、技能）。
-- **初始化指令**（容器工作区第一步）：模板下拉框（按目录里的锁文件推荐：pnpm、npm、yarn、uv、requirements.txt、git 子模块）加可编辑的命令列表。工作区建好后，在容器里的工作区目录下以 `todex` 用户依次执行（`bash -c`，遇到失败就停止），实时显示输出；可以转到后台，结束时通知。
-- **自动冻结**（默认关闭，15 分钟到 4 小时）：在这台 Desktop 看来，容器的后端在设定时长内没有进行中或等待审批的回合、运行中的终端、排队或定时的消息，就用 `docker pause` 冻结它（进程和内存原样保留），并安静地断开连接。在它的会话里发消息、打开终端或它的工作区，或在设置页点 **恢复**，都会解冻并重连，刚才的消息随后发出。其他设备在用这个容器时，这台 Desktop 看不到。
-- Linux 上 Desktop 通过容器共享的 socket 配对（`todex-ipc://container-<名称>`），由 Desktop 新建的容器不发布宿主机端口（`TODEX_PUBLISH=0`，即 todexc 的 `--no-publish`）。Docker Desktop、rootless Docker、Podman、userns-remap 用不了这个 socket：Desktop 把容器发布到 `http://127.0.0.1:<端口>`（只走 socket 的容器会被重建），并用 `docker exec … todex-agentd pair approve` 自动批准配对。
-- **宿主机端口**：需要发布的容器从 设置 → TodeX Container 里的端口范围（默认 17345–17444）随机取一个空闲端口，不会使用本机后端的端口（它配置的端口，未知时按 7345，后端停止时也一样）。端口被占用或正好是本机后端端口的容器，会在 Desktop 启动或重建它时换到新端口；正在运行且占着本机后端端口的容器（Docker 开机自动拉起的）会在 Desktop 启动时换走。旧端口记在 `former-ports` 里，仍指向旧端口的已配对连接，在新端口上用它固定的密钥成功发出一次加密请求后，会被改指到新端口。
-
-## 连接与故障排查
-
-桌面端设置面板会根据探测结果提供明确的诊断信息：
-
-| 诊断状态 | 可能原因 | 排查与解决建议 |
-| :--- | :--- | :--- |
-| **后端未启动 / 无法连接** | `/v2/version` 或 `/health` 请求失败。 | 确认 `todex-agentd` 服务已启动，且端口配置正确。 |
-| **后端地址无效** | 输入的 URL 无法解析为有效 Origin。 | 请使用标准格式，如 `http://127.0.0.1:7345`。 |
-| **认证失败 (401/403)** | Token 缺失或与后端不匹配。 | 在设置页输入与后端配置一致的 `Auth Token`。 |
-| **协议版本已废弃** | 连接地址中包含了旧版 `/v1` 路径。 | 将地址更新为 `/v2`，旧版接口已移除。 |
-| **WebSocket 握手失败** | HTTP 探测正常但 `/v2/ws` 连接中断。 | 检查本地防火墙规则。以 `4400` 关闭表示固定的公钥不匹配，请在「设置 → 设备验证」重新配对。 |
-| **需要加密配对** | 远程后端尚未固定传输公钥，或后端改变了加密方式。 | 在「设置」完成设备验证（或「重新配对」），批准后自动固定公钥。 |
-| **Agent 不可用** | Provider 状态返回 `available = false`。 | 确认运行后端的机器上已安装并登录对应 CLI（`codex`、`pi`、`claude` 等）。 |
-
----
-
-## 安全设计
-
-- **进程隔离**：渲染进程始终运行于 `nodeIntegration: false` 与 `contextIsolation: true` 模式。
-- **IPC 白名单**：原生对话框、安全存储与工作区文件操作（打开、打开方式、在文件夹中显示）均通过 Preload 安全白名单通道进行。渲染进程无法通过 IPC 读取本机文件；文件操作只接受绝对路径，直接打开时拒绝可执行文件与应用包。
-- **应用窗口**：导航、重定向与子框架导航只允许应用自身入口；除通知与剪贴板写入外的网页权限一律拒绝。
-- **后端 Origin**：打包后的渲染页发起的 WebSocket 以 `Origin: todex-desktop://app` 代替 `file://`（或 `null`）；匿名回环后端接受该值并拒绝 `null` / `file://`，因此需要配套更新的后端。
-- **作用域约束**：仅与用户明确指定的后端 daemon 实例进行通信。
-- **浏览器视图**：工作台页面运行在沙箱化的 `WebContentsView` 中，使用独立分区而非应用自身存储，顶层导航在主进程中校验。
-
----
+截图基线只在 CI 中渲染，更新方法见 [AGENTS.md](AGENTS.md#ui-tests-and-visual-regression-ci)。开发版（`DEV0.0.0`）会把详细日志写入 `userData/logs/todex-desktop-debug.log`（可用 `TODEX_DESKTOP_LOG_PATH` 覆盖），其中的令牌、密钥和附件内容都会脱敏。应用图标资源见 [docs/app-icons.md](docs/app-icons.md)。
 
 ## 相关仓库
 
-- **[TodeX 后端服务](../TodeX_backend)**：基于 Rust 构建的后端守护进程 (`todex-agentd`)。
-- **[TodeX Protocol](../TodeX_protocol)**：本客户端与 Web 客户端共用的 `@todex/protocol` 协议源码。
-- **[Todex 移动端应用](../Todex_mobile)**：基于 Swift + UIKit 构建的移动客户端。
+- [TodeX Backend](https://github.com/youtonghy/TodeX_backend)：运行 Agent 的后端 `todex-agentd`
+- [TodeX Web](https://github.com/youtonghy/TodeX_web)：在浏览器中获得同样的体验
+- [TodeX Native](https://github.com/youtonghy/TodeX_native)：移动端应用
+- [TodeX Container](https://github.com/youtonghy/TodeX_container)：内置后端和 Agent CLI 的 Docker 镜像
+- [TodeX Protocol](https://github.com/youtonghy/TodeX_protocol)：桌面端和 Web 端共用的客户端库
 
----
+## 许可证
 
-## 开源协议
-
-本项目采用 MIT 许可证 - 详情参见 [LICENSE](LICENSE) 文件。
-
-## 应用图标
-
-桌面端与 Web 端使用同一套 T 图标，界面和文档按明暗主题展示。图标预览、文件用途与更新步骤见[图标资源说明](docs/app-icons.md)。
+MIT 许可证。
