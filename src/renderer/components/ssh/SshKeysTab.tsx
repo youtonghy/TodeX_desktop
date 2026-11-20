@@ -1,8 +1,10 @@
 import { useRef, useState, type ReactNode } from 'react';
-import { RiAddLine, RiFileCopyLine, RiFolderOpenLine, RiKey2Line, RiUpload2Line } from '@remixicon/react';
-import { SSH_KEY_ALGORITHMS, isValidSshKeyName, type SshKeyAlgorithm, type SshKeysResponse } from '@todex/protocol/ssh';
+import { RiAddLine, RiFileCopyLine, RiFolderOpenLine, RiKey2Line, RiShareForwardLine, RiUpload2Line } from '@remixicon/react';
+import { SSH_KEY_ALGORITHMS, isValidSshKeyName, type SshHost, type SshKey, type SshKeyAlgorithm, type SshKeysResponse } from '@todex/protocol/ssh';
 import { Field } from '../Field';
 import { useT } from '../../i18n';
+import { SshKeyDeployDialog } from './SshKeyDeployDialog';
+import type { AskSshPassword } from './sshPasswordFlow';
 import { errorMessage, type SshApi } from './sshShared';
 import { Chip } from '@/components/base/badges/chip';
 import { Button } from '@/components/base/buttons/button';
@@ -18,13 +20,18 @@ import { toast } from '@/components/ui/toast-store';
 
 type Props = {
   api: SshApi;
+  /** Backend profile the hosts belong to; saved passwords are kept per profile. */
+  backendId: string;
+  askPassword: AskSshPassword;
   keys: SshKeysResponse | null;
+  hosts: SshHost[];
   onReload: () => void;
 };
 
-export function SshKeysTab({ api, keys, onReload }: Props) {
+export function SshKeysTab({ api, backendId, askPassword, keys, hosts, onReload }: Props) {
   const t = useT();
   const [dialog, setDialog] = useState<'import' | 'generate' | null>(null);
+  const [deploying, setDeploying] = useState<SshKey | null>(null);
 
   const copyPublicKey = async (publicKey: string) => {
     try {
@@ -75,15 +82,26 @@ export function SshKeysTab({ api, keys, onReload }: Props) {
                     {key.usedBy.length ? t('ssh.keys.usedBy', { hosts: key.usedBy.join(', ') }) : t('ssh.keys.unused')}
                   </p>
                 </div>
-                {key.publicKey ? (
-                  <IconAction
-                    icon={RiFileCopyLine}
-                    size="sm"
-                    aria-label={t('ssh.keys.copyPublic', { name: key.name })}
-                    tooltip
-                    onClick={() => void copyPublicKey(key.publicKey ?? '')}
-                  />
-                ) : null}
+                <div className="flex shrink-0 gap-1">
+                  {key.publicKey && key.privateKeyPath ? (
+                    <IconAction
+                      icon={RiShareForwardLine}
+                      size="sm"
+                      aria-label={t('ssh.keys.deploy.open', { name: key.name })}
+                      tooltip
+                      onClick={() => setDeploying(key)}
+                    />
+                  ) : null}
+                  {key.publicKey ? (
+                    <IconAction
+                      icon={RiFileCopyLine}
+                      size="sm"
+                      aria-label={t('ssh.keys.copyPublic', { name: key.name })}
+                      tooltip
+                      onClick={() => void copyPublicKey(key.publicKey ?? '')}
+                    />
+                  ) : null}
+                </div>
               </div>
             </Card>
           ))}
@@ -92,6 +110,17 @@ export function SshKeysTab({ api, keys, onReload }: Props) {
       {/* Mounted only while open so secrets never outlive the dialog. */}
       {dialog === 'import' ? <ImportKeyDialog api={api} onClose={() => setDialog(null)} onSaved={onReload} /> : null}
       {dialog === 'generate' ? <GenerateKeyDialog api={api} onClose={() => setDialog(null)} onSaved={onReload} /> : null}
+      {deploying ? (
+        <SshKeyDeployDialog
+          api={api}
+          backendId={backendId}
+          sshKey={deploying}
+          hosts={hosts}
+          askPassword={askPassword}
+          onClose={() => setDeploying(null)}
+          onDeployed={onReload}
+        />
+      ) : null}
     </div>
   );
 }

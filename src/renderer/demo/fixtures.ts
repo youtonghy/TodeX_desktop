@@ -749,4 +749,35 @@ export const demoSshHosts: SshHostsResponse = {
   ],
 };
 
-export const demoSshKeys: SshKeysResponse = { sshDirectory: '/home/demo/.ssh', agentAvailable: true, keys: [] };
+export const demoSshKeys: SshKeysResponse = {
+  sshDirectory: '/home/demo/.ssh',
+  agentAvailable: true,
+  keys: [
+    {
+      name: 'id_ed25519',
+      privateKeyPath: '/home/demo/.ssh/id_ed25519',
+      publicKeyPath: '/home/demo/.ssh/id_ed25519.pub',
+      algorithm: 'ssh-ed25519',
+      bits: 256,
+      fingerprint: 'SHA256:q3J8m0b6P0xXkzS1v2B5cT9dY4wR7nL0eH2uA6fK1gM',
+      comment: 'demo@todex',
+      encrypted: false,
+      loadedInAgent: true,
+      publicKey: 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDemoPreviewKeyOnlyNotARealKey000000000000 demo@todex',
+      usedBy: ['build-box', 'gs-dev'],
+    },
+    {
+      name: 'deploy_2026',
+      privateKeyPath: '/home/demo/.ssh/deploy_2026',
+      publicKeyPath: '/home/demo/.ssh/deploy_2026.pub',
+      algorithm: 'ssh-ed25519',
+      bits: 256,
+      fingerprint: 'SHA256:Zk4pT1n8aV3sQ6yH0cL2wE9rB5uJ7mD1xF4gN8oP2iA',
+      comment: 'deploy key',
+      encrypted: false,
+      loadedInAgent: false,
+      publicKey: 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDemoDeployKeyOnlyNotARealKey11111111111 deploy key',
+      usedBy: [],
+    },
+  ],
+};

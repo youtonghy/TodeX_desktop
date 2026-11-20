@@ -513,6 +513,47 @@ test('terminal host context menu', async ({ page, openDemo }) => {
   await expect(page).toHaveScreenshot('terminal-host-menu-light.png', { mask: volatile(page) });
 });
 
+async function openTerminalKeys(page: Page, openDemo: (theme?: Theme, query?: string) => Promise<void>, theme: Theme) {
+  await openTerminalHosts(page, openDemo, theme);
+  await page.getByRole('tab', { name: '密钥' }).click();
+  await expect(page.getByRole('heading', { name: 'deploy_2026' })).toBeVisible();
+}
+
+for (const theme of ['light', 'dark'] as const) {
+  test(`terminal key list (${theme})`, async ({ page, openDemo }) => {
+    await openTerminalKeys(page, openDemo, theme);
+    await settle(page);
+    await expect(page).toHaveScreenshot(`terminal-keys-${theme}.png`, { mask: volatile(page) });
+  });
+}
+
+// Deploying a key: the password host is picked by default, the key host and
+// the read-only host are listed with their state.
+test('terminal key deploy dialog', async ({ page, openDemo }) => {
+  await openTerminalKeys(page, openDemo, 'light');
+  await page.getByRole('button', { name: '将 deploy_2026 部署到主机' }).click();
+  const dialog = page.getByRole('dialog', { name: '部署 deploy_2026 到主机' });
+  await expect(dialog.getByRole('checkbox', { name: 'pp-lax' })).toBeChecked();
+  await expect(dialog.getByRole('checkbox', { name: 'build-box' })).toBeDisabled();
+  await settle(page);
+  await expect(page).toHaveScreenshot('terminal-key-deploy-light.png', { mask: volatile(page) });
+});
+
+// Overwriting a key host and turning off password login both need a
+// confirmation first.
+test('terminal key deploy confirmation', async ({ page, openDemo }) => {
+  await openTerminalKeys(page, openDemo, 'light');
+  await page.getByRole('button', { name: '将 deploy_2026 部署到主机' }).click();
+  const dialog = page.getByRole('dialog', { name: '部署 deploy_2026 到主机' });
+  // React Aria hides the inputs; their labels take the click.
+  await dialog.getByRole('listitem').filter({ hasText: 'gs-dev' }).locator('label').click();
+  await dialog.getByText(/^关闭服务器的密码登录/).click();
+  await dialog.getByRole('button', { name: '部署到 2 台主机' }).click();
+  await expect(page.getByRole('dialog', { name: '确认部署' })).toBeVisible();
+  await settle(page);
+  await expect(page).toHaveScreenshot('terminal-key-deploy-confirm-light.png', { mask: volatile(page) });
+});
+
 // Two paired backends (`backends=2`), the second holding slightly different config.
 async function openConfigSync(page: Page, openDemo: (theme?: Theme, query?: string, start?: 'conversation' | 'home') => Promise<void>, theme: Theme) {
   await openDemo(theme, 'backends=2');

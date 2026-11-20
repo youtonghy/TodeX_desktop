@@ -696,6 +696,21 @@ function demoApiKeysRoute(method: string, path: string, body: Record<string, unk
   apiKeys = apiKeys.map((item) => (item.id === key.id ? next : item));
   return json(next);
 }
+/** Deploys succeed in the preview; nothing is saved. */
+function demoSshKeyDeploy(name: string, body: Record<string, unknown>): SecureResponse {
+  const key = fixtures.demoSshKeys.keys.find((item) => item.name === name);
+  const host = fixtures.demoSshHosts.hosts.find((item) => item.alias === body.alias)?.managed;
+  if (!key || !host) return json({ error: { code: 'NOT_FOUND', message: `ssh key ${name} or host not found` } }, 404);
+  return json({
+    ok: true,
+    durationMs: 820,
+    alreadyInstalled: false,
+    verified: true,
+    host: { ...host, authMethod: undefined, identityFile: key.privateKeyPath },
+    ...(body.disablePasswordLogin === true ? { passwordLogin: { status: 'disabled' } } : {}),
+  });
+}
+
 const sockets = new Set<DemoSocket>();
 
 function json(value: unknown, status = 200): SecureResponse {
@@ -1106,6 +1121,8 @@ function route(request: SecureRequest): SecureResponse {
     return json({ deleted: true });
   }
   if (path === '/v2/agent-calling' && method === 'PUT') return demoAgentCallingUpdate(body);
+  const keyDeploy = path.match(/^\/v2\/ssh\/keys\/([^/]+)\/deploy$/);
+  if (keyDeploy && method === 'POST') return demoSshKeyDeploy(decodeURIComponent(keyDeploy[1]), body);
   if (path === '/v2/agent-calling/api-listener' && method === 'PUT') return demoApiListenerUpdate(body);
   const apiKeyResponse = demoApiKeysRoute(method, path, body);
   if (apiKeyResponse) return apiKeyResponse;

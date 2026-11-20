@@ -180,7 +180,14 @@ export function SshPanel({ session, backendId, onBackendChange, scopeKey, workbe
           </TabPanel>
           <TabPanel id="keys" className="flex min-h-0 flex-1 flex-col">
             <ScrollArea className="flex-1" contentClassName="py-4" surface="secondary">
-              <SshKeysTab api={api} keys={keys} onReload={() => void reloadAll()} />
+              <SshKeysTab
+                api={api}
+                backendId={backendId}
+                askPassword={remoteConnector.askPassword}
+                keys={keys}
+                hosts={hosts?.hosts ?? []}
+                onReload={() => void reloadAll()}
+              />
             </ScrollArea>
           </TabPanel>
           <TabPanel id="connections" className="flex min-h-0 flex-1 flex-col">
