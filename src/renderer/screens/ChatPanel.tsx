@@ -115,7 +115,6 @@ import {
 } from '../session/helpers';
 import { selectionInside } from '../lib/selection';
 import { quotaLimits, quotaMessage } from '../session/quota';
-import { backendApi } from '../session/helpers';
 import { EXIT_PLAN_MODE_TOOL, findCapabilityHashTrigger, insertCapabilityReference, normalizeReasoningEffort } from '@todex/protocol/todex';
 import { buildCapabilitySuggestions, capabilityCatalogsPending, type CapabilitySuggestion } from '@todex/protocol/capabilityCatalog';
 import {
@@ -607,16 +606,12 @@ function isChatReminderEntry(entry: { subtitle: string; title: string }): boolea
     || entry.subtitle.trim() === 'codex.local.start';
 }
 
-// Plan quota per provider, shared by every composer for a minute so opening
-// the context popover does not refetch on each click.
-const QUOTA_CACHE_MS = 60_000;
-let quotaCache: { at: number; providers: Record<string, ProviderQuotaSnapshot> } | null = null;
-
 /** Context meter in the composer-panel recipe: a 16px ring that opens the
  * BoardUI agent-limits card with the conversation's context window and the
  * current agent's plan limits. */
 function ContextUsageIndicator({
   session,
+  conversationId,
   provider,
   usedTokens,
   contextWindow,
@@ -626,6 +621,7 @@ function ContextUsageIndicator({
   cacheWriteTokens,
 }: {
   session: TodeXSession;
+  conversationId: string;
   provider?: string;
   usedTokens: number;
   contextWindow?: number;
@@ -659,22 +655,20 @@ function ContextUsageIndicator({
   const progress = percent ?? 0;
   const circumference = 2 * Math.PI * 6;
 
+  const { getConversationProviderQuota, reportClaudeQuotaError } = session;
   useEffect(() => {
     if (!open || !provider) return;
     let cancelled = false;
-    const pick = (providers: Record<string, ProviderQuotaSnapshot>) => { if (!cancelled) setQuota(providers[provider] ?? null); };
-    if (quotaCache && Date.now() - quotaCache.at < QUOTA_CACHE_MS) {
-      pick(quotaCache.providers);
-    } else {
-      backendApi(session.settings).getProviderQuotas()
-        .then((response) => {
-          quotaCache = { at: Date.now(), providers: response.providers ?? {} };
-          pick(quotaCache.providers);
-        })
-        .catch(() => { if (!cancelled) setQuota(null); });
-    }
+    setQuota(undefined);
+    getConversationProviderQuota(conversationId, provider).then(snapshot => {
+      if (!cancelled) setQuota(snapshot);
+    }).catch((error: unknown) => {
+      if (cancelled) return;
+      setQuota(null);
+      if (reportClaudeQuotaError(error)) setOpen(false);
+    });
     return () => { cancelled = true; };
-  }, [open, provider, session.settings.serverUrl, session.settings.deviceSecret]);
+  }, [open, provider, conversationId, getConversationProviderQuota, reportClaudeQuotaError]);
 
   const descriptor = session.v2Providers.find((item) => item.id === provider);
   return (
@@ -2598,7 +2592,9 @@ export function ChatPanel({ session }: Props) {
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
                     <ContextUsageIndicator
+                      key={conversation.id}
                       session={session}
+                      conversationId={conversation.id}
                       provider={conversation.provider}
                       usedTokens={contextUsage?.usedTokens ?? 0}
                       contextWindow={currentContextWindow}

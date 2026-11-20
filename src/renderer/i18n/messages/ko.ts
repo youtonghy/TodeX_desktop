@@ -8,6 +8,11 @@ export const ko: Messages = {
   'common.save': '저장',
   'common.delete': '삭제',
   'common.copy': '복사',
+  'claudeRegion.detected': '감지된 지역: {region}',
+  'claudeRegion.title': 'Claude Code를 사용할 수 없음',
+  'claudeRegion.unsupported': 'Anthropic은 이 백엔드가 연결하는 지역을 지원하지 않습니다. 다른 에이전트를 선택하세요.',
+  'claudeRegion.unverified': '백엔드가 연결 지역의 Anthropic 지원 여부를 확인하지 못했습니다. 나중에 다시 시도하거나 다른 에이전트를 선택하세요.',
+  'claudeRegion.upgrade': 'Claude Code를 사용하려면 Anthropic 지원 지역을 사전에 확인하는 버전으로 백엔드를 업그레이드하세요.',
   'common.close': '닫기',
   'common.copied': '복사됨',
   // markdown

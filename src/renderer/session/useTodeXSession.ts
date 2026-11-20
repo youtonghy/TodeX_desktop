@@ -27,6 +27,7 @@ import { piExtensionPlainText } from '../components/piExtensionPresentation';
 import { PiExtensionEffects, canApplyPluginDraft } from './piExtensionEffects';
 import { commandContextKey, findPromptCommand, routePiSlashCommand, type ProviderCommandCatalog } from './providerCommands';
 import { platform } from '../platform';
+import { claudeRegionCapability, claudeRegionError, type ClaudeRegionBlock } from './claudeRegion';
 import { migrateLegacyFollowUps, restoreQueuedFollowUps, type LegacyAddResult, type LegacyFollowUps, type LegacyQueueTarget } from './queuedFollowUps';
 import { backendRateLimitState } from './sessionRateLimit';
 import { ConversationRecovery, isConversationRuntimeBusy, type ConversationOpenStatus, type EarlierHistoryResult } from './conversationRecovery';
@@ -465,6 +466,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const pendingV2SubmissionsRef = useRef(new Map<string, SubmissionDraft & {
     requestId: string;
     turnId?: string;
+    composerDraft?: SubmissionDraft;
     phase: 'sending' | 'running' | 'unknown';
   }>());
   const backendContinuationsRef = useRef(new Map<string, BackendContinuation>());
@@ -732,6 +734,39 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const v2Providers = v2ProvidersByBackend[activeBackendConnectionId] ?? EMPTY_PROVIDERS;
   const v2ProvidersByBackendRef = useRef(v2ProvidersByBackend);
   v2ProvidersByBackendRef.current = v2ProvidersByBackend;
+  const [claudeRegionBlock, setClaudeRegionBlock] = useState<ClaudeRegionBlock>();
+  const shownClaudeRegionRequests = useRef(new Set<string>());
+  const showClaudeRegionBlock = useCallback((block: ClaudeRegionBlock, backendId: string, rejectionId?: string) => {
+    if (rejectionId) {
+      const key = JSON.stringify([backendId, rejectionId]);
+      const shown = shownClaudeRegionRequests.current;
+      if (shown.has(key)) return;
+      shown.add(key);
+      if (shown.size > 2000) shown.delete(shown.values().next().value!);
+    }
+    setClaudeRegionBlock(block);
+  }, []);
+  const dismissClaudeRegionBlock = useCallback(() => setClaudeRegionBlock(undefined), []);
+  const refuseClaudeOperation = useCallback((conversation: ConversationRecord) => {
+    const backendId = backendIdForConversation(conversation.id);
+    const block = claudeRegionCapability(conversation.provider, v2ProvidersByBackendRef.current[backendId]);
+    if (!block) return false;
+    showClaudeRegionBlock({ kind: block }, backendId);
+    return true;
+  }, [showClaudeRegionBlock]);
+  const getConversationProviderQuota = useCallback(async (conversationId: string, provider: string) => {
+    const conversation = stores.conversations.get().find(item => item.id === conversationId);
+    if (!conversation || conversation.provider !== provider || refuseClaudeOperation(conversation)) return null;
+    const api = v2ApiForConversation(conversationId);
+    if (provider === 'claude-code') return api.getClaudeProviderQuota();
+    const result = await api.getProviderQuotas();
+    return result.providers?.[provider] ?? null;
+  }, [refuseClaudeOperation, stores, v2ApiForConversation]);
+  const reportClaudeQuotaError = useCallback((error: unknown) => {
+    const block = claudeRegionError(error);
+    if (block) setClaudeRegionBlock(block);
+    return Boolean(block);
+  }, []);
   /** Agents of the backend serving a conversation. */
   const providersForConversation = (conversation: { id: string } | null | undefined): ProviderDescriptor[] => (
     (conversation ? v2ProvidersByBackendRef.current[backendIdForConversation(conversation.id)] : undefined) ?? v2ProvidersRef.current
@@ -2049,6 +2084,17 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     setConversationSelectedSkills(conversationId, (current) => current.length ? current : submission.skills);
   }, [setConversationChatDraft, setConversationAttachments, setConversationSelectedSkills]);
 
+  const restoreRegionSubmission = useCallback((conversationId: string, draft: SubmissionDraft) => {
+    setConversationChatDraft(conversationId, current => current.trim() === draft.text.trim()
+      ? current : [draft.text, current].filter(part => part.trim()).join('\n\n'));
+    setConversationAttachments(conversationId, current => [
+      ...draft.attachments.filter(attachment => !current.some(other => other.id === attachment.id)), ...current,
+    ]);
+    setConversationSelectedSkills(conversationId, current => [
+      ...draft.skills.filter(skill => !current.some(other => other.name === skill.name && other.path === skill.path)), ...current,
+    ]);
+  }, [setConversationChatDraft, setConversationAttachments, setConversationSelectedSkills]);
+
   const restorePendingSubmission = useCallback((conversationId: string) => {
     const submission = pendingV2SubmissionsRef.current.get(conversationId);
     if (submission) restoreSubmissionDraft(conversationId, submission);
@@ -2263,6 +2309,11 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       if (['turn.completed', 'turn.cancelled', 'turn.failed', 'turn.interrupted'].includes(type)) {
         // A realtime frame is news even when it lands inside a history replay.
         const replayed = recovering && !live.has(event.sequence);
+        const regionBlock = type === 'turn.failed' ? claudeRegionError(data) : undefined;
+        if (regionBlock && !replayed) {
+          const rejectionId = typeof requestId === 'string' && requestId ? requestId : ['turn', localId, turnId || event.sequence].join(':');
+          showClaudeRegionBlock(regionBlock, backendIdForConversation(localId), rejectionId);
+        }
         completedAt = Math.max(completedAt, Date.parse(event.time) || Date.now());
         // Extensions can change their catalog or native session during a turn;
         // Claude's slash-command catalog likewise only arrives once a turn's
@@ -2272,7 +2323,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         const settledKey = turnId ? `${state.conversationId}:${turnId}` : '';
         const firstSettle = Boolean(settledKey) && !settledV2TurnsRef.current.has(settledKey);
         if (turnId) {
-          settledV2TurnsRef.current.set(settledKey, type);
+          settledV2TurnsRef.current.set(settledKey, regionBlock ? 'turn.failed.region' : type);
           if (settledV2TurnsRef.current.size > 2000) settledV2TurnsRef.current.delete(settledV2TurnsRef.current.keys().next().value!);
         }
         if (type === 'turn.completed' && firstSettle && !replayed) {
@@ -2283,7 +2334,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         // queue snapshot, so its error text is not parsed.
         const backendQueued = hasBackendQueue(providersForConversation(stores.conversations.get().find((item) => item.id === localId)), stores.conversations.get().find((item) => item.id === localId));
         if (submission && turnId && submission.turnId === turnId) {
-          if (type === 'turn.failed' && backendQueued) {
+          if (regionBlock) {
+            restoreRegionSubmission(localId, submission.composerDraft ?? submission);
+          } else if (type === 'turn.failed' && backendQueued) {
             void awaitBackendContinuation(localId, turnId, submission,
               typeof data.message === 'string' ? data.message : '');
           } else if (type === 'turn.failed') {
@@ -3057,12 +3110,15 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         link.commands.resolve(id, payload);
         return;
       }
-      if (messageType === 'server.error' && parsed.id !== undefined) {
+      if (messageType === 'server.error') {
         const payload = parsed.payload as { code?: unknown; message?: unknown; conversationId?: unknown } | undefined;
         const code = typeof payload?.code === 'string' ? payload.code : '';
         const detail = historyErrorMessage(code) ?? (typeof payload?.message === 'string' ? payload.message : t('sess.v2CommandFailed'));
         const message = code ? `[${code}] ${detail}` : detail;
         const requestId = typeof parsed.id === 'string' ? parsed.id : '';
+        const regionBlock = claudeRegionError(payload);
+        if (regionBlock) showClaudeRegionBlock(regionBlock, backendId, requestId);
+        if (parsed.id === undefined) return;
         if (isAgentBrowserWatchRequestId(requestId)) {
           // A live view that cannot start falls back to screenshots; it is not
           // the user's failure to report.
@@ -3086,7 +3142,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         // No recipient to encrypt the write for: register this device again.
         if (code === HISTORY_KEY_REQUIRED) void historyEncryptionRef.current?.keyRequired(backendId);
         link.commands.reject(requestId, message, code);
-        if (!callerReports) setLastError(message);
+        if (!callerReports && !regionBlock) setLastError(message);
         return;
       }
       if (messageType === HISTORY_ENCRYPTION_UPDATED) {
@@ -3307,19 +3363,20 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const activeConversationBackendId = activeConversation ? backendIdForConversation(activeConversation.id) : '';
   const activeConversationLink = linkStatusByBackend[activeConversationBackendId] ?? IDLE_BACKEND_LINK;
   const activeConversationConnected = activeConversationLink.state === 'open';
+  const activeClaudeRegionBlock = claudeRegionCapability(activeConversation?.provider, v2ProvidersByBackend[activeConversationBackendId]);
   useEffect(() => {
     const conversation = activeConversation;
     const v2Id = conversation?.v2ConversationId;
-    if (!activeConversationConnected || !conversation || !v2Id || conversation.archived === true) return;
+    if (!activeConversationConnected || !conversation || !v2Id || conversation.archived === true || activeClaudeRegionBlock) return;
     const runtime = conversationRecoveryRef.current?.get(v2Id);
     const busy = Boolean(runtime && isConversationRuntimeBusy(runtime)) || conversationHasPendingWork(conversation.id);
     const now = Date.now();
     if (!shouldWarmConversation(v2Id, now, conversationWarmSentAtRef.current, busy)) return;
-    const sent = sendRawProtocolFrame({ id: createRequestId(CONVERSATION_WARM_ID_PREFIX), type: 'conversation.warm', payload: { conversationId: v2Id } });
+    const sent = sendRawProtocolFrame({ id: createRequestId(CONVERSATION_WARM_ID_PREFIX), type: 'conversation.warm', payload: { conversationId: v2Id } }, activeConversationBackendId);
     if (sent) conversationWarmSentAtRef.current.set(v2Id, now);
     // Busy state is sampled when the conversation opens or the connection is
     // (re)established; it is deliberately not a dependency.
-  }, [activeConversation?.id, activeConversation?.v2ConversationId, activeConversationConnected, activeConversationLink.epoch, sendRawProtocolFrame]);
+  }, [activeConversation?.id, activeConversation?.v2ConversationId, activeClaudeRegionBlock, activeConversationBackendId, activeConversationConnected, activeConversationLink.epoch, sendRawProtocolFrame]);
 
   /** A command on a backend's socket; without a backend it goes to the one
    * owning the conversation the command names (else the focused backend). */
@@ -3407,6 +3464,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const controlConversation = useCallback(async (conversationId: string, control: LiveConversationControl): Promise<boolean> => {
     const conversation = stores.conversations.get().find(item => item.id === conversationId);
     if (refuseReadOnlyWrite(conversation)) return false;
+    if (conversation && (control.action === 'steer' || control.action === 'queueAdd' || control.action === 'configure')
+      && refuseClaudeOperation(conversation)) return false;
     const turnId = turnIdsRef.current[conversationId];
     if (!conversation?.v2ConversationId || !turnId || controlRequestsRef.current.has(conversationId)) {
       setLastError(t('sess.turnEndedUnconfirmed'));
@@ -3422,7 +3481,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     try {
       const result = await sendProtocolCommand({ id: requestId, type: 'conversation.control', payload: {
         conversationId: conversation.v2ConversationId, expectedTurnId: turnId, control,
-      } }, 35_000);
+      } }, 35_000, backendIdForConversation(conversation.id));
       if (result.status === 'targetUnavailable') throw new Error(t('sess.turnEndedNotApplied'));
       if (controlRequestsRef.current.get(conversationId) === requestId) {
         controlRequestsRef.current.delete(conversationId);
@@ -3435,7 +3494,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         if (!unknown) controlRequestsRef.current.delete(conversationId);
         setControlStatusByConversation(current => withEntry(current, conversationId, unknown ? 'unknown' : undefined));
       }
-      setLastError(error instanceof Error ? error.message : t('sess.agentControlFailed'));
+      if (!claudeRegionError(error)) setLastError(error instanceof Error ? error.message : t('sess.agentControlFailed'));
       if (unknown) await recoverConversation(conversationId);
       return false;
     }
@@ -5738,6 +5797,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       if (conversation.v2ConversationId) {
         return conversation;
       }
+      if (refuseClaudeOperation(conversation)) return null;
       const backendConnectionId = conversation.backendConnectionId
         || workspace.backendConnectionId
         || (isNoneWorkspaceId(workspace.id) ? noWorkspaceBackendIdRef.current || null : null);
@@ -5763,6 +5823,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       }
 
       try {
+        if (!backendProfile && provider.id === 'claude-code') throw new Error(t('sidebar.backendRemoved'));
         const api = backendApi(backendProfile ?? settings);
         const requestedTitle = isDefaultTitle ? firstMessageTitle || undefined : title || undefined;
         const created = await api.createConversation({
@@ -5821,6 +5882,11 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         subscribeV2Conversation(created.id, { afterSequence: 0, limit: 200 });
         return record;
       } catch (error) {
+        const regionBlock = claudeRegionError(error);
+        if (regionBlock) {
+          showClaudeRegionBlock(regionBlock, backendConnectionId ?? '');
+          return null;
+        }
         const message = error instanceof ConnectionError
           ? `${connectionErrorText(error)}（${error.technicalDetails}）`
           : error instanceof Error ? error.message : t('alert.createConversationFailed');
@@ -5886,6 +5952,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       conversationId = activeConversationRef.current,
       skills: SelectedSkillAttachment[] = [],
       rawAttachments: ComposerAttachmentDraft[] = [],
+      composerDraft?: SubmissionDraft,
     ): Promise<boolean> => {
       const context = getConversationContext(conversationId);
       if (!context) {
@@ -5894,6 +5961,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       }
       const { workspace, conversation } = context;
       if (refuseReadOnlyWrite(conversation)) return false;
+      if (refuseClaudeOperation(conversation)) return false;
       // Reference attachments only send while their [引用:name] token is in the text.
       const attachments = liveComposerAttachments(text, rawAttachments);
       if (!isV2Conversation(conversation) || !conversation.provider) {
@@ -5976,7 +6044,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         return false;
       }
       const requestId = createRequestId('prompt');
-      const submission = { text, skills, attachments, requestId, phase: 'sending' as 'sending' | 'running' | 'unknown', turnId: undefined as string | undefined };
+      const submission = { text, skills, attachments, requestId, composerDraft, phase: 'sending' as 'sending' | 'running' | 'unknown', turnId: undefined as string | undefined };
       pendingV2SubmissionsRef.current.set(conversation.id, submission);
       setSubmissionStatusByConversation((current) => ({ ...current, [conversation.id]: 'sending' }));
 
@@ -5992,7 +6060,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
             text || attachmentPrompt(attachments) || selectedSkillSummary(skills),
           );
         const v2Id = readyConversation?.v2ConversationId;
-        if (!readyConversation || !v2Id) {
+        if (!readyConversation || !v2Id || refuseClaudeOperation(readyConversation)) {
           setConversationThinking(conversation.id, false);
           pendingV2SubmissionsRef.current.delete(conversation.id);
           setSubmissionStatusByConversation((current) => ({ ...current, [conversation.id]: undefined }));
@@ -6015,7 +6083,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
             clientRequestId: requestId,
             ...v2PromptFields(readyConversation, workspace, permissionMode, text, skills, attachments),
           },
-        });
+        }, undefined, promptBackendId);
         updateConversation(readyConversation.id, { permissionMode,
           mode: readyConversation.mode === 'plan' || readyConversation.mode === 'smart' ? readyConversation.mode : 'implement' });
         restartSmartPlanForSkills(readyConversation.id, skills);
@@ -6029,6 +6097,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
             // tells whether it continues the prompt (then the composer clears).
             return awaitBackendContinuation(conversation.id, submission.turnId!, submission, '');
           }
+          if (terminal === 'turn.failed.region') return false;
           if (terminal === 'turn.failed') {
             restoreSubmission();
             return false;
@@ -6046,7 +6115,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           if (submission.phase === 'running') {
             const v2Id = stores.conversations.get().find((item) => item.id === conversation.id)?.v2ConversationId;
             const terminal = submission.turnId ? settledV2TurnsRef.current.get(`${v2Id}:${submission.turnId}`) : undefined;
-            return terminal !== 'turn.failed';
+            return terminal !== 'turn.failed' && terminal !== 'turn.failed.region';
           }
           submission.phase = 'unknown';
           setSubmissionStatusByConversation((current) => ({ ...current, [conversation.id]: 'unknown' }));
@@ -6060,7 +6129,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
             if (terminal === 'turn.failed' && backendQueued) {
               return awaitBackendContinuation(conversation.id, submission.turnId!, submission, '');
             }
-            return terminal !== 'turn.failed';
+            return terminal !== 'turn.failed' && terminal !== 'turn.failed.region';
           }
           return latest?.phase === 'running';
         }
@@ -6082,7 +6151,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         const message = error instanceof ConnectionError
           ? connectionErrorText(error)
           : error instanceof Error ? error.message : t('sess.sendFailedShort');
-        setLastError(message);
+        if (!claudeRegionError(error)) setLastError(message);
         pendingV2SubmissionsRef.current.delete(conversation.id);
         setSubmissionStatusByConversation((current) => ({ ...current, [conversation.id]: undefined }));
         restoreSubmission();
@@ -6128,7 +6197,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     }
     try {
       const frame = followUpQueueFrame('add', v2Id, { ...fields, itemId: item.id, ...(paused ? { paused: true } : {}) });
-      const result = await sendProtocolCommand({ id: createRequestId('queue-add'), ...frame });
+      const result = await sendProtocolCommand({ id: createRequestId('queue-add'), ...frame }, undefined, backendIdForConversation(conversation.id));
       const started = result.status === 'started';
       if (started) setConversationThinking(conversation.id, true);
       restartSmartPlanForSkills(conversation.id, item.skills);
@@ -6154,7 +6223,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     if (refuseReadOnlyWrite(conversation)) return false;
     const result = await addFollowUp(conversationId, item);
     if ('error' in result) {
-      setLastError(result.error instanceof Error ? result.error.message : t('sess.sendFailedShort'));
+      if (!claudeRegionError(result.error)) setLastError(result.error instanceof Error ? result.error.message : t('sess.sendFailedShort'));
       return false;
     }
     return result.status;
@@ -6202,7 +6271,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
    * was refused, with the reason reported — the caller keeps the message. */
   const queueWhileBusy = useCallback(async (conversationId: string, item: QueuedChatSubmission): Promise<'queued' | 'held' | false> => {
     const conversation = getConversationContext(conversationId)?.conversation;
-    if (!conversation) return false;
+    if (!conversation || refuseClaudeOperation(conversation)) return false;
     if (!isV2Conversation(conversation)) {
       setLastError(t('sess.queueUnsupported'));
       return false;
@@ -6243,15 +6312,17 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
 
   /** Removes one item, clears, resumes, or (`backendQueueControl`) pauses the backend queue. */
   const editFollowUpQueue = useCallback(async (conversationId: string, operation: 'remove' | 'clear' | 'resume' | 'pause', itemId?: string) => {
-    const v2Id = stores.conversations.get().find((item) => item.id === conversationId)?.v2ConversationId;
-    if (!v2Id) return false;
+    const conversation = stores.conversations.get().find(item => item.id === conversationId);
+    const v2Id = conversation?.v2ConversationId;
+    if (!conversation || !v2Id) return false;
+    if (operation === 'resume' && refuseClaudeOperation(conversation)) return false;
     try {
       const result = await sendProtocolCommand({ id: createRequestId(`queue-${operation}`),
-        ...followUpQueueFrame(operation, v2Id, itemId ? { itemId } : {}) });
+        ...followUpQueueFrame(operation, v2Id, itemId ? { itemId } : {}) }, undefined, backendIdForConversation(conversationId));
       conversationRecoveryRef.current?.adoptFollowUpQueue(v2Id, parseFollowUpQueue(result.queue));
       return true;
     } catch (error) {
-      setLastError(error instanceof Error ? error.message : t('sess.requestFailed', { method: `conversation.queue.${operation}` }));
+      if (!claudeRegionError(error)) setLastError(error instanceof Error ? error.message : t('sess.requestFailed', { method: `conversation.queue.${operation}` }));
       return false;
     }
   }, [sendProtocolCommand, setLastError]);
@@ -6267,14 +6338,15 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       return false;
     }
     try {
-      const result = await sendProtocolCommand({ id: createRequestId('schedule'), ...conversationScheduleFrame(v2Id, at) });
+      if (at !== null && refuseClaudeOperation(conversation)) return false;
+      const result = await sendProtocolCommand({ id: createRequestId('schedule'), ...conversationScheduleFrame(v2Id, at) }, undefined, backendIdForConversation(conversationId));
       if (result.queue !== undefined) conversationRecoveryRef.current?.adoptFollowUpQueue(v2Id, parseFollowUpQueue(result.queue));
       const schedule = parseConversationSchedule(result.schedule);
       const apply = (items: ConversationRecord[]) => items.map((item) => item.id === conversationId ? { ...item, schedule } : item);
       setConversations(apply);
       return true;
     } catch (error) {
-      setLastError(error instanceof Error ? error.message : t('sess.requestFailed', { method: 'conversation.schedule' }));
+      if (!claudeRegionError(error)) setLastError(error instanceof Error ? error.message : t('sess.requestFailed', { method: 'conversation.schedule' }));
       return false;
     }
   }, [sendProtocolCommand, setLastError]);
@@ -6409,7 +6481,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         const conversation = stores.conversations.get().find((item) => item.id === conversationId);
         if (!conversation || isReadOnlyConversation(conversation)) return { kind: 'gone' };
         // Each backend's queue is migrated once that backend is connected.
-        if (!conversation.v2ConversationId || linkStatusRef.current[backendIdForConversation(conversation.id)]?.state !== 'open'
+        const backendId = backendIdForConversation(conversation.id);
+        if (!conversation.v2ConversationId || linkStatusRef.current[backendId]?.state !== 'open'
+          || claudeRegionCapability(conversation.provider, v2ProvidersByBackendRef.current[backendId])
           || !providerHasBackendQueue(providersForConversation(conversation), conversation.provider)) return { kind: 'wait' };
         return { kind: 'ready', control: providerHasBackendQueueControl(providersForConversation(conversation), conversation.provider) };
       },
@@ -6894,6 +6968,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         return;
       }
       if (lower === 'compact' || lower === 'retry' || lower === 'resume') {
+        if (refuseClaudeOperation(conversation)) return;
         const provider = providersForConversation(conversation).find((item) => item.id === conversation.provider);
         const nativeAction = provider?.capabilities.controlActions?.includes(lower) === true;
         // Some providers expose these as catalog commands instead of control
@@ -6906,7 +6981,11 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           return;
         }
         if (!nativeAction) {
-          void sendV2Prompt(trimmed, conversation.id);
+          void sendV2Prompt(trimmed, conversation.id).then(accepted => {
+            if (accepted && conversation.provider === 'claude-code') {
+              setConversationChatDraft(conversation.id, current => current.trim() === trimmed ? '' : current);
+            }
+          });
           return;
         }
         const instructions = lower === 'compact' ? argumentText : '';
@@ -6939,9 +7018,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
             conversationId: v2Id,
             ...fields,
             ...(instructions ? { instructions } : {}),
-          } }).then(() => recoverConversation(conversation.id));
+          } }, undefined, backendIdForConversation(conversation.id)).then(() => recoverConversation(conversation.id));
         }).catch((error: unknown) => {
-          setLastError(error instanceof Error ? error.message : t('sess.operationFailed'));
+          if (!claudeRegionError(error)) setLastError(error instanceof Error ? error.message : t('sess.operationFailed'));
           void recoverConversation(conversation.id);
         });
         return;
@@ -7182,7 +7261,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     const { workspace } = context;
     // A draft without an agent gets one before anything is sent.
     const conversation = ensureConversationAgent(conversationId);
-    if (!conversation) return;
+    if (!conversation || refuseClaudeOperation(conversation)) return;
     const isThinking = thinkingConversations[conversationId] === true;
     if (conversation.provider === 'pi' && text.startsWith('/')) {
       const route = routePiSlashCommand(text, getProviderCommandCatalog(conversation.id));
@@ -7194,7 +7273,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         return;
       }
       sendSlashCommand(text, conversationId);
-      setConversationChatDraft(conversationId, '');
+      if (conversation.provider !== 'claude-code') setConversationChatDraft(conversationId, '');
       return;
     }
     const mentionReferences = parseMentionReferences(text);
@@ -7237,7 +7316,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         .then((queued) => { if (queued) clearSubmittedComposer(); });
       return;
     }
-    void sendV2Prompt(text, conversationId, skills, attachments).then((accepted) => {
+    const composerDraft = { text: draftText, attachments: draftAttachments, skills };
+    void sendV2Prompt(text, conversationId, skills, attachments, composerDraft).then((accepted) => {
       if (accepted) clearSubmittedComposer();
     });
   }, [appendTimeline, chatDrafts, composerAttachments, controlConversation, ensureConversationAgent, getConversationContext, queueWhileBusy, rememberMentionReferences, selectedSkills, sendSlashCommand, sendV2Prompt, setConversationAttachments, setConversationChatDraft, setConversationComposerSelection, setConversationSelectedSkills, thinkingConversations, getProviderCommandCatalog]);
@@ -7345,6 +7425,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     backendStarting,
     modelCatalog,
     lastError,
+    claudeRegionBlock,
+    dismissClaudeRegionBlock,
+    getConversationProviderQuota,
+    reportClaudeQuotaError,
     serverVersion,
     versionMismatch,
     /** High-frequency state; components subscribe through conversationStore.ts. */

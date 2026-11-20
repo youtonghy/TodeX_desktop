@@ -8,6 +8,11 @@ export const ja: Messages = {
   'common.save': '保存',
   'common.delete': '削除',
   'common.copy': 'コピー',
+  'claudeRegion.detected': '検出された地域：{region}',
+  'claudeRegion.title': 'Claude Code を利用できません',
+  'claudeRegion.unsupported': 'このバックエンドの接続元地域は Anthropic のサポート対象外です。別のエージェントを選択してください。',
+  'claudeRegion.unverified': 'バックエンドは接続元地域が Anthropic のサポート対象か確認できませんでした。しばらくしてから再試行するか、別のエージェントを選択してください。',
+  'claudeRegion.upgrade': 'Claude Code を使用するには、Anthropic の対応地域を事前確認できるバージョンにバックエンドを更新してください。',
   'common.close': '閉じる',
   'common.copied': 'コピーしました',
   // markdown

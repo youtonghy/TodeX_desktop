@@ -8,6 +8,11 @@ export const en: Messages = {
   'common.save': 'Save',
   'common.delete': 'Delete',
   'common.copy': 'Copy',
+  'claudeRegion.detected': 'Detected region: {region}',
+  'claudeRegion.title': 'Claude Code unavailable',
+  'claudeRegion.unsupported': 'Anthropic does not support the region this backend connects from. Choose a different agent to continue.',
+  'claudeRegion.unverified': 'The backend could not verify that its region is supported by Anthropic. Try again later or choose a different agent.',
+  'claudeRegion.upgrade': 'Upgrade this backend to a version that checks Anthropic region availability before running Claude Code.',
   'common.close': 'Close',
   'common.copied': 'Copied',
   // markdown

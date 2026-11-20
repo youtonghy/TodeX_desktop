@@ -755,6 +755,21 @@ export function App() {
           <SettingsPanel session={session} historyRecoverySetup={historyRecoverySetup} repairPairing={repairPairing} sectionRequest={settingsSectionRequest} />
         </PanelBoundary>
       </SettingsModal>
+      <Modal
+        isOpen={Boolean(session.claudeRegionBlock)}
+        onOpenChange={open => { if (!open) session.dismissClaudeRegionBlock(); }}
+        size="sm"
+        title={t('claudeRegion.title')}
+      >
+        {session.claudeRegionBlock ? (
+          <div className="flex flex-col gap-2 text-body-regular text-text-secondary">
+            <p>{t(`claudeRegion.${session.claudeRegionBlock.kind}`)}</p>
+            {session.claudeRegionBlock.kind === 'unsupported' && session.claudeRegionBlock.region ? (
+              <p>{t('claudeRegion.detected', { region: session.claudeRegionBlock.region })}</p>
+            ) : null}
+          </div>
+        ) : null}
+      </Modal>
       <GitActionsModal key={session.activeConversation?.id} session={session} isOpen={gitOpen} onOpenChange={setGitOpen} />
       <PrivateConversationDialog
         isOpen={privateWorkspaceId !== null}

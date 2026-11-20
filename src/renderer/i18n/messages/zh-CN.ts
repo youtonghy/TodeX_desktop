@@ -8,6 +8,11 @@ export const zhCN = {
   'common.save': '保存',
   'common.delete': '删除',
   'common.copy': '复制',
+  'claudeRegion.detected': '检测到的地区：{region}',
+  'claudeRegion.title': 'Claude Code 暂不可用',
+  'claudeRegion.unsupported': 'Anthropic 不支持此后端的连接地区。请选择其他代理继续。',
+  'claudeRegion.unverified': '后端无法确认其连接地区是否受 Anthropic 支持。请稍后重试，或选择其他代理。',
+  'claudeRegion.upgrade': '请将此后端升级到支持 Anthropic 地区预检查的版本，再使用 Claude Code。',
   'common.close': '关闭',
   'common.copied': '已复制',
   // markdown

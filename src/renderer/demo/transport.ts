@@ -32,6 +32,11 @@ const decoder = new TextDecoder();
 type Journal = { manifest: ConversationManifest; events: ConversationEvent[] };
 
 // Mutable copies so prompts, renames and kanban edits persist for the tab.
+// Region failures are opt-in so the normal demo runs unchanged.
+function demoClaudeRegionMode() {
+  return new URLSearchParams(window.location.search).get('claude-region');
+}
+
 const journals = new Map<string, Journal>(
   [...fixtures.demoJournals, fixtures.demoPrivateJournal].map((journal) => [journal.manifest.id, { manifest: { ...journal.manifest }, events: [...journal.events] }]),
 );
@@ -888,7 +893,16 @@ function route(request: SecureRequest): SecureResponse {
       case '/v2/version':
         return json({ name: 'todex-agentd', version: demoBackendVersion, data_dir: '/home/demo/.todex-agent', workspace_root: fixtures.DEMO_ROOT, scratch_workspace_root: '/home/demo/.todex-agent/workspace', mesh: 1 });
       case '/v2/providers':
-        return json({ providers: fixtures.demoProviders });
+        return json({ providers: demoClaudeRegionMode() === 'legacy'
+          ? fixtures.demoProviders.map(provider => provider.id === 'claude-code'
+            ? { ...provider, capabilities: { ...provider.capabilities, claudeRegionPreflight: undefined } }
+            : provider)
+          : fixtures.demoProviders });
+      case '/v2/providers/claude-code/quota':
+        if (demoClaudeRegionMode() === 'quota') {
+          return json({ code: 'CLAUDE_REGION_UNVERIFIED', message: 'Claude region could not be verified' }, 503);
+        }
+        return json(fixtures.demoQuota.providers['claude-code']);
       case '/v2/providers/models':
         return json({ provider, models: fixtures.demoModels[provider] ?? [], source: 'demo', fetchedAt: now });
       case '/v2/providers/image-input':
@@ -1186,6 +1200,25 @@ class DemoSocket implements SecureSocket {
       }
     } else if (message.type === 'conversation.prompt') {
       const journal = journals.get(String(payload.conversationId));
+      if (journal?.manifest.provider === 'claude-code') {
+        const mode = demoClaudeRegionMode();
+        if (mode === 'prompt') {
+          this.emit({ type: 'server.error', id: message.id, payload: {
+            code: 'CLAUDE_REGION_UNSUPPORTED', message: 'Claude Code is not available in the detected region (XX)',
+          } });
+          return;
+        }
+        if (mode === 'turn') {
+          const turnId = crypto.randomUUID();
+          const clientRequestId = payload.clientRequestId;
+          appendDemoEvent(journal, turnId, 'turn.started', { clientRequestId });
+          this.emit({ type: 'server.result', id: message.id, payload: { conversationId: journal.manifest.id, turnId } });
+          setTimeout(() => appendDemoEvent(journal, turnId, 'turn.failed', {
+            clientRequestId, code: 'CLAUDE_REGION_UNVERIFIED', message: 'Claude region could not be verified',
+          }), 200);
+          return;
+        }
+      }
       if (journal) result = { conversationId: journal.manifest.id, turnId: playCannedTurn(journal, String(payload.text ?? ''), smartRun(payload)) };
     } else if (message.type === 'conversation.permission.respond') {
       const answer = demoPermissions.get(String(payload.permissionId ?? ''));

@@ -10,6 +10,39 @@ function settingsSection(page: Page, name: string) {
   return page.getByRole('navigation', { name: '设置' }).getByRole('button', { name, exact: true });
 }
 
+test('an old backend refuses Claude submissions and keeps the draft', async ({ page, openDemo }) => {
+  await openDemo('light', 'claude-region=legacy');
+  const composer = page.getByRole('textbox', { name: '消息输入' });
+  await composer.fill('保留这条草稿');
+  await composer.press('Enter');
+  const dialog = page.getByRole('dialog', { name: 'Claude Code 暂不可用' });
+  await expect(dialog).toContainText('请将此后端升级');
+  await dialog.getByRole('button', { name: '关闭' }).click();
+  await expect(composer).toHaveText('保留这条草稿');
+});
+
+test('a failed Claude turn restores its draft', async ({ page, openDemo }) => {
+  await openDemo('light', 'claude-region=turn');
+  const composer = page.getByRole('textbox', { name: '消息输入' });
+  await composer.fill('恢复被拒绝的草稿');
+  await composer.press('Enter');
+  const dialog = page.getByRole('dialog', { name: 'Claude Code 暂不可用' });
+  await expect(dialog).toContainText('后端无法确认');
+  await dialog.getByRole('button', { name: '关闭' }).click();
+  await expect(composer).toHaveText('恢复被拒绝的草稿');
+});
+
+test('each Claude quota opening rechecks the region', async ({ page, openDemo }) => {
+  await openDemo('light', 'claude-region=quota');
+  const quota = page.getByRole('button', { name: /^上下文(?:已使用|用量等待)/ });
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await quota.click();
+    const dialog = page.getByRole('dialog', { name: 'Claude Code 暂不可用' });
+    await expect(dialog).toContainText('后端无法确认');
+    await dialog.getByRole('button', { name: '关闭' }).click();
+  }
+});
+
 const SETTINGS_TABS = {
   功能: 'features',
   外观: 'appearance',
@@ -29,6 +62,19 @@ for (const theme of ['light', 'dark'] as Theme[]) {
     test('workbench with an open conversation', async ({ page, openDemo }) => {
       await openDemo(theme);
       await expect(page).toHaveScreenshot(`workbench-${theme}.png`, { mask: volatile(page) });
+    });
+
+    test('Claude region refusal keeps the submitted draft', async ({ page, openDemo }) => {
+      await openDemo(theme, 'claude-region=prompt');
+      const composer = page.getByRole('textbox', { name: '消息输入' });
+      await composer.fill('保留这条草稿');
+      await composer.press('Enter');
+      const dialog = page.getByRole('dialog', { name: 'Claude Code 暂不可用' });
+      await expect(dialog).toContainText('Anthropic 不支持此后端的连接地区');
+      await expect(dialog).toContainText('检测到的地区：XX');
+      await expect(dialog).toHaveScreenshot(`claude-region-refused-${theme}.png`);
+      await dialog.getByRole('button', { name: '关闭' }).click();
+      await expect(composer).toHaveText('保留这条草稿');
     });
 
     // A finished run is titled by what it did; its steps name the action and
