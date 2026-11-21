@@ -123,6 +123,15 @@ function sameDaemonKey(ipc: DaemonProfileLike, other: DaemonProfileLike): boolea
     && other.transportVerified && other.encryptionPublicKey === ipc.encryptionPublicKey;
 }
 
+/** Whether what is known of `other` says it is not `ipc`'s daemon: both
+ * pinned a transport key and the keys differ, or it is a group node other
+ * than the one the IPC daemon reported being. */
+function anotherDaemon(ipc: DaemonProfileLike, other: DaemonProfileLike, ipcNode: string | undefined): boolean {
+  const keysDiffer = Boolean(ipc.transportVerified && ipc.encryptionPublicKey && other.transportVerified && other.encryptionPublicKey)
+    && other.encryptionPublicKey !== ipc.encryptionPublicKey;
+  return keysDiffer || Boolean(ipcNode && other.mesh && other.mesh.nodeId !== ipcNode);
+}
+
 /**
  * The other profiles of `profileId`'s daemon: both pinned the same transport
  * key (an IPC profile and the loopback or group node profile it took over,
@@ -158,7 +167,11 @@ export function moveProfileKeyedEntries<V>(entries: Readonly<Record<string, V>>,
  * Two profiles name the same daemon when both pinned the same transport key,
  * when `reachesSameDaemon` says the TCP address is the IPC daemon's
  * listener, or when a group node profile names the node `nodeOf` learned
- * over IPC. Each enabled TCP profile that does is paired with the IPC
+ * over IPC. The address is only a guess: a loopback address on the daemon's
+ * port can be an SSH tunnel to another backend, so it does not count against
+ * a pinned key or node id that says otherwise (`anotherDaemon`); such a
+ * profile would be resumed as an orphaned standby at once, and disabled
+ * again, without end. Each enabled TCP profile that does is paired with the IPC
  * profile that takes over: one daemon, one enabled profile, so its records
  * (whose ids the daemon issues) are listed once. A group node profile that
  * loses stays connected as a standby (`isStandbyProfile`).
@@ -177,7 +190,8 @@ export function ipcDaemonConflicts<P extends DaemonProfileLike>(
     for (const loser of enabled) {
       if (loser === winner || isIpc(loser.serverUrl) || conflicts.some((item) => item.loserId === loser.id)) continue;
       const sameNode = Boolean(node) && loser.mesh?.nodeId === node;
-      if (sameDaemonKey(winner, loser) || sameNode || reachesSameDaemon(winner.serverUrl, loser.serverUrl)) {
+      const sameAddress = !anotherDaemon(winner, loser, node) && reachesSameDaemon(winner.serverUrl, loser.serverUrl);
+      if (sameDaemonKey(winner, loser) || sameNode || sameAddress) {
         conflicts.push({ loserId: loser.id, winnerId: winner.id });
       }
     }

@@ -164,6 +164,38 @@ test('a group node served over IPC loses to the IPC profile and becomes its stan
   assert.equal(isStandbyProfile(node('local', 'node_local')), false);
 });
 
+test('a loopback address on the daemon port does not make another backend this daemon', () => {
+  // An SSH tunnel's local end: the address is this daemon's listener, the
+  // pinned key and the node id are another backend's.
+  const onPort = (_ipc: string, url: string) => url === 'http://127.0.0.1:7345';
+  const ipc = daemonProfile('ipc', 'todex-ipc://local', 'k_local');
+  const tunnelled = { ...daemonProfile('remote', 'http://127.0.0.1:7345', 'k_remote'), mesh: { nodeId: 'node_remote' } };
+  const nodeOf = (id: string) => (id === 'ipc' ? 'node_local' : undefined);
+  assert.deepEqual(ipcDaemonConflicts([ipc, tunnelled], isIpc, onPort, nodeOf), []);
+  // Either sign is enough: the key alone, or the node id alone.
+  assert.deepEqual(ipcDaemonConflicts([ipc, tunnelled], isIpc, onPort), []);
+  assert.deepEqual(ipcDaemonConflicts([daemonProfile('ipc', 'todex-ipc://local'), tunnelled], isIpc, onPort, nodeOf), []);
+  assert.deepEqual(ipcDaemonConflicts([ipc, daemonProfile('paired', 'http://127.0.0.1:7345', 'k_remote')], isIpc, onPort), []);
+  // With nothing saying otherwise, the address still counts.
+  assert.deepEqual(ipcDaemonConflicts([ipc, daemonProfile('unpaired', 'http://127.0.0.1:7345')], isIpc, onPort), [
+    { loserId: 'unpaired', winnerId: 'ipc' },
+  ]);
+  assert.deepEqual(ipcDaemonConflicts([daemonProfile('ipc', 'todex-ipc://local'), tunnelled], isIpc, onPort), [
+    { loserId: 'remote', winnerId: 'ipc' },
+  ]);
+  // A profile disabled as a conflict is never resumed as an orphan, which
+  // would disable it again: whatever is known of the two profiles.
+  for (const ipcKey of ['', 'k_local', 'k_remote']) {
+    for (const node of [undefined, 'node_local', 'node_remote']) {
+      const profiles = [daemonProfile('ipc', 'todex-ipc://local', ipcKey), tunnelled];
+      const reported = (id: string) => (id === 'ipc' ? node : undefined);
+      const losers = ipcDaemonConflicts(profiles, isIpc, onPort, reported).map((item) => item.loserId);
+      const settled = profiles.map((profile) => (losers.includes(profile.id) ? { ...profile, disabled: true } : profile));
+      assert.deepEqual(orphanedStandbyProfiles(settled, isIpc, reported), [], `key ${ipcKey || 'none'}, node ${node ?? 'unknown'}`);
+    }
+  }
+});
+
 test('a standby carries the data again once no IPC profile serves its daemon', () => {
   const standby = { ...daemonProfile('local', 'http://192.168.1.5:7345', 'k1', { disabled: true }), mesh: { nodeId: 'node_local' } };
   const ids = (items: { id: string }[]) => items.map((item) => item.id);
