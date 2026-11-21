@@ -24,6 +24,9 @@ const history = (byte: number) => historyRecipientKeyPairFromSeed(seed(byte)).pu
 /** A second node (`mesh=leaving`): offline, so it never confirms. */
 export const DEMO_MESH_NAS_ID = 'node_demo_nas';
 
+/** Where the demo node says the group reaches it. */
+const DEMO_MESH_NODE_LAN_URL = 'http://192.168.1.20:7345';
+
 /** This device's group key (base64url Ed25519 seed). */
 export const DEMO_MESH_DEVICE_SECRET = encodeBase64Url(seed(0x31));
 
@@ -48,9 +51,11 @@ export function demoMesh(serverUrl: string): DemoMesh {
   const node = meshNodeMember({ publicKey: nodeKey, name: 'MBP', addedBy: self.id, addedAt: NOW + 1 });
   const phone = meshDeviceMember({ publicKey: ed25519.getPublicKey(seed(0x32)), name: 'iPhone', historyKey: history(0x32), addedBy: self.id, addedAt: NOW + 2 });
   const chain = appendMeshRoster(base, { signerSecretKey: seed(0x31), members: [self, node, phone], now: NOW + 2 });
+  // The node announces its LAN address, which invites carry; this device
+  // reaches it at the demo backend's loopback address, which they do not.
   const nodeInfo = signMeshDoc(MESH_NODE_INFO_DOMAIN, {
     type: 'todex.mesh.node-info', v: 1, nodeId: node.id, publicKey: node.publicKey, seq: NOW, name: 'MBP',
-    transportProtocol: 'none', transportPublicKey: '', urls: [serverUrl], signedAt: NOW,
+    transportProtocol: 'none', transportPublicKey: '', urls: [DEMO_MESH_NODE_LAN_URL], signedAt: NOW,
   }, seed(0x39));
   const groupId = base.groupId;
   const joiner = ed25519.getPublicKey(seed(0x33));
