@@ -9,7 +9,7 @@ import { SegmentedControl, SegmentedControlItem } from '@/components/base/segmen
 import { Select, SelectItem } from '@/components/base/select/select';
 import { Switch } from '@/components/base/switch/switch';
 import { Textarea } from '@/components/base/textarea/textarea';
-import { isMeshAddress, isMeshJoinCode, type MeshRelayRole } from '@todex/protocol/mesh';
+import { isShareableMeshAddress, isMeshJoinCode, type MeshRelayRole } from '@todex/protocol/mesh';
 import { connectionStateLabel } from '../../session/helpers';
 import type { MeshGroupView, MeshJoinView, MeshMemberView } from '../../session/useMeshGroups';
 import type { TodeXSession } from '../../session/useTodeXSession';
@@ -314,7 +314,7 @@ function NodeDialog({ member, busy, error, onClose, onSave }: {
   const [relay, setRelay] = useState<MeshRelayRole>(member.relay ?? 'allowed');
   const [relayTarget, setRelayTarget] = useState(member.relayTarget !== false);
   const candidate = draft.trim().replace(/\/+$/, '');
-  const canAdd = isMeshAddress(candidate) && !addresses.includes(candidate) && addresses.length < 16;
+  const canAdd = isShareableMeshAddress(candidate) && !addresses.includes(candidate) && addresses.length < 16;
   return (
     <Modal
       isOpen

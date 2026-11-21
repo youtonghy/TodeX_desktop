@@ -9,6 +9,7 @@ import {
   encodeMeshInvite,
   encodeMeshInviteForQr,
   isMeshAddress,
+  isShareableMeshAddress,
   meshCommands,
   meshMemberForJoinRequest,
   meshNodeMember,
@@ -491,7 +492,8 @@ export function useMeshGroups({
   }, []);
 
   // Getting back to a node: an unreachable node is tried at each of its
-  // addresses in turn; when every one failed (and this device relays), it is
+  // addresses in turn (one that leaves the attempt hanging counts as
+  // unreachable too); when every one failed (and this device relays), it is
   // reached through another connected node of the group. A relayed node's
   // direct addresses are checked every minute and win as soon as one
   // answers; its ticket is renewed before it expires.
@@ -565,12 +567,18 @@ export function useMeshGroups({
           }
           continue;
         }
-        if (state === 'connecting' || state === undefined) continue;
+        if (state === undefined) continue;
         failing.current.set(profile.id, entry);
         if (now - entry.since < ROTATE_AFTER_MS || now - entry.rotatedAt < ROTATE_AFTER_MS) continue;
+        const tried = profile.mesh.via ? entry.tried : new Set([...entry.tried, profile.serverUrl]);
+        const next = urls.find((url) => !tried.has(url));
+        // An address that does not answer keeps its attempt connecting for
+        // minutes: it gives way to one not tried yet. With none left, the
+        // attempt runs out before relaying or starting over (a backend that
+        // is still starting answers late, not never).
+        if (state === 'connecting' && !next) continue;
         entry.rotatedAt = now;
-        if (!profile.mesh.via) entry.tried.add(profile.serverUrl);
-        const next = urls.find((url) => !entry.tried.has(url));
+        entry.tried = tried;
         if (next) {
           moveTo(profile, next);
           continue;
@@ -936,7 +944,9 @@ export function useMeshGroups({
       };
     });
     const inviteNodes = members.filter((member) => member.kind === 'node').map((member) => ({
-      nodeId: member.id, name: member.name, urls: nodeUrls(group, member.info, member.id, { pinned: member.addresses }),
+      // A loopback address this device reaches a node at (a tunnel, a
+      // published port) is no use to the device that reads the invite.
+      nodeId: member.id, name: member.name, urls: nodeUrls(group, member.info, member.id, { pinned: member.addresses }).filter(isShareableMeshAddress),
     })).filter((node) => node.urls.length);
     const invite = { groupId: group.groupId, name: chain?.head.name ?? group.name, nodes: inviteNodes };
     const leaving = group.leaving ? {
