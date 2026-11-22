@@ -15,7 +15,6 @@ import {
   meshNodeMember,
   meshRelayExpiry,
   meshRelayTicket,
-  meshRelayUrl,
   parseMeshPresence,
   meshRecoveryKeys,
   parseMeshInvite,
@@ -33,6 +32,17 @@ import {
 } from '@todex/protocol/mesh';
 import { platform } from '../platform';
 import { recoveryWordsFromSeed } from '@todex/protocol/recoveryKey';
+import {
+  MESH_PATH_MEASURE_MS,
+  addMeshPathSample,
+  meshPathCandidates,
+  meshPathKeyOf,
+  pickMeshPath,
+  probeMeshPath,
+  raceMeshPaths,
+  type MeshPath,
+  type MeshPathSamples,
+} from '@todex/protocol/meshPaths';
 import { createRequestId, normalizeServerUrl } from '@todex/protocol/todex';
 import { t } from '../i18n';
 import { loadJson, loadSecret, removeSecret, saveJson, saveSecret } from '../lib/storage';
@@ -68,13 +78,22 @@ import {
 /** This device's group preferences: `relay` off never relays. */
 const MESH_PREFS_STORAGE_KEY = `${platform.storagePrefix}.meshPrefs.v1`;
 type MeshPrefs = { relay: boolean };
-/** Unreachable this long before the next address is tried. */
-const ROTATE_AFTER_MS = 15_000;
-/** How often a relayed node's direct addresses are checked. */
-const DIRECT_PROBE_MS = 60_000;
+/** A node not open this long races its paths; again at most every 10 s. */
+const RACE_AFTER_MS = 2_000;
+const RACE_AGAIN_MS = 10_000;
 /** Relay tickets this device issues, and when they are renewed. */
 const RELAY_TICKET_MS = 24 * 60 * 60 * 1000;
 const RELAY_RENEW_MS = 60 * 60 * 1000;
+const CHECK_INTERVAL_MS = 5_000;
+/** How a node is being reached: recent probe times per path, and when it last raced, measured and moved. */
+type PathState = {
+  samples: Map<string, MeshPathSamples>;
+  busy: boolean;
+  notOpenSince: number | null;
+  racedAt: number;
+  measuredAt: number;
+  switchedAt: number;
+};
 
 // Device groups on this client (TodeX_backend docs/mesh-v1.md). Every node of
 // a group gets a backend profile (`profile.mesh`) signed with the group's
@@ -513,52 +532,114 @@ export function useMeshGroups({
     return () => { alive = false; clearInterval(timer); };
   }, []);
 
-  // Getting back to a node: an unreachable node is tried at each of its
-  // addresses in turn (one that leaves the attempt hanging counts as
-  // unreachable too); when every one failed (and this device relays), it is
-  // reached through another connected node of the group. A relayed node's
-  // direct addresses are checked every minute and win as soon as one
-  // answers; its ticket is renewed before it expires.
-  const failing = useRef(new Map<string, { since: number; rotatedAt: number; tried: Set<string>; relaysTried: Set<string>; probedAt: number }>());
+  // Getting to a node by the fastest way that works (TodeX_protocol
+  // `meshPaths`): its direct addresses and a relay through every other node
+  // of the group are probed together. A node that is not open races them
+  // and moves to the first that answers as that node; an open one measures
+  // them every minute and moves to one clearly faster. Relay tickets are
+  // renewed before they expire.
+  const paths = useRef(new Map<string, PathState>());
+  /** Races a node's paths now (retry); set by the effect below. */
+  const raceNow = useRef<(profileId: string) => void>(() => undefined);
   useEffect(() => {
     const credentialsOf = (profile: BackendConnectionProfile): MeshPairingCredentials => ({
       deviceSecret: profile.deviceSecret, encryptionProtocol: profile.encryptionProtocol,
       encryptionPublicKey: profile.encryptionPublicKey, transportVerified: profile.transportVerified,
     });
+    const profileById = (id: string) => live.current.profiles.find((item) => item.id === id);
     const moveTo = (profile: BackendConnectionProfile, serverUrl: string, via?: string) => {
       const credentials = credentialsOf(profile);
       const { via: _via, ...mesh } = profile.mesh!;
       live.current.updateProfile(profile.id, { serverUrl, mesh: via ? { ...mesh, via } : mesh, ...credentials });
       live.current.approveCredentials(profile.id, credentials);
     };
-    // `skip`: relays that already failed to reach this node (a relay may not
-    // reach every node, e.g. a public node a LAN-only one), so the next
-    // attempt asks another.
-    const relayFor = async (profile: BackendConnectionProfile, chain: MeshChain, skip: ReadonlySet<string> = new Set()): Promise<{ url: string; via: string } | null> => {
-      const target = chain.head.members.find((member) => member.id === profile.mesh!.nodeId);
-      if (!prefsRef.current.relay || !target || target.relayTarget === false) return null;
-      const roleOf = (nodeId: string) => chain.head.members.find((member) => member.id === nodeId)?.relay ?? 'allowed';
-      const relays = live.current.profiles
-        .filter((item) => item.id !== profile.id && item.mesh?.groupId === profile.mesh!.groupId && !item.mesh.via
-          && live.current.links[item.id]?.state === 'open' && /^https?:\/\//.test(item.serverUrl) && roleOf(item.mesh.nodeId) !== 'denied'
-          && !skip.has(item.mesh.nodeId))
-        .sort((a, b) => Number(roleOf(b.mesh!.nodeId) === 'preferred') - Number(roleOf(a.mesh!.nodeId) === 'preferred'));
-      const relay = relays[0];
-      if (!relay) return null;
-      const identity = await identityOf(profile.mesh!.groupId);
-      const ticket = meshRelayTicket({
-        deviceSecretKey: decodeBase64Url(identity.secretKey), deviceId: identity.deviceId,
-        relayNodeId: relay.mesh!.nodeId, targetNodeId: profile.mesh!.nodeId, expiresAt: Date.now() + RELAY_TICKET_MS,
-      });
-      return { url: meshRelayUrl(relay.serverUrl, profile.mesh!.nodeId, ticket), via: relay.mesh!.nodeId };
-    };
-    const reachable = async (url: string) => {
-      try {
-        const response = await fetch(`${url}/health`, { signal: AbortSignal.timeout(3_000) });
-        return response.ok;
-      } catch {
-        return false;
+    const stateOf = (profileId: string): PathState => {
+      let state = paths.current.get(profileId);
+      if (!state) {
+        state = { samples: new Map(), busy: false, notOpenSince: null, racedAt: 0, measuredAt: Date.now(), switchedAt: 0 };
+        paths.current.set(profileId, state);
       }
+      return state;
+    };
+    const probe = (nodeId: string, path: MeshPath) => probeMeshPath(path.url, nodeId, { fetchImpl: fetch.bind(window) });
+    // The ways to reach a node: its addresses, and a relay through each other
+    // node of its group at that node's direct address.
+    const candidates = async (profile: BackendConnectionProfile): Promise<MeshPath[]> => {
+      const mesh = profile.mesh;
+      const group = groupsRef.current.find((item) => item.groupId === mesh?.groupId);
+      const chain = group ? storedChain(group) : null;
+      if (!mesh || !group || !chain) return [];
+      const infos = nodeInfosOf(group, chain);
+      const urlsOf = (nodeId: string) => nodeUrls(group, infos.get(nodeId), nodeId, {
+        pinned: chain.head.members.find((item) => item.id === nodeId)?.addresses, beacons: beaconUrls(beacons.current, nodeId),
+      });
+      const relays = live.current.profiles
+        .filter((item) => item.id !== profile.id && item.mesh?.groupId === mesh.groupId && item.mesh.nodeId !== mesh.nodeId)
+        .flatMap((item) => {
+          const url = item.mesh!.via || !isMeshAddress(item.serverUrl) ? urlsOf(item.mesh!.nodeId)[0] : item.serverUrl;
+          return url ? [{ nodeId: item.mesh!.nodeId, url }] : [];
+        });
+      const identity = relays.length && prefsRef.current.relay ? await identityOf(mesh.groupId) : null;
+      const secret = identity ? decodeBase64Url(identity.secretKey) : null;
+      const expiresAt = Date.now() + RELAY_TICKET_MS;
+      return meshPathCandidates({
+        chain, targetNodeId: mesh.nodeId, urls: urlsOf(mesh.nodeId), relays, relayEnabled: Boolean(identity),
+        ticketFor: (relayNodeId) => meshRelayTicket({ deviceSecretKey: secret!, deviceId: identity!.deviceId, relayNodeId, targetNodeId: mesh.nodeId, expiresAt }),
+      });
+    };
+    // Moves to the first path that answers, unless it is the one in use,
+    // which then reconnects now.
+    const race = async (profileId: string) => {
+      const profile = profileById(profileId);
+      const state = stateOf(profileId);
+      if (!profile?.mesh || state.busy) return;
+      const nodeId = profile.mesh.nodeId;
+      state.busy = true;
+      state.racedAt = Date.now();
+      try {
+        const winner = await raceMeshPaths(await candidates(profile), (path) => probe(nodeId, path), (path, ms) => {
+          state.samples.set(path.key, addMeshPathSample(state.samples.get(path.key), ms));
+        });
+        const current = profileById(profileId);
+        if (!winner || !current?.mesh || live.current.links[profileId]?.state === 'open') return;
+        // Not a move between working paths: the cooldown does not start.
+        if (winner.path.key !== meshPathKeyOf(current.serverUrl, current.mesh.via)) moveTo(current, winner.path.url, winner.path.via);
+        else live.current.approveCredentials(profileId, credentialsOf(current));
+      } finally {
+        state.busy = false;
+      }
+    };
+    // Measures an open node's paths and moves to one clearly faster.
+    const measure = async (profileId: string) => {
+      const profile = profileById(profileId);
+      const state = stateOf(profileId);
+      if (!profile?.mesh || state.busy) return;
+      const nodeId = profile.mesh.nodeId;
+      state.busy = true;
+      state.measuredAt = Date.now();
+      try {
+        const found = await candidates(profile);
+        await Promise.all(found.map(async (path) => {
+          state.samples.set(path.key, addMeshPathSample(state.samples.get(path.key), await probe(nodeId, path)));
+        }));
+        // Paths that are gone (an address or relay left the group) stop counting.
+        const keys = new Set(found.map((path) => path.key));
+        for (const key of state.samples.keys()) if (!keys.has(key)) state.samples.delete(key);
+        const current = profileById(profileId);
+        if (!current?.mesh) return;
+        const now = Date.now();
+        const key = pickMeshPath({ currentKey: meshPathKeyOf(current.serverUrl, current.mesh.via), samples: state.samples, now, lastSwitchAt: state.switchedAt });
+        const next = key ? found.find((path) => path.key === key) : undefined;
+        if (!next) return;
+        state.switchedAt = now;
+        moveTo(current, next.url, next.via);
+      } finally {
+        state.busy = false;
+      }
+    };
+    raceNow.current = (profileId) => {
+      paths.current.delete(profileId);
+      void race(profileId);
     };
     let running = false;
     const check = async () => {
@@ -566,68 +647,31 @@ export function useMeshGroups({
       for (const profile of live.current.profiles) {
         // Standby links (disabled group node profiles) are kept up too.
         if (!profile.mesh) continue;
-        const group = groupsRef.current.find((item) => item.groupId === profile.mesh!.groupId);
-        const chain = group ? storedChain(group) : null;
-        if (!group || !chain) continue;
-        const member = chain.head.members.find((item) => item.id === profile.mesh!.nodeId);
-        const urls = nodeUrls(group, nodeInfosOf(group, chain).get(profile.mesh.nodeId), profile.mesh.nodeId, {
-          pinned: member?.addresses, beacons: beaconUrls(beacons.current, profile.mesh.nodeId),
-        });
-        const state = live.current.links[profile.id]?.state;
-        const entry = failing.current.get(profile.id) ?? { since: now, rotatedAt: 0, tried: new Set<string>(), relaysTried: new Set<string>(), probedAt: now };
-        if (state === 'open') {
-          failing.current.set(profile.id, { ...entry, since: now, tried: new Set(), relaysTried: new Set() });
-          if (!profile.mesh.via) continue;
+        const state = stateOf(profile.id);
+        const link = live.current.links[profile.id]?.state;
+        if (link === 'open') {
+          state.notOpenSince = null;
           const expiry = meshRelayExpiry(profile.serverUrl);
-          if (now - entry.probedAt >= DIRECT_PROBE_MS) {
-            failing.current.set(profile.id, { ...entry, since: now, tried: new Set(), relaysTried: new Set(), probedAt: now });
-            for (const url of urls) {
-              if (await reachable(url)) {
-                moveTo(profile, url);
-                break;
-              }
-            }
-          } else if (expiry !== null && expiry - now < RELAY_RENEW_MS) {
-            const relay = await relayFor(profile, chain);
-            if (relay) moveTo(profile, relay.url, relay.via);
+          if (profile.mesh.via && expiry !== null && expiry - now < RELAY_RENEW_MS) {
+            const renewed = (await candidates(profile)).find((path) => path.via === profile.mesh!.via);
+            if (renewed) moveTo(profile, renewed.url, renewed.via);
+            continue;
           }
+          if (!state.busy && now - state.measuredAt >= MESH_PATH_MEASURE_MS) void measure(profile.id);
           continue;
         }
-        if (state === undefined) continue;
-        failing.current.set(profile.id, entry);
-        if (now - entry.since < ROTATE_AFTER_MS || now - entry.rotatedAt < ROTATE_AFTER_MS) continue;
-        const tried = profile.mesh.via ? entry.tried : new Set([...entry.tried, profile.serverUrl]);
-        const relaysTried = profile.mesh.via ? new Set([...entry.relaysTried, profile.mesh.via]) : entry.relaysTried;
-        const next = urls.find((url) => !tried.has(url));
-        // An address that does not answer keeps its attempt connecting for
-        // minutes: it gives way to one not tried yet. With none left, the
-        // attempt runs out before relaying or starting over (a backend that
-        // is still starting answers late, not never).
-        if (state === 'connecting' && !next) continue;
-        entry.rotatedAt = now;
-        entry.tried = tried;
-        entry.relaysTried = relaysTried;
-        if (next) {
-          moveTo(profile, next);
-          continue;
-        }
-        // Every address failed (and every relay tried so far): the next
-        // relay, else start over from the first address.
-        const relay = await relayFor(profile, chain, relaysTried);
-        if (relay) {
-          moveTo(profile, relay.url, relay.via);
-          continue;
-        }
-        entry.tried = new Set();
-        entry.relaysTried = new Set();
-        if (urls[0] && (profile.mesh.via || urls.length > 1)) moveTo(profile, urls[0]);
+        if (link === undefined) continue;
+        state.notOpenSince ??= now;
+        // The link's own attempt gets a moment before the paths race.
+        if (now - state.notOpenSince < RACE_AFTER_MS || state.busy || now - state.racedAt < RACE_AGAIN_MS) continue;
+        void race(profile.id);
       }
     };
     const timer = setInterval(() => {
       if (running) return;
       running = true;
       void check().finally(() => { running = false; });
-    }, 5_000);
+    }, CHECK_INTERVAL_MS);
     return () => clearInterval(timer);
   }, [identityOf]);
 
@@ -637,11 +681,11 @@ export function useMeshGroups({
     void saveJson(MESH_PREFS_STORAGE_KEY, next);
   }, []);
 
-  /** Tries a node again from its best address. */
+  /** Tries a node again: every path races again at once. */
   const retryNode = useCallback((profileId: string) => {
     const profile = live.current.profiles.find((item) => item.id === profileId);
     if (!profile?.mesh) return;
-    failing.current.delete(profileId);
+    raceNow.current(profileId);
     live.current.approveCredentials(profileId, {
       deviceSecret: profile.deviceSecret, encryptionProtocol: profile.encryptionProtocol,
       encryptionPublicKey: profile.encryptionPublicKey, transportVerified: profile.transportVerified,
