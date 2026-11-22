@@ -33,7 +33,7 @@ import {
 } from '@todex/protocol/mesh';
 import { platform } from '../platform';
 import { recoveryWordsFromSeed } from '@todex/protocol/recoveryKey';
-import { createRequestId } from '@todex/protocol/todex';
+import { createRequestId, normalizeServerUrl } from '@todex/protocol/todex';
 import { t } from '../i18n';
 import { loadJson, loadSecret, removeSecret, saveJson, saveSecret } from '../lib/storage';
 import { deleteHistorySeed, loadHistorySeed, saveHistorySeed } from '../lib/historyKeyStore';
@@ -497,7 +497,7 @@ export function useMeshGroups({
   // reached through another connected node of the group. A relayed node's
   // direct addresses are checked every minute and win as soon as one
   // answers; its ticket is renewed before it expires.
-  const failing = useRef(new Map<string, { since: number; rotatedAt: number; tried: Set<string>; probedAt: number }>());
+  const failing = useRef(new Map<string, { since: number; rotatedAt: number; tried: Set<string>; relaysTried: Set<string>; probedAt: number }>());
   useEffect(() => {
     const credentialsOf = (profile: BackendConnectionProfile): MeshPairingCredentials => ({
       deviceSecret: profile.deviceSecret, encryptionProtocol: profile.encryptionProtocol,
@@ -509,13 +509,17 @@ export function useMeshGroups({
       live.current.updateProfile(profile.id, { serverUrl, mesh: via ? { ...mesh, via } : mesh, ...credentials });
       live.current.approveCredentials(profile.id, credentials);
     };
-    const relayFor = async (profile: BackendConnectionProfile, chain: MeshChain): Promise<{ url: string; via: string } | null> => {
+    // `skip`: relays that already failed to reach this node (a relay may not
+    // reach every node, e.g. a public node a LAN-only one), so the next
+    // attempt asks another.
+    const relayFor = async (profile: BackendConnectionProfile, chain: MeshChain, skip: ReadonlySet<string> = new Set()): Promise<{ url: string; via: string } | null> => {
       const target = chain.head.members.find((member) => member.id === profile.mesh!.nodeId);
       if (!prefsRef.current.relay || !target || target.relayTarget === false) return null;
       const roleOf = (nodeId: string) => chain.head.members.find((member) => member.id === nodeId)?.relay ?? 'allowed';
       const relays = live.current.profiles
         .filter((item) => item.id !== profile.id && item.mesh?.groupId === profile.mesh!.groupId && !item.mesh.via
-          && live.current.links[item.id]?.state === 'open' && /^https?:\/\//.test(item.serverUrl) && roleOf(item.mesh.nodeId) !== 'denied')
+          && live.current.links[item.id]?.state === 'open' && /^https?:\/\//.test(item.serverUrl) && roleOf(item.mesh.nodeId) !== 'denied'
+          && !skip.has(item.mesh.nodeId))
         .sort((a, b) => Number(roleOf(b.mesh!.nodeId) === 'preferred') - Number(roleOf(a.mesh!.nodeId) === 'preferred'));
       const relay = relays[0];
       if (!relay) return null;
@@ -548,13 +552,13 @@ export function useMeshGroups({
           pinned: member?.addresses, beacons: beaconUrls(beacons.current, profile.mesh.nodeId),
         });
         const state = live.current.links[profile.id]?.state;
-        const entry = failing.current.get(profile.id) ?? { since: now, rotatedAt: 0, tried: new Set<string>(), probedAt: now };
+        const entry = failing.current.get(profile.id) ?? { since: now, rotatedAt: 0, tried: new Set<string>(), relaysTried: new Set<string>(), probedAt: now };
         if (state === 'open') {
-          failing.current.set(profile.id, { ...entry, since: now, tried: new Set() });
+          failing.current.set(profile.id, { ...entry, since: now, tried: new Set(), relaysTried: new Set() });
           if (!profile.mesh.via) continue;
           const expiry = meshRelayExpiry(profile.serverUrl);
           if (now - entry.probedAt >= DIRECT_PROBE_MS) {
-            failing.current.set(profile.id, { ...entry, since: now, tried: new Set(), probedAt: now });
+            failing.current.set(profile.id, { ...entry, since: now, tried: new Set(), relaysTried: new Set(), probedAt: now });
             for (const url of urls) {
               if (await reachable(url)) {
                 moveTo(profile, url);
@@ -571,6 +575,7 @@ export function useMeshGroups({
         failing.current.set(profile.id, entry);
         if (now - entry.since < ROTATE_AFTER_MS || now - entry.rotatedAt < ROTATE_AFTER_MS) continue;
         const tried = profile.mesh.via ? entry.tried : new Set([...entry.tried, profile.serverUrl]);
+        const relaysTried = profile.mesh.via ? new Set([...entry.relaysTried, profile.mesh.via]) : entry.relaysTried;
         const next = urls.find((url) => !tried.has(url));
         // An address that does not answer keeps its attempt connecting for
         // minutes: it gives way to one not tried yet. With none left, the
@@ -579,15 +584,21 @@ export function useMeshGroups({
         if (state === 'connecting' && !next) continue;
         entry.rotatedAt = now;
         entry.tried = tried;
+        entry.relaysTried = relaysTried;
         if (next) {
           moveTo(profile, next);
           continue;
         }
-        // Every address failed (or the relay did): relay, else start over.
-        const relay = profile.mesh.via ? null : await relayFor(profile, chain);
+        // Every address failed (and every relay tried so far): the next
+        // relay, else start over from the first address.
+        const relay = await relayFor(profile, chain, relaysTried);
+        if (relay) {
+          moveTo(profile, relay.url, relay.via);
+          continue;
+        }
         entry.tried = new Set();
-        if (relay) moveTo(profile, relay.url, relay.via);
-        else if (urls[0] && (profile.mesh.via || urls.length > 1)) moveTo(profile, urls[0]);
+        entry.relaysTried = new Set();
+        if (urls[0] && (profile.mesh.via || urls.length > 1)) moveTo(profile, urls[0]);
       }
     };
     const timer = setInterval(() => {
@@ -722,9 +733,13 @@ export function useMeshGroups({
     if (result.status !== 'approved' || !result.mesh?.nodeId || !result.mesh.nodePublicKey) throw new Error(t('mesh.joinCodeRejected'));
     const nodeId = result.mesh.nodeId;
     const nodePublicKey = result.mesh.nodePublicKey;
+    const name = result.mesh.nodeName ?? hostOf(serverUrl);
+    // The address the user reached the node at is pinned for the whole group:
+    // the node may not know it (a public address behind NAT).
+    const pinned = isShareableMeshAddress(serverUrl) ? { addresses: [normalizeServerUrl(serverUrl)] } : {};
     const group = await editRoster(groupId, (chain, self) => ({
       members: [...chain.head.members.filter((member) => member.id !== nodeId),
-        meshNodeMember({ publicKey: decodeBase64Url(nodePublicKey), name: hostOf(serverUrl), addedBy: self })],
+        { ...meshNodeMember({ publicKey: decodeBase64Url(nodePublicKey), name, addedBy: self }), ...pinned }],
     }));
     replaceGroup({ ...group, nodeUrls: { ...group.nodeUrls, [nodeId]: [serverUrl] } });
     const seed = await loadHistorySeed(meshHistoryKeyId(groupId));
@@ -734,7 +749,7 @@ export function useMeshGroups({
     seed.fill(0);
     // The node admits this key until it receives the chain, which the first
     // sync pushes.
-    live.current.addProfile({ id, name: hostOf(serverUrl), serverUrl, tenantId: 'local', mesh: { groupId, nodeId } });
+    live.current.addProfile({ id, name, serverUrl, tenantId: 'local', mesh: { groupId, nodeId } });
     live.current.approveCredentials(id, {
       deviceSecret: identity.secretKey, encryptionProtocol: result.pin.encryptionProtocol,
       encryptionPublicKey: result.pin.encryptionPublicKey, transportVerified: true,
