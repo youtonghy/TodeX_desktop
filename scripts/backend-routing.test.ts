@@ -10,6 +10,7 @@ import {
   resolveNoWorkspaceBackendId,
   reusableNativeProfile,
   sameDaemonProfiles,
+  sshPasswordDonors,
   tagLegacyBackendRecords,
 } from '../src/renderer/session/backendRouting.ts';
 import { needsSiblingGrant } from '../src/renderer/session/siblingHistoryGrants.ts';
@@ -223,6 +224,22 @@ test('the profiles of one daemon are the others that pinned its transport key', 
   // No pinned key, no daemon to compare.
   assert.deepEqual(ids('unpaired'), []);
   assert.deepEqual(ids('gone'), []);
+});
+
+test('an enabled profile takes saved SSH passwords from its daemon\'s disabled profiles, newest first', () => {
+  const items = [
+    { ...daemonProfile('old', 'http://127.0.0.1:7345', 'k1', { disabled: true }), createdAt: 1 },
+    { ...daemonProfile('loopback', 'http://127.0.0.1:7345', 'k1', { disabled: true }), createdAt: 2 },
+    { ...daemonProfile('ipc', 'todex-ipc://local', 'k1'), createdAt: 3 },
+    { ...daemonProfile('lan', 'http://192.168.1.5:7345', 'k1'), createdAt: 4 },
+    { ...daemonProfile('remote', 'https://remote.example', 'k2', { disabled: true }), createdAt: 5 },
+  ];
+  const ids = (id: string) => sshPasswordDonors(items, id).map((item) => item.id);
+  assert.deepEqual(ids('ipc'), ['loopback', 'old']);
+  // A disabled profile gives, it does not take.
+  assert.deepEqual(ids('old'), []);
+  // Another daemon's profiles never give.
+  assert.deepEqual(ids('remote'), []);
 });
 
 test('provider preferences follow their records to the other profile', () => {

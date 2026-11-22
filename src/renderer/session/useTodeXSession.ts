@@ -1,5 +1,5 @@
 import { normalizeBackendLabelColor, type BackendConnectionProfile } from './backendColors';
-import { ipcDaemonConflicts, isStandbyProfile, moveBackendRecords, moveProfileKeyedEntries, ownerBackendId, resolveNoWorkspaceBackendId, sameDaemonProfiles, tagLegacyBackendRecords, workspaceRemovalScope } from './backendRouting';
+import { ipcDaemonConflicts, isStandbyProfile, moveBackendRecords, moveProfileKeyedEntries, ownerBackendId, resolveNoWorkspaceBackendId, sameDaemonProfiles, sshPasswordDonors, tagLegacyBackendRecords, workspaceRemovalScope } from './backendRouting';
 import { deviceIdentityFromSecret } from '@todex/protocol/deviceAuth';
 import { useWorkbenchSharing } from './useWorkbenchSharing';
 import { SMART_WORK_MODE_PROVIDER, smartPromptFields, smartPromptPhase, smartWorkModeAvailable, useSmartWorkMode } from './smartWorkMode';
@@ -1799,6 +1799,31 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     }, 15000);
     return () => clearInterval(timer);
   }, [backendEndpointsKey, hydrated, openBackendIdsKey, syncWorkspacesFromBackend]);
+
+  // A backend that opens takes the saved SSH passwords its daemon's disabled
+  // profiles still hold (swaps by older builds, and the startup takeover of
+  // a duplicate profile, left them there); once per profile and app start.
+  const sshPasswordsAdoptedRef = useRef(new Set<string>());
+  useEffect(() => {
+    if (!hydrated || !openBackendIdsKey) return;
+    for (const backendId of openBackendIdsKey.split('\n')) {
+      if (sshPasswordsAdoptedRef.current.has(backendId)) continue;
+      const donors = sshPasswordDonors(backendConnectionsRef.current, backendId);
+      const target = profileFor(backendId);
+      if (!donors.length || !target) continue;
+      sshPasswordsAdoptedRef.current.add(backendId);
+      void backendApi(target).listSshHosts()
+        .then(async ({ hosts }) => {
+          const aliases = hosts.map((host) => host.alias);
+          for (const donor of donors) await copySshPasswords(donor.id, backendId, aliases);
+        })
+        .catch((error: unknown) => {
+          // Retried the next time this backend opens.
+          sshPasswordsAdoptedRef.current.delete(backendId);
+          console.warn('saved SSH passwords of this backend\'s other profiles were not copied', error);
+        });
+    }
+  }, [hydrated, openBackendIdsKey]);
 
   useEffect(() => {
     if (!hydrated) {

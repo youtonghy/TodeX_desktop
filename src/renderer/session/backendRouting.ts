@@ -145,6 +145,19 @@ export function sameDaemonProfiles<P extends DaemonProfileLike>(profiles: readon
 }
 
 /**
+ * The disabled profiles of `profileId`'s daemon whose saved SSH passwords an
+ * enabled `profileId` takes over, newest first (the first holding a host's
+ * password wins). They were swapped out for `profileId`, possibly by builds
+ * that left the passwords behind; an enabled sibling keeps its own.
+ */
+export function sshPasswordDonors<P extends DaemonProfileLike>(profiles: readonly P[], profileId: string): P[] {
+  if (profiles.find((item) => item.id === profileId)?.disabled) return [];
+  return sameDaemonProfiles(profiles, profileId)
+    .filter((other) => other.disabled)
+    .sort((a, b) => b.createdAt - a.createdAt);
+}
+
+/**
  * Entries of a record keyed `<profileId>::<rest>` (provider model
  * preferences) re-filed from `fromId` to `toId`; an entry `toId` already has
  * wins. Returns the input when nothing moved.
