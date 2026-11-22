@@ -223,6 +223,10 @@ export function useMeshGroups({
   }, []);
 
   const profileOf = (groupId: string, nodeId: string) => live.current.profiles.find((profile) => profile.mesh?.groupId === groupId && profile.mesh.nodeId === nodeId);
+  /** Every profile of a node, first created first. */
+  const profilesOf = (groupId: string, nodeId: string) => live.current.profiles
+    .filter((profile) => profile.mesh?.groupId === groupId && profile.mesh.nodeId === nodeId)
+    .sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0) || a.id.localeCompare(b.id));
   const connectedProfiles = (groupId: string) => live.current.profiles.filter((profile) => profile.mesh?.groupId === groupId
     && live.current.links[profile.id]?.state === 'open' && live.current.links[profile.id]?.mesh);
   /** The enabled IPC profile serving node `nodeId` (the transport key its
@@ -385,15 +389,20 @@ export function useMeshGroups({
         if (member.kind !== 'node') continue;
         nodeIds.add(member.id);
         const info = infos.get(member.id);
-        const existing = profileOf(group.groupId, member.id);
+        // One profile per node: a second one (two paths created it at once)
+        // gives its records to the first created and goes.
+        const [existing, ...extra] = profilesOf(group.groupId, member.id);
+        for (const duplicate of extra) live.current.removeProfile(duplicate.id);
         if (existing) {
           const patch: Partial<BackendConnectionProfile> = {};
+          // The group names its nodes: the roster's name wins.
+          if (existing.name !== member.name) patch.name = member.name;
           if (info && (existing.encryptionProtocol !== info.transportProtocol || existing.encryptionPublicKey !== info.transportPublicKey)) {
             patch.encryptionProtocol = info.transportProtocol;
             patch.encryptionPublicKey = info.transportPublicKey;
             patch.transportVerified = true;
           }
-          if (Object.keys(patch).length) {
+          if (patch.encryptionPublicKey) {
             live.current.updateProfile(existing.id, patch);
             live.current.approveCredentials(existing.id, {
               deviceSecret: existing.deviceSecret,
@@ -401,6 +410,8 @@ export function useMeshGroups({
               encryptionPublicKey: patch.encryptionPublicKey ?? existing.encryptionPublicKey,
               transportVerified: true,
             });
+          } else if (patch.name) {
+            live.current.updateProfile(existing.id, patch);
           }
           continue;
         }
@@ -413,6 +424,11 @@ export function useMeshGroups({
             const identity = await identityOf(group.groupId);
             const seed = await loadHistorySeed(meshHistoryKeyId(group.groupId));
             if (!seed) throw new Error(t('mesh.keyMissing'));
+            // Created meanwhile (by the add that put the node in the roster).
+            if (profileOf(group.groupId, member.id)) {
+              seed.fill(0);
+              return;
+            }
             const id = createRequestId('backend');
             // The history key is in place before the first connect, which
             // registers it.
@@ -437,6 +453,12 @@ export function useMeshGroups({
       for (const profile of profiles) {
         if (profile.mesh?.groupId === group.groupId && !nodeIds.has(profile.mesh.nodeId)) live.current.removeProfile(profile.id);
       }
+    }
+    // An IPC profile serving a group node is named after it too.
+    for (const [profileId, nodeId] of Object.entries(ipcNodeIds)) {
+      const profile = live.current.profiles.find((item) => item.id === profileId);
+      const name = groups.flatMap((group) => storedChain(group)?.head.members ?? []).find((member) => member.id === nodeId)?.name;
+      if (profile && !profile.mesh && name && profile.name !== name) live.current.updateProfile(profileId, { name });
     }
     // Profiles of groups this client no longer keeps.
     const known = new Set(groups.map((group) => group.groupId));
@@ -734,26 +756,37 @@ export function useMeshGroups({
     const nodeId = result.mesh.nodeId;
     const nodePublicKey = result.mesh.nodePublicKey;
     const name = result.mesh.nodeName ?? hostOf(serverUrl);
-    // The address the user reached the node at is pinned for the whole group:
-    // the node may not know it (a public address behind NAT).
-    const pinned = isShareableMeshAddress(serverUrl) ? { addresses: [normalizeServerUrl(serverUrl)] } : {};
-    const group = await editRoster(groupId, (chain, self) => ({
-      members: [...chain.head.members.filter((member) => member.id !== nodeId),
-        { ...meshNodeMember({ publicKey: decodeBase64Url(nodePublicKey), name, addedBy: self }), ...pinned }],
-    }));
-    replaceGroup({ ...group, nodeUrls: { ...group.nodeUrls, [nodeId]: [serverUrl] } });
-    const seed = await loadHistorySeed(meshHistoryKeyId(groupId));
-    if (!seed) throw new Error(t('mesh.keyMissing'));
-    const id = createRequestId('backend');
-    await saveHistorySeed(id, seed);
-    seed.fill(0);
-    // The node admits this key until it receives the chain, which the first
-    // sync pushes.
-    live.current.addProfile({ id, name, serverUrl, tenantId: 'local', mesh: { groupId, nodeId } });
-    live.current.approveCredentials(id, {
-      deviceSecret: identity.secretKey, encryptionProtocol: result.pin.encryptionProtocol,
-      encryptionPublicKey: result.pin.encryptionPublicKey, transportVerified: true,
-    });
+    // Until its profile exists, the roster effect must not create a second
+    // one for the node this puts in the roster.
+    const reserved = `${groupId}/${nodeId}`;
+    creating.current.add(reserved);
+    try {
+      // The address the user reached the node at is pinned for the whole
+      // group: the node may not know it (a public address behind NAT).
+      const pinned = isShareableMeshAddress(serverUrl) ? { addresses: [normalizeServerUrl(serverUrl)] } : {};
+      const group = await editRoster(groupId, (chain, self) => ({
+        members: [...chain.head.members.filter((member) => member.id !== nodeId),
+          { ...meshNodeMember({ publicKey: decodeBase64Url(nodePublicKey), name, addedBy: self }), ...pinned }],
+      }));
+      replaceGroup({ ...group, nodeUrls: { ...group.nodeUrls, [nodeId]: [serverUrl] } });
+      const seed = await loadHistorySeed(meshHistoryKeyId(groupId));
+      if (!seed) throw new Error(t('mesh.keyMissing'));
+      // A node added again keeps its profile, at the new address and key.
+      const existing = profileOf(groupId, nodeId);
+      const id = existing?.id ?? createRequestId('backend');
+      await saveHistorySeed(id, seed);
+      seed.fill(0);
+      // The node admits this key until it receives the chain, which the
+      // first sync pushes.
+      if (existing) live.current.updateProfile(id, { name, serverUrl });
+      else live.current.addProfile({ id, name, serverUrl, tenantId: 'local', mesh: { groupId, nodeId } });
+      live.current.approveCredentials(id, {
+        deviceSecret: identity.secretKey, encryptionProtocol: result.pin.encryptionProtocol,
+        encryptionPublicKey: result.pin.encryptionPublicKey, transportVerified: true,
+      });
+    } finally {
+      creating.current.delete(reserved);
+    }
   }, [editRoster, identityOf, replaceGroup]);
 
   /** Joins the group of `inviteText`: asks the first reachable node, then

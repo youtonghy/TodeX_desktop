@@ -86,12 +86,21 @@ export function installDemoMode(): boolean {
   // backend; the group's link to it is the standby.
   // `mesh=leaving`: this device is leaving that group; the demo backend
   // confirmed the final roster, an offline NAS has not.
+  // `mesh=duplicates`: `local`, with what older builds left behind: the IPC
+  // profile under its own name, a second standby for the same node and a
+  // swapped-out loopback profile. Each backend is listed once, by its group
+  // name.
   const meshMode = params.get('mesh');
-  if (meshMode === '1' || meshMode === 'local' || meshMode === 'leaving') {
+  if (meshMode === '1' || meshMode === 'local' || meshMode === 'leaving' || meshMode === 'duplicates') {
     const mesh = demoMesh(DEMO_SERVER_URL);
     const node = { groupId: mesh.group.groupId, nodeId: mesh.nodeId };
     const profile = { name: 'MBP', labelColor: '#3b82f6', tenantId: 'default', encryptionProtocol: 'none', encryptionPublicKey: '', transportVerified: false, createdAt: 0, updatedAt: 0 };
-    store.set(BACKEND_CONNECTIONS_STORAGE_KEY, meshMode === 'local' ? [
+    store.set(BACKEND_CONNECTIONS_STORAGE_KEY, meshMode === 'duplicates' ? [
+      { ...profile, id: 'default-backend', name: '本机', serverUrl: 'todex-ipc://local' },
+      { ...profile, id: 'demo-mesh-standby', serverUrl: DEMO_SERVER_URL, disabled: true, mesh: node },
+      { ...profile, id: 'demo-mesh-standby-copy', serverUrl: DEMO_SERVER_URL, disabled: true, mesh: node, createdAt: 1 },
+      { ...profile, id: 'demo-legacy-loopback', serverUrl: 'http://127.0.0.1:7345', disabled: true },
+    ] : meshMode === 'local' ? [
       { ...profile, id: 'default-backend', serverUrl: 'todex-ipc://local' },
       { ...profile, id: 'demo-mesh-standby', serverUrl: DEMO_SERVER_URL, disabled: true, mesh: node },
     ] : meshMode === 'leaving' ? [

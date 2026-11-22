@@ -1730,7 +1730,8 @@ export function installDemoFetch(): void {
   const realFetch = window.fetch.bind(window);
   window.fetch = async (input, init) => {
     const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url, window.location.href);
-    const answer = url.origin === new URL(fixtures.DEMO_SERVER_URL).origin ? route
+    // This computer's backend over IPC is the demo backend too.
+    const answer = url.origin === new URL(fixtures.DEMO_SERVER_URL).origin || url.protocol === 'todex-ipc:' ? route
       : url.origin === new URL(fixtures.DEMO_SECOND_SERVER_URL).origin ? secondRoute : null;
     if (url.origin === new URL(fixtures.DEMO_OFFLINE_SERVER_URL).origin) throw new TypeError('Failed to fetch');
     if (!answer) return realFetch(input, init);

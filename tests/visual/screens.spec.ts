@@ -438,6 +438,26 @@ test('settings: backend group with this computer over IPC', async ({ page, openD
   await expect(page.locator('[data-backend-id="demo-mesh-standby"]')).toHaveCount(0);
 });
 
+// One daemon, one entry: the new-workspace backend picker leaves out
+// disabled profiles (the group's standby, a swapped-out loopback one), the
+// IPC profile takes its group node's name, and a second profile for the
+// same node is merged away.
+test('new workspace: each backend listed once, by its group name', async ({ page, openDemo }) => {
+  await openDemo('light', 'mesh=duplicates');
+  await page.getByRole('button', { name: '设置', exact: true }).click();
+  await settingsSection(page, '后端连接').click();
+  await expect(page.locator('[data-backend-id="default-backend"]')).toContainText('MBP');
+  await page.keyboard.press('Escape');
+  await page.getByRole('complementary').getByRole('button', { name: '新建工作区' }).first().click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByRole('button', { name: /连接后端/ }).click();
+  const options = page.getByRole('option');
+  await expect(options).toHaveCount(1);
+  await expect(options.first()).toHaveText('MBP · todex-ipc://local');
+  await settle(page);
+  await expect(page).toHaveScreenshot('new-workspace-backends-light.png', { mask: volatile(page) });
+});
+
 // The agent starts using the backend's computer: by default its live view
 // opens as a side-panel tab.
 test('computer use live view in the side panel', async ({ page, openDemo }) => {

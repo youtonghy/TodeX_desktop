@@ -826,7 +826,12 @@ function CreateWorkspaceModal({
     onOpenSettings: onOpenContainerSettings,
   });
   const [path, setPath] = useState(workspace?.path ?? session.settings.defaultWorkspacePath);
-  const [backendId, setBackendId] = useState(workspace?.backendConnectionId ?? session.activeBackendConnectionId);
+  // A new workspace starts on an enabled backend: a disabled profile (a
+  // group's standby link, one swapped out for IPC) is not offered.
+  const [backendId, setBackendId] = useState(() => workspace?.backendConnectionId
+    ?? (session.backendConnections.find((profile) => profile.id === session.activeBackendConnectionId && !profile.disabled)
+      ?? session.backendConnections.find((profile) => !profile.disabled))?.id
+    ?? session.activeBackendConnectionId);
   const [entries, setEntries] = useState<string[]>([]);
   const [roots, setRoots] = useState<string[]>([]);
   const [activeRoot, setActiveRoot] = useState('');
@@ -978,7 +983,9 @@ function CreateWorkspaceModal({
           void browseBackend(key);
         }}
       >
-        {session.backendConnections.map((profile) => <SelectItem key={profile.id} id={profile.id} textValue={profile.name}>{profile.name} · {profile.serverUrl}</SelectItem>)}
+        {/* A disabled profile's backend is picked through the profile serving it
+            (one daemon, one entry); a workspace's own backend stays listed. */}
+        {session.backendConnections.filter((profile) => !profile.disabled || (workspace && profile.id === backendId)).map((profile) => <SelectItem key={profile.id} id={profile.id} textValue={profile.name}>{profile.name} · {profile.serverUrl}</SelectItem>)}
       </Select>
       <Field label={t('app.workspaceDirectory')} value={path} onChange={(value) => { setPath(value); setMountHint(''); }} />
       {mountHint ? <WorkspaceMountHint path={mountHint} /> : null}
