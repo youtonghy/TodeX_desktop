@@ -122,6 +122,33 @@ for (const theme of ['light', 'dark'] as Theme[]) {
       await expect(page).toHaveScreenshot(`model-card-${theme}.png`, { mask: volatile(page) });
     });
 
+    test('山海经 model table on a long press', async ({ page, openDemo }) => {
+      // The table deals models with Math.random; a seeded generator keeps the deal stable.
+      await page.addInitScript(() => {
+        let state = 20261020;
+        Math.random = () => {
+          state = (state + 0x6d2b79f5) | 0;
+          let value = Math.imul(state ^ (state >>> 15), 1 | state);
+          value = (value + Math.imul(value ^ (value >>> 7), 61 | value)) ^ value;
+          return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
+        };
+      });
+      await openDemo(theme);
+      await page.getByRole('button', { name: '选择模型和思考强度' }).click();
+      const trigger = page.getByRole('button', { name: '选择模型', exact: true });
+      const box = await trigger.boundingBox();
+      if (!box) throw new Error('model picker trigger is not visible');
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await page.mouse.down();
+      const table = page.getByRole('dialog', { name: '山海经模型周期表' });
+      await expect(table).toBeVisible();
+      await page.mouse.up();
+      await expect(page.getByRole('dialog', { name: '选择模型' })).toHaveCount(0);
+      await page.mouse.move(0, 0);
+      await settle(page);
+      await expect(page).toHaveScreenshot(`model-shanhai-${theme}.png`, { mask: volatile(page) });
+    });
+
     test('quick search', async ({ page, openDemo }) => {
       await openDemo(theme);
       await page.getByRole('button', { name: '快速搜索' }).click();

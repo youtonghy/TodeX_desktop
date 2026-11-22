@@ -10,6 +10,7 @@ import {
   Popover as AriaPopover,
   useFilter,
   type Key,
+  type PressEvent,
   type MenuItemProps as AriaMenuItemProps,
 } from 'react-aria-components';
 import type { ProviderModelDescriptor } from '@todex/protocol/v2';
@@ -22,6 +23,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { cx } from '@/utils/cx';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { reasoningEffortLabel, modelDisplayLabel } from '../session/helpers';
+import { ShanhaiModelPopover } from './ShanhaiModelTable';
 
 // Pretty labels for vendor-style families emitted by providers like Devin
 // (vendor token of the model id) and Pi (provider prefix). Anything unknown
@@ -58,6 +60,9 @@ const THUMB_WIDTH = 21;
 const THUMB_INSET = THUMB_WIDTH / 2;
 
 const stopPosition = (fraction: number) => `calc(${THUMB_INSET}px + (100% - ${THUMB_WIDTH}px) * ${fraction})`;
+
+/** Holding the model picker trigger this long opens the 山海经 table. */
+const LONG_PRESS_MS = 500;
 
 const MENU_ITEM_SELECTOR = '[role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"]';
 
@@ -145,6 +150,12 @@ export function ModelReasoningCard({
   const [modelSearch, setModelSearch] = useState('');
   const [isPickerOpen, setPickerOpen] = useState(false);
   const [activeFamily, setActiveFamily] = useState<string | null>(null);
+  const [isShanhaiOpen, setShanhaiOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Set when a long press opened the table, so the release that ends the
+  // same press does not also open the regular picker.
+  const longPressFired = useRef(false);
   const { contains } = useFilter({ sensitivity: 'base' });
 
   // Focus the search input once the picker's focus scope is in place, so
@@ -205,8 +216,37 @@ export function ModelReasoningCard({
     [currentFamily, selectedKeys],
   );
 
+  const clearLongPress = useCallback(() => {
+    if (longPressTimer.current === null) return;
+    clearTimeout(longPressTimer.current);
+    longPressTimer.current = null;
+  }, []);
+
+  useEffect(() => clearLongPress, [clearLongPress]);
+
+  // Easter egg: holding the trigger with a pointer opens the 山海经 table.
+  // Keyboard and assistive-technology presses keep the regular picker only.
+  const handleTriggerPressStart = useCallback(
+    (event: PressEvent) => {
+      clearLongPress();
+      longPressFired.current = false;
+      if (event.pointerType === 'keyboard' || event.pointerType === 'virtual' || providerModels.length === 0) return;
+      longPressTimer.current = setTimeout(() => {
+        longPressTimer.current = null;
+        longPressFired.current = true;
+        setPickerOpen(false);
+        setShanhaiOpen(true);
+      }, LONG_PRESS_MS);
+    },
+    [clearLongPress, providerModels.length],
+  );
+
   const handlePickerOpenChange = useCallback(
     (isOpen: boolean) => {
+      if (isOpen && longPressFired.current) {
+        longPressFired.current = false;
+        return;
+      }
       setPickerOpen(isOpen);
       if (isOpen) {
         setModelSearch('');
@@ -330,6 +370,10 @@ export function ModelReasoningCard({
     setPickerOpen(false);
   };
   const selectModel = (key: Key) => pickModel(String(key));
+  const pickShanhaiModel = (id: string) => {
+    onSelectModel(id);
+    setShanhaiOpen(false);
+  };
   const modelRow = (item: ProviderModelDescriptor) => (
     <ModelMenuItem key={item.id} id={item.id} textValue={item.displayName}>
       {item.displayName}
@@ -346,9 +390,12 @@ export function ModelReasoningCard({
             panel's focus scope, so the release closed both popovers. */}
         <AriaDialogTrigger isOpen={isPickerOpen} onOpenChange={handlePickerOpenChange}>
           <AriaButton
+            ref={triggerRef}
             aria-label="选择模型"
+            onPressStart={handleTriggerPressStart}
+            onPressEnd={clearLongPress}
             className={cx(
-              'flex min-w-0 max-w-full cursor-pointer items-center justify-center gap-0.5 rounded-xl py-1 ps-2 pe-1 outline-none',
+              'flex min-w-0 max-w-full cursor-pointer items-center justify-center gap-0.5 rounded-xl py-1 ps-2 pe-1 outline-none select-none',
               'transition-colors duration-150 ease hover:bg-background-primary-hover data-[pressed]:bg-background-primary-active',
               'focus-visible:ring-2 focus-visible:ring-border-focus-ring',
             )}
@@ -531,6 +578,14 @@ export function ModelReasoningCard({
             </AriaDialog>
           </AriaPopover>
         </AriaDialogTrigger>
+        <ShanhaiModelPopover
+          triggerRef={triggerRef}
+          isOpen={isShanhaiOpen}
+          onOpenChange={setShanhaiOpen}
+          models={providerModels}
+          currentModel={currentModel}
+          onSelectModel={pickShanhaiModel}
+        />
       </div>
 
       {/* Bottom row: stepped effort slider (BoardUI EffortSlider recipe) */}
