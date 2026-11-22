@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { AgentCallingApproval, AgentCallingSettings as Settings, AgentScope, ApiKeySummary } from '@todex/protocol/v2';
+import type { AgentCallingApproval, AgentCallingChildPermission, AgentCallingSettings as Settings, AgentScope, ApiKeySummary } from '@todex/protocol/v2';
 import { ConnectionError } from '@todex/protocol/connectionError';
 import { Chip } from '@/components/base/badges/chip';
 import { Button } from '@/components/base/buttons/button';
@@ -7,7 +7,7 @@ import { Input } from '@/components/base/input/input';
 import { Select, SelectItem } from '@/components/base/select/select';
 import { Switch } from '@/components/base/switch/switch';
 import type { TodeXSession } from '../session/useTodeXSession';
-import { useT } from '../i18n';
+import { useT, type MessageKey } from '../i18n';
 import { backendApi } from '../session/helpers';
 import { usePanelBackend, type PanelBackend } from '../session/panelBackend';
 import { BackendScopeRow } from './settings/BackendScopeRow';
@@ -17,6 +17,12 @@ import { AgentScopeSettings, ROW_SELECT_TRIGGER, scopeAllowsAgent } from './agen
 import { APPROVAL_LABELS, APPROVALS } from './agentCalling/ApiKeyFormModal';
 import { ApiKeysSection } from './agentCalling/ApiKeysSection';
 import { CliUsageGuide } from './agentCalling/CliUsageGuide';
+
+const CHILD_PERMISSIONS: AgentCallingChildPermission[] = ['full-access', 'inherit'];
+const CHILD_PERMISSION_LABELS: Record<AgentCallingChildPermission, MessageKey> = {
+  'full-access': 'agentCalling.childPermissionFullAccess',
+  inherit: 'agentCalling.childPermissionInherit',
+};
 
 /**
  * Settings → Agent Calling for the picked backend. One scope (which agents
@@ -130,6 +136,22 @@ function BackendAgentCallingSettings({ session, backend }: { session: TodeXSessi
               onChange={enabled => { void save(() => api.setAgentCalling({ mcp: { enabled } })); }}
             />
           </SettingsRow>
+          {/* Daemons that predate the setting omit it; their children inherit the calling turn's mode. */}
+          {mcp?.childPermission ? (
+            <SettingsRow label={t('agentCalling.childPermission')} description={t('agentCalling.childPermissionHint')}>
+              <Select
+                aria-label={t('agentCalling.childPermission')}
+                selectedKey={mcp.childPermission}
+                isDisabled={disabled}
+                triggerClassName={ROW_SELECT_TRIGGER}
+                onSelectionChange={(value) => {
+                  if (CHILD_PERMISSIONS.includes(value as AgentCallingChildPermission)) void save(() => api.setAgentCalling({ mcp: { childPermission: value as AgentCallingChildPermission } }));
+                }}
+              >
+                {CHILD_PERMISSIONS.map(id => <SelectItem key={id} id={id} textValue={t(CHILD_PERMISSION_LABELS[id])}>{t(CHILD_PERMISSION_LABELS[id])}</SelectItem>)}
+              </Select>
+            </SettingsRow>
+          ) : null}
           <SettingsRow label={t('agentCalling.approval')} description={t('agentCalling.mcpApprovalHint')}>
             <Select
               aria-label={t('agentCalling.approval')}

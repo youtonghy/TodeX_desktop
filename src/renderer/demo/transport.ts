@@ -622,7 +622,7 @@ let sshConnectionSettings = { serverAliveEnabled: false, serverAliveInterval: 15
 const demoListenerRunning = { enabled: true, port: 7346 };
 let agentCalling: AgentCallingSettings = {
   scope: { agents: null, models: {} },
-  mcp: { enabled: true, approval: 'ask', injected: true },
+  mcp: { enabled: true, approval: 'ask', childPermission: 'full-access', injected: true },
   apiListener: { enabled: true, host: '127.0.0.1', port: 7346, listening: true, baseUrl: 'http://127.0.0.1:7346/api/v1', pendingRestart: false },
   limits: { maxConcurrentCalls: 4, maxWaitSecs: 1200, defaultWaitSecs: 300 },
 };
@@ -647,6 +647,7 @@ function demoAgentCallingUpdate(body: Record<string, unknown>): SecureResponse {
     mcp: {
       enabled: mcpEnabled,
       approval: mcpUpdate.approval ?? agentCalling.mcp.approval,
+      childPermission: mcpUpdate.childPermission ?? agentCalling.mcp.childPermission,
       injected: mcpEnabled && (nextScope.agents === null || nextScope.agents.length > 0),
     },
   };
