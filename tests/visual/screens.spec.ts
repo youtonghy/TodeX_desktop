@@ -428,7 +428,8 @@ test('settings: backend group with this computer over IPC', async ({ page, openD
   await page.getByRole('button', { name: '设置', exact: true }).click();
   await settingsSection(page, '后端组').click();
   await expect(page.getByText('本机 · 数据走 IPC', { exact: true })).toBeVisible();
-  await expect(page.getByText('已连接', { exact: true }).first()).toBeVisible();
+  // The sidebar's connection tooltip says it too, hidden.
+  await expect(page.getByText('已连接', { exact: true }).filter({ visible: true }).first()).toBeVisible();
   await settle(page);
   await expect(page).toHaveScreenshot('settings-mesh-local-light.png', { mask: volatile(page) });
   // Backend connections lists point-to-point backends only: the group's
