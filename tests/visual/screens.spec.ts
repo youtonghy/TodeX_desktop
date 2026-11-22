@@ -451,6 +451,8 @@ test('new workspace: each backend listed once, by its group name', async ({ page
   await page.keyboard.press('Escape');
   await page.getByRole('complementary').getByRole('button', { name: '新建工作区' }).first().click();
   const dialog = page.getByRole('dialog');
+  // It starts on an offered backend, not the active disabled standby.
+  await expect(dialog.getByRole('button', { name: /连接后端/ })).toContainText('MBP · todex-ipc://local');
   await dialog.getByRole('button', { name: /连接后端/ }).click();
   const options = page.getByRole('option');
   await expect(options).toHaveCount(1);

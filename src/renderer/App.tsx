@@ -828,10 +828,9 @@ function CreateWorkspaceModal({
   const [path, setPath] = useState(workspace?.path ?? session.settings.defaultWorkspacePath);
   // A new workspace starts on an enabled backend: a disabled profile (a
   // group's standby link, one swapped out for IPC) is not offered.
-  const [backendId, setBackendId] = useState(() => workspace?.backendConnectionId
-    ?? (session.backendConnections.find((profile) => profile.id === session.activeBackendConnectionId && !profile.disabled)
-      ?? session.backendConnections.find((profile) => !profile.disabled))?.id
-    ?? session.activeBackendConnectionId);
+  const newWorkspaceBackendId = () => (session.backendConnections.find((profile) => profile.id === session.activeBackendConnectionId && !profile.disabled)
+    ?? session.backendConnections.find((profile) => !profile.disabled))?.id ?? session.activeBackendConnectionId;
+  const [backendId, setBackendId] = useState(() => workspace?.backendConnectionId ?? newWorkspaceBackendId());
   const [entries, setEntries] = useState<string[]>([]);
   const [roots, setRoots] = useState<string[]>([]);
   const [activeRoot, setActiveRoot] = useState('');
@@ -886,8 +885,9 @@ function CreateWorkspaceModal({
 
   useEffect(() => {
     if (!isOpen || workspace) return;
-    setBackendId(session.activeBackendConnectionId);
-    void browseBackend(session.activeBackendConnectionId, session.settings.defaultWorkspacePath);
+    const id = newWorkspaceBackendId();
+    setBackendId(id);
+    void browseBackend(id, session.settings.defaultWorkspacePath);
   }, [isOpen, workspace, session.activeBackendConnectionId, session.settings]);
 
   const readFailed = (error: unknown) => toast.danger(error instanceof Error ? error.message : t('app.workspaceReadFailed'));
