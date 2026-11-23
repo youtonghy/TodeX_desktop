@@ -137,6 +137,7 @@ export function MeshGroupSettings({ session }: { session: TodeXSession }) {
                     <span className="truncate">{member.name}</span>
                     {member.self ? <Chip variant="caption" color="neutral">{t('mesh.thisDevice')}</Chip> : null}
                     {member.local ? <Chip variant="caption" color="cyan">{t('mesh.localNode')}</Chip> : null}
+                    {member.hub ? <Chip variant="caption" color="purple">{t('mesh.hub')}</Chip> : null}
                   </span>
                 )}
                 description={member.kind === 'node'
@@ -300,19 +301,22 @@ function relativeTime(at: number): string {
   return format.format(Math.round(hours / 24), 'day');
 }
 
-/** A node's group settings: pinned addresses and relaying. */
+/** A node's group settings: hub, pinned addresses and relaying. */
 function NodeDialog({ member, busy, error, onClose, onSave }: {
   member: MeshMemberView;
   busy: boolean;
   error: string;
   onClose: () => void;
-  onSave: (patch: { addresses: string[]; relay: MeshRelayRole; relayTarget: boolean }) => void;
+  onSave: (patch: { addresses: string[]; relay: MeshRelayRole; relayTarget: boolean; hub: boolean }) => void;
 }) {
   const t = useT();
   const [addresses, setAddresses] = useState<string[]>(member.addresses ?? []);
   const [draft, setDraft] = useState('');
   const [relay, setRelay] = useState<MeshRelayRole>(member.relay ?? 'allowed');
   const [relayTarget, setRelayTarget] = useState(member.relayTarget !== false);
+  const [hub, setHub] = useState(member.hub === true);
+  // A hub others cannot reach is no use: say so, but let the user decide.
+  const reachable = addresses.length > 0 || Boolean(member.info?.urls.some(isShareableMeshAddress));
   const candidate = draft.trim().replace(/\/+$/, '');
   const canAdd = isShareableMeshAddress(candidate) && !addresses.includes(candidate) && addresses.length < 16;
   return (
@@ -324,11 +328,17 @@ function NodeDialog({ member, busy, error, onClose, onSave }: {
       footer={(
         <>
           <Button size="small" variant="secondary" onClick={onClose}>{t('common.cancel')}</Button>
-          <Button size="small" disabled={busy} onClick={() => onSave({ addresses, relay, relayTarget })}>{t('mesh.save')}</Button>
+          <Button size="small" disabled={busy} onClick={() => onSave({ addresses, relay, relayTarget, hub })}>{t('mesh.save')}</Button>
         </>
       )}
     >
       <div className="flex flex-col gap-4">
+        <SettingsCard>
+          <SettingsRow label={t('mesh.hub')} description={member.hubCapable ? t('mesh.hubHint') : t('mesh.hubUnsupported')}>
+            <Switch size="sm" aria-label={t('mesh.hub')} isDisabled={!member.hubCapable} isSelected={hub} onChange={setHub} />
+          </SettingsRow>
+        </SettingsCard>
+        {hub && !reachable ? <Alert status="warning" title={t('mesh.hubNoAddress')} /> : null}
         <SettingsGroup label={t('mesh.pinnedAddresses')} description={t('mesh.pinnedAddressesHint')}>
           <SettingsCard>
             {addresses.map((address) => (
@@ -342,8 +352,8 @@ function NodeDialog({ member, busy, error, onClose, onSave }: {
           </SettingsCard>
         </SettingsGroup>
         <SettingsCard>
-          <SettingsRow label={t('mesh.relayRole')} description={t('mesh.relayRoleHint')}>
-            <Select aria-label={t('mesh.relayRole')} selectedKey={relay} triggerClassName="h-8 w-auto gap-1 rounded-lg px-2 py-1.5" onSelectionChange={(value) => { if (value === 'preferred' || value === 'allowed' || value === 'denied') setRelay(value); }}>
+          <SettingsRow label={t('mesh.relayRole')} description={hub ? t('mesh.relayRoleHub') : t('mesh.relayRoleHint')}>
+            <Select aria-label={t('mesh.relayRole')} selectedKey={hub ? 'preferred' : relay} isDisabled={hub} triggerClassName="h-8 w-auto gap-1 rounded-lg px-2 py-1.5" onSelectionChange={(value) => { if (value === 'preferred' || value === 'allowed' || value === 'denied') setRelay(value); }}>
               <SelectItem id="preferred" textValue={t('mesh.relayPreferred')}>{t('mesh.relayPreferred')}</SelectItem>
               <SelectItem id="allowed" textValue={t('mesh.relayAllowed')}>{t('mesh.relayAllowed')}</SelectItem>
               <SelectItem id="denied" textValue={t('mesh.relayDenied')}>{t('mesh.relayDenied')}</SelectItem>

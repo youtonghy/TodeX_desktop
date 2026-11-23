@@ -112,7 +112,7 @@ Turn on agent desktop tools for a backend and agents can work on that backend's 
 
 TodeX Desktop stays connected to every backend you add, so switching workspaces never reconnects. Pairing a backend takes only its address and a code you compare with the backend before approving; there are no tokens or keys to copy.
 
-**Backend groups** join devices and backends into one group: approve a new device by comparing its code, invite one with a QR code, and reach a backend through another member of the group when its own address doesn't answer (relayed traffic stays end-to-end encrypted). **Config sync** compares two backends side by side and copies the agent accounts, settings, MCP servers and skills you tick; nothing on the target is deleted and secrets stay hidden.
+**Backend groups** join devices and backends into one group: approve a new device by comparing its code, invite one with a QR code, and reach a backend through another member of the group when its own address doesn't answer (relayed traffic stays end-to-end encrypted). Mark a backend with a public address as the group's **hub**: the other backends and devices reach it first for everyone's latest address and relay through it, then switch to a direct connection as soon as one works. **Config sync** compares two backends side by side and copies the agent accounts, settings, MCP servers and skills you tick; nothing on the target is deleted and secrets stay hidden.
 
 | Backend connections | Backend groups |
 | :---: | :---: |

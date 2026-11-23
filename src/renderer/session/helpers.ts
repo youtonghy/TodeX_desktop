@@ -118,6 +118,8 @@ export type ServerVersion = {
   terminalSnapshot?: number;
   /** `1` when the backend can join device groups (docs/mesh-v1.md). */
   mesh?: number;
+  /** `true` when, in a group, the backend can be a hub (docs/mesh-v1.md "Hub"). */
+  meshHub?: boolean;
   /** Where the backend runs; `host` on backends that predate it. */
   deployment: BackendDeployment;
   /** Host ↔ backend folder pairs; empty when the backend publishes none. */

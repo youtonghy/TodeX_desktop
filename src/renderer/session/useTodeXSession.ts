@@ -4711,11 +4711,11 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   // do not re-run its effects.
   const meshLinksKey = JSON.stringify(backendConnections.map((profile) => {
     const status = linkStatusByBackend[profile.id];
-    return [profile.id, status?.state ?? 'idle', status?.serverVersion ? status.serverVersion.mesh === 1 : null];
+    return [profile.id, status?.state ?? 'idle', status?.serverVersion ? status.serverVersion.mesh === 1 : null, status?.serverVersion?.meshHub === true];
   }));
   const meshLinks = useMemo(() => Object.fromEntries(
-    (JSON.parse(meshLinksKey) as [string, MeshLink['state'], boolean | null][]).map(([backendId, state, mesh]) => [
-      backendId, { state, mesh: mesh ?? undefined },
+    (JSON.parse(meshLinksKey) as [string, MeshLink['state'], boolean | null, boolean][]).map(([backendId, state, mesh, hub]) => [
+      backendId, { state, mesh: mesh ?? undefined, ...(hub ? { hub } : {}) },
     ]),
   ), [meshLinksKey]);
   const meshGroups = useMeshGroups({

@@ -369,14 +369,16 @@ test('settings: computer use permissions', async ({ page, openDemo }) => {
   await expect(page).toHaveScreenshot('settings-computer-use-permissions-light.png', { mask: volatile(page) });
 });
 
-// A device group: this device, a second device and the demo backend, plus a
-// device asking to join (approving it compares the verification code).
+// A device group: this device, a second device and the demo backend (its
+// hub), plus a device asking to join (approving it compares the
+// verification code).
 test('settings: backend group with a join request', async ({ page, openDemo }) => {
   await openDemo('light', 'mesh=1');
   await page.getByRole('button', { name: '设置', exact: true }).click();
   await settingsSection(page, '后端组').click();
   await expect(page.getByText('Pixel 9', { exact: true }).first()).toBeVisible();
   await expect(page.getByText('iPhone', { exact: true })).toBeVisible();
+  await expect(page.getByText('中心节点', { exact: true })).toBeVisible();
   await settle(page);
   await expect(page).toHaveScreenshot('settings-mesh-group-light.png', { mask: volatile(page) });
   await page.getByRole('button', { name: '批准', exact: true }).first().click();
@@ -386,6 +388,8 @@ test('settings: backend group with a join request', async ({ page, openDemo }) =
   await page.getByRole('dialog', { name: '批准 Pixel 9 加入？' }).getByRole('button', { name: '取消', exact: true }).click();
   await page.getByRole('button', { name: 'MBP 的组设置' }).click();
   await expect(page.getByRole('dialog', { name: 'MBP 的组设置' })).toBeVisible();
+  // A hub always relays: its relay role is fixed.
+  await expect(page.getByRole('dialog', { name: 'MBP 的组设置' }).getByRole('switch', { name: '中心节点' })).toBeChecked();
   await settle(page);
   await expect(page).toHaveScreenshot('settings-mesh-node-light.png', { mask: volatile(page) });
   await page.keyboard.press('Escape');

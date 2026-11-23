@@ -1,5 +1,6 @@
 // Demo preview (`?demo&mesh=1`): a device group with this device, a second
-// device and the demo backend as its node, plus a device asking to join.
+// device and the demo backend as its node (the group's hub), plus a device
+// asking to join.
 // Every key is fixed, so the signed roster and the screenshots are stable.
 import { ed25519 } from '@noble/curves/ed25519.js';
 import { encodeBase64Url } from '@todex/protocol/deviceAuth';
@@ -48,7 +49,7 @@ export function demoMesh(serverUrl: string): DemoMesh {
   const base = verifyMeshChain(genesis);
   const self = base.head.members[0];
   const nodeKey = ed25519.getPublicKey(seed(0x39));
-  const node = meshNodeMember({ publicKey: nodeKey, name: 'MBP', addedBy: self.id, addedAt: NOW + 1 });
+  const node = { ...meshNodeMember({ publicKey: nodeKey, name: 'MBP', addedBy: self.id, addedAt: NOW + 1 }), hub: true as const };
   const phone = meshDeviceMember({ publicKey: ed25519.getPublicKey(seed(0x32)), name: 'iPhone', historyKey: history(0x32), addedBy: self.id, addedAt: NOW + 2 });
   const chain = appendMeshRoster(base, { signerSecretKey: seed(0x31), members: [self, node, phone], now: NOW + 2 });
   // The node announces its LAN address, which invites carry; this device

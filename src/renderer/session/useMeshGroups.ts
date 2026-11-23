@@ -111,7 +111,8 @@ type PathState = {
 
 export type MeshPairingCredentials = Pick<BackendConnectionProfile, 'deviceSecret' | 'encryptionProtocol' | 'encryptionPublicKey' | 'transportVerified'>;
 
-export type MeshLink = { state: ConnectionState; mesh: boolean | undefined };
+/** `hub`: the backend can be a group hub (`meshHub` in `/v2/version`). */
+export type MeshLink = { state: ConnectionState; mesh: boolean | undefined; hub?: boolean };
 
 export type MeshMemberView = MeshMember & {
   self: boolean;
@@ -124,6 +125,9 @@ export type MeshMemberView = MeshMember & {
   info?: MeshNodeInfo;
   /** Node members reached through another node: that node's name. */
   via?: string;
+  /** Node members: their backend reported it can be a hub (it was seen
+   * connected and new enough); a hub already set stays editable. */
+  hubCapable?: boolean;
   /** Device members: connected to a node this client sees. */
   online?: boolean;
   /** Device members: when a node last saw it leave. */
@@ -315,6 +319,8 @@ export function useMeshGroups({
     }
   }, []);
 
+  /** Tries a group's nodes again after new addresses; set by the path effect. */
+  const rePath = useRef<(groupId: string) => void>(() => undefined);
   /** Reads one node's group state and join requests and merges them. */
   const syncing = useRef(new Map<string, Promise<void>>());
   const notified = useRef(new Set<string>());
@@ -349,6 +355,10 @@ export function useMeshGroups({
         return;
       }
       if (outcome.changed || remembered) replaceGroup(group);
+      // New addresses (a hub hands out every node's latest info) are tried
+      // at once: nodes not open race again, relayed ones measure again.
+      const infosChanged = Object.entries(group.nodeInfos).some(([nodeId, doc]) => stored.nodeInfos[nodeId]?.body !== doc.body);
+      if (infosChanged) rePath.current(group.groupId);
       if (outcome.push) {
         await live.current.send(profileId, meshCommands.statePush(group.chain, Object.values(group.nodeInfos))).catch(() => undefined);
       }
@@ -640,6 +650,16 @@ export function useMeshGroups({
     raceNow.current = (profileId) => {
       paths.current.delete(profileId);
       void race(profileId);
+    };
+    rePath.current = (groupId) => {
+      for (const profile of live.current.profiles) {
+        if (profile.mesh?.groupId !== groupId) continue;
+        if (live.current.links[profile.id]?.state === 'open') {
+          if (profile.mesh.via) void measure(profile.id);
+        } else if (live.current.links[profile.id]) {
+          void race(profile.id);
+        }
+      }
     };
     let running = false;
     const check = async () => {
@@ -940,15 +960,21 @@ export function useMeshGroups({
     if (group?.deviceId === memberId) await forgetGroup(groupId);
   }, [editRoster, forgetGroup]);
 
-  /** Changes one node's roster entry: pinned addresses, relay role, or
-   * whether it may be reached through a relay. */
-  const updateNode = useCallback(async (groupId: string, nodeId: string, patch: { addresses?: string[]; relay?: MeshRelayRole; relayTarget?: boolean }) => {
+  /** Changes one node's roster entry: pinned addresses, relay role,
+   * whether it may be reached through a relay, and whether it is a hub (a
+   * hub always relays: its role is dropped). */
+  const updateNode = useCallback(async (groupId: string, nodeId: string, patch: { addresses?: string[]; relay?: MeshRelayRole; relayTarget?: boolean; hub?: boolean }) => {
     await editRoster(groupId, (chain) => ({
       members: chain.head.members.map((member) => {
         if (member.id !== nodeId || member.kind !== 'node') return member;
-        const next: MeshMember = { ...member, ...patch };
+        const { hub, ...rest } = patch;
+        const next: MeshMember = { ...member, ...rest };
+        if (hub !== undefined) {
+          if (hub) next.hub = true;
+          else delete next.hub;
+        }
         if (!next.addresses?.length) delete next.addresses;
-        if (next.relay === 'allowed') delete next.relay;
+        if (next.relay === 'allowed' || next.hub) delete next.relay;
         if (next.relayTarget !== false) delete next.relayTarget;
         return next;
       }),
@@ -1028,6 +1054,7 @@ export function useMeshGroups({
         ...(local ? { local } : {}),
         ...(profile ? { profileId: profile.id, state: links[profile.id]?.state ?? 'idle' } : {}),
         ...(profile?.mesh?.via ? { via: nameOf(profile.mesh.via) } : {}),
+        ...(member.kind === 'node' && (member.hub || (profile && links[profile.id]?.hub)) ? { hubCapable: true } : {}),
         ...(infos.get(member.id) ? { info: infos.get(member.id) } : {}),
         ...(member.kind === 'device' ? {
           online: self || reports.some((report) => report.connected.some((item) => item.deviceId === member.id)),
@@ -1035,11 +1062,15 @@ export function useMeshGroups({
         } : {}),
       };
     });
-    const inviteNodes = members.filter((member) => member.kind === 'node').map((member) => ({
-      // A loopback address this device reaches a node at (a tunnel, a
-      // published port) is no use to the device that reads the invite.
-      nodeId: member.id, name: member.name, urls: nodeUrls(group, member.info, member.id, { pinned: member.addresses }).filter(isShareableMeshAddress),
-    })).filter((node) => node.urls.length);
+    // Hubs first: a joining device tries the invite's nodes in order.
+    const inviteNodes = members.filter((member) => member.kind === 'node')
+      .sort((a, b) => Number(Boolean(b.hub)) - Number(Boolean(a.hub)))
+      .map((member) => ({
+        // A loopback address this device reaches a node at (a tunnel, a
+        // published port) is no use to the device that reads the invite.
+        nodeId: member.id, name: member.name, urls: nodeUrls(group, member.info, member.id, { pinned: member.addresses }).filter(isShareableMeshAddress),
+      }))
+      .filter((node) => node.urls.length);
     const invite = { groupId: group.groupId, name: chain?.head.name ?? group.name, nodes: inviteNodes };
     const leaving = group.leaving ? {
       pendingNodes: group.leaving.pendingNodes.map((id) => {

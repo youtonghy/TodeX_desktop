@@ -909,7 +909,7 @@ function route(request: SecureRequest): SecureResponse {
       case '/v2/transport-policy':
         return json({ requiredProtocol: 'none' });
       case '/v2/version':
-        return json({ name: 'todex-agentd', version: demoBackendVersion, data_dir: '/home/demo/.todex-agent', workspace_root: fixtures.DEMO_ROOT, scratch_workspace_root: '/home/demo/.todex-agent/workspace', mesh: 1 });
+        return json({ name: 'todex-agentd', version: demoBackendVersion, data_dir: '/home/demo/.todex-agent', workspace_root: fixtures.DEMO_ROOT, scratch_workspace_root: '/home/demo/.todex-agent/workspace', mesh: 1, meshHub: true });
       case '/v2/providers':
         return json({ providers: demoClaudeRegionMode() === 'legacy'
           ? fixtures.demoProviders.map(provider => provider.id === 'claude-code'
