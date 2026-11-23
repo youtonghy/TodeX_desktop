@@ -960,10 +960,11 @@ export function useMeshGroups({
     if (group?.deviceId === memberId) await forgetGroup(groupId);
   }, [editRoster, forgetGroup]);
 
-  /** Changes one node's roster entry: pinned addresses, relay role,
-   * whether it may be reached through a relay, and whether it is a hub (a
-   * hub always relays: its role is dropped). */
-  const updateNode = useCallback(async (groupId: string, nodeId: string, patch: { addresses?: string[]; relay?: MeshRelayRole; relayTarget?: boolean; hub?: boolean }) => {
+  /** Changes one node's roster entry: its name (the group's name for it,
+   * which every device shows), pinned addresses, relay role, whether it may
+   * be reached through a relay, and whether it is a hub (a hub always
+   * relays: its role is dropped). */
+  const updateNode = useCallback(async (groupId: string, nodeId: string, patch: { name?: string; addresses?: string[]; relay?: MeshRelayRole; relayTarget?: boolean; hub?: boolean }) => {
     await editRoster(groupId, (chain) => ({
       members: chain.head.members.map((member) => {
         if (member.id !== nodeId || member.kind !== 'node') return member;

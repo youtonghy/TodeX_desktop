@@ -301,15 +301,28 @@ function relativeTime(at: number): string {
   return format.format(Math.round(hours / 24), 'day');
 }
 
-/** A node's group settings: hub, pinned addresses and relaying. */
+/** A roster name the nodes accept (TodeX_backend `validate_device_name`):
+ * 1 to 80 characters, no control or bidirectional formatting characters.
+ * Callers trim it first. */
+function isValidMemberName(name: string): boolean {
+  const length = [...name].length;
+  return length > 0 && length <= 80 && !/[\p{Cc}\u200e\u200f\u202a-\u202e\u2066-\u2069]/u.test(name);
+}
+
+/** A node's group settings: name, hub, pinned addresses and relaying. */
 function NodeDialog({ member, busy, error, onClose, onSave }: {
   member: MeshMemberView;
   busy: boolean;
   error: string;
   onClose: () => void;
-  onSave: (patch: { addresses: string[]; relay: MeshRelayRole; relayTarget: boolean; hub: boolean }) => void;
+  onSave: (patch: { name?: string; addresses: string[]; relay: MeshRelayRole; relayTarget: boolean; hub: boolean }) => void;
 }) {
   const t = useT();
+  // The roster names the node for the whole group, in place of the name
+  // the backend reported when it joined.
+  const [name, setName] = useState(member.name);
+  const trimmedName = name.trim();
+  const nameValid = isValidMemberName(trimmedName);
   const [addresses, setAddresses] = useState<string[]>(member.addresses ?? []);
   const [draft, setDraft] = useState('');
   const [relay, setRelay] = useState<MeshRelayRole>(member.relay ?? 'allowed');
@@ -328,11 +341,20 @@ function NodeDialog({ member, busy, error, onClose, onSave }: {
       footer={(
         <>
           <Button size="small" variant="secondary" onClick={onClose}>{t('common.cancel')}</Button>
-          <Button size="small" disabled={busy} onClick={() => onSave({ addresses, relay, relayTarget, hub })}>{t('mesh.save')}</Button>
+          <Button size="small" disabled={busy || !nameValid} onClick={() => onSave({ ...(trimmedName !== member.name ? { name: trimmedName } : {}), addresses, relay, relayTarget, hub })}>{t('mesh.save')}</Button>
         </>
       )}
     >
       <div className="flex flex-col gap-4">
+        <Input
+          label={t('mesh.nodeName')}
+          name="mesh-node-name"
+          size="small"
+          value={name}
+          onChange={setName}
+          isInvalid={!nameValid}
+          hint={nameValid ? t('mesh.nodeNameHint') : t('mesh.nodeNameInvalid')}
+        />
         <SettingsCard>
           <SettingsRow label={t('mesh.hub')} description={member.hubCapable ? t('mesh.hubHint') : t('mesh.hubUnsupported')}>
             <Switch size="sm" aria-label={t('mesh.hub')} isDisabled={!member.hubCapable} isSelected={hub} onChange={setHub} />

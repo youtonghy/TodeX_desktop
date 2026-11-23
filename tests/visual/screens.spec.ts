@@ -392,6 +392,12 @@ test('settings: backend group with a join request', async ({ page, openDemo }) =
   await expect(page.getByRole('dialog', { name: 'MBP 的组设置' }).getByRole('switch', { name: '中心节点' })).toBeChecked();
   await settle(page);
   await expect(page).toHaveScreenshot('settings-mesh-node-light.png', { mask: volatile(page) });
+  // The group's name for the node is editable; an empty one cannot be saved.
+  const nodeDialog = page.getByRole('dialog', { name: 'MBP 的组设置' });
+  await expect(nodeDialog.getByRole('textbox', { name: '名称' })).toHaveValue('MBP');
+  await nodeDialog.getByRole('textbox', { name: '名称' }).fill('  ');
+  await expect(nodeDialog.getByText('请输入 1 到 80 个字符。', { exact: true })).toBeVisible();
+  await expect(nodeDialog.getByRole('button', { name: '保存', exact: true })).toBeDisabled();
   await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog', { name: 'MBP 的组设置' })).toBeHidden();
   // The invite as a QR code a phone scans, above the text to paste.
