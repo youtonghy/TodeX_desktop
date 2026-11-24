@@ -31,6 +31,7 @@ import {
 } from './fixtures';
 import { demoOfflineTransport, demoSecondTransport, demoTransport, installDemoFetch } from './transport';
 import { DEMO_MESH_DEVICE_SECRET, DEMO_MESH_NAS_ID, demoMesh } from './mesh';
+import { demoLocalBackend } from './localBackend';
 import { MESH_GROUPS_STORAGE_KEY, meshDeviceSecretKey } from '../session/meshGroups';
 
 export function installDemoMode(): boolean {
@@ -116,6 +117,8 @@ export function installDemoMode(): boolean {
       available: async () => true,
     };
   }
+  // `localBackend=1`: Settings › Local backend with a running daemon.
+  if (params.get('localBackend') === '1') bridge.localBackend = demoLocalBackend(bridge.localBackend);
   const theme = params.get('theme');
   if (theme === 'dark' || theme === 'light') {
     bridge.theme = { ...bridge.theme, shouldUseDark: async () => theme === 'dark', onUpdated: () => () => undefined };

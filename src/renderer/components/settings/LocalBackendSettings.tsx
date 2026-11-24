@@ -344,6 +344,8 @@ export function InstanceAdmin({ instance, status: initialStatus, ipcConnected, c
   const networkSupported = config?.networkEnabled !== undefined;
   const networkSaved = config?.networkEnabled !== false;
   const networkRunning = status.networkEnabled !== false;
+  // Older daemons, other platforms and containers cannot keep the host awake.
+  const keepAwakeSupported = config?.keepAwakeSupported === true;
   // Turning it off must leave this app a way in.
   const canTurnNetworkOff = ipcConnected && Boolean(status.ipcPath);
   const listenEditable = editable && networkSaved;
@@ -373,6 +375,20 @@ export function InstanceAdmin({ instance, status: initialStatus, ipcConnected, c
                 isSelected={networkSaved}
                 isDisabled={!editable || (networkSaved && !canTurnNetworkOff)}
                 onChange={(enabled) => (enabled ? void saveConfig({ networkEnabled: true }) : setConfirmNetworkOff(true))}
+              />
+            </SettingsRow>
+          ) : null}
+          {keepAwakeSupported ? (
+            <SettingsRow
+              label={t('localBackend.keepAwake')}
+              description={networkSaved ? t('localBackend.keepAwakeHint') : t('localBackend.keepAwakeNetworkOff')}
+            >
+              <Switch
+                size="sm"
+                aria-label={t('localBackend.keepAwake')}
+                isSelected={config?.keepAwake === true}
+                isDisabled={!editable}
+                onChange={(keepAwake) => void saveConfig({ keepAwake })}
               />
             </SettingsRow>
           ) : null}

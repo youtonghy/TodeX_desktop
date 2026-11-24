@@ -42,8 +42,15 @@ export type LocalBackendConfigPatch = {
   pairingEncryption: PairingEncryption;
   workspaceRoots: string[];
   autoUpdate: boolean;
+  /** Stop idle system sleep on AC power while listening (macOS). Absent from older daemons. */
+  keepAwake?: boolean;
 };
-export type LocalBackendConfig = LocalBackendConfigPatch & { editable: boolean; restartRequired: boolean };
+export type LocalBackendConfig = LocalBackendConfigPatch & {
+  editable: boolean;
+  restartRequired: boolean;
+  /** Whether this daemon can keep its host awake (macOS, not a container). Absent from older daemons. */
+  keepAwakeSupported?: boolean;
+};
 
 export type LocalPairingRequest = {
   requestId: string;

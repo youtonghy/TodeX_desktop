@@ -769,3 +769,19 @@ test('sidebar: offline backend workspaces hidden, then revealed', async ({ page,
   await settle(page);
   await expect(page).toHaveScreenshot('sidebar-offline-revealed-light.png', { mask: volatile(page) });
 });
+
+// This computer's backend, running on macOS: the listen card offers to
+// keep the Mac awake on AC power, which the setting toggles in place.
+test('settings: local backend keeps the host awake', async ({ page, openDemo }) => {
+  await openDemo('light', 'localBackend=1');
+  await page.getByRole('button', { name: '设置', exact: true }).click();
+  await settingsSection(page, '本机 Backend').click();
+  const keepAwake = page.getByRole('switch', { name: '接电源时保持唤醒' });
+  await expect(keepAwake).toBeChecked();
+  await settle(page);
+  // settle() parks scrolled panes at their end; bring the listen card back.
+  await keepAwake.evaluate((element) => element.scrollIntoView({ block: 'center' }));
+  await expect(page).toHaveScreenshot('settings-local-backend-light.png', { mask: volatile(page) });
+  await keepAwake.click({ force: true });
+  await expect(keepAwake).not.toBeChecked();
+});
