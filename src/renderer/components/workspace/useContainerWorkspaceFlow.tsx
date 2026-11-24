@@ -21,6 +21,7 @@ import type { TodeXSession } from '../../session/useTodeXSession';
 import { AGENT_CONFIG_CATEGORIES, agentConfigSource } from '../settings/backendConnection';
 import { SettingsCard, SettingsNote, SettingsRow, SettingsValueField } from '../settings/SettingsRows';
 import { dockerProblemText } from '../settings/dockerProblem';
+import { installUnavailableKey } from '../../lib/cliSettings';
 
 const NEW_CONTAINER = '__new__';
 const TEMPLATE_LABELS = {
@@ -504,9 +505,10 @@ function useAgentInstallStep({ session, profileId, onFinish }: { session: TodeXS
           <SettingsCard>
             {rows.map(({ cli, operation, startError }) => {
               const canInstall = !cli.installed && cli.installSupported === true;
+              const unavailableKey = cli.managedBy === 'image' ? undefined : installUnavailableKey(cli);
               const failed = startError ?? (operation?.status === 'failed' ? operation.error || t('cli.installFailed') : '');
               return (
-                <SettingsRow key={cli.id} label={cli.name} description={failed || cli.currentVersion}>
+                <SettingsRow key={cli.id} label={cli.name} description={failed || cli.currentVersion || (unavailableKey && operation?.status !== 'running' ? t(unavailableKey) : undefined)}>
                   {operation?.status === 'running' ? <Spinner aria-label={t('container.agents.installing')} />
                     : cli.managedBy === 'image' ? <Chip variant="caption" color="neutral">{t('cli.statusImageManaged')}</Chip>
                       : cli.installed ? <Chip variant="caption" color="lime">{t('container.agents.installed')}</Chip>

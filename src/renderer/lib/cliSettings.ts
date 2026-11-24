@@ -6,7 +6,7 @@
  * (hooks, plugins, MCP servers…) are never touched.
  */
 
-import type { CliSettingsProvider } from '@todex/protocol/v2';
+import type { CliSettingsProvider, CliVersionInfo } from '@todex/protocol/v2';
 import type { MessageKey } from '../i18n';
 
 export type SettingsObject = Record<string, unknown>;
@@ -425,3 +425,18 @@ export function envFromRows(rows: { name: string; value: string }[]): SettingsOb
 }
 
 export const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+const INSTALL_UNAVAILABLE_KEYS: Record<string, MessageKey> = {
+  unsupportedPlatform: 'cli.installUnavailable.unsupportedPlatform',
+  authDisabled: 'cli.installUnavailable.authDisabled',
+  npmMissing: 'cli.installUnavailable.npmMissing',
+  nodeMissing: 'cli.installUnavailable.nodeMissing',
+};
+
+/** Why a missing managed CLI cannot be installed, or `undefined` when it
+ * can. Older backends send no reason, so they get a generic message. */
+export function installUnavailableKey(cli: CliVersionInfo): MessageKey | undefined {
+  if (cli.kind !== 'managed' || cli.installed || cli.installSupported) return undefined;
+  const reason = cli.installUnavailableReason;
+  return (reason && INSTALL_UNAVAILABLE_KEYS[reason]) || 'cli.installUnavailable.unknown';
+}

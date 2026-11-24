@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Focusable } from 'react-aria-components';
 import { RiArrowDownSLine, RiDownload2Line, RiDownloadCloud2Line, RiFileList3Line, RiPuzzle2Line, RiRefreshLine, RiServerLine, RiSettings3Line, RiTerminalBoxLine } from '@remixicon/react';
 import { Chip, type ChipProps } from '@/components/base/badges/chip';
 import { Button } from '@/components/base/buttons/button';
 import { Divider } from '@/components/base/divider/divider';
+import { Tooltip, TooltipTrigger } from '@/components/base/tooltip/tooltip';
 import { Card } from '@/components/ui/card';
 import { EmptyState } from '@/components/ui/empty-state';
 import { IconAction } from '@/components/ui/icon-action';
@@ -24,6 +26,7 @@ import { NoticeToast } from '../components/NoticeToast';
 import { getLocale, t, useT, type MessageKey } from '../i18n';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { backendApi } from '../session/helpers';
+import { installUnavailableKey } from '../lib/cliSettings';
 import { usePanelBackend } from '../session/panelBackend';
 import { BackendSelect } from '@/components/ui/backend-select';
 
@@ -328,6 +331,7 @@ export function CliManagerPanel({ session, page = null, onPageChange = () => {} 
                 <Card id="cli-install-more" variant="secondary" className="gap-0 py-1">
                   {available.map((cli, index) => {
                     const running = isRunning(cli.id);
+                    const unavailableKey = running ? undefined : installUnavailableKey(cli);
                     return (
                       <div key={cli.id} className="flex flex-col">
                         {index ? <Divider /> : null}
@@ -343,13 +347,28 @@ export function CliManagerPanel({ session, page = null, onPageChange = () => {} 
                           </div>
                           {isImageManaged(cli) ? (
                             <Chip variant="caption" color={IMAGE_MANAGED_STATUS.color}>{t(IMAGE_MANAGED_STATUS.labelKey)}</Chip>
+                          ) : unavailableKey ? (
+                            <TooltipTrigger delay={200}>
+                              {/* A disabled button gets no hover or focus, so this wrapper carries the reason. */}
+                              <Focusable>
+                                <span
+                                  tabIndex={0}
+                                  className="inline-flex rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-border-focus-ring"
+                                >
+                                  <Button size="small" variant="secondary" leadingIcon={RiDownload2Line} disabled className="pointer-events-none">
+                                    {t('cli.install')}
+                                  </Button>
+                                </span>
+                              </Focusable>
+                              <Tooltip placement="top" className="max-w-xs">{t(unavailableKey)}</Tooltip>
+                            </TooltipTrigger>
                           ) : cli.kind === 'managed' ? (
                             <Button
                               size="small"
                               variant="secondary"
                               leadingIcon={running ? SpinnerIcon : RiDownload2Line}
                               aria-busy={running || undefined}
-                              disabled={!cli.installSupported || isBusy(cli.id)}
+                              disabled={isBusy(cli.id)}
                               onClick={() => void startOperation(cli.id, 'install')}
                             >
                               {running ? t('cli.installingNow') : t('cli.install')}

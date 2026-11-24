@@ -517,6 +517,20 @@ test('settings: Claude Code skills with a linked skill', async ({ page, openDemo
   await expect(page).toHaveScreenshot('settings-claude-skills-linked-light.png', { mask: volatile(page) });
 });
 
+// A CLI the backend cannot install: its disabled Install button explains why.
+test('settings: CLI install unavailable reason', async ({ page, openDemo }) => {
+  await openDemo('light');
+  await page.getByRole('button', { name: '设置', exact: true }).click();
+  await settingsSection(page, 'CLI 管理').click();
+  await page.getByRole('button', { name: /^安装更多/ }).click();
+  const row = page.locator('#cli-install-more > div').filter({ hasText: 'Grok Build' });
+  await row.locator('span[tabindex="0"]').hover();
+  const tooltip = page.getByRole('tooltip');
+  await expect(tooltip).toContainText('关闭了设备认证');
+  await settle(page);
+  await expect(page).toHaveScreenshot('settings-cli-install-unavailable-light.png', { mask: volatile(page) });
+});
+
 // SSH settings with the connection approval switched to per command.
 test('settings: SSH approval per command', async ({ page, openDemo }) => {
   await openDemo('light');

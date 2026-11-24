@@ -479,6 +479,8 @@ export const demoCliVersions: CliVersionsResponse = {
     { id: 'codex', kind: 'managed', name: 'Codex', installed: true, currentVersion: '0.162.0', latestVersion: '0.163.1', status: 'updateAvailable', upgradeSupported: true, installSupported: true },
     { id: 'pi', kind: 'managed', name: 'Pi', installed: true, currentVersion: '1.1.0', latestVersion: '1.1.0', status: 'upToDate', upgradeSupported: true, installSupported: true },
     { id: 'opencode', kind: 'managed', name: 'OpenCode', installed: false, latestVersion: '1.18.35', status: 'notInstalled', upgradeSupported: true, installSupported: true },
+    // Not installable here; the CLI manager explains why in a tooltip.
+    { id: 'grok-build', kind: 'managed', name: 'Grok Build', installed: false, latestVersion: '0.9.4', status: 'notInstalled', upgradeSupported: false, installSupported: false, installUnavailableReason: 'authDisabled' },
     { id: 'deepseek-harness', kind: 'managed', name: 'DeepSeek Harness', installed: true, currentVersion: '0.2.1-rc.2', latestVersion: '0.2.1-rc.2', status: 'upToDate', upgradeSupported: true, installSupported: true },
   ],
 };
