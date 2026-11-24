@@ -1485,11 +1485,15 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         .slice(0, MAX_WORKSPACE_TOMBSTONES);
       // Untagged records predate parallel connections and belonged to the
       // backend that was active then: the one owning the restored workspace,
-      // otherwise the profile the persisted settings point at.
+      // otherwise the profile the persisted settings point at. Enabled
+      // profiles come first: the sidebar lists no disabled one (a group
+      // standby, say, which carries no data), so its records would hide.
       const restoredWorkspace = normalizedWorkspaces.find((workspace) => workspace.id === firstWorkspaceId);
-      const legacyProfile = profiles.find((profile) => profile.id === restoredWorkspace?.backendConnectionId)
-        ?? profiles.find((profile) => profile.serverUrl === nextSettings.serverUrl)
-        ?? profiles[0];
+      const enabledProfiles = profiles.filter((profile) => !profile.disabled);
+      const legacyCandidates = enabledProfiles.length ? enabledProfiles : profiles;
+      const legacyProfile = legacyCandidates.find((profile) => profile.id === restoredWorkspace?.backendConnectionId)
+        ?? legacyCandidates.find((profile) => profile.serverUrl === nextSettings.serverUrl)
+        ?? legacyCandidates[0];
       const tagged = tagLegacyBackendRecords({
         workspaces: normalizedWorkspaces,
         conversations: normalizedConversations,
