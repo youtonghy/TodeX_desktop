@@ -1,5 +1,5 @@
 import { normalizeBackendLabelColor, type BackendConnectionProfile } from './backendColors';
-import { ipcDaemonConflicts, isStandbyProfile, moveBackendRecords, moveProfileKeyedEntries, ownerBackendId, resolveNoWorkspaceBackendId, sameDaemonProfiles, sshPasswordDonors, tagLegacyBackendRecords, workspaceRemovalScope } from './backendRouting';
+import { ipcDaemonConflicts, isStandbyProfile, moveBackendRecords, moveProfileKeyedEntries, ownerBackendId, resolveNoWorkspaceBackendId, sameDaemonProfiles, sshPasswordDonors, strandedProfileHeirs, tagLegacyBackendRecords, workspaceRemovalScope } from './backendRouting';
 import { deviceIdentityFromSecret } from '@todex/protocol/deviceAuth';
 import { useWorkbenchSharing } from './useWorkbenchSharing';
 import { SMART_WORK_MODE_PROVIDER, smartPromptFields, smartPromptPhase, smartWorkModeAvailable, useSmartWorkMode } from './smartWorkMode';
@@ -927,9 +927,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   }, [contextUsageByConversation]);
 
   // The transport fields of every profile; list effects restart when one
-  // backend is re-pointed or re-paired.
+  // backend is re-pointed, re-paired, disabled or enabled.
   const backendEndpointsKey = useMemo(() => JSON.stringify(backendConnections.map((profile) => [
-    profile.id, profile.serverUrl, profile.deviceSecret, profile.encryptionProtocol, profile.encryptionPublicKey, profile.transportVerified,
+    profile.id, profile.serverUrl, profile.deviceSecret, profile.encryptionProtocol, profile.encryptionPublicKey, profile.transportVerified, Boolean(profile.disabled),
   ])), [backendConnections]);
   const directorySyncStatus = directorySyncByBackend[activeBackendConnectionId] ?? (hydrated ? 'ready' : 'loading');
 
@@ -950,12 +950,16 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     }
   }, [conversations]);
 
-  // Every backend's agents and conversation list, refreshed over HTTP.
+  // Every enabled backend's agents and conversation list, refreshed over
+  // HTTP. A disabled profile (swapped out for its daemon's IPC profile, or a
+  // group standby) is not listed: it reaches a daemon an enabled profile
+  // already lists, and would claim its new conversations under a profile
+  // the sidebar does not show.
   useEffect(() => {
     if (!hydrated) return;
     const stops: Array<() => void> = [];
     for (const profile of backendConnectionsRef.current) {
-      if (!profile.serverUrl.trim()) continue;
+      if (!profile.serverUrl.trim() || profile.disabled) continue;
       const api = backendApi(profile);
       const backendId = profile.id;
       let active = true;
@@ -1506,6 +1510,15 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         if (restoredNoneBackendId === loserId) restoredNoneBackendId = winnerId;
         resolvedProfiles = resolvedProfiles.map((profile) => (profile.id === loserId ? { ...profile, disabled: true } : profile));
       }
+      // Records an earlier build left under a disabled profile of a daemon
+      // an enabled profile serves go to that profile: the sidebar lists
+      // only enabled profiles, so they were hidden.
+      for (const { fromId, toId } of strandedProfileHeirs(resolvedProfiles, isIpcServerUrl)) {
+        const moved = moveBackendRecords(records, fromId, toId);
+        records = moved;
+        restoredConversationId = moved.conversationIds.get(restoredConversationId) ?? restoredConversationId;
+        if (restoredNoneBackendId === fromId) restoredNoneBackendId = toId;
+      }
       setPreferences(nextSettings);
       setBackendConnections(resolvedProfiles);
       setWorkspaces(records.workspaces);
@@ -1744,7 +1757,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       }
 
       link.workspaceReady = true;
-      if (listConversations) {
+      // A disabled profile's daemon is listed by its enabled profile.
+      if (listConversations && !profile.disabled) {
         try {
           const epoch = manifestEpoch(backendId);
           const conversationResponse = await backendApi(profile).listConversations();

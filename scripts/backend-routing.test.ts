@@ -11,6 +11,7 @@ import {
   reusableNativeProfile,
   sameDaemonProfiles,
   sshPasswordDonors,
+  strandedProfileHeirs,
   tagLegacyBackendRecords,
 } from '../src/renderer/session/backendRouting.ts';
 import { needsSiblingGrant } from '../src/renderer/session/siblingHistoryGrants.ts';
@@ -267,4 +268,25 @@ test('a profile asks its siblings for history once, while one can grant it', () 
   assert.equal(needsSiblingGrant({ status: 'loading' }, [holder]), false);
   assert.equal(needsSiblingGrant(ready('r_new', [], { accessRevoked: true }), [holder]), false);
   assert.equal(needsSiblingGrant({ ...ready('r_new'), state: { grants: [], myAccess: 'revoked' } }, [holder]), false);
+});
+
+test('records of a disabled profile go to the enabled profile of its daemon, IPC first', () => {
+  const isIpc = (url: string) => url.startsWith('todex-ipc:');
+  const items = [
+    { ...daemonProfile('old', 'http://127.0.0.1:7345', 'k1', { disabled: true }), createdAt: 1 },
+    { ...daemonProfile('lan', 'http://192.168.1.5:7345', 'k1'), createdAt: 2 },
+    { ...daemonProfile('ipc', 'todex-ipc://local', 'k1'), createdAt: 3 },
+    { ...daemonProfile('standby', 'http://10.0.0.2:7345', 'k1', { disabled: true }), mesh: { nodeId: 'node_local' }, createdAt: 4 },
+    // Disabled with no enabled profile of its daemon: it keeps its records.
+    { ...daemonProfile('remote', 'https://remote.example', 'k2', { disabled: true }), createdAt: 5 },
+    daemonProfile('unpaired', 'http://127.0.0.1:7346', '', { disabled: true }),
+  ];
+  assert.deepEqual(strandedProfileHeirs(items, isIpc), [
+    { fromId: 'old', toId: 'ipc' },
+    { fromId: 'standby', toId: 'ipc' },
+  ]);
+  assert.deepEqual(strandedProfileHeirs(items.filter((item) => item.id !== 'ipc'), isIpc), [
+    { fromId: 'old', toId: 'lan' },
+    { fromId: 'standby', toId: 'lan' },
+  ]);
 });

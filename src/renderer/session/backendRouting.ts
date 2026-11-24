@@ -158,6 +158,26 @@ export function sshPasswordDonors<P extends DaemonProfileLike>(profiles: readonl
 }
 
 /**
+ * Disabled profiles (a swapped-out loopback profile, a group standby) whose
+ * daemon an enabled profile serves, each paired with that profile: one
+ * daemon is one backend, so records left filed under a disabled profile
+ * (the sidebar has no row for it) belong to the enabled one. The IPC
+ * profile wins, then the first added.
+ */
+export function strandedProfileHeirs<P extends DaemonProfileLike>(
+  profiles: readonly P[],
+  isIpc: (serverUrl: string) => boolean,
+): Array<{ fromId: string; toId: string }> {
+  return profiles.flatMap((profile) => {
+    if (!profile.disabled) return [];
+    const heir = sameDaemonProfiles(profiles, profile.id)
+      .filter((other) => !other.disabled)
+      .sort((a, b) => Number(isIpc(b.serverUrl)) - Number(isIpc(a.serverUrl)) || a.createdAt - b.createdAt)[0];
+    return heir ? [{ fromId: profile.id, toId: heir.id }] : [];
+  });
+}
+
+/**
  * Entries of a record keyed `<profileId>::<rest>` (provider model
  * preferences) re-filed from `fromId` to `toId`; an entry `toId` already has
  * wins. Returns the input when nothing moved.
