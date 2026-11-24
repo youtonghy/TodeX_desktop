@@ -17,6 +17,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { cx } from '@/utils/cx';
 import { ProviderIcon } from '../components/ProviderIcon';
 import { sameRecordValues, useRuntimeSelector, useTimelineSelector } from '../session/conversationStore';
+import { readCachedProviderQuotas, writeCachedProviderQuotas } from '../session/providerQuotaCache';
 import { backendApi, getConversationStatus, isListedConversation, isPrivateConversation, workspaceDisplayName, type ConversationRecord, type TimelineEntry, type UsageRecord } from '../session/helpers';
 import { HOME_COLUMNS, HOME_MIN_HEIGHT, isHomeWidgetId, resetHomeLayout, setHomeLayout, useHomeLayout, type HomeWidgetId, type HomeWidgetLayout } from '../session/homeLayout';
 import { quotaLimits } from '../session/quota';
@@ -276,12 +277,22 @@ export function HomePanel({ session, onOpenConversation }: Props) {
   }, [todayRecords, t]);
 
   // --- Plan limits -----------------------------------------------------------
-  // undefined: loading; null: the backend could not be asked.
-  const [quotas, setQuotas] = useState<Record<string, ProviderQuotaSnapshot> | null | undefined>(undefined);
+  // undefined: loading; null: the backend could not be asked. The last answer
+  // (under an hour old) shows at once while the backend is asked again.
+  const [quotas, setQuotas] = useState<Record<string, ProviderQuotaSnapshot> | null | undefined>(
+    () => readCachedProviderQuotas(session.settings.serverUrl),
+  );
   useEffect(() => {
     let cancelled = false;
+    const serverUrl = session.settings.serverUrl;
+    setQuotas(readCachedProviderQuotas(serverUrl));
     const load = () => backendApi(session.settings).getProviderQuotas()
-      .then((response) => { if (!cancelled) setQuotas(response.providers ?? {}); })
+      .then((response) => {
+        if (cancelled) return;
+        const providers = response.providers ?? {};
+        writeCachedProviderQuotas(serverUrl, providers);
+        setQuotas(providers);
+      })
       .catch(() => { if (!cancelled) setQuotas((current) => current ?? null); });
     void load();
     const timer = window.setInterval(load, QUOTA_REFRESH_MS);
