@@ -82,6 +82,10 @@ export type Platform = {
     openPath: (path: string) => Promise<void>;
     openWith: (path: string) => Promise<void>;
     reveal: (path: string) => Promise<void>;
+    /** Where a dropped, pasted or picked file lives on this machine, so a
+     * backend on this machine can read it in place; null when it is not a
+     * file on disk. Absent where the client cannot tell (web). */
+    pathForFile?: (file: File) => string | null;
   };
   preview?: PlatformPreview;
   /** LAN beacons of device group nodes (docs/mesh-v1.md); desktop only. */

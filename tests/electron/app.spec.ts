@@ -60,6 +60,30 @@ test('opens the window with the renderer and an isolated profile', async () => {
   expect(userData.startsWith(sandbox)).toBe(true);
 });
 
+test('the bridge tells where a picked file lives on disk, and nothing for an in-memory file', async () => {
+  const onDisk = join(sandbox, 'attach me.txt');
+  writeFileSync(onDisk, 'hello');
+  await page.evaluate(() => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.id = 'e2e-file-path';
+    input.hidden = true;
+    document.body.append(input);
+  });
+  await page.locator('#e2e-file-path').setInputFiles(onDisk);
+  const paths = await page.evaluate(() => {
+    const input = document.getElementById('e2e-file-path') as HTMLInputElement;
+    const picked = input.files?.[0];
+    input.remove();
+    return {
+      picked: picked ? window.todexDesktop.files.pathForFile(picked) : null,
+      memory: window.todexDesktop.files.pathForFile(new File(['x'], 'pasted.png')),
+    };
+  });
+  expect(paths.picked).toBe(onDisk);
+  expect(paths.memory).toBe('');
+});
+
 test('a secureStore value is on disk when set resolves', async () => {
   const userData = await app.evaluate(({ app }) => app.getPath('userData'));
   const result = await page.evaluate(async () => {

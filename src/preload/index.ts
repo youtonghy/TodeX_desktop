@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import type {
   LocalAdminStatus,
   LocalBackendConfig,
@@ -85,6 +85,12 @@ const api = {
   },
   dialog: {
     openDirectory: () => invoke('dialog:openDirectory') as Promise<string | null>,
+  },
+  files: {
+    /** Where a dropped, pasted or picked `File` lives on disk; '' for one
+     * that is not backed by a file (a pasted screenshot). Synchronous and
+     * local to this process: no IPC channel. */
+    pathForFile: (file: File) => webUtils.getPathForFile(file),
   },
   shell: {
     platform: process.platform,

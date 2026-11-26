@@ -49,6 +49,10 @@ export function installBrowserDesktopBridge(): void {
     dialog: {
       openDirectory: async () => null,
     },
+    // A browser never learns where a file lives on disk.
+    files: {
+      pathForFile: () => '',
+    },
     shell: {
       platform: navigator.userAgent.includes('Mac') ? 'darwin' : navigator.userAgent.includes('Win') ? 'win32' : 'linux',
       openPath: async () => {

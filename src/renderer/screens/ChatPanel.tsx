@@ -30,8 +30,9 @@ import {
   RiSpyLine,
   RiStopFill,
   RiTimerLine,
+  RiUploadCloud2Line,
 } from '@remixicon/react';
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent } from 'react';
 import type { ComponentProps, Dispatch, KeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode, SetStateAction } from 'react';
 import { Focusable, ListBox as AriaListBox, ListBoxItem as AriaListBoxItem, type ListBoxItemRenderProps } from 'react-aria-components';
 import { motion, useReducedMotion } from 'motion/react';
@@ -138,6 +139,7 @@ import { isThinkingProgressEntry } from '@todex/protocol/mobileParity';
 import { getLocale, t, useT, type MessageKey } from '../i18n';
 import { useConversationRuntime, useConversationTimeline } from '../session/conversationStore';
 import { ErrorBoundary } from '@/components/ui/error-boundary';
+import { platform } from '../platform';
 
 type Props = {
   session: TodeXSession;
@@ -309,6 +311,18 @@ async function inlineAttachmentContent(attachment: ComposerAttachmentDraft, blob
   if (blob.size > MAX_COMPOSER_TEXT_BYTES) return null;
   if (attachment.textContent !== undefined) return { textContent: attachment.textContent };
   return attachment.mimeType.startsWith('text/') ? { textContent: await blob.text() } : null;
+}
+
+/** Where `blob` lives on this machine's disk: only a dropped, pasted or
+ * picked file has a path, and only the desktop client can tell it. */
+function diskPath(blob: Blob): string | undefined {
+  if (!(blob instanceof File)) return undefined;
+  try {
+    return platform.files?.pathForFile?.(blob) ?? undefined;
+  } catch {
+    // Not a file the bridge recognizes: it has no path, so it is uploaded.
+    return undefined;
+  }
 }
 
 function clipboardFiles(data: DataTransfer): File[] {
@@ -1487,8 +1501,10 @@ export function ChatPanel({ session }: Props) {
   }
 
   const attachments = session.composerAttachments[conversation.id] ?? [];
-  const tokenStates: Record<string, { state: ComposerTokenState; title?: string }> = {};
+  const tokenStates: Record<string, { state?: ComposerTokenState; title?: string }> = {};
   for (const item of attachments) {
+    // A linked file names the original, so its capsule shows where it is.
+    if (item.linked && item.uploadedPath && !item.uploadState) tokenStates[attachmentToken(item)] = { title: item.uploadedPath };
     if (!item.uploadState) continue;
     tokenStates[attachmentToken(item)] = item.uploadState === 'uploading'
       ? { state: 'uploading', title: t('chat.uploading', { name: item.name }) }
@@ -1833,15 +1849,22 @@ export function ChatPanel({ session }: Props) {
   };
 
   /** Uploads an attachment to the backend; the prompt then names the stored
-   * path. A backend without `/v2/uploads` gets the content inline instead,
-   * when it is an image or text file small enough for that. */
+   * path. A file on disk that a backend on this machine can read is linked
+   * in place instead of copied. A backend without `/v2/uploads` gets the
+   * content inline instead, when it is an image or text file small enough
+   * for that. */
   const uploadAttachment = async (conversationId: string, attachment: ComposerAttachmentDraft, blob: Blob) => {
     uploadBlobsRef.current.set(attachment.id, blob);
-    patchAttachment(conversationId, attachment.id, { uploadState: 'uploading', uploadError: undefined, uploadedPath: undefined });
+    patchAttachment(conversationId, attachment.id, { uploadState: 'uploading', uploadError: undefined, uploadedPath: undefined, linked: undefined });
     try {
-      const stored = await session.uploadComposerFile(conversationId, attachment.name, blob);
+      const stored = await session.uploadComposerFile(conversationId, attachment.name, blob, diskPath(blob));
       uploadBlobsRef.current.delete(attachment.id);
-      patchAttachment(conversationId, attachment.id, { uploadState: undefined, uploadedPath: stored.path, sizeBytes: stored.sizeBytes });
+      patchAttachment(conversationId, attachment.id, {
+        uploadState: undefined,
+        uploadedPath: stored.path,
+        sizeBytes: stored.sizeBytes,
+        linked: stored.linked || undefined,
+      });
     } catch (error) {
       if (isPromptUploadUnsupported(error)) {
         const inline = await inlineAttachmentContent(attachment, blob);
@@ -1877,7 +1900,9 @@ export function ChatPanel({ session }: Props) {
         break;
       }
       try {
-        if (file.size > PROMPT_UPLOAD_MAX_BYTES) throw new Error(t('chat.uploadTooLarge', { name: file.name }));
+        // A file on disk may be linked in place, with no size limit; if it
+        // has to be uploaded after all, the upload reports the limit.
+        if (file.size > PROMPT_UPLOAD_MAX_BYTES && !diskPath(file)) throw new Error(t('chat.uploadTooLarge', { name: file.name }));
         const mimeType = file.type || inferMimeType(file.name);
         const image = isImageMimeType(mimeType);
         const name = uniqueAttachmentName(
@@ -1994,6 +2019,18 @@ export function ChatPanel({ session }: Props) {
   // Rows mounting while a turn runs blur in; history reveals and prepends stay still.
   const animateEntrance = entranceArmedFor === conversation.id && runActive && !historyAnchorRef.current;
   const attachDisabled = readOnly || executionUnknown || attachments.length >= MAX_COMPOSER_ATTACHMENTS;
+  /** A drag of files from outside the composer that may become attachments. */
+  const acceptsFileDrag = (event: DragEvent<HTMLElement>) =>
+    event.dataTransfer.types.includes('Files') && !internalDragRef.current && !readOnly && !executionUnknown;
+  /** Takes dropped files as attachments; false when the drop carried none. */
+  const dropAttachmentFiles = (event: DragEvent<HTMLElement>): boolean => {
+    const files = droppedFiles(event.dataTransfer);
+    if (files.files.length === 0 && files.folders === 0) return false;
+    event.preventDefault();
+    if (files.folders > 0) toast.danger(t('chat.folderUnsupported'));
+    if (files.files.length > 0) void addBrowserFiles(files.files);
+    return true;
+  };
   const canSend = !readOnly && !executionUnknown && submissionStatus !== 'sending'
     && Boolean(draft.trim() || attachments.length > 0 || selectedSkillAttachments.length > 0);
   const effortClass = displayedEffortLevel ? EFFORT_TEXT[displayedEffortLevel] : undefined;
@@ -2026,7 +2063,32 @@ export function ChatPanel({ session }: Props) {
   const suggestionEmpty = 'px-2 py-1 text-caption-1-regular text-text-tertiary';
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div
+      className="relative flex h-full min-h-0 flex-col"
+      // Files dropped anywhere on the conversation become attachments, not
+      // only on the composer card.
+      onDragEnter={(event) => {
+        if (!acceptsFileDrag(event)) return;
+        event.preventDefault();
+        setIsDraggingAttachment(true);
+      }}
+      onDragOver={(event) => {
+        if (!acceptsFileDrag(event)) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'copy';
+        setIsDraggingAttachment(true);
+      }}
+      onDragLeave={(event) => {
+        const nextTarget = event.relatedTarget;
+        if (!nextTarget || !event.currentTarget.contains(nextTarget as Node)) setIsDraggingAttachment(false);
+      }}
+      onDrop={(event) => {
+        // The composer card took it already (or it was text dropped there).
+        if (event.defaultPrevented) return;
+        setIsDraggingAttachment(false);
+        if (!internalDragRef.current) dropAttachmentFiles(event);
+      }}
+    >
       <div className="@container relative min-h-0 flex-1">
         <ScrollArea
           viewportRef={scrollRef}
@@ -2372,33 +2434,12 @@ export function ChatPanel({ session }: Props) {
                 data-dragging={isDraggingAttachment || undefined}
                 onDragStart={() => { internalDragRef.current = true; }}
                 onDragEnd={() => { internalDragRef.current = false; }}
-                onDragEnter={(event) => {
-                  if (!event.dataTransfer.types.includes('Files')) return;
-                  event.preventDefault();
-                  setIsDraggingAttachment(true);
-                }}
-                onDragOver={(event) => {
-                  if (!event.dataTransfer.types.includes('Files')) return;
-                  event.preventDefault();
-                  event.dataTransfer.dropEffect = 'copy';
-                  setIsDraggingAttachment(true);
-                }}
-                onDragLeave={(event) => {
-                  const nextTarget = event.relatedTarget;
-                  if (!nextTarget || !event.currentTarget.contains(nextTarget as Node)) {
-                    setIsDraggingAttachment(false);
-                  }
-                }}
+                // File drags anywhere over the panel are handled on its root;
+                // only text drops land here, where the pointer is.
                 onDrop={(event) => {
                   setIsDraggingAttachment(false);
                   if (internalDragRef.current) return;
-                  const files = droppedFiles(event.dataTransfer);
-                  if (files.files.length > 0 || files.folders > 0) {
-                    event.preventDefault();
-                    if (files.folders > 0) toast.danger(t('chat.folderUnsupported'));
-                    if (files.files.length > 0) void addBrowserFiles(files.files);
-                    return;
-                  }
+                  if (dropAttachmentFiles(event)) return;
                   // Dropped text follows the paste rules; short text drops in
                   // where the pointer is, as plain text (never the rich HTML
                   // the browser would insert).
@@ -2635,6 +2676,34 @@ export function ChatPanel({ session }: Props) {
           {currentProvider === 'pi' && runtime ? <PiExtensionPanel placement="belowEditor"
             extensionUi={runtime.extensionUi} /> : null}
         </div>
+      </div>
+      <AttachmentDropOverlay visible={isDraggingAttachment} />
+    </div>
+  );
+}
+
+/** Shown over the whole conversation while files are dragged onto it. Pointer
+ * input passes through to the panel underneath, which takes the drop. */
+function AttachmentDropOverlay({ visible }: { visible: boolean }) {
+  return (
+    <div
+      aria-hidden
+      data-visible={visible || undefined}
+      className={cx(
+        'pointer-events-none absolute inset-2 z-30 flex flex-col items-center justify-center gap-3.5 rounded-3xl',
+        'border-2 border-dashed border-border-button-active bg-background-secondary-default/85 backdrop-blur-[2px]',
+        'opacity-0 transition-opacity duration-100 ease-in data-[visible]:opacity-100 data-[visible]:duration-150 data-[visible]:ease-out',
+        'motion-reduce:transition-none',
+      )}
+    >
+      <span className="flex size-10 items-center justify-center rounded-full bg-file-upload-icon-background p-2.5">
+        <RiUploadCloud2Line aria-hidden className="size-6 shrink-0 text-file-upload-icon-foreground" />
+      </span>
+      <div className="flex flex-col items-center gap-1 px-6 text-center">
+        <p className="text-body-medium text-text-primary">{t('chat.dropFilesTitle')}</p>
+        <p className="text-body-2-regular text-text-tertiary">
+          {t(platform.files?.pathForFile ? 'chat.dropFilesHint' : 'chat.dropFilesUploadHint')}
+        </p>
       </div>
     </div>
   );

@@ -30,6 +30,10 @@ export type TodeXDesktopApi = {
   dialog: {
     openDirectory: () => Promise<string | null>;
   };
+  files: {
+    /** The `File`'s path on disk; '' when it is not backed by a file. */
+    pathForFile: (file: File) => string;
+  };
   shell: {
     platform: string;
     openPath: (path: string) => Promise<void>;

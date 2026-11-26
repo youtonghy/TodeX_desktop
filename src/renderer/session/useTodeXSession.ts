@@ -17,7 +17,8 @@ import { attachmentsFromRequestContent, bindSentAttachmentEvents, prepareSentAtt
 import { ManifestEpochs, flagWorkspaceMissing, mergeWorkspaceDirectory } from './workspaceDirectorySync';
 import { createConversationStores, sameRecordValues, visibleTimeline, type ConversationStores } from './conversationStore';
 import { useStoreSelector } from './store/createStore';
-import { uploadPromptFile } from './promptUploads';
+import { linkOrUploadPromptFile, type LocalPromptFile } from './promptUploads';
+import { isLocalBackendUrl } from '@todex/protocol/mobileParity';
 import { uploadedPromptContent } from '@todex/protocol/promptUploads';
 import { isIpcServerUrl } from '@todex/protocol/ipcServerUrl';
 import { configureKanbanRouting, configureKanbanSync, syncKanbanTasksFromBackend } from './kanbanTasks';
@@ -6927,22 +6928,35 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   }, [decryptedHistoryReplay, v2ApiForConversation]);
 
   /** Uploads a composer attachment to the backend that owns the conversation;
-   * the prompt then names the returned path on that backend's machine. */
-  const uploadComposerFile = useCallback(async (conversationId: string, name: string, blob: Blob) => {
-    const profile = profileFor(backendIdForConversation(conversationId));
+   * the prompt then names the returned path on that backend's machine.
+   * `hostPath`, the file's path on this machine's disk, lets a backend on
+   * this machine read the file in place instead (`linked`). */
+  const uploadComposerFile = useCallback(async (conversationId: string, name: string, blob: Blob, hostPath?: string) => {
+    const backendId = backendIdForConversation(conversationId);
+    const profile = profileFor(backendId);
     if (!profile) throw new Error(t('sidebar.backendRemoved'));
+    const serverVersion = linkStatusRef.current[backendId]?.serverVersion;
+    const local: LocalPromptFile | undefined = hostPath ? {
+      hostPath,
+      context: {
+        loopback: isLocalBackendUrl(profile.serverUrl),
+        deployment: serverVersion?.deployment ?? 'host',
+        pathMappings: serverVersion?.pathMappings ?? [],
+        windows: platform.os === 'win32',
+      },
+    } : undefined;
     // A private conversation's files go to its private folder, deleted with
     // it; it was created on the backend when it was opened.
     const conversation = stores.conversations.get().find((item) => item.id === conversationId);
     // Gone already: it may have been private, and without its id the file
     // would land in the shared upload folder instead of being dropped.
     if (!conversation) throw new Error(t('private.uploadConversationGone'));
-    if (!isPrivateConversation(conversation)) return uploadPromptFile(backendApi(profile), name, blob);
+    if (!isPrivateConversation(conversation)) return linkOrUploadPromptFile(backendApi(profile), name, blob, local);
     const privateId = conversation.v2ConversationId;
     if (!privateId) throw new Error(t('private.notReady'));
     // Deleted mid-upload: the remaining chunks are not sent.
     const stillWanted = () => stores.conversations.get().some((item) => item.id === conversationId && item.v2ConversationId === privateId);
-    return uploadPromptFile(backendApi(profile), name, blob, privateId, stillWanted);
+    return linkOrUploadPromptFile(backendApi(profile), name, blob, local, privateId, stillWanted);
   }, []);
 
   /** Sets, pauses, resumes or clears the goal an agent pursues on its own

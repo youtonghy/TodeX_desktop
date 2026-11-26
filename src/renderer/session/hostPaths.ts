@@ -6,6 +6,7 @@
 // Pure (types only from the protocol, the mapper passed in) so node can test
 // it without the `@todex/protocol` alias.
 import type { BackendDeployment, PathMapping, PathMappingOptions } from '@todex/protocol/pathMapping';
+import type { PromptLinkRequest, PromptUploadChunkResult } from '@todex/protocol/promptUploads';
 
 export type PathMapper = (path: string, mappings: readonly PathMapping[], options: PathMappingOptions) => string | null;
 
@@ -52,4 +53,43 @@ export function systemShellPathResolver(
       ?? (deployment === 'container' ? null : backendPath);
   }
   return deployment === 'container' ? null : (backendPath) => backendPath;
+}
+
+/** What {@link linkLocalFile} needs from the backend and the protocol. */
+export type LocalFileLinker = {
+  link: (request: PromptLinkRequest) => Promise<PromptUploadChunkResult>;
+  fingerprint: (head: Uint8Array) => string;
+  fingerprintBytes: number;
+  mapHostPathToBackend: PathMapper;
+};
+
+/**
+ * Registers a file on this machine with the backend (`POST /v2/uploads/link`)
+ * so the prompt names it in place instead of a copy. Null when that does not
+ * apply: a remote backend, a container that does not mount the file, or a
+ * backend that refuses (another machine behind a loopback tunnel, where the
+ * path is missing or the fingerprint differs, or a daemon without the
+ * route). The caller then uploads the file, which works in every case.
+ */
+export async function linkLocalFile(
+  linker: LocalFileLinker,
+  context: HostPathContext,
+  file: { hostPath: string; blob: Blob; conversationId?: string },
+): Promise<PromptUploadChunkResult | null> {
+  if (!context.loopback || !file.hostPath) return null;
+  const mapped = pickedHostPathToBackend(context, file.hostPath, linker.mapHostPathToBackend);
+  if (mapped.unmounted) return null;
+  const head = new Uint8Array(await file.blob.slice(0, linker.fingerprintBytes).arrayBuffer());
+  try {
+    return await linker.link({
+      path: mapped.path,
+      sizeBytes: file.blob.size,
+      headSha256: linker.fingerprint(head),
+      ...(file.conversationId ? { conversationId: file.conversationId } : {}),
+    });
+  } catch {
+    // Every refusal means the same thing here: this backend cannot read the
+    // file in place, so it gets a copy.
+    return null;
+  }
 }

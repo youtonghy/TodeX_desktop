@@ -410,6 +410,9 @@ export type ComposerAttachmentDraft = {
   /** Where `PUT /v2/uploads` stored the file on the backend's machine; the
    * prompt names this path instead of carrying the content. */
   uploadedPath?: string;
+  /** `uploadedPath` is the original file, which a backend on this machine
+   * reads in place (`POST /v2/uploads/link`), not a copy. */
+  linked?: boolean;
   /** Set while the upload runs and after it failed; absent once uploaded
    * (or for attachments that never upload). */
   uploadState?: 'uploading' | 'failed';

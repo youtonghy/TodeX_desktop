@@ -253,6 +253,30 @@ for (const theme of ['light', 'dark'] as Theme[]) {
       await expect(page).toHaveScreenshot(`background-tasks-${theme}.png`, { mask: volatile(page) });
     });
 
+    // Files dragged anywhere over the conversation: the drop overlay, then
+    // the uploaded file's capsule in the composer.
+    test('dropping a file onto the conversation', async ({ page, openDemo }) => {
+      await openDemo(theme);
+      const composer = page.getByRole('textbox', { name: '消息输入' });
+      await expect(composer).toBeVisible();
+      const dataTransfer = await page.evaluateHandle(() => {
+        const transfer = new DataTransfer();
+        transfer.items.add(new File(['# 设计说明\n'], '设计说明.md', { type: 'text/markdown' }));
+        return transfer;
+      });
+      await composer.dispatchEvent('dragenter', { dataTransfer });
+      await composer.dispatchEvent('dragover', { dataTransfer });
+      await expect(page.getByText('拖到这里添加附件')).toBeVisible();
+      await settle(page);
+      await expect(page).toHaveScreenshot(`attachment-drop-${theme}.png`, { mask: volatile(page) });
+      await composer.dispatchEvent('drop', { dataTransfer });
+      const capsule = composer.locator('.composer-ref').filter({ hasText: '设计说明.md' });
+      await expect(capsule).toBeVisible();
+      await expect(capsule).not.toHaveAttribute('data-state', /./);
+      await settle(page);
+      await expect(page).toHaveScreenshot(`attachment-capsule-${theme}.png`, { mask: volatile(page) });
+    });
+
     test('private conversation', async ({ page, openDemo }) => {
       await openDemo(theme);
       await page.getByText('infra-scripts', { exact: true }).click();

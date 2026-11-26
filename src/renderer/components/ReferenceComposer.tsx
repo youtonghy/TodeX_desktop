@@ -224,8 +224,9 @@ export const ReferenceComposer = forwardRef<ReferenceComposerHandle, {
   /** Capsule label override, e.g. the first line of a quoted excerpt. */
   resolveTokenLabel?: (kind: TokenKind, name: string) => string | undefined;
   onTokenClick?: (kind: TokenKind, name: string) => void;
-  /** Upload state and tooltip per capsule token. */
-  tokenStates?: Readonly<Record<string, { state: ComposerTokenState; title?: string }>>;
+  /** Upload state and tooltip per capsule token (a tooltip alone, without a
+   * state, keeps the capsule's normal look). */
+  tokenStates?: Readonly<Record<string, { state?: ComposerTokenState; title?: string }>>;
 }>(function ReferenceComposer({
   value,
   onChange,

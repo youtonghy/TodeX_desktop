@@ -46,6 +46,7 @@ export const platform: Platform = {
     openPath: (path) => bridge().shell.openPath(path),
     openWith: (path) => bridge().shell.openWith(path),
     reveal: (path) => bridge().shell.showItemInFolder(path),
+    pathForFile: (file) => bridge().files.pathForFile(file) || null,
   },
   get preview() { return bridge().preview; },
   meshBeacons: () => bridge().mesh.beacons(),
