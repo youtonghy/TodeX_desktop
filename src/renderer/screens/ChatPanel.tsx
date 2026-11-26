@@ -2677,23 +2677,23 @@ export function ChatPanel({ session }: Props) {
             extensionUi={runtime.extensionUi} /> : null}
         </div>
       </div>
-      <AttachmentDropOverlay visible={isDraggingAttachment} />
+      {isDraggingAttachment ? <AttachmentDropOverlay /> : null}
     </div>
   );
 }
 
 /** Shown over the whole conversation while files are dragged onto it. Pointer
- * input passes through to the panel underneath, which takes the drop. */
-function AttachmentDropOverlay({ visible }: { visible: boolean }) {
+ * input passes through to the panel underneath, which takes the drop.
+ * Mounted only during the drag: a backdrop filter, even a transparent one,
+ * composites the panel and costs its text subpixel antialiasing. */
+function AttachmentDropOverlay() {
   return (
     <div
       aria-hidden
-      data-visible={visible || undefined}
       className={cx(
         'pointer-events-none absolute inset-2 z-30 flex flex-col items-center justify-center gap-3.5 rounded-3xl',
         'border-2 border-dashed border-border-button-active bg-background-secondary-default/85 backdrop-blur-[2px]',
-        'opacity-0 transition-opacity duration-100 ease-in data-[visible]:opacity-100 data-[visible]:duration-150 data-[visible]:ease-out',
-        'motion-reduce:transition-none',
+        'motion-safe:animate-[row-fade-in_150ms_ease-out]',
       )}
     >
       <span className="flex size-10 items-center justify-center rounded-full bg-file-upload-icon-background p-2.5">
