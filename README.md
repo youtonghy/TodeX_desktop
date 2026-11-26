@@ -26,7 +26,7 @@ TodeX Desktop is the desktop client of TodeX. It connects to one or more TodeX b
 - [Conversations](#conversations)
 - [Models, reasoning and work modes](#models-reasoning-and-work-modes)
 - [Plans and the task board](#plans-and-the-task-board)
-- [Private and scheduled conversations](#private-and-scheduled-conversations)
+- [Private conversations and scheduled send](#private-conversations-and-scheduled-send)
 - [Workbench, terminal and SSH](#workbench-terminal-and-ssh)
 - [Agent desktop tools: browser and Computer Use](#agent-desktop-tools-browser-and-computer-use)
 - [Backends, groups and config sync](#backends-groups-and-config-sync)
@@ -83,9 +83,9 @@ Pick the model from a searchable list and drag the reasoning effort; Codex also 
 | :---: | :---: |
 | ![Task board](docs/screenshots/task-board-en.png) | ![Plan calendar](docs/screenshots/plan-calendar-en.png) |
 
-## Private and scheduled conversations
+## Private conversations and scheduled send
 
-A **private conversation** keeps its content only in the backend's memory: nothing goes into history, and it is gone after a restart (changes the agent makes to workspace files are kept as usual). A **scheduled conversation** sends its prompt at the time you pick, even while the app is closed.
+A **private conversation** keeps its content only in the backend's memory: nothing goes into history, and it is gone after a restart (changes the agent makes to workspace files are kept as usual). **Scheduled send** (the timer button next to Send) sends the message at the time you pick, even while the app is closed. It works in a new or an existing conversation and uses that conversation's agent, model and settings. Until then the backend holds anything else sent in the conversation and sends it at the same time. A backend restart drops the held messages and marks the schedule interrupted.
 
 ![Private conversation](docs/screenshots/private-conversation-en.png)
 

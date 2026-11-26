@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from 'react';
 
-/** Optional sidebar features the user can show, fold under "More", or turn off. */
+/** Optional features the user can show, fold under "More", or turn off.
+ * `scheduledConversations` is the composer's scheduled send, only on or off. */
 export const FEATURE_IDS = ['scheduledConversations', 'terminal', 'kanban'] as const;
 export type FeatureId = (typeof FEATURE_IDS)[number];
 export type FeatureMode = 'shown' | 'folded' | 'off';

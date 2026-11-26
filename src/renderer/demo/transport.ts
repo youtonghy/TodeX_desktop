@@ -952,7 +952,7 @@ function route(request: SecureRequest): SecureResponse {
       case '/v2/api-keys':
         return json({ keys: apiKeys });
       case '/v2/kanban/tasks':
-        return json({ tasks: kanbanTasks });
+        return json({ tasks: kanbanTasks, timeZone: DEMO_TIME_ZONE });
       case '/v2/history/storage': {
         // Private conversations are not stored history.
         const conversations = [...journals.values()].filter((journal) => !journal.manifest.ephemeral)
@@ -1038,7 +1038,7 @@ function route(request: SecureRequest): SecureResponse {
   }
   if (path === '/v2/kanban/tasks' && method === 'PUT') {
     if (Array.isArray(body.tasks)) kanbanTasks = body.tasks as typeof kanbanTasks;
-    return json({ tasks: kanbanTasks });
+    return json({ tasks: kanbanTasks, timeZone: DEMO_TIME_ZONE });
   }
   if (settingsFile && (method === 'PATCH' || method === 'PUT')) {
     const current = demoCliSettingsDocument(settingsFile);
@@ -1286,6 +1286,34 @@ class DemoSocket implements SecureSocket {
       result = { nodeId: mesh.nodeId, connected: [{ deviceId: mesh.group.deviceId, connections: 1, connectedAt: Date.now() - 600_000 }], lastSeen: phone ? { [phone]: Date.now() - 7_200_000 } : {} };
     } else if (message.type === 'mesh.join.list') {
       result = { requests: demoInMeshGroup() ? [demoMesh(fixtures.DEMO_SERVER_URL).joinRequest] : [] };
+    } else if (message.type === 'conversation.schedule') {
+      // Holds the conversation's queue until `at`, like the daemon (null cancels).
+      const journal = journals.get(String(payload.conversationId));
+      if (journal) {
+        if (typeof payload.at === 'string') journal.manifest.schedule = { at: payload.at };
+        else delete journal.manifest.schedule;
+        result = { conversationId: journal.manifest.id, queue: demoQueueSnapshot(journal), schedule: journal.manifest.schedule ?? null };
+      }
+    } else if (message.type === 'conversation.queue.add') {
+      // A scheduled conversation holds the message; any other starts it now.
+      const journal = journals.get(String(payload.conversationId));
+      if (journal?.manifest.schedule) {
+        const items = demoQueues.get(journal.manifest.id) ?? [];
+        demoQueues.set(journal.manifest.id, [...items, {
+          id: String(payload.itemId ?? crypto.randomUUID()),
+          text: String(payload.text ?? ''),
+          status: 'queued',
+          queuedAt: new Date().toISOString(),
+          contentCount: Array.isArray(payload.content) ? payload.content.length : 0,
+          skills: [],
+        }]);
+        const queue = demoQueueSnapshot(journal);
+        appendDemoEvent(journal, '', 'followups.updated', queue);
+        result = { conversationId: journal.manifest.id, status: 'queued', queue };
+      } else if (journal) {
+        playCannedTurn(journal, String(payload.text ?? ''), smartRun(payload));
+        result = { conversationId: journal.manifest.id, status: 'started' };
+      }
     } else if (message.type === 'conversation.warm') {
       // The demo has no agent processes to start.
       result = { conversationId: String(payload.conversationId ?? ''), warmed: false, reason: 'demo' };
@@ -1372,6 +1400,19 @@ function demoScreen(kind: string): string {
 type DemoRun = { turnId: string; timers: (() => void)[]; onCancel?: () => void };
 /** Scripted turns still playing, by conversation id, so they can be cancelled. */
 const demoRuns = new Map<string, DemoRun>();
+
+/** The demo backend runs in the screenshots' zone (`FIXED_NOW` is +08:00). */
+const DEMO_TIME_ZONE = { name: 'Asia/Shanghai', offsetMinutes: 480 };
+
+/** Messages the demo daemon holds for a scheduled conversation, by id. */
+const demoQueues = new Map<string, Array<Record<string, unknown>>>();
+
+/** The `followups.updated` snapshot of a demo conversation's queue. */
+function demoQueueSnapshot(journal: Journal): Record<string, unknown> {
+  const items = demoQueues.get(journal.manifest.id) ?? [];
+  const schedule = journal.manifest.schedule;
+  return { items, paused: Boolean(schedule), pauseReason: schedule ? 'scheduled' : '', pauseMessage: '', resumeAt: schedule?.at ?? '' };
+}
 
 function appendDemoEvent(journal: Journal, turnId: string, type: string, payload: Record<string, unknown>): void {
   const event: ConversationEvent = {

@@ -6,7 +6,6 @@ import type { TaskBoardHandlers } from '@/components/application/project-board/t
 import { Button } from '@/components/base/buttons/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { ALL_BACKENDS, BackendSelect } from '@/components/ui/backend-select';
-import { ScheduleConversationDialog } from '../components/ScheduleConversationDialog';
 import { isListedConversation, isNoneWorkspaceId, isPrivateConversation, workspaceDisplayName } from '../session/helpers';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { useT } from '../i18n';
@@ -29,8 +28,6 @@ type Props = { session: TodeXSession; onOpenConversation: () => void };
 export function KanbanPanel({ session, onOpenConversation }: Props) {
   const t = useT();
   const allTasks = useKanbanTasks();
-  const [schedulingTaskId, setSchedulingTaskId] = useState<string | null>(null);
-  const schedulingTask = allTasks.find((task) => task.id === schedulingTaskId && !task.deletedAt) ?? null;
   // Every backend's workspaces, or one backend's.
   const [backendFilter, setBackendFilter] = useState(ALL_BACKENDS);
   const filteredBackend = session.backendConnections.some((profile) => profile.id === backendFilter) ? backendFilter : ALL_BACKENDS;
@@ -58,7 +55,6 @@ export function KanbanPanel({ session, onOpenConversation }: Props) {
     tasks: kanbanTasksForWorkspace(allTasks, workspace.id, backendOf(workspace)),
   })), [orderedWorkspaces, allTasks, session.activeBackendConnectionId]);
   const hasWorkspaces = session.workspaces.some((workspace) => !isNoneWorkspaceId(workspace.id));
-  const schedulingWorkspace = schedulingTask ? session.workspaces.find((workspace) => workspace.id === schedulingTask.workspaceId) : undefined;
   const total = groups.reduce((count, group) => count + group.tasks.length, 0);
   const conversations = useMemo(
     // Private conversations never link to (or receive drafts from) tasks.
@@ -90,24 +86,13 @@ export function KanbanPanel({ session, onOpenConversation }: Props) {
   /** Starts the task's conversation, prefilled with its draft. It
    * is created on the backend right away: an unsent local draft is dropped
    * as soon as another one opens, and only the backend id resolves on other
-   * devices and for schedules. */
-  /** Creates the task's conversation as a scheduled one, prefilled with its
-   * draft: what is sent there waits on the backend until `at`. */
-  const scheduleTaskConversation = async (task: KanbanTask, at: string) => {
-    if (!kanbanTaskCanStartConversation(task, getKanbanTasks())) return false;
-    const record = await session.createScheduledConversation(task.workspaceId, at, { title: task.title });
-    if (!record?.v2ConversationId) return false;
-    attachKanbanTask(task.id, record.id);
-    replaceKanbanTaskConversation(task.id, record.id, record.v2ConversationId);
-    session.setConversationChatDraft(record.id, kanbanTaskDraftText(task));
-    openConversation(task.workspaceId, record.id);
-    return true;
-  };
-
-  const startTaskConversation = (task: KanbanTask) => {
+   * devices and for schedules. `schedule` opens the composer's
+   * scheduled-send picker for it. */
+  const startTaskConversation = (task: KanbanTask, { schedule = false } = {}) => {
     if (!kanbanTaskCanStartConversation(task, getKanbanTasks())) return;
     const created = session.createConversation(task.workspaceId, { title: task.title, fresh: true });
     if (!created) return;
+    if (schedule) session.requestComposerSchedule(created.id);
     attachKanbanTask(task.id, created.id);
     session.setConversationChatDraft(created.id, kanbanTaskDraftText(task));
     openConversation(task.workspaceId, created.id);
@@ -121,8 +106,8 @@ export function KanbanPanel({ session, onOpenConversation }: Props) {
     conversations,
     latestEntries,
     onOpenConversation: openConversation,
-    onStartConversation: startTaskConversation,
-    onSchedule: (task) => setSchedulingTaskId(task.id),
+    onStartConversation: (task) => startTaskConversation(task),
+    onSchedule: (task) => startTaskConversation(task, { schedule: true }),
   };
 
   return (
@@ -153,13 +138,6 @@ export function KanbanPanel({ session, onOpenConversation }: Props) {
           onBack={onOpenConversation}
         />
       )}
-      <ScheduleConversationDialog
-        isOpen={Boolean(schedulingTask)}
-        mode="create"
-        backendId={schedulingWorkspace ? backendOf(schedulingWorkspace) : undefined}
-        onConfirm={(at) => (schedulingTask ? scheduleTaskConversation(schedulingTask, at) : Promise.resolve(false))}
-        onClose={() => setSchedulingTaskId(null)}
-      />
     </div>
   );
 }

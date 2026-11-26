@@ -381,8 +381,8 @@ function TicketDetailBody({ task, workspaces, handlers, editTitle, onOpenTask, o
                       />
                     )}
                     <DueDateProperty task={task} />
-                    {/* Schedules from before scheduled conversations still show
-                        (and run); new ones are scheduled conversations. */}
+                    {/* Schedules from before scheduled sends still show (and
+                        run); new ones open the task's conversation to schedule it. */}
                     {task.schedule && task.schedule.status !== "cancelled" ? (
                       <span className={PROPERTY_PILL}>
                         <TaskScheduleLine schedule={task.schedule} className="text-body-medium" />

@@ -649,11 +649,6 @@ export function App() {
         setPanel(null);
       }}
       onCreatePrivateConversation={openPrivateConversation}
-      onCreateScheduledConversation={async (workspaceId, at, options) => {
-        const record = await session.createScheduledConversation(workspaceId, at, options);
-        if (record) setPanel(null);
-        return Boolean(record);
-      }}
       onOpenSettings={() => setPanel('settings')}
       onOpenProfile={() => { setPanel('profile'); persistAsideOpen(false); }}
       onOpenKanban={() => { setPanel('kanban'); persistAsideOpen(false); }}

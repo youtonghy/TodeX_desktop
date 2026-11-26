@@ -7,6 +7,8 @@ import { useAgentDesktopPreferences } from '../session/agentDesktopPreferences';
 import { ConversationGoalBar } from '../components/ConversationGoal';
 import { ConversationPlanBar } from '../components/ConversationPlan';
 import { ConversationScheduleBar } from '../components/ConversationSchedule';
+import { ScheduleConversationDialog } from '../components/ScheduleConversationDialog';
+import { useFeatureModes } from '../session/featureToggles';
 import { NoticeToast } from '../components/NoticeToast';
 import {
   RiArrowDownDoubleLine,
@@ -110,6 +112,7 @@ import {
   STREAMING_REPLY_PLACEHOLDER,
   canAutoLoadEarlierHistory,
   isListedConversation,
+  providerSupportsScheduledConversations,
   type ComposerAttachmentDraft,
   type MentionTrigger,
   type TimelineEntry,
@@ -1199,6 +1202,16 @@ export function ChatPanel({ session }: Props) {
   const [expandedProcessIds, setExpandedProcessIds] = useState<Set<string>>(() => new Set());
   const [processGroupLoad, setProcessGroupLoad] = useState<Record<string, 'loading' | 'error'>>({});
   const [isDraggingAttachment, setIsDraggingAttachment] = useState(false);
+  const [schedulingSend, setSchedulingSend] = useState(false);
+  const features = useFeatureModes();
+  // A kanban task scheduled from the board opens here with the picker up.
+  const scheduleRequested = Boolean(conversation) && session.composerScheduleRequest === conversation?.id;
+  const { requestComposerSchedule } = session;
+  useEffect(() => {
+    if (!scheduleRequested) return;
+    setSchedulingSend(true);
+    requestComposerSchedule(null);
+  }, [requestComposerSchedule, scheduleRequested]);
   /** Files kept for retrying a failed upload, by attachment id. */
   const uploadBlobsRef = useRef(new Map<string, Blob>());
   /** A drag that started inside the composer moves its own text. */
@@ -2033,6 +2046,13 @@ export function ChatPanel({ session }: Props) {
   };
   const canSend = !readOnly && !executionUnknown && submissionStatus !== 'sending'
     && Boolean(draft.trim() || attachments.length > 0 || selectedSkillAttachments.length > 0);
+  // Scheduled send: the message goes at a picked time with this
+  // conversation's agent, model and modes. A scheduled conversation already
+  // holds whatever is sent, and a running one cannot be scheduled.
+  const canScheduleSend = features.scheduledConversations !== 'off' && !readOnly && !isPrivateConversation(conversation)
+    && !conversation.schedule && providerDescriptor?.available === true
+    && providerSupportsScheduledConversations(session.v2Providers, currentProvider);
+  const scheduleSendDisabled = !canSend || thinking || draft.trim().startsWith('/');
   const effortClass = displayedEffortLevel ? EFFORT_TEXT[displayedEffortLevel] : undefined;
   const modelTrigger = (
     <>
@@ -2665,6 +2685,21 @@ export function ChatPanel({ session }: Props) {
                         <Tooltip placement="top">{t('chat.stopBackground')}</Tooltip>
                       </TooltipTrigger>
                     ) : null}
+                    {!canScheduleSend ? null : scheduleSendDisabled ? (
+                      // A disabled button cannot hold a tooltip; a running reply names why.
+                      <ComposerRoundButton aria-label={thinking ? t('schedule.busy') : t('schedule.send')} disabled>
+                        <RiTimerLine aria-hidden className="size-4" />
+                      </ComposerRoundButton>
+                    ) : (
+                      <TooltipTrigger delay={200}>
+                        <Focusable>
+                          <ComposerRoundButton aria-label={t('schedule.send')} onClick={() => setSchedulingSend(true)}>
+                            <RiTimerLine aria-hidden className="size-4" />
+                          </ComposerRoundButton>
+                        </Focusable>
+                        <Tooltip placement="top">{t('schedule.send')}</Tooltip>
+                      </TooltipTrigger>
+                    )}
                     <ComposerSendButton aria-label={t('workbench.send')} disabled={!canSend} onClick={submitComposer}>
                       <RiArrowUpLine aria-hidden className="size-5" />
                     </ComposerSendButton>
@@ -2675,6 +2710,13 @@ export function ChatPanel({ session }: Props) {
           </ConversationPromptInput>
           {currentProvider === 'pi' && runtime ? <PiExtensionPanel placement="belowEditor"
             extensionUi={runtime.extensionUi} /> : null}
+          <ScheduleConversationDialog
+            isOpen={schedulingSend}
+            mode="create"
+            backendId={conversation.backendConnectionId ?? undefined}
+            onConfirm={(at) => session.scheduleChat(conversation.id, at)}
+            onClose={() => setSchedulingSend(false)}
+          />
         </div>
       </div>
       {isDraggingAttachment ? <AttachmentDropOverlay /> : null}

@@ -80,6 +80,8 @@ const capabilities: ProviderCapabilities = {
   imageInputMode: 'model',
   streaming: true,
   followUpQueue: true,
+  backendQueue: true,
+  scheduledConversations: true,
   permissionConfig: {
     modes: ['ask', 'accept-edits', 'auto', 'full-access'],
     defaultMode: 'auto',

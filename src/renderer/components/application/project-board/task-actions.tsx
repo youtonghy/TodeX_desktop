@@ -51,8 +51,8 @@ export function useTaskActions(task: KanbanTask, handlers: TaskBoardHandlers, op
   // One conversation per task; a task split into subtasks talks through them.
   const hasSubtasks = allTasks.some((item) => item.parentId === task.id && !item.deletedAt);
   const canStart = kanbanTaskCanStartConversation(task, allTasks);
-  // A scheduled conversation is the task's conversation, created now and
-  // sent by the backend later.
+  // Scheduling opens the task's new conversation with the composer's
+  // scheduled-send picker up; the backend sends it later.
   const canSchedule = canStart
     && session.v2Providers.some((provider) => provider.available && provider.capabilities.scheduledConversations === true);
 

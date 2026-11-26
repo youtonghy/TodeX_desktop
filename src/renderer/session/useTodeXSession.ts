@@ -6405,29 +6405,84 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     return true;
   }, [editFollowUpQueue]);
 
-  /** Creates a conversation on the backend right away and schedules it: what
-   * is sent to it waits there until `at`. Resolves the opened record, or
-   * null with the reason reported. */
-  const createScheduledConversation = useCallback(async (
-    workspaceId: string,
-    at: string,
-    options?: { title?: string; provider?: ProviderKind },
-  ): Promise<ConversationRecord | null> => {
-    const created = createConversation(workspaceId, {
-      fresh: true,
-      ...(options?.title ? { title: options.title } : {}),
-      ...(options?.provider ? { provider: options.provider } : {}),
-    });
-    if (!created) return null;
-    if (!providerSupportsScheduledConversations(providersForConversation(created), created.provider)) {
-      setLastError(t('sess.scheduleNeedsUpgrade'));
-      return null;
+  /** Sends the composer's message at `at` (ISO instant) instead of now. A
+   * draft is created on the backend first; the conversation is then
+   * scheduled and the message joins its held queue, carrying the
+   * conversation's current agent, model, effort and modes. Resolves whether
+   * it was accepted; on a refusal the composer keeps the message and a
+   * schedule this call set is withdrawn. */
+  const scheduleChat = useCallback(async (conversationId: string, at: string): Promise<boolean> => {
+    const draftText = (chatDrafts[conversationId] ?? '').trim();
+    const draftAttachments = composerAttachments[conversationId] ?? [];
+    const skills = selectedSkills[conversationId] ?? [];
+    if (!draftText && draftAttachments.length === 0 && skills.length === 0) return false;
+    const pendingUpload = liveComposerAttachments(draftText, draftAttachments).find((item) => item.uploadState);
+    if (pendingUpload) {
+      toast.danger(pendingUpload.uploadState === 'uploading' ? t('chat.uploadPending') : t('chat.uploadFailedBlocking', { name: pendingUpload.name }));
+      return false;
     }
-    const record = await materializeV2Conversation(created.id, options?.title ?? '');
-    if (!record?.v2ConversationId) return null;
-    if (!await scheduleConversation(record.id, at)) return null;
-    return stores.conversations.get().find((item) => item.id === record.id) ?? record;
-  }, [createConversation, materializeV2Conversation, scheduleConversation, setLastError]);
+    const frozenBackend = backendIdForConversation(conversationId);
+    if (backendWakeGateRef.current?.isFrozen(frozenBackend)) {
+      try {
+        await backendWakeGateRef.current.wake(frozenBackend);
+      } catch (error) {
+        setLastError(error instanceof Error ? error.message : String(error));
+        return false;
+      }
+    }
+    const { text: expandedText, attachments } = expandTextCapsules(draftText, draftAttachments);
+    const text = expandedText.trim();
+    const context = getConversationContext(conversationId);
+    if (!context) {
+      desktopAlert(t('alert.noWorkspace'), t('alert.pickWorkspace'));
+      return false;
+    }
+    const conversation = ensureConversationAgent(conversationId);
+    if (!conversation || refuseClaudeOperation(conversation) || refuseReadOnlyWrite(conversation)) return false;
+    if (isPrivateConversation(conversation)) {
+      setLastError(t('private.scheduleRefused'));
+      return false;
+    }
+    if (thinkingConversations[conversationId] === true || pendingV2SubmissionsRef.current.has(conversationId)
+      || pendingV2FirstPromptsRef.current.has(conversationId)) {
+      setLastError(t('schedule.busy'));
+      return false;
+    }
+    if (!providerSupportsScheduledConversations(providersForConversation(conversation), conversation.provider)) {
+      setLastError(t('sess.scheduleNeedsUpgrade'));
+      return false;
+    }
+    if (!resolvePermissionMode(conversation, context.workspace)) {
+      setLastError(t('sess.permissionSelectRequired'));
+      return false;
+    }
+    const liveAttachments = liveComposerAttachments(text, attachments);
+    const record = conversation.v2ConversationId
+      ? conversation
+      : await materializeV2Conversation(conversation.id, text || attachmentPrompt(liveAttachments) || selectedSkillSummary(skills));
+    if (!record?.v2ConversationId) return false;
+    // An already scheduled conversation keeps its time; the message joins what it holds.
+    const armed = !activeConversationSchedule(stores.conversations.get().find((item) => item.id === conversationId));
+    if (armed && !await scheduleConversation(conversationId, at)) return false;
+    const queued = await addFollowUp(conversationId, { id: createRequestId('queued'), text, attachments: liveAttachments, skills });
+    if ('error' in queued) {
+      if (!claudeRegionError(queued.error)) setLastError(queued.error instanceof Error ? queued.error.message : t('sess.sendFailedShort'));
+      // A refused message leaves no empty schedule behind; one whose answer was lost may be held.
+      if (armed && !(queued.error instanceof ProtocolCommandError && queued.error.state === 'unknown')) await scheduleConversation(conversationId, null);
+      return false;
+    }
+    const mentionReferences = parseMentionReferences(text);
+    if (mentionReferences.length > 0) rememberMentionReferences(context.workspace.id, mentionReferences);
+    setConversationChatDraft(conversationId, (current) => current.trim() === draftText ? '' : current);
+    setConversationAttachments(conversationId, (current) => current === draftAttachments ? [] : current);
+    setConversationSelectedSkills(conversationId, (current) => current === skills ? [] : current);
+    setConversationComposerSelection(conversationId, DEFAULT_COMPOSER_SELECTION);
+    return true;
+  }, [addFollowUp, chatDrafts, composerAttachments, ensureConversationAgent, getConversationContext, materializeV2Conversation, rememberMentionReferences, scheduleConversation, selectedSkills, setConversationAttachments, setConversationChatDraft, setConversationComposerSelection, setConversationSelectedSkills, setLastError, thinkingConversations]);
+
+  /** A conversation whose composer should open its schedule picker once
+   * shown (a kanban task scheduled from the board). */
+  const [composerScheduleRequest, setComposerScheduleRequest] = useState<string | null>(null);
 
   /** Creates a private (RAM-only) conversation on the workspace's backend
    * right away, so its id exists before attachments upload into its private
@@ -6475,25 +6530,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     const eligible = listed.filter((item) => item.privateMode);
     const defaultProvider = eligible.some((item) => item.id === agent?.provider) ? agent?.provider : eligible[0]?.id;
     return { providers: listed, defaultProvider };
-  }, []);
-
-  /** Agents a scheduled conversation in the workspace can run on (available
-   * and able to hold its queue until a set time), and the one a new
-   * conversation there would start with when it is among them. */
-  const scheduledConversationAgents = useCallback((workspaceId: string): { providers: ProviderDescriptor[]; defaultProvider?: ProviderKind } => {
-    const workspace = stores.workspaces.get().find((item) => item.id === workspaceId);
-    const backendConnectionId = workspace?.backendConnectionId
-      ?? (workspace && isNoneWorkspaceId(workspace.id) ? noWorkspaceBackendIdRef.current || null : null);
-    const providers = (backendConnectionId ? v2ProvidersByBackendRef.current[backendConnectionId] : undefined) ?? v2ProvidersRef.current;
-    const eligible = providers.filter((item) => item.available && providerSupportsScheduledConversations(providers, item.id));
-    const agent = resolveCreateConversationAgent({
-      providers,
-      conversations: stores.conversations.get(),
-      activeConversationId: activeConversationRef.current,
-      workspaceId,
-    });
-    const defaultProvider = eligible.some((item) => item.id === agent?.provider) ? agent?.provider : eligible[0]?.id;
-    return { providers: eligible, defaultProvider };
   }, []);
 
   useEffect(() => {
@@ -7503,8 +7539,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     editFollowUpQueue,
     scheduleConversation,
     sendScheduledNow,
-    createScheduledConversation,
-    scheduledConversationAgents,
+    scheduleChat,
+    composerScheduleRequest,
+    requestComposerSchedule: setComposerScheduleRequest,
     createPrivateConversation,
     privateConversationAgents,
     controlConversation,

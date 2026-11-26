@@ -302,6 +302,39 @@ for (const theme of ['light', 'dark'] as Theme[]) {
       await expect(page).toHaveScreenshot(`unified-sidebar-${theme}.png`, { mask: volatile(page) });
     });
 
+    // Scheduled send: the composer's timer button asks only for a time; the
+    // conversation's own agent, model and modes go with the message.
+    test('scheduled send picker', async ({ page, openDemo }) => {
+      await openDemo(theme);
+      await page.getByRole('textbox', { name: '消息输入' }).fill('明早跑一遍回归测试');
+      await page.getByRole('button', { name: '定时发送' }).click();
+      const dialog = page.getByRole('dialog', { name: '定时发送' });
+      await expect(dialog.getByText(/^按后端时区/)).toBeVisible();
+      await expect(dialog).toHaveScreenshot(`schedule-send-dialog-${theme}.png`);
+    });
+
+    // A draft is created on the backend when it is scheduled; the message
+    // waits there and the composer empties.
+    test('a draft scheduled from the composer', async ({ page, openDemo }) => {
+      await openDemo(theme);
+      await page.getByRole('button', { name: '新建对话' }).click();
+      const composer = page.getByRole('textbox', { name: '消息输入' });
+      await composer.fill('明早跑一遍回归测试');
+      await page.getByRole('button', { name: '定时发送' }).click();
+      const dialog = page.getByRole('dialog', { name: '定时发送' });
+      await expect(dialog.getByText(/^按后端时区/)).toBeVisible();
+      await dialog.getByRole('button', { name: '定时', exact: true }).click();
+      await expect(dialog).toBeHidden();
+      await expect(page.getByText(/^定时对话 · 将于/)).toBeVisible();
+      const countdown = page.getByText(/已暂存 1 条$/);
+      await expect(countdown).toBeVisible();
+      await expect(composer).toHaveText('');
+      await page.mouse.move(0, 0);
+      await settle(page);
+      // The countdown ticks with the flowing clock.
+      await expect(page).toHaveScreenshot(`scheduled-draft-${theme}.png`, { mask: [...volatile(page), countdown] });
+    });
+
     test('settings: general', async ({ page, openDemo }) => {
       await openDemo(theme);
       await page.getByRole('button', { name: '设置', exact: true }).click();
