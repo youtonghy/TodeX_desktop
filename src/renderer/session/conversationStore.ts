@@ -6,7 +6,7 @@
 // re-render only when it changes.
 import type { ConversationRuntime } from '@todex/protocol/conversationRuntime';
 import { createStore, useStoreSelector, type Store } from './store/createStore';
-import type { ConversationRecord, TimelineEntry } from './helpers';
+import type { ComposerSelection, ConversationRecord, TimelineEntry } from './helpers';
 import type { WorkspaceRecord, WorkspaceTombstone } from '@todex/protocol/todex';
 import { projectSentAttachments, type SentAttachmentRecord } from './sentAttachments';
 
@@ -22,6 +22,10 @@ export type ConversationStores = {
   conversations: Store<ConversationRecord[]>;
   workspaces: Store<WorkspaceRecord[]>;
   workspaceTombstones: Store<WorkspaceTombstone[]>;
+  /** Composer text and caret per conversation: they change on every
+   * keystroke, so only the composer subscribes to them. */
+  chatDrafts: Store<Record<string, string>>;
+  composerSelections: Store<Record<string, ComposerSelection>>;
 };
 
 type Projection = { records: SentAttachmentRecord[]; projected: TimelineEntry };
@@ -35,6 +39,8 @@ export function createConversationStores(): ConversationStores {
     conversations: createStore<ConversationRecord[]>([]),
     workspaces: createStore<WorkspaceRecord[]>([]),
     workspaceTombstones: createStore<WorkspaceTombstone[]>([]),
+    chatDrafts: createStore<Record<string, string>>({}),
+    composerSelections: createStore<Record<string, ComposerSelection>>({}),
   };
 }
 
@@ -95,6 +101,16 @@ export function useTimelineSelector<Slice>(stores: ConversationStores, select: (
 /** One conversation's rows; another conversation's events do not re-render it. */
 export function useConversationTimeline(stores: ConversationStores, conversationId: string | undefined): TimelineEntry[] {
   return useVisibleSource(stores, (visible) => (conversationId ? visible.filter((entry) => entry.conversationId === conversationId) : []), sameRows);
+}
+
+/** One conversation's composer text; typing elsewhere does not re-render it. */
+export function useConversationDraft(stores: ConversationStores, conversationId: string | undefined): string {
+  return useStoreSelector(stores.chatDrafts, (drafts) => (conversationId ? drafts[conversationId] ?? '' : ''));
+}
+
+/** One conversation's composer caret, or undefined before the composer reported one. */
+export function useComposerSelection(stores: ConversationStores, conversationId: string | undefined): ComposerSelection | undefined {
+  return useStoreSelector(stores.composerSelections, (selections) => (conversationId ? selections[conversationId] : undefined));
 }
 
 export function useConversationRuntime(stores: ConversationStores, conversationId: string | undefined): ConversationRuntime | undefined {

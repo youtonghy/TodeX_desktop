@@ -388,11 +388,26 @@ function workspaceIdOfRow(rowId: string): string {
 type TimelineInfo = { latestAt: number; latestEntry?: TimelineEntry; latestIncomingAt: number; firstPrompt: string; firstPromptAt: number };
 const NO_ROWS: TimelineEntry[] = [];
 
-/** Equal when every conversation's status inputs and title fallback are. */
-function sameTimelineInfo(left: Record<string, TimelineInfo>, right: Record<string, TimelineInfo>): boolean {
-  return sameRecordValues(left, right, (a, b) => a.latestAt === b.latestAt && a.latestIncomingAt === b.latestIncomingAt
-    && a.firstPrompt === b.firstPrompt && a.latestEntry?.id === b.latestEntry?.id && a.latestEntry?.kind === b.latestEntry?.kind
-    && a.latestEntry?.marker === b.latestEntry?.marker && a.latestEntry?.title === b.latestEntry?.title);
+/** Equal when every conversation's status inputs and title fallback are.
+ * The status reads a row time only against the conversation's read mark, so
+ * two times on the same side of it are equal: a streamed delta moving its
+ * row's time does not re-render the sidebar. */
+function sameTimelineInfo(readAtById: Record<string, number>) {
+  return (left: Record<string, TimelineInfo>, right: Record<string, TimelineInfo>): boolean => {
+    const ids = Object.keys(left);
+    if (ids.length !== Object.keys(right).length) return false;
+    return ids.every((id) => {
+      const a = left[id];
+      const b = right[id];
+      if (!b) return false;
+      const readAt = readAtById[id] ?? 0;
+      const sameSide = (x: number, y: number) => (x > readAt) === (y > readAt);
+      return sameSide(a.latestAt, b.latestAt) && sameSide(a.latestIncomingAt, b.latestIncomingAt)
+        && sameSide(a.latestEntry?.at ?? 0, b.latestEntry?.at ?? 0)
+        && a.firstPrompt === b.firstPrompt && a.latestEntry?.id === b.latestEntry?.id && a.latestEntry?.kind === b.latestEntry?.kind
+        && a.latestEntry?.marker === b.latestEntry?.marker && a.latestEntry?.title === b.latestEntry?.title;
+    });
+  };
 }
 
 export function AppSidebar({
@@ -678,6 +693,10 @@ export function AppSidebar({
   // (title fallback). Taken from the session stores, and kept while what the
   // rows show does not change, so a streamed delta into an existing row does
   // not re-render the sidebar.
+  const sameInfo = useMemo(
+    () => sameTimelineInfo(Object.fromEntries(session.conversations.map((conversation) => [conversation.id, conversation.lastReadAt ?? 0]))),
+    [session.conversations],
+  );
   const timelineInfoMap = useTimelineSelector(session.stores, (timeline) => {
     const map: Record<string, TimelineInfo> = {};
     for (let i = 0; i < timeline.length; i++) {
@@ -697,7 +716,7 @@ export function AppSidebar({
       }
     }
     return map;
-  }, sameTimelineInfo);
+  }, sameInfo);
   // Message text only matters while searching.
   const searchTimeline = useTimelineSelector(session.stores, (timeline) => (query ? timeline : NO_ROWS), Object.is);
   // Rate-limit badges read each conversation's follow-up queue.

@@ -390,6 +390,8 @@ export type BackendWakeGate = {
 
 /** How often a streaming conversation's record takes its new high-water mark. */
 const LAST_SEQUENCE_WRITE_MS = 2000;
+/** How often rows streaming into the open conversation re-mark it read. */
+const READ_MARK_INTERVAL_MS = 1000;
 
 /** How long an opened socket may take to become ready (hello, or open over IPC). */
 const SOCKET_OPEN_TIMEOUT_MS = 20_000;
@@ -674,13 +676,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const sentAttachmentRecordsRef = useRef<SentAttachmentRecord[]>([]);
   const [mentionHistory, setMentionHistory] = useState<WorkspaceMentionHistory[]>([]);
   const [experimentalFeatures, setExperimentalFeatures] = useState<ExperimentalFeatureSettings>(EXPERIMENTAL_FEATURE_DEFAULTS);
-  const [chatDrafts, setChatDraftsState] = useState<Record<string, string>>({});
-  const chatDraftsRef = useRef<Record<string, string>>({});
-  const setChatDrafts = useCallback((value: SetStateAction<Record<string, string>>) => {
-    const next = typeof value === 'function' ? value(chatDraftsRef.current) : value;
-    chatDraftsRef.current = next;
-    setChatDraftsState(next);
-  }, []);
+  // Composer text and caret change on every keystroke: they live in stores,
+  // not hook state, so typing re-renders only the composer that subscribes.
+  const setChatDrafts = stores.chatDrafts.set;
   // Pi extensions: notices and editor drafts their events produce, and
   // runtimes being stopped from the extension panel.
   const extensionEffectsRef = useRef(new PiExtensionEffects());
@@ -701,7 +699,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   // backend queue once the id exists, or handed back to the composer.
   const heldFollowUpsRef = useRef(new Map<string, QueuedChatSubmission[]>());
   const [composerAttachments, setComposerAttachments] = useState<Record<string, ComposerAttachmentDraft[]>>({});
-  const [composerSelections, setComposerSelections] = useState<Record<string, ComposerSelection>>({});
+  const setComposerSelections = stores.composerSelections.set;
   const [selectedSkills, setSelectedSkills] = useState<Record<string, SelectedSkillAttachment[]>>({});
   const [turnIds, setTurnIds] = useState<Record<string, string>>({});
   const [thinkingConversations, setThinkingConversations] = useState<Record<string, boolean>>({});
@@ -1898,12 +1896,16 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     };
   }, [hydrated, scheduleJsonSave, stores]);
 
+  // The usage list is large (hundreds of KB): rewrite it when it or the set
+  // of private conversations it must leave out changes, not on every
+  // conversation record update.
+  const privateConversationKey = useMemo(() => [...privateConversationIds(conversations)].sort().join('\n'), [conversations]);
   useEffect(() => {
     if (!hydrated) {
       return;
     }
-    scheduleJsonSave(USAGE_RECORDS_STORAGE_KEY, withoutPrivateEntries(usageRecords, privateConversationIds(stores.conversations.get())).slice(0, MAX_USAGE_RECORDS));
-  }, [conversations, hydrated, scheduleJsonSave, usageRecords]);
+    scheduleJsonSave(USAGE_RECORDS_STORAGE_KEY, withoutPrivateEntries(usageRecords, new Set(privateConversationKey.split('\n').filter(Boolean))).slice(0, MAX_USAGE_RECORDS));
+  }, [hydrated, privateConversationKey, scheduleJsonSave, usageRecords]);
 
   useEffect(() => {
     if (!hydrated) {
@@ -2265,7 +2267,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         else if (effect.notice.level === 'warning') toast.warning(title, options);
         else toast.info(title, options);
       } else if (effect?.kind === 'editor') {
-        if (canApplyPluginDraft(chatDraftsRef.current[localId] ?? '')) {
+        if (canApplyPluginDraft(stores.chatDrafts.get()[localId] ?? '')) {
           setConversationChatDraft(localId, effect.request.text);
           setPendingPluginDrafts(current => ({ ...current, [localId]: undefined }));
         } else setPendingPluginDrafts(current => ({ ...current, [localId]: effect.request }));
@@ -2772,30 +2774,51 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   // A conversation counts as read while it is on screen in a focused window:
   // opening it, refocusing the app, or watching replies stream in all clear
   // the unread marker. Activity that lands while hidden stays unread. Only
-  // new activity (a later row, completion or status) re-marks it, so
-  // streaming into an existing row writes nothing.
-  const activeRowsAt = useStoreSelector(stores.timeline, (rows) => {
-    let latest = 0;
-    for (const entry of rows) {
-      if (entry.conversationId === activeConversationId && entry.at > latest) latest = entry.at;
-    }
-    return latest;
-  });
-  const activeAttentionAt = Math.max(activeRowsAt, activeConversationRecord?.updatedAt ?? 0, activeConversationRecord?.lastCompletedAt ?? 0);
+  // new activity (a later row, completion or status) re-marks it.
+  //
+  // The stores are watched here instead of selected during render: a
+  // streamed delta moves its row's time, and a render-time selector re-ran
+  // the whole app for every delta. Row changes re-mark at most every
+  // READ_MARK_INTERVAL_MS (the trailing one lands too); record changes, such
+  // as a turn completing, re-mark at once so no unread dot flashes up.
   useEffect(() => {
+    if (!activeConversationId) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let lastMarkAt = 0;
+    const attentionAt = () => {
+      let latest = 0;
+      for (const entry of stores.timeline.get()) {
+        if (entry.conversationId === activeConversationId && entry.at > latest) latest = entry.at;
+      }
+      const record = stores.conversations.get().find((item) => item.id === activeConversationId);
+      return Math.max(latest, record?.updatedAt ?? 0, record?.lastCompletedAt ?? 0);
+    };
     const markActiveRead = () => {
-      if (!activeConversationId) return;
+      if (timer !== undefined) clearTimeout(timer);
+      timer = undefined;
       if (document.visibilityState !== 'visible' || !document.hasFocus()) return;
-      markConversationRead(activeConversationId, activeAttentionAt || Date.now());
+      lastMarkAt = Date.now();
+      markConversationRead(activeConversationId, attentionAt() || Date.now());
+    };
+    const scheduleMark = () => {
+      if (timer !== undefined) return;
+      const wait = READ_MARK_INTERVAL_MS - (Date.now() - lastMarkAt);
+      if (wait <= 0) markActiveRead();
+      else timer = setTimeout(markActiveRead, wait);
     };
     markActiveRead();
+    const unsubscribeTimeline = stores.timeline.subscribe(scheduleMark);
+    const unsubscribeConversations = stores.conversations.subscribe(markActiveRead);
     window.addEventListener('focus', markActiveRead);
     document.addEventListener('visibilitychange', markActiveRead);
     return () => {
+      if (timer !== undefined) clearTimeout(timer);
+      unsubscribeTimeline();
+      unsubscribeConversations();
       window.removeEventListener('focus', markActiveRead);
       document.removeEventListener('visibilitychange', markActiveRead);
     };
-  }, [activeConversationId, activeAttentionAt, markConversationRead]);
+  }, [activeConversationId, markConversationRead, stores]);
 
 
 
@@ -6416,7 +6439,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
    * it was accepted; on a refusal the composer keeps the message and a
    * schedule this call set is withdrawn. */
   const scheduleChat = useCallback(async (conversationId: string, at: string): Promise<boolean> => {
-    const draftText = (chatDrafts[conversationId] ?? '').trim();
+    const draftText = (stores.chatDrafts.get()[conversationId] ?? '').trim();
     const draftAttachments = composerAttachments[conversationId] ?? [];
     const skills = selectedSkills[conversationId] ?? [];
     if (!draftText && draftAttachments.length === 0 && skills.length === 0) return false;
@@ -6487,7 +6510,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     setConversationSelectedSkills(conversationId, (current) => current === skills ? [] : current);
     setConversationComposerSelection(conversationId, DEFAULT_COMPOSER_SELECTION);
     return true;
-  }, [addFollowUp, chatDrafts, composerAttachments, ensureConversationAgent, getConversationContext, materializeV2Conversation, rememberMentionReferences, scheduleConversation, selectedSkills, setConversationAttachments, setConversationChatDraft, setConversationComposerSelection, setConversationSelectedSkills, setLastError, thinkingConversations]);
+  }, [addFollowUp, composerAttachments, ensureConversationAgent, getConversationContext, materializeV2Conversation, rememberMentionReferences, scheduleConversation, selectedSkills, setConversationAttachments, setConversationChatDraft, setConversationComposerSelection, setConversationSelectedSkills, setLastError, thinkingConversations, stores]);
 
   /** A conversation whose composer should open its schedule picker once
    * shown (a kanban task scheduled from the board). */
@@ -6560,7 +6583,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       setLastError(reason);
       return false;
     }
-    const draftText = (chatDrafts[conversationId] ?? '').trim();
+    const draftText = (stores.chatDrafts.get()[conversationId] ?? '').trim();
     const skills = selectedSkills[conversationId] ?? [];
     if (!draftText && skills.length === 0) return false;
     const source = getConversationContext(conversationId)?.conversation;
@@ -6585,7 +6608,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     const { text } = expandTextCapsules(draftText, []);
     await sendV2Prompt(text.trim(), record.id, skills, [], { text: draftText, attachments: [], skills });
     return true;
-  }, [chatDrafts, createPrivateConversation, getConversationContext, privateSendUnavailable, selectedSkills, sendV2Prompt, setComposerSendMode, setConversationChatDraft, setConversationComposerSelection, setConversationSelectedSkills, setLastError]);
+  }, [createPrivateConversation, getConversationContext, privateSendUnavailable, selectedSkills, sendV2Prompt, setComposerSendMode, setConversationChatDraft, setConversationComposerSelection, setConversationSelectedSkills, setLastError, stores]);
 
   useEffect(() => {
     refreshFollowUpQueueRef.current = refreshFollowUpQueue;
@@ -7379,7 +7402,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   }, [appendTimeline, recoverConversation, sendProtocolCommand]);
 
   const submitChat = useCallback((conversationId: string) => {
-    const draftText = (chatDrafts[conversationId] ?? '').trim();
+    const draftText = (stores.chatDrafts.get()[conversationId] ?? '').trim();
     const draftAttachments = composerAttachments[conversationId] ?? [];
     const skills = selectedSkills[conversationId] ?? [];
     if (!draftText && draftAttachments.length === 0 && skills.length === 0) {
@@ -7469,7 +7492,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     void sendV2Prompt(text, conversationId, skills, attachments, composerDraft).then((accepted) => {
       if (accepted) clearSubmittedComposer();
     });
-  }, [appendTimeline, chatDrafts, composerAttachments, controlConversation, ensureConversationAgent, getConversationContext, queueWhileBusy, rememberMentionReferences, selectedSkills, sendSlashCommand, sendV2Prompt, setConversationAttachments, setConversationChatDraft, setConversationComposerSelection, setConversationSelectedSkills, thinkingConversations, getProviderCommandCatalog]);
+  }, [appendTimeline, composerAttachments, controlConversation, ensureConversationAgent, getConversationContext, queueWhileBusy, rememberMentionReferences, selectedSkills, sendSlashCommand, sendV2Prompt, setConversationAttachments, setConversationChatDraft, setConversationComposerSelection, setConversationSelectedSkills, thinkingConversations, getProviderCommandCatalog, stores]);
   const submitChatRef = useRef(submitChat);
   submitChatRef.current = submitChat;
 
@@ -7590,7 +7613,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     mentionHistory,
     experimentalFeatures,
     setExperimentalFeatures,
-    chatDrafts,
+    /** Composer text per conversation right now. Not reactive: render through
+     * `useConversationDraft` so typing re-renders only the composer. */
+    get chatDrafts() { return stores.chatDrafts.get(); },
     editFollowUpQueue,
     scheduleConversation,
     sendScheduledNow,
@@ -7605,7 +7630,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     controlConversation,
     controlStatusByConversation,
     composerAttachments,
-    composerSelections,
+    /** Composer caret per conversation right now (see `chatDrafts`). */
+    get composerSelections() { return stores.composerSelections.get(); },
     selectedSkills,
     turnIds,
     thinkingConversations,

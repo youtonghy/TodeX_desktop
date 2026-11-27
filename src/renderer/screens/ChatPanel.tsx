@@ -143,7 +143,7 @@ import { describeToolCall, summarizeToolActions, type ToolAction, type ToolCallK
 import { agentCallingToolFromName, agentCallingToolSummary, type AgentCallingTool } from '@todex/protocol/agentCalling';
 import { isThinkingProgressEntry } from '@todex/protocol/mobileParity';
 import { getLocale, t, useT, type MessageKey } from '../i18n';
-import { useConversationRuntime, useConversationTimeline } from '../session/conversationStore';
+import { useComposerSelection, useConversationDraft, useConversationRuntime, useConversationTimeline } from '../session/conversationStore';
 import { ErrorBoundary } from '@/components/ui/error-boundary';
 import { platform } from '../platform';
 
@@ -1182,7 +1182,9 @@ export function ChatPanel({ session }: Props) {
   const t = useT();
   const conversation = session.activeConversation;
   const workspace = session.activeWorkspace;
-  const draft = conversation ? (session.chatDrafts[conversation.id] ?? '') : '';
+  // Subscribed here, not read from `session`: typing re-renders this panel only.
+  const draft = useConversationDraft(session.stores, conversation?.id);
+  const composerSelection = useComposerSelection(session.stores, conversation?.id);
   const composerRef = useRef<ReferenceComposerHandle>(null);
   // Attachment reads are async; insert against the live draft, not the render
   // that started the read.
@@ -1190,10 +1192,10 @@ export function ChatPanel({ session }: Props) {
   draftRef.current = draft;
   const conversationIdRef = useRef(conversation?.id);
   conversationIdRef.current = conversation?.id;
-  const composerSelectionRef = useRef(session.composerSelections[conversation?.id ?? '']);
-  composerSelectionRef.current = session.composerSelections[conversation?.id ?? ''];
-  const mention = findMentionTrigger(draft, conversation ? (session.composerSelections[conversation.id]?.end ?? draft.length) : 0);
-  const capability = conversation ? findCapabilityHashTrigger(draft, session.composerSelections[conversation.id]?.end ?? draft.length) : null;
+  const composerSelectionRef = useRef(composerSelection);
+  composerSelectionRef.current = composerSelection;
+  const mention = findMentionTrigger(draft, conversation ? (composerSelection?.end ?? draft.length) : 0);
+  const capability = conversation ? findCapabilityHashTrigger(draft, composerSelection?.end ?? draft.length) : null;
   // `@` and `#` can both parse when one wraps the other (`@file#x`); the
   // trigger closest to the caret wins.
   const mentionActive = Boolean(mention && (!capability || mention.start > capability.start));
@@ -1432,6 +1434,7 @@ export function ChatPanel({ session }: Props) {
   // The turn being read: the last user message whose top has passed a line
   // just below the viewport top (the newest one once scrolled to the bottom).
   const [activeTurnId, setActiveTurnId] = useState<string | null>(null);
+  const activeTurnFrameRef = useRef(0);
   const updateActiveTurn = () => {
     const viewport = scrollRef.current;
     const list = messagesRef.current;
@@ -1451,6 +1454,8 @@ export function ChatPanel({ session }: Props) {
     }
     setActiveTurnId(current);
   };
+  const updateActiveTurnRef = useRef(updateActiveTurn);
+  updateActiveTurnRef.current = updateActiveTurn;
   /** Scrolls a mounted message to the top of the viewport; false when it is not mounted. */
   const scrollMessageToTop = (id: string) => {
     const viewport = scrollRef.current;
@@ -1475,7 +1480,14 @@ export function ChatPanel({ session }: Props) {
     atBottomRef.current = atBottom;
     setIsAtBottom(atBottom);
     if (element.scrollTop < 240) requestEarlierHistory();
-    updateActiveTurn();
+    // Measuring every user row on each scroll event forced a layout per
+    // event; once per frame is enough for the turn navigator.
+    if (!activeTurnFrameRef.current) {
+      activeTurnFrameRef.current = requestAnimationFrame(() => {
+        activeTurnFrameRef.current = 0;
+        updateActiveTurnRef.current();
+      });
+    }
   };
   useLayoutEffect(() => {
     const anchor = historyAnchorRef.current;
@@ -1506,9 +1518,20 @@ export function ChatPanel({ session }: Props) {
     historyAnchorRef.current = null;
     scrollToLatest();
   }, [conversation?.id]);
+  // Following a stream reads scrollHeight, which forces a layout: commits
+  // landing in the same frame share one.
+  const followFrameRef = useRef(0);
   useEffect(() => {
-    if (atBottomRef.current) scrollToLatest();
+    if (!atBottomRef.current || followFrameRef.current) return;
+    followFrameRef.current = requestAnimationFrame(() => {
+      followFrameRef.current = 0;
+      if (atBottomRef.current) scrollToLatest();
+    });
   }, [conversationTimeline]);
+  useEffect(() => () => {
+    cancelAnimationFrame(followFrameRef.current);
+    cancelAnimationFrame(activeTurnFrameRef.current);
+  }, []);
   useEffect(updateActiveTurn, [chatTurns]);
   // Rows on screen when a conversation opens stay still; rows that arrive
   // later in a live turn blur in (see RowEntrance).
