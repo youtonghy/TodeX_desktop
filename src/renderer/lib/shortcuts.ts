@@ -5,7 +5,7 @@ export const isMacLike = platform.os === 'darwin' || navigator.userAgent.include
 
 export type ShortcutId =
   | 'newConversation'
-  | 'newPrivateConversation'
+  | 'privateSend'
   | 'newWorkspace'
   | 'kanban'
   | 'sshTerminal'
@@ -44,8 +44,9 @@ const COMBOS: Record<ShortcutId, ShortcutCombo> = {
   gitActions: { code: 'KeyG', label: 'G', mod: true, shift: true },
   newConversation: { code: 'KeyN', label: 'N', ...newMod },
   newWorkspace: { code: 'KeyN', label: 'N', ...newMod, shift: true },
-  // ⌘⇧N / Ctrl+Shift+N is taken by the new workspace; P for private.
-  newPrivateConversation: { code: 'KeyP', label: 'P', ...newMod, shift: true },
+  // ⌘⇧N / Ctrl+Shift+N is taken by the new workspace; P for private: the
+  // open conversation's next message goes as a private conversation.
+  privateSend: { code: 'KeyP', label: 'P', ...newMod, shift: true },
   kanban: { code: 'KeyK', label: 'K', mod: true, shift: true },
   sshTerminal: { code: 'KeyT', label: 'T', ...newMod, shift: true },
   quickSearch: { code: 'KeyL', label: 'L', mod: true, outsideEditors: true },

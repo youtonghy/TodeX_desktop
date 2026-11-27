@@ -8,6 +8,7 @@ import { ConversationGoalBar } from '../components/ConversationGoal';
 import { ConversationPlanBar } from '../components/ConversationPlan';
 import { ConversationScheduleBar } from '../components/ConversationSchedule';
 import { ScheduleConversationDialog } from '../components/ScheduleConversationDialog';
+import { RadialMenu, useRadialMenuTrigger, type RadialMenuItem } from '@/components/ui/radial-menu';
 import { useFeatureModes } from '../session/featureToggles';
 import { NoticeToast } from '../components/NoticeToast';
 import {
@@ -112,6 +113,8 @@ import {
   STREAMING_REPLY_PLACEHOLDER,
   canAutoLoadEarlierHistory,
   isListedConversation,
+  activeConversationSchedule,
+  formatResetInstant,
   providerSupportsScheduledConversations,
   type ComposerAttachmentDraft,
   type MentionTrigger,
@@ -1139,6 +1142,16 @@ const ChatTimelineItem = memo(function ChatTimelineItem({
   && prev.onApprove === next.onApprove);
 
 /** One row that failed to render; the rest of the conversation stays usable. */
+/** The scheduled time on the send-mode chip: the time today, else month and day too. */
+function formatScheduleChip(at: string): string {
+  const date = new Date(at);
+  const today = new Date();
+  const time = date.toLocaleTimeString(getLocale(), { hour: '2-digit', minute: '2-digit' });
+  return date.toDateString() === today.toDateString()
+    ? time
+    : `${date.toLocaleDateString(getLocale(), { month: 'numeric', day: 'numeric' })} ${time}`;
+}
+
 function RowRenderError() {
   const t = useT();
   return <p className="px-1 py-0.5 text-caption-1-regular text-text-tertiary">{t('chat.rowRenderFailed')}</p>;
@@ -1203,6 +1216,11 @@ export function ChatPanel({ session }: Props) {
   const [processGroupLoad, setProcessGroupLoad] = useState<Record<string, 'loading' | 'error'>>({});
   const [isDraggingAttachment, setIsDraggingAttachment] = useState(false);
   const [schedulingSend, setSchedulingSend] = useState(false);
+  /** The send button's wheel: open, and whether a long press still holds it. */
+  const [sendWheel, setSendWheel] = useState<{ dragging: boolean } | null>(null);
+  /** Wraps the send button: the wheel fans out around it. */
+  const sendButtonRef = useRef<HTMLSpanElement>(null);
+  const sendWheelTrigger = useRadialMenuTrigger((dragging) => setSendWheel({ dragging }));
   const features = useFeatureModes();
   // A kanban task scheduled from the board opens here with the picker up.
   const scheduleRequested = Boolean(conversation) && session.composerScheduleRequest === conversation?.id;
@@ -2019,11 +2037,20 @@ export function ChatPanel({ session }: Props) {
     return true;
   };
 
+  const sendMode = session.composerSendModes[conversation.id];
   const submitComposer = () => {
     if (!conversation) return;
     if (readOnly || executionUnknown || submissionStatus === 'sending') return;
     if (currentProvider !== 'pi' && draft.trim().startsWith('/')) {
       session.sendSlashCommand(draft, conversation.id);
+    } else if (sendMode?.kind === 'schedule') {
+      // Set on the wheel; sending is what applies it.
+      const conversationId = conversation.id;
+      void session.scheduleChat(conversationId, sendMode.at).then((sent) => {
+        if (sent) session.setComposerSendMode(conversationId, null);
+      });
+    } else if (sendMode?.kind === 'private') {
+      void session.sendPrivateChat(conversation.id);
     } else {
       session.submitChat(conversation.id);
     }
@@ -2031,10 +2058,11 @@ export function ChatPanel({ session }: Props) {
 
   // Rows mounting while a turn runs blur in; history reveals and prepends stay still.
   const animateEntrance = entranceArmedFor === conversation.id && runActive && !historyAnchorRef.current;
-  const attachDisabled = readOnly || executionUnknown || attachments.length >= MAX_COMPOSER_ATTACHMENTS;
+  // A private send cannot take attachments uploaded outside its conversation.
+  const attachDisabled = readOnly || executionUnknown || attachments.length >= MAX_COMPOSER_ATTACHMENTS || sendMode?.kind === 'private';
   /** A drag of files from outside the composer that may become attachments. */
   const acceptsFileDrag = (event: DragEvent<HTMLElement>) =>
-    event.dataTransfer.types.includes('Files') && !internalDragRef.current && !readOnly && !executionUnknown;
+    event.dataTransfer.types.includes('Files') && !internalDragRef.current && !readOnly && !executionUnknown && sendMode?.kind !== 'private';
   /** Takes dropped files as attachments; false when the drop carried none. */
   const dropAttachmentFiles = (event: DragEvent<HTMLElement>): boolean => {
     const files = droppedFiles(event.dataTransfer);
@@ -2046,13 +2074,34 @@ export function ChatPanel({ session }: Props) {
   };
   const canSend = !readOnly && !executionUnknown && submissionStatus !== 'sending'
     && Boolean(draft.trim() || attachments.length > 0 || selectedSkillAttachments.length > 0);
-  // Scheduled send: the message goes at a picked time with this
-  // conversation's agent, model and modes. A scheduled conversation already
-  // holds whatever is sent, and a running one cannot be scheduled.
-  const canScheduleSend = features.scheduledConversations !== 'off' && !readOnly && !isPrivateConversation(conversation)
-    && !conversation.schedule && providerDescriptor?.available === true
-    && providerSupportsScheduledConversations(session.v2Providers, currentProvider);
-  const scheduleSendDisabled = !canSend || thinking || draft.trim().startsWith('/');
+  // The send button's wheel sets how the next message goes; sending applies
+  // it. Scheduled send keeps this conversation's agent, model and modes; a
+  // private send starts a private conversation with them. The two exclude
+  // each other (a private conversation cannot be scheduled).
+  const isPrivate = isPrivateConversation(conversation);
+  const sendWheelItems: RadialMenuItem[] = [
+    ...(features.scheduledConversations !== 'off' && !isPrivate ? [{
+      id: 'schedule',
+      label: t('schedule.send'),
+      icon: RiTimerLine,
+      description: t('sendWheel.scheduleHint'),
+      disabledReason: !providerSupportsScheduledConversations(session.v2Providers, currentProvider) ? t('sess.scheduleNeedsUpgrade')
+        : activeConversationSchedule(conversation) ? t('sendWheel.alreadyScheduled') : undefined,
+      selected: sendMode?.kind === 'schedule',
+    }] : []),
+    ...(!isPrivate ? [{
+      id: 'private',
+      label: t('sendWheel.private'),
+      icon: RiSpyLine,
+      description: t('sendWheel.privateHint'),
+      disabledReason: session.privateSendUnavailable(conversation.id) || undefined,
+      selected: sendMode?.kind === 'private',
+    }] : []),
+  ];
+  const canOpenSendWheel = !readOnly && sendWheelItems.length > 0;
+  const sendModeLabel = sendMode?.kind === 'schedule'
+    ? t('sendWheel.scheduledFor', { at: formatResetInstant(Date.parse(sendMode.at)) })
+    : sendMode?.kind === 'private' ? t('sendWheel.privateSet') : '';
   const effortClass = displayedEffortLevel ? EFFORT_TEXT[displayedEffortLevel] : undefined;
   const modelTrigger = (
     <>
@@ -2685,24 +2734,42 @@ export function ChatPanel({ session }: Props) {
                         <Tooltip placement="top">{t('chat.stopBackground')}</Tooltip>
                       </TooltipTrigger>
                     ) : null}
-                    {!canScheduleSend ? null : scheduleSendDisabled ? (
-                      // A disabled button cannot hold a tooltip; a running reply names why.
-                      <ComposerRoundButton aria-label={thinking ? t('schedule.busy') : t('schedule.send')} disabled>
-                        <RiTimerLine aria-hidden className="size-4" />
-                      </ComposerRoundButton>
-                    ) : (
+                    {sendMode ? (
+                      // How the next message goes; pressing it goes back to sending now.
                       <TooltipTrigger delay={200}>
                         <Focusable>
-                          <ComposerRoundButton aria-label={t('schedule.send')} onClick={() => setSchedulingSend(true)}>
-                            <RiTimerLine aria-hidden className="size-4" />
-                          </ComposerRoundButton>
+                          <button
+                            type="button"
+                            aria-label={`${sendModeLabel} · ${t('sendWheel.clear')}`}
+                            onClick={() => session.setComposerSendMode(conversation.id, null)}
+                            className="flex h-9 shrink-0 items-center gap-1.5 rounded-full border border-accent-500 bg-background-primary-default ps-2.5 pe-3 text-text-accent outline-none transition-colors duration-150 ease-out hover:bg-background-primary-hover focus-visible:ring-2 focus-visible:ring-border-focus-ring"
+                          >
+                            {sendMode.kind === 'schedule' ? <RiTimerLine aria-hidden className="size-4" /> : <RiSpyLine aria-hidden className="size-4" />}
+                            <span className="text-body-2-medium">
+                              {sendMode.kind === 'schedule' ? formatScheduleChip(sendMode.at) : t('sendWheel.private')}
+                            </span>
+                          </button>
                         </Focusable>
-                        <Tooltip placement="top">{t('schedule.send')}</Tooltip>
+                        <Tooltip placement="top">{`${sendModeLabel} · ${t('sendWheel.clear')}`}</Tooltip>
                       </TooltipTrigger>
-                    )}
-                    <ComposerSendButton aria-label={t('workbench.send')} disabled={!canSend} onClick={submitComposer}>
-                      <RiArrowUpLine aria-hidden className="size-5" />
-                    </ComposerSendButton>
+                    ) : null}
+                    <span ref={sendButtonRef} className="inline-flex">
+                    <TooltipTrigger delay={400} isDisabled={sendWheel !== null}>
+                      <Focusable>
+                        <ComposerSendButton
+                          aria-label={canOpenSendWheel ? `${t('workbench.send')} · ${t('sendWheel.hint')}` : t('workbench.send')}
+                          aria-disabled={!canSend || undefined}
+                          aria-haspopup={canOpenSendWheel ? 'menu' : undefined}
+                          aria-expanded={canOpenSendWheel ? sendWheel !== null : undefined}
+                          {...(canOpenSendWheel ? sendWheelTrigger : {})}
+                          onClick={() => { if (canSend) submitComposer(); }}
+                        >
+                          <RiArrowUpLine aria-hidden className="size-5" />
+                        </ComposerSendButton>
+                      </Focusable>
+                      <Tooltip placement="top">{canOpenSendWheel ? t('sendWheel.hint') : t('workbench.send')}</Tooltip>
+                    </TooltipTrigger>
+                    </span>
                   </div>
                 </div>
               </div>
@@ -2710,11 +2777,28 @@ export function ChatPanel({ session }: Props) {
           </ConversationPromptInput>
           {currentProvider === 'pi' && runtime ? <PiExtensionPanel placement="belowEditor"
             extensionUi={runtime.extensionUi} /> : null}
+          <RadialMenu
+            open={sendWheel !== null}
+            dragging={sendWheel?.dragging ?? false}
+            anchorRef={sendButtonRef}
+            label={t('sendWheel.label')}
+            items={sendWheelItems}
+            onSelect={(id) => {
+              if (id === 'schedule') setSchedulingSend(true);
+              else if (id === 'private') session.setComposerSendMode(conversation.id, { kind: 'private' });
+            }}
+            onClose={() => setSendWheel(null)}
+          />
+          {/* Picks the time only: the message goes when it is sent. */}
           <ScheduleConversationDialog
             isOpen={schedulingSend}
             mode="create"
+            initialAt={sendMode?.kind === 'schedule' ? sendMode.at : undefined}
             backendId={conversation.backendConnectionId ?? undefined}
-            onConfirm={(at) => session.scheduleChat(conversation.id, at)}
+            onConfirm={(at) => {
+              session.setComposerSendMode(conversation.id, { kind: 'schedule', at });
+              return Promise.resolve(true);
+            }}
             onClose={() => setSchedulingSend(false)}
           />
         </div>

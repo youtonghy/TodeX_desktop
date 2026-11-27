@@ -374,6 +374,10 @@ type LiveConversationControl =
   | { action: 'queueList' | 'queueClear' };
 export type TodeXSession = ReturnType<typeof useTodeXSession>;
 
+/** How a composer's next message goes, picked on the send button's wheel:
+ * at a time (`at`, an ISO instant) or as a new private conversation. */
+export type ComposerSendMode = { kind: 'schedule'; at: string } | { kind: 'private' };
+
 
 
 export type { CatalogState };
@@ -6416,6 +6420,11 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     const draftAttachments = composerAttachments[conversationId] ?? [];
     const skills = selectedSkills[conversationId] ?? [];
     if (!draftText && draftAttachments.length === 0 && skills.length === 0) return false;
+    // The time was picked before the message was sent; it may have passed since.
+    if (!(Date.parse(at) > Date.now())) {
+      setLastError(t('kanban.schedulePast'));
+      return false;
+    }
     const pendingUpload = liveComposerAttachments(draftText, draftAttachments).find((item) => item.uploadState);
     if (pendingUpload) {
       toast.danger(pendingUpload.uploadState === 'uploading' ? t('chat.uploadPending') : t('chat.uploadFailedBlocking', { name: pendingUpload.name }));
@@ -6484,13 +6493,40 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
    * shown (a kanban task scheduled from the board). */
   const [composerScheduleRequest, setComposerScheduleRequest] = useState<string | null>(null);
 
+  /** How each composer's next message goes, set from the send button's
+   * wheel and applied when it is sent; absent means "now". */
+  const [composerSendModes, setComposerSendModes] = useState<Record<string, ComposerSendMode>>({});
+  const setComposerSendMode = useCallback((conversationId: string, mode: ComposerSendMode | null) => {
+    setComposerSendModes((current) => {
+      if (!mode && !current[conversationId]) return current;
+      const next = { ...current };
+      if (mode) next[conversationId] = mode;
+      else delete next[conversationId];
+      return next;
+    });
+  }, []);
+
+  /** Why the composer's message cannot go as a private conversation, or ''
+   * (a real workspace, an agent that can keep one, no attachments: they were
+   * uploaded where a private conversation's must not be). */
+  const privateSendUnavailable = useCallback((conversationId: string): string => {
+    const context = getConversationContext(conversationId);
+    if (!context) return t('private.pickWorkspace');
+    const { workspace, conversation } = context;
+    if (isNoneWorkspaceId(workspace.id)) return t('private.needsWorkspace');
+    const descriptor = providersForConversation(conversation).find((item) => item.id === conversation.provider);
+    if (!descriptor?.available || !providerPrivateMode(descriptor)) return t('private.agentUnsupported');
+    if ((composerAttachments[conversationId] ?? []).length > 0) return t('sendWheel.privateNoAttachments');
+    return '';
+  }, [composerAttachments, getConversationContext]);
+
   /** Creates a private (RAM-only) conversation on the workspace's backend
    * right away, so its id exists before attachments upload into its private
    * folder. The placeholder never persists and is dropped when the backend
    * refuses or cannot keep the conversation private. */
   const createPrivateConversation = useCallback(async (
     workspaceId: string,
-    options?: { provider?: ProviderKind },
+    options?: { provider?: ProviderKind; providerProfile?: string },
   ): Promise<ConversationRecord | null> => {
     if (isNoneWorkspaceId(workspaceId)) {
       setLastError(t('private.needsWorkspace'));
@@ -6500,6 +6536,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       fresh: true,
       ephemeral: true,
       ...(options?.provider ? { provider: options.provider } : {}),
+      ...(options?.providerProfile ? { providerProfile: options.providerProfile } : {}),
     });
     if (!created) return null;
     const record = await materializeV2Conversation(created.id, '');
@@ -6513,24 +6550,42 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     return null;
   }, [createConversation, materializeV2Conversation, pruneConversationState, setLastError]);
 
-  /** Agents of the workspace's backend for a private conversation: every
-   * available one, those that cannot hold one marked unsupported, and the
-   * default pick among the supported. */
-  const privateConversationAgents = useCallback((workspaceId: string): { providers: Array<ProviderDescriptor & { privateMode: 'native' | 'scrubbed' | null }>; defaultProvider?: ProviderKind } => {
-    const workspace = stores.workspaces.get().find((item) => item.id === workspaceId);
-    const backendConnectionId = workspace?.backendConnectionId ?? null;
-    const providers = (backendConnectionId ? v2ProvidersByBackendRef.current[backendConnectionId] : undefined) ?? v2ProvidersRef.current;
-    const listed = providers.filter((item) => item.available).map((item) => ({ ...item, privateMode: providerPrivateMode(item) }));
-    const agent = resolveCreateConversationAgent({
-      providers,
-      conversations: stores.conversations.get(),
-      activeConversationId: activeConversationRef.current,
-      workspaceId,
+  /** Sends the composer's message as a new private conversation in the same
+   * workspace, with this conversation's agent, model and modes. The message
+   * moves there and it opens; this conversation is left as it was (an unsent
+   * draft gives way to it). Resolves whether the private one was created. */
+  const sendPrivateChat = useCallback(async (conversationId: string): Promise<boolean> => {
+    const reason = privateSendUnavailable(conversationId);
+    if (reason) {
+      setLastError(reason);
+      return false;
+    }
+    const draftText = (chatDrafts[conversationId] ?? '').trim();
+    const skills = selectedSkills[conversationId] ?? [];
+    if (!draftText && skills.length === 0) return false;
+    const source = getConversationContext(conversationId)?.conversation;
+    if (!source) return false;
+    const created = await createPrivateConversation(source.workspaceId, {
+      ...(source.provider ? { provider: source.provider as ProviderKind } : {}),
+      ...(source.providerProfile ? { providerProfile: source.providerProfile } : {}),
     });
-    const eligible = listed.filter((item) => item.privateMode);
-    const defaultProvider = eligible.some((item) => item.id === agent?.provider) ? agent?.provider : eligible[0]?.id;
-    return { providers: listed, defaultProvider };
-  }, []);
+    if (!created) return false;
+    const record: ConversationRecord = {
+      ...created,
+      model: source.model,
+      reasoningEffort: source.reasoningEffort,
+      permissionMode: source.permissionMode,
+      mode: source.mode,
+    };
+    setConversations((current) => current.map((item) => item.id === record.id ? record : item));
+    setConversationChatDraft(conversationId, (current) => current.trim() === draftText ? '' : current);
+    setConversationSelectedSkills(conversationId, (current) => current === skills ? [] : current);
+    setConversationComposerSelection(conversationId, DEFAULT_COMPOSER_SELECTION);
+    setComposerSendMode(conversationId, null);
+    const { text } = expandTextCapsules(draftText, []);
+    await sendV2Prompt(text.trim(), record.id, skills, [], { text: draftText, attachments: [], skills });
+    return true;
+  }, [chatDrafts, createPrivateConversation, getConversationContext, privateSendUnavailable, selectedSkills, sendV2Prompt, setComposerSendMode, setConversationChatDraft, setConversationComposerSelection, setConversationSelectedSkills, setLastError]);
 
   useEffect(() => {
     refreshFollowUpQueueRef.current = refreshFollowUpQueue;
@@ -7542,8 +7597,11 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     scheduleChat,
     composerScheduleRequest,
     requestComposerSchedule: setComposerScheduleRequest,
+    composerSendModes,
+    setComposerSendMode,
+    privateSendUnavailable,
+    sendPrivateChat,
     createPrivateConversation,
-    privateConversationAgents,
     controlConversation,
     controlStatusByConversation,
     composerAttachments,

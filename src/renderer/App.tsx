@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { RiAddLine, RiFolderAddLine, RiExpandLeftLine, RiExpandRightLine, RiGithubLine, RiLayoutLeftLine, RiLayoutRightLine } from '@remixicon/react';
 import { motion, useReducedMotion } from 'motion/react';
 import { Dialog, Modal as AriaModal, ModalOverlay } from 'react-aria-components';
@@ -35,8 +35,7 @@ import { AppIcon } from './components/AppIcon';
 import { ChatPanel } from './screens/ChatPanel';
 import { HistoryRecoveryNotice } from './components/HistoryRecoveryNotice';
 import { Field } from './components/Field';
-import { connectionStateLabel, conversationDisplayTitle, firstPromptText, createWorkspaceDirectory, fetchWorkspaceDirectorySnapshot, isNoneWorkspaceId, isPrivateConversation, isUnmountedPathError } from './session/helpers';
-import { PrivateConversationDialog } from './components/PrivateConversationDialog';
+import { connectionStateLabel, conversationDisplayTitle, firstPromptText, createWorkspaceDirectory, fetchWorkspaceDirectorySnapshot, isPrivateConversation, isUnmountedPathError } from './session/helpers';
 import { pickedHostPathToBackend } from './session/hostPaths';
 import { WorkspaceMountHint } from './components/WorkspaceMountHint';
 import { platform } from './platform';
@@ -200,17 +199,14 @@ export function App() {
   const openPanelHandlerRef = useRef<(name: string, params?: OpenPanelOptions) => void>(() => {});
   const forwardOpenPanel = useCallback((name: string, params?: OpenPanelOptions) => openPanelHandlerRef.current(name, params), []);
   const session = useTodeXSession(forwardOpenPanel);
-  // Workspace a private conversation is being started in (its dialog is open).
-  const [privateWorkspaceId, setPrivateWorkspaceId] = useState<string | null>(null);
-  const privateAgents = useMemo(
-    () => (privateWorkspaceId ? session.privateConversationAgents(privateWorkspaceId) : undefined),
-    // Re-read when the agent catalogs change while the dialog is open.
-    [privateWorkspaceId, session.privateConversationAgents, session.v2Providers],
-  );
-  const openPrivateConversation = () => {
-    // Private conversations need a real workspace.
-    if (!session.activeWorkspaceId || isNoneWorkspaceId(session.activeWorkspaceId)) return;
-    setPrivateWorkspaceId(session.activeWorkspaceId);
+  /** ⇧⌘P: the open conversation's next message goes as a private
+   * conversation (the send button's wheel), or the reason it cannot. */
+  const setPrivateSend = () => {
+    const conversation = session.activeConversation;
+    if (!conversation || isPrivateConversation(conversation)) return;
+    const reason = session.privateSendUnavailable(conversation.id);
+    if (reason) toast.danger(reason);
+    else session.setComposerSendMode(conversation.id, { kind: 'private' });
   };
   const { AppOverlays } = slots;
   slots.useSessionEffects(session);
@@ -474,7 +470,7 @@ export function App() {
       setEditingWorkspaceId(null);
       setCreateOpen(true);
     },
-    newPrivateConversation: openPrivateConversation,
+    privateSend: setPrivateSend,
   });
 
   useEffect(() => platform.theme.onUpdated(applyTheme), []);
@@ -648,7 +644,6 @@ export function App() {
         session.createConversation(workspaceId, options);
         setPanel(null);
       }}
-      onCreatePrivateConversation={openPrivateConversation}
       onOpenSettings={() => setPanel('settings')}
       onOpenProfile={() => { setPanel('profile'); persistAsideOpen(false); }}
       onOpenKanban={() => { setPanel('kanban'); persistAsideOpen(false); }}
@@ -766,17 +761,6 @@ export function App() {
         ) : null}
       </Modal>
       <GitActionsModal key={session.activeConversation?.id} session={session} isOpen={gitOpen} onOpenChange={setGitOpen} />
-      <PrivateConversationDialog
-        isOpen={privateWorkspaceId !== null}
-        agents={privateAgents}
-        onConfirm={async (options) => {
-          if (!privateWorkspaceId) return false;
-          const record = await session.createPrivateConversation(privateWorkspaceId, options);
-          if (record) setPanel(null);
-          return Boolean(record);
-        }}
-        onClose={() => setPrivateWorkspaceId(null)}
-      />
       {createOpen ? <CreateWorkspaceModal
         key={editingWorkspaceId ?? 'create'}
         session={session}

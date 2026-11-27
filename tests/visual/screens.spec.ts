@@ -302,33 +302,49 @@ for (const theme of ['light', 'dark'] as Theme[]) {
       await expect(page).toHaveScreenshot(`unified-sidebar-${theme}.png`, { mask: volatile(page) });
     });
 
-    // Scheduled send: the composer's timer button asks only for a time; the
-    // conversation's own agent, model and modes go with the message.
-    test('scheduled send picker', async ({ page, openDemo }) => {
+    // The send button's wheel (right-click or hold) sets how the message goes:
+    // at a time, or as a private conversation.
+    test('send button wheel', async ({ page, openDemo }) => {
       await openDemo(theme);
       await page.getByRole('textbox', { name: '消息输入' }).fill('明早跑一遍回归测试');
-      await page.getByRole('button', { name: '定时发送' }).click();
+      await page.getByRole('button', { name: /^发送/ }).click({ button: 'right' });
+      const wheel = page.getByRole('menu', { name: '发送方式' });
+      await expect(wheel.getByRole('menuitem', { name: '定时发送' })).toBeFocused();
+      await expect(wheel.getByRole('menuitem', { name: '隐私对话' })).toBeVisible();
+      await expect(page.getByRole('tooltip')).toHaveCount(0);
+      await settle(page);
+      await expect(page).toHaveScreenshot(`send-wheel-${theme}.png`, { mask: volatile(page) });
+      await wheel.getByRole('menuitem', { name: '定时发送' }).click();
       const dialog = page.getByRole('dialog', { name: '定时发送' });
       await expect(dialog.getByText(/^按后端时区/)).toBeVisible();
       await expect(dialog).toHaveScreenshot(`schedule-send-dialog-${theme}.png`);
     });
 
-    // A draft is created on the backend when it is scheduled; the message
-    // waits there and the composer empties.
+    // Picking a time only sets it (the chip beside send); sending applies it:
+    // a draft is created on the backend and the message waits there.
     test('a draft scheduled from the composer', async ({ page, openDemo }) => {
       await openDemo(theme);
       await page.getByRole('button', { name: '新建对话' }).click();
       const composer = page.getByRole('textbox', { name: '消息输入' });
       await composer.fill('明早跑一遍回归测试');
-      await page.getByRole('button', { name: '定时发送' }).click();
+      const send = page.getByRole('button', { name: /^发送/ });
+      await send.click({ button: 'right' });
+      await page.getByRole('menuitem', { name: '定时发送' }).click();
       const dialog = page.getByRole('dialog', { name: '定时发送' });
       await expect(dialog.getByText(/^按后端时区/)).toBeVisible();
       await dialog.getByRole('button', { name: '定时', exact: true }).click();
       await expect(dialog).toBeHidden();
+      await expect(page.getByRole('button', { name: '将于 10月20日 11:00 发送 · 点击取消' })).toHaveText('11:00');
+      await expect(composer).toHaveText('明早跑一遍回归测试');
+      await page.mouse.move(0, 0);
+      await settle(page);
+      await expect(page).toHaveScreenshot(`send-mode-scheduled-${theme}.png`, { mask: volatile(page) });
+      await send.click();
       await expect(page.getByText(/^定时对话 · 将于/)).toBeVisible();
       const countdown = page.getByText(/已暂存 1 条$/);
       await expect(countdown).toBeVisible();
       await expect(composer).toHaveText('');
+      await expect(page.getByRole('button', { name: /点击取消$/ })).toHaveCount(0);
       await page.mouse.move(0, 0);
       await settle(page);
       // The countdown ticks with the flowing clock.
@@ -812,13 +828,60 @@ test('unreadable encrypted history', async ({ page, openDemo }) => {
   await expect(page).toHaveScreenshot('unreadable-history-light.png', { mask: volatile(page) });
 });
 
-test('new private conversation', async ({ page, openDemo }) => {
+// A private send starts a private conversation with the message and the
+// composer's agent; the conversation it was typed in stays as it was.
+test('private send from the wheel', async ({ page, openDemo }) => {
   await openDemo('light');
-  await page.getByRole('button', { name: '新建隐私对话' }).click();
-  await expect(page.getByRole('dialog')).toBeVisible();
-  await expect(page.getByRole('radio', { name: /Claude Code/ })).toBeChecked();
+  const composer = page.getByRole('textbox', { name: '消息输入' });
+  await composer.fill('私下问一句');
+  await page.getByRole('button', { name: /^发送/ }).click({ button: 'right' });
+  await page.getByRole('menuitem', { name: '隐私对话' }).click();
+  await expect(page.getByRole('button', { name: '将作为新的隐私对话发送 · 点击取消' })).toBeVisible();
+  // Attachments would be uploaded outside the private conversation.
+  await expect(page.getByRole('button', { name: '添加附件' })).toBeDisabled();
+  await page.mouse.move(0, 0);
   await settle(page);
-  await expect(page).toHaveScreenshot('new-private-conversation-light.png', { mask: volatile(page) });
+  await expect(page).toHaveScreenshot('send-mode-private-light.png', { mask: volatile(page) });
+  await composer.press('Enter');
+  await expect(page.getByText(/^隐私对话：内容只保存在守护进程内存中/)).toBeVisible();
+  await expect(page.getByText('私下问一句').first()).toBeVisible();
+  await expect(page.getByRole('grid', { name: '对话' }).getByRole('row', { name: /重构结账页表单校验/ })).toBeVisible();
+  await settle(page);
+  await expect(page).toHaveScreenshot('private-send-light.png', { mask: volatile(page) });
+});
+
+// An empty composer: send does nothing, but its hint shows and the wheel opens.
+// Holding send opens the wheel; releasing over an item picks it.
+test('send button hint, hold and keyboard', async ({ page, openDemo }) => {
+  await openDemo('light');
+  const send = page.getByRole('button', { name: /^发送/ });
+  await expect(send).toHaveAttribute('aria-disabled', 'true');
+  await send.hover();
+  await expect(page.getByRole('tooltip')).toHaveText('右键或长按：定时发送、隐私对话');
+  await send.click({ force: true });
+  await expect(page.getByRole('menu', { name: '发送方式' })).toHaveCount(0);
+
+  const box = (await send.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  const item = page.getByRole('menuitem', { name: '隐私对话' });
+  await expect(item).toBeVisible();
+  const target = (await item.boundingBox())!;
+  await page.mouse.move(target.x + target.width / 2, target.y + target.height / 2, { steps: 4 });
+  await page.mouse.up();
+  await expect(page.getByRole('menu', { name: '发送方式' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: '将作为新的隐私对话发送 · 点击取消' })).toBeVisible();
+  await page.getByRole('button', { name: '将作为新的隐私对话发送 · 点击取消' }).click();
+  await expect(page.getByRole('button', { name: /点击取消$/ })).toHaveCount(0);
+
+  await send.focus();
+  await page.keyboard.press('Shift+F10');
+  await expect(page.getByRole('menuitem', { name: '定时发送' })).toBeFocused();
+  await page.keyboard.press('ArrowDown');
+  await expect(page.getByRole('menuitem', { name: '隐私对话' })).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('menu', { name: '发送方式' })).toHaveCount(0);
+  await expect(send).toBeFocused();
 });
 
 test.describe('compact window', () => {

@@ -171,7 +171,7 @@ export function ComposerSendButton({ className, children, ...props }: ComponentP
     <button
       type="button"
       {...props}
-      className={cx(ROUND_BUTTON, 'bg-button-primary p-2 text-text-white transition-opacity duration-200 ease disabled:opacity-40', className)}
+      className={cx(ROUND_BUTTON, 'bg-button-primary p-2 text-text-white transition-opacity duration-200 ease disabled:opacity-40 aria-disabled:opacity-40', className)}
     >
       {children}
     </button>

@@ -85,7 +85,10 @@ Pick the model from a searchable list and drag the reasoning effort; Codex also 
 
 ## Private conversations and scheduled send
 
-A **private conversation** keeps its content only in the backend's memory: nothing goes into history, and it is gone after a restart (changes the agent makes to workspace files are kept as usual). **Scheduled send** (the timer button next to Send) sends the message at the time you pick, even while the app is closed. It works in a new or an existing conversation and uses that conversation's agent, model and settings. Until then the backend holds anything else sent in the conversation and sends it at the same time. A backend restart drops the held messages and marks the schedule interrupted.
+Right-click or hold the Send button to choose how the message goes; the choice shows beside Send (click it to cancel), and pressing Send applies it.
+
+- **Private conversation** (also ⇧⌘P): the message starts a new private conversation in the same workspace, with the current agent, model and settings. Its content is kept only in the backend's memory: nothing goes into history, and it is gone after a restart (changes the agent makes to workspace files are kept as usual). It cannot take attachments.
+- **Scheduled send**: pick a time, and the message is sent then, even while the app is closed, with the conversation's agent, model and settings. Until then the backend holds anything else sent in the conversation and sends it at the same time. A backend restart drops the held messages and marks the schedule interrupted.
 
 ![Private conversation](docs/screenshots/private-conversation-en.png)
 

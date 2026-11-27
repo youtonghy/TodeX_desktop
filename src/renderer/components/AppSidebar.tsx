@@ -84,7 +84,6 @@ type Props = {
   /** Creates a conversation in the workspace that sends at `at` (ISO), on
    * the picked agent (the default one when absent). */
   /** Opens the private (RAM-only) conversation dialog for the active workspace. */
-  onCreatePrivateConversation: () => void;
   onOpenSettings: () => void;
   onOpenProfile: () => void;
   onOpenKanban: () => void;
@@ -406,7 +405,6 @@ export function AppSidebar({
   onCreateWorkspace,
   onEditWorkspace,
   onCreateConversation,
-  onCreatePrivateConversation,
   onOpenSettings,
   onOpenProfile,
   onOpenKanban,
@@ -577,12 +575,6 @@ export function AppSidebar({
     : focusConnectionLabel;
 
   const [contextMenu, setContextMenu] = useState<ContextMenu>(null);
-  // Private conversations need a real workspace and an agent able to keep
-  // one; a backend without any is too old for them.
-  const privateUnavailable = !session.activeWorkspaceId ? t('private.pickWorkspace')
-    : isNoneWorkspaceId(session.activeWorkspaceId) ? t('private.needsWorkspace')
-      : !session.v2Providers.some((provider) => provider.available && provider.capabilities.privateConversations) ? t('private.backendUnsupportedHint')
-        : '';
   // The menu keeps rendering its last target while it animates out.
   const lastContextMenuRef = useRef<ContextMenu>(contextMenu);
   if (contextMenu) lastContextMenuRef.current = contextMenu;
@@ -1711,18 +1703,6 @@ export function AppSidebar({
       disabled: !session.activeWorkspaceId,
       onClick: () => onCreateConversation(),
       hint: <ShortcutHint id="newConversation" />,
-    },
-    {
-      key: 'new-private-conversation',
-      label: t('private.create'),
-      icon: RiSpyLine,
-      disabled: Boolean(privateUnavailable),
-      disabledReason: privateUnavailable || undefined,
-      onClick: () => {
-        if (mobile) onCloseMobile?.();
-        onCreatePrivateConversation();
-      },
-      hint: <ShortcutHint id="newPrivateConversation" />,
     },
   ];
   // Optional features: shown in the nav, folded under "More", or off.
