@@ -1529,8 +1529,12 @@ export function ChatPanel({ session }: Props) {
     });
   }, [conversationTimeline]);
   useEffect(() => () => {
+    // Reset as well: a pending id left behind (StrictMode replays this
+    // cleanup on mount) would block every later frame.
     cancelAnimationFrame(followFrameRef.current);
     cancelAnimationFrame(activeTurnFrameRef.current);
+    followFrameRef.current = 0;
+    activeTurnFrameRef.current = 0;
   }, []);
   useEffect(updateActiveTurn, [chatTurns]);
   // Rows on screen when a conversation opens stay still; rows that arrive
