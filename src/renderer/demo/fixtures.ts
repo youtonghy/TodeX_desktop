@@ -681,6 +681,30 @@ export const demoAgentDesktop: AgentDesktopSettings = {
   computerEngines: {
     agentDesktop: { version: '1.0.2', installed: false, downloading: false, overridden: false, available: false, reason: 'agent-desktop is not installed yet.' },
   },
+  cameraEnabled: true,
+  camera: {
+    supported: true,
+    reason: null,
+    host: 'lumen-devbox',
+    platform: 'macos',
+    permission: 'granted',
+    permissionRequest: false,
+    devices: [
+      { id: 'demo-cam-builtin', name: 'FaceTime 高清摄像头', connected: true, allowed: true, inUse: false },
+      { id: 'demo-cam-desk', name: '桌面 USB 摄像头', connected: true, allowed: true, inUse: false },
+      { id: 'demo-cam-phone', name: 'iPhone 连续互通摄像头', connected: true, allowed: false, inUse: false },
+    ],
+    defaultDevice: 'demo-cam-builtin',
+    capture: { mode: 'dynamic', fps: 1, sensitivity: 50 },
+    maxSeconds: 600,
+    maxFrames: 600,
+    limits: {
+      fps: { min: 0.2, max: 5 },
+      sensitivity: { min: 1, max: 100 },
+      maxSeconds: { min: 10, max: 3600 },
+      maxFrames: { min: 10, max: 2000 },
+    },
+  },
 };
 
 // `?computer=ungranted`: a Mac whose backend has no OS permissions yet.

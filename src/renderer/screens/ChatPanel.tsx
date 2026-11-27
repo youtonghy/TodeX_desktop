@@ -58,6 +58,7 @@ import { cx } from '@/utils/cx';
 import { baseMarkdownComponents } from '../components/markdownComponents';
 import { providerDisplayName, type ProviderKind, type ProviderQuotaSnapshot, type PermissionMode, type SkillCatalogDescriptor } from '@todex/protocol/v2';
 import { ConversationPermissionActions, ConversationPromptInput, ConversationRunStatus, PermissionRequestCard, TurnUsageSummary } from '../components/ConversationRunStatus';
+import { CameraLiveView, CameraRequestCard, cameraRequestDetails } from '../components/AgentCamera';
 import { ReferenceComposer, type ComposerTokenState, type ReferenceComposerHandle } from '../components/ReferenceComposer';
 import { PROMPT_UPLOAD_MAX_BYTES, isPromptUploadUnsupported, pastedTextDisposition } from '@todex/protocol/promptUploads';
 import { ComposerAttachmentPreview } from '../components/ComposerAttachmentPreview';
@@ -2325,7 +2326,17 @@ export function ChatPanel({ session }: Props) {
           {/* Pinned here only when chosen in Settings; by default both live in the side panel. */}
           {agentDesktopPreferences.browserPlacement === 'composer' ? <AgentBrowserLiveView session={session} conversationId={conversation.id} variant="card" /> : null}
           {agentDesktopPreferences.computerPlacement === 'composer' ? <ComputerLiveView session={session} conversationId={conversation.v2ConversationId ?? conversation.id} state={conversationRuntime?.desktopComputer} /> : null}
-          {readOnly ? null : permissionRequests.map(request => <PermissionRequestCard
+          <CameraLiveView session={session} conversationId={conversation.v2ConversationId ?? conversation.id} state={conversationRuntime?.desktopCamera} />
+          {readOnly ? null : permissionRequests.map(request => {
+            const camera = cameraRequestDetails(request);
+            return camera ? <CameraRequestCard
+              key={request.requestId}
+              session={session}
+              conversationId={conversation.v2ConversationId ?? conversation.id}
+              request={request}
+              details={camera}
+              onSelect={(option, data) => { session.sendApprovalResponse(option, request, data); }}
+            /> : <PermissionRequestCard
             key={request.requestId}
             request={request}
             fallbackTitle={sessionPermissionIds.has(request.requestId) ? t('chat.piPluginRequest') : request.title || t('chat.permissionApproval')}
@@ -2334,7 +2345,8 @@ export function ChatPanel({ session }: Props) {
               ? t('runStatus.planReviewSmartHint', { model: providerModels.find((item) => item.id === smartExecuteStage.model)?.displayName || modelDisplayLabel(smartExecuteStage.model, session.modelCatalog) })
               : undefined}
             onSelect={(option, data) => { session.sendApprovalResponse(option, request, data); }}
-          />)}
+          />;
+          })}
           {currentProvider === 'pi' && runtime ? <PiExtensionPanel placement="aboveEditor"
             extensionUi={runtime.extensionUi} providerRuntime={runtime.providerRuntime}
             pendingEditorRequest={session.pendingPluginDrafts[conversation.id]}

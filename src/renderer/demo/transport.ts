@@ -892,6 +892,41 @@ function route(request: SecureRequest): SecureResponse {
     return json({ hosts: demoBrowserHosts });
   }
 
+  // The agent camera: settings previews, the card's preview and the
+  // recording view all show the same stand-in picture.
+  if (path === '/v2/agent-desktop/camera/preview' && method === 'GET') {
+    const deviceId = query.get('deviceId') ?? '';
+    return json({ mimeType: 'image/svg+xml', dataUrl: demoCameraPicture(deviceId), deviceId });
+  }
+  const cameraFrame = path.match(/^\/v2\/conversations\/([^/]+)\/agent-desktop\/camera$/);
+  if (cameraFrame && method === 'GET') {
+    const session = demoCameraSessions.get(decodeURIComponent(cameraFrame[1]));
+    const deviceId = session?.deviceId ?? query.get('deviceId') ?? 'demo-cam-builtin';
+    if (!session && !demoCameraCards.has(decodeURIComponent(cameraFrame[1]))) {
+      return json({ error: { code: 'NOT_FOUND', message: 'no camera for this conversation' } }, 404);
+    }
+    return json({
+      mimeType: 'image/svg+xml', dataUrl: demoCameraPicture(deviceId), deviceId,
+      ...(session ? { session: {
+        sessionId: session.sessionId, deviceName: session.deviceName, capture: session.capture, maxSeconds: 600, maxFrames: 600,
+        progress: { frames: 23, elapsedMs: 41_000, changeKbps: 6.4, rateFps: 1.6 },
+      } } : {}),
+    });
+  }
+  const revoked = path.match(/^\/v2\/conversations\/([^/]+)\/agent-desktop$/);
+  if (revoked && method === 'DELETE') {
+    const conversationId = decodeURIComponent(revoked[1]);
+    const session = demoCameraSessions.get(conversationId);
+    const journal = journals.get(conversationId);
+    const capability = query.get('capability');
+    if (session && journal && (!capability || capability === 'camera')) {
+      demoCameraSessions.delete(conversationId);
+      appendDemoEvent(journal, `${conversationId}-camera`, 'desktop.camera.session', {
+        status: 'ended', sessionId: session.sessionId, reason: 'user', frames: 23, durationMs: 41_000, directory: '/tmp/todex/file/demo',
+      });
+    }
+    return json({ conversationId, revoked: Boolean(session) });
+  }
   const liveFrame = path.match(/^\/v2\/conversations\/[^/]+\/agent-desktop\/frame$/);
   if (liveFrame && method === 'GET') {
     if (DEMO_LIVE !== 'computer') return json({ error: { code: 'NOT_FOUND', message: 'no screen session' } }, 404);
@@ -1154,6 +1189,25 @@ function route(request: SecureRequest): SecureResponse {
     agentSshApproval = { enabled: body.enabled, scope: body.scope };
     return json(agentSshApproval);
   }
+  if (path === '/v2/agent-desktop/camera' && method === 'PUT' && agentDesktop.camera) {
+    let camera = agentDesktop.camera;
+    if (Array.isArray(body.allowed)) {
+      const allowed = new Set(body.allowed.map(String));
+      camera = { ...camera, devices: camera.devices.map(device => ({ ...device, allowed: allowed.has(device.id) })) };
+      if (camera.defaultDevice && !allowed.has(camera.defaultDevice)) camera = { ...camera, defaultDevice: [...allowed][0] ?? null };
+    }
+    if (typeof body.defaultDevice === 'string' || body.defaultDevice === null) camera = { ...camera, defaultDevice: body.defaultDevice };
+    if (body.capture && typeof body.capture === 'object') camera = { ...camera, capture: body.capture as typeof camera.capture };
+    if (typeof body.maxSeconds === 'number') camera = { ...camera, maxSeconds: body.maxSeconds };
+    if (typeof body.maxFrames === 'number') camera = { ...camera, maxFrames: body.maxFrames };
+    agentDesktop = { ...agentDesktop, camera, ...(typeof body.enabled === 'boolean' ? { cameraEnabled: body.enabled } : {}) };
+    return json(agentDesktop);
+  }
+  // The demo host shows macOS's prompt and nobody answers it.
+  if (path === '/v2/agent-desktop/camera/permission' && method === 'POST' && agentDesktop.camera) {
+    agentDesktop = { ...agentDesktop, camera: { ...agentDesktop.camera, permissionRequest: true } };
+    return json(agentDesktop);
+  }
   if (path.startsWith('/v2/agent-desktop') && (method === 'PUT' || method === 'POST' || method === 'PATCH')) {
     if (typeof body.enabled === 'boolean') agentDesktop = { ...agentDesktop, enabled: body.enabled };
     if (typeof body.computerEnabled === 'boolean') agentDesktop = { ...agentDesktop, computerEnabled: body.computerEnabled };
@@ -1370,12 +1424,14 @@ const DEMO_LIVE = typeof location !== 'undefined' ? new URLSearchParams(location
 let demoLiveStarted = false;
 
 function startDemoLiveTool(journal: Journal): void {
-  if (demoLiveStarted || journal.manifest.id !== fixtures.demoActiveConversationId || (DEMO_LIVE !== 'computer' && DEMO_LIVE !== 'browser')) return;
+  if (demoLiveStarted || journal.manifest.id !== fixtures.demoActiveConversationId || (DEMO_LIVE !== 'computer' && DEMO_LIVE !== 'browser' && DEMO_LIVE !== 'camera')) return;
   demoLiveStarted = true;
   const turnId = `${journal.manifest.id}-live`;
   // After the subscription's backfill, so it arrives as something new.
   setTimeout(() => {
-    if (DEMO_LIVE === 'computer') {
+    if (DEMO_LIVE === 'camera') {
+      startDemoCameraSession(journal, turnId, 'demo-cam-builtin', { mode: 'dynamic', fps: 1, sensitivity: 50 });
+    } else if (DEMO_LIVE === 'computer') {
       appendDemoEvent(journal, turnId, 'desktop.computer.session', { status: 'started', deviceId: 'host', deviceName: 'lumen-devbox' });
       appendDemoEvent(journal, turnId, 'desktop.computer.action', { actionId: 'demo-computer-1', tool: 'computer_act', ok: true, summary: '点击“保存”', app: 'TextEdit', path: 'background', point: { x: 0.765625, y: 0.7825 }, shotId: 'demo-shot-computer', deviceId: 'host', deviceName: 'lumen-devbox' });
     } else {
@@ -1483,6 +1539,10 @@ function playCannedTurn(journal: Journal, text: string, smart: SmartRun = {}): s
     playAgentCallTurn(journal, turnId, text);
     return turnId;
   }
+  if (/摄像头|camera/i.test(text) && !journal.manifest.parentConversationId) {
+    playCameraTurn(journal, turnId, text);
+    return turnId;
+  }
   if (/ssh|服务器/i.test(text) && !journal.manifest.parentConversationId) {
     playSshTurn(journal, turnId, text);
     return turnId;
@@ -1568,6 +1628,88 @@ function playAgentCallTurn(journal: Journal, turnId: string, text: string): void
     })],
     [7000, 'turn.completed', { status: 'completed' }],
   ]);
+}
+
+/** Demo camera sessions recording now, by conversation id. */
+const demoCameraSessions = new Map<string, { sessionId: string; deviceId: string; deviceName: string; capture: Record<string, unknown> }>();
+/** Conversations whose camera card is open (their previews answer). */
+const demoCameraCards = new Set<string>();
+
+function startDemoCameraSession(journal: Journal, turnId: string, deviceId: string, capture: Record<string, unknown>): void {
+  const deviceName = fixtures.demoAgentDesktop.camera?.devices.find(device => device.id === deviceId)?.name ?? deviceId;
+  const session = { sessionId: `cam_${turnId}`, deviceId, deviceName, capture };
+  demoCameraSessions.set(journal.manifest.id, session);
+  appendDemoEvent(journal, turnId, 'desktop.camera.session', {
+    status: 'started', ...session, maxSeconds: 600, maxFrames: 600, directory: '/tmp/todex/file/demo',
+  });
+}
+
+/** A stand-in camera picture: a desk with a hand over a circuit board. */
+function demoCameraPicture(deviceId: string): string {
+  const desk = deviceId === 'demo-cam-desk';
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720"><rect width="1280" height="720" fill="${desk ? '#c9b79c' : '#5b6472'}"/>`
+    + `<rect x="0" y="${desk ? 0 : 430}" width="1280" height="${desk ? 720 : 290}" fill="${desk ? '#c9b79c' : '#8a6f52'}"/>`
+    + `<rect x="${desk ? 360 : 460}" y="${desk ? 200 : 470}" width="${desk ? 560 : 360}" height="${desk ? 320 : 170}" rx="12" fill="#1f6f4a"/>`
+    + `<rect x="${desk ? 420 : 500}" y="${desk ? 250 : 500}" width="90" height="60" rx="6" fill="#111827"/><rect x="${desk ? 560 : 610}" y="${desk ? 280 : 520}" width="60" height="60" rx="6" fill="#111827"/>`
+    + `<circle cx="${desk ? 820 : 760}" cy="${desk ? 300 : 540}" r="14" fill="#f59e0b"/>`
+    + `<ellipse cx="${desk ? 960 : 900}" cy="${desk ? 420 : 560}" rx="120" ry="70" fill="#e0b89a"/>`
+    + `<text x="40" y="60" font-family="Helvetica, Arial, sans-serif" font-size="26" fill="#ffffff">${desk ? '桌面 USB 摄像头' : 'FaceTime 高清摄像头'}</text></svg>`;
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
+/** A prompt mentioning the camera plays a turn whose `camera_start` asks on
+ * the camera card; allowing starts a recording that runs until stopped. */
+function playCameraTurn(journal: Journal, turnId: string, text: string): void {
+  const permissionId = `${turnId}-camera`;
+  const toolCallId = `${turnId}-camera-start`;
+  const toolName = 'mcp__todex_desktop__camera_start';
+  const camera = fixtures.demoAgentDesktop.camera;
+  const devices = (camera?.devices ?? []).filter(device => device.allowed).map(({ id, name }) => ({ id, name }));
+  scheduleDemoTurn(journal, turnId, [
+    [0, 'message.created', { role: 'user', content: text }],
+    [150, 'turn.started', { status: 'running' }],
+    [500, 'tool.started', { toolCallId, toolName, arguments: {} }],
+    [700, 'permission.requested', () => {
+      demoCameraCards.add(journal.manifest.id);
+      demoPermissions.set(permissionId, (outcome, data) => {
+        demoPermissions.delete(permissionId);
+        demoCameraCards.delete(journal.manifest.id);
+        const allowed = outcome.startsWith('allow');
+        appendDemoEvent(journal, turnId, 'permission.resolved', { permissionId, outcome });
+        const deviceId = typeof data?.deviceId === 'string' ? data.deviceId : camera?.defaultDevice ?? 'demo-cam-builtin';
+        const capture = data?.capture && typeof data.capture === 'object' ? data.capture as Record<string, unknown> : { ...camera?.capture };
+        if (allowed) startDemoCameraSession(journal, turnId, deviceId, capture);
+        scheduleDemoTurn(journal, turnId, [
+          [200, 'tool.completed', {
+            toolCallId, toolName, arguments: {}, isError: !allowed,
+            result: allowed ? `Camera session cam_${turnId} is recording.` : 'DECLINED: the user did not allow the camera.',
+          }],
+          [600, 'message.completed', {
+            role: 'assistant',
+            message: { role: 'assistant', content: [{ type: 'text', text: allowed ? '摄像头已开始录制，请在镜头前演示，完成后告诉我。' : '你没有允许使用摄像头，我不会录制。' }] },
+            block: { category: 'assistant_final', id: `${turnId}-answer`, turnId, phase: 'completed' },
+          }],
+          [700, 'turn.completed', { status: 'completed' }],
+        ]);
+      });
+      return {
+        permissionId,
+        providerRequestId: `agent_mcp_${permissionId}`,
+        kind: 'desktop_camera',
+        title: 'Allow the agent to use a camera on lumen-devbox?',
+        details: {
+          host: 'lumen-devbox', devices, deviceId: camera?.defaultDevice ?? devices[0]?.id,
+          capture: camera?.capture, maxSeconds: camera?.maxSeconds ?? 600, maxFrames: camera?.maxFrames ?? 600,
+          limits: { fps: camera?.limits.fps, sensitivity: camera?.limits.sensitivity },
+        },
+        options: [
+          { optionId: 'once', kind: 'allow_once', name: 'Allow once' },
+          { optionId: 'conversation', kind: 'allow_always', name: 'Allow for this conversation' },
+          { optionId: 'reject', kind: 'reject_once', name: 'Deny' },
+        ],
+      };
+    }],
+  ], () => { demoPermissions.delete(permissionId); demoCameraCards.delete(journal.manifest.id); });
 }
 
 /** Pending demo permission prompts: permission id → answer with an outcome. */

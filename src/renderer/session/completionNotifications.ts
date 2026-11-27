@@ -4,7 +4,7 @@ import { SETTINGS_STORAGE_KEY, type TimelineEntry } from './helpers';
 import { t } from '../i18n';
 import { platform } from '../platform';
 import { permissionRequestSummary, type PendingRequest } from '@todex/protocol/todex';
-import { DESKTOP_BROWSER_ACTION_KIND, DESKTOP_BROWSER_GRANT_KIND, DESKTOP_BROWSER_HOST_KIND } from '@todex/protocol/agentDesktop';
+import { DESKTOP_BROWSER_ACTION_KIND, DESKTOP_BROWSER_GRANT_KIND, DESKTOP_BROWSER_HOST_KIND, DESKTOP_CAMERA_KIND } from '@todex/protocol/agentDesktop';
 import { AGENT_SSH_HOST_GRANT_KIND } from '@todex/protocol/ssh';
 
 const STORAGE_KEY = `${SETTINGS_STORAGE_KEY}.completionNotifications.v1`;
@@ -50,6 +50,7 @@ export function agentToolRequestTitle(request: PendingRequest, translate: typeof
     if (text(details.host)) return translate('agentSsh.hostGrantTitle', { host: text(details.host) });
   }
   if (kind === DESKTOP_BROWSER_GRANT_KIND && text(details.host)) return translate('agentBrowser.grantTitle', { host: text(details.host) });
+  if (kind === DESKTOP_CAMERA_KIND && text(details.host)) return translate('camera.grantTitle', { host: text(details.host) });
   if (kind === DESKTOP_BROWSER_ACTION_KIND && text(details.action)) return translate('agentBrowser.actionTitle', { action: text(details.action) });
   if (kind === DESKTOP_BROWSER_HOST_KIND && text(details.host)) {
     return translate(details.localNetwork === true ? 'agentBrowser.hostLocalTitle' : 'agentBrowser.hostTitle', { host: text(details.host) });

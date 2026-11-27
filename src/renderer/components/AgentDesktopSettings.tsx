@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { RiComputerLine, RiGlobalLine } from '@remixicon/react';
+import { RiCameraLine, RiComputerLine, RiGlobalLine } from '@remixicon/react';
 import { Chip } from '@/components/base/badges/chip';
 import { Button } from '@/components/base/buttons/button';
 import { Switch } from '@/components/base/switch/switch';
@@ -13,20 +13,21 @@ import { backendApi } from '../session/helpers';
 import { usePanelBackend, type PanelBackend } from '../session/panelBackend';
 import { BackendScopeRow } from './settings/BackendScopeRow';
 import { AgentBrowserSettings } from './AgentBrowserSettings';
+import { CameraSettings, cameraSummaryStatus } from './CameraSettings';
 import { ComputerUseSettings } from './ComputerUseSettings';
 import { SettingsCard, SettingsEntry, SettingsNote, SettingsRow, SettingsSubpage } from './settings/SettingsRows';
 import { toast } from './ui/toast-store';
 
 /** A tool with its own settings page; `null` is the settings overview. */
-export type AgentDesktopPage = 'browser' | 'computer';
+export type AgentDesktopPage = 'browser' | 'computer' | 'camera';
 
 type ChipColor = 'success' | 'warning' | 'default' | 'danger';
 const CHIP_COLORS = { success: 'lime', warning: 'yellow', default: 'neutral', danger: 'rose' } as const;
 
 /**
- * Agent desktop tools for the picked backend. The agent browser and
- * Computer Use both run on the backend's computer; this app only watches
- * them, so everything here is backend state.
+ * Agent desktop tools for the picked backend. The agent browser, Computer
+ * Use and the agent camera all run on the backend's computer; this app only
+ * watches them, so everything here is backend state.
  *
  * The overview keeps only the master switch and one entry per tool; each
  * tool's details live on its own page, which replaces the whole settings
@@ -90,7 +91,7 @@ function BackendDesktopSettings({ session, backend, page, onPageChange }: {
   }, [refresh]);
 
   // The person at the host is granting a permission: follow it closely.
-  const granting = settings?.computer?.permissionRequest !== undefined;
+  const granting = settings?.computer?.permissionRequest !== undefined || settings?.camera?.permissionRequest === true;
   useEffect(() => {
     if (!granting) return;
     const timer = setInterval(() => { void refresh(); }, 1500);
@@ -156,6 +157,13 @@ function BackendDesktopSettings({ session, backend, page, onPageChange }: {
         </SettingsSubpage>
       );
     }
+    if (page === 'camera') {
+      return (
+        <SettingsSubpage title={t('cameraSettings.title')} onBack={back}>
+          <CameraSettings api={api} settings={settings} saving={saving} onSave={work => { void save(work); }} />
+        </SettingsSubpage>
+      );
+    }
     return (
       <SettingsSubpage title={t('computerSettings.title')} onBack={back}>
         <ComputerUseSettings
@@ -171,6 +179,7 @@ function BackendDesktopSettings({ session, backend, page, onPageChange }: {
 
   const browser = settings ? browserSummary(settings, t) : undefined;
   const computer = settings ? computerSummary(settings, t) : undefined;
+  const camera = settings ? cameraSummary(settings, t) : undefined;
   // The settings section tab already names this page, so it has no heading.
   return (
     <div ref={overview} className="flex flex-col gap-6">
@@ -203,6 +212,15 @@ function BackendDesktopSettings({ session, backend, page, onPageChange }: {
           trailing={enabled && computer ? <SummaryChip summary={computer} /> : undefined}
           isDisabled={!enabled}
           onPress={() => onPageChange('computer')}
+        />
+        <SettingsEntry
+          data-agent-desktop-page="camera"
+          icon={RiCameraLine}
+          title={t('cameraSettings.title')}
+          description={t('agentDesktop.cameraEntry')}
+          trailing={enabled && camera ? <SummaryChip summary={camera} /> : undefined}
+          isDisabled={!enabled}
+          onPress={() => onPageChange('camera')}
         />
       </SettingsCard>
       {legacyData ? (
@@ -240,6 +258,17 @@ function computerSummary(settings: Settings, t: ReturnType<typeof useT>): Summar
   return computer.permissions.screen && computer.permissions.accessibility
     ? { label: t('agentDesktop.statusOn'), color: 'success' }
     : { label: t('agentDesktop.statusNeedsPermission'), color: 'warning' };
+}
+
+function cameraSummary(settings: Settings, t: ReturnType<typeof useT>): Summary {
+  switch (cameraSummaryStatus(settings)) {
+    case 'legacy': return { label: t('agentDesktop.statusUpdateBackend'), color: 'warning' };
+    case 'unsupported': return { label: t('agentDesktop.statusUnavailable'), color: 'default' };
+    case 'off': return { label: t('agentDesktop.statusOff'), color: 'default' };
+    case 'permission': return { label: t('agentDesktop.statusNeedsPermission'), color: 'warning' };
+    case 'noCamera': return { label: t('cameraSettings.statusNoCamera'), color: 'warning' };
+    case 'on': return { label: t('agentDesktop.statusOn'), color: 'success' };
+  }
 }
 
 function SummaryChip({ summary }: { summary: Summary }) {

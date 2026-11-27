@@ -388,6 +388,19 @@ test('settings: computer use engine', async ({ page, openDemo }) => {
   await expect(page).toHaveScreenshot('settings-computer-use-engine-light.png', { mask: volatile(page) });
 });
 
+// The agent camera's page: the switch, macOS's permission, the cameras the
+// backend's computer has (with one previewed) and the capture defaults.
+test('settings: agent camera', async ({ page, openDemo }) => {
+  await openDemo('light');
+  await page.getByRole('button', { name: '设置', exact: true }).click();
+  await settingsSection(page, 'Agent 桌面工具').click();
+  await page.getByRole('button', { name: /^摄像头/ }).click();
+  await page.getByRole('button', { name: '预览' }).first().click();
+  await expect(page.getByRole('img', { name: 'FaceTime 高清摄像头 的实时预览' })).toBeVisible();
+  await settle(page);
+  await expect(page).toHaveScreenshot('settings-agent-camera-light.png', { mask: volatile(page) });
+});
+
 // The agent browser's page: its engine, Chromium, the workspace profiles and
 // the sites it may always open.
 test('settings: agent browser', async ({ page, openDemo }) => {
@@ -614,6 +627,38 @@ test('settings: SSH approval per command', async ({ page, openDemo }) => {
   await settle(page);
   await expect(page).toHaveScreenshot('settings-ssh-approval-command-light.png', { mask: volatile(page) });
 });
+
+// `camera_start` asks on a card with a live preview, where the person picks
+// the camera and the capture (dynamic by default, or fixed); allowing starts
+// the recording view with its Stop button.
+for (const theme of ['light', 'dark'] as Theme[]) {
+  test(`camera approval card (${theme})`, async ({ page, openDemo }) => {
+    await openDemo(theme);
+    await page.getByRole('textbox', { name: '消息输入' }).fill('用摄像头看看我的电路板');
+    await page.keyboard.press('Enter');
+    const title = page.getByText('允许 Agent 使用 lumen-devbox 上的摄像头吗？', { exact: true });
+    await expect(title).toBeVisible();
+    const card = title.locator('xpath=ancestor::div[contains(@class, "rounded-2xl")][1]');
+    await expect(card.getByRole('img', { name: 'FaceTime 高清摄像头 的实时预览' })).toBeVisible();
+    await settle(page);
+    await expect(card).toHaveScreenshot(`camera-approval-${theme}.png`);
+    if (theme === 'light') {
+      await card.getByRole('radio', { name: '固定' }).click();
+      await expect(card.getByText('每秒帧数')).toBeVisible();
+      await settle(page);
+      await expect(card).toHaveScreenshot('camera-approval-fixed-light.png');
+      await card.getByRole('button', { name: '允许本次' }).click();
+      await expect(title).toHaveCount(0);
+      const recording = page.getByText('Agent 正在录制 FaceTime 高清摄像头');
+      await expect(recording).toBeVisible();
+      await expect(page.getByText('摄像头已开始录制，请在镜头前演示，完成后告诉我。')).toBeVisible();
+      await settle(page);
+      await expect(page).toHaveScreenshot('camera-recording-light.png', { mask: volatile(page) });
+      await page.getByRole('button', { name: '停止' }).click();
+      await expect(recording).toHaveCount(0);
+    }
+  });
+}
 
 // An agent's first connection to a host asks in the conversation, like the
 // browser grant; allowing it lets the command run.
