@@ -110,6 +110,13 @@ export function ComposerLoader({
   const gradientId = `bui-cl-${useId().replace(/[^a-zA-Z0-9]/g, "")}`;
   const clipRef = useRef<HTMLSpanElement>(null);
   const [box, setBox] = useState({ w: 640, h: 52 });
+  // Once faded out the light is unmounted: its blurred strokes otherwise
+  // keep animating (and repainting) behind opacity 0 for as long as the
+  // composer is on screen.
+  const [fadedOut, setFadedOut] = useState(!active);
+  useEffect(() => {
+    if (active) setFadedOut(false);
+  }, [active]);
 
   useEffect(() => {
     const el = clipRef.current;
@@ -222,8 +229,11 @@ export function ComposerLoader({
           transition: "opacity 450ms ease",
           mixBlendMode: blend,
         }}
+        onTransitionEnd={(event) => {
+          if (!active && event.target === event.currentTarget && event.propertyName === "opacity") setFadedOut(true);
+        }}
       >
-        <svg
+        {(active || !fadedOut) && <svg
           width="100%"
           height="100%"
           viewBox={`0 0 ${box.w} ${box.h}`}
@@ -246,7 +256,7 @@ export function ComposerLoader({
           {!bloomOnly && stroke(line * 3.2, 6, 0.8, band * 0.95, 10)}
           {/* crisp refraction line, tip leading */}
           {!bloomOnly && stroke(line, CRISP_BLUR, 1, band, 0)}
-        </svg>
+        </svg>}
       </span>
 
       <div className="relative">{children}</div>

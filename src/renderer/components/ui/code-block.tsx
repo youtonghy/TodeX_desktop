@@ -61,8 +61,13 @@ export function CopyCodeButton({ code, label: labelProp, copiedLabel: copiedProp
 const HIGHLIGHT_MAX_CHARS = 200_000;
 const HIGHLIGHT_MAX_LINES = 5_000;
 const HIGHLIGHT_MAX_LINE_CHARS = 10_000;
-/** A changing block (a streamed reply) is re-highlighted at most this often. */
+/** A changing block (a streamed reply) is re-highlighted at most this often… */
 const HIGHLIGHT_DEBOUNCE_MS = 150;
+/** …and, since each pass re-tokenizes the whole block, never sooner than this
+ * many times the last pass took, so a long streamed block spends at most a
+ * fifth of the main thread on highlighting. */
+const HIGHLIGHT_COST_FACTOR = 4;
+const HIGHLIGHT_MAX_INTERVAL_MS = 1500;
 
 function highlightable(code: string): boolean {
   if (code.length > HIGHLIGHT_MAX_CHARS) return false;
@@ -80,16 +85,22 @@ export function HighlightedCode({ code, language = 'plaintext', className }: { c
   const enabled = useMemo(() => highlightable(code), [code]);
   const [html, setHtml] = useState<{ key: string; language: string; code: string; html: string } | null>(null);
   const lastRunRef = useRef(0);
+  const intervalRef = useRef(HIGHLIGHT_DEBOUNCE_MS);
   useEffect(() => {
     if (!code || !enabled) return;
     let cancelled = false;
     const run = () => {
+      const started = performance.now();
       lastRunRef.current = Date.now();
       codeToHtml(code, { lang: language, themes: { light: 'github-light', dark: 'github-dark' }, defaultColor: false })
-        .then((result) => { if (!cancelled) setHtml({ key, language, code, html: result }); })
+        .then((result) => {
+          intervalRef.current = Math.min(HIGHLIGHT_MAX_INTERVAL_MS,
+            Math.max(HIGHLIGHT_DEBOUNCE_MS, (performance.now() - started) * HIGHLIGHT_COST_FACTOR));
+          if (!cancelled) setHtml({ key, language, code, html: result });
+        })
         .catch(() => { if (!cancelled) setHtml(null); });
     };
-    const wait = HIGHLIGHT_DEBOUNCE_MS - (Date.now() - lastRunRef.current);
+    const wait = intervalRef.current - (Date.now() - lastRunRef.current);
     if (wait <= 0) {
       run();
       return () => { cancelled = true; };

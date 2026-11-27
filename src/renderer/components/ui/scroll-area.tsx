@@ -64,6 +64,9 @@ export function ScrollArea({ children, className, contentClassName, surface = 'p
 function Edge({ side, opacity, color }: { side: 'top' | 'bottom'; opacity: number; color: string }) {
   const mask = `linear-gradient(to ${side === 'top' ? 'bottom' : 'top'}, black, transparent)`;
   const anchor = side === 'top' ? 'top-0' : 'bottom-0';
+  // At rest the edge is invisible: keep its backdrop blurs out of the
+  // compositor until the content scrolls under it.
+  if (opacity <= 0) return null;
   return (
     <div aria-hidden className={cx('pointer-events-none absolute inset-x-0 z-10', anchor)}>
       <div className={cx('absolute inset-x-0 h-6 backdrop-blur-[1px]', anchor)} style={{ opacity, maskImage: mask }} />
