@@ -6,6 +6,9 @@ export const DEBUG_LOG_PATH_KEY = 'todex.desktop.debug.logPath';
 export const DEBUG_LOG_FILE_NAME = 'todex-desktop-debug.log';
 export const CHROMIUM_LOG_FILE_NAME = 'todex-desktop-chromium.log';
 const MAX_LOG_FILE_BYTES = 20 * 1024 * 1024;
+/** Chromium's verbose log (`--v=1`, every process) grows without bound on
+ * its own; it is rotated at startup like the debug log. */
+const MAX_CHROMIUM_LOG_FILE_BYTES = 50 * 1024 * 1024;
 const MAX_RECORD_BYTES = 8 * 1024;
 const TRUNCATED_PREVIEW_BYTES = 1024;
 const MAX_STRING_LENGTH = 16 * 1024;
@@ -109,6 +112,12 @@ function serialize(value: unknown): string {
   }
 }
 
+/** Moves `path` to `<path>.previous` (replacing the older one) once it
+ * exceeds `maxBytes`. */
+function rotateLogFile(path: string, maxBytes: number): void {
+  if (existsSync(path) && statSync(path).size > maxBytes) renameSync(path, `${path}.previous`);
+}
+
 export class DebugLogger {
   readonly info: DebugLogInfo;
   private sequence = 0;
@@ -122,9 +131,9 @@ export class DebugLogger {
     if (!this.info.enabled) return;
     try {
       mkdirSync(dirname(this.info.logPath), { recursive: true });
-      if (existsSync(this.info.logPath) && statSync(this.info.logPath).size > MAX_LOG_FILE_BYTES) {
-        renameSync(this.info.logPath, `${this.info.logPath}.previous`);
-      }
+      rotateLogFile(this.info.logPath, MAX_LOG_FILE_BYTES);
+      // Before any child process opens it: the switches are added after start().
+      if (this.info.chromiumLogPath) rotateLogFile(this.info.chromiumLogPath, MAX_CHROMIUM_LOG_FILE_BYTES);
       this.bytesWritten = existsSync(this.info.logPath) ? statSync(this.info.logPath).size : 0;
       this.write('info', 'debug.logger.started', { configPath: this.info.configPath, logPath: this.info.logPath, chromiumLogPath: this.info.chromiumLogPath });
     } catch {
