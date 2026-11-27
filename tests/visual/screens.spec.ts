@@ -617,6 +617,23 @@ for (const theme of ['light', 'dark'] as Theme[]) {
   });
 }
 
+// An agent's `ssh_upload` shows in the Agent SSH tab as a transfer: both
+// ends, the size and the host-side SHA-256 check instead of a command line.
+for (const theme of ['light', 'dark'] as Theme[]) {
+  test(`agent SSH upload run (${theme})`, async ({ page, openDemo }) => {
+    await openDemo(theme);
+    await page.getByRole('textbox', { name: '消息输入' }).fill('把新编译的 lumen-server 上传到 gs-dev 服务器');
+    await page.keyboard.press('Enter');
+    await page.getByRole('button', { name: '本对话内允许' }).click();
+    await expect(page.getByText('新的 lumen-server 已上传并核对 SHA-256。', { exact: false })).toBeVisible();
+    const card = page.locator('article[data-ssh-exec]').filter({ has: page.locator('[data-ssh-transfer="upload"]') });
+    await expect(card.getByText('已在 gs-dev 上核对 SHA-256')).toBeVisible();
+    await settle(page);
+    // The start time follows the running clock; everything else is fixed.
+    await expect(card).toHaveScreenshot(`ssh-exec-upload-${theme}.png`, { mask: [card.getByText(/^\d\d:\d\d:\d\d$/)] });
+  });
+}
+
 // Terminal screen: host cards (name and user, no addresses), then a host's right-click menu.
 async function openTerminalHosts(page: Page, openDemo: (theme?: Theme, query?: string) => Promise<void>, theme: Theme) {
   await openDemo(theme);

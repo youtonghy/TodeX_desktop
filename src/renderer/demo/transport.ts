@@ -1591,7 +1591,32 @@ function playSshTurn(journal: Journal, turnId: string, text: string): void {
         demoPermissions.delete(permissionId);
         const allowed = outcome.startsWith('allow');
         appendDemoEvent(journal, turnId, 'permission.resolved', { permissionId, outcome });
+        // Allowed: the command runs (shown in the Agent SSH tab); a prompt
+        // that asks to upload then copies a build there with `ssh_upload`.
+        const uploads = /上传|upload/i.test(text);
+        const execId = `${turnId}-sshx`;
+        const uploadId = `${turnId}-sshx-upload`;
+        const uploadCall = `${turnId}-ssh-upload`;
+        const uploadArgs = { host, localPath: 'target/release/lumen-server', remotePath: '/opt/lumen/bin/lumen-server', overwrite: true };
+        const uploaded = {
+          direction: 'upload', localPath: '/Users/demo/lumen/target/release/lumen-server', remotePath: '/opt/lumen/bin/lumen-server',
+          sizeBytes: 24398200, sha256: 'fbbe71c1164d78bad444557641e8e77f4df93c74ddb1a2c422c586a0692eccf3',
+          remoteSha256: 'fbbe71c1164d78bad444557641e8e77f4df93c74ddb1a2c422c586a0692eccf3', verified: 'sha256', replaced: true,
+        };
+        const sshRuns: DemoStep[] = allowed ? [
+          [100, 'ssh.exec.started', { execId, host, command: args.command, turnId }],
+          [200, 'ssh.exec.output', { execId, stream: 'stdout', data: 'Filesystem  Size  Used Avail Use% Mounted on\n/dev/vda1    80G   31G   46G  41% /\n', turnId }],
+          [250, 'ssh.exec.completed', { execId, host, exitCode: 0, durationMs: 412, truncated: false, outputTruncated: false, turnId }],
+        ] : [];
+        const uploadRuns: DemoStep[] = allowed && uploads ? [
+          [400, 'tool.started', { toolCallId: uploadCall, toolName: 'mcp__todex_ssh__ssh_upload', arguments: uploadArgs }],
+          [450, 'ssh.exec.started', { execId: uploadId, host, command: `upload ${uploadArgs.localPath} → ${host}:${uploadArgs.remotePath}`, transfer: { direction: 'upload', localPath: uploaded.localPath, remotePath: uploaded.remotePath }, turnId }],
+          [700, 'ssh.exec.completed', { execId: uploadId, host, durationMs: 2140, truncated: false, outputTruncated: false, transfer: uploaded, turnId }],
+          [750, 'tool.completed', { toolCallId: uploadCall, toolName: 'mcp__todex_ssh__ssh_upload', arguments: uploadArgs, isError: false, result: JSON.stringify({ ...uploaded, host, durationMs: 2140 }) }],
+        ] : [];
         scheduleDemoTurn(journal, turnId, [
+          ...sshRuns,
+          ...uploadRuns,
           [300, 'tool.completed', {
             toolCallId, toolName, arguments: args, isError: !allowed,
             result: allowed
@@ -1600,7 +1625,7 @@ function playSshTurn(journal: Journal, turnId: string, text: string): void {
           }],
           [900, 'message.completed', {
             role: 'assistant',
-            message: { role: 'assistant', content: [{ type: 'text', text: allowed ? `${host} 的根分区已用 41%，还有 46G 可用。` : `你拒绝了连接 ${host}，我没有在服务器上执行任何命令。` }] },
+            message: { role: 'assistant', content: [{ type: 'text', text: allowed ? `${host} 的根分区已用 41%，还有 46G 可用。${uploads ? '新的 lumen-server 已上传并核对 SHA-256。' : ''}` : `你拒绝了连接 ${host}，我没有在服务器上执行任何命令。` }] },
             block: { category: 'assistant_final', id: `${turnId}-answer`, turnId, phase: 'completed' },
           }],
           [1000, 'turn.completed', { status: 'completed' }],

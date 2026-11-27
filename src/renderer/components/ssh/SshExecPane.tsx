@@ -1,5 +1,5 @@
 import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { RiArrowDownLine, RiDeleteBinLine, RiFileCopyLine, RiShieldKeyholeLine } from '@remixicon/react';
+import { RiArrowDownLine, RiDeleteBinLine, RiDownload2Line, RiFileCopyLine, RiShieldCheckLine, RiShieldKeyholeLine, RiUpload2Line } from '@remixicon/react';
 import {
   isSshFailureKind,
   isSshLoginPending,
@@ -10,6 +10,7 @@ import {
   type SshExecLogin,
   type SshExecRedactedValue,
   type SshExecRun,
+  type SshExecTransfer,
 } from '@todex/protocol/ssh';
 import { SSH_FAILURE_HINT_KEYS, SSH_FAILURE_LABEL_KEYS } from './sshShared';
 import {
@@ -24,6 +25,7 @@ import {
   useSshExecClear,
   visibleSshExecs,
 } from '../../session/sshExecTabs';
+import { formatBytes } from '../../session/helpers';
 import { t, useT, type MessageKey } from '../../i18n';
 import { Chip } from '@/components/base/badges/chip';
 import { Button } from '@/components/base/buttons/button';
@@ -63,6 +65,7 @@ function runStatus(run: SshExecRun): { label: string; color: ChipColor; hint: st
     const kind = isSshFailureKind(run.failure) ? run.failure : 'other';
     return { label: t(SSH_FAILURE_LABEL_KEYS[kind]), color: 'yellow', hint: t(SSH_FAILURE_HINT_KEYS[kind]) };
   }
+  if (run.transfer) return { label: t(run.transfer.direction === 'upload' ? 'sshExec.transfer.uploaded' : 'sshExec.transfer.downloaded'), color: 'lime', hint: '' };
   if (run.exitCode === undefined) return { label: t('sshExec.completed'), color: 'lime', hint: '' };
   return { label: t('sshExec.exitCode', { code: run.exitCode }), color: run.exitCode === 0 ? 'lime' : 'rose', hint: '' };
 }
@@ -132,6 +135,47 @@ function SshExecRedactionsLine({ redactions }: { redactions: AgentOutputRedactio
   );
 }
 
+/** What an `ssh_upload` / `ssh_download` copied, in place of a command line:
+ * both ends, then (once done) the size and how the copy was checked. */
+function SshExecTransferBlock({ run, transfer }: { run: SshExecRun; transfer: SshExecTransfer }) {
+  const t = useT();
+  const upload = transfer.direction === 'upload';
+  const local = { place: t('sshExec.transfer.thisMachine'), path: transfer.localPath };
+  const remote = { place: run.host, path: transfer.remotePath };
+  const rows: Array<[MessageKey, { place: string; path: string }]> = [['sshExec.transfer.from', upload ? local : remote], ['sshExec.transfer.to', upload ? remote : local]];
+  const done = run.status === 'completed' && transfer.sizeBytes !== undefined;
+  const Icon = upload ? RiUpload2Line : RiDownload2Line;
+  return (
+    <div data-ssh-transfer={transfer.direction} className="mx-3 mt-2 rounded-xl bg-background-secondary-default px-2.5 py-2">
+      <div className="flex items-start gap-2">
+        <Icon aria-label={t(upload ? 'sshExec.transfer.upload' : 'sshExec.transfer.download')} className="mt-0.5 size-3.5 shrink-0 text-foreground-icon-secondary" />
+        <dl className="m-0 grid min-w-0 flex-1 grid-cols-[auto_minmax(0,1fr)] gap-x-2 gap-y-0.5 text-caption-1-regular">
+          {rows.map(([label, value]) => (
+            <Fragment key={label}>
+              <dt className="text-text-tertiary">{t(label)}</dt>
+              <dd className="m-0 min-w-0">
+                <span className="me-1.5 text-text-secondary">{value.place}</span>
+                <code className="font-mono break-all text-text-primary" dir="ltr">{value.path}</code>
+              </dd>
+            </Fragment>
+          ))}
+        </dl>
+      </div>
+      {done ? (
+        <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 ps-5.5 text-caption-1-regular text-text-secondary">
+          <span className="tabular-nums">{transfer.sizeBytes === 0 ? '0 B' : formatBytes(transfer.sizeBytes)}</span>
+          {transfer.sha256 ? <code className="font-mono text-text-tertiary" title={transfer.sha256}>sha256 {transfer.sha256.slice(0, 12)}…</code> : null}
+          <span className="flex items-center gap-1">
+            <RiShieldCheckLine aria-hidden className="size-3.5 shrink-0 text-foreground-icon-tertiary" />
+            {t(transfer.remoteSha256 ? 'sshExec.transfer.verifiedHash' : 'sshExec.transfer.verifiedSize', { host: run.host })}
+          </span>
+          {transfer.replaced ? <span>{t('sshExec.transfer.replaced')}</span> : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 /** One call. Memoized on the run object, which the runtime only replaces when
  * that call changes, so an output batch re-renders just its own card. */
 const SshExecCard = memo(function SshExecCard({ run }: { run: SshExecRun }) {
@@ -162,8 +206,9 @@ const SshExecCard = memo(function SshExecCard({ run }: { run: SshExecRun }) {
   const border = running
     ? 'border-accent-300'
     : failed ? 'border-border-error-default' : 'border-border-button-default';
-  // A connection failure without output shows only its hint.
-  const showOutput = Boolean(output.text) || running || !status.hint;
+  // A connection failure without output shows only its hint; a transfer
+  // shows output only for the reason it failed.
+  const showOutput = run.transfer ? Boolean(output.text) : Boolean(output.text) || running || !status.hint;
   return (
     <article data-ssh-exec={run.id} data-failed={failed || undefined} className={cx('mb-2.5 overflow-hidden rounded-2xl border bg-background-primary-default shadow-card', border)}>
       <div className="flex items-center gap-2 px-3 pt-2.5 text-caption-1-regular">
@@ -178,6 +223,7 @@ const SshExecCard = memo(function SshExecCard({ run }: { run: SshExecRun }) {
           {status.label}
         </Chip>
       </div>
+      {run.transfer ? <SshExecTransferBlock run={run} transfer={run.transfer} /> : (
       <button
         type="button" aria-expanded={commandOpen} title={run.command}
         className="mx-3 mt-2 flex w-[calc(100%-1.5rem)] cursor-pointer items-start gap-1.5 rounded-xl bg-background-secondary-default px-2 py-1.5 text-start font-mono text-caption-1-regular text-text-primary transition-colors duration-150 ease outline-none hover:bg-background-secondary-hover focus-visible:ring-2 focus-visible:ring-border-focus-ring"
@@ -186,6 +232,7 @@ const SshExecCard = memo(function SshExecCard({ run }: { run: SshExecRun }) {
         <span aria-hidden="true" className="select-none text-text-accent">$</span>
         <span className={cx('min-w-0 flex-1 whitespace-pre-wrap break-all', !commandOpen && 'line-clamp-2')}>{run.command || '…'}</span>
       </button>
+      )}
       {run.cwd ? (
         <div className="mx-3.5 mt-1 truncate text-caption-2-regular text-text-tertiary" title={run.cwd}>
           {t('sshExec.cwd')} <code className="font-mono">{run.cwd}</code>
@@ -233,7 +280,9 @@ const SshExecCard = memo(function SshExecCard({ run }: { run: SshExecRun }) {
             {expanded ? t('sshExec.collapse') : t('sshExec.expand', { lines: output.lines })}
           </LinkButton>
         ) : null}
-        {run.command ? <LinkButton size="xs" onClick={() => copyText(run.command, t('sshExec.commandCopied'))}>{t('sshExec.copyCommand')}</LinkButton> : null}
+        {run.transfer?.sha256 ? (
+          <LinkButton size="xs" onClick={() => copyText(run.transfer?.sha256 ?? '', t('sshExec.transfer.hashCopied'))}>{t('sshExec.transfer.copyHash')}</LinkButton>
+        ) : run.command && !run.transfer ? <LinkButton size="xs" onClick={() => copyText(run.command, t('sshExec.commandCopied'))}>{t('sshExec.copyCommand')}</LinkButton> : null}
         {!running && output.text ? <LinkButton size="xs" onClick={() => copyText(output.text, t('sshExec.outputCopied'))}>{t('sshExec.copyOutput')}</LinkButton> : null}
         {revealed ? (
           <LinkButton size="xs" onClick={() => { setCoverRound(round => round + 1); setRevealed(false); }}>{t('sshExec.coverAgain')}</LinkButton>
