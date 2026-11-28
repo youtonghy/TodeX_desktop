@@ -213,7 +213,7 @@ export function HomePanel({ session, onOpenConversation }: Props) {
     [session.conversations],
   );
   const { running, waiting } = useMemo(() => {
-    const statusSession = { activeConversationId: session.activeConversationId, turnIds: session.turnIds, backgroundWaits };
+    const statusSession = { activeConversationId: session.activeConversationId, turnIds: session.turnIds, backgroundWaits, readSyncBackends: session.readSyncBackends };
     const asking = new Set(session.pendingRequests.map((request) => request.data.conversationId));
     const running: ConversationRecord[] = [];
     const waiting: { conversation: ConversationRecord; reason: string }[] = [];
@@ -229,7 +229,7 @@ export function HomePanel({ session, onOpenConversation }: Props) {
     }
     const byRecent = (a: ConversationRecord, b: ConversationRecord) => b.updatedAt - a.updatedAt;
     return { running: running.sort(byRecent), waiting: waiting.sort((a, b) => byRecent(a.conversation, b.conversation)) };
-  }, [conversations, latestById, backgroundWaits, session.activeConversationId, session.turnIds, session.pendingRequests, t]);
+  }, [conversations, latestById, backgroundWaits, session.activeConversationId, session.turnIds, session.readSyncBackends, session.pendingRequests, t]);
 
   // --- Today -----------------------------------------------------------------
   const today = dayKey(new Date(now));

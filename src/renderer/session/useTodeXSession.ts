@@ -66,6 +66,7 @@ import { startSocketVerification, type SocketVerification } from '@todex/protoco
 import { HISTORY_ENCRYPTION_UPDATED, historyRetryPrompt, historyRetryRequest, historyRetrySequence } from '@todex/protocol/historyEncryption';
 import { historyErrorMessage, useHistoryEncryption, type HistoryEncryptionSession } from './useHistoryEncryption';
 import { MESH_UPDATED_EVENT, useMeshGroups, type MeshGroupsSession, type MeshLink } from './useMeshGroups';
+import { CONVERSATION_READ_EVENT, ReadReporter, conversationReadFrame, parseConversationReadPosition, readSequenceOf } from '@todex/protocol/readPositions';
 import { HISTORY_KEY_REQUIRED, HISTORY_READ_ONLY } from '@todex/protocol/historyEncryption';
 import { retryWithDelays } from '@todex/protocol/retry';
 import { probeBackendConnection, nextReconnectDelayMs, inspectServerUrl, credentialMatchesOrigin } from '@todex/protocol/connectionProbe';
@@ -519,6 +520,18 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const [noneBackendSelection, setNoneBackendSelection] = useState('');
   const noWorkspaceBackendIdRef = useRef('');
   const [linkStatusByBackend, setLinkStatusByBackend] = useState<Record<string, BackendLinkStatus>>({});
+  /** Backends whose `/v2/version` reports `readSync` (TodeX_backend
+   * docs/API.md "已读位置"): their conversations share one read position
+   * across the owner's devices. Kept while a backend is unreachable, so its
+   * status dots do not fall back to this device's own read times. */
+  const [readSyncBackends, setReadSyncBackends] = useState<Record<string, boolean>>({});
+  const readSyncBackendsRef = useRef(readSyncBackends);
+  readSyncBackendsRef.current = readSyncBackends;
+  /** Reports this device's read positions, one reporter per backend. */
+  const readReportersRef = useRef(new Map<string, ReadReporter>());
+  useEffect(() => () => {
+    for (const reporter of readReportersRef.current.values()) reporter.dispose();
+  }, []);
   const patchLinkStatus = useCallback((backendId: string, patch: Partial<BackendLinkStatus> | ((current: BackendLinkStatus) => Partial<BackendLinkStatus>)) => {
     setLinkStatusByBackend((current) => {
       const previous = current[backendId] ?? IDLE_BACKEND_LINK;
@@ -549,6 +562,20 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     const conversation = stores.conversations.get().find((item) => item.v2ConversationId === conversationId || item.id === conversationId);
     const workspace = stores.workspaces.get().find((item) => item.id === conversation?.workspaceId);
     return ownerBackendId(conversation, workspace, noWorkspaceBackendIdRef.current);
+  }
+  function readReporterFor(backendId: string): ReadReporter {
+    let reporter = readReportersRef.current.get(backendId);
+    if (!reporter) {
+      reporter = new ReadReporter({
+        send: (conversationId, sequence) => sendProtocolCommand(
+          { id: createRequestId('read'), ...conversationReadFrame(conversationId, sequence) }, 15_000, backendId,
+        ),
+        // Best effort: the next mark sends the position again.
+        onError: (error) => console.warn('conversation.read failed', error instanceof Error ? error.message : error),
+      });
+      readReportersRef.current.set(backendId, reporter);
+    }
+    return reporter;
   }
   /** Backend a protocol frame is for, read from what it addresses: a
    * conversation, a codex session, a workspace or a terminal. Anything else
@@ -717,6 +744,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const [v2ConversationsByBackend, setV2ConversationsByBackend] = useState<Record<string, ConversationManifest[]>>({});
   const v2Conversations = useMemo(() => Object.values(v2ConversationsByBackend).flat(), [v2ConversationsByBackend]);
   const setBackendManifests = useCallback((backendId: string, manifests: ConversationManifest[]) => {
+    const reporter = readReportersRef.current.get(backendId);
+    if (reporter) for (const manifest of manifests) reporter.learn(manifest.id, readSequenceOf(manifest.readSequence));
     setV2ConversationsByBackend((current) => (current[backendId] === manifests ? current : { ...current, [backendId]: manifests }));
   }, []);
   /** A complete conversation list of a backend: cached history of the
@@ -1472,6 +1501,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
                   lastReadAt: typeof conversation.lastReadAt === 'number' && Number.isFinite(conversation.lastReadAt)
                     ? conversation.lastReadAt
                     : Date.now(),
+                  readSequence: readSequenceOf(conversation.readSequence),
                   labelColor: normalizeBackendLabelColor(conversation.labelColor),
                 };
               })
@@ -2788,6 +2818,28 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     });
   }, []);
 
+  /** Reports what this device shows of a conversation as its shared read
+   * position (TodeX_backend docs/API.md "已读位置"): the newest sequence the
+   * runtime applied. The record moves at once so the dot clears before the
+   * backend answers. Private conversations and backends without `readSync`
+   * keep only the local lastReadAt. */
+  const reportConversationRead = useCallback((conversationId: string) => {
+    const record = stores.conversations.get().find((item) => item.id === conversationId);
+    if (!record?.v2ConversationId || isPrivateConversation(record)) return;
+    const backendId = backendIdForConversation(record.id);
+    if (!readSyncBackendsRef.current[backendId]) return;
+    const applied = stores.runtime.get()[conversationId]?.appliedSequence ?? 0;
+    if (applied <= 0 || (record.readSequence ?? -1) >= applied) return;
+    readReporterFor(backendId).mark(record.v2ConversationId, applied);
+    setConversations((current) => {
+      const index = current.findIndex((item) => item.id === conversationId);
+      if (index < 0 || (current[index].readSequence ?? -1) >= applied) return current;
+      const next = [...current];
+      next[index] = { ...next[index], readSequence: applied };
+      return next;
+    });
+  }, []);
+
   const setConversationLabelColor = useCallback((conversationId: string, labelColor?: string) => {
     updateConversation(conversationId, { labelColor: normalizeBackendLabelColor(labelColor) });
   }, [updateConversation]);
@@ -2801,7 +2853,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   // streamed delta moves its row's time, and a render-time selector re-ran
   // the whole app for every delta. Row changes re-mark at most every
   // READ_MARK_INTERVAL_MS (the trailing one lands too); record changes, such
-  // as a turn completing, re-mark at once so no unread dot flashes up.
+  // as a turn completing, re-mark at once so no unread dot flashes up. On a
+  // backend with readSync the mark is also reported as the shared read
+  // position; its version arriving (readSyncBackends) reports what is shown.
   useEffect(() => {
     if (!activeConversationId) return;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -2820,6 +2874,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       if (document.visibilityState !== 'visible' || !document.hasFocus()) return;
       lastMarkAt = Date.now();
       markConversationRead(activeConversationId, attentionAt() || Date.now());
+      reportConversationRead(activeConversationId);
     };
     const scheduleMark = () => {
       if (timer !== undefined) return;
@@ -2839,7 +2894,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       window.removeEventListener('focus', markActiveRead);
       document.removeEventListener('visibilitychange', markActiveRead);
     };
-  }, [activeConversationId, markConversationRead, stores]);
+  }, [activeConversationId, markConversationRead, readSyncBackends, reportConversationRead, stores]);
 
 
 
@@ -3231,7 +3286,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         if (endedConversationId) link.subscriptions.delete(endedConversationId);
         // A busy conversation's prompt may still join the backend queue;
         // sendV2Prompt reports the conflict itself when it cannot.
-        const callerReports = code === 'CONFLICT' && link.commands.typeOf(requestId) === 'conversation.prompt';
+        // Read reports are best effort and say so themselves.
+        const callerReports = (code === 'CONFLICT' && link.commands.typeOf(requestId) === 'conversation.prompt')
+          || link.commands.typeOf(requestId) === CONVERSATION_READ_EVENT;
         // No recipient to encrypt the write for: register this device again.
         if (code === HISTORY_KEY_REQUIRED) void historyEncryptionRef.current?.keyRequired(backendId);
         link.commands.reject(requestId, message, code);
@@ -3249,6 +3306,21 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       // A group node's standby link: its daemon's events reach this client
       // over IPC, where its records are filed.
       if (isStandbyProfile(profileFor(backendId))) return;
+      if (messageType === CONVERSATION_READ_EVENT) {
+        // Another device (or this one) saw the conversation up to here.
+        const position = parseConversationReadPosition(parsed.payload);
+        if (!position) return;
+        readReportersRef.current.get(backendId)?.learn(position.conversationId, position.readSequence);
+        setConversations((current) => {
+          const index = current.findIndex((item) => item.v2ConversationId === position.conversationId
+            && backendIdForConversation(item.id) === backendId);
+          if (index < 0 || (current[index].readSequence ?? -1) >= position.readSequence) return current;
+          const next = [...current];
+          next[index] = { ...next[index], readSequence: position.readSequence };
+          return next;
+        });
+        return;
+      }
       if (messageType === 'agentBrowser.frame') {
         const frame = parsed.payload as AgentBrowserFrame | undefined;
         if (frame?.conversationId) agentBrowserWatchersRef.current.get(frame.conversationId)?.forEach(listener => listener(frame));
@@ -3615,6 +3687,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       if (!response.ok) throw await readBackendError(response, '/v2/version');
       const json = normalizeServerVersion((await response.json()) as Record<string, unknown>);
       patchLinkStatus(backendId, { serverVersion: json });
+      const readSync = json.readSync === 1;
+      setReadSyncBackends((current) => (Boolean(current[backendId]) === readSync ? current : { ...current, [backendId]: readSync }));
       terminalSnapshotRef.current.set(backendId, (json.terminalSnapshot ?? 0) >= 1);
       noteTerminalReplayRef.current(backendId, (json.terminalReplay ?? 0) >= 1);
     } catch (error) {
@@ -4708,6 +4782,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     closeSocket(id, true);
     linksRef.current.get(id)?.commands.dispose();
     linksRef.current.delete(id);
+    readReportersRef.current.get(id)?.dispose();
+    readReportersRef.current.delete(id);
     configureKanbanSync(id, null);
     setLinkStatusByBackend(({ [id]: _removed, ...rest }) => rest);
     setV2ConversationsByBackend(({ [id]: _removed, ...rest }) => rest);
@@ -7599,6 +7675,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     activeBackendConnectionId,
     /** Connection status of every backend, by profile id. */
     backendLinkStatus: linkStatusByBackend,
+    /** Backends sharing read positions across devices (`readSync`). */
+    readSyncBackends,
     /** Device groups this client is in (TodeX_backend docs/mesh-v1.md). */
     meshGroups,
     /** Backend of the None workspace in view (the sidebar lists None once

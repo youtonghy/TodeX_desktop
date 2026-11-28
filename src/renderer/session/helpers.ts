@@ -44,6 +44,8 @@ export function isStaleCancelResult(result: Record<string, unknown>): boolean {
   return result.cancelled === false;
 }
 import { parseConversationSchedule, providerDisplayName } from '@todex/protocol/v2';
+import { hasUnseenEvents, readSequenceOf } from '@todex/protocol/readPositions';
+import { conversationAttention } from './conversationAttention';
 import { ConnectionError, ConnectionErrorType, type ConnectionFailureCode } from '@todex/protocol/connectionError';
 import { matchesMessage, t, type MessageKey } from '../i18n';
 
@@ -120,6 +122,9 @@ export type ServerVersion = {
   mesh?: number;
   /** `true` when, in a group, the backend can be a hub (docs/mesh-v1.md "Hub"). */
   meshHub?: boolean;
+  /** `1` when conversations carry the owner's shared read position
+   * (`readSequence`, TodeX_backend docs/API.md "已读位置"). */
+  readSync?: number;
   /** Where the backend runs; `host` on backends that predate it. */
   deployment: BackendDeployment;
   /** Host ↔ backend folder pairs; empty when the backend publishes none. */
@@ -237,10 +242,17 @@ export type ConversationRecord = {
    * exists only once opened from the parent's Agent calls tab, and lives as
    * long as its parent is listed. */
   parentConversationId?: string;
+  /** Newest journal sequence known here: the manifest's `lastSequence` or
+   * what this client applied, whichever is later. */
   lastSequence?: number;
   lastCompletedAt?: number;
   /** Last time the conversation was visible in a focused window. */
   lastReadAt?: number;
+  /** Newest sequence any of the owner's devices has seen (manifest
+   * `readSequence`, the `conversation.read` event, or this device's own
+   * report): shared across devices on a backend with `readSync`. Only moves
+   * forward; absent when the conversation predates read sync. */
+  readSequence?: number;
   /** User-picked tag color (hex); persists independently of read state. */
   labelColor?: string;
   createdAt: number;
@@ -569,9 +581,11 @@ export type ConversationStatus = {
 };
 
 /** `backgroundWaits` marks conversations whose turn ended while the agent
- * still waits on background tasks to report back: they read as working too. */
+ * still waits on background tasks to report back: they read as working too.
+ * `readSyncBackends` names the backends whose `/v2/version` reports
+ * `readSync`. */
 export function getConversationStatus(
-  session: { activeConversationId: string; turnIds: Record<string, string>; backgroundWaits?: Record<string, boolean> },
+  session: { activeConversationId: string; turnIds: Record<string, string>; backgroundWaits?: Record<string, boolean>; readSyncBackends?: Readonly<Record<string, boolean>> },
   conversation: ConversationRecord,
   latestEntry?: TimelineEntry,
   latestIncomingAt?: number,
@@ -579,21 +593,17 @@ export function getConversationStatus(
   if (isConversationHighlighted(conversation, session.activeConversationId, session.turnIds) || session.backgroundWaits?.[conversation.id]) {
     return { kind: 'working', color: 'bg-chart-7', border: 'border-chart-7', label: t('sidebar.statusWorking') };
   }
-  // The dot is an attention marker: it clears once the conversation has been
-  // seen (lastReadAt), regardless of which state produced it.
-  const lastReadAt = conversation.lastReadAt ?? 0;
-  const latestEntryUnread = Boolean(latestEntry && latestEntry.at > lastReadAt);
-  if (
-    (latestEntry?.marker === 'error' && latestEntryUnread) ||
-    (/error|failed|异常|失败/i.test(conversation.nativeStatus || '') && conversation.updatedAt > lastReadAt) ||
-    (/error|failed|异常|失败/i.test(latestEntry?.title || '') && latestEntryUnread)
-  ) {
+  // Shared read position (TodeX_backend docs/API.md "已读位置"): a reply or
+  // failure seen on any of the owner's devices is seen here too. A
+  // conversation without a position predates read sync and counts as read.
+  const sharedRead = conversation.readSequence !== undefined
+    || Boolean(conversation.backendConnectionId && session.readSyncBackends?.[conversation.backendConnectionId]);
+  const attention = conversationAttention(conversation, latestEntry, latestIncomingAt,
+    sharedRead ? hasUnseenEvents(conversation.lastSequence, conversation.readSequence) : undefined);
+  if (attention === 'issue') {
     return { kind: 'issue', color: 'bg-chart-8', border: 'border-chart-8', label: t('sidebar.statusIssue') };
   }
-  // Timeline rows of an idle background conversation are released from
-  // memory, so the persisted turn completion keeps a reply unread until seen.
-  const incomingAt = Math.max(latestIncomingAt ?? (latestEntry?.kind === 'incoming' ? latestEntry.at : 0), conversation.lastCompletedAt ?? 0);
-  if (incomingAt > lastReadAt) {
+  if (attention === 'unread') {
     return { kind: 'unread', color: 'bg-accent-500', border: 'border-accent-500', label: t('sidebar.statusUnread') };
   }
   return null;
@@ -2020,6 +2030,7 @@ export function conversationFromManifest(
     v2ConversationId: manifest.id,
     ...(manifest.parentConversationId ? { parentConversationId: manifest.parentConversationId } : {}),
     lastSequence: manifest.lastSequence,
+    ...(readSequenceOf(manifest.readSequence) !== undefined ? { readSequence: manifest.readSequence } : {}),
     createdAt,
     updatedAt,
   };
@@ -2043,6 +2054,12 @@ export function sameConversationSchedule(left?: ConversationSchedule, right?: Co
 export function activeConversationSchedule(conversation: Pick<ConversationRecord, 'schedule'> | null | undefined): ConversationSchedule | undefined {
   const schedule = conversation?.schedule;
   return schedule && !schedule.interrupted ? schedule : undefined;
+}
+
+/** The later of two read positions: a shared read position never moves back. */
+export function laterReadSequence(current: number | undefined, next: number | undefined): number | undefined {
+  if (next === undefined) return current;
+  return current === undefined || next > current ? next : current;
 }
 
 export function mergeManifestConversations(
@@ -2103,6 +2120,7 @@ export function mergeManifestConversations(
       const manifestUpdatedAt = Date.parse(manifest.updatedAt) || 0;
       const updatedAt = Math.max(existing.updatedAt, manifestUpdatedAt);
       const lastSequence = Math.max(existing.lastSequence ?? 0, manifest.lastSequence ?? 0);
+      const readSequence = laterReadSequence(existing.readSequence, readSequenceOf(manifest.readSequence));
       // An encrypted title this device has not read yet keeps the local one
       // (e.g. a rename just made here) instead of the provider name.
       const title = manifest.title || (manifest.titleEnc && existing.title ? existing.title : providerDisplayName(manifest.provider));
@@ -2122,6 +2140,7 @@ export function mergeManifestConversations(
         && existing.workspaceId === workspace.id
         && (!manifest.scratchWorkspace || existing.workspacePath === manifest.workspace)
         && existing.lastSequence === lastSequence
+        && existing.readSequence === readSequence
         && existing.updatedAt === updatedAt
         && existing.backendConnectionId === backendConnectionId;
       if (!same) {
@@ -2140,6 +2159,7 @@ export function mergeManifestConversations(
           workspaceId: workspace.id,
           ...(manifest.scratchWorkspace ? { workspacePath: manifest.workspace } : {}),
           lastSequence,
+          ...(readSequence !== undefined ? { readSequence } : {}),
           updatedAt,
           backendConnectionId,
         };

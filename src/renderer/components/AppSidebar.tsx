@@ -733,8 +733,8 @@ export function AppSidebar({
     return map;
   }, sameRecordValues);
   const statusSession = useMemo(
-    () => ({ activeConversationId: session.activeConversationId, turnIds: session.turnIds, backgroundWaits }),
-    [session.activeConversationId, session.turnIds, backgroundWaits],
+    () => ({ activeConversationId: session.activeConversationId, turnIds: session.turnIds, backgroundWaits, readSyncBackends: session.readSyncBackends }),
+    [session.activeConversationId, session.turnIds, backgroundWaits, session.readSyncBackends],
   );
 
   // A workspace surfaces its most urgent conversation status: a running turn
