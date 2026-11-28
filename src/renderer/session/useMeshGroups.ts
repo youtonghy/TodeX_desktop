@@ -66,14 +66,19 @@ import {
   mergeNodeState,
   meshDeviceSecretKey,
   meshHistoryKeyId,
-  nodeInfosOf,
   normalizeStoredMeshGroups,
   rememberUrl,
   startLeave,
-  storedChain,
   type MeshBeacon,
   type StoredMeshGroup,
 } from './meshGroups';
+import { createMeshVerifier } from '@todex/protocol/meshVerify';
+
+// Each render, reachability check, settings view and sync asks for the same
+// verified roster chain and node infos; checking their signatures in plain
+// JavaScript every time cost 100+ ms per render with a group of five nodes.
+// Each set of documents is verified once (`createMeshVerifier`).
+const { storedChain, nodeInfosOf, verifiers: meshVerifiers } = createMeshVerifier();
 
 /** This device's group preferences: `relay` off never relays. */
 const MESH_PREFS_STORAGE_KEY = `${platform.storagePrefix}.meshPrefs.v1`;
@@ -345,7 +350,7 @@ export function useMeshGroups({
         live.current.updateProfile(profileId, { mesh: { groupId: stored.groupId, nodeId: state.nodeId } });
       }
       const remote = state.groups.find((item) => item.groupId === stored.groupId);
-      const outcome = mergeNodeState(stored, { nodeId: state.nodeId, nodeInfo: state.nodeInfo, chain: remote?.chain, nodeInfos: remote?.nodeInfos });
+      const outcome = mergeNodeState(stored, { nodeId: state.nodeId, nodeInfo: state.nodeInfo, chain: remote?.chain, nodeInfos: remote?.nodeInfos }, meshVerifiers);
       let group = outcome.group;
       const remembered = profile.mesh.via || !isMeshAddress(profile.serverUrl) ? null : rememberUrl(group, state.nodeId, profile.serverUrl);
       if (remembered) group = remembered;
