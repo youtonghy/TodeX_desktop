@@ -297,17 +297,29 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
     setActiveId(item.id);
     onTabChange(type);
   };
+  // The tabs and the active one as they are now, for picking the tab that
+  // takes over a closed active one. Kept current on each close too, so
+  // several closes in one event (queued close requests) see each other.
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
+  const activeIdRef = useRef(activeId);
+  activeIdRef.current = activeId;
+  // The replacement is chosen here, not inside setItems' updater: an updater
+  // runs during render (twice under StrictMode), where setting the active tab
+  // and App's tab is a setState-in-render error.
   const removeTab = useCallback((id: string) => {
-    setItems((current) => {
-      const next = current.filter((item) => item.id !== id);
-      if (id === activeId) {
-        const replacement = next[Math.max(0, current.findIndex((item) => item.id === id) - 1)] ?? next[0];
-        setActiveId(replacement?.id ?? '');
-        if (replacement) onTabChange(replacement.type);
-      }
-      return next;
-    });
-  }, [activeId, onTabChange]);
+    const current = itemsRef.current;
+    const index = current.findIndex((item) => item.id === id);
+    if (index < 0) return;
+    const next = current.filter((item) => item.id !== id);
+    itemsRef.current = next;
+    setItems((items) => items.filter((item) => item.id !== id));
+    if (id !== activeIdRef.current) return;
+    const replacement = next[Math.max(0, index - 1)] ?? next[0];
+    activeIdRef.current = replacement?.id ?? '';
+    setActiveId(activeIdRef.current);
+    if (replacement) onTabChange(replacement.type);
+  }, [onTabChange]);
 
   // Closing a terminal tab that holds a live PTY stops the backend PTY
   // instead of leaving it running in the background; closing a remote files
