@@ -3257,7 +3257,7 @@ export const ja: Messages = {
   'chat.providerNotice.withSubject': '{notice}：{subject}',
   'sess.smartModeUnsupported': '現在の Agent はスマート作業モードに対応していません。別の作業モードを選んでください。',
   'smart.title': 'スマート作業モード',
-  'smart.description': 'Claude Code 向け：計画用モデルで計画を立て、承認後は実行用モデルに自動で切り替えて自動承認で実行します。入力欄の作業モードで「スマート」を選ぶと使えます。',
+  'smart.description': 'Claude Code 向け：計画用モデルで計画を立て、承認後は実行用モデルに自動で切り替えて自動承認で実行します。入力欄の作業モードで「スマート」を選ぶと使えます。選択は 1 回の実行に限り有効で、実行が終わると「実行」モードに戻ります。',
   'smart.planStage': '計画段階',
   'smart.executeStage': '実行段階',
   'smart.model': 'モデル',

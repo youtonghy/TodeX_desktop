@@ -827,6 +827,22 @@ test('smart conversation re-entering planning', async ({ page, openDemo }) => {
   await expect(page).toHaveScreenshot('smart-plan-reentered-light.png', { mask: volatile(page) });
 });
 
+// Smart is one-shot: approving that plan executes it in the same turn, and
+// once the turn completes the composer is back on Implement.
+test('smart conversation returns to Implement after executing', async ({ page, openDemo }) => {
+  await openDemo('light');
+  await page.getByText('design-tokens', { exact: true }).click();
+  await page.getByText('拆分主题构建脚本').first().click();
+  await page.getByRole('textbox', { name: '消息输入' }).fill('先给导出加进度提示出个计划');
+  await page.keyboard.press('Enter');
+  const modeButton = page.getByRole('button', { name: /选择工作模式/ });
+  await expect(modeButton).toContainText('智能 · 计划中');
+  await page.getByRole('button', { name: '批准计划' }).click();
+  await expect(page.getByText('计划已批准，开始实施第 1 步。')).toBeVisible();
+  await expect(modeButton).not.toContainText('智能');
+  await expect(modeButton).toContainText('执行');
+});
+
 // A plan handed in for approval (Claude ExitPlanMode as a plan review): the
 // plan is its own timeline row and the composer card approves it or sends
 // requested changes back.

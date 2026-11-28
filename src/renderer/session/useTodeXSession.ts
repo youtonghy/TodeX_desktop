@@ -2,7 +2,7 @@ import { normalizeBackendLabelColor, type BackendConnectionProfile } from './bac
 import { ipcDaemonConflicts, isStandbyProfile, moveBackendRecords, moveProfileKeyedEntries, ownerBackendId, resolveNoWorkspaceBackendId, sameDaemonProfiles, sshPasswordDonors, strandedProfileHeirs, tagLegacyBackendRecords, workspaceRemovalScope } from './backendRouting';
 import { deviceIdentityFromSecret } from '@todex/protocol/deviceAuth';
 import { useWorkbenchSharing } from './useWorkbenchSharing';
-import { SMART_WORK_MODE_PROVIDER, smartPromptFields, smartPromptPhase, smartWorkModeAvailable, useSmartWorkMode } from './smartWorkMode';
+import { SMART_WORK_MODE_PROVIDER, smartPromptFields, smartPromptPhase, smartRunFinished, smartWorkModeAvailable, useSmartWorkMode } from './smartWorkMode';
 import {
   completionNotificationBody,
   requestNotificationBody,
@@ -2214,6 +2214,17 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     if (record.smartPhase === phase && (record.smartPhaseSequence ?? 0) >= sequence) return;
     updateConversation(localId, { smartPhase: phase, smartPhaseSequence: Math.max(sequence, record.smartPhaseSequence ?? 0) });
   };
+  /** Turns whose `plan_handoff` applies from the next message: they only
+   * approved a plan, so their completion does not end the smart run. */
+  const deferredSmartHandoffsRef = useRef(new Set<string>());
+  /** Smart is one-shot: a completed execution turn sends the conversation
+   * back to the implement work mode (see `smartRunFinished`). */
+  const finishSmartRun = (localId: string, sequence: number, turnId: string) => {
+    const deferred = Boolean(turnId) && deferredSmartHandoffsRef.current.has(`${localId}:${turnId}`);
+    const record = stores.conversations.get().find((item) => item.id === localId);
+    if (!record || !smartRunFinished(record, sequence, deferred)) return;
+    updateConversation(localId, { mode: 'implement', smartPhase: undefined, smartPhaseSequence: undefined });
+  };
   /** Receipts read back from storage hold only ids: a shown message they
    * belong to is read once in full detail, whose `retryRequest` holds the
    * text and attachments it was sent with. Messages without one keep what
@@ -2327,7 +2338,17 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         submission.phase = 'running';
         setSubmissionStatusByConversation((current) => ({ ...current, [localId]: 'running' }));
       }
-      if (type === 'provider.event' && data.providerMethod === 'plan_handoff') applySmartPhaseEvent(localId, event.sequence, live.has(event.sequence), 'execute');
+      if (type === 'provider.event' && data.providerMethod === 'plan_handoff') {
+        const metadata = data.metadata && typeof data.metadata === 'object' ? data.metadata as Record<string, unknown> : {};
+        if (turnId && metadata.applied === 'next_turn') {
+          deferredSmartHandoffsRef.current.add(`${localId}:${turnId}`);
+          if (deferredSmartHandoffsRef.current.size > 256) {
+            deferredSmartHandoffsRef.current.delete(deferredSmartHandoffsRef.current.keys().next().value!);
+          }
+        }
+        applySmartPhaseEvent(localId, event.sequence, live.has(event.sequence), 'execute');
+      }
+      if (type === 'turn.completed') finishSmartRun(localId, event.sequence, turnId);
       if (type === 'provider.event' && data.providerMethod === 'plan_reentered') applySmartPhaseEvent(localId, event.sequence, live.has(event.sequence), 'plan');
       if (type === 'followups.updated') {
         // The daemon's queue after a failure tells whether it continues the

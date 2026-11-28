@@ -3257,7 +3257,7 @@ export const en: Messages = {
   'chat.providerNotice.withSubject': '{notice}: {subject}',
   'sess.smartModeUnsupported': 'The current Agent does not support Smart work mode; pick another work mode.',
   'smart.title': 'Smart work mode',
-  'smart.description': 'For Claude Code: plan with one model, then, once you approve the plan, switch to an execution model that runs with auto-approval. Choose Smart as the work mode in the composer to use it.',
+  'smart.description': 'For Claude Code: plan with one model, then, once you approve the plan, switch to an execution model that runs with auto-approval. Choose Smart as the work mode in the composer to use it; it applies to one run, and once execution finishes the conversation goes back to Implement.',
   'smart.planStage': 'Plan stage',
   'smart.executeStage': 'Execute stage',
   'smart.model': 'Model',

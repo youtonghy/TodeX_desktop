@@ -3257,7 +3257,7 @@ export const ko: Messages = {
   'chat.providerNotice.withSubject': '{notice}: {subject}',
   'sess.smartModeUnsupported': '현재 Agent는 스마트 작업 모드를 지원하지 않습니다. 다른 작업 모드를 선택하세요.',
   'smart.title': '스마트 작업 모드',
-  'smart.description': 'Claude Code용: 계획 모델로 계획을 세우고, 계획을 승인하면 실행 모델로 자동 전환해 자동 승인으로 실행합니다. 입력창의 작업 모드에서 "스마트"를 선택해 사용하세요.',
+  'smart.description': 'Claude Code용: 계획 모델로 계획을 세우고, 계획을 승인하면 실행 모델로 자동 전환해 자동 승인으로 실행합니다. 입력창의 작업 모드에서 "스마트"를 선택해 사용하세요. 선택은 한 번의 실행에만 적용되며, 실행이 끝나면 "실행" 모드로 돌아갑니다.',
   'smart.planStage': '계획 단계',
   'smart.executeStage': '실행 단계',
   'smart.model': '모델',

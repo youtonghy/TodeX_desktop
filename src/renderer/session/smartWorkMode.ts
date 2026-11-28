@@ -10,8 +10,10 @@ import { platform } from '../platform';
  * `afterPlan`, reported back as a `plan_handoff` provider notice). During
  * execution it plans again when a message attaches the configured plan skill
  * ([`smartPromptPhase`]) or when Claude enters Plan mode on its own (the
- * prompt's `replan`, reported back as a `plan_reentered` notice). One global
- * configuration per device.
+ * prompt's `replan`, reported back as a `plan_reentered` notice). Smart is
+ * one-shot: once an execution turn completes, the conversation goes back to
+ * the implement work mode ([`smartRunFinished`]); choosing Smart again starts
+ * over with a plan. One global configuration per device.
  */
 
 export type SmartPhase = 'plan' | 'execute';
@@ -107,6 +109,21 @@ export function smartPromptPhase(
 ): SmartPhase {
   const planSkill = config.plan.skill;
   return phase === 'execute' && planSkill && attachedSkills.some((skill) => skill.name === planSkill) ? 'plan' : phase;
+}
+
+/** Whether a `turn.completed` at `sequence` ends a smart conversation's run,
+ * sending it back to the implement work mode: the conversation is executing,
+ * the completion is newer than the last time its phase was set (so replayed
+ * history never undoes a later manual choice), and the turn did not only
+ * approve a plan whose execution starts with the next message
+ * (`deferredHandoff`, a `plan_handoff` applied `next_turn`). */
+export function smartRunFinished(
+  record: { mode?: string; smartPhase?: SmartPhase; smartPhaseSequence?: number },
+  sequence: number,
+  deferredHandoff: boolean,
+): boolean {
+  return record.mode === 'smart' && record.smartPhase === 'execute'
+    && sequence > (record.smartPhaseSequence ?? 0) && !deferredHandoff;
 }
 
 /** How a smart conversation's next prompt runs in `phase`. `supportsReplan`:

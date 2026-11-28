@@ -3257,7 +3257,7 @@ export const zhCN = {
   'chat.providerNotice.withSubject': '{notice}：{subject}',
   'sess.smartModeUnsupported': '当前 Agent 不支持智能工作模式，请改用其他工作模式。',
   'smart.title': '智能工作模式',
-  'smart.description': '适用于 Claude Code：先用计划模型制定计划，批准后自动切换到执行模型并自动审批执行。在输入框的工作模式中选择「智能」即可使用。',
+  'smart.description': '适用于 Claude Code：先用计划模型制定计划，批准后自动切换到执行模型并自动审批执行。在输入框的工作模式中选择「智能」即可使用；每次选择只生效一轮，执行完成后自动切回执行模式。',
   'smart.planStage': '计划阶段',
   'smart.executeStage': '执行阶段',
   'smart.model': '模型',
