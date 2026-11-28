@@ -6,9 +6,14 @@ import { cx } from '@/utils/cx';
 import { t } from '../../i18n';
 
 export interface ChatTurn {
-  /** `data-message-id` of the user message that opens the turn. */
+  /** `data-message-id` of the user message that opens the turn; a turn
+   * whose history is not loaded has a placeholder id. */
   id: string;
   preview: string;
+  /** Journal sequence of the prompt, once known. */
+  sequence?: number;
+  /** The turn's row is mounted (false: picking it pages history in). */
+  loaded?: boolean;
 }
 
 /** Turn dots shown at once; longer conversations slide a window around the active turn. */
@@ -16,16 +21,21 @@ const MAX_VISIBLE_TURNS = 12;
 
 /**
  * Vertical quick switcher for the user messages of a conversation:
- * previous · one dot per turn · next. Picking a turn scrolls its message to the top.
+ * previous · one dot per turn · next. Picking a turn scrolls its message to
+ * the top; `loadingId` marks a turn whose history is still being fetched.
+ * `onLoadEarlier` lets "previous" page in older history from the first
+ * known turn (a backend without a turn outline lists only loaded turns).
  *
  * Needs an `@container` ancestor: in a container narrower than 48rem the rail
  * would cover the messages, so it hides until the pointer reaches the start
  * edge (or keyboard focus lands in it) and then floats on a surface.
  */
-export function TurnNavigator({ turns, activeId, onSelect, className }: {
+export function TurnNavigator({ turns, activeId, loadingId = null, onSelect, onLoadEarlier, className }: {
   turns: ChatTurn[];
   activeId: string | null;
+  loadingId?: string | null;
   onSelect: (id: string) => void;
+  onLoadEarlier?: () => void;
   className?: string;
 }) {
   if (turns.length < 2) return null;
@@ -57,13 +67,14 @@ export function TurnNavigator({ turns, activeId, onSelect, className }: {
           aria-label={t('chat.turnNavPrevious')}
           tooltip
           tooltipPlacement="right"
-          disabled={active === 0}
-          onClick={() => onSelect(turns[active - 1].id)}
+          disabled={active === 0 && !onLoadEarlier}
+          onClick={() => (active === 0 ? onLoadEarlier?.() : onSelect(turns[active - 1].id))}
         />
         {moreAbove ? overflowDot : null}
         {visible.map((turn, offset) => {
           const index = start + offset;
           const current = index === active;
+          const loading = turn.id === loadingId;
           const label = t('chat.turnNavItem', { index: index + 1 });
           return (
             <TooltipTrigger key={turn.id} delay={200}>
@@ -71,6 +82,7 @@ export function TurnNavigator({ turns, activeId, onSelect, className }: {
                 <button
                   type="button"
                   aria-current={current ? 'true' : undefined}
+                  aria-busy={loading || undefined}
                   aria-label={label}
                   onClick={() => onSelect(turn.id)}
                   className="group/dot inline-flex size-6 cursor-pointer items-center justify-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-border-focus-ring"
@@ -79,9 +91,10 @@ export function TurnNavigator({ turns, activeId, onSelect, className }: {
                     aria-hidden
                     className={cx(
                       'rounded-full transition-[width,height,background-color] duration-150 ease',
-                      current
+                      current || loading
                         ? 'size-2 bg-foreground-icon-primary'
                         : 'size-1.5 bg-foreground-icon-quaternary group-hover/dot:bg-foreground-icon-secondary',
+                      loading && 'motion-safe:animate-pulse',
                     )}
                   />
                 </button>

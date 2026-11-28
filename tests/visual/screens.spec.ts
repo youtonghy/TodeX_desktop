@@ -997,3 +997,24 @@ test('settings: local backend keeps the host awake', async ({ page, openDemo }) 
   await keepAwake.click({ force: true });
   await expect(keepAwake).not.toBeChecked();
 });
+
+// A conversation longer than one history window opens with only its newest
+// turns loaded; the turn outline still lists every turn, and picking the
+// first one pages its history in and scrolls to it.
+test('turn navigator reaches turns that are not loaded', async ({ page, openDemo }) => {
+  await openDemo('light', 'turn-outline');
+  await page.getByText('lumen-api', { exact: true }).click();
+  await page.getByText('重写鉴权中间件').first().click();
+  const navigator = page.getByRole('navigation', { name: '对话快速切换' });
+  await expect(navigator.getByRole('button', { name: /^对话\d+$/ })).toHaveCount(12);
+  await expect(page.getByText('第 12 步：收尾：合并前自查。')).toBeInViewport();
+  const firstPrompt = page.locator('[data-message-id]').filter({ hasText: '第 1 步：梳理现有的路由守卫。' });
+  await expect(firstPrompt).toHaveCount(0);
+  await navigator.getByRole('button', { name: '对话1', exact: true }).click();
+  await expect(firstPrompt).toBeInViewport();
+  await expect(navigator.getByRole('button', { name: '对话1', exact: true })).toHaveAttribute('aria-current', 'true');
+  // `settle` would scroll the chat back to its end, so only the navigator
+  // is captured: every turn listed, the revealed first one current.
+  await page.mouse.move(0, 0);
+  await expect(navigator).toHaveScreenshot('turn-outline-revealed-light.png');
+});

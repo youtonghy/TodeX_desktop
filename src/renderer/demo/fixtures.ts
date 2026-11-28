@@ -448,6 +448,24 @@ export const demoPrivateJournal: Journal = privateJournal(journal('c4d5e6f7-a8b9
     .answer('脚本在 `set -x` 打开时会把旧密钥打印到 CI 日志。已改为只在调试块里临时开启 `set -x`，并在轮换前后用 `***` 遮盖密钥变量。', { model: 'sonnet', input: 14_000, output: 1_200, cacheRead: 0, cacheWrite: 0 });
 }));
 
+/** A long conversation (`?demo&turn-outline`): more events than one history
+ * window holds, so its first turns open unloaded and the turn navigator lists
+ * them from the backend's turn outline. */
+export function demoLongJournal(): Journal {
+  const steps = ['梳理现有的路由守卫', '把登录态检查移到中间件', '为过期 token 加刷新逻辑', '补齐守卫的单元测试', '处理并发刷新的竞态',
+    '把错误页改成统一组件', '清理旧的 auth context', '给中间件加日志', '更新文档里的鉴权流程', '跑一遍端到端测试',
+    '修复 Safari 下 cookie 丢失', '收尾：合并前自查'];
+  return journal('5e6f7a8b-9c0d-4e1f-8a2b-3c4d5e6f7a8b', lumenApi, 'claude-code', '重写鉴权中间件', NOW - 6 * HOUR, (j) => {
+    steps.forEach((step, index) => {
+      j.user(`第 ${index + 1} 步：${step}。`);
+      for (let call = 0; call < 100; call++) {
+        j.tool('Read', { file_path: `src/auth/step${index + 1}-${call}.ts` }, `// ${step}\nexport {};`);
+      }
+      j.answer(`${step}已完成。`, { model: 'opus', input: 9_000, output: 800, cacheRead: 40_000, cacheWrite: 1_200 });
+    });
+  });
+}
+
 export const demoActiveConversationId = demoJournals[0].manifest.id;
 
 // --- Panel data ----------------------------------------------------------------

@@ -80,6 +80,7 @@ import { TurnNavigator, type ChatTurn } from '../components/chat/TurnNavigator';
 import { activeChatProcessId, buildChatRenderItems, isChatTimelineEntry, isChatToolEntry, latestIncomingEntryIds, sortChatEntries } from '../components/conversationTimeline';
 import type { ChatRenderItem } from '../components/conversationTimeline';
 import { awaitedBackgroundTasks, type BackgroundTask } from '@todex/protocol/conversationRuntime';
+import { outlineTurns } from '@todex/protocol/turnOutline';
 import { ModelReasoningCard } from '../components/ModelReasoningCard';
 import { EFFORT_TEXT } from '../components/modelReasoning';
 import { ProviderIcon } from '../components/ProviderIcon';
@@ -1322,9 +1323,19 @@ export function ChatPanel({ session }: Props) {
   const chatEntries = useMemo(() => sortChatEntries(conversationTimeline
     .filter((entry) => isChatTimelineEntry(entry) && !isChatReminderEntry(entry))), [conversationTimeline]);
   const items = useMemo(() => buildChatRenderItems(chatEntries), [chatEntries]);
-  const chatTurns = useMemo<ChatTurn[]>(() => items.flatMap((item) => (
-    item.type === 'entry' && item.entry.kind === 'outgoing' ? [{ id: item.entry.id, preview: item.entry.subtitle.trim() }] : []
-  )), [items]);
+  // Loaded user rows plus the prompts of the turn outline whose history is
+  // not loaded, so the navigator reaches every turn of the conversation.
+  const turnOutline = conversation?.id ? session.turnOutlines?.[conversation.id] : undefined;
+  const chatTurns = useMemo<ChatTurn[]>(() => outlineTurns(turnOutline, items.flatMap((item) => (
+    item.type === 'entry' && item.entry.kind === 'outgoing'
+      ? [{ id: item.entry.id, sequence: item.entry.firstSequence ?? item.entry.sequence, preview: item.entry.subtitle.trim() }]
+      : []
+  ))).map((turn) => ({
+    id: turn.id ?? `turn-sequence-${turn.sequence}`,
+    preview: turn.preview,
+    sequence: turn.sequence,
+    loaded: Boolean(turn.id),
+  })), [items, turnOutline]);
   const actionableIncoming = useMemo(() => latestIncomingEntryIds(chatEntries), [chatEntries]);
   const latestReplyId = useMemo(() => {
     for (let index = chatEntries.length - 1; index >= 0; index--) {
@@ -1446,7 +1457,9 @@ export function ChatPanel({ session }: Props) {
     }
     const turnIds = new Set(chatTurns.map((turn) => turn.id));
     const line = viewport.getBoundingClientRect().top + 96;
-    let current = chatTurns[0].id;
+    // Above the first loaded user row the reader is still in that turn's
+    // history, not in an unloaded earlier one.
+    let current = (chatTurns.find((turn) => turn.loaded) ?? chatTurns[0]).id;
     for (const row of list.querySelectorAll<HTMLElement>('[data-message-id]')) {
       const id = row.dataset.messageId ?? '';
       if (!turnIds.has(id)) continue;
@@ -1458,12 +1471,12 @@ export function ChatPanel({ session }: Props) {
   const updateActiveTurnRef = useRef(updateActiveTurn);
   updateActiveTurnRef.current = updateActiveTurn;
   /** Scrolls a mounted message to the top of the viewport; false when it is not mounted. */
-  const scrollMessageToTop = (id: string) => {
+  const scrollMessageToTop = (id: string, behavior: ScrollBehavior = 'smooth') => {
     const viewport = scrollRef.current;
     const target = messagesRef.current?.querySelector(`[data-message-id="${CSS.escape(id)}"]`);
     if (!viewport || !target) return false;
     const offset = target.getBoundingClientRect().top - viewport.getBoundingClientRect().top;
-    viewport.scrollTo({ top: viewport.scrollTop + offset - 16, behavior: 'smooth' });
+    viewport.scrollTo({ top: viewport.scrollTop + offset - 16, behavior });
     setActiveTurnId(id);
     return true;
   };
@@ -1538,6 +1551,44 @@ export function ChatPanel({ session }: Props) {
     activeTurnFrameRef.current = 0;
   }, []);
   useEffect(updateActiveTurn, [chatTurns]);
+  useEffect(() => {
+    if (conversation?.id) void session.loadTurnOutline?.(conversation.id);
+  }, [conversation?.id]);
+  /** A turn picked in the navigator whose history is still loading. */
+  const [revealing, setRevealing] = useState<{ conversationId: string; sequence: number } | null>(null);
+  const selectTurn = (id: string) => {
+    const turn = chatTurns.find((item) => item.id === id);
+    if (!conversation || !turn) return;
+    if (turn.loaded || !turn.sequence) {
+      scrollMessageToTop(id);
+      return;
+    }
+    const target = { conversationId: conversation.id, sequence: turn.sequence };
+    // The reader leaves follow mode now: pages landing meanwhile must not
+    // pull the view back to the newest message.
+    atBottomRef.current = false;
+    cancelAnimationFrame(followFrameRef.current);
+    followFrameRef.current = 0;
+    setRevealing(target);
+    void session.revealTurn(target.conversationId, target.sequence).then((revealed) => {
+      if (!revealed) setRevealing((current) => (current === target ? null : current));
+    });
+  };
+  // Once the picked turn's row mounted, scroll to it.
+  useEffect(() => {
+    if (!revealing) return;
+    if (revealing.conversationId !== conversation?.id) {
+      setRevealing(null);
+      return;
+    }
+    const turn = chatTurns.find((item) => item.sequence === revealing.sequence && item.loaded);
+    if (!turn || !scrollMessageToTop(turn.id, 'auto')) return;
+    setRevealing(null);
+    // Rows paged in just now may still change height (folded groups,
+    // Markdown) after this commit: land on the row again once they settled.
+    const frame = requestAnimationFrame(() => scrollMessageToTop(turn.id, 'auto'));
+    return () => cancelAnimationFrame(frame);
+  }, [chatTurns, revealing, conversation?.id]);
   // Rows on screen when a conversation opens stay still; rows that arrive
   // later in a live turn blur in (see RowEntrance).
   const [entranceArmedFor, setEntranceArmedFor] = useState<string | null>(null);
@@ -2277,7 +2328,9 @@ export function ChatPanel({ session }: Props) {
         <TurnNavigator
           turns={chatTurns}
           activeId={activeTurnId}
-          onSelect={scrollMessageToTop}
+          loadingId={revealing ? chatTurns.find((turn) => turn.sequence === revealing.sequence)?.id ?? null : null}
+          onSelect={selectTurn}
+          onLoadEarlier={earlierHistoryStatus?.hasMore ? () => requestEarlierHistory() : undefined}
           className="absolute inset-y-0 start-0 z-20 ps-3"
         />
         {isAtBottom ? null : (

@@ -38,7 +38,8 @@ function demoClaudeRegionMode() {
 }
 
 const journals = new Map<string, Journal>(
-  [...fixtures.demoJournals, fixtures.demoPrivateJournal].map((journal) => [journal.manifest.id, { manifest: { ...journal.manifest }, events: [...journal.events] }]),
+  [...fixtures.demoJournals, fixtures.demoPrivateJournal,
+    ...(new URLSearchParams(window.location.search).has('turn-outline') ? [fixtures.demoLongJournal()] : [])].map((journal) => [journal.manifest.id, { manifest: { ...journal.manifest }, events: [...journal.events] }]),
 );
 let workspaces = [...fixtures.demoWorkspaces];
 let kanbanTasks = [...fixtures.demoKanbanTasks];
@@ -758,6 +759,22 @@ function replay(journal: Journal, query: URLSearchParams) {
   return { conversationId: journal.manifest.id, fromSequence: after + 1, nextSequence: last + 1, hasMore: last < journal.events.length, events };
 }
 
+/** `GET /v2/conversations/{id}/turns`, as the daemon pages it. */
+function turns(journal: Journal, query: URLSearchParams) {
+  const prompts = journal.events.filter((event) => event.type === 'message.created'
+    && ['user', 'human'].includes(String((event.payload as Record<string, unknown>).role)));
+  const limit = Math.min(Number(query.get('limit')) || 100, 200);
+  const after = Number(query.get('afterSequence')) || 0;
+  const before = query.get('beforeSequence') === null ? Infinity : Number(query.get('beforeSequence'));
+  const range = prompts.filter((event) => event.sequence > after && event.sequence <= before);
+  const events = range.slice(-limit);
+  const hasMore = range.length > events.length;
+  return {
+    conversationId: journal.manifest.id, sequences: prompts.map((event) => event.sequence), events, hasMore,
+    beforeSequence: hasMore ? events[0].sequence - 1 : 0,
+  };
+}
+
 type DemoCatalog = {
   skills: SkillCatalog;
   mcp: McpCatalog;
@@ -1032,9 +1049,12 @@ function route(request: SecureRequest): SecureResponse {
       default:
         break;
     }
-    const conversation = path.match(/^\/v2\/conversations\/([^/]+)(\/events)?$/);
+    const conversation = path.match(/^\/v2\/conversations\/([^/]+)(\/events|\/turns)?$/);
     const journal = conversation ? journals.get(decodeURIComponent(conversation[1])) : undefined;
-    if (journal) return json(conversation?.[2] ? replay(journal, query) : journal.manifest);
+    if (journal) {
+      if (conversation?.[2] === '/turns') return json(turns(journal, query));
+      return json(conversation?.[2] ? replay(journal, query) : journal.manifest);
+    }
     const nativeList = path.match(/^\/v2\/native-history\/(claude-code|pi|codex|grok-build|devin)\/(sessions|policy)$/);
     if (nativeList) return json(nativeList[2] === 'sessions' ? demoNativeList(nativeList[1]) : demoNativePolicy(nativeList[1]));
     const nativeTranscript = path.match(/^\/v2\/native-history\/(claude-code|pi|codex|grok-build|devin)\/sessions\/([^/]+)\/transcript$/);

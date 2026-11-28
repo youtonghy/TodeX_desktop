@@ -43,7 +43,8 @@ import type { AgentCallSession } from '@todex/protocol/agentCalling';
 import { parseFollowUpQueue, type ConversationRuntime, type ExtensionEditorRequest, type FollowUpQueueState } from '@todex/protocol/conversationRuntime';
 import { conversationScheduleFrame, followUpQueueFrame } from '@todex/protocol/conversationCommands';
 import { conversationTranscriptMarkdown, fetchConversationTranscriptTail, transcriptEntries } from '@todex/protocol/conversationExport';
-import { canonicalConversationEventType, type ConversationEvent } from '@todex/protocol/v2';
+import { canonicalConversationEventType, type ConversationEvent, type ConversationTurnsPage } from '@todex/protocol/v2';
+import { mergeTurnOutline, newestLabeledTurn, newestUnlabeledTurn, type TurnOutline } from '@todex/protocol/turnOutline';
 import { ConversationEventBatcher } from '@todex/protocol/frameBatch';
 import { TerminalStreamStore } from '@todex/protocol/terminalStream';
 import { isLocalTerminalHost } from '@todex/protocol/ssh';
@@ -391,6 +392,15 @@ export type BackendWakeGate = {
 
 /** How often a streaming conversation's record takes its new high-water mark. */
 const LAST_SEQUENCE_WRITE_MS = 2000;
+/** Prompt labels per turns page, and pages read per outline load. */
+const TURN_OUTLINE_PAGE_LIMIT = 100;
+const TURN_OUTLINE_MAX_PAGES = 20;
+/** Jumping to an unloaded turn pages backwards at most this many events
+ * per page (the backend's cap) and this many pages, keeping a few events
+ * before the prompt for context. */
+const TURN_REVEAL_PAGE_LIMIT = 1000;
+const TURN_REVEAL_MAX_PAGES = 50;
+const TURN_REVEAL_CONTEXT_EVENTS = 20;
 /** How often rows streaming into the open conversation re-mark it read. */
 const READ_MARK_INTERVAL_MS = 1000;
 
@@ -854,6 +864,12 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const [openStatusByConversation, setOpenStatusByConversation] = useState<Record<string, ConversationOpenStatus>>({});
   // Per-conversation lazy-history flags for the chat scroll sentinel.
   const [earlierHistory, setEarlierHistory] = useState<Record<string, EarlierHistoryStatus>>({});
+  /** Turn outlines by local conversation id: every prompt of the journal,
+   * so the turn navigator lists turns whose history is not loaded. */
+  const [turnOutlines, setTurnOutlines] = useState<Record<string, TurnOutline>>({});
+  const turnOutlinesRef = useRef(turnOutlines);
+  turnOutlinesRef.current = turnOutlines;
+  const turnOutlineLoadsRef = useRef(new Map<string, Promise<void>>());
   const [submissionStatusByConversation, setSubmissionStatusByConversation] = useState<Record<string, 'sending' | 'running' | 'unknown' | undefined>>({});
   const settledV2TurnsRef = useRef(new Map<string, string>());
   /** Drops per-conversation state the app rebuilds when a conversation is
@@ -2515,7 +2531,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
    * earlier events remain or a page is in flight. Every call fetches, so an
    * explicit retry after a failure goes through here; automatic triggers
    * check `canAutoLoadEarlierHistory` first. */
-  const loadEarlierHistory = useCallback(async (conversationId: string) => {
+  const loadEarlierHistory = useCallback(async (conversationId: string, limit?: number) => {
     const conversation = stores.conversations.get().find((item) => item.id === conversationId);
     const v2Id = conversation?.v2ConversationId;
     const recovery = conversationRecoveryRef.current;
@@ -2525,7 +2541,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     setEarlierHistory((current) => ({ ...current, [conversation.id]: { hasMore: true, loading: true } }));
     let result: EarlierHistoryResult | undefined;
     try {
-      result = await recovery.loadEarlier(v2Id, conversation.workspaceId);
+      result = await recovery.loadEarlier(v2Id, conversation.workspaceId, limit);
       return result.hasMore;
     } finally {
       const failed = !result || result.failed === true;
@@ -2536,6 +2552,86 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       }));
     }
   }, []);
+
+  /** Loads a conversation's turn outline: the copy cached on this device
+   * first, then the prompts the backend lists after the newest labelled one,
+   * then labels for older prompts page by page. Single-flight; a failure
+   * leaves the outline as it was (the navigator then lists loaded turns). */
+  const loadTurnOutline = useCallback((conversationId: string): Promise<void> => {
+    const inflight = turnOutlineLoadsRef.current.get(conversationId);
+    if (inflight) return inflight;
+    const conversation = stores.conversations.get().find((item) => item.id === conversationId);
+    const v2Id = conversation?.v2ConversationId;
+    if (!conversation || !v2Id) return Promise.resolve();
+    const cacheable = !isPrivateBackendConversation(v2Id);
+    const backendId = backendIdForConversation(v2Id);
+    const publish = (outline: TurnOutline) => {
+      turnOutlinesRef.current = { ...turnOutlinesRef.current, [conversationId]: outline };
+      setTurnOutlines((current) => ({ ...current, [conversationId]: outline }));
+    };
+    const decrypt = <P extends Pick<ConversationTurnsPage, 'events' | 'frames'>>(page: P) => {
+      const history = historyEncryptionRef.current;
+      return history ? history.decryptPage(backendId, v2Id, page, 'summary') : Promise.resolve(page);
+    };
+    const work = (async () => {
+      let outline = turnOutlinesRef.current[conversationId];
+      if (!outline && cacheable && historyTailCache) {
+        const cached = await historyTailCache.readOutline(backendId, v2Id);
+        if (cached) {
+          const page = await decrypt({ events: cached.events as ConversationEvent[], frames: cached.frames });
+          outline = mergeTurnOutline(undefined, { sequences: cached.sequences, events: page.events });
+          publish(outline);
+        }
+      }
+      const api = v2ApiForConversation(v2Id);
+      const fetchPage = async (options: { afterSequence?: number; beforeSequence?: number }) => {
+        const page = await api.conversationTurns(v2Id, { ...options, limit: TURN_OUTLINE_PAGE_LIMIT });
+        if (cacheable) historyTailCache?.captureOutline(backendId, v2Id, page);
+        const decrypted = await decrypt(page);
+        outline = mergeTurnOutline(outline, decrypted);
+        publish(outline);
+        return decrypted;
+      };
+      await fetchPage({ afterSequence: newestLabeledTurn(outline) });
+      // Pages only move down: a prompt the backend could not read stays
+      // unlabelled instead of being asked for again.
+      let below = Number.MAX_SAFE_INTEGER;
+      for (let pages = 0; pages < TURN_OUTLINE_MAX_PAGES; pages++) {
+        const before = newestUnlabeledTurn(outline!, below);
+        if (!before) break;
+        const page = await fetchPage({ beforeSequence: before });
+        if (!page.hasMore) break;
+        below = page.beforeSequence + 1;
+      }
+    })().catch((error: unknown) => {
+      console.warn('[turn-outline] load failed', error);
+    }).finally(() => {
+      turnOutlineLoadsRef.current.delete(conversationId);
+    });
+    turnOutlineLoadsRef.current.set(conversationId, work);
+    return work;
+  }, []);
+
+  /** Pages history in until the prompt at `sequence` is loaded. Resolves
+   * whether it is; false when paging failed or the conversation already
+   * holds as many rows as the session keeps. */
+  const revealTurn = useCallback(async (conversationId: string, sequence: number): Promise<boolean> => {
+    const v2Id = stores.conversations.get().find((item) => item.id === conversationId)?.v2ConversationId;
+    const recovery = conversationRecoveryRef.current;
+    if (!v2Id || !recovery) return false;
+    for (let pages = 0; pages < TURN_REVEAL_MAX_PAGES; pages++) {
+      const floor = recovery.historyFloor(v2Id);
+      if (floor < sequence) return true;
+      if (recovery.isLoadingEarlier(v2Id)) {
+        await loadEarlierHistory(conversationId).catch(() => false);
+        continue;
+      }
+      // The target and a few events of the turn before it.
+      await loadEarlierHistory(conversationId, Math.min(TURN_REVEAL_PAGE_LIMIT, floor - sequence + 1 + TURN_REVEAL_CONTEXT_EVENTS));
+      if (recovery.historyFloor(v2Id) === floor) return false;
+    }
+    return recovery.historyFloor(v2Id) < sequence;
+  }, [loadEarlierHistory]);
 
   // Returning to a conversation lets it page history in on its own again.
   useEffect(() => {
@@ -2633,6 +2729,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       setRecoveringConversations(withoutReleased);
       setOpenStatusByConversation(withoutReleased);
       setEarlierHistory(withoutReleased);
+      setTurnOutlines(withoutReleased);
       pruneConversationState(released);
     }
     // Agent extension state and command catalogs are rebuilt on demand.
@@ -7757,6 +7854,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     submissionStatusByConversation,
     recoverConversation,
     loadEarlierHistory,
+    turnOutlines,
+    loadTurnOutline,
+    revealTurn,
     reconcilePendingSubmission,
     memoryEntriesByConversation,
     usageRecords,

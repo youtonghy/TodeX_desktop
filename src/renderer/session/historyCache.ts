@@ -23,6 +23,15 @@ export type StoredHistoryTail = {
   key: string;
   events: HistoryWireEvent[];
   frames: Record<string, unknown>;
+  /** The conversation's turn outline as the backend sent it (every prompt
+   * sequence, plus the prompt events read so far as ciphertext); stored
+   * with the tail so it shares its lifetime and quota. */
+  outline?: StoredTurnOutline;
+};
+export type StoredTurnOutline = {
+  sequences: number[];
+  events: HistoryWireEvent[];
+  frames: Record<string, unknown>;
 };
 export type HistoryTailMeta = {
   key: string;
@@ -61,10 +70,13 @@ type Buffer = {
   conversationId: string;
   events: Map<number, HistoryWireEvent>;
   frames: Record<string, unknown>;
+  outline?: OutlineBuffer;
   dirty: boolean;
   touchedAt: number;
   timer: ReturnType<typeof setTimeout> | null;
 };
+
+type OutlineBuffer = { sequences: number[]; events: Map<number, HistoryWireEvent>; frames: Record<string, unknown> };
 
 type SettingsStore = { get: (key: string) => Promise<unknown>; set: (key: string, value: unknown) => Promise<void> };
 
@@ -98,6 +110,8 @@ export class HistoryTailCache {
   /** Conversations that delivered plaintext (legacy history) or are
    * private (RAM-only): never cached. */
   private readonly plaintext = new Set<string>();
+  /** Outlines captured before their conversation's tail buffer exists. */
+  private readonly pendingOutlines = new Map<string, OutlineBuffer>();
   private enabled = true;
   private loading: Promise<void> | null = null;
   private recipientFor: (backendId: string) => Promise<string | undefined> = async () => undefined;
@@ -179,6 +193,54 @@ export class HistoryTailCache {
     this.schedule(key, buffer);
   }
 
+  /** Records a turns page (still ciphertext): its sequence list replaces
+   * the stored one and its prompt events add up. It is written with the
+   * conversation's tail; until a tail is captured it waits in memory. */
+  captureOutline(backendId: string, conversationId: string, page: { sequences: readonly number[]; events: readonly HistoryWireEvent[]; frames?: unknown }): void {
+    if (!this.enabled || !backendId || !conversationId) return;
+    const key = bufferKey(backendId, conversationId);
+    if (this.plaintext.has(key)) return;
+    if (page.events.some((event) => !isHistoryEncryptedPayload(event.payload))) {
+      this.pendingOutlines.delete(key);
+      const buffer = this.buffers.get(key);
+      if (buffer) delete buffer.outline;
+      return;
+    }
+    const buffer = this.buffers.get(key);
+    const outline = buffer?.outline ?? this.pendingOutlines.get(key) ?? { sequences: [], events: new Map(), frames: {} };
+    outline.sequences = page.sequences.filter((sequence) => Number.isInteger(sequence) && sequence > 0);
+    const listed = new Set(outline.sequences);
+    for (const sequence of [...outline.events.keys()]) if (!listed.has(sequence)) outline.events.delete(sequence);
+    for (const event of page.events) {
+      const sequence = sequenceOf(event);
+      if (listed.has(sequence)) outline.events.set(sequence, cachedEvent(event));
+    }
+    if (page.frames && typeof page.frames === 'object') Object.assign(outline.frames, page.frames);
+    if (!buffer) {
+      if (this.pendingOutlines.size >= MAX_BUFFERS) this.pendingOutlines.delete(this.pendingOutlines.keys().next().value!);
+      this.pendingOutlines.set(key, outline);
+      return;
+    }
+    buffer.outline = outline;
+    buffer.dirty = true;
+    buffer.touchedAt = this.now();
+    this.schedule(key, buffer);
+  }
+
+  /** The stored turn outline of a conversation (ciphertext), or `null`. */
+  async readOutline(backendId: string, conversationId: string): Promise<StoredTurnOutline | null> {
+    await this.loaded;
+    const rid = await this.recipientFor(backendId).catch(() => undefined);
+    if (!this.enabled || !rid || this.plaintext.has(bufferKey(backendId, conversationId))) return null;
+    try {
+      const outline = (await this.store.getTail(tailKey(backendId, rid, conversationId)))?.outline;
+      return outline?.sequences.length ? outline : null;
+    } catch (error) {
+      warn('read outline', error);
+      return null;
+    }
+  }
+
   private createBuffer(key: string, backendId: string, conversationId: string): Buffer {
     if (this.buffers.size >= MAX_BUFFERS) {
       const oldest = [...this.buffers.entries()].sort((a, b) => a[1].touchedAt - b[1].touchedAt)[0];
@@ -188,6 +250,11 @@ export class HistoryTailCache {
       }
     }
     const buffer: Buffer = { backendId, conversationId, events: new Map(), frames: {}, dirty: false, touchedAt: this.now(), timer: null };
+    const outline = this.pendingOutlines.get(key);
+    if (outline) {
+      buffer.outline = outline;
+      this.pendingOutlines.delete(key);
+    }
     this.buffers.set(key, buffer);
     return buffer;
   }
@@ -212,6 +279,7 @@ export class HistoryTailCache {
     const buffer = this.buffers.get(key);
     if (buffer?.timer) clearTimeout(buffer.timer);
     this.buffers.delete(key);
+    this.pendingOutlines.delete(key);
   }
 
   /** Writes every changed tail now (conversation switch, window hidden). */
@@ -237,6 +305,13 @@ export class HistoryTailCache {
     buffer.frames = frames;
     const storeKey = tailKey(buffer.backendId, rid, buffer.conversationId);
     const tail: StoredHistoryTail = { key: storeKey, events, frames };
+    if (buffer.outline?.sequences.length) {
+      const outlineEvents = [...buffer.outline.events.entries()].sort((a, b) => a[0] - b[0]).map(([, event]) => event);
+      const outlineFrames: Record<string, unknown> = {};
+      for (const id of new Set(outlineEvents.flatMap(frameIdsOf))) if (id in buffer.outline.frames) outlineFrames[id] = buffer.outline.frames[id];
+      buffer.outline.frames = outlineFrames;
+      tail.outline = { sequences: [...buffer.outline.sequences], events: outlineEvents, frames: outlineFrames };
+    }
     const at = this.now();
     const meta: HistoryTailMeta = {
       key: storeKey, backendId: buffer.backendId, rid, conversationId: buffer.conversationId,
@@ -285,6 +360,13 @@ export class HistoryTailCache {
         if (sequence && !buffer.events.has(sequence)) buffer.events.set(sequence, event);
       }
       buffer.frames = { ...tail.frames, ...buffer.frames };
+      if (tail.outline?.sequences.length && !buffer.outline) {
+        buffer.outline = {
+          sequences: [...tail.outline.sequences],
+          events: new Map(tail.outline.events.map((event) => [sequenceOf(event), event])),
+          frames: { ...tail.outline.frames },
+        };
+      }
       this.keepContiguousTail(buffer);
       void this.store.putTailMeta({
         key, backendId, rid, conversationId, firstSequence: first, lastSequence: last,

@@ -121,6 +121,8 @@ export class ConversationRecovery {
   isRecovering(conversationId: string): boolean { return this.recovering.has(conversationId) || this.incomplete.has(conversationId); }
   /** Older journal pages remain unfetched. */
   hasEarlierHistory(conversationId: string): boolean { return (this.historyFloors.get(conversationId) ?? 0) > 0; }
+  /** Events at or below this sequence are not loaded (0: none missing). */
+  historyFloor(conversationId: string): number { return this.historyFloors.get(conversationId) ?? 0; }
   isLoadingEarlier(conversationId: string): boolean { return this.historyLoading.has(conversationId); }
   openStatus(conversationId: string): ConversationOpenStatus | undefined { return this.openStatuses.get(conversationId); }
   /** Conversations with a projected runtime, including ones only live frames

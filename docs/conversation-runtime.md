@@ -48,6 +48,15 @@ optional and canonical aliases are recomputed when old journals are replayed.
   is removed, and per conversation when it is deleted or leaves the backend's
   list. Settings → General → Storage switches it off or clears it. Web keeps
   no cache.
+- The chat's turn navigator lists every turn, not only the loaded ones: each
+  conversation's turn outline (`GET /v2/conversations/{id}/turns`, see
+  `@todex/protocol/turnOutline`) gives every prompt's sequence plus prompt
+  events for labels, loaded newest first. Desktop stores the outline as
+  ciphertext in the conversation's cached tail record (same lifetime, quota
+  and clearing), so after a restart the navigator is complete before any
+  request; a reopen only asks for prompts after the newest labelled one.
+  Picking a turn whose history is not loaded pages history in backwards
+  until its prompt row mounts, then scrolls to it.
 - The conversation list is fetched once per 15-second manifest refresh. The
   periodic workspace sync leaves it to that refresh; only the sync that runs
   when a connection opens lists conversations itself.
